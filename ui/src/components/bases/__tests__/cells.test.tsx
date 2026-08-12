@@ -10,10 +10,7 @@ import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagInput } from "#/components/ui/tag-input";
 
 type EditableProps = Parameters<typeof EditableCell>[0];
-type AccessibilityProps = Pick<
-  EditableProps,
-  "ariaLabel" | "ariaDescribedBy"
->;
+type AccessibilityProps = Pick<EditableProps, "ariaLabel" | "ariaDescribedBy">;
 
 interface CellHarnessProps {
   value: EditableProps["value"];
@@ -186,10 +183,9 @@ describe("cell editors", () => {
       vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
     );
     const user = userEvent.setup();
-    const { onCommit } = renderCell(
-      ["[[Solar Cycle]]", "[[Book of Days]]"],
-      { type: "relation" },
-    );
+    const { onCommit } = renderCell(["[[Solar Cycle]]", "[[Book of Days]]"], {
+      type: "relation",
+    });
     await user.click(
       screen.getByRole("button", { name: "[[Solar Cycle]], [[Book of Days]]" }),
     );
@@ -266,10 +262,9 @@ describe("cell editors", () => {
 
   it("datetime cell preserves its zone suffix when committing with Tab", async () => {
     const user = userEvent.setup();
-    const { onCommit, onCommitNext } = renderCell(
-      "2026-08-06T14:30:00Z",
-      { type: "datetime" },
-    );
+    const { onCommit, onCommitNext } = renderCell("2026-08-06T14:30:00Z", {
+      type: "datetime",
+    });
     await user.click(
       screen.getByRole("button", { name: "2026-08-06T14:30:00Z" }),
     );
@@ -344,7 +339,9 @@ describe("cell editors", () => {
     async (_name, value, definition) => {
       vi.stubGlobal(
         "fetch",
-        vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
+        vi
+          .fn()
+          .mockResolvedValue({ ok: true, json: () => Promise.resolve([]) }),
       );
       const user = userEvent.setup();
       render(

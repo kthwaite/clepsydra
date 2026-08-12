@@ -72,9 +72,9 @@ function declarationOrder() {
 }
 
 async function editProperty(key: string) {
-  await userEvent.setup().click(
-    screen.getByRole("button", { name: `Edit ${key}` }),
-  );
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: `Edit ${key}` }));
 }
 
 async function addProperty(key: string, type: PropertyType) {
@@ -134,16 +134,16 @@ describe("PropertiesEditor", () => {
     await addProperty("field", type);
     expect(latest(onChange).at(-1)?.definition.type).toBe(type);
   });
-  it.each([
-    "constructor",
-    "__proto__",
-  ])("allows the valid prototype-like key %s", async (key) => {
-    const onChange = vi.fn();
-    renderProperties({ onChange });
-    await addProperty(key, "text");
-    expect(latest(onChange).at(-1)?.key).toBe(key);
-    expect(screen.queryByRole("alert")).toBeNull();
-  });
+  it.each(["constructor", "__proto__"])(
+    "allows the valid prototype-like key %s",
+    async (key) => {
+      const onChange = vi.fn();
+      renderProperties({ onChange });
+      await addProperty(key, "text");
+      expect(latest(onChange).at(-1)?.key).toBe(key);
+      expect(screen.queryByRole("alert")).toBeNull();
+    },
+  );
 
   it("presents declarations as a semantic table with stable keys, summaries, and row actions", async () => {
     const user = userEvent.setup();
@@ -165,7 +165,9 @@ describe("PropertiesEditor", () => {
       name: "Ordered property declarations",
     });
     expect(
-      within(table).getAllByRole("columnheader").map((cell) => cell.textContent),
+      within(table)
+        .getAllByRole("columnheader")
+        .map((cell) => cell.textContent),
     ).toEqual(["Order", "Key", "Type and configuration", "Actions"]);
     expect(declarationOrder()).toEqual(["alpha", "status", "parent"]);
     expect(within(table).getByText("Text")).toBeInTheDocument();
@@ -181,7 +183,9 @@ describe("PropertiesEditor", () => {
       within(table).getByRole("button", { name: "Remove status" }),
     ).toBeInTheDocument();
 
-    await user.click(within(table).getByRole("button", { name: "Edit status" }));
+    await user.click(
+      within(table).getByRole("button", { name: "Edit status" }),
+    );
     expect(screen.getByLabelText("Type for status")).toHaveValue("select");
     expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
   });
@@ -194,9 +198,7 @@ describe("PropertiesEditor", () => {
     ];
     const { onChange } = renderProperties({ properties });
 
-    fireEvent.dragStart(
-      screen.getByRole("button", { name: "Reorder beta" }),
-    );
+    fireEvent.dragStart(screen.getByRole("button", { name: "Reorder beta" }));
     fireEvent.dragOver(screen.getByRole("row", { name: /gamma/i }));
     fireEvent.drop(screen.getByRole("row", { name: /gamma/i }));
 
@@ -239,11 +241,7 @@ describe("PropertiesEditor", () => {
     handle.focus();
     await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
     const reordered = latest(onChange);
-    expect(reordered.map(({ key }) => key)).toEqual([
-      "beta",
-      "alpha",
-      "gamma",
-    ]);
+    expect(reordered.map(({ key }) => key)).toEqual(["beta", "alpha", "gamma"]);
 
     rerender(<PropertiesEditor {...props} properties={reordered} />);
     expect(screen.getByRole("button", { name: "Reorder beta" })).toHaveFocus();
@@ -253,10 +251,7 @@ describe("PropertiesEditor", () => {
   });
 
   it("does not move a keyboard handle beyond a boundary", async () => {
-    const properties = [
-      property("alpha", "text"),
-      property("beta", "text"),
-    ];
+    const properties = [property("alpha", "text"), property("beta", "text")];
     const { onChange } = renderProperties({ properties });
     const handle = screen.getByRole("button", { name: "Reorder alpha" });
     handle.focus();
@@ -323,53 +318,56 @@ describe("PropertiesEditor", () => {
     ]);
   });
 
-  it.each([
-    "select",
-    "multi_select",
-  ] as const)("authors ordered option chips for %s", async (type) => {
-    const user = userEvent.setup();
-    const initial = {
-      ...property("status", type),
-      definition: { type, options: [] },
-    };
-    const { onChange, rerender, props } = renderProperties({
-      properties: [initial],
-    });
-    await user.click(screen.getByRole("button", { name: "Edit status" }));
-    expect(screen.getByText("Open vocabulary")).toBeInTheDocument();
-    await user.type(screen.getByLabelText("New option for status"), "queued");
-    await user.click(
-      screen.getByRole("button", { name: "Add option to status" }),
-    );
-    let changed = latest(onChange);
-    expect(changed[0].definition.options).toEqual(["queued"]);
+  it.each(["select", "multi_select"] as const)(
+    "authors ordered option chips for %s",
+    async (type) => {
+      const user = userEvent.setup();
+      const initial = {
+        ...property("status", type),
+        definition: { type, options: [] },
+      };
+      const { onChange, rerender, props } = renderProperties({
+        properties: [initial],
+      });
+      await user.click(screen.getByRole("button", { name: "Edit status" }));
+      expect(screen.getByText("Open vocabulary")).toBeInTheDocument();
+      await user.type(screen.getByLabelText("New option for status"), "queued");
+      await user.click(
+        screen.getByRole("button", { name: "Add option to status" }),
+      );
+      let changed = latest(onChange);
+      expect(changed[0].definition.options).toEqual(["queued"]);
 
-    rerender(<PropertiesEditor {...props} properties={changed} />);
-    await user.type(screen.getByLabelText("New option for status"), "active");
-    await user.click(
-      screen.getByRole("button", { name: "Add option to status" }),
-    );
-    changed = latest(onChange);
-    rerender(<PropertiesEditor {...props} properties={changed} />);
-    await user.click(screen.getByRole("button", { name: "Move active up" }));
-    expect(latest(onChange)[0].definition.options).toEqual([
-      "active",
-      "queued",
-    ]);
+      rerender(<PropertiesEditor {...props} properties={changed} />);
+      await user.type(screen.getByLabelText("New option for status"), "active");
+      await user.click(
+        screen.getByRole("button", { name: "Add option to status" }),
+      );
+      changed = latest(onChange);
+      rerender(<PropertiesEditor {...props} properties={changed} />);
+      await user.click(screen.getByRole("button", { name: "Move active up" }));
+      expect(latest(onChange)[0].definition.options).toEqual([
+        "active",
+        "queued",
+      ]);
 
-    rerender(<PropertiesEditor {...props} properties={latest(onChange)} />);
-    await user.click(screen.getByRole("button", { name: "Rename active" }));
-    await user.clear(screen.getByLabelText("Option name for active"));
-    await user.type(screen.getByLabelText("Option name for active"), "doing");
-    await user.click(
-      screen.getByRole("button", { name: "Save option active" }),
-    );
-    expect(latest(onChange)[0].definition.options).toEqual(["doing", "queued"]);
+      rerender(<PropertiesEditor {...props} properties={latest(onChange)} />);
+      await user.click(screen.getByRole("button", { name: "Rename active" }));
+      await user.clear(screen.getByLabelText("Option name for active"));
+      await user.type(screen.getByLabelText("Option name for active"), "doing");
+      await user.click(
+        screen.getByRole("button", { name: "Save option active" }),
+      );
+      expect(latest(onChange)[0].definition.options).toEqual([
+        "doing",
+        "queued",
+      ]);
 
-    rerender(<PropertiesEditor {...props} properties={latest(onChange)} />);
-    await user.click(screen.getByRole("button", { name: "Remove queued" }));
-    expect(latest(onChange)[0].definition.options).toEqual(["doing"]);
-  });
+      rerender(<PropertiesEditor {...props} properties={latest(onChange)} />);
+      await user.click(screen.getByRole("button", { name: "Remove queued" }));
+      expect(latest(onChange)[0].definition.options).toEqual(["doing"]);
+    },
+  );
 
   it("shows option controls only for select types and resets incompatible settings", async () => {
     const user = userEvent.setup();
@@ -416,19 +414,22 @@ describe("PropertiesEditor", () => {
     ["", /key is required/i],
     ["status", /already declared/i],
     ["title", /reserved system field/i],
-  ])("rejects invalid key %j with a focused diagnostic", async (key, message) => {
-    const onDiagnosticsChange = vi.fn();
-    renderProperties({
-      properties: [property("status", "select")],
-      onDiagnosticsChange,
-    });
-    await addProperty(key, "text");
-    expect(screen.getByRole("alert")).toHaveTextContent(message);
-    expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
-      expect.objectContaining({ severity: "error", path: "properties" }),
-    ]);
-    expect(screen.getByLabelText("New property key")).toHaveFocus();
-  });
+  ])(
+    "rejects invalid key %j with a focused diagnostic",
+    async (key, message) => {
+      const onDiagnosticsChange = vi.fn();
+      renderProperties({
+        properties: [property("status", "select")],
+        onDiagnosticsChange,
+      });
+      await addProperty(key, "text");
+      expect(screen.getByRole("alert")).toHaveTextContent(message);
+      expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({ severity: "error", path: "properties" }),
+      ]);
+      expect(screen.getByLabelText("New property key")).toHaveFocus();
+    },
+  );
 
   it("states that removing a persisted declaration keeps page values", async () => {
     const user = userEvent.setup();
@@ -474,35 +475,39 @@ describe("PropertiesEditor", () => {
     ["", /key is required/i],
     ["rating", /already declared/i],
     ["title", /reserved system field/i],
-  ])("reports invalid rename key %j beside the exact rename target", async (key, message) => {
-    const user = userEvent.setup();
-    const onDiagnosticsChange = vi.fn();
-    const status = property("status", "select");
-    renderProperties({
-      properties: [status, property("rating", "number")],
-      persistedPropertyIds: new Set([status.id]),
-      onDiagnosticsChange,
-    });
-    await user.click(screen.getByRole("button", { name: "Rename status" }));
-    if (key) await user.type(screen.getByLabelText("New key for status"), key);
-    await user.click(
-      screen.getByRole("button", { name: "Review rename status" }),
-    );
+  ])(
+    "reports invalid rename key %j beside the exact rename target",
+    async (key, message) => {
+      const user = userEvent.setup();
+      const onDiagnosticsChange = vi.fn();
+      const status = property("status", "select");
+      renderProperties({
+        properties: [status, property("rating", "number")],
+        persistedPropertyIds: new Set([status.id]),
+        onDiagnosticsChange,
+      });
+      await user.click(screen.getByRole("button", { name: "Rename status" }));
+      if (key)
+        await user.type(screen.getByLabelText("New key for status"), key);
+      await user.click(
+        screen.getByRole("button", { name: "Review rename status" }),
+      );
 
-    const renameInput = screen.getByLabelText("New key for status");
-    expect(renameInput).toHaveAccessibleDescription(message);
-    expect(renameInput).toHaveAttribute("aria-invalid", "true");
-    expect(screen.getByText(message)).toHaveAttribute("role", "alert");
-    expect(screen.getByLabelText("New property key")).not.toHaveAttribute(
-      "aria-invalid",
-    );
-    expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
-      expect.objectContaining({
-        path: "properties.status",
-        message: expect.stringMatching(message),
-      }),
-    ]);
-  });
+      const renameInput = screen.getByLabelText("New key for status");
+      expect(renameInput).toHaveAccessibleDescription(message);
+      expect(renameInput).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByText(message)).toHaveAttribute("role", "alert");
+      expect(screen.getByLabelText("New property key")).not.toHaveAttribute(
+        "aria-invalid",
+      );
+      expect(onDiagnosticsChange).toHaveBeenLastCalledWith([
+        expect.objectContaining({
+          path: "properties.status",
+          message: expect.stringMatching(message),
+        }),
+      ]);
+    },
+  );
 
   it("keeps add and rename diagnostics independent", async () => {
     const user = userEvent.setup();

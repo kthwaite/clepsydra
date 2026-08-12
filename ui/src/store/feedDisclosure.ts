@@ -115,7 +115,9 @@ export function writeFeedDisclosurePreferences(
 }
 
 function setsEqual<T>(left: Set<T>, right: Set<T>): boolean {
-  return left.size === right.size && [...left].every((value) => right.has(value));
+  return (
+    left.size === right.size && [...left].every((value) => right.has(value))
+  );
 }
 
 export function reconcileFeedDisclosurePreferences(

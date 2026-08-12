@@ -6,13 +6,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import {
-  act,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocsLayout } from "#/components/docs/DocsLayout";
@@ -223,9 +217,7 @@ describe("DocsLayout", () => {
         screen.queryByRole("dialog", { name: "Documentation navigation" }),
       ).not.toBeInTheDocument();
       expect(article).toHaveFocus();
-      expect(
-        article.closest("[aria-hidden='true'], [inert]"),
-      ).toBeNull();
+      expect(article.closest("[aria-hidden='true'], [inert]")).toBeNull();
     });
   });
 });

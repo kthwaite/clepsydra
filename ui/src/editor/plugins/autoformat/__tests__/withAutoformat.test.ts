@@ -247,9 +247,7 @@ describe("withAutoformat integration", () => {
             children: [
               {
                 type: "list-item",
-                children: [
-                  { type: "paragraph", children: [{ text: "" }] },
-                ],
+                children: [{ type: "paragraph", children: [{ text: "" }] }],
               },
             ],
           },
@@ -267,9 +265,7 @@ describe("withAutoformat integration", () => {
             children: [
               {
                 type: "list-item",
-                children: [
-                  { type: "paragraph", children: [{ text: "" }] },
-                ],
+                children: [{ type: "paragraph", children: [{ text: "" }] }],
               },
             ],
           },
@@ -368,19 +364,22 @@ describe("withAutoformat integration", () => {
       ["$*x*$", "*x*"],
       ["$_x_$", "_x_"],
       ["$ *x$", " *x"],
-    ])("keeps mark syntax literal inside typed math source: %s", (source, tex) => {
-      const editor = makeSchemaEditor();
+    ])(
+      "keeps mark syntax literal inside typed math source: %s",
+      (source, tex) => {
+        const editor = makeSchemaEditor();
 
-      type(editor, source);
+        type(editor, source);
 
-      expect(elementChildren(editor.children[0])).toContainEqual(
-        expect.objectContaining({
-          type: "inline-math",
-          delimiter: "$",
-          tex,
-        }),
-      );
-    });
+        expect(elementChildren(editor.children[0])).toContainEqual(
+          expect.objectContaining({
+            type: "inline-math",
+            delimiter: "$",
+            tex,
+          }),
+        );
+      },
+    );
 
     it("overtypes a bracket inside an unmatched math candidate literally", () => {
       const editor = makeSchemaEditor([
@@ -527,18 +526,21 @@ describe("withAutoformat integration", () => {
     it.each([
       ["$$x$$", "$$"],
       [String.raw`\[x\]`, "\\["],
-    ])("resolves composed standalone display syntax %s", (source, delimiter) => {
-      const editor = makeSchemaEditor();
+    ])(
+      "resolves composed standalone display syntax %s",
+      (source, delimiter) => {
+        const editor = makeSchemaEditor();
 
-      editor.insertText(source);
+        editor.insertText(source);
 
-      expect(editor.children[0]).toMatchObject({
-        type: "math-block",
-        tex: "x",
-        delimiter,
-      });
-      expect(editor.selection?.anchor.path).toEqual([1, 0]);
-    });
+        expect(editor.children[0]).toMatchObject({
+          type: "math-block",
+          tex: "x",
+          delimiter,
+        });
+        expect(editor.selection?.anchor.path).toEqual([1, 0]);
+      },
+    );
   });
 
   describe("inline transforms via insertText", () => {
@@ -1001,9 +1003,7 @@ describe("withAutoformat integration", () => {
       editor.insertBreak();
 
       expect(editor.children).toHaveLength(2);
-      expect(Node.string(editor.children[0])).toBe(
-        "YouTube: dQw4w9WgXcQ",
-      );
+      expect(Node.string(editor.children[0])).toBe("YouTube: dQw4w9WgXcQ");
       expect(editor.selection).toEqual({
         anchor: { path: [1, 0], offset: 0 },
         focus: { path: [1, 0], offset: 0 },

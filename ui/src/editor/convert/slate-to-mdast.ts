@@ -105,8 +105,7 @@ function gfmToMarkdownWithEmptyTasks(): Options {
 
             value = value.replace(
               /^(?:[*+-]|\d+\.)(?=\r?\n|$)/,
-              (marker) =>
-                `${marker} [${node.checked ? "x" : " "}] `,
+              (marker) => `${marker} [${node.checked ? "x" : " "}] `,
             );
             return value.replace(
               /^((?:[*+-]|\d+\.)[ \t]+\[[ xX]\])(?=\r?\n|$)/,
@@ -392,9 +391,7 @@ const ctx: SerializeCtx = {
 
 // ---------------------------------------------------------------------------
 // Public API
-function withoutBaseEmbedTrailingSentinel(
-  nodes: Descendant[],
-): Descendant[] {
+function withoutBaseEmbedTrailingSentinel(nodes: Descendant[]): Descendant[] {
   if (nodes.length < 2) return nodes;
   const base = nodes[nodes.length - 2];
   const sentinel = nodes[nodes.length - 1];
@@ -444,13 +441,8 @@ export function slateToMdast(nodes: Descendant[]): string {
       singleTildeStrikethroughExtension(),
     ],
   });
-  const last = root.children.at(-1) as unknown as
-    | BaseFenceMdast
-    | undefined;
-  if (
-    last?.type === "baseFence" &&
-    !/[\r\n]$/.test(last.rawBlock)
-  ) {
+  const last = root.children.at(-1) as unknown as BaseFenceMdast | undefined;
+  if (last?.type === "baseFence" && !/[\r\n]$/.test(last.rawBlock)) {
     return markdown.slice(0, -1);
   }
   return markdown;

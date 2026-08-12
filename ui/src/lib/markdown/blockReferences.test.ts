@@ -17,10 +17,7 @@ function findPrivateBlockLinks(tree: Root): Nodes[] {
   const links: Nodes[] = [];
 
   function visit(node: Nodes): void {
-    if (
-      node.type === "link" &&
-      node.url.startsWith(BLOCK_REFERENCE_SCHEME)
-    ) {
+    if (node.type === "link" && node.url.startsWith(BLOCK_REFERENCE_SCHEME)) {
       links.push(node);
     }
     if ("children" in node) {

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import {
   act,
   fireEvent,
@@ -7,6 +6,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {

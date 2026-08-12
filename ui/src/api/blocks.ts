@@ -1,4 +1,9 @@
-import { type QueryClient, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  type QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { components } from "#/api/schema";
 import { fetchClient } from "./client";
 import { invalidatePageContent, queryKeys } from "./keys";

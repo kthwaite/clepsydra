@@ -1,11 +1,6 @@
 import { Menu, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
-import {
-  Dialog,
-  Heading,
-  Modal,
-  ModalOverlay,
-} from "react-aria-components";
+import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { DocsSidebar } from "#/components/docs/DocsSidebar";
 import { IconButton } from "#/components/ui/icon-button";
 

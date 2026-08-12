@@ -1,8 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import {
-  EMPTY_FILTER,
   type BoardFilter,
+  EMPTY_FILTER,
 } from "#/components/tasking/board-filter";
 
 export type BoardMode = "card" | "backlog" | "cycle" | "timeline";

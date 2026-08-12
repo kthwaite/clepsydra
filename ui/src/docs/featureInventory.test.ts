@@ -97,9 +97,9 @@ describe("feature documentation inventory", () => {
       FEATURE_INVENTORY.map((entry) => [entry.id, entry]),
     );
 
-    expect(
-      REQUIRED_WORKFLOW_IDS.filter((id) => !entriesById.has(id)),
-    ).toEqual([]);
+    expect(REQUIRED_WORKFLOW_IDS.filter((id) => !entriesById.has(id))).toEqual(
+      [],
+    );
     expect(
       REQUIRED_WORKFLOW_IDS.filter(
         (id) => entriesById.get(id)?.disposition.kind === "internal",
@@ -120,10 +120,8 @@ describe("feature documentation inventory", () => {
   });
 
   it("maps Codex, conversation capture, and integrations to their dedicated guides", () => {
-    const entriesById: ReadonlyMap<
-      string,
-      (typeof FEATURE_INVENTORY)[number]
-    > = new Map(FEATURE_INVENTORY.map((entry) => [entry.id, entry]));
+    const entriesById: ReadonlyMap<string, (typeof FEATURE_INVENTORY)[number]> =
+      new Map(FEATURE_INVENTORY.map((entry) => [entry.id, entry]));
 
     for (const [id, slug] of Object.entries(TASK_6_GUIDE_ASSIGNMENTS)) {
       expect(entriesById.get(id)?.disposition).toEqual({
@@ -143,9 +141,7 @@ describe("feature documentation inventory", () => {
     const integrationSlugs = [
       ...new Set(
         integrations.flatMap((entry) =>
-          entry.disposition.kind === "guide"
-            ? [entry.disposition.slug]
-            : [],
+          entry.disposition.kind === "guide" ? [entry.disposition.slug] : [],
         ),
       ),
     ];
@@ -219,25 +215,13 @@ describe("feature documentation inventory", () => {
       "## Status and preferences",
       "preferences",
     ],
-    [
-      "app.themeToggle",
-      "configuration",
-      "### Theme toggle",
-      "theme",
-    ],
-    [
-      "sys.chrome",
-      "configuration",
-      "### Diegetic chrome",
-      "diegetic chrome",
-    ],
+    ["app.themeToggle", "configuration", "### Theme toggle", "theme"],
+    ["sys.chrome", "configuration", "### Diegetic chrome", "diegetic chrome"],
   ] as const)(
     "%s is owned by useful content and discovery metadata in %s",
     (id, slug, heading, discoveryTerm) => {
       const entry = FEATURE_INVENTORY.find((candidate) => candidate.id === id);
-      expect(entry?.disposition).toEqual(
-        expect.objectContaining({ slug }),
-      );
+      expect(entry?.disposition).toEqual(expect.objectContaining({ slug }));
 
       const page = DOC_PAGES.find((candidate) => candidate.slug === slug);
       expect(page?.source).toContain(heading);

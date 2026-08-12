@@ -232,13 +232,14 @@ w = z^2
 
   it("renders malformed private block URLs as inert text", () => {
     render(
-      <MarkdownRenderer
-        content="[Malformed](clepsydra-block:short) [Unknown](other-scheme:abc123DEF0)"
-      />,
+      <MarkdownRenderer content="[Malformed](clepsydra-block:short) [Unknown](other-scheme:abc123DEF0)" />,
     );
 
     expect(screen.getByText("Malformed").closest("a")).toBeNull();
-    expect(screen.getByText("Unknown").closest("a")).toHaveAttribute("href", "");
+    expect(screen.getByText("Unknown").closest("a")).toHaveAttribute(
+      "href",
+      "",
+    );
   });
 
   it("does not preserve private block schemes in image destinations", () => {

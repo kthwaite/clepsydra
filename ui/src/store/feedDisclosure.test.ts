@@ -1,16 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   emptyFeedDisclosurePreferences,
+  type FeedDisclosurePreferences,
+  type FeedDisclosureStorage,
   feedDisclosureStorageKey,
   normalizeFeedGroupIdentity,
   readFeedDisclosurePreferences,
   reconcileFeedDisclosurePreferences,
   writeFeedDisclosurePreferences,
-  type FeedDisclosurePreferences,
-  type FeedDisclosureStorage,
 } from "#/store/feedDisclosure";
 
-function memoryStorage(initial: Record<string, string> = {}): FeedDisclosureStorage & {
+function memoryStorage(
+  initial: Record<string, string> = {},
+): FeedDisclosureStorage & {
   values: Map<string, string>;
 } {
   const values = new Map(Object.entries(initial));

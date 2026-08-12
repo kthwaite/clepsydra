@@ -4,6 +4,10 @@ import remarkParse from "remark-parse";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { Descendant } from "slate";
 import { unified } from "unified";
+import {
+  type ConversationMarker,
+  parseConversationMarker,
+} from "#/editor/conversation/marker";
 import type {
   BlockRefElement,
   CustomElement,
@@ -18,10 +22,6 @@ import type {
 import { remarkFolioMath } from "#/lib/markdown/folioMath";
 import { baseEmbedFromCode } from "./baseEmbedMarkdown";
 import type { FolioInlineMathMdast, FolioMathMdast } from "./mdastTypes";
-import {
-  parseConversationMarker,
-  type ConversationMarker,
-} from "#/editor/conversation/marker";
 
 // Re-export for the barrel
 export type { Descendant };
@@ -148,7 +148,9 @@ function conversationMarkerFromBlockquote(
   if (firstChild.type !== "text") return null;
   const lineEnd = firstChild.value.indexOf("\n");
   if (lineEnd < 0) return null;
-  const prefixMarker = parseConversationMarker(firstChild.value.slice(0, lineEnd));
+  const prefixMarker = parseConversationMarker(
+    firstChild.value.slice(0, lineEnd),
+  );
   if (!prefixMarker) return null;
 
   const bodyChildren = first.children.slice(1);

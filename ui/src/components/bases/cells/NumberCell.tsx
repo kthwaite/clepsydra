@@ -13,9 +13,7 @@ export function NumberCell({
   const [draft, setDraft] = useState(
     typeof value === "number" ? String(value) : "",
   );
-  const commit = (
-    submit: CellEditorProps["onCommit"] = onCommit,
-  ): boolean => {
+  const commit = (submit: CellEditorProps["onCommit"] = onCommit): boolean => {
     if (draft === "") {
       submit(null);
       return true;

@@ -15,8 +15,7 @@ vi.mock("#/hooks/useOpenTab", () => ({
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { todayJournalPath } from "#/lib/journal";
 
-const CANONICAL_TODAY_PATH =
-  "journals/20260808T005500Z--2026-08-08--a1b2c3.md";
+const CANONICAL_TODAY_PATH = "journals/20260808T005500Z--2026-08-08--a1b2c3.md";
 
 describe("useOpenTodayJournal", () => {
   it("opens the canonical page when today's journal already exists", () => {

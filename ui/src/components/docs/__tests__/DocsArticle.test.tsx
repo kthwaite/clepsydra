@@ -8,8 +8,8 @@ import {
 } from "@tanstack/react-router";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { ComponentPropsWithoutRef, ElementType } from "react";
 import type { MDXComponents } from "mdx/types";
+import type { ComponentPropsWithoutRef, ElementType } from "react";
 import { describe, expect, it } from "vitest";
 import { DocsArticle } from "#/components/docs/DocsArticle";
 import type { DocPage } from "#/docs/types";
@@ -128,10 +128,9 @@ describe("DocsArticle", () => {
     const router = renderArticle();
     await screen.findByRole("heading", { level: 1, name: page.title });
 
-    expect(screen.getByRole("link", { name: "Jump to fields" })).toHaveAttribute(
-      "href",
-      "#fields",
-    );
+    expect(
+      screen.getByRole("link", { name: "Jump to fields" }),
+    ).toHaveAttribute("href", "#fields");
     expect(screen.getByRole("link", { name: "Bases" })).toHaveAttribute(
       "href",
       "/docs/bases#fields",

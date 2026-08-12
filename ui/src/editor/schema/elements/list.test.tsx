@@ -50,7 +50,6 @@ function renderedTask() {
   };
 }
 
-
 describe("list item checkbox", () => {
   it("keeps the DOM, Slate node, Markdown, and one-step undo in agreement", async () => {
     const user = userEvent.setup();

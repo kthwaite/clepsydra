@@ -8,17 +8,13 @@ import type { BlockResponse } from "#/api/blocks";
 import { markdownToSlate } from "#/editor/convert";
 import type { CustomEditor } from "#/editor/types";
 
-const {
-  lookupMock,
-  openTabMock,
-  resolveOrCreateMock,
-  useBlockMock,
-} = vi.hoisted(() => ({
-  lookupMock: vi.fn(),
-  openTabMock: vi.fn(),
-  resolveOrCreateMock: vi.fn(),
-  useBlockMock: vi.fn(),
-}));
+const { lookupMock, openTabMock, resolveOrCreateMock, useBlockMock } =
+  vi.hoisted(() => ({
+    lookupMock: vi.fn(),
+    openTabMock: vi.fn(),
+    resolveOrCreateMock: vi.fn(),
+    useBlockMock: vi.fn(),
+  }));
 
 vi.mock("#/editor/wikilinkResolution", () => ({
   useWikilinkResolution: () => ({ lookup: lookupMock }),
@@ -170,9 +166,7 @@ describe("SlateEditor embedded read-only contract", () => {
     expect(screen.queryByRole("button", { name: "RUST" })).toBeNull();
     expect(screen.queryByPlaceholderText("Search language…")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Copy code" }));
-    await waitFor(() =>
-      expect(writeText).toHaveBeenCalledWith("fn main() {}"),
-    );
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("fn main() {}"));
 
     expect(editor.children).toEqual(before);
     expect(onChange).not.toHaveBeenCalled();

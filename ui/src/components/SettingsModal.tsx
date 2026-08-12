@@ -268,9 +268,7 @@ function OperatorPreferences() {
             id: item,
             label: item,
           }))}
-          onChange={(value) =>
-            setDensity(value as (typeof DENSITIES)[number])
-          }
+          onChange={(value) => setDensity(value as (typeof DENSITIES)[number])}
           className="w-fit gap-0 border border-border"
           itemClassName="cl-mono ml-0 border-0 border-r border-border px-3 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground last:border-r-0 data-[hovered]:bg-transparent data-[hovered]:text-foreground data-[selected]:border-border data-[selected]:bg-accent data-[selected]:font-normal data-[selected]:text-black [&[data-hovered][data-selected]]:text-black"
         />

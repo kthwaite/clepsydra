@@ -17,9 +17,7 @@ export interface FeedGroupComboBoxProps {
 }
 
 function groupKey(value: string): string {
-  return value
-    .trim()
-    .replace(/[A-Z]/g, (letter) => letter.toLowerCase());
+  return value.trim().replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 }
 
 export function canonicalFeedGroups(groups: string[]): string[] {

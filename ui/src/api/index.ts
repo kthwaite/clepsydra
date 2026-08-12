@@ -1,10 +1,10 @@
 import {
   type QueryClient,
+  type UseMutationResult,
+  type UseQueryResult,
   useMutation,
   useQuery,
   useQueryClient,
-  type UseMutationResult,
-  type UseQueryResult,
 } from "@tanstack/react-query";
 import type { components, operations } from "#/api/schema";
 import { $api, fetchClient } from "./client";
@@ -300,10 +300,15 @@ export function useRebuildIndex() {
 }
 
 export function useTags(enabled = true) {
-  return $api.useQuery("get", "/api/vault/index/tags", {}, {
-    enabled,
-    throwOnError: false,
-  });
+  return $api.useQuery(
+    "get",
+    "/api/vault/index/tags",
+    {},
+    {
+      enabled,
+      throwOnError: false,
+    },
+  );
 }
 
 export function useTagSuggestions(query: string, limit = 12, enabled = true) {

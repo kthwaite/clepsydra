@@ -1,9 +1,8 @@
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it } from "vitest";
-import { docsMdxComponents } from "#/components/docs/DocsMdxComponents";
 import { STATIC_COMMANDS } from "#/components/codex/commandRegistry";
-import { routeTree } from "#/routeTree.gen";
+import { docsMdxComponents } from "#/components/docs/DocsMdxComponents";
 import BooksAndReading, {
   meta as booksAndReadingMeta,
 } from "#/docs/content/books-and-reading.mdx";
@@ -19,6 +18,7 @@ import Troubleshooting, {
 } from "#/docs/content/troubleshooting.mdx";
 import { FEATURE_INVENTORY } from "#/docs/featureInventory";
 import { DOC_PAGES } from "#/docs/registry";
+import { routeTree } from "#/routeTree.gen";
 
 const STRUCTURED_GUIDE_SLUGS = [
   ...new Set(
@@ -154,9 +154,7 @@ it("documents the plaintext Base definition, property, projection, and protected
   expect(source).toMatch(
     /frontmatter properties and\s+relation values are plaintext/i,
   );
-  expect(source).toMatch(
-    /index projections of that metadata are\s+plaintext/i,
-  );
+  expect(source).toMatch(/index projections of that metadata are\s+plaintext/i);
   expect(source).toMatch(
     /protected folio bodies do not contribute body-derived[\s\S]*frontmatter\s+remains available/i,
   );
@@ -401,9 +399,7 @@ it("documents the exact extension manifest and blob construction", () => {
 });
 
 it("documents task date, stale-span, and current Today projection boundaries", () => {
-  const source = registeredGuideSource(
-    "tasks-agenda-journals-and-board",
-  );
+  const source = registeredGuideSource("tasks-agenda-journals-and-board");
 
   expect(source).toContain("not validated as dates by the server");
   expect(source).toContain("compares their indexed strings lexicographically");
@@ -426,7 +422,9 @@ it("documents exact academic deduplication and Zotero status matrices", () => {
   ]) {
     expect(source).toContain(status);
   }
-  expect(source).toContain("DOI and ISBN deduplication compares exact indexed strings");
+  expect(source).toContain(
+    "DOI and ISBN deduplication compares exact indexed strings",
+  );
   expect(source).toMatch(/BibTeX and\s+Zotero preserve source spelling/);
 });
 
@@ -473,14 +471,10 @@ function runtimeRoutePaths(): string[] {
 }
 
 it("cross-links the knowledge guides and repair workspace", () => {
-  const linksGuide = registeredGuideSource(
-    "links-search-graph-and-repair",
-  );
+  const linksGuide = registeredGuideSource("links-search-graph-and-repair");
   const basesGuide = registeredGuideSource("bases");
 
-  expect(linksGuide).toContain(
-    "](/docs/block-references-and-transclusion)",
-  );
+  expect(linksGuide).toContain("](/docs/block-references-and-transclusion)");
   expect(linksGuide).toContain("](/repairs)");
   expect(linksGuide).toContain("](/docs/bases)");
   expect(linksGuide).toContain("](/docs/lsp)");
@@ -509,23 +503,21 @@ it("documents the shipped link, search, graph, and repair contracts", () => {
   expect(source).toContain("no bulk apply");
   expect(source).toContain("remains in the list");
   expect(source).toContain("409");
-  expect(source).toContain(
-    "Protected outbound body topology is unavailable",
-  );
+  expect(source).toContain("Protected outbound body topology is unavailable");
   expect(source).toContain(
     "an inbound-free protected page is reported as an orphan",
   );
 });
 
 it("documents single-block non-recursive transclusion and its privacy boundary", () => {
-  const source = registeredGuideSource(
-    "block-references-and-transclusion",
-  );
+  const source = registeredGuideSource("block-references-and-transclusion");
 
   expect(source).toContain("one read-only block");
   expect(source).toContain("Nested reference tokens remain inert");
   expect(source).toContain("Referenced block unavailable");
-  expect(source).toContain("protected and missing targets are indistinguishable");
+  expect(source).toContain(
+    "protected and missing targets are indistinguishable",
+  );
   expect(source).toContain("assigns the ID to the source block");
   expect(source).toContain(
     "current detail endpoint returns the first matching row",

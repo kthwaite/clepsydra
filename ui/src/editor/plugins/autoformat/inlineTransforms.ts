@@ -25,11 +25,7 @@ function isOpenerBoundary(charBefore: string): boolean {
 
 function isEscaped(text: string, index: number): boolean {
   let backslashes = 0;
-  for (
-    let cursor = index - 1;
-    cursor >= 0 && text[cursor] === "\\";
-    cursor--
-  ) {
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor--) {
     backslashes++;
   }
   return backslashes % 2 === 1;
@@ -95,10 +91,7 @@ function getTextBefore(
   return { text: textBefore, path: anchor.path as unknown as number[] };
 }
 
-export function selectTextAfterInline(
-  editor: Editor,
-  inlinePath: Path,
-): void {
+export function selectTextAfterInline(editor: Editor, inlinePath: Path): void {
   const textPath = Path.next(inlinePath);
   const nextNode = Editor.hasPath(editor, textPath)
     ? Editor.node(editor, textPath)[0]
@@ -231,7 +224,6 @@ function tryMarkTransform(
 
   return true;
 }
-
 
 function tryWikilinkTransform(
   editor: Editor,

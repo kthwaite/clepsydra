@@ -27,11 +27,8 @@ export const queryKeys = {
     today: ["agenda", "today"] as const,
     week: ["agenda", "week"] as const,
     overdue: ["agenda", "overdue"] as const,
-    cycleBurndown: (
-      cycle: string | null,
-      project?: string,
-      unfiled = false,
-    ) => ["agenda", "cycle-burndown", cycle, project, unfiled] as const,
+    cycleBurndown: (cycle: string | null, project?: string, unfiled = false) =>
+      ["agenda", "cycle-burndown", cycle, project, unfiled] as const,
   },
 
   journal: {
@@ -65,15 +62,8 @@ export const queryKeys = {
     issuesPath: "/api/vault/index/issues",
     graphPath: "/api/vault/index/graph",
     issues: (
-      query: NonNullable<
-        operations["reference_issues"]["parameters"]["query"]
-      >,
-    ) =>
-      [
-        "get",
-        "/api/vault/index/issues",
-        { params: { query } },
-      ] as const,
+      query: NonNullable<operations["reference_issues"]["parameters"]["query"]>,
+    ) => ["get", "/api/vault/index/issues", { params: { query } }] as const,
   },
   bases: {
     pathPrefix: "/api/vault/bases",

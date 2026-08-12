@@ -216,7 +216,9 @@ describe("DocsSidebar", () => {
       "configure neovim",
     );
     await user.click(
-      screen.getByRole("link", { name: /LSP.*Configure Neovim 0\.11 or newer/ }),
+      screen.getByRole("link", {
+        name: /LSP.*Configure Neovim 0\.11 or newer/,
+      }),
     );
     await waitFor(() => {
       expect(onNavigate).toHaveBeenCalledTimes(1);
@@ -233,7 +235,9 @@ describe("DocsSidebar", () => {
       "configure neovim",
     );
     await user.click(
-      screen.getByRole("link", { name: /LSP.*Configure Neovim 0\.11 or newer/ }),
+      screen.getByRole("link", {
+        name: /LSP.*Configure Neovim 0\.11 or newer/,
+      }),
     );
     await waitFor(() => {
       expect(onNavigate).toHaveBeenCalledTimes(2);

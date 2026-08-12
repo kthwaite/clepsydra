@@ -13,17 +13,16 @@ function firstBlock(markdown: string): Block {
 }
 
 describe("journal time heading markdown", () => {
-  it.each([
-    "00:00",
-    "09:07",
-    "23:59",
-  ])("recognizes an exact level-two %s heading", (time) => {
-    expect(firstBlock(`## ${time}`)).toEqual({
-      type: "journal-time",
-      time,
-      children: [{ text: "" }],
-    });
-  });
+  it.each(["00:00", "09:07", "23:59"])(
+    "recognizes an exact level-two %s heading",
+    (time) => {
+      expect(firstBlock(`## ${time}`)).toEqual({
+        type: "journal-time",
+        time,
+        children: [{ text: "" }],
+      });
+    },
+  );
 
   it.each([
     ["# 09:07", 1],

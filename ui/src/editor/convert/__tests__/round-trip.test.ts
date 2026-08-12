@@ -318,7 +318,6 @@ x
     expect(slateToMarkdown(markdownToSlate(source)).trim()).toBe(source.trim());
   });
 
-
   it("round-trips programmatic inline dollar collisions through backslash math", () => {
     const slate = [
       {

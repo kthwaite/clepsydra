@@ -15,9 +15,15 @@ describe("classifyLinkResource", () => {
     ["https://pmc.ncbi.nlm.nih.gov/articles/PMC123/", "pubmed"],
     ["https://www.semanticscholar.org/paper/example", "semantic-scholar"],
     ["https://github.com/example/project", "github"],
-    ["https://raw.githubusercontent.com/example/project/main/file.ts", "github"],
+    [
+      "https://raw.githubusercontent.com/example/project/main/file.ts",
+      "github",
+    ],
     ["https://gitlab.com/example/project", "gitlab"],
-    ["https://web.archive.org/web/20200101/https://example.com", "internet-archive"],
+    [
+      "https://web.archive.org/web/20200101/https://example.com",
+      "internet-archive",
+    ],
     ["https://www.youtube.com/watch?v=abc", "youtube"],
     ["https://youtu.be/abc", "youtube"],
     ["https://player.vimeo.com/video/123", "vimeo"],

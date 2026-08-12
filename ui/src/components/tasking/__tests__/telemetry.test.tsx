@@ -4,10 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fetchClient } from "#/api/client";
 import { useBoardStore } from "#/store/board";
 import { TaskingScreen } from "../TaskingScreen";
-import {
-  BOARD_FIXTURE,
-  BOARD_FIXTURE_WITH_NO_SLUG_OP,
-} from "./fixtures";
+import { BOARD_FIXTURE, BOARD_FIXTURE_WITH_NO_SLUG_OP } from "./fixtures";
 
 function renderScreen() {
   const client = new QueryClient({
@@ -23,7 +20,10 @@ function renderScreen() {
 function stubTelemetryFetch({
   empty = false,
   board = BOARD_FIXTURE,
-}: { empty?: boolean; board?: typeof BOARD_FIXTURE } = {}) {
+}: {
+  empty?: boolean;
+  board?: typeof BOARD_FIXTURE;
+} = {}) {
   const completionDays = empty
     ? Array.from({ length: 14 }, (_, index) => ({
         date: `2026-06-${String(index + 1).padStart(2, "0")}`,
@@ -53,16 +53,14 @@ function stubTelemetryFetch({
       ),
     ),
   );
-  return vi.spyOn(fetchClient, "GET").mockImplementation(
-    ((path: string) =>
-      Promise.resolve({
-        data: path.includes("tasks/history")
-          ? { days: completionDays }
-          : { cycle: "C-01", points },
-        error: undefined,
-        response: new Response(null, { status: 200 }),
-      })) as never,
-  );
+  return vi.spyOn(fetchClient, "GET").mockImplementation(((path: string) =>
+    Promise.resolve({
+      data: path.includes("tasks/history")
+        ? { days: completionDays }
+        : { cycle: "C-01", points },
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    })) as never);
 }
 
 describe("tasking telemetry", () => {
@@ -79,7 +77,9 @@ describe("tasking telemetry", () => {
     const get = stubTelemetryFetch();
     renderScreen();
 
-    expect(await screen.findByLabelText("14-day seal history: 0, 2, 1")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("14-day seal history: 0, 2, 1"),
+    ).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith("/api/vault/tasks/history", {
       params: {
         query: { days: 14, project: undefined, unfiled: undefined },
@@ -92,7 +92,9 @@ describe("tasking telemetry", () => {
     const get = stubTelemetryFetch();
     renderScreen();
 
-    expect(await screen.findByLabelText("14-day seal history: 0, 2, 1")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("14-day seal history: 0, 2, 1"),
+    ).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith("/api/vault/tasks/history", {
       params: {
         query: { days: 14, project: undefined, unfiled: true },
@@ -114,7 +116,9 @@ describe("tasking telemetry", () => {
     stubTelemetryFetch();
     renderScreen();
 
-    expect(await screen.findByLabelText("Cycle burndown: 4, 3, 1")).toBeInTheDocument();
+    expect(
+      await screen.findByLabelText("Cycle burndown: 4, 3, 1"),
+    ).toBeInTheDocument();
   });
 
   it("shows honest empty states when no seals or cycle history exist", async () => {

@@ -1,5 +1,5 @@
-import { isBlockNotFound, useBlock } from "#/api/blocks";
 import type { BlockResponse } from "#/api/blocks";
+import { isBlockNotFound, useBlock } from "#/api/blocks";
 import { cn } from "#/lib/cn";
 
 export interface BlockTransclusionProps {
@@ -51,10 +51,7 @@ export function BlockTransclusion({
 
   if (isPending) {
     return (
-      <span
-        role="status"
-        className={cn("text-muted-foreground", className)}
-      >
+      <span role="status" className={cn("text-muted-foreground", className)}>
         Loading referenced block
       </span>
     );

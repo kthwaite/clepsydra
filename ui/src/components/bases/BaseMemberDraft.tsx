@@ -11,8 +11,8 @@ import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagInput } from "#/components/ui/tag-input";
 import type { Kind } from "#/lib/kind";
-import { EditableCell } from "./EditableCell";
 import type { CellValue } from "./cells/types";
+import { EditableCell } from "./EditableCell";
 import {
   type BaseMemberDraftField,
   type BaseMemberDraftValue,
@@ -37,7 +37,6 @@ function fieldLabel(key: string): string {
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-
 function requirementText(field: BaseMemberDraftField): string | undefined {
   if (field.membership && field.viewOnly && field.embedOnly) {
     return "Required for base membership, the active view, and the embedded filter.";
@@ -56,7 +55,6 @@ function requirementText(field: BaseMemberDraftField): string | undefined {
   if (field.embedOnly) return "Required for the embedded filter.";
   return undefined;
 }
-
 
 interface DraftFieldControlProps {
   field: BaseMemberDraftField;
@@ -193,7 +191,10 @@ export function BaseMemberDraft({
 
   const commitActiveEditor = () => {
     const active = document.activeElement;
-    if (!(active instanceof HTMLElement) || !active.closest("[data-draft-editor]")) {
+    if (
+      !(active instanceof HTMLElement) ||
+      !active.closest("[data-draft-editor]")
+    ) {
       return;
     }
     active.dispatchEvent(
@@ -237,7 +238,9 @@ export function BaseMemberDraft({
   const alertMessage =
     summaryError ??
     titleError ??
-    (diagnostics.length > 0 ? "Please correct the highlighted fields." : undefined);
+    (diagnostics.length > 0
+      ? "Please correct the highlighted fields."
+      : undefined);
 
   return (
     <form
@@ -351,7 +354,10 @@ export function BaseMemberDraft({
         </div>
       </fieldset>
       {alertMessage ? (
-        <div role="alert" className="border-t border-rule px-2 py-1 text-[11px] text-hot">
+        <div
+          role="alert"
+          className="border-t border-rule px-2 py-1 text-[11px] text-hot"
+        >
           {alertMessage}
         </div>
       ) : null}

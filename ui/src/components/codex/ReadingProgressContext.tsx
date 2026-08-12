@@ -14,9 +14,8 @@ type SetProgress = (progress: number) => void;
 
 const DEFAULT_SET_PROGRESS: SetProgress = () => undefined;
 const ReadingProgressValueContext = createContext(0);
-const ReadingProgressActionsContext = createContext<SetProgress>(
-  DEFAULT_SET_PROGRESS,
-);
+const ReadingProgressActionsContext =
+  createContext<SetProgress>(DEFAULT_SET_PROGRESS);
 
 export function ReadingProgressProvider({ children }: PropsWithChildren) {
   const [progress, setProgress] = useState(0);

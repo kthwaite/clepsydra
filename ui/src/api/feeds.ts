@@ -108,11 +108,7 @@ function filtersFromEntryQueryKey(queryKey: readonly unknown[]) {
 }
 
 function entryDetailQueryKey(id: number) {
-  return [
-    "get",
-    ENTRY_DETAIL_PATH,
-    { params: { path: { id } } },
-  ] as const;
+  return ["get", ENTRY_DETAIL_PATH, { params: { path: { id } } }] as const;
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]) {
@@ -396,7 +392,8 @@ function reconcileUpdatedEntryQuery(
 ) {
   const layers = optimisticEntryMutationLayers.get(queryClient);
   const pages = query.state.data;
-  if (layers === undefined || layers.length === 0 || pages === undefined) return;
+  if (layers === undefined || layers.length === 0 || pages === undefined)
+    return;
 
   let states = optimisticEntryStates.get(queryClient);
   if (states === undefined) {
@@ -485,7 +482,8 @@ function foldSettledEntryDetailLayers(state: EntryDetailOptimisticState) {
       state.layers.shift();
       continue;
     }
-    if (settled.result === undefined || settled.serverEntry === undefined) break;
+    if (settled.result === undefined || settled.serverEntry === undefined)
+      break;
     state.baseline =
       state.baseline === undefined
         ? settled.serverEntry
@@ -573,7 +571,8 @@ function settleEntryDetailMutation(
   const states = optimisticEntryDetailStates.get(queryClient);
   const state = states?.get(entryId);
   const layer = state?.layers.find((candidate) => candidate.id === layerId);
-  if (states === undefined || state === undefined || layer === undefined) return;
+  if (states === undefined || state === undefined || layer === undefined)
+    return;
 
   attachEntryDetailQuery(queryClient, state);
   if (result === undefined) {
@@ -761,11 +760,7 @@ export function usePatchFeedEntry() {
     onError: (_error, _variables, context) => {
       if (context === undefined) return;
       settleEntryMutation(queryClient, context.layerId);
-      settleEntryDetailMutation(
-        queryClient,
-        context.entryId,
-        context.layerId,
-      );
+      settleEntryDetailMutation(queryClient, context.entryId, context.layerId);
     },
     onSettled: () => invalidateEntryMutationQueries(queryClient),
   });

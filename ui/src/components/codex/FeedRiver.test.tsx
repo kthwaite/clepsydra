@@ -106,7 +106,9 @@ vi.mock("#/api/feeds", async (importOriginal) => {
         : riverMocks.feedEntriesInfiniteOptions(filters),
     useFeeds: () => riverMocks.feedsQuery,
     useFeedEntry: (id?: number) =>
-      riverMocks.useRealHooks ? actual.useFeedEntry(id) : riverMocks.detailQuery,
+      riverMocks.useRealHooks
+        ? actual.useFeedEntry(id)
+        : riverMocks.detailQuery,
     usePatchFeedEntry: () =>
       riverMocks.useRealHooks
         ? actual.usePatchFeedEntry()
@@ -253,7 +255,9 @@ describe("FeedRiver", () => {
     expect(riverMocks.patchEntry).toHaveBeenCalledWith(
       expect.objectContaining({ id: 101, read: true }),
     );
-    expect(screen.queryByText("The complete entry body.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("The complete entry body."),
+    ).not.toBeInTheDocument();
   });
 
   it("marks the selected row current while retaining every loaded row", () => {
@@ -290,8 +294,12 @@ describe("FeedRiver", () => {
 
     expect(river).toBe(screen.getByRole("region", { name: "Feed river" }));
     expect(river.scrollTop).toBe(173);
-    expect(screen.getByRole("article", { name: /cache semantics/i })).toBeVisible();
-    expect(screen.getByRole("article", { name: /earlier dispatch/i })).toBeVisible();
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("article", { name: /earlier dispatch/i }),
+    ).toBeVisible();
   });
 
   it("pins an unread selected row through optimistic removal and rollback without moving the scroll container", async () => {
@@ -310,9 +318,9 @@ describe("FeedRiver", () => {
     const river = screen.getByRole("region", { name: "Feed river" });
     river.scrollTop = 211;
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: /cache semantics/i }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /cache semantics/i }));
     setEntries([]);
     page.rerender(
       <FeedRiver
@@ -382,11 +390,7 @@ describe("FeedRiver", () => {
     const tagged = entry({ tags: ["rust", "reading"] });
     setEntries([tagged]);
     riverMocks.detailQuery.data = tagged;
-    const page = renderRiver(
-      { view: "all", tag: "rust" },
-      false,
-      101,
-    );
+    const page = renderRiver({ view: "all", tag: "rust" }, false, 101);
 
     setEntries([]);
     riverMocks.detailQuery.data = entry({ tags: ["reading"] });
@@ -453,14 +457,15 @@ describe("FeedRiver", () => {
     };
     riverMocks.entriesQuery.hasNextPage = false;
     page.rerender(
-      <FeedRiver
-        filters={{ view: "all" }}
-        onSelectEntry={vi.fn()}
-      />,
+      <FeedRiver filters={{ view: "all" }} onSelectEntry={vi.fn()} />,
     );
 
-    expect(screen.getByRole("article", { name: /cache semantics/i })).toBeVisible();
-    expect(screen.getByRole("article", { name: /page two dispatch/i })).toBeVisible();
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("article", { name: /page two dispatch/i }),
+    ).toBeVisible();
   });
 
   it("keeps compact disclosure and its full-reader continuation", async () => {

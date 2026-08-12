@@ -91,7 +91,6 @@ describe("parseRecipeMarkdown", () => {
     });
   });
 
-
   it("normalizes CRLF and removes only an exactly matching trimmed first title", () => {
     const source = `  Phở Gà  \r
 Broth with **ginger**.\r
@@ -327,15 +326,18 @@ NOTES
 `,
       reason: "invalid-step",
     },
-  ] as const)("rejects $name without mutating the source", ({ source, reason }) => {
-    const originalSource = source;
+  ] as const)(
+    "rejects $name without mutating the source",
+    ({ source, reason }) => {
+      const originalSource = source;
 
-    expect(parseRecipeMarkdown(source, "Recipe")).toEqual({
-      ok: false,
-      reason,
-    });
-    expect(source).toBe(originalSource);
-  });
+      expect(parseRecipeMarkdown(source, "Recipe")).toEqual({
+        ok: false,
+        reason,
+      });
+      expect(source).toBe(originalSource);
+    },
+  );
 
   it("round-trips marker-shaped Markdown inside Notes as notes content", () => {
     const document = {

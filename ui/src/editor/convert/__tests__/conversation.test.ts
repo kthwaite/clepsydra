@@ -75,7 +75,9 @@ describe("conversation markdown/Slate conversion", () => {
     expect(markdownToSlate(markdown)).toEqual([
       expect.objectContaining({
         type: "conversation-turn",
-        children: [{ type: "paragraph", children: [{ text: "Captured body" }] }],
+        children: [
+          { type: "paragraph", children: [{ text: "Captured body" }] },
+        ],
       }),
     ]);
   });
@@ -101,7 +103,6 @@ describe("conversation markdown/Slate conversion", () => {
       ],
     });
   });
-
 
   it("preserves a leading greater-than in top-level display math", () => {
     expect(markdownToSlate("$$\n> x\n$$")).toEqual([

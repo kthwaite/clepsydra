@@ -85,7 +85,9 @@ describe("SheafContextMenu — tab target", () => {
       screen.queryByRole("menuitem", { name: /^(un)?pin$/i }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "CLOSE" })).toBeVisible();
-    expect(screen.getByRole("menuitem", { name: "CLOSE OTHERS" })).toBeVisible();
+    expect(
+      screen.getByRole("menuitem", { name: "CLOSE OTHERS" }),
+    ).toBeVisible();
   });
 });
 

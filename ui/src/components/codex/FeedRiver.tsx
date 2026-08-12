@@ -5,16 +5,13 @@ import {
   type EntryView,
   type FeedEntry,
   feedEntriesInfiniteOptions,
-  useFeeds,
   useFeedEntry,
+  useFeeds,
   useMarkFeedEntriesRead,
   usePatchFeedEntry,
 } from "#/api/feeds";
 import { feedEntryBoundary, formatFeedDay, formatFeedTime } from "#/lib/time";
-import {
-  normalizeFeedEntryTags,
-  safeFeedEntryUrl,
-} from "./FeedReaderPane";
+import { normalizeFeedEntryTags, safeFeedEntryUrl } from "./FeedReaderPane";
 
 export type FeedRiverFilters = {
   view: EntryView;
@@ -49,8 +46,7 @@ export function FeedRiver({
   const [tagEditorId, setTagEditorId] = useState<number | null>(null);
   const expandedMutationVersion = useRef(0);
   const activeExpandedEntry =
-    expandedEntryFilters &&
-    sameFeedRiverFilters(expandedEntryFilters, filters)
+    expandedEntryFilters && sameFeedRiverFilters(expandedEntryFilters, filters)
       ? expandedEntry
       : null;
 
@@ -123,10 +119,10 @@ export function FeedRiver({
       : undefined;
   const activeSelectedEntry =
     selectedEntryId !== undefined
-      ? authoritativeSelectedEntry ??
+      ? (authoritativeSelectedEntry ??
         (selectedEntrySnapshot?.id === selectedEntryId
           ? selectedEntrySnapshot
-          : loadedSelectedEntry)
+          : loadedSelectedEntry))
       : undefined;
   const selectedEntries = useMemo(() => {
     if (!activeSelectedEntry) return entries;
@@ -685,7 +681,6 @@ function groupByDay(entries: FeedEntry[]) {
   }));
 }
 
-
 function fullReaderHref(filters: FeedRiverFilters) {
   const params = new URLSearchParams({ view: filters.view });
   if (filters.group) params.set("group", filters.group);
@@ -694,10 +689,7 @@ function fullReaderHref(filters: FeedRiverFilters) {
   return `/feeds?${params.toString()}`;
 }
 
-function sameFeedRiverFilters(
-  left: FeedRiverFilters,
-  right: FeedRiverFilters,
-) {
+function sameFeedRiverFilters(left: FeedRiverFilters, right: FeedRiverFilters) {
   return (
     left.view === right.view &&
     left.group === right.group &&

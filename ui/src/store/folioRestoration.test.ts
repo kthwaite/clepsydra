@@ -66,8 +66,12 @@ describe("folio restoration store", () => {
     }
 
     expect(readFolioRestoration("bounded-0", "notes/bounded-0.md")).toBeNull();
-    expect(readFolioRestoration("bounded-1", "notes/bounded-1.md")).not.toBeNull();
-    expect(readFolioRestoration("bounded-16", "notes/bounded-16.md")).not.toBeNull();
+    expect(
+      readFolioRestoration("bounded-1", "notes/bounded-1.md"),
+    ).not.toBeNull();
+    expect(
+      readFolioRestoration("bounded-16", "notes/bounded-16.md"),
+    ).not.toBeNull();
   });
 
   it("keeps save, read, and clear entirely out of localStorage", () => {

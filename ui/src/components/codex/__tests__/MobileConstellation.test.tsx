@@ -1,6 +1,6 @@
-import { useState } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import type { GraphEdge, GraphNode } from "#/api/types";
 import {
@@ -62,7 +62,10 @@ function Harness({
 
 async function graphTitles(): Promise<string[]> {
   const chart = await screen.findByRole("img", { name: "Constellation graph" });
-  return Array.from(chart.querySelectorAll("text"), (label) => label.textContent ?? "");
+  return Array.from(
+    chart.querySelectorAll("text"),
+    (label) => label.textContent ?? "",
+  );
 }
 
 describe("MobileConstellation", () => {
@@ -96,7 +99,13 @@ describe("MobileConstellation", () => {
       .getAllByRole("heading")
       .map((heading) => heading.textContent ?? "");
 
-    expect(listNodeTitles).toEqual(["Alpha", "Beta", "Daily", "Gamma", "Orphan"]);
+    expect(listNodeTitles).toEqual([
+      "Alpha",
+      "Beta",
+      "Daily",
+      "Gamma",
+      "Orphan",
+    ]);
     expect([...listNodeTitles].sort()).toEqual(chartNodeTitles);
   });
 

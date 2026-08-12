@@ -22,8 +22,8 @@ import {
   feedEntriesInfiniteOptions,
   updateCachedEntryPages,
   useDeleteFeed,
-  useFeeds,
   useFeedEntry,
+  useFeeds,
   useImportOpml,
   usePatchFeedEntry,
   useSubscribeFeed,
@@ -63,11 +63,7 @@ function entriesKey(filters: EntryFilters) {
 }
 
 function entryDetailKey(id: number) {
-  return [
-    "get",
-    entryDetailPath,
-    { params: { path: { id } } },
-  ] as const;
+  return ["get", entryDetailPath, { params: { path: { id } } }] as const;
 }
 
 function wrapper(client: QueryClient) {
@@ -582,12 +578,12 @@ describe("usePatchFeedEntry", () => {
     await mutation;
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
-    expect(
-      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
-    ).toBe(true);
-    expect(
-      client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
-    ).toBe(true);
+    expect(listObserver.getCurrentResult().data?.pages[0].entries[0].read).toBe(
+      true,
+    );
+    expect(client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read).toBe(
+      true,
+    );
     unsubscribeList();
   });
 
@@ -627,12 +623,12 @@ describe("usePatchFeedEntry", () => {
       expect(listObserver.getCurrentResult().isSuccess).toBe(true),
     );
     expect(patch.result.current.isPending).toBe(true);
-    expect(
-      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
-    ).toBe(true);
-    expect(
-      client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
-    ).toBe(true);
+    expect(listObserver.getCurrentResult().data?.pages[0].entries[0].read).toBe(
+      true,
+    );
+    expect(client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read).toBe(
+      true,
+    );
 
     patchResponse.resolve(jsonResponse(patched));
     await mutation;
@@ -672,12 +668,12 @@ describe("usePatchFeedEntry", () => {
       );
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
     await listObserver.fetchNextPage();
-    expect(
-      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
-    ).toBe(true);
-    expect(
-      listObserver.getCurrentResult().data?.pages[1].entries[0],
-    ).toEqual(nextPageEntry);
+    expect(listObserver.getCurrentResult().data?.pages[0].entries[0].read).toBe(
+      true,
+    );
+    expect(listObserver.getCurrentResult().data?.pages[1].entries[0]).toEqual(
+      nextPageEntry,
+    );
     unsubscribeList();
 
     patchResponse.resolve(
@@ -775,9 +771,7 @@ describe("usePatchFeedEntry", () => {
   it("defers active list refetch until overlapping optimistic patches settle", async () => {
     const entry = makeEntry({ read: false, bookmarked: true });
     const baseline = makePages([entry], ["baseline"]);
-    const finalPages = makePages([
-      { ...entry, read: true, bookmarked: false },
-    ]);
+    const finalPages = makePages([{ ...entry, read: true, bookmarked: false }]);
     const listKey = entriesKey({ view: "all" });
     const detailKey = entryDetailKey(entry.id);
     const client = freshClient();
@@ -1011,213 +1005,213 @@ describe("usePatchFeedEntry", () => {
       firstFailure: "newer" as const,
       surviving: { read: true, bookmarked: true },
     },
-  ])("rebases the surviving optimistic layer when the $name", async ({
-    firstFailure,
-    surviving,
-  }) => {
-    const entry = makeEntry({ read: false, bookmarked: true });
-    const baseline = makePages([entry], ["baseline"]);
-    const key = entriesKey({ view: "all" });
-    const client = freshClient();
-    client.setQueryData(key, baseline);
-    const olderResponse = deferred<Response>();
-    const newerResponse = deferred<Response>();
-    fetchMock
-      .mockReturnValueOnce(olderResponse.promise)
-      .mockReturnValueOnce(newerResponse.promise);
-    const { result } = renderHook(() => usePatchFeedEntry(), {
-      wrapper: wrapper(client),
-    });
+  ])(
+    "rebases the surviving optimistic layer when the $name",
+    async ({ firstFailure, surviving }) => {
+      const entry = makeEntry({ read: false, bookmarked: true });
+      const baseline = makePages([entry], ["baseline"]);
+      const key = entriesKey({ view: "all" });
+      const client = freshClient();
+      client.setQueryData(key, baseline);
+      const olderResponse = deferred<Response>();
+      const newerResponse = deferred<Response>();
+      fetchMock
+        .mockReturnValueOnce(olderResponse.promise)
+        .mockReturnValueOnce(newerResponse.promise);
+      const { result } = renderHook(() => usePatchFeedEntry(), {
+        wrapper: wrapper(client),
+      });
 
-    const olderMutation = result.current
-      .mutateAsync({ id: entry.id, read: true })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
+      const olderMutation = result.current
+        .mutateAsync({ id: entry.id, read: true })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const newerMutation = result.current
+        .mutateAsync({ id: entry.id, bookmarked: false })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(
+        client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+      ).toMatchObject({ read: true, bookmarked: false });
+
+      const firstResponse =
+        firstFailure === "older" ? olderResponse : newerResponse;
+      const firstMutation =
+        firstFailure === "older" ? olderMutation : newerMutation;
+      firstResponse.resolve(
+        jsonResponse({ error: `${firstFailure} failed` }, 500),
       );
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const newerMutation = result.current
-      .mutateAsync({ id: entry.id, bookmarked: false })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(
-      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
-    ).toMatchObject({ read: true, bookmarked: false });
-
-    const firstResponse =
-      firstFailure === "older" ? olderResponse : newerResponse;
-    const firstMutation =
-      firstFailure === "older" ? olderMutation : newerMutation;
-    firstResponse.resolve(
-      jsonResponse({ error: `${firstFailure} failed` }, 500),
-    );
-    await expect(firstMutation).resolves.toEqual({
-      error: `${firstFailure} failed`,
-    });
-    expect(
-      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
-    ).toMatchObject(surviving);
-
-    const lastResponse =
-      firstFailure === "older" ? newerResponse : olderResponse;
-    const lastMutation =
-      firstFailure === "older" ? newerMutation : olderMutation;
-    const lastFailure =
-      firstFailure === "older" ? "newer failed" : "older failed";
-    lastResponse.resolve(jsonResponse({ error: lastFailure }, 500));
-    await expect(lastMutation).resolves.toEqual({ error: lastFailure });
-    expect(client.getQueryData(key)).toBe(baseline);
-  });
-
-  it.each([
-    "failure first",
-    "success first",
-  ] as const)("retains a successful newer patch when the older patch settles %s", async (settlementOrder) => {
-    const entry = makeEntry({ read: false, bookmarked: true });
-    const baseline = makePages([entry], ["baseline"]);
-    const key = entriesKey({ view: "all" });
-    const client = freshClient();
-    client.setQueryData(key, baseline);
-    const olderResponse = deferred<Response>();
-    const newerResponse = deferred<Response>();
-    fetchMock
-      .mockReturnValueOnce(olderResponse.promise)
-      .mockReturnValueOnce(newerResponse.promise);
-    const { result } = renderHook(() => usePatchFeedEntry(), {
-      wrapper: wrapper(client),
-    });
-
-    const olderMutation = result.current
-      .mutateAsync({ id: entry.id, read: true })
-      .then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const newerMutation = result.current.mutateAsync({
-      id: entry.id,
-      bookmarked: false,
-    });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-
-    if (settlementOrder === "failure first") {
-      olderResponse.resolve(jsonResponse({ error: "older failed" }, 500));
-      await expect(olderMutation).resolves.toEqual({
-        error: "older failed",
+      await expect(firstMutation).resolves.toEqual({
+        error: `${firstFailure} failed`,
       });
       expect(
         client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
-      ).toMatchObject({ read: false, bookmarked: false });
-      newerResponse.resolve(jsonResponse({ ...entry, bookmarked: false }));
-      await newerMutation;
-    } else {
-      newerResponse.resolve(jsonResponse({ ...entry, bookmarked: false }));
-      await newerMutation;
-      olderResponse.resolve(jsonResponse({ error: "older failed" }, 500));
-      await expect(olderMutation).resolves.toEqual({
-        error: "older failed",
+      ).toMatchObject(surviving);
+
+      const lastResponse =
+        firstFailure === "older" ? newerResponse : olderResponse;
+      const lastMutation =
+        firstFailure === "older" ? newerMutation : olderMutation;
+      const lastFailure =
+        firstFailure === "older" ? "newer failed" : "older failed";
+      lastResponse.resolve(jsonResponse({ error: lastFailure }, 500));
+      await expect(lastMutation).resolves.toEqual({ error: lastFailure });
+      expect(client.getQueryData(key)).toBe(baseline);
+    },
+  );
+
+  it.each(["failure first", "success first"] as const)(
+    "retains a successful newer patch when the older patch settles %s",
+    async (settlementOrder) => {
+      const entry = makeEntry({ read: false, bookmarked: true });
+      const baseline = makePages([entry], ["baseline"]);
+      const key = entriesKey({ view: "all" });
+      const client = freshClient();
+      client.setQueryData(key, baseline);
+      const olderResponse = deferred<Response>();
+      const newerResponse = deferred<Response>();
+      fetchMock
+        .mockReturnValueOnce(olderResponse.promise)
+        .mockReturnValueOnce(newerResponse.promise);
+      const { result } = renderHook(() => usePatchFeedEntry(), {
+        wrapper: wrapper(client),
       });
-    }
 
-    expect(
-      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
-    ).toMatchObject({ read: false, bookmarked: false });
-    expect(client.getQueryData(key)).not.toBe(baseline);
-  });
+      const olderMutation = result.current
+        .mutateAsync({ id: entry.id, read: true })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const newerMutation = result.current.mutateAsync({
+        id: entry.id,
+        bookmarked: false,
+      });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
 
-  it.each([
-    "older response first",
-    "newer response first",
-  ] as const)("merges normalized successful fields without stale overwrite when the %s", async (responseOrder) => {
-    const entry = makeEntry({
-      read: false,
-      bookmarked: true,
-      tags: ["rust"],
-    });
-    const baseline = makePages([entry], ["baseline"]);
-    const key = entriesKey({ view: "all" });
-    const client = freshClient();
-    client.setQueryData(key, baseline);
-    expect(
-      client
-        .getQueryCache()
-        .find({ queryKey: key, exact: true })
-        ?.getObserversCount(),
-    ).toBe(0);
-    const olderResponse = deferred<Response>();
-    const newerResponse = deferred<Response>();
-    fetchMock
-      .mockReturnValueOnce(olderResponse.promise)
-      .mockReturnValueOnce(newerResponse.promise);
-    const { result } = renderHook(() => usePatchFeedEntry(), {
-      wrapper: wrapper(client),
-    });
+      if (settlementOrder === "failure first") {
+        olderResponse.resolve(jsonResponse({ error: "older failed" }, 500));
+        await expect(olderMutation).resolves.toEqual({
+          error: "older failed",
+        });
+        expect(
+          client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+        ).toMatchObject({ read: false, bookmarked: false });
+        newerResponse.resolve(jsonResponse({ ...entry, bookmarked: false }));
+        await newerMutation;
+      } else {
+        newerResponse.resolve(jsonResponse({ ...entry, bookmarked: false }));
+        await newerMutation;
+        olderResponse.resolve(jsonResponse({ error: "older failed" }, 500));
+        await expect(olderMutation).resolves.toEqual({
+          error: "older failed",
+        });
+      }
 
-    const olderMutation = result.current.mutateAsync({
-      id: entry.id,
-      read: true,
-    });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const newerMutation = result.current.mutateAsync({
-      id: entry.id,
-      tags: [" rust ", "rust", "ai"],
-    });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+      expect(
+        client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+      ).toMatchObject({ read: false, bookmarked: false });
+      expect(client.getQueryData(key)).not.toBe(baseline);
+    },
+  );
 
-    if (responseOrder === "older response first") {
-      olderResponse.resolve(
-        jsonResponse({ ...entry, read: true, tags: ["rust"] }),
-      );
-      await olderMutation;
+  it.each(["older response first", "newer response first"] as const)(
+    "merges normalized successful fields without stale overwrite when the %s",
+    async (responseOrder) => {
+      const entry = makeEntry({
+        read: false,
+        bookmarked: true,
+        tags: ["rust"],
+      });
+      const baseline = makePages([entry], ["baseline"]);
+      const key = entriesKey({ view: "all" });
+      const client = freshClient();
+      client.setQueryData(key, baseline);
+      expect(
+        client
+          .getQueryCache()
+          .find({ queryKey: key, exact: true })
+          ?.getObserversCount(),
+      ).toBe(0);
+      const olderResponse = deferred<Response>();
+      const newerResponse = deferred<Response>();
+      fetchMock
+        .mockReturnValueOnce(olderResponse.promise)
+        .mockReturnValueOnce(newerResponse.promise);
+      const { result } = renderHook(() => usePatchFeedEntry(), {
+        wrapper: wrapper(client),
+      });
+
+      const olderMutation = result.current.mutateAsync({
+        id: entry.id,
+        read: true,
+      });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      const newerMutation = result.current.mutateAsync({
+        id: entry.id,
+        tags: [" rust ", "rust", "ai"],
+      });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+      if (responseOrder === "older response first") {
+        olderResponse.resolve(
+          jsonResponse({ ...entry, read: true, tags: ["rust"] }),
+        );
+        await olderMutation;
+        expect(
+          client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+        ).toMatchObject({
+          read: true,
+          tags: [" rust ", "rust", "ai"],
+        });
+        newerResponse.resolve(
+          jsonResponse({
+            ...entry,
+            read: false,
+            tags: ["rust", "ai"],
+          }),
+        );
+        await newerMutation;
+      } else {
+        newerResponse.resolve(
+          jsonResponse({
+            ...entry,
+            read: false,
+            tags: ["rust", "ai"],
+          }),
+        );
+        await newerMutation;
+        expect(
+          client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
+        ).toMatchObject({ read: true, tags: ["rust", "ai"] });
+        olderResponse.resolve(
+          jsonResponse({ ...entry, read: true, tags: ["rust"] }),
+        );
+        await olderMutation;
+      }
+
       expect(
         client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
       ).toMatchObject({
         read: true,
-        tags: [" rust ", "rust", "ai"],
+        bookmarked: true,
+        tags: ["rust", "ai"],
       });
-      newerResponse.resolve(
-        jsonResponse({
-          ...entry,
-          read: false,
-          tags: ["rust", "ai"],
-        }),
-      );
-      await newerMutation;
-    } else {
-      newerResponse.resolve(
-        jsonResponse({
-          ...entry,
-          read: false,
-          tags: ["rust", "ai"],
-        }),
-      );
-      await newerMutation;
       expect(
-        client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
-      ).toMatchObject({ read: true, tags: ["rust", "ai"] });
-      olderResponse.resolve(
-        jsonResponse({ ...entry, read: true, tags: ["rust"] }),
-      );
-      await olderMutation;
-    }
-
-    expect(
-      client.getQueryData<EntryPages>(key)?.pages[0].entries[0],
-    ).toMatchObject({
-      read: true,
-      bookmarked: true,
-      tags: ["rust", "ai"],
-    });
-    expect(
-      client
-        .getQueryCache()
-        .find({ queryKey: key, exact: true })
-        ?.getObserversCount(),
-    ).toBe(0);
-  });
+        client
+          .getQueryCache()
+          .find({ queryKey: key, exact: true })
+          ?.getObserversCount(),
+      ).toBe(0);
+    },
+  );
 
   it("recreates a removed inactive query and rebases its captured mutation layers", async () => {
     const entry = makeEntry({ read: false, bookmarked: true });
@@ -1326,9 +1320,9 @@ describe("usePatchFeedEntry", () => {
     expect(replacementQuery).toBeDefined();
     expect(replacementQuery).not.toBe(originalQuery);
     expect(replacementQuery?.queryKey).toEqual(key);
-    expect(
-      client.getQueryData<EntryPages>(key)?.pages[0].entries[0].read,
-    ).toBe(true);
+    expect(client.getQueryData<EntryPages>(key)?.pages[0].entries[0].read).toBe(
+      true,
+    );
     expect(independentClone).toEqual(baseline);
     expect(independentClone).not.toBe(baseline);
 
@@ -1410,37 +1404,40 @@ describe("feed membership mutations", () => {
     },
   ] as const;
 
-  it.each(cases)("uses the latest cached manifest_revision for $name", async ({
-    useMutation,
-    variables,
-    expectedBody,
-    response,
-    method,
-    path,
-  }) => {
-    const client = freshClient();
-    client.setQueryData(feedsKey, makeFeedList("revision-stale"));
-    fetchMock.mockResolvedValue(jsonResponse(response));
-    const { result } = renderHook(() => useMutation(), {
-      wrapper: wrapper(client),
-    });
+  it.each(cases)(
+    "uses the latest cached manifest_revision for $name",
+    async ({
+      useMutation,
+      variables,
+      expectedBody,
+      response,
+      method,
+      path,
+    }) => {
+      const client = freshClient();
+      client.setQueryData(feedsKey, makeFeedList("revision-stale"));
+      fetchMock.mockResolvedValue(jsonResponse(response));
+      const { result } = renderHook(() => useMutation(), {
+        wrapper: wrapper(client),
+      });
 
-    client.setQueryData(feedsKey, makeFeedList("revision-current"));
-    const mutateAsync = result.current.mutateAsync as (
-      input: typeof variables,
-    ) => Promise<unknown>;
-    await mutateAsync(variables);
+      client.setQueryData(feedsKey, makeFeedList("revision-current"));
+      const mutateAsync = result.current.mutateAsync as (
+        input: typeof variables,
+      ) => Promise<unknown>;
+      await mutateAsync(variables);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(await requestBody(fetchMock)).toEqual(expectedBody);
-    expect(requestedUrl(fetchMock).pathname).toBe(path);
-    const [requestInput, requestInit] = fetchMock.mock.calls[0];
-    const actualMethod =
-      requestInput instanceof NativeRequest
-        ? requestInput.method
-        : (requestInit?.method ?? "GET");
-    expect(actualMethod).toBe(method);
-  });
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(await requestBody(fetchMock)).toEqual(expectedBody);
+      expect(requestedUrl(fetchMock).pathname).toBe(path);
+      const [requestInput, requestInit] = fetchMock.mock.calls[0];
+      const actualMethod =
+        requestInput instanceof NativeRequest
+          ? requestInput.method
+          : (requestInit?.method ?? "GET");
+      expect(actualMethod).toBe(method);
+    },
+  );
 
   it("does not let a late membership response downgrade a newer manifest revision", async () => {
     const client = freshClient();

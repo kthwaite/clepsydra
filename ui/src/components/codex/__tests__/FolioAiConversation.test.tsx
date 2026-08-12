@@ -7,10 +7,10 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createEditor, Node, type Descendant, type Editor } from "slate";
+import { createEditor, type Descendant, type Editor, Node } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import { useConversationPresentation } from "#/editor/conversation/presentation";
+import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import type { CustomEditor } from "#/editor/types";
 
 const HASH = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
@@ -391,9 +391,7 @@ describe("Folio AI conversation presentation", () => {
       screen.getByRole("button", { name: "Manage attachments" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Manage paths" })).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Raw Markdown" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Raw Markdown" })).toBeVisible();
   });
 
   it("does not expose an edit-to-Read transition while raw mode is active", async () => {

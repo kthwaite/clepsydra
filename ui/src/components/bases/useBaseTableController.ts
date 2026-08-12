@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  decodeBaseMemberDiagnostics,
-  useBase,
-  useBaseView,
-  useBaseViewEvaluation,
-  useCreateBaseMember,
-  usePropertyCommit,
   type BaseDetailResponse,
   type BaseFilter,
   type BaseMemberCapability,
   type BaseMemberDiagnostic,
   type BaseViewEvaluateResponse,
+  decodeBaseMemberDiagnostics,
   type PropertyType,
   type QueryOutput,
   type QueryRow,
   type SortKey,
+  useBase,
+  useBaseView,
+  useBaseViewEvaluation,
+  useCreateBaseMember,
+  usePropertyCommit,
   type ViewOverrides,
 } from "#/api/bases";
 import { formatApiError, isApiError } from "#/api/error";
@@ -22,16 +22,16 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { useProjects } from "#/lib/useProjects";
 import type { CellValue } from "./cells/types";
 import {
+  type BaseEmbedConfig,
   EMBED_DEFAULT_LIMIT,
   predicateIdentity,
   queryIdentity,
-  type BaseEmbedConfig,
 } from "./embed-query";
 import { asciiCaseFold } from "./local-validation";
 import {
-  composeMemberDraftFields,
   type BaseMemberDraftField,
   type BaseMemberDraftValue,
+  composeMemberDraftFields,
 } from "./member-draft";
 
 export interface BaseTableControllerOptions {
@@ -58,7 +58,12 @@ export interface BaseTableControllerModel {
   onSortChange(sort: SortKey[] | undefined): void;
   onOpenPage(path: string): void;
   configureSlug: string | undefined;
-  onCommitCell(row: QueryRow, key: string, value: CellValue, hint?: PropertyType): void;
+  onCommitCell(
+    row: QueryRow,
+    key: string,
+    value: CellValue,
+    hint?: PropertyType,
+  ): void;
   memberCapability: BaseMemberCapability | undefined;
   memberDraftFields: BaseMemberDraftField[];
   memberDraftOpen: boolean;
@@ -181,7 +186,10 @@ export function useBaseTableController(
       view: mode === "embedded" ? activeView : "",
       filter: mode === "embedded" ? filter : undefined,
       sort: mode === "embedded" ? sort : undefined,
-      limit: mode === "embedded" ? (limit ?? EMBED_DEFAULT_LIMIT) : EMBED_DEFAULT_LIMIT,
+      limit:
+        mode === "embedded"
+          ? (limit ?? EMBED_DEFAULT_LIMIT)
+          : EMBED_DEFAULT_LIMIT,
     }),
     [activeView, filter, limit, mode, slug, sort],
   );
@@ -200,10 +208,12 @@ export function useBaseTableController(
   const evaluationRefetch = evaluationQuery.refetch;
   const savedViewRefetch = savedViewQuery.refetch;
 
-  const predicate = mode === "embedded"
-    ? predicateIdentity(embeddedConfig)
-    : JSON.stringify({ mode, slug });
-  const embeddedQueryKey = mode === "embedded" ? queryIdentity(embeddedConfig) : "";
+  const predicate =
+    mode === "embedded"
+      ? predicateIdentity(embeddedConfig)
+      : JSON.stringify({ mode, slug });
+  const embeddedQueryKey =
+    mode === "embedded" ? queryIdentity(embeddedConfig) : "";
   const generationRef = useRef({ predicate, generation: 0 });
   const currentOperation = useRef<
     { generation: number; operation: number } | undefined
@@ -233,9 +243,10 @@ export function useBaseTableController(
   const [storedMemberState, setStoredMemberState] = useState<MemberState>(() =>
     emptyMemberState(generation),
   );
-  const memberState = storedMemberState.generation === generation
-    ? storedMemberState
-    : emptyMemberState(generation);
+  const memberState =
+    storedMemberState.generation === generation
+      ? storedMemberState
+      : emptyMemberState(generation);
 
   useEffect(() => {
     mounted.current = true;
@@ -267,26 +278,32 @@ export function useBaseTableController(
     !evaluationQuery.isLoading &&
     !evaluationQuery.isFetching &&
     !evaluationQuery.error;
-  const output = mode === "standalone" ? savedViewQuery.data : exactEmbeddedSuccess?.output;
+  const output =
+    mode === "standalone" ? savedViewQuery.data : exactEmbeddedSuccess?.output;
 
   const memberCapability = useMemo(
-    () => mode === "embedded"
-      ? predicateEmbeddedSuccess?.member_creation
-      : detail.data?.member_creation?.find(
-          (candidate) => asciiCaseFold(candidate.view) === asciiCaseFold(activeView),
-        ),
+    () =>
+      mode === "embedded"
+        ? predicateEmbeddedSuccess?.member_creation
+        : detail.data?.member_creation?.find(
+            (candidate) =>
+              asciiCaseFold(candidate.view) === asciiCaseFold(activeView),
+          ),
     [activeView, detail.data?.member_creation, mode, predicateEmbeddedSuccess],
   );
   const activeViewDefinition = useMemo(
-    () => detail.data?.views?.find(
-      (candidate) => asciiCaseFold(candidate.name) === asciiCaseFold(activeView),
-    ),
+    () =>
+      detail.data?.views?.find(
+        (candidate) =>
+          asciiCaseFold(candidate.name) === asciiCaseFold(activeView),
+      ),
     [activeView, detail.data?.views],
   );
   const memberDraftFields = useMemo(
-    () => detail.data && activeView && memberCapability
-      ? composeMemberDraftFields(detail.data, activeView, memberCapability)
-      : [],
+    () =>
+      detail.data && activeView && memberCapability
+        ? composeMemberDraftFields(detail.data, activeView, memberCapability)
+        : [],
     [activeView, detail.data, memberCapability],
   );
 
@@ -303,7 +320,8 @@ export function useBaseTableController(
       while (operationIsCurrent(operation, operationGeneration)) {
         const target = currentEmbeddedQuery.current;
         const refreshed = await target.refetch();
-        if (!operationIsCurrent(operation, operationGeneration)) return undefined;
+        if (!operationIsCurrent(operation, operationGeneration))
+          return undefined;
         if (currentEmbeddedQuery.current.query === target.query) {
           return {
             refreshed,
@@ -319,11 +337,7 @@ export function useBaseTableController(
     [operationIsCurrent],
   );
   const finishMemberOperation = useCallback(
-    (
-      operation: number,
-      operationGeneration: number,
-      notice?: MemberNotice,
-    ) => {
+    (operation: number, operationGeneration: number, notice?: MemberNotice) => {
       if (!operationIsCurrent(operation, operationGeneration)) return;
       currentOperation.current = undefined;
       setStoredMemberState((current) =>
@@ -361,10 +375,12 @@ export function useBaseTableController(
       );
       return;
     }
-    const loading = mode === "standalone"
-      ? savedViewQuery.isFetching || savedViewQuery.isLoading
-      : evaluationQuery.isFetching || evaluationQuery.isLoading;
-    const error = mode === "standalone" ? savedViewQuery.error : evaluationQuery.error;
+    const loading =
+      mode === "standalone"
+        ? savedViewQuery.isFetching || savedViewQuery.isLoading
+        : evaluationQuery.isFetching || evaluationQuery.isLoading;
+    const error =
+      mode === "standalone" ? savedViewQuery.error : evaluationQuery.error;
     if (loading || error || !output) return;
     if (!outputContains(output, creation.createdId)) {
       finishMemberOperation(
@@ -404,110 +420,163 @@ export function useBaseTableController(
     savedViewQuery.isLoading,
   ]);
 
-  const createMember = useCallback(async (value: BaseMemberDraftValue) => {
-    if (mode === "embedded" && !embeddedAuthoritative) return;
-    const revision = mode === "embedded"
-      ? evaluationRevision
-      : detailRevision;
-    if (!revision || !activeView) return;
+  const createMember = useCallback(
+    async (value: BaseMemberDraftValue) => {
+      if (mode === "embedded" && !embeddedAuthoritative) return;
+      const revision =
+        mode === "embedded" ? evaluationRevision : detailRevision;
+      if (!revision || !activeView) return;
 
-    const operation = nextOperation.current + 1;
-    nextOperation.current = operation;
-    const operationGeneration = generation;
-    currentOperation.current = { generation: operationGeneration, operation };
-    setStoredMemberState((current) => ({
-      ...(current.generation === operationGeneration
-        ? current
-        : emptyMemberState(operationGeneration)),
-      error: undefined,
-      diagnostics: [],
-      creation: { phase: "submitting", operation, view: activeView },
-    }));
+      const operation = nextOperation.current + 1;
+      nextOperation.current = operation;
+      const operationGeneration = generation;
+      currentOperation.current = { generation: operationGeneration, operation };
+      setStoredMemberState((current) => ({
+        ...(current.generation === operationGeneration
+          ? current
+          : emptyMemberState(operationGeneration)),
+        error: undefined,
+        diagnostics: [],
+        creation: { phase: "submitting", operation, view: activeView },
+      }));
 
-    const requestFields: BaseMemberDraftValue["fields"] = {};
-    for (const key in value.fields) {
-      if (!Object.hasOwn(value.fields, key)) continue;
-      const fieldValue = value.fields[key];
-      if (fieldValue !== null) requestFields[key] = fieldValue;
-    }
+      const requestFields: BaseMemberDraftValue["fields"] = {};
+      for (const key in value.fields) {
+        if (!Object.hasOwn(value.fields, key)) continue;
+        const fieldValue = value.fields[key];
+        if (fieldValue !== null) requestFields[key] = fieldValue;
+      }
 
-    let created;
-    try {
-      created = await createMemberAsync({
-        params: { path: { slug } },
-        body: {
-          base_revision: revision,
-          ...(mode === "embedded" ? { embed_filter: filter } : {}),
-          view: activeView,
-          title: value.title.trim(),
-          fields: requestFields,
-        },
-      });
-    } catch (error) {
-      if (!operationIsCurrent(operation, operationGeneration)) return;
-      setStoredMemberState((current) => current.generation === operationGeneration
-        ? {
-            ...current,
-            error: formatApiError(error, "Member could not be created."),
-            diagnostics: decodeBaseMemberDiagnostics(error),
+      let created;
+      try {
+        created = await createMemberAsync({
+          params: { path: { slug } },
+          body: {
+            base_revision: revision,
+            ...(mode === "embedded" ? { embed_filter: filter } : {}),
+            view: activeView,
+            title: value.title.trim(),
+            fields: requestFields,
+          },
+        });
+      } catch (error) {
+        if (!operationIsCurrent(operation, operationGeneration)) return;
+        setStoredMemberState((current) =>
+          current.generation === operationGeneration
+            ? {
+                ...current,
+                error: formatApiError(error, "Member could not be created."),
+                diagnostics: decodeBaseMemberDiagnostics(error),
+              }
+            : current,
+        );
+        if (isRevisionConflict(error)) {
+          try {
+            if (mode === "embedded") {
+              await refetchCurrentEmbeddedQuery(operation, operationGeneration);
+            } else {
+              await detailRefetch();
+            }
+          } finally {
+            finishMemberOperation(operation, operationGeneration);
           }
-        : current,
-      );
-      if (isRevisionConflict(error)) {
-        try {
-          if (mode === "embedded") {
-            await refetchCurrentEmbeddedQuery(operation, operationGeneration);
-          } else {
-            await detailRefetch();
-          }
-        } finally {
+        } else {
           finishMemberOperation(operation, operationGeneration);
         }
-      } else {
-        finishMemberOperation(operation, operationGeneration);
-      }
-      return;
-    }
-
-    if (!operationIsCurrent(operation, operationGeneration)) return;
-    setStoredMemberState((current) => current.generation === operationGeneration
-      ? {
-          ...current,
-          draftOpen: false,
-          notice: undefined,
-          creation: {
-            phase: "refreshing",
-            operation,
-            createdId: created.id,
-            view: activeView,
-          },
-        }
-      : current,
-    );
-    try {
-      const refresh = mode === "embedded"
-        ? await refetchCurrentEmbeddedQuery(operation, operationGeneration)
-        : {
-            refreshed: await savedViewRefetch(),
-            placement: { mode: "standalone" } as const,
-          };
-      if (!refresh) return;
-      const { refreshed, placement } = refresh;
-      if (!operationIsCurrent(operation, operationGeneration)) return;
-      if (
-        mode === "standalone" &&
-        asciiCaseFold(activeViewRef.current) !== asciiCaseFold(activeView)
-      ) {
-        finishMemberOperation(
-          operation,
-          operationGeneration,
-          genericNotice(
-            "The member was created, but focus was skipped because the active view changed.",
-          ),
-        );
         return;
       }
-      if (refreshed.error) {
+
+      if (!operationIsCurrent(operation, operationGeneration)) return;
+      setStoredMemberState((current) =>
+        current.generation === operationGeneration
+          ? {
+              ...current,
+              draftOpen: false,
+              notice: undefined,
+              creation: {
+                phase: "refreshing",
+                operation,
+                createdId: created.id,
+                view: activeView,
+              },
+            }
+          : current,
+      );
+      try {
+        const refresh =
+          mode === "embedded"
+            ? await refetchCurrentEmbeddedQuery(operation, operationGeneration)
+            : {
+                refreshed: await savedViewRefetch(),
+                placement: { mode: "standalone" } as const,
+              };
+        if (!refresh) return;
+        const { refreshed, placement } = refresh;
+        if (!operationIsCurrent(operation, operationGeneration)) return;
+        if (
+          mode === "standalone" &&
+          asciiCaseFold(activeViewRef.current) !== asciiCaseFold(activeView)
+        ) {
+          finishMemberOperation(
+            operation,
+            operationGeneration,
+            genericNotice(
+              "The member was created, but focus was skipped because the active view changed.",
+            ),
+          );
+          return;
+        }
+        if (refreshed.error) {
+          finishMemberOperation(
+            operation,
+            operationGeneration,
+            genericNotice(
+              "The member was created, but the current view could not be refreshed.",
+            ),
+          );
+          return;
+        }
+        const refreshedOutput =
+          mode === "embedded"
+            ? (refreshed.data as BaseViewEvaluateResponse | undefined)?.output
+            : (refreshed.data as QueryOutput | undefined);
+        if (refreshedOutput && !outputContains(refreshedOutput, created.id)) {
+          finishMemberOperation(
+            operation,
+            operationGeneration,
+            placementNotice(
+              "The member was created, but it is not included in the current view.",
+              placement,
+            ),
+          );
+          return;
+        }
+        const columns = activeViewDefinition?.columns;
+        if (columns && columns.length > 0 && !columns.includes("title")) {
+          finishMemberOperation(
+            operation,
+            operationGeneration,
+            genericNotice(
+              "The member was created, but this view does not display its title.",
+            ),
+          );
+          return;
+        }
+        setStoredMemberState((current) =>
+          current.generation === operationGeneration
+            ? {
+                ...current,
+                creation: {
+                  phase: "resolving",
+                  operation,
+                  createdId: created.id,
+                  view: activeView,
+                  placement,
+                },
+              }
+            : current,
+        );
+      } catch {
         finishMemberOperation(
           operation,
           operationGeneration,
@@ -515,89 +584,46 @@ export function useBaseTableController(
             "The member was created, but the current view could not be refreshed.",
           ),
         );
-        return;
       }
-      const refreshedOutput = mode === "embedded"
-        ? (refreshed.data as BaseViewEvaluateResponse | undefined)?.output
-        : (refreshed.data as QueryOutput | undefined);
-      if (refreshedOutput && !outputContains(refreshedOutput, created.id)) {
-        finishMemberOperation(
-          operation,
-          operationGeneration,
-          placementNotice(
-            "The member was created, but it is not included in the current view.",
-            placement,
-          ),
-        );
-        return;
-      }
-      const columns = activeViewDefinition?.columns;
-      if (columns && columns.length > 0 && !columns.includes("title")) {
-        finishMemberOperation(
-          operation,
-          operationGeneration,
-          genericNotice(
-            "The member was created, but this view does not display its title.",
-          ),
-        );
-        return;
-      }
-      setStoredMemberState((current) => current.generation === operationGeneration
-        ? {
-            ...current,
-            creation: {
-              phase: "resolving",
-              operation,
-              createdId: created.id,
-              view: activeView,
-              placement,
-            },
-          }
-        : current,
-      );
-    } catch {
-      finishMemberOperation(
-        operation,
-        operationGeneration,
-        genericNotice(
-          "The member was created, but the current view could not be refreshed.",
-        ),
-      );
-    }
-  }, [
-    activeView,
-    activeViewDefinition?.columns,
-    createMemberAsync,
-    detailRefetch,
-    detailRevision,
-    embeddedAuthoritative,
-    evaluationRevision,
-    filter,
-    finishMemberOperation,
-    generation,
-    mode,
-    operationIsCurrent,
-    refetchCurrentEmbeddedQuery,
-    savedViewRefetch,
-    slug,
-  ]);
+    },
+    [
+      activeView,
+      activeViewDefinition?.columns,
+      createMemberAsync,
+      detailRefetch,
+      detailRevision,
+      embeddedAuthoritative,
+      evaluationRevision,
+      filter,
+      finishMemberOperation,
+      generation,
+      mode,
+      operationIsCurrent,
+      refetchCurrentEmbeddedQuery,
+      savedViewRefetch,
+      slug,
+    ],
+  );
 
-  const handleViewChange = useCallback((name: string) => {
-    if (mode === "embedded") {
-      currentOperation.current = undefined;
-      setStoredMemberState(emptyMemberState(generation));
-    } else {
-      setStoredMemberState((current) => ({
-        ...current,
-        draftOpen: false,
-        error: undefined,
-        diagnostics: [],
-        notice: undefined,
-      }));
-    }
-    notifySortChange(undefined);
-    notifyViewChange(name);
-  }, [generation, mode, notifySortChange, notifyViewChange]);
+  const handleViewChange = useCallback(
+    (name: string) => {
+      if (mode === "embedded") {
+        currentOperation.current = undefined;
+        setStoredMemberState(emptyMemberState(generation));
+      } else {
+        setStoredMemberState((current) => ({
+          ...current,
+          draftOpen: false,
+          error: undefined,
+          diagnostics: [],
+          notice: undefined,
+        }));
+      }
+      notifySortChange(undefined);
+      notifyViewChange(name);
+    },
+    [generation, mode, notifySortChange, notifyViewChange],
+  );
   const handleSortChange = useCallback(
     (nextSort: SortKey[] | undefined) => {
       notifySortChange(nextSort);
@@ -610,27 +636,39 @@ export function useBaseTableController(
       memberState.creation.phase !== "idle" ||
       currentOperation.current !== undefined ||
       (mode === "embedded" && !embeddedAuthoritative)
-    ) return;
+    )
+      return;
     setStoredMemberState({ ...emptyMemberState(generation), draftOpen: true });
-  }, [embeddedAuthoritative, generation, memberCapability?.enabled, memberState.creation.phase, mode]);
+  }, [
+    embeddedAuthoritative,
+    generation,
+    memberCapability?.enabled,
+    memberState.creation.phase,
+    mode,
+  ]);
   const handleCancelMember = useCallback(() => {
-    setStoredMemberState((current) => current.generation === generation
-      ? { ...current, draftOpen: false, error: undefined, diagnostics: [] }
-      : current,
+    setStoredMemberState((current) =>
+      current.generation === generation
+        ? { ...current, draftOpen: false, error: undefined, diagnostics: [] }
+        : current,
     );
   }, [generation]);
   const handleMemberEdit = useCallback(() => {
-    setStoredMemberState((current) => current.generation === generation
-      ? { ...current, error: undefined, diagnostics: [] }
-      : current,
+    setStoredMemberState((current) =>
+      current.generation === generation
+        ? { ...current, error: undefined, diagnostics: [] }
+        : current,
     );
   }, [generation]);
-  const handleCreatedRowFocused = useCallback((createdId: string) => {
-    const creation = memberState.creation;
-    if (creation.phase === "resolving" && creation.createdId === createdId) {
-      finishMemberOperation(creation.operation, generation);
-    }
-  }, [finishMemberOperation, generation, memberState.creation]);
+  const handleCreatedRowFocused = useCallback(
+    (createdId: string) => {
+      const creation = memberState.creation;
+      if (creation.phase === "resolving" && creation.createdId === createdId) {
+        finishMemberOperation(creation.operation, generation);
+      }
+    },
+    [finishMemberOperation, generation, memberState.creation],
+  );
   const handleOpenPage = useCallback(
     (path: string) => openTab("page", path),
     [openTab],
@@ -648,27 +686,34 @@ export function useBaseTableController(
     [createMember],
   );
 
-  const viewErrorValue = mode === "standalone" ? savedViewQuery.error : evaluationQuery.error;
-  const viewErrorObject = viewErrorValue as { error?: string } | null | undefined;
-  const viewLoading = mode === "standalone"
-    ? savedViewQuery.isLoading
-    : evaluationQuery.isLoading && !exactEmbeddedSuccess;
+  const viewErrorValue =
+    mode === "standalone" ? savedViewQuery.error : evaluationQuery.error;
+  const viewErrorObject = viewErrorValue as
+    | { error?: string }
+    | null
+    | undefined;
+  const viewLoading =
+    mode === "standalone"
+      ? savedViewQuery.isLoading
+      : evaluationQuery.isLoading && !exactEmbeddedSuccess;
   const creation = memberState.creation;
-  const memberSaving = creation.phase !== "idle" ||
+  const memberSaving =
+    creation.phase !== "idle" ||
     (memberState.draftOpen && mode === "embedded" && !embeddedAuthoritative);
 
-  const visibleMemberNotice = memberState.notice?.scope === "query"
-    ? mode === "embedded" &&
+  const visibleMemberNotice =
+    memberState.notice?.scope === "query"
+      ? mode === "embedded" &&
         memberState.notice.queryIdentity === embeddedQueryKey
-      ? memberState.notice.message
-      : undefined
-    : memberState.notice?.message;
+        ? memberState.notice.message
+        : undefined
+      : memberState.notice?.message;
   const focusCreatedId =
     creation.phase === "resolving" &&
-      ((mode === "standalone" && creation.placement.mode === "standalone") ||
-        (mode === "embedded" &&
-          creation.placement.mode === "embedded" &&
-          creation.placement.queryIdentity === embeddedQueryKey))
+    ((mode === "standalone" && creation.placement.mode === "standalone") ||
+      (mode === "embedded" &&
+        creation.placement.mode === "embedded" &&
+        creation.placement.queryIdentity === embeddedQueryKey))
       ? creation.createdId
       : undefined;
   return {
@@ -677,7 +722,9 @@ export function useBaseTableController(
     detailMissing: !!detail.error || !detail.data || !activeView,
     activeView,
     output,
-    viewError: viewErrorValue ? (viewErrorObject?.error ?? "request failed") : undefined,
+    viewError: viewErrorValue
+      ? (viewErrorObject?.error ?? "request failed")
+      : undefined,
     viewLoading,
     sort,
     onViewChange: handleViewChange,

@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Profiler, useSyncExternalStore } from "react";
 import { flushSync } from "react-dom";
@@ -276,8 +282,7 @@ describe("CommandPalette keyboard navigation", () => {
       data: undefined,
       isFetching: false,
       isError: query === "clep",
-      error:
-        query === "clep" ? new Error("Search service unavailable") : null,
+      error: query === "clep" ? new Error("Search service unavailable") : null,
       refetch: searchRefetchMock,
     }));
     const user = userEvent.setup();

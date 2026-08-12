@@ -1,9 +1,4 @@
-import {
-  Editor,
-  Element as SlateElement,
-  type Path,
-  Transforms,
-} from "slate";
+import { Editor, type Path, Element as SlateElement, Transforms } from "slate";
 import type { ConversationTurnElement } from "../schema/types";
 import type { ConversationRole } from "./marker";
 

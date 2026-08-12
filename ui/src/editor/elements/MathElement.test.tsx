@@ -12,8 +12,8 @@ import {
   createEditor,
   type Descendant,
   Editor,
-  Element as SlateElement,
   Node,
+  Element as SlateElement,
   Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
@@ -31,10 +31,7 @@ import {
 } from "#/editor/mathEditing";
 import { makeInlineMath } from "#/editor/schema/elements/math";
 import { withSchema } from "#/editor/schema/withSchema";
-import type {
-  InlineMathElement,
-  MathBlockElement,
-} from "#/editor/types";
+import type { InlineMathElement, MathBlockElement } from "#/editor/types";
 
 function MathEditingSurface({
   editor,
@@ -178,9 +175,9 @@ describe("MathElement", () => {
     expect(Node.get(editor, [0, 1])).toMatchObject({ tex: invalidTex });
     expect(source).toHaveAttribute("aria-invalid", "true");
     expect(source).toHaveFocus();
-    expect(
-      screen.getByRole("textbox", { name: "Edit inline math" }),
-    ).toBe(source);
+    expect(screen.getByRole("textbox", { name: "Edit inline math" })).toBe(
+      source,
+    );
   });
 
   it("commits invalid TeX but keeps its described source editor visible", async () => {
@@ -197,14 +194,18 @@ describe("MathElement", () => {
     });
     expect(source).toHaveAttribute("aria-invalid", "true");
     expect(source).toHaveAccessibleDescription("Invalid TeX source");
-    expect(
-      screen.getByRole("textbox", { name: "Edit inline math" }),
-    ).toBe(source);
+    expect(screen.getByRole("textbox", { name: "Edit inline math" })).toBe(
+      source,
+    );
   });
 
   it.each([
     ["ArrowLeft", 0, { path: [0, 0], offset: 6 }],
-    ["ArrowRight", String.raw`\notACommand{`.length, { path: [0, 2], offset: 0 }],
+    [
+      "ArrowRight",
+      String.raw`\notACommand{`.length,
+      { path: [0, 2], offset: 0 },
+    ],
   ] as const)(
     "commits invalid TeX at the %s boundary without closing source",
     async (key, caret, expectedPoint) => {
@@ -224,9 +225,9 @@ describe("MathElement", () => {
       expect(editor.selection?.anchor).toEqual(expectedPoint);
       expect(source).toHaveValue(invalidTex);
       expect(source).toHaveAttribute("aria-invalid", "true");
-      expect(
-        screen.getByRole("textbox", { name: "Edit inline math" }),
-      ).toBe(source);
+      expect(screen.getByRole("textbox", { name: "Edit inline math" })).toBe(
+        source,
+      );
     },
   );
 

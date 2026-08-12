@@ -244,7 +244,6 @@ describe("BaseTable standalone regression", () => {
   });
 });
 
-
 describe("BaseTable member creation", () => {
   it("preserves a rejected draft, clears stale diagnostics on edit, then focuses the authoritative grouped row", async () => {
     const user = userEvent.setup();

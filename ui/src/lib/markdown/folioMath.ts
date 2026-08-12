@@ -1,11 +1,7 @@
 import type { Data as MdastData, Parents, Root } from "mdast";
 import type { InlineMath, Math } from "mdast-util-math";
 import { mathFromMarkdown } from "mdast-util-math";
-import type {
-  Info,
-  Options,
-  State,
-} from "mdast-util-to-markdown";
+import type { Info, Options, State } from "mdast-util-to-markdown";
 import { math as mathSyntax } from "micromark-extension-math-extended";
 import type {
   Code,
@@ -13,7 +9,7 @@ import type {
   State as MicromarkState,
   Token,
 } from "micromark-util-types";
-import type { Data as ProcessorData, Plugin } from "unified";
+import type { Plugin, Data as ProcessorData } from "unified";
 
 export type MathDelimiter = "$" | "$$" | "\\(" | "\\[";
 
@@ -29,10 +25,9 @@ export interface FolioMathData extends MdastData {
   };
 }
 
-type FolioMathNode = (
-  | Omit<InlineMath, "data">
-  | Omit<Math, "data">
-) & { data?: MdastData };
+type FolioMathNode = (Omit<InlineMath, "data"> | Omit<Math, "data">) & {
+  data?: MdastData;
+};
 type MutableParent = { children: MutableNode[] };
 type MutableNode =
   | FolioMathNode
@@ -98,10 +93,7 @@ function restoreSource(node: FolioMathNode, source: string): MutableNode {
     : { type: "paragraph", children: [text], position: node.position };
 }
 
-function annotateNode(
-  node: FolioMathNode,
-  source: string,
-): MutableNode | void {
+function annotateNode(node: FolioMathNode, source: string): MutableNode | void {
   const start = node.position?.start.offset;
   const end = node.position?.end.offset;
   if (start === undefined || end === undefined) return;
@@ -372,11 +364,7 @@ function inlineMath(
 inlineMath.peek = (node: InlineMath): string =>
   inlineOutputDelimiter(node) === "\\(" ? "\\" : "$";
 
-function serializeDollarDisplay(
-  node: Math,
-  state: State,
-  info: Info,
-): string {
+function serializeDollarDisplay(node: Math, state: State, info: Info): string {
   const raw = sourceBody(node);
   const tracker = state.createTracker(info);
   const sequence = "$$";
@@ -441,4 +429,3 @@ export function folioMathToMarkdown(): Options {
     handlers: { math, inlineMath } as Options["handlers"],
   };
 }
-

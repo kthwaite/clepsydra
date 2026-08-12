@@ -9,15 +9,15 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { StrictMode } from "react";
-import { beforeAll, afterEach, describe, expect, it, vi } from "vitest";
 import { createEditor, type Descendant, Node, Transforms } from "slate";
 import { Editable, ReactEditor, Slate, withReact } from "slate-react";
-import { SlateEditor } from "#/editor/SlateEditor";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
-  ConversationPresentationProvider,
   type ConversationPresentation,
+  ConversationPresentationProvider,
 } from "#/editor/conversation/presentation";
 import { renderElement } from "#/editor/elements/renderElement";
+import { SlateEditor } from "#/editor/SlateEditor";
 import type {
   ConversationTurnElement,
   CustomEditor,
@@ -93,7 +93,9 @@ describe("conversation turn presentation", () => {
 
     const label = screen.getByText("Claude");
     expect(label.closest("aside")).toHaveAttribute("contenteditable", "false");
-    expect(screen.queryByRole("combobox", { name: "Change participant" })).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "Change participant" }),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: "Move turn up" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Move turn down" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Add turn after" })).toBeNull();
@@ -134,7 +136,9 @@ describe("conversation turn presentation", () => {
   });
 
   it("always labels the user participant You", () => {
-    renderConversation({ mode: "read", provider: "chatgpt" }, [turn(1, "user")]);
+    renderConversation({ mode: "read", provider: "chatgpt" }, [
+      turn(1, "user"),
+    ]);
 
     expect(screen.getByText("You")).toBeInTheDocument();
     expect(screen.queryByText("ChatGPT")).toBeNull();
@@ -148,7 +152,9 @@ describe("conversation turn presentation", () => {
       </Slate>,
     );
 
-    expect(screen.getByText("turn 1").closest("blockquote")).toBeInTheDocument();
+    expect(
+      screen.getByText("turn 1").closest("blockquote"),
+    ).toBeInTheDocument();
     expect(
       screen.queryByRole("combobox", { name: "Change participant" }),
     ).toBeNull();
@@ -185,10 +191,18 @@ describe("conversation turn presentation", () => {
 
     const select = screen.getByRole("combobox", { name: "Change participant" });
     expect(select).toHaveValue("assistant");
-    expect(screen.getByRole("button", { name: "Move turn up" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Move turn down" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Add turn after" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Remove turn" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Move turn up" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Move turn down" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Add turn after" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Remove turn" }),
+    ).toBeInTheDocument();
     expect(select.closest("aside")).toHaveAttribute("contenteditable", "false");
 
     await user.selectOptions(select, "user");
@@ -254,7 +268,9 @@ describe("SlateEditor read-only contract", () => {
     const { container, unmount } = render(
       <QueryClientProvider client={client}>
         <SlateEditor
-          initialValue={[{ type: "paragraph", children: [{ text: "copy me" }] }]}
+          initialValue={[
+            { type: "paragraph", children: [{ text: "copy me" }] },
+          ]}
           onChange={onChange}
           onSaveNow={onSaveNow}
           readOnly

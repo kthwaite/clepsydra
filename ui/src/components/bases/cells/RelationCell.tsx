@@ -41,7 +41,9 @@ export function RelationCell({
       .split(",")
       .map((target) => target.trim())
       .filter((target) => target !== "");
-    submit(targets.length === 0 ? null : targets.map((target) => `[[${target}]]`));
+    submit(
+      targets.length === 0 ? null : targets.map((target) => `[[${target}]]`),
+    );
   };
 
   useEffect(() => {
@@ -67,7 +69,6 @@ export function RelationCell({
       cancelled = true;
     };
   }, [draft]);
-
 
   return (
     <>

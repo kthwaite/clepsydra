@@ -10,10 +10,10 @@ import {
   useState,
 } from "react";
 import {
-  Editor,
-  Element as SlateElement,
   type Descendant,
+  Editor,
   type Range,
+  Element as SlateElement,
   Transforms,
 } from "slate";
 import { ReactEditor } from "slate-react";
@@ -29,14 +29,11 @@ import { AiConversationControls } from "#/components/codex/AiConversationControl
 import { CLink } from "#/components/codex/CLink";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
 import {
-  buildToc,
-  type TocEntry,
-} from "#/components/codex/folioToc";
-import {
   countWordsFromSlate,
   shortFolio,
   visibleFolioOutlinks,
 } from "#/components/codex/folio-utils";
+import { buildToc, type TocEntry } from "#/components/codex/folioToc";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
 import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
@@ -153,9 +150,7 @@ function RawMarkdownNavigationGuard({
 
   return (
     <Dialog
-      isOpen={
-        blocker.status === "blocked" || pendingTransition !== null
-      }
+      isOpen={blocker.status === "blocked" || pendingTransition !== null}
       onOpenChange={(open) => {
         if (!open) stay();
       }}
@@ -375,7 +370,6 @@ export function Folio({ tabId, path }: FolioProps) {
     if (editor.title) updateTabLabel(tabId, editor.title);
   }, [tabId, editor.title, updateTabLabel]);
 
-
   useEffect(() => {
     setProgress(0);
   }, [setProgress]);
@@ -412,17 +406,14 @@ export function Folio({ tabId, path }: FolioProps) {
     activeRecipeParse?.ok === true ? activeRecipeParse.value : null;
   const recipeStructured = activeRecipeParse?.ok === true;
   const recipeHasBlockIds =
-    isRecipe &&
-    containsBlockId(editor.editorValue ?? editor.initialValue);
+    isRecipe && containsBlockId(editor.editorValue ?? editor.initialValue);
   const recipePresentationStructured = recipeStructured && !recipeHasBlockIds;
-  const recipeReadOnly =
-    recipePresentationStructured && recipeMode === "read";
+  const recipeReadOnly = recipePresentationStructured && recipeMode === "read";
   // Archived bodies are generated from a captured snapshot, and the page's
   // frontmatter hash claims to describe them; the server refuses body writes
   // until the reader explicitly unlocks the page.
   const bodyProtected = editor.readonly;
-  const folioReadOnly =
-    conversationReadOnly || recipeReadOnly || bodyProtected;
+  const folioReadOnly = conversationReadOnly || recipeReadOnly || bodyProtected;
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
@@ -506,11 +497,7 @@ export function Folio({ tabId, path }: FolioProps) {
     }
   };
   useEffect(() => {
-    if (
-      !focusRequestId ||
-      editor.isLoading ||
-      !editor.isEditorSynchronized
-    ) {
+    if (!focusRequestId || editor.isLoading || !editor.isEditorSynchronized) {
       return;
     }
     const focusBlockId = takeTabFocus(tabId, focusRequestId);
@@ -533,7 +520,10 @@ export function Folio({ tabId, path }: FolioProps) {
           node.blockId === focusBlockId,
       }).next().value;
       if (entry) {
-        Transforms.select(editorInstance, Editor.start(editorInstance, entry[1]));
+        Transforms.select(
+          editorInstance,
+          Editor.start(editorInstance, entry[1]),
+        );
         ReactEditor.focus(editorInstance);
       }
       return;
@@ -742,11 +732,7 @@ export function Folio({ tabId, path }: FolioProps) {
   if (!rawMarkdownSession && editor.error && !editor.isDraft) {
     return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
   }
-  if (
-    !rawMarkdownSession &&
-    encrypted &&
-    encryptionState.status !== "plain"
-  ) {
+  if (!rawMarkdownSession && encrypted && encryptionState.status !== "plain") {
     return (
       <LockedFolio
         path={path}
@@ -927,9 +913,7 @@ export function Folio({ tabId, path }: FolioProps) {
                       value: nextDocument,
                     },
                   });
-                  editor.setBodyMarkdown(
-                    serializeRecipeMarkdown(nextDocument),
-                  );
+                  editor.setBodyMarkdown(serializeRecipeMarkdown(nextDocument));
                 }}
               />
             ) : (
@@ -1779,8 +1763,7 @@ function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
   const recent = tabs
     .filter((tab) => tab.type === "page")
     .sort(
-      (left, right) =>
-        (right.lastActiveAt ?? 0) - (left.lastActiveAt ?? 0),
+      (left, right) => (right.lastActiveAt ?? 0) - (left.lastActiveAt ?? 0),
     );
 
   return (

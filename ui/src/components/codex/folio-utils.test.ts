@@ -8,10 +8,7 @@ import {
   visibleFolioOutlinks,
 } from "./folio-utils";
 
-const outlink = (
-  kind: string,
-  target_path: string | null,
-): OutlinkEntry => ({
+const outlink = (kind: string, target_path: string | null): OutlinkEntry => ({
   kind,
   source_field: kind === "property_ref" ? "tags" : null,
   target_id: target_path ? "019ff000-0000-7000-8000-000000000000" : null,
@@ -29,10 +26,12 @@ describe("visibleFolioOutlinks", () => {
       outlink("block_ref", "notes/page.md"),
     ]);
 
-    expect(visible.map(({ kind, target_path }) => [kind, target_path])).toEqual([
-      ["wiki", "notes/page.md"],
-      ["block_ref", "notes/page.md"],
-    ]);
+    expect(visible.map(({ kind, target_path }) => [kind, target_path])).toEqual(
+      [
+        ["wiki", "notes/page.md"],
+        ["block_ref", "notes/page.md"],
+      ],
+    );
   });
 
   it("returns an empty array for absent data", () => {

@@ -1,8 +1,8 @@
 import type { BaseEditor, Descendant } from "slate";
 import type { HistoryEditor } from "slate-history";
 import type { ReactEditor } from "slate-react";
-import type { MathDelimiter } from "#/lib/markdown/folioMath";
 import type { BaseEmbedConfig } from "#/components/bases/embed-query";
+import type { MathDelimiter } from "#/lib/markdown/folioMath";
 
 // --- Element types ---
 

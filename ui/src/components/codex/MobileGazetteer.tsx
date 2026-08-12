@@ -13,8 +13,8 @@ import {
 import type { ContentEntry, TagCount } from "#/api/types";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { Button } from "#/components/ui/button";
-import { TagInput } from "#/components/ui/tag-input";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
+import { TagInput } from "#/components/ui/tag-input";
 import { TextField } from "#/components/ui/text-field";
 import { cn } from "#/lib/cn";
 import {
@@ -25,10 +25,7 @@ import {
   resolveKind,
 } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
-import {
-  appendUniqueTag,
-  type GazetteerSort,
-} from "./gazetteer-filter";
+import { appendUniqueTag, type GazetteerSort } from "./gazetteer-filter";
 
 export interface MobileGazetteerProps {
   query: string;

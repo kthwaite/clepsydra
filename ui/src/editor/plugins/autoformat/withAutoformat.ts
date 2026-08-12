@@ -16,12 +16,12 @@ import {
   tryThematicBreak,
 } from "./blockTransforms";
 import { tryInlineTransform } from "./inlineTransforms";
+import { tryListContinuation } from "./listContinuation";
 import {
   isInMathCandidate,
   tryDisplayMathNewline,
   tryMathTransform,
 } from "./mathTransforms";
-import { tryListContinuation } from "./listContinuation";
 import {
   tryPrefixedLinkBreakTransform,
   tryPrefixedLinkTextTransform,

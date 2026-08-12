@@ -1,14 +1,9 @@
 import katex from "katex";
-import { useMemo } from "react";
 import type { KeyboardEvent } from "react";
-import {
-  formatMathSource,
-  type MathDelimiter,
-} from "#/lib/markdown/folioMath";
+import { useMemo } from "react";
+import { formatMathSource, type MathDelimiter } from "#/lib/markdown/folioMath";
 
-export type MathRenderResult =
-  | { ok: true; html: string }
-  | { ok: false };
+export type MathRenderResult = { ok: true; html: string } | { ok: false };
 
 export interface MathExpressionProps {
   tex: string;

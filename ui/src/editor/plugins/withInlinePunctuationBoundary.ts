@@ -1,17 +1,15 @@
 import {
   Editor,
-  Element as SlateElement,
   Point,
   Range,
+  Element as SlateElement,
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
 
 const TRAILING_PUNCTUATION = /^[,.;:!?]$/;
 
-type TerminalInlineCodeInsertState =
-  | "awaiting-first"
-  | { nextPoint: Point };
+type TerminalInlineCodeInsertState = "awaiting-first" | { nextPoint: Point };
 
 const TERMINAL_INLINE_CODE_INSERT_STATE = new WeakMap<
   Editor,

@@ -125,8 +125,6 @@ describe("attachmentReferences", () => {
           "```",
         ].join("\n"),
       ),
-    ).toEqual([
-      { path: "café.pdf", label: "First", image: false },
-    ]);
+    ).toEqual([{ path: "café.pdf", label: "First", image: false }]);
   });
 });

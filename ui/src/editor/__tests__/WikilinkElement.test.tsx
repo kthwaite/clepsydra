@@ -2,11 +2,17 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { createEditor, type Descendant } from "slate";
-import { Editable, type RenderElementProps, Slate, withReact } from "slate-react";
+import {
+  Editable,
+  type RenderElementProps,
+  Slate,
+  withReact,
+} from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { withSchema } from "#/editor/schema/withSchema";
+import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import type * as WikilinkEditingExports from "#/editor/wikilinkEditing";
+
 type CapturedCLinkProps = {
   path?: string;
   onClick?: (e: unknown) => void;

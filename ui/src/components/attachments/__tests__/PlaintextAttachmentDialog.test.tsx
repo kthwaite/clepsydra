@@ -7,7 +7,6 @@ import {
   PlaintextAttachmentDialog,
 } from "#/components/attachments/PlaintextAttachmentDialog";
 
-
 const uploadAction: PendingAttachmentAction = {
   kind: "upload",
   file: new File(["image"], "diagram.png", { type: "image/png" }),
@@ -75,8 +74,7 @@ describe("PlaintextAttachmentDialog", () => {
         path: "sketches/diagram.png",
         size: 1536,
       },
-      markdown:
-        "![diagram.png](/api/vault/attachments/sketches/diagram.png)",
+      markdown: "![diagram.png](/api/vault/attachments/sketches/diagram.png)",
     };
     const onCancel = vi.fn();
 

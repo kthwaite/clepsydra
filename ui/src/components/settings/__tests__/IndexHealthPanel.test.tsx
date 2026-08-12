@@ -85,9 +85,7 @@ describe("IndexHealthPanel", () => {
       screen.getByRole("heading", { name: "Index diagnostics" }),
     ).toBeVisible();
     expect(screen.getByText("Failed to parse broken.md")).toBeVisible();
-    expect(
-      screen.getByRole("button", { name: "Rebuild index" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Rebuild index" })).toBeVisible();
     expect(
       screen.queryByRole("heading", { name: "Unresolved links" }),
     ).not.toBeInTheDocument();

@@ -140,7 +140,11 @@ describe("composeMemberDraftFields", () => {
       }),
     );
 
-    expect(fields.map((field) => field.key)).toEqual(["title", "kind", "status"]);
+    expect(fields.map((field) => field.key)).toEqual([
+      "title",
+      "kind",
+      "status",
+    ]);
   });
 
   it("preserves canonical property namespaces when custom fields shadow system and derived fields", () => {
@@ -231,18 +235,18 @@ describe("composeMemberDraftFields", () => {
     const constructorDefinition: PropertyDefinition = { type: "text" };
     const declared = composeMemberDraftFields(
       makeDefinition({
-        properties: [
-          { key: "constructor", definition: constructorDefinition },
-        ],
+        properties: [{ key: "constructor", definition: constructorDefinition }],
         views: [{ name: "Continues", columns: ["prop.constructor"] }],
       }),
       "Continues",
       makeCapability(),
     );
-    expect(declared.find((field) => field.key === "constructor")).toMatchObject({
-      kind: "property",
-      definition: constructorDefinition,
-    });
+    expect(declared.find((field) => field.key === "constructor")).toMatchObject(
+      {
+        kind: "property",
+        definition: constructorDefinition,
+      },
+    );
   });
 
   it("does not turn undeclared filter keys into controls or consume their diagnostics", () => {

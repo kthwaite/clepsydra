@@ -2,10 +2,7 @@
 
 export type GazetteerSort = "ts" | "id" | "title" | "words";
 
-export function appendUniqueTag(
-  selectedTags: string[],
-  tag: string,
-): string[] {
+export function appendUniqueTag(selectedTags: string[], tag: string): string[] {
   return selectedTags.includes(tag) ? selectedTags : [...selectedTags, tag];
 }
 

@@ -10,9 +10,9 @@ import {
 } from "react";
 import {
   Editor,
-  Element as SlateElement,
   Path,
   type PathRef,
+  Element as SlateElement,
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";

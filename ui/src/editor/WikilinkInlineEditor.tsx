@@ -1,12 +1,7 @@
+import { type KeyboardEvent, useLayoutEffect, useRef, useState } from "react";
 import {
-  type KeyboardEvent,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from "react";
-import {
-  parseWikilinkDraft,
   type ParsedWikilinkDraft,
+  parseWikilinkDraft,
   type WikilinkCaretEdge,
   type WikilinkExit,
 } from "#/editor/wikilinkEditing";

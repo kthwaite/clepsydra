@@ -367,34 +367,31 @@ describe("ImportDialog", () => {
       mutation: mocks.importIsbn,
       expected: { body: { isbn: "978-0-262-03384-8" } },
     },
-  ])("submits $label imports and reports per-item results", async ({
-    mode,
-    label,
-    input,
-    mutation,
-    expected,
-  }) => {
-    const user = userEvent.setup();
-    render(<ImportDialog isOpen onClose={vi.fn()} />);
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Import source" }),
-      mode,
-    );
-    fireEvent.change(screen.getByRole("textbox", { name: label }), {
-      target: { value: input },
-    });
-    await user.click(screen.getByRole("button", { name: `Import ${label}` }));
+  ])(
+    "submits $label imports and reports per-item results",
+    async ({ mode, label, input, mutation, expected }) => {
+      const user = userEvent.setup();
+      render(<ImportDialog isOpen onClose={vi.fn()} />);
+      await user.selectOptions(
+        screen.getByRole("combobox", { name: "Import source" }),
+        mode,
+      );
+      fireEvent.change(screen.getByRole("textbox", { name: label }), {
+        target: { value: input },
+      });
+      await user.click(screen.getByRole("button", { name: `Import ${label}` }));
 
-    expect(mutation).toHaveBeenCalledWith(expected);
-    if (mode === "bibtex") {
-      const request = mutation.mock.calls[0]?.[0] as {
-        body: string;
-        bodySerializer: (body: string) => string;
-      };
-      expect(request.bodySerializer(request.body)).toBe(input);
-    }
-    expect(await screen.findByText("created")).toBeVisible();
-  });
+      expect(mutation).toHaveBeenCalledWith(expected);
+      if (mode === "bibtex") {
+        const request = mutation.mock.calls[0]?.[0] as {
+          body: string;
+          bodySerializer: (body: string) => string;
+        };
+        expect(request.bodySerializer(request.body)).toBe(input);
+      }
+      expect(await screen.findByText("created")).toBeVisible();
+    },
+  );
 
   it("supports safe Zotero dry runs and explicit conflict policy", async () => {
     const user = userEvent.setup();

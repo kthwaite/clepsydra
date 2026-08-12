@@ -6,7 +6,8 @@ import type { DocPage } from "#/docs/types";
 
 export function DocsArticle({ page }: { page: DocPage }) {
   const groupLabel =
-    DOC_GROUPS.find((group) => group.id === page.groupId)?.label ?? page.groupId;
+    DOC_GROUPS.find((group) => group.id === page.groupId)?.label ??
+    page.groupId;
   const { previous, next } = getDocNeighbors(page.slug);
   const Component = page.Component;
 

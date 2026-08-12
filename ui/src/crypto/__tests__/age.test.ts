@@ -68,17 +68,17 @@ describe("age adapter", () => {
     expect((result as Error).message).not.toContain("fixture-password");
   });
 
-  it.each([
-    "",
-    "# Unicode\n\nΚαλημέρα κόσμε 🌊\nこんにちは 🔐\n",
-  ])("round-trips Markdown %j", async (markdown) => {
-    const { identity, recipient } = await createVaultIdentity();
+  it.each(["", "# Unicode\n\nΚαλημέρα κόσμε 🌊\nこんにちは 🔐\n"])(
+    "round-trips Markdown %j",
+    async (markdown) => {
+      const { identity, recipient } = await createVaultIdentity();
 
-    const armor = await encryptMarkdown(markdown, recipient);
+      const armor = await encryptMarkdown(markdown, recipient);
 
-    expectCanonicalArmor(armor);
-    await expect(decryptMarkdown(armor, identity)).resolves.toBe(markdown);
-  });
+      expectCanonicalArmor(armor);
+      await expect(decryptMarkdown(armor, identity)).resolves.toBe(markdown);
+    },
+  );
 
   it("rejects a wrong identity and tampering without leaking inputs", async () => {
     const owner = await createVaultIdentity();

@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { BlockApiError } from "#/api/blocks";
 import type { BlockResponse } from "#/api/blocks";
+import { BlockApiError } from "#/api/blocks";
 import {
   BlockTransclusion,
   blockDisplayContent,
@@ -55,9 +55,7 @@ beforeEach(() => {
 
 describe("blockDisplayContent", () => {
   it("returns the endpoint's normalized content unchanged", () => {
-    expect(blockDisplayContent(block)).toBe(
-      "Important note ((nested1234))",
-    );
+    expect(blockDisplayContent(block)).toBe("Important note ((nested1234))");
   });
 
   it("preserves marker-like text supplied as valid block content", () => {

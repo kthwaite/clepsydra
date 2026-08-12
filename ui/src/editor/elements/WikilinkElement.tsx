@@ -8,10 +8,10 @@ import {
 } from "slate-react";
 import { CLink } from "#/components/codex/CLink";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
+import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
 import { useWikilinkEditing } from "#/editor/wikilinkEditing";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
-import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { usePreviewStore } from "#/store/preview";
 

@@ -18,8 +18,7 @@ export function useOpenTodayJournal(): () => void {
     }
     const draftPath = todayJournalPath();
     const path = page?.path ?? draftPath;
-    const label =
-      page?.meta.title ?? journalDateFromPath(draftPath) ?? "today";
+    const label = page?.meta.title ?? journalDateFromPath(draftPath) ?? "today";
     openTab("page", path, label);
   }, [journalToday, openTab, refetch]);
 }

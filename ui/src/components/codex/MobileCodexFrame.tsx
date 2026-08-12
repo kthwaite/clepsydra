@@ -8,10 +8,7 @@ import {
 import { useTheme } from "#/components/ThemeProvider";
 import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
-import {
-  runWorkspaceTransition,
-  useWorkspaceStore,
-} from "#/store/workspace";
+import { runWorkspaceTransition, useWorkspaceStore } from "#/store/workspace";
 
 type MobileRoot = Extract<
   CodexView,

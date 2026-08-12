@@ -85,9 +85,9 @@ describe("useWorkspaceStore block focus requests", () => {
       .openTab("page", "source.md", "Source", { blockId: "abc123DEF0" });
 
     const state = useWorkspaceStore.getState();
-    expect(state.tabs.find((tab) => tab.id === state.activeTabId)?.focusBlockId).toBe(
-      "abc123DEF0",
-    );
+    expect(
+      state.tabs.find((tab) => tab.id === state.activeTabId)?.focusBlockId,
+    ).toBe("abc123DEF0");
   });
 
   it("sets and clears a focus request on a newly opened page tab", () => {

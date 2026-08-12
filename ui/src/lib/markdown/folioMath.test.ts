@@ -5,9 +5,9 @@ import remarkParse from "remark-parse";
 import { unified } from "unified";
 import { describe, expect, it } from "vitest";
 import {
+  type FolioMathData,
   folioMathToMarkdown,
   formatMathSource,
-  type FolioMathData,
   remarkFolioMath,
 } from "./folioMath";
 
@@ -62,9 +62,14 @@ describe("remarkFolioMath", () => {
     ["inline $x^2$ end", "inlineMath", "$", "x^2"],
     [String.raw`inline \(x^2\) end`, "inlineMath", String.raw`\(`, "x^2"],
     ["$$\nx^2\n$$", "math", "$$", "\nx^2\n"],
-    [String.raw`\[
+    [
+      String.raw`\[
 x^2
-\]`, "math", String.raw`\[`, "\nx^2\n"],
+\]`,
+      "math",
+      String.raw`\[`,
+      "\nx^2\n",
+    ],
   ])("annotates %s", (source, type, delimiter, body) => {
     const node = findMath(parse(source))[0];
 
@@ -76,9 +81,7 @@ x^2
   });
 
   it("annotates multiple mixed inline expressions independently", () => {
-    const nodes = findMath(
-      parse(String.raw`alpha $x$ and \(y\), then $z^2$.`),
-    );
+    const nodes = findMath(parse(String.raw`alpha $x$ and \(y\), then $z^2$.`));
 
     expect(nodes).toMatchObject([
       {
@@ -120,7 +123,7 @@ x^2
   });
 
   it("does not parse math delimiters in inline code", () => {
-    expect(findMath(parse('code: `$x$ and \\(y\\)`'))).toHaveLength(0);
+    expect(findMath(parse("code: `$x$ and \\(y\\)`"))).toHaveLength(0);
   });
 
   it("does not parse math delimiters in fenced code", () => {
@@ -223,23 +226,25 @@ x
 
   it.each([
     ["$x$", "span", "$", "x"],
-    [String.raw`\[
+    [
+      String.raw`\[
 x
-\]`, "div", String.raw`\[`, "\nx\n"],
-  ])(
-    "projects stable hast data for %s",
-    (source, hName, delimiter, body) => {
-      expect(findMath(parse(source))[0]?.data).toMatchObject({
-        hName,
-        hChildren: [],
-        hProperties: {
-          "data-folio-math": true,
-          "data-tex": body,
-          "data-delimiter": delimiter,
-        },
-      });
-    },
-  );
+\]`,
+      "div",
+      String.raw`\[`,
+      "\nx\n",
+    ],
+  ])("projects stable hast data for %s", (source, hName, delimiter, body) => {
+    expect(findMath(parse(source))[0]?.data).toMatchObject({
+      hName,
+      hChildren: [],
+      hProperties: {
+        "data-folio-math": true,
+        "data-tex": body,
+        "data-delimiter": delimiter,
+      },
+    });
+  });
 });
 
 describe("folioMathToMarkdown", () => {
@@ -247,11 +252,14 @@ describe("folioMathToMarkdown", () => {
     ["$x$", "$x$"],
     [String.raw`\(x\)`, String.raw`\(x\)`],
     ["$$\nx\n$$", "$$\nx\n$$"],
-    [String.raw`\[
+    [
+      String.raw`\[
 x
-\]`, String.raw`\[
+\]`,
+      String.raw`\[
 x
-\]`],
+\]`,
+    ],
   ])("preserves parsed source: %s", (source, expected) => {
     expect(serialize(parse(source)).trim()).toBe(expected.trim());
   });
@@ -327,11 +335,7 @@ x
   });
 
   it.each([
-    [
-      String.raw`a\$$b`,
-      String.raw`\(a\$$b\)`,
-      String.raw`\(`,
-    ],
+    [String.raw`a\$$b`, String.raw`\(a\$$b\)`, String.raw`\(`],
     [String.raw`a\\$$b`, String.raw`$a\\$$b$`, "$"],
   ])(
     "round-trips a two-dollar streak after escaped-backslash parity: %s",
@@ -379,15 +383,18 @@ x
     ["$ x $", " x "],
     ["before $ a\nb $ after", " a\nb "],
     ["before $ a\r\nb $ after", " a\r\nb "],
-  ])("preserves authored inline source and line endings: %s", (source, body) => {
-    const output = serialize(parse(source)).trimEnd();
-    expect(output).toBe(source);
-    expect(findMath(parse(output))[0]).toMatchObject({
-      type: "inlineMath",
-      value: body,
-      data: { folioDelimiter: "$", folioSourceBody: body },
-    });
-  });
+  ])(
+    "preserves authored inline source and line endings: %s",
+    (source, body) => {
+      const output = serialize(parse(source)).trimEnd();
+      expect(output).toBe(source);
+      expect(findMath(parse(output))[0]).toMatchObject({
+        type: "inlineMath",
+        value: body,
+        data: { folioDelimiter: "$", folioSourceBody: body },
+      });
+    },
+  );
 
   it("preserves an authored display body containing dollar streaks", () => {
     const source = "$$\na $$ b\n$$";
@@ -407,9 +414,13 @@ describe("formatMathSource", () => {
     ["x", "$", "$x$"],
     ["x", "\\(", String.raw`\(x\)`],
     ["\nx\n", "$$", "$$\nx\n$$"],
-    ["\nx\n", "\\[", String.raw`\[
+    [
+      "\nx\n",
+      "\\[",
+      String.raw`\[
 x
-\]`],
+\]`,
+    ],
   ] as const)("pairs %s with %s", (body, delimiter, expected) => {
     expect(formatMathSource(body, delimiter)).toBe(expected);
   });

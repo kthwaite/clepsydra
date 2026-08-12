@@ -1,10 +1,10 @@
 import {
+  type MutableRefObject,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type MutableRefObject,
 } from "react";
 import {
   type BasePoint,
@@ -28,8 +28,8 @@ import {
   applyBlockConversion,
   type BlockConversion,
 } from "#/editor/transforms/blockConversions";
-import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import type { CustomEditor } from "#/editor/types";
+import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { BlockRefCombobox } from "./BlockRefCombobox";
 import {

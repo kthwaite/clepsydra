@@ -1,6 +1,6 @@
-import { StrictMode } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "#/api/schema";
 import { feedDisclosureStorageKey } from "#/store/feedDisclosure";
@@ -229,7 +229,6 @@ describe("FeedManagement", () => {
     );
   });
 
-
   it("offers canonical live-manifest groups in both group comboboxes", async () => {
     managementMocks.feedsQuery.data = {
       ...feedList,
@@ -248,7 +247,9 @@ describe("FeedManagement", () => {
     });
     await user.type(subscribeGroup, "e");
     expect(
-      (await screen.findAllByRole("option")).map((option) => option.textContent),
+      (await screen.findAllByRole("option")).map(
+        (option) => option.textContent,
+      ),
     ).toEqual(["Engineering", "Research", "Design"]);
     await user.keyboard("{Escape}");
 
@@ -260,7 +261,9 @@ describe("FeedManagement", () => {
     await user.clear(editGroup);
     await user.type(editGroup, "e");
     expect(
-      (await screen.findAllByRole("option")).map((option) => option.textContent),
+      (await screen.findAllByRole("option")).map(
+        (option) => option.textContent,
+      ),
     ).toEqual(["Engineering", "Research", "Design"]);
   });
 
@@ -577,7 +580,9 @@ describe("FeedManagement", () => {
       expect(
         screen.getByRole("textbox", { name: /feed or site url/i }),
       ).toHaveValue("");
-      expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue("");
+      expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue(
+        "",
+      );
     });
   });
 
@@ -757,38 +762,38 @@ describe("FeedManagement", () => {
     });
   });
 
-  it.each([
-    "success",
-    "failure",
-  ] as const)("resets the OPML picker after %s so the same file can be retried", async (outcome) => {
-    managementMocks.importOpml.mockImplementation(() => {
-      if (outcome === "failure") throw new Error("Import failed");
-    });
-    const user = userEvent.setup();
-    const opml = '<?xml version="1.0"?><opml version="2.0"><body /></opml>';
-    const file = new File([opml], "subscriptions.opml", {
-      type: "text/x-opml",
-    });
-    Object.defineProperty(file, "text", {
-      configurable: true,
-      value: vi.fn().mockResolvedValue(opml),
-    });
-    renderManagement();
-    const input = screen.getByLabelText(/import opml/i);
+  it.each(["success", "failure"] as const)(
+    "resets the OPML picker after %s so the same file can be retried",
+    async (outcome) => {
+      managementMocks.importOpml.mockImplementation(() => {
+        if (outcome === "failure") throw new Error("Import failed");
+      });
+      const user = userEvent.setup();
+      const opml = '<?xml version="1.0"?><opml version="2.0"><body /></opml>';
+      const file = new File([opml], "subscriptions.opml", {
+        type: "text/x-opml",
+      });
+      Object.defineProperty(file, "text", {
+        configurable: true,
+        value: vi.fn().mockResolvedValue(opml),
+      });
+      renderManagement();
+      const input = screen.getByLabelText(/import opml/i);
 
-    await user.upload(input, file);
-    await waitFor(() =>
-      expect(managementMocks.importOpml).toHaveBeenCalledTimes(1),
-    );
-    expect(input).toHaveValue("");
+      await user.upload(input, file);
+      await waitFor(() =>
+        expect(managementMocks.importOpml).toHaveBeenCalledTimes(1),
+      );
+      expect(input).toHaveValue("");
 
-    await user.upload(input, file);
-    await waitFor(() =>
-      expect(managementMocks.importOpml).toHaveBeenCalledTimes(2),
-    );
-    expect(managementMocks.importOpml).toHaveBeenLastCalledWith({ opml });
-    expect(input).toHaveValue("");
-  });
+      await user.upload(input, file);
+      await waitFor(() =>
+        expect(managementMocks.importOpml).toHaveBeenCalledTimes(2),
+      );
+      expect(managementMocks.importOpml).toHaveBeenLastCalledWith({ opml });
+      expect(input).toHaveValue("");
+    },
+  );
 
   it("starts every group and feed expanded when storage is absent", async () => {
     managementMocks.feedsQuery.data = disclosureFeedList;
@@ -989,9 +994,7 @@ describe("FeedManagement", () => {
     const collapsed = within(item as HTMLElement);
 
     expect(collapsed.getByText("One Example")).toBeVisible();
-    expect(
-      collapsed.getByText("https://one.example/feed.xml"),
-    ).toBeVisible();
+    expect(collapsed.getByText("https://one.example/feed.xml")).toBeVisible();
     expect(collapsed.getByLabelText(/degraded feed health/i)).toBeVisible();
     expect(collapsed.getByText(/last fetch/i)).toBeVisible();
     expect(collapsed.getByText(/next fetch/i)).toBeVisible();
@@ -1067,7 +1070,9 @@ describe("FeedManagement", () => {
         managementMocks.feedsQuery.isLoading = true;
       } else {
         managementMocks.feedsQuery.isError = true;
-        managementMocks.feedsQuery.error = new Error("background refresh failed");
+        managementMocks.feedsQuery.error = new Error(
+          "background refresh failed",
+        );
       }
       const user = userEvent.setup();
       renderManagement();

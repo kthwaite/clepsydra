@@ -122,9 +122,7 @@ function resolveField(
   }
   if (isSystemField(reference)) return { field: systemField(reference) };
   const field = propertyField(reference, detail);
-  return field
-    ? { field }
-    : { message: `unknown field \`${reference}\`` };
+  return field ? { field } : { message: `unknown field \`${reference}\`` };
 }
 
 function supportsContains(type: PropertyType): boolean {

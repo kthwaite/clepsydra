@@ -1,9 +1,6 @@
 import { createEditor } from "slate";
 import { describe, expect, it } from "vitest";
-import {
-  baseEmbedDescriptor,
-  makeBaseEmbed,
-} from "../elements/baseEmbed";
+import { baseEmbedDescriptor, makeBaseEmbed } from "../elements/baseEmbed";
 import {
   inlineMathDescriptor,
   makeInlineMath,

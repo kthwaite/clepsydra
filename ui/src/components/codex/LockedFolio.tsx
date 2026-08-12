@@ -65,10 +65,7 @@ export function LockedFolio({
           {path}
         </p>
         {tags.length > 0 ? (
-          <p
-            aria-label="Tags"
-            className="cl-mono mt-2 text-[11px] text-accent"
-          >
+          <p aria-label="Tags" className="cl-mono mt-2 text-[11px] text-accent">
             {tags.map((tag) => `#${tag}`).join(" ")}
           </p>
         ) : null}

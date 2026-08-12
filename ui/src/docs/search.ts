@@ -67,7 +67,9 @@ function renderedBlockText(node: Nodes): string {
   return toString(node, { includeHtml: false });
 }
 
-export function buildDocsIndex(pages: readonly DocPage[]): readonly DocSearchSection[] {
+export function buildDocsIndex(
+  pages: readonly DocPage[],
+): readonly DocSearchSection[] {
   const sections: DocSearchSection[] = [];
   const slugger = new GithubSlugger();
   let order = 0;
@@ -215,7 +217,10 @@ function transformedPositions(
   return positions;
 }
 
-function normalizedWithPositions(value: string): { normalized: string; positions: number[] } {
+function normalizedWithPositions(value: string): {
+  normalized: string;
+  positions: number[];
+} {
   const decomposed = value.normalize("NFKD");
   const decomposedPositions = transformedPositions(value, (character) =>
     character.normalize("NFKD"),
@@ -228,7 +233,9 @@ function normalizedWithPositions(value: string): { normalized: string; positions
   let pendingSeparator: number | undefined;
 
   for (let foldedIndex = 0; foldedIndex < folded.length; ) {
-    const character = String.fromCodePoint(folded.codePointAt(foldedIndex) ?? 0);
+    const character = String.fromCodePoint(
+      folded.codePointAt(foldedIndex) ?? 0,
+    );
     const decomposedIndex = foldedPositions[foldedIndex] ?? foldedIndex;
     const sourceIndex = decomposedPositions[decomposedIndex] ?? 0;
 
@@ -256,7 +263,10 @@ function firstTextMatch(text: string, tokens: readonly string[]): number {
 
   for (const token of tokens) {
     const tokenIndex = normalized.indexOf(token);
-    if (tokenIndex >= 0 && (firstNormalizedIndex < 0 || tokenIndex < firstNormalizedIndex)) {
+    if (
+      tokenIndex >= 0 &&
+      (firstNormalizedIndex < 0 || tokenIndex < firstNormalizedIndex)
+    ) {
       firstNormalizedIndex = tokenIndex;
     }
   }
@@ -336,7 +346,9 @@ export function searchDocs(
     })
     .map((section) => {
       const page = normalizedPages.get(section.page);
-      return page === undefined ? undefined : rankSection(section, page, normalizedQuery, tokens);
+      return page === undefined
+        ? undefined
+        : rankSection(section, page, normalizedQuery, tokens);
     })
     .filter((candidate): candidate is RankedSection => candidate !== undefined);
 
@@ -359,7 +371,10 @@ export function searchDocs(
   }
 
   return [...bestByPage.values()]
-    .sort((left, right) => right.score - left.score || left.section.order - right.section.order)
+    .sort(
+      (left, right) =>
+        right.score - left.score || left.section.order - right.section.order,
+    )
     .map(({ section, score, excerptText }) => ({
       page: section.page,
       heading: section.heading,

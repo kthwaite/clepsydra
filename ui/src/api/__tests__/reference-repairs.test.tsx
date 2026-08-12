@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchClient } from "#/api/client";
 import {
-  ReferenceRepairApiError,
   type ReferenceIssueFilters,
+  ReferenceRepairApiError,
   useApplyReferenceRepair,
   usePreviewReferenceRepair,
   useReferenceIssues,
@@ -94,7 +94,9 @@ describe("useReferenceIssues", () => {
       offset: 50,
     };
     const { client, wrapper } = harness();
-    const { result } = renderHook(() => useReferenceIssues(filters), { wrapper });
+    const { result } = renderHook(() => useReferenceIssues(filters), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
@@ -120,10 +122,13 @@ describe("useReferenceIssues", () => {
 
   it("omits empty filters and reuses the cache entry across object identities", async () => {
     transport.fetch.mockResolvedValue(
-      new Response(JSON.stringify({ ...issuesResponse, limit: 50, offset: 0 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({ ...issuesResponse, limit: 50, offset: 0 }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
     );
     const { client, wrapper } = harness();
     const { result, rerender } = renderHook(
@@ -153,28 +158,30 @@ describe("useReferenceIssues", () => {
 
 describe("reference repair mutations", () => {
   it("forwards the fingerprint, revision, and action to preview and apply", async () => {
-    const post = vi.spyOn(fetchClient, "POST").mockImplementation(async (path) => {
-      if (path === "/api/vault/index/issues/preview") {
+    const post = vi
+      .spyOn(fetchClient, "POST")
+      .mockImplementation(async (path) => {
+        if (path === "/api/vault/index/issues/preview") {
+          return {
+            data: {
+              after: "[[Target]]",
+              before: "[[Missing]]",
+              fingerprint: "fp-1",
+              plan: { file_ops: [], text_edits: [] },
+            },
+            error: undefined,
+            response: new Response(null, { status: 200 }),
+          } as never;
+        }
         return {
           data: {
-            after: "[[Target]]",
-            before: "[[Missing]]",
             fingerprint: "fp-1",
-            plan: { file_ops: [], text_edits: [] },
+            notification: { removed: [], upserted: ["notes/source.md"] },
           },
           error: undefined,
           response: new Response(null, { status: 200 }),
         } as never;
-      }
-      return {
-        data: {
-          fingerprint: "fp-1",
-          notification: { removed: [], upserted: ["notes/source.md"] },
-        },
-        error: undefined,
-        response: new Response(null, { status: 200 }),
-      } as never;
-    });
+      });
     const { wrapper } = harness();
     const preview = renderHook(() => usePreviewReferenceRepair(), { wrapper });
     const apply = renderHook(() => useApplyReferenceRepair(), { wrapper });
@@ -182,11 +189,9 @@ describe("reference repair mutations", () => {
     await act(() => preview.result.current.mutateAsync(request));
     await act(() => apply.result.current.mutateAsync(request));
 
-    expect(post).toHaveBeenNthCalledWith(
-      1,
-      "/api/vault/index/issues/preview",
-      { body: request },
-    );
+    expect(post).toHaveBeenNthCalledWith(1, "/api/vault/index/issues/preview", {
+      body: request,
+    });
     expect(post).toHaveBeenNthCalledWith(2, "/api/vault/index/issues/apply", {
       body: request,
     });

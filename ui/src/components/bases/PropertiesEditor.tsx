@@ -225,7 +225,12 @@ export function PropertiesEditor({
   }
 
   function moveProperty(from: number, to: number) {
-    if (from < 0 || to < 0 || from >= properties.length || to >= properties.length)
+    if (
+      from < 0 ||
+      to < 0 ||
+      from >= properties.length ||
+      to >= properties.length
+    )
       return;
     const moved = properties[from];
     if (!moved || from === to) return;
@@ -348,7 +353,10 @@ export function PropertiesEditor({
                 <th scope="col" className="px-2 py-2 sm:px-3">
                   Type and configuration
                 </th>
-                <th scope="col" className="w-28 px-1 py-2 text-right sm:w-48 sm:px-2">
+                <th
+                  scope="col"
+                  className="w-28 px-1 py-2 text-right sm:w-48 sm:px-2"
+                >
                   Actions
                 </th>
               </tr>
@@ -377,7 +385,8 @@ export function PropertiesEditor({
                   }}
                   onDrop={dropProperty}
                   onHandleRef={(propertyId, element) => {
-                    if (element) reorderHandles.current.set(propertyId, element);
+                    if (element)
+                      reorderHandles.current.set(propertyId, element);
                     else reorderHandles.current.delete(propertyId);
                   }}
                   onRemove={removeProperty}

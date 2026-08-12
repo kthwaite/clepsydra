@@ -205,9 +205,7 @@ describe("Folio recipe presentation", () => {
     renderFolio(editor);
 
     await user.click(screen.getByRole("radio", { name: "Edit" }));
-    expect(
-      screen.getByRole("button", { name: "Raw Markdown" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Raw Markdown" })).toBeVisible();
     const description = screen.getByRole("textbox", { name: "Description" });
     fireEvent.change(description, { target: { value: "A deeper dish." } });
 

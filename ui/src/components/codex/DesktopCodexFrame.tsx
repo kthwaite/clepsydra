@@ -18,10 +18,7 @@ import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
 import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
-import {
-  runWorkspaceTransition,
-  useWorkspaceStore,
-} from "#/store/workspace";
+import { runWorkspaceTransition, useWorkspaceStore } from "#/store/workspace";
 
 /** Nav order + diegetic index numbers. */
 const NAV: ReadonlyArray<readonly [CodexView, string]> = [

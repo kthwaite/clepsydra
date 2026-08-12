@@ -189,7 +189,9 @@ vi.mock("#/editor/SlateEditor", () => ({
       <textarea
         aria-label="Page body"
         data-testid="slate-editor"
-        defaultValue={firstChild && Text.isText(firstChild) ? firstChild.text : ""}
+        defaultValue={
+          firstChild && Text.isText(firstChild) ? firstChild.text : ""
+        }
         onChange={(event) =>
           onChange([
             {
@@ -211,6 +213,8 @@ vi.mock("#/lib/useProjects", () => ({
   useProjects: () => [],
 }));
 
+import { TabContent } from "#/components/TabContent";
+import { todayJournalPath } from "#/lib/journal";
 import {
   clearFolioRestoration,
   type FolioRestoration,
@@ -218,8 +222,6 @@ import {
   saveFolioRestoration,
 } from "#/store/folioRestoration";
 import { useWorkspaceStore } from "#/store/workspace";
-import { todayJournalPath } from "#/lib/journal";
-import { TabContent } from "#/components/TabContent";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
@@ -524,7 +526,6 @@ describe("Folio invalid-tab recovery", () => {
     await user.click(beta);
     expect(useWorkspaceStore.getState().activeTabId).toBe("t2");
   });
-
 });
 
 describe("Folio outbound links", () => {
@@ -589,9 +590,7 @@ describe("Folio raw Markdown mode", () => {
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
-    expect(
-      screen.getByRole("button", { name: "Raw Markdown" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Raw Markdown" })).toBeVisible();
   });
 
   it("snapshots the current unsaved rich draft instead of stale server Markdown", async () => {
@@ -724,9 +723,7 @@ describe("Folio raw Markdown mode", () => {
     const editor = editableEditor();
     usePageEditorMock.mockReturnValue(editor);
     useWorkspaceStore.setState({
-      tabs: [
-        { id: "t1", type: "page", path: draftPath, label: "Today" },
-      ],
+      tabs: [{ id: "t1", type: "page", path: draftPath, label: "Today" }],
       activeTabId: "t1",
     });
     const view = render(<TabContent />);
@@ -973,7 +970,6 @@ describe("Folio raw Markdown mode", () => {
   });
 });
 
-
 describe("Folio attachment protection plumbing", () => {
   beforeEach(() => {
     mobileLayoutState.matches = false;
@@ -991,18 +987,14 @@ describe("Folio attachment protection plumbing", () => {
       ...editableEditor(),
       encrypted: true,
     });
-    const protectedView = render(
-      <Folio tabId="t1" path="notes/alpha.md" />,
-    );
+    const protectedView = render(<Folio tabId="t1" path="notes/alpha.md" />);
 
     await user.click(
       screen.getByRole("button", { name: "Manage attachments" }),
     );
     fireEvent.change(await screen.findByLabelText("Upload attachment"), {
       target: {
-        files: [
-          new File(["image"], "diagram.png", { type: "image/png" }),
-        ],
+        files: [new File(["image"], "diagram.png", { type: "image/png" })],
       },
     });
     expect(
@@ -1019,9 +1011,7 @@ describe("Folio attachment protection plumbing", () => {
     );
     fireEvent.change(await screen.findByLabelText("Upload attachment"), {
       target: {
-        files: [
-          new File(["image"], "diagram.png", { type: "image/png" }),
-        ],
+        files: [new File(["image"], "diagram.png", { type: "image/png" })],
       },
     });
 

@@ -181,10 +181,7 @@ export function DocsSidebar({ activeSlug, onNavigate }: DocsSidebarProps) {
                   key={`${result.page.slug}:${result.headingId ?? "page"}`}
                   className="border-b border-rule-soft last:border-b-0"
                 >
-                  <SearchResultLink
-                    result={result}
-                    onNavigate={onNavigate}
-                  />
+                  <SearchResultLink result={result} onNavigate={onNavigate} />
                 </li>
               ))}
             </ul>
@@ -223,9 +220,15 @@ export function DocsSidebar({ activeSlug, onNavigate }: DocsSidebarProps) {
                       className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-semibold uppercase tracking-widest text-ink-mute outline-none transition-colors hover:bg-paper-edge hover:text-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
                     >
                       {collapsed ? (
-                        <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+                        <ChevronRight
+                          aria-hidden="true"
+                          className="h-3.5 w-3.5"
+                        />
                       ) : (
-                        <ChevronDown aria-hidden="true" className="h-3.5 w-3.5" />
+                        <ChevronDown
+                          aria-hidden="true"
+                          className="h-3.5 w-3.5"
+                        />
                       )}
                       {group.label}
                     </button>

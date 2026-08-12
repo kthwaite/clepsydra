@@ -1,20 +1,20 @@
 import {
   type QueryClient,
   queryOptions,
+  type UseQueryResult,
   useQuery,
   useQueryClient,
-  type UseQueryResult,
 } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
-import { $api, fetchClient } from "./client";
-import { isApiError } from "./error";
 import {
-  baseViewEvaluationBody,
   type BaseEmbedConfig,
+  baseViewEvaluationBody,
   queryIdentity,
 } from "#/components/bases/embed-query";
+import { $api, fetchClient } from "./client";
+import { isApiError } from "./error";
 import {
   type BaseEvaluationQueryKey,
   invalidateByPath,
@@ -60,9 +60,7 @@ const BASE_MEMBER_SCOPES: ReadonlySet<string> = new Set([
   "embed",
 ]);
 
-function isBaseMemberDiagnostic(
-  value: unknown,
-): value is BaseMemberDiagnostic {
+function isBaseMemberDiagnostic(value: unknown): value is BaseMemberDiagnostic {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return false;
   }
@@ -110,9 +108,7 @@ export function decodeBaseMemberDiagnostics(
   return diagnostics;
 }
 
-export function invalidateBaseMutationQueries(
-  queryClient: QueryClient,
-): void {
+export function invalidateBaseMutationQueries(queryClient: QueryClient): void {
   invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
   invalidateByPath(queryClient, queryKeys.query.pathPrefix);
   invalidateByPath(queryClient, queryKeys.pages.pathPrefix);

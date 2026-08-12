@@ -101,7 +101,6 @@ interface Deferred<T> {
   reject: (error: Error) => void;
 }
 
-
 function makePage(
   body: string,
   revision = "rev-a",
@@ -236,7 +235,9 @@ describe("usePageEditor raw Markdown body", () => {
 
     expect(mutateAsyncMock).toHaveBeenCalledOnce();
     expect(mutateAsyncMock.mock.calls[0]?.[0].body.body).toBe(authoredBody);
-    expect(mutateAsyncMock.mock.calls[0]?.[0].body.body).not.toBe(failedRawBody);
+    expect(mutateAsyncMock.mock.calls[0]?.[0].body.body).not.toBe(
+      failedRawBody,
+    );
   });
 
   it("queues a newer exact body written during an in-flight save", async () => {
@@ -251,7 +252,9 @@ describe("usePageEditor raw Markdown body", () => {
     });
     const { result } = renderHook(() => usePageEditor("notes/page.md"));
 
-    act(() => result.current.setBodyMarkdown("first body without normalization"));
+    act(() =>
+      result.current.setBodyMarkdown("first body without normalization"),
+    );
     let firstFlight!: Promise<void>;
     act(() => {
       firstFlight = result.current.saveNow();
@@ -295,7 +298,9 @@ describe("usePageEditor raw Markdown body", () => {
     act(() => result.current.setBodyMarkdown(RAW_BODY));
     act(() =>
       result.current.onSlateChange(
-        [{ type: "paragraph", children: [{ text: "Slate wins" }] }] as Descendant[],
+        [
+          { type: "paragraph", children: [{ text: "Slate wins" }] },
+        ] as Descendant[],
         {
           operations: [
             { type: "insert_text", path: [0, 0], offset: 0, text: "x" },

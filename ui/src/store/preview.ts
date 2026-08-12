@@ -145,7 +145,8 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
       return {
         windows,
         hoverId:
-          s.hoverId && s.windows.some((w) => w.id === s.hoverId && w.path === path)
+          s.hoverId &&
+          s.windows.some((w) => w.id === s.hoverId && w.path === path)
             ? null
             : s.hoverId,
       };
@@ -170,9 +171,7 @@ export const usePreviewStore = create<PreviewState>((set, get) => ({
 
   commitMove(id, x, y) {
     set((s) => {
-      const windows = s.windows.map((w) =>
-        w.id === id ? { ...w, x, y } : w,
-      );
+      const windows = s.windows.map((w) => (w.id === id ? { ...w, x, y } : w));
       savePinned(windows);
       return { windows };
     });

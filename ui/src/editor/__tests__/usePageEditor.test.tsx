@@ -274,8 +274,7 @@ function notFoundError() {
 
 const TODAY_PATH = "journals/2026-08-06.md";
 const PAST_PATH = "journals/2026-08-05.md";
-const CANONICAL_TODAY_PATH =
-  "journals/20260808T005500Z--2026-08-06--a1b2c3.md";
+const CANONICAL_TODAY_PATH = "journals/20260808T005500Z--2026-08-06--a1b2c3.md";
 
 function ensuredPage(body = "") {
   return {

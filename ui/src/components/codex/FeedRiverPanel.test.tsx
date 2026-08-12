@@ -223,9 +223,7 @@ describe("FeedRiverPanel", () => {
     expect(caption).toHaveClass("whitespace-normal");
     expect(action).toHaveClass("shrink-0");
 
-    expect(
-      screen.getByRole("button", { name: /^hide read/i }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /^hide read/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /^saved/i })).toBeVisible();
     expect(action).toBeVisible();
   });

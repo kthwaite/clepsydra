@@ -44,9 +44,7 @@ describe("buildToc", () => {
 
   it("uses untitled for headings without text", () => {
     expect(
-      buildToc([
-        { type: "heading", level: 1, children: [{ text: "  " }] },
-      ]),
+      buildToc([{ type: "heading", level: 1, children: [{ text: "  " }] }]),
     ).toEqual([{ number: "1", depth: 1, text: "(untitled)" }]);
   });
 });

@@ -751,9 +751,13 @@ See [[Other Page]] for more.`;
 
     it.each([
       ["$$\nx\n$$", "$$", "\nx\n"],
-      [String.raw`\[
+      [
+        String.raw`\[
 x
-\]`, String.raw`\[`, "\nx\n"],
+\]`,
+        String.raw`\[`,
+        "\nx\n",
+      ],
     ])("maps display math separately: %s", (source, delimiter, tex) => {
       expect(markdownToSlate(source)).toEqual([
         {

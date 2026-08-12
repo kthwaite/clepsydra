@@ -16,15 +16,9 @@ import {
   useReadOnly,
   useSlateStatic,
 } from "slate-react";
-import {
-  MathExpression,
-  renderMathToHtml,
-} from "#/components/MathExpression";
-import type {
-  InlineMathElement,
-  MathBlockElement,
-} from "#/editor/types";
+import { MathExpression, renderMathToHtml } from "#/components/MathExpression";
 import { useMathEditing } from "#/editor/mathEditing";
+import type { InlineMathElement, MathBlockElement } from "#/editor/types";
 
 interface MathSourceEditorProps {
   display: boolean;

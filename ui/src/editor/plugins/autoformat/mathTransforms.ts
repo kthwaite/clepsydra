@@ -118,8 +118,7 @@ export function isInMathCandidate(editor: Editor): boolean {
   }
 
   return (
-    hasUnclosedBackslashParen(textBefore) ||
-    hasUnclosedInlineDollar(textBefore)
+    hasUnclosedBackslashParen(textBefore) || hasUnclosedInlineDollar(textBefore)
   );
 }
 
@@ -145,7 +144,8 @@ function currentMathCandidateContext(
   if (!blockEntry) return null;
 
   const [block] = blockEntry;
-  if (!SlateElement.isElement(block) || block.type === "code-block") return null;
+  if (!SlateElement.isElement(block) || block.type === "code-block")
+    return null;
 
   return {
     block,
@@ -153,7 +153,6 @@ function currentMathCandidateContext(
     textBefore: leaf.text.slice(0, anchor.offset),
   };
 }
-
 
 function hasUnmatchedDisplayOpener(textBefore: string): boolean {
   return (
@@ -320,11 +319,7 @@ function findUnescaped(text: string, needle: string, from: number): number {
 
 function isEscaped(text: string, index: number): boolean {
   let backslashes = 0;
-  for (
-    let cursor = index - 1;
-    cursor >= 0 && text[cursor] === "\\";
-    cursor--
-  ) {
+  for (let cursor = index - 1; cursor >= 0 && text[cursor] === "\\"; cursor--) {
     backslashes++;
   }
   return backslashes % 2 === 1;
@@ -356,7 +351,11 @@ function replaceInline(
   });
 }
 
-function replaceDisplay(editor: Editor, blockPath: Path, match: MathMatch): void {
+function replaceDisplay(
+  editor: Editor,
+  blockPath: Path,
+  match: MathMatch,
+): void {
   HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
     Editor.withoutNormalizing(editor, () => {
       Transforms.removeNodes(editor, { at: blockPath });

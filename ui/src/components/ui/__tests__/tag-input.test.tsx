@@ -725,7 +725,10 @@ describe("TagInput", () => {
       />,
     );
 
-    await user.type(screen.getByRole("combobox", { name: "Add tags" }), "unknown{Enter}");
+    await user.type(
+      screen.getByRole("combobox", { name: "Add tags" }),
+      "unknown{Enter}",
+    );
     expect(onChange).not.toHaveBeenCalled();
   });
   it("commits the active matching suggestion on Enter when creation is disabled", async () => {

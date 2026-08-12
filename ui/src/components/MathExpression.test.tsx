@@ -1,10 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import {
-  MathExpression,
-  renderMathToHtml,
-} from "#/components/MathExpression";
+import { MathExpression, renderMathToHtml } from "#/components/MathExpression";
 
 describe("renderMathToHtml", () => {
   it("returns combined visual HTML and accessible MathML", () => {
@@ -93,12 +90,7 @@ describe("MathExpression", () => {
 
   it("does not expose no-op button semantics without an activation handler", () => {
     const { container } = render(
-      <MathExpression
-        tex="x^2"
-        delimiter="$"
-        display={false}
-        interactive
-      />,
+      <MathExpression tex="x^2" delimiter="$" display={false} interactive />,
     );
 
     const wrapper = container.querySelector(".folio-math");

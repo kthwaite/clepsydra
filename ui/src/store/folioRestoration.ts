@@ -60,7 +60,11 @@ export function snapshotTextPoint(
 ): TextPointSnapshot | null {
   try {
     const [node] = Editor.node(editor, point.path);
-    if (!Text.isText(node) || point.offset < 0 || point.offset > node.text.length) {
+    if (
+      !Text.isText(node) ||
+      point.offset < 0 ||
+      point.offset > node.text.length
+    ) {
       return null;
     }
     return { path: [...point.path], offset: point.offset, text: node.text };

@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -462,7 +468,9 @@ describe("BaseTableView", () => {
     });
     expect(focused).toBe(true);
     expect(grids[0]).toContainElement(document.activeElement as HTMLElement);
-    expect(grids[1]).not.toContainElement(document.activeElement as HTMLElement);
+    expect(grids[1]).not.toContainElement(
+      document.activeElement as HTMLElement,
+    );
   });
 
   it("returns false when entry has no enabled view or table target", () => {
@@ -701,9 +709,10 @@ describe("BaseTableView", () => {
     expect(
       screen.getByRole("columnheader", { name: /author/ }),
     ).toHaveAttribute("aria-sort", "descending");
-    expect(
-      screen.getByRole("columnheader", { name: "title" }),
-    ).toHaveAttribute("aria-sort", "none");
+    expect(screen.getByRole("columnheader", { name: "title" })).toHaveAttribute(
+      "aria-sort",
+      "none",
+    );
 
     await user.click(screen.getByRole("columnheader", { name: "title" }));
     expect(props.onSortChange).toHaveBeenCalledWith([
@@ -788,9 +797,9 @@ describe("BaseTableView", () => {
     const props = renderView({ viewLoading: true });
 
     expect(screen.getByText("The Book of the New Sun")).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "View loading" })).toHaveTextContent(
-      "Loading",
-    );
+    expect(
+      screen.getByRole("status", { name: "View loading" }),
+    ).toHaveTextContent("Loading");
 
     props.rerender({
       viewLoading: false,
@@ -861,7 +870,9 @@ describe("BaseTableView", () => {
         ],
       },
     });
-    expect(screen.getByRole("columnheader", { name: "rating" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "rating" }),
+    ).toBeInTheDocument();
     restoreBaseline();
 
     expectRemount({
@@ -916,18 +927,15 @@ describe("BaseTableView", () => {
         { field: "rating", dir: "asc" },
       ],
     });
-    expect(screen.getByRole("columnheader", { name: /author/ })).toHaveAttribute(
-      "aria-sort",
-      "ascending",
-    );
+    expect(
+      screen.getByRole("columnheader", { name: /author/ }),
+    ).toHaveAttribute("aria-sort", "ascending");
     restoreBaseline();
 
     expectRemount({
       output: {
         shape: "grouped",
-        groups: [
-          { key: "reading", total: 1, aggregates: [], rows: [row] },
-        ],
+        groups: [{ key: "reading", total: 1, aggregates: [], rows: [row] }],
       },
     });
     expect(screen.getByText("reading")).toBeInTheDocument();
@@ -946,9 +954,7 @@ describe("BaseTableView", () => {
     props.rerender({
       output: {
         shape: "grouped",
-        groups: [
-          { key: "(empty)", total: 1, aggregates: [], rows: [row] },
-        ],
+        groups: [{ key: "(empty)", total: 1, aggregates: [], rows: [row] }],
       },
     });
 
@@ -961,7 +967,9 @@ describe("BaseTableView", () => {
       output: { shape: "flat", rows: [row], total: 3 },
     });
 
-    expect(screen.getByRole("status", { name: "Result limit" })).toHaveTextContent(
+    expect(
+      screen.getByRole("status", { name: "Result limit" }),
+    ).toHaveTextContent(
       "Showing 1 of 3 rows; 2 rows excluded by the current limit.",
     );
   });
@@ -981,7 +989,9 @@ describe("BaseTableView", () => {
     expect(screen.getByText("3 rows")).toBeInTheDocument();
     expect(screen.getByText(/count\s*3/)).toBeInTheDocument();
     expect(screen.getByText(/avg\(rating\)\s*4.75/)).toBeInTheDocument();
-    expect(screen.getByRole("status", { name: "Result limit" })).toHaveTextContent(
+    expect(
+      screen.getByRole("status", { name: "Result limit" }),
+    ).toHaveTextContent(
       "Showing 1 of 5 rows across groups; 4 rows excluded by the current per-group limit.",
     );
   });
@@ -1050,9 +1060,10 @@ describe("BaseTableView", () => {
     rerender(<BaseTableView {...props} activeView="Second" />);
 
     expect(screen.queryByRole("textbox", { name: "Edit text" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Gene Wolfe" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Gene Wolfe" }),
+    ).toBeInTheDocument();
   });
-
 
   it("commits with Tab and opens the next editable property in the row", async () => {
     const user = userEvent.setup();
@@ -1079,7 +1090,9 @@ describe("BaseTableView", () => {
       "Ursula Le Guin",
       undefined,
     );
-    expect(screen.getByRole("spinbutton", { name: "Edit number" })).toHaveFocus();
+    expect(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+    ).toHaveFocus();
   });
 
   it("does not reopen a Tab target after its row disappears", async () => {
@@ -1110,7 +1123,9 @@ describe("BaseTableView", () => {
     fireEvent.keyDown(screen.getByRole("textbox", { name: "Edit text" }), {
       key: "Tab",
     });
-    expect(screen.getByRole("spinbutton", { name: "Edit number" })).toHaveFocus();
+    expect(
+      screen.getByRole("spinbutton", { name: "Edit number" }),
+    ).toHaveFocus();
 
     rerender(
       <BaseTableView
@@ -1180,10 +1195,9 @@ describe("BaseTableView", () => {
     const props = renderView({ definition: terminalDefinition });
 
     await user.click(screen.getByRole("button", { name: "4.5" }));
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Edit number" }),
-      { key: "Tab" },
-    );
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Edit number" }), {
+      key: "Tab",
+    });
     props.rerender({
       definition: terminalDefinition,
       output: { shape: "flat", rows: [], total: 0 },
@@ -1210,10 +1224,9 @@ describe("BaseTableView", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "4.5" }));
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Edit number" }),
-      { key: "Tab" },
-    );
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Edit number" }), {
+      key: "Tab",
+    });
     props.rerender({
       definition: terminalDefinition,
       activeView: "Second",
@@ -1243,10 +1256,9 @@ describe("BaseTableView", () => {
     const props = renderView({ definition: terminalDefinition });
 
     await user.click(screen.getByRole("button", { name: "4.5" }));
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Edit number" }),
-      { key: "Tab" },
-    );
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Edit number" }), {
+      key: "Tab",
+    });
     props.rerender({
       definition: terminalDefinition,
       output: { shape: "flat", rows: [], total: 0 },
@@ -1261,7 +1273,6 @@ describe("BaseTableView", () => {
       screen.getByRole("button", { name: "The Book of the New Sun" }),
     ).not.toHaveFocus();
   });
-
 
   it("focuses the stable view region when terminal Tab has no title target", async () => {
     const user = userEvent.setup();
@@ -1279,10 +1290,9 @@ describe("BaseTableView", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "4.5" }));
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Edit number" }),
-      { key: "Tab" },
-    );
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Edit number" }), {
+      key: "Tab",
+    });
     expect(props.onCommitCell).toHaveBeenCalledTimes(1);
 
     await waitFor(() =>
@@ -1313,10 +1323,9 @@ describe("BaseTableView", () => {
     await waitFor(() => expect(title).toHaveFocus());
 
     await user.click(screen.getByRole("button", { name: "4.5" }));
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Edit number" }),
-      { key: "Tab" },
-    );
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Edit number" }), {
+      key: "Tab",
+    });
     expect(props.onCommitCell).toHaveBeenCalledTimes(1);
 
     await waitFor(() => expect(title).toHaveFocus());
@@ -1337,10 +1346,9 @@ describe("BaseTableView", () => {
     const props = renderView({ definition: terminalDefinition });
 
     await user.click(screen.getByRole("button", { name: "4.5" }));
-    fireEvent.keyDown(
-      screen.getByRole("spinbutton", { name: "Edit number" }),
-      { key: "Tab" },
-    );
+    fireEvent.keyDown(screen.getByRole("spinbutton", { name: "Edit number" }), {
+      key: "Tab",
+    });
     props.rerender({
       definition: terminalDefinition,
       viewLoading: true,

@@ -105,9 +105,7 @@ describe("withMathClipboard", () => {
 
     editor.setFragmentData(data, "copy");
 
-    expect(data.getData("text/plain")).toBe(
-      String.raw`before \(x^2\) after`,
-    );
+    expect(data.getData("text/plain")).toBe(String.raw`before \(x^2\) after`);
     expect(data.getData(INTERNAL_FRAGMENT)).not.toBe("");
   });
 

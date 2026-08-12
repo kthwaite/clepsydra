@@ -1,10 +1,5 @@
 import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
-import {
-  type KeyboardEvent,
-  useEffect,
-  useRef,
-  useState,
-} from "react";
+import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { Aggregate, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
@@ -105,9 +100,7 @@ export function ViewDefinitionEditor({
     setColumnRows((current) => {
       if (
         current.length === view.columns.length &&
-        current.every(
-          ({ column }, index) => column === view.columns[index],
-        )
+        current.every(({ column }, index) => column === view.columns[index])
       )
         return current;
       const available = [...current];

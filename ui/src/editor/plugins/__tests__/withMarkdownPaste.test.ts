@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
 import { withSchema } from "#/editor/schema/withSchema";
 import { withAutoformat } from "../autoformat/withAutoformat";
-import { withMathClipboard } from "../withMathClipboard";
 import { withMarkdownPaste } from "../withMarkdownPaste";
+import { withMathClipboard } from "../withMathClipboard";
 
 /**
  * Build a test editor with a stubbed base insertData (the slot withReact would

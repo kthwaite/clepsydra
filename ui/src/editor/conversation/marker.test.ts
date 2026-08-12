@@ -11,9 +11,7 @@ const UUID = "123e4567-e89b-12d3-a456-426614174000";
 describe("conversation marker grammar", () => {
   it("parses source user and assistant markers with optional timestamp", () => {
     expect(
-      parseConversationMarker(
-        `[!AI-USER source=sha256:${HASH} sequence=1]`,
-      ),
+      parseConversationMarker(`[!AI-USER source=sha256:${HASH} sequence=1]`),
     ).toEqual({
       role: "user",
       source: `sha256:${HASH}`,
@@ -35,9 +33,7 @@ describe("conversation marker grammar", () => {
   });
 
   it("parses local markers without sequence or timestamp", () => {
-    expect(
-      parseConversationMarker(`[!AI-USER source=local:${UUID}]`),
-    ).toEqual({
+    expect(parseConversationMarker(`[!AI-USER source=local:${UUID}]`)).toEqual({
       role: "user",
       source: `local:${UUID}`,
       sequence: null,
@@ -59,7 +55,8 @@ describe("conversation marker grammar", () => {
       `[!AI-USER source=sha256:${HASH} sequence=1 timestamp=not-a-date]`,
       `prefix [!AI-USER source=sha256:${HASH} sequence=1]`,
     ];
-    for (const marker of invalid) expect(parseConversationMarker(marker)).toBeNull();
+    for (const marker of invalid)
+      expect(parseConversationMarker(marker)).toBeNull();
   });
 
   it("formats canonical markers", () => {

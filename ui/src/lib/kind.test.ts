@@ -49,9 +49,9 @@ describe("parseFrontmatterKind", () => {
     expect(parseFrontmatterKind(body)).toBe("PROJECT");
   });
   it("reads underscore-bearing AI conversation kinds", () => {
-    expect(
-      parseFrontmatterKind("---\ntype: AI_CONVERSATION\n---\nbody"),
-    ).toBe("AI_CONVERSATION");
+    expect(parseFrontmatterKind("---\ntype: AI_CONVERSATION\n---\nbody")).toBe(
+      "AI_CONVERSATION",
+    );
   });
 
   it("also accepts a `kind` key", () => {

@@ -146,8 +146,8 @@ vi.mock("#/components/codex/FeedManagement", () => ({
   FeedManagement: () => <div aria-label="Feed management fixture" />,
 }));
 
-import { Route } from "#/routes/feeds";
 import { CodexFrame } from "#/components/codex/CodexFrame";
+import { Route } from "#/routes/feeds";
 
 const FeedsPage = Route.options.component as () => ReactNode;
 
@@ -179,7 +179,9 @@ describe("feeds route controls", () => {
       throw new Error("Expected a callable search validator");
     }
     expect(validateSearch({})).toMatchObject({ view: "all" });
-    expect(validateSearch({ view: "not-a-view" })).toMatchObject({ view: "all" });
+    expect(validateSearch({ view: "not-a-view" })).toMatchObject({
+      view: "all",
+    });
   });
 
   it.each([23, "23"])("accepts positive integer entry %s", (entry) => {
@@ -202,9 +204,9 @@ describe("feeds route controls", () => {
   it("selecting changes only entry while preserving all filters and manage state", async () => {
     render(<FeedsPage />);
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: /select direct entry/i }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /select direct entry/i }));
 
     const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
@@ -220,9 +222,9 @@ describe("feeds route controls", () => {
     routeMocks.detailQuery.data = directEntry;
     render(<FeedsPage />);
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: "Back to entries" }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Back to entries" }));
 
     const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
@@ -254,11 +256,16 @@ describe("feeds route controls", () => {
   it("retains selection and exposes retry for a transient detail error", async () => {
     routeMocks.search.entry = 501;
     routeMocks.detailQuery.isError = true;
-    routeMocks.detailQuery.error = { status: 503, error: "archive unavailable" };
+    routeMocks.detailQuery.error = {
+      status: 503,
+      error: "archive unavailable",
+    };
     render(<FeedsPage />);
 
     expect(routeMocks.navigate).not.toHaveBeenCalled();
-    await userEvent.setup().click(screen.getByRole("button", { name: /retry/i }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /retry/i }));
     expect(routeMocks.detailQuery.refetch).toHaveBeenCalledTimes(1);
     expect(routeMocks.navigate).not.toHaveBeenCalled();
   });
@@ -274,12 +281,12 @@ describe("feeds route controls", () => {
     expect(screen.getByRole("region", { name: "Feed reader" })).toHaveClass(
       "overflow-y-auto",
     );
-    expect(screen.getByRole("region", { name: "Entry list" })).not.toHaveAttribute(
-      "hidden",
-    );
-    expect(screen.getByRole("region", { name: "Feed reader" })).not.toHaveAttribute(
-      "hidden",
-    );
+    expect(
+      screen.getByRole("region", { name: "Entry list" }),
+    ).not.toHaveAttribute("hidden");
+    expect(
+      screen.getByRole("region", { name: "Feed reader" }),
+    ).not.toHaveAttribute("hidden");
   });
 
   it("shows mobile list without selection and detail with an explicit back control", () => {
@@ -295,7 +302,9 @@ describe("feeds route controls", () => {
 
     expect(screen.queryByRole("region", { name: "Entry list" })).toBeNull();
     expect(screen.getByRole("region", { name: "Feed reader" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Back to entries" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Back to entries" }),
+    ).toBeVisible();
   });
 
   it("keeps the mobile river mounted but inaccessible while detail is selected", () => {
@@ -307,9 +316,9 @@ describe("feeds route controls", () => {
     routeMocks.detailQuery.data = directEntry;
     page.rerender(<FeedsPage />);
 
-    expect(screen.getByLabelText("Feed river fixture", { selector: "[hidden] *" })).toBe(
-      riverFixture,
-    );
+    expect(
+      screen.getByLabelText("Feed river fixture", { selector: "[hidden] *" }),
+    ).toBe(riverFixture);
     expect(screen.queryByRole("region", { name: "Entry list" })).toBeNull();
     expect(riverFixture.closest("[hidden]")).not.toBeNull();
   });
@@ -328,9 +337,9 @@ describe("feeds route controls", () => {
       screen.getByRole("button", { name: "Back to entries" }),
     );
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: "Back to entries" }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Back to entries" }));
     routeMocks.search.entry = undefined;
     page.rerender(<FeedsPage />);
 
@@ -347,9 +356,9 @@ describe("feeds route controls", () => {
     const main = screen.getByRole("main");
     main.scrollTop = 700;
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: /select direct entry/i }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /select direct entry/i }));
     routeMocks.search.entry = 501;
     routeMocks.detailQuery.data = directEntry;
     page.rerender(
@@ -359,9 +368,9 @@ describe("feeds route controls", () => {
     );
     main.scrollTop = 0;
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: "Back to entries" }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Back to entries" }));
     routeMocks.search.entry = undefined;
     page.rerender(
       <CodexFrame forceView="feeds">
@@ -392,9 +401,9 @@ describe("feeds route controls", () => {
     const main = screen.getByRole("main");
     main.scrollTop = 700;
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: /select direct entry/i }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /select direct entry/i }));
     routeMocks.search.entry = 501;
     routeMocks.detailQuery.data = directEntry;
     page.rerender(
@@ -491,9 +500,9 @@ describe("feeds route controls", () => {
     routeMocks.detailQuery.data = directEntry;
     const page = render(<FeedsPage />);
 
-    expect(screen.getByRole("article", { name: "Direct archive entry" })).toHaveTextContent(
-      "Stored direct body.",
-    );
+    expect(
+      screen.getByRole("article", { name: "Direct archive entry" }),
+    ).toHaveTextContent("Stored direct body.");
     expect(screen.getByText("Loaded list entry")).toBeVisible();
     expect(routeMocks.useFeedEntry).toHaveBeenCalledWith(501);
     expect(page.container.querySelector("iframe")).not.toBeInTheDocument();

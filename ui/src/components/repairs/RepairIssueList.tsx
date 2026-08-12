@@ -50,7 +50,10 @@ export function RepairIssueList({
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
     const direction = event.key === "ArrowDown" ? 1 : -1;
-    const nextIndex = Math.min(Math.max(index + direction, 0), issues.length - 1);
+    const nextIndex = Math.min(
+      Math.max(index + direction, 0),
+      issues.length - 1,
+    );
     const next = issues[nextIndex];
     if (!next) return;
     onSelect(next.fingerprint);
@@ -58,7 +61,11 @@ export function RepairIssueList({
   }
 
   return (
-    <ul aria-label="Reference issues" className="divide-y divide-rule" role="list">
+    <ul
+      aria-label="Reference issues"
+      className="divide-y divide-rule"
+      role="list"
+    >
       {issues.map((issue, index) => {
         const isSelected = selectedFingerprint === issue.fingerprint;
         const actionable = issue.actions.some(

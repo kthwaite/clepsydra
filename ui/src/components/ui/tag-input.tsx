@@ -95,7 +95,8 @@ export function TagInput({
       if (!trimmed) return null;
       if (allowCreate) return trimmed;
       return (
-        suggestions?.find((suggestion) => tagsEqual(suggestion, trimmed)) ?? null
+        suggestions?.find((suggestion) => tagsEqual(suggestion, trimmed)) ??
+        null
       );
     },
     [allowCreate, suggestions],
@@ -155,7 +156,9 @@ export function TagInput({
         }
       } else if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
         e.preventDefault();
-        addValue(open && (!allowCreate || navigated) ? matches[selected] : query);
+        addValue(
+          open && (!allowCreate || navigated) ? matches[selected] : query,
+        );
       } else if (e.key === ",") {
         e.preventDefault();
         addValue(query);

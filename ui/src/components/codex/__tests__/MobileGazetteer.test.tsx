@@ -162,9 +162,7 @@ describe("MobileGazetteer", () => {
       name: "Filter by tags",
     });
     await user.type(tagPicker, "res");
-    await user.click(
-      within(dialog).getByRole("option", { name: "#research" }),
-    );
+    await user.click(within(dialog).getByRole("option", { name: "#research" }));
     expect(onSelectedTagsChange).toHaveBeenCalledWith(["research"]);
 
     await user.click(within(dialog).getByRole("radio", { name: "Title" }));
@@ -198,7 +196,9 @@ describe("MobileGazetteer", () => {
       within(dialog).queryByRole("button", { name: "Filter by active" }),
     ).not.toBeInTheDocument();
 
-    await user.click(within(dialog).getByRole("button", { name: "Clear tags" }));
+    await user.click(
+      within(dialog).getByRole("button", { name: "Clear tags" }),
+    );
     expect(onSelectedTagsChange).toHaveBeenCalledWith([]);
   });
 

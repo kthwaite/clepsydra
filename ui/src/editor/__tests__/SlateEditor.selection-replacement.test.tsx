@@ -1,13 +1,19 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentType } from "react";
 import {
   type Descendant,
   type Editor,
-  Element as SlateElement,
   Node,
   Range,
+  Element as SlateElement,
   Transforms,
 } from "slate";
 import type { HistoryEditor } from "slate-history";
@@ -165,9 +171,9 @@ it("opens source editing with Enter when an inline math void is selected", async
 
   fireEvent.keyDown(editable, { key: "Enter" });
 
-  expect(
-    screen.getByRole("textbox", { name: "Edit inline math" }),
-  ).toHaveValue("x^2");
+  expect(screen.getByRole("textbox", { name: "Edit inline math" })).toHaveValue(
+    "x^2",
+  );
 });
 
 it("leaves deletion of a selected math void to Slate", async () => {
@@ -182,8 +188,7 @@ it("leaves deletion of a selected math void to Slate", async () => {
   }
   expect(
     paragraph.children.some(
-      (child) =>
-        SlateElement.isElement(child) && child.type === "inline-math",
+      (child) => SlateElement.isElement(child) && child.type === "inline-math",
     ),
   ).toBe(false);
 });
@@ -206,8 +211,7 @@ it("leaves replacement of a selection spanning math to Slate", async () => {
   }
   expect(
     paragraph.children.some(
-      (child) =>
-        SlateElement.isElement(child) && child.type === "inline-math",
+      (child) => SlateElement.isElement(child) && child.type === "inline-math",
     ),
   ).toBe(false);
 });

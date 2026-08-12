@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type {
-  BaseDetailResponse,
-  BaseFilter,
-  SortKey,
-} from "#/api/bases";
+import type { BaseDetailResponse, BaseFilter, SortKey } from "#/api/bases";
 import { validateBaseEmbedSemantics } from "#/components/bases/embed-semantic-validation";
 
 function detail(): BaseDetailResponse {
@@ -141,14 +137,17 @@ describe("validateBaseEmbedSemantics", () => {
     const diagnostics = validate({ filter });
 
     expect(diagnostics).toEqual([
-      expect.objectContaining({ path, message: expect.stringMatching(message) }),
+      expect.objectContaining({
+        path,
+        message: expect.stringMatching(message),
+      }),
     ]);
   });
 
   it("treats missing valueless values as the server's default null", () => {
-    expect(
-      validate({ filter: { field: "title", op: "is_empty" } }),
-    ).toEqual([]);
+    expect(validate({ filter: { field: "title", op: "is_empty" } })).toEqual(
+      [],
+    );
   });
 
   it.each([

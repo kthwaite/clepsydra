@@ -241,10 +241,7 @@ function OptionEditor({
 
 function propertySummary(definition: PropertyDefinition) {
   const label = PROPERTY_TYPE_LABELS[definition.type];
-  if (
-    definition.type === "select" ||
-    definition.type === "multi_select"
-  ) {
+  if (definition.type === "select" || definition.type === "multi_select") {
     const optionCount = definition.options?.length ?? 0;
     return `${label} · ${
       optionCount === 0
@@ -360,7 +357,9 @@ export function PropertyDefinitionEditor({
               variant="ghost"
               onPress={() => setEditing((current) => !current)}
             >
-              {editing ? `Close editor ${property.key}` : `Edit ${property.key}`}
+              {editing
+                ? `Close editor ${property.key}`
+                : `Edit ${property.key}`}
             </Button>
             <IconButton
               aria-label={`Rename ${property.key}`}
@@ -432,7 +431,9 @@ export function PropertyDefinitionEditor({
             )}
 
             {editing && (
-              <div className={renaming ? "mt-4 border-t border-border pt-4" : ""}>
+              <div
+                className={renaming ? "mt-4 border-t border-border pt-4" : ""}
+              >
                 <div className="grid gap-4 sm:grid-cols-2">
                   <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
                     Type for {property.key}

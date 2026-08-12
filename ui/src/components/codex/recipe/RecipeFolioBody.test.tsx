@@ -3,8 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import {
-  serializeRecipeMarkdown,
   type RecipeDocument,
+  serializeRecipeMarkdown,
 } from "#/recipe/recipeCodec";
 import { RecipeFolioBody } from "./RecipeFolioBody";
 
@@ -61,7 +61,9 @@ describe("RecipeFolioBody", () => {
 
     const steps = screen.getByRole("region", { name: "Steps" });
     expect(within(steps).getAllByRole("listitem")).toHaveLength(2);
-    expect(within(steps).getByText("Toss with lemon and parmesan.")).toBeVisible();
+    expect(
+      within(steps).getByText("Toss with lemon and parmesan."),
+    ).toBeVisible();
 
     const notes = screen.getByRole("region", { name: "Notes" });
     expect(within(notes).getByText("black pepper").tagName).toBe("STRONG");
@@ -188,9 +190,7 @@ describe("RecipeFolioBody", () => {
     render(<ControlledRecipe />);
 
     act(() => {
-      screen
-        .getByRole("button", { name: "Move ingredient 3 up" })
-        .focus();
+      screen.getByRole("button", { name: "Move ingredient 3 up" }).focus();
     });
     await user.keyboard("{Enter}");
 

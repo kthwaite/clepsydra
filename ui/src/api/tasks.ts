@@ -11,8 +11,7 @@ export type AgendaOverdueResponse =
 export type TaskListResponse = components["schemas"]["TaskListResponse"];
 type TaskCompletionHistoryResponse =
   components["schemas"]["TaskCompletionHistoryResponse"];
-type CycleBurndownResponse =
-  components["schemas"]["CycleBurndownResponse"];
+type CycleBurndownResponse = components["schemas"]["CycleBurndownResponse"];
 export type TaskFilters = NonNullable<
   operations["list_tasks"]["parameters"]["query"]
 >;

@@ -3,8 +3,8 @@
 declare const __APP_VERSION__: string;
 
 declare module "*.mdx" {
-  import type { ComponentType } from "react";
   import type { MDXComponents } from "mdx/types";
+  import type { ComponentType } from "react";
   import type { DocMeta } from "#/docs/types";
 
   export const meta: DocMeta;

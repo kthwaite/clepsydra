@@ -139,13 +139,16 @@ describe("SlateEditor terminal inline-code boundary", () => {
   it.each([
     ["native composition", { isComposing: true }],
     ["legacy IME composition", { keyCode: 229 }],
-  ] as const)("does not exit inline code during %s", async (_name, eventInit) => {
-    const { editable, editor } = await renderTerminalInlineCode();
+  ] as const)(
+    "does not exit inline code during %s",
+    async (_name, eventInit) => {
+      const { editable, editor } = await renderTerminalInlineCode();
 
-    expect(
-      fireEvent.keyDown(editable, { key: "ArrowRight", ...eventInit }),
-    ).toBe(true);
-    expect(Editor.marks(editor)?.code).toBe(true);
-    expect(slateToMarkdown(editor.children).trim()).toBe("`code`");
-  });
+      expect(
+        fireEvent.keyDown(editable, { key: "ArrowRight", ...eventInit }),
+      ).toBe(true);
+      expect(Editor.marks(editor)?.code).toBe(true);
+      expect(slateToMarkdown(editor.children).trim()).toBe("`code`");
+    },
+  );
 });

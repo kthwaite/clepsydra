@@ -82,7 +82,7 @@ function renderPane(
       feedName={
         overrides.feedName === null
           ? undefined
-          : overrides.feedName ?? "Source Ledger"
+          : (overrides.feedName ?? "Source Ledger")
       }
       onBack={overrides.onBack ?? vi.fn()}
       onMissing={overrides.onMissing ?? vi.fn()}
@@ -134,7 +134,9 @@ describe("FeedReaderPane", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent(/entry 101/i);
     expect(screen.getByRole("alert")).toHaveTextContent(/archive unavailable/i);
-    await userEvent.setup().click(screen.getByRole("button", { name: /retry/i }));
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /retry/i }));
     expect(paneMocks.query.refetch).toHaveBeenCalledTimes(1);
   });
 
@@ -146,7 +148,9 @@ describe("FeedReaderPane", () => {
     const page = renderPane(101, { onMissing });
 
     expect(onMissing).toHaveBeenCalledWith(101);
-    expect(screen.queryByRole("button", { name: /retry/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /retry/i }),
+    ).not.toBeInTheDocument();
 
     page.rerender(
       <FeedReaderPane
@@ -211,10 +215,9 @@ describe("FeedReaderPane", () => {
 
     expect(screen.getByText(/no stored body/i)).toBeVisible();
     expect(screen.getByText("Ada Reader")).toBeVisible();
-    expect(screen.getByRole("link", { name: /open original/i })).toHaveAttribute(
-      "href",
-      "http://source.example/plain",
-    );
+    expect(
+      screen.getByRole("link", { name: /open original/i }),
+    ).toHaveAttribute("href", "http://source.example/plain");
 
     paneMocks.query.data = {
       ...storedEntry,
@@ -229,7 +232,9 @@ describe("FeedReaderPane", () => {
         onMissing={vi.fn()}
       />,
     );
-    expect(screen.queryByRole("link", { name: /open original/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("link", { name: /open original/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("patches read, bookmark, and normalized tags while preserving a failed tag draft", async () => {
@@ -243,7 +248,9 @@ describe("FeedReaderPane", () => {
     await user.click(screen.getByRole("button", { name: /mark read/i }));
     await user.click(screen.getByRole("button", { name: /unsave/i }));
     await user.click(screen.getByRole("button", { name: /edit tags/i }));
-    const input = screen.getByRole("textbox", { name: /tags for stored dispatch/i });
+    const input = screen.getByRole("textbox", {
+      name: /tags for stored dispatch/i,
+    });
     await user.clear(input);
     await user.type(input, " systems, #later, systems ");
     await user.click(screen.getByRole("button", { name: /save tags/i }));
@@ -260,7 +267,9 @@ describe("FeedReaderPane", () => {
       id: 101,
       tags: ["systems", "later"],
     });
-    await waitFor(() => expect(input).toHaveValue(" systems, #later, systems "));
+    await waitFor(() =>
+      expect(input).toHaveValue(" systems, #later, systems "),
+    );
     expect(screen.getByRole("alert")).toHaveTextContent("tags unavailable");
   });
 
@@ -268,9 +277,9 @@ describe("FeedReaderPane", () => {
     const onBack = vi.fn();
     renderPane(101, { onBack });
 
-    await userEvent.setup().click(
-      screen.getByRole("button", { name: "Back to entries" }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Back to entries" }));
     expect(onBack).toHaveBeenCalledTimes(1);
   });
 });

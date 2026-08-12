@@ -45,11 +45,7 @@ export function PlaintextAttachmentDialog({
       isDismissable={!isPending}
       footer={
         <>
-          <Button
-            variant="secondary"
-            onPress={onCancel}
-            isDisabled={isPending}
-          >
+          <Button variant="secondary" onPress={onCancel} isDisabled={isPending}>
             Cancel
           </Button>
           <Button
@@ -85,8 +81,7 @@ export function PlaintextAttachmentDialog({
           {action.kind === "insert" ? (
             <p className="text-ink-mute">
               Only the Markdown reference becomes part of the protected note
-              body. The existing attachment remains plaintext at its vault
-              path.
+              body. The existing attachment remains plaintext at its vault path.
             </p>
           ) : (
             <p className="text-ink-mute">

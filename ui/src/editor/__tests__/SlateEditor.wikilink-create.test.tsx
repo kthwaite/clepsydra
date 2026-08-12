@@ -132,12 +132,12 @@ it("creates in the background and inserts the requested wikilink", async () => {
   await user.click(editable);
   await typeText("[[New Topic");
   expect(editable).toHaveTextContent("[[New Topic");
-  await user.click(screen.getByText('Create “New Topic”'));
+  await user.click(screen.getByText("Create “New Topic”"));
 
   await waitFor(() =>
     expect(resolveOrCreateMock).toHaveBeenCalledWith("New Topic"),
   );
-  expect(screen.queryByText('Create “New Topic”')).toBeNull();
+  expect(screen.queryByText("Create “New Topic”")).toBeNull();
   expect(latestChanges()).toEqual([
     {
       type: "paragraph",
@@ -167,7 +167,7 @@ it("retries after failure and inserts only after the retry succeeds", async () =
   const { user, editable, latestChanges, typeText } = renderEditor();
   await user.click(editable);
   await typeText("[[New Topic");
-  await user.click(screen.getByText('Create “New Topic”'));
+  await user.click(screen.getByText("Create “New Topic”"));
 
   await screen.findByText("Creation failed — press Enter to retry");
   expect(findWikilinks(latestChanges())).toEqual([]);
@@ -216,7 +216,7 @@ it("creates for a new trigger while an older request is pending", async () => {
   expect(resolveOrCreateMock).toHaveBeenNthCalledWith(1, "First");
 
   await act(async () => replaceText("[[Second"));
-  expect(screen.getByText('Create “Second”')).toBeInTheDocument();
+  expect(screen.getByText("Create “Second”")).toBeInTheDocument();
   await user.keyboard("{Enter}");
   expect(resolveOrCreateMock).toHaveBeenNthCalledWith(2, "Second");
 
@@ -278,6 +278,6 @@ it("does not insert into a different live trigger", async () => {
   expect(latestChanges()).toEqual([
     { type: "paragraph", children: [{ text: "[[Second" }] },
   ]);
-  expect(screen.getByText('Create “Second”')).toBeInTheDocument();
+  expect(screen.getByText("Create “Second”")).toBeInTheDocument();
   expect(openTabMock).not.toHaveBeenCalled();
 });

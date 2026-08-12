@@ -155,10 +155,7 @@ function tabKey(type: TabType, path?: string): string {
 }
 
 function withoutTabFocus(tab: TabDescriptor): TabDescriptor {
-  if (
-    tab.focusBlockId === undefined &&
-    tab.focusRequestId === undefined
-  ) {
+  if (tab.focusBlockId === undefined && tab.focusRequestId === undefined) {
     return tab;
   }
   const { focusBlockId: _, focusRequestId: __, ...rest } = tab;
@@ -302,10 +299,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       addTab(tab) {
-        if (
-          workspaceTransitionDepth === 0 &&
-          tab.id !== get().activeTabId
-        ) {
+        if (workspaceTransitionDepth === 0 && tab.id !== get().activeTabId) {
           runWorkspaceTransition(() => get().addTab(tab));
           return;
         }
@@ -323,10 +317,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const state = get();
         const idx = state.tabs.findIndex((t) => t.id === tabId);
         if (idx === -1) return;
-        if (
-          workspaceTransitionDepth === 0 &&
-          state.activeTabId === tabId
-        ) {
+        if (workspaceTransitionDepth === 0 && state.activeTabId === tabId) {
           runWorkspaceTransition(() => get().closeTab(tabId));
           return;
         }
@@ -355,10 +346,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       closeOtherTabs(tabId) {
-        if (
-          workspaceTransitionDepth === 0 &&
-          get().activeTabId !== tabId
-        ) {
+        if (workspaceTransitionDepth === 0 && get().activeTabId !== tabId) {
           runWorkspaceTransition(() => get().closeOtherTabs(tabId));
           return;
         }
@@ -372,10 +360,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       activateTab(tabId) {
-        if (
-          workspaceTransitionDepth === 0 &&
-          get().activeTabId !== tabId
-        ) {
+        if (workspaceTransitionDepth === 0 && get().activeTabId !== tabId) {
           runWorkspaceTransition(() => get().activateTab(tabId));
           return;
         }
@@ -402,10 +387,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       },
 
       clearActiveTab() {
-        if (
-          workspaceTransitionDepth === 0 &&
-          get().activeTabId !== null
-        ) {
+        if (workspaceTransitionDepth === 0 && get().activeTabId !== null) {
           runWorkspaceTransition(() => get().clearActiveTab());
           return;
         }
@@ -616,10 +598,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const active = current.tabs.find(
           (tab) => tab.id === current.activeTabId,
         );
-        if (
-          workspaceTransitionDepth === 0 &&
-          active?.quireId === quireId
-        ) {
+        if (workspaceTransitionDepth === 0 && active?.quireId === quireId) {
           runWorkspaceTransition(() => get().closeQuireTabs(quireId));
           return;
         }

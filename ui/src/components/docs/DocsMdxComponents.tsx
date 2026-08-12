@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router";
+import type { MDXComponents } from "mdx/types";
 import {
   type AnchorHTMLAttributes,
   type ComponentPropsWithoutRef,
   type HTMLAttributes,
   useRef,
 } from "react";
-import type { MDXComponents } from "mdx/types";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { cn } from "#/lib/cn";
 import { classifyLinkResource } from "#/lib/linkResource";
@@ -82,12 +82,7 @@ function DocsLink({
 
     if (pathname === "/docs") {
       return (
-        <Link
-          {...props}
-          to="/docs"
-          hash={hash}
-          className={classes}
-        >
+        <Link {...props} to="/docs" hash={hash} className={classes}>
           {children}
         </Link>
       );
@@ -178,10 +173,7 @@ function DocsPre({
   );
 }
 
-function DocsTable({
-  className,
-  ...props
-}: ComponentPropsWithoutRef<"table">) {
+function DocsTable({ className, ...props }: ComponentPropsWithoutRef<"table">) {
   return (
     <div
       role="region"
@@ -280,9 +272,6 @@ export const docsMdxComponents = {
     <hr {...props} className={cn("my-8 border-rule", className)} />
   ),
   strong: ({ className, ...props }) => (
-    <strong
-      {...props}
-      className={cn("font-semibold text-ink", className)}
-    />
+    <strong {...props} className={cn("font-semibold text-ink", className)} />
   ),
 } satisfies MDXComponents;

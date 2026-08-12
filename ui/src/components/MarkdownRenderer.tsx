@@ -6,17 +6,17 @@ import Markdown, {
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
-import { MathExpression } from "#/components/MathExpression";
 import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
+import { MathExpression } from "#/components/MathExpression";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
-import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 import {
   BLOCK_REFERENCE_SCHEME,
   blockIdFromHref,
   remarkBlockReferences,
 } from "#/lib/markdown/blockReferences";
+import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 import { isCasResource, resolveResourceUrl } from "#/lib/resourceUrl";
 
 interface MarkdownRendererProps {

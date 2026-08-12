@@ -27,12 +27,12 @@ describe("resolveCodexView", () => {
     expect(resolveCodexView(pathname, [], null)).toBe(expected);
   });
 
-  it.each([
-    "/feeds-old",
-    "/feedsfoo",
-  ])("does not treat the near-prefix path %s as Feeds", (pathname) => {
-    expect(resolveCodexView(pathname, [], null)).toBe("atrium");
-  });
+  it.each(["/feeds-old", "/feedsfoo"])(
+    "does not treat the near-prefix path %s as Feeds",
+    (pathname) => {
+      expect(resolveCodexView(pathname, [], null)).toBe("atrium");
+    },
+  );
 
   it("resolves a page workspace to Folio", () => {
     expect(

@@ -1,3 +1,5 @@
+import { Link } from "@tanstack/react-router";
+import { Settings } from "lucide-react";
 import {
   forwardRef,
   useCallback,
@@ -9,8 +11,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { Link } from "@tanstack/react-router";
-import { Settings } from "lucide-react";
 import {
   Cell,
   Column,
@@ -102,7 +102,6 @@ interface CreatedFocusRequest {
   view: string;
 }
 
-
 /**
  * System fields render read-only — the complete contract, mirroring
  * `SYSTEM_FIELDS` in `src/vault/base.rs`. Only *declared* properties reach
@@ -150,7 +149,6 @@ function BodyExcerptCell({
   );
 }
 
-
 function aggregateLabel(
   definition: BaseDetailResponse,
   viewName: string,
@@ -174,34 +172,37 @@ function aggregateLabel(
 export const BaseTableView = forwardRef<
   BaseTableViewHandle,
   BaseTableViewProps
->(function BaseTableView({
-  definition,
-  activeView,
-  onViewChange,
-  output,
-  viewError,
-  viewLoading,
-  sort,
-  onSortChange,
-  onOpenPage,
-  configureSlug,
-  onCommitCell,
-  readOnly = false,
-  memberCapability,
-  memberDraftFields = [],
-  memberDraftOpen = false,
-  memberSaving = false,
-  memberDiagnostics = [],
-  memberError,
-  memberNotice,
-  projects = [],
-  onAddMember,
-  onSaveMember,
-  onCancelMember,
-  onMemberEdit,
-  focusCreatedId,
-  onCreatedRowFocused,
-}, ref) {
+>(function BaseTableView(
+  {
+    definition,
+    activeView,
+    onViewChange,
+    output,
+    viewError,
+    viewLoading,
+    sort,
+    onSortChange,
+    onOpenPage,
+    configureSlug,
+    onCommitCell,
+    readOnly = false,
+    memberCapability,
+    memberDraftFields = [],
+    memberDraftOpen = false,
+    memberSaving = false,
+    memberDiagnostics = [],
+    memberError,
+    memberNotice,
+    projects = [],
+    onAddMember,
+    onSaveMember,
+    onCancelMember,
+    onMemberEdit,
+    focusCreatedId,
+    onCreatedRowFocused,
+  },
+  ref,
+) {
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === equivalentActiveView,
@@ -249,8 +250,7 @@ export const BaseTableView = forwardRef<
     ForwardFocusRequest | undefined
   >(undefined);
   const editableColumns = columns.filter(
-    (column) =>
-      SYSTEM_COLUMNS[column] === undefined && properties.has(column),
+    (column) => SYSTEM_COLUMNS[column] === undefined && properties.has(column),
   );
   const nextEditableColumn = (column: string): string | undefined => {
     const index = editableColumns.indexOf(column);
@@ -271,7 +271,6 @@ export const BaseTableView = forwardRef<
         output.groups.some((group) =>
           group.rows.some((row) => String(row.id) === activeRowId),
         ));
-
 
   useEffect(() => {
     if (activeCell && !activeCellIsRendered) {
@@ -349,65 +348,62 @@ export const BaseTableView = forwardRef<
     viewLoading,
   ]);
 
-  const setCreatedTitleRef = useCallback(
-    (node: HTMLButtonElement | null) => {
-      createdTitleRef.current = node;
-      if (!node) {
-        if (createdFocusTimer.current !== undefined) {
-          window.clearTimeout(createdFocusTimer.current);
-          createdFocusTimer.current = undefined;
-        }
-        return;
+  const setCreatedTitleRef = useCallback((node: HTMLButtonElement | null) => {
+    createdTitleRef.current = node;
+    if (!node) {
+      if (createdFocusTimer.current !== undefined) {
+        window.clearTimeout(createdFocusTimer.current);
+        createdFocusTimer.current = undefined;
       }
-      const request = createdFocusRequest.current;
+      return;
+    }
+    const request = createdFocusRequest.current;
+    if (
+      !request ||
+      request.view !== activeViewIdentityRef.current ||
+      createdFocusBlocked.current ||
+      focusedCreatedId.current === request.id ||
+      createdFocusTimer.current !== undefined
+    ) {
+      return;
+    }
+
+    // Entering a React Aria Table initializes its selection manager, whose
+    // pending effect focuses the row. Prime that state, then restore the
+    // requested descendant focus after the row effect has settled.
+    node.focus();
+    const { id: createdId, view: requestView } = request;
+    createdFocusTimer.current = window.setTimeout(() => {
+      createdFocusTimer.current = undefined;
+      const current = createdFocusRequest.current;
       if (
-        !request ||
-        request.view !== activeViewIdentityRef.current ||
         createdFocusBlocked.current ||
-        focusedCreatedId.current === request.id ||
-        createdFocusTimer.current !== undefined
+        createdTitleRef.current !== node ||
+        current?.id !== createdId ||
+        current.view !== requestView ||
+        activeViewIdentityRef.current !== requestView ||
+        !node.isConnected
       ) {
         return;
       }
-
-      // Entering a React Aria Table initializes its selection manager, whose
-      // pending effect focuses the row. Prime that state, then restore the
-      // requested descendant focus after the row effect has settled.
       node.focus();
-      const { id: createdId, view: requestView } = request;
-      createdFocusTimer.current = window.setTimeout(() => {
-        createdFocusTimer.current = undefined;
-        const current = createdFocusRequest.current;
+      queueMicrotask(() => {
+        const latest = createdFocusRequest.current;
         if (
-          createdFocusBlocked.current ||
-          createdTitleRef.current !== node ||
-          current?.id !== createdId ||
-          current.view !== requestView ||
-          activeViewIdentityRef.current !== requestView ||
-          !node.isConnected
+          !createdFocusBlocked.current &&
+          createdTitleRef.current === node &&
+          latest?.id === createdId &&
+          latest.view === requestView &&
+          activeViewIdentityRef.current === requestView &&
+          node.isConnected &&
+          document.activeElement === node
         ) {
-          return;
+          focusedCreatedId.current = createdId;
+          createdRowFocusedHandler.current?.(createdId);
         }
-        node.focus();
-        queueMicrotask(() => {
-          const latest = createdFocusRequest.current;
-          if (
-            !createdFocusBlocked.current &&
-            createdTitleRef.current === node &&
-            latest?.id === createdId &&
-            latest.view === requestView &&
-            activeViewIdentityRef.current === requestView &&
-            node.isConnected &&
-            document.activeElement === node
-          ) {
-            focusedCreatedId.current = createdId;
-            createdRowFocusedHandler.current?.(createdId);
-          }
-        });
-      }, 0);
-    },
-    [],
-  );
+      });
+    }, 0);
+  }, []);
   const setForwardTitleRef = useCallback(
     (token: number, node: HTMLButtonElement | null) => {
       const request = pendingForwardFocus.current;
@@ -509,21 +505,13 @@ export const BaseTableView = forwardRef<
       : (memberCapability?.blockers?.[0]?.message ??
         "Member creation is unavailable for this view.");
   const memberAddDisabled =
-    memberDraftOpen ||
-    memberSaving ||
-    memberCapability?.enabled !== true;
+    memberDraftOpen || memberSaving || memberCapability?.enabled !== true;
 
   useEffect(() => {
     if (focusCreatedId) {
       setCreatedTitleRef(createdTitleRef.current);
     }
-  }, [
-    focusCreatedId,
-    output,
-    setCreatedTitleRef,
-    viewError,
-    viewLoading,
-  ]);
+  }, [focusCreatedId, output, setCreatedTitleRef, viewError, viewLoading]);
 
   useEffect(
     () => () => {
@@ -545,11 +533,7 @@ export const BaseTableView = forwardRef<
       }
     : undefined;
 
-  const grid = (
-    rows: QueryRow[],
-    label: string,
-    cacheIdentity: string,
-  ) => (
+  const grid = (rows: QueryRow[], label: string, cacheIdentity: string) => (
     <Table
       key={cacheIdentity}
       aria-label={label}
@@ -561,8 +545,7 @@ export const BaseTableView = forwardRef<
               onSortChange([
                 {
                   field: String(descriptor.column),
-                  dir:
-                    descriptor.direction === "descending" ? "desc" : "asc",
+                  dir: descriptor.direction === "descending" ? "desc" : "asc",
                 },
               ])
       }
@@ -758,8 +741,7 @@ export const BaseTableView = forwardRef<
     }
     return undefined;
   })();
-  const shouldRenderGrid =
-    output !== undefined || (!viewError && !viewLoading);
+  const shouldRenderGrid = output !== undefined || (!viewError && !viewLoading);
 
   return (
     <div
@@ -828,7 +810,8 @@ export const BaseTableView = forwardRef<
         {!readOnly ? (
           <>
             {/* Reset React Aria's press responder after an in-flight operation. */}
-            <Button key={memberSaving ? "add-busy" : "add-ready"}
+            <Button
+              key={memberSaving ? "add-busy" : "add-ready"}
               variant="secondary"
               size="sm"
               className={configureSlug ? undefined : "ml-auto"}

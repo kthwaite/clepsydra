@@ -1,5 +1,5 @@
-import type { ComponentType } from "react";
 import type { MDXComponents } from "mdx/types";
+import type { ComponentType } from "react";
 
 export interface DocMeta {
   slug: string;

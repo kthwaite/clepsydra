@@ -4,9 +4,24 @@ import { expandPrefixedLink } from "./prefixedExternalLinks";
 
 describe("expandPrefixedLink", () => {
   it.each([
-    ["wiki", "Vichy Catalán", "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n", "Vichy Catalán"],
-    ["WiKi", "  Vichy   Catalán  ", "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n", "Vichy Catalán"],
-    ["wiki", "Hypertext", "https://en.wikipedia.org/wiki/Hypertext", "Hypertext"],
+    [
+      "wiki",
+      "Vichy Catalán",
+      "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n",
+      "Vichy Catalán",
+    ],
+    [
+      "WiKi",
+      "  Vichy   Catalán  ",
+      "https://en.wikipedia.org/wiki/Vichy_Catal%C3%A1n",
+      "Vichy Catalán",
+    ],
+    [
+      "wiki",
+      "Hypertext",
+      "https://en.wikipedia.org/wiki/Hypertext",
+      "Hypertext",
+    ],
   ])("expands Wikipedia value %#", (prefix, value, url, label) => {
     expect(expandPrefixedLink(prefix, value)).toEqual({
       provider: "wiki",
@@ -19,9 +34,14 @@ describe("expandPrefixedLink", () => {
     expect(expandPrefixedLink("wi\u212ai", "Hypertext")).toBeNull();
   });
 
-  it.each(["", "   ", "title\u0000suffix", "title\u0009suffix", "title\u0085suffix"])(
-    "rejects invalid Wikipedia value %j",
-    (value) => expect(expandPrefixedLink("wiki", value)).toBeNull(),
+  it.each([
+    "",
+    "   ",
+    "title\u0000suffix",
+    "title\u0009suffix",
+    "title\u0085suffix",
+  ])("rejects invalid Wikipedia value %j", (value) =>
+    expect(expandPrefixedLink("wiki", value)).toBeNull(),
   );
 
   it.each(["\ud800", "\udc00"])(

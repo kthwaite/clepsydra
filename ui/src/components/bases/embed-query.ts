@@ -1,8 +1,4 @@
-import type {
-  BaseFilter,
-  BaseViewEvaluateRequest,
-  SortKey,
-} from "#/api/bases";
+import type { BaseFilter, BaseViewEvaluateRequest, SortKey } from "#/api/bases";
 import { asciiCaseFold } from "./local-validation";
 
 export interface BaseEmbedConfig {
@@ -93,9 +89,7 @@ export function baseViewEvaluationBody(
 ): BaseViewEvaluateRequest {
   const normalized = normalizeEmbedConfiguration(config);
   return {
-    ...(normalized.filter === undefined
-      ? {}
-      : { filter: normalized.filter }),
+    ...(normalized.filter === undefined ? {} : { filter: normalized.filter }),
     ...(normalized.sort.mode === "inherited"
       ? {}
       : { sort: normalized.sort.value }),

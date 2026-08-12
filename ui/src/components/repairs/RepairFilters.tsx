@@ -20,7 +20,13 @@ const ACTIONABILITY_OPTIONS = [
   { id: "navigation", label: "Navigation only" },
 ] as const;
 
-function FilterCheckbox({ value, children }: { value: string; children: string }) {
+function FilterCheckbox({
+  value,
+  children,
+}: {
+  value: string;
+  children: string;
+}) {
   return (
     <Checkbox
       aria-label={children}
@@ -119,7 +125,11 @@ export function RepairFilters({ filters, onChange }: RepairFiltersProps) {
           onChange({
             ...filters,
             actionable:
-              key === "actionable" ? true : key === "navigation" ? false : undefined,
+              key === "actionable"
+                ? true
+                : key === "navigation"
+                  ? false
+                  : undefined,
           })
         }
         items={ACTIONABILITY_OPTIONS}

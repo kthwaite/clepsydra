@@ -145,13 +145,7 @@ describe("sheafSegments", () => {
   it("preserves normalized tab order within and outside quires", () => {
     const quires = { q1: quire("q1") };
     const normalized = normalizeQuires(
-      [
-        tab("x"),
-        tab("a", "q1"),
-        tab("y"),
-        tab("b", "q1"),
-        tab("z"),
-      ],
+      [tab("x"), tab("a", "q1"), tab("y"), tab("b", "q1"), tab("z")],
       quires,
     );
 

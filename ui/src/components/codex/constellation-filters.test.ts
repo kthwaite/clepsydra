@@ -101,7 +101,9 @@ describe("applyFilters", () => {
     });
 
     expect(out.nodes.map((node) => node.id)).toEqual(["a", "b", "e"]);
-    expect(out.edges.every((edge) => edge.source !== "c" && edge.target !== "c")).toBe(true);
+    expect(
+      out.edges.every((edge) => edge.source !== "c" && edge.target !== "c"),
+    ).toBe(true);
   });
 
   it("excludes an orphan selected as the anchor when orphans are hidden", () => {

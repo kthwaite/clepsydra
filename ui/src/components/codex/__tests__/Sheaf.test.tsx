@@ -81,9 +81,9 @@ describe("Sheaf quire rendering", () => {
     expect(
       screen.queryByRole("button", { name: /pin folio/i }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getAllByRole("button", { name: "close folio" }),
-    ).toHaveLength(3);
+    expect(screen.getAllByRole("button", { name: "close folio" })).toHaveLength(
+      3,
+    );
 
     await user.click(screen.getByRole("button", { name: "Alpha" }));
     expect(useWorkspaceStore.getState().activeTabId).toBe("t1");

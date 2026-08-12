@@ -68,11 +68,7 @@ describe("Dialog", () => {
     const body = screen.getByText("Long body").parentElement;
     const footer = screen.getByRole("button", { name: "Save" }).parentElement;
 
-    expect(modal).toHaveClass(
-      "flex",
-      "max-h-[calc(100dvh-2rem)]",
-      "flex-col",
-    );
+    expect(modal).toHaveClass("flex", "max-h-[calc(100dvh-2rem)]", "flex-col");
     expect(dialog).toHaveClass("flex", "min-h-0", "flex-1", "flex-col");
     expect(body).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
     expect(footer).toHaveClass("shrink-0");

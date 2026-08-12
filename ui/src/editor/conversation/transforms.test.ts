@@ -13,9 +13,12 @@ import {
   setConversationRole,
 } from "./transforms";
 
-const HASH_A = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
-const HASH_B = "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0";
-const HASH_C = "23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01";
+const HASH_A =
+  "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+const HASH_B =
+  "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0";
+const HASH_C =
+  "23456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01";
 
 function turn(
   source: string,

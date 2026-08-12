@@ -60,7 +60,6 @@ interface PromiseConstructorWithResolvers extends PromiseConstructor {
 const promiseWithResolvers =
   Promise as unknown as PromiseConstructorWithResolvers;
 
-
 describe("AttachmentManager", () => {
   it("shows honest loading and empty states", () => {
     mocks.useAttachments.mockReturnValueOnce({
@@ -101,15 +100,10 @@ describe("AttachmentManager", () => {
     const user = userEvent.setup();
     const onInsertMarkdown = vi.fn();
     render(
-      <AttachmentManager
-        protectedPage
-        onInsertMarkdown={onInsertMarkdown}
-      />,
+      <AttachmentManager protectedPage onInsertMarkdown={onInsertMarkdown} />,
     );
 
-    chooseFile(
-      new File(["image"], "diagram.png", { type: "image/png" }),
-    );
+    chooseFile(new File(["image"], "diagram.png", { type: "image/png" }));
 
     expect(
       screen.getByRole("dialog", { name: "Store plaintext attachment?" }),
@@ -124,14 +118,10 @@ describe("AttachmentManager", () => {
     const user = userEvent.setup();
     const onInsertMarkdown = vi.fn();
     const uploaded = { name: "diagram.png", path: "diagram.png", size: 5 };
-    const uploadResult =
-      promiseWithResolvers.withResolvers<typeof uploaded>();
+    const uploadResult = promiseWithResolvers.withResolvers<typeof uploaded>();
     mocks.upload.mockReturnValueOnce(uploadResult.promise);
     render(
-      <AttachmentManager
-        protectedPage
-        onInsertMarkdown={onInsertMarkdown}
-      />,
+      <AttachmentManager protectedPage onInsertMarkdown={onInsertMarkdown} />,
     );
     const file = new File(["image"], "diagram.png", { type: "image/png" });
 
@@ -173,10 +163,7 @@ describe("AttachmentManager", () => {
       .mockRejectedValueOnce(new Error("upload unavailable"))
       .mockResolvedValueOnce(uploaded);
     render(
-      <AttachmentManager
-        protectedPage
-        onInsertMarkdown={onInsertMarkdown}
-      />,
+      <AttachmentManager protectedPage onInsertMarkdown={onInsertMarkdown} />,
     );
     const file = new File(["image"], "diagram.png", { type: "image/png" });
 
@@ -232,10 +219,7 @@ describe("AttachmentManager", () => {
       error: null,
     });
     render(
-      <AttachmentManager
-        protectedPage
-        onInsertMarkdown={onInsertMarkdown}
-      />,
+      <AttachmentManager protectedPage onInsertMarkdown={onInsertMarkdown} />,
     );
 
     await user.click(
@@ -357,8 +341,7 @@ describe("AttachmentManager", () => {
   });
 
   it("suppresses the audit while inventory is loading or failed", () => {
-    const pageMarkdown =
-      "[Missing](/api/vault/attachments/missing.pdf)";
+    const pageMarkdown = "[Missing](/api/vault/attachments/missing.pdf)";
     mocks.useAttachments.mockReturnValue({
       data: undefined,
       isLoading: true,

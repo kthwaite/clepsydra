@@ -33,9 +33,7 @@ export interface WikilinkEditingController {
   cancel(exit: WikilinkExit): void;
 }
 
-export function parseWikilinkDraft(
-  draft: string,
-): ParsedWikilinkDraft | null {
+export function parseWikilinkDraft(draft: string): ParsedWikilinkDraft | null {
   const divider = draft.indexOf("|");
   const target = divider === -1 ? draft : draft.slice(0, divider);
   const alias = divider === -1 ? undefined : draft.slice(divider + 1);
@@ -90,7 +88,9 @@ export function findAdjacentWikilink(
 function selectExit(editor: Editor, path: Path, exit: WikilinkExit): void {
   if (exit === "preserve") return;
   const point =
-    exit === "before" ? Editor.before(editor, path) : Editor.after(editor, path);
+    exit === "before"
+      ? Editor.before(editor, path)
+      : Editor.after(editor, path);
   if (ReactEditor.isFocused(editor)) ReactEditor.blur(editor);
   if (point) Transforms.select(editor, point);
   // Slate clears selection operations in a microtask. Focus after that flush
@@ -101,9 +101,8 @@ function selectExit(editor: Editor, path: Path, exit: WikilinkExit): void {
 export function useWikilinkEditingController(
   editor: Editor,
 ): WikilinkEditingController {
-  const [active, setActive] = useState<WikilinkEditingController["active"]>(
-    null,
-  );
+  const [active, setActive] =
+    useState<WikilinkEditingController["active"]>(null);
 
   const begin = useCallback<WikilinkEditingController["begin"]>(
     (path, initialCaret, returnSide) => {
@@ -118,11 +117,19 @@ export function useWikilinkEditingController(
 
       HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
         Editor.withoutNormalizing(editor, () => {
-          Transforms.setNodes(editor, { target: parsed.target }, { at: active.path });
+          Transforms.setNodes(
+            editor,
+            { target: parsed.target },
+            { at: active.path },
+          );
           if (parsed.alias === undefined) {
             Transforms.unsetNodes(editor, "alias", { at: active.path });
           } else {
-            Transforms.setNodes(editor, { alias: parsed.alias }, { at: active.path });
+            Transforms.setNodes(
+              editor,
+              { alias: parsed.alias },
+              { at: active.path },
+            );
           }
         });
       });
@@ -148,8 +155,9 @@ export function useWikilinkEditingController(
   );
 }
 
-const WikilinkEditingContext =
-  createContext<WikilinkEditingController | null>(null);
+const WikilinkEditingContext = createContext<WikilinkEditingController | null>(
+  null,
+);
 
 export function WikilinkEditingProvider({
   value,

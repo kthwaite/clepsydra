@@ -27,8 +27,7 @@ export function canonicalAttachmentPath(path: string): string {
 
 function attachmentPathFromUrl(url: string): string | null {
   const suffixIndex = url.search(/[?#]/);
-  const destination =
-    suffixIndex === -1 ? url : url.slice(0, suffixIndex);
+  const destination = suffixIndex === -1 ? url : url.slice(0, suffixIndex);
   let decodedUrl: string;
   try {
     decodedUrl = decodeURIComponent(destination);

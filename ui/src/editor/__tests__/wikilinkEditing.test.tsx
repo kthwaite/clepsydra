@@ -2,10 +2,10 @@ import { act, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import {
   createEditor,
-  Node,
-  Transforms,
   type Descendant,
   type Editor,
+  Node,
+  Transforms,
 } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it, vi } from "vitest";
@@ -14,9 +14,9 @@ import { withSchema } from "../schema/withSchema";
 import {
   findAdjacentWikilink,
   parseWikilinkDraft,
-  type WikilinkEditingController,
   useWikilinkEditing,
   useWikilinkEditingController,
+  type WikilinkEditingController,
   WikilinkEditingProvider,
 } from "../wikilinkEditing";
 
@@ -136,7 +136,11 @@ describe("findAdjacentWikilink", () => {
         type: "paragraph",
         children: [
           { text: "before" },
-          { type: "link", url: "https://example.com", children: [{ text: "link" }] },
+          {
+            type: "link",
+            url: "https://example.com",
+            children: [{ text: "link" }],
+          },
           { text: "after" },
         ],
       },
@@ -160,10 +164,7 @@ describe("useWikilinkEditingController", () => {
     });
 
     act(() =>
-      result.current.commit(
-        { target: "New Target", alias: "Label" },
-        "after",
-      ),
+      result.current.commit({ target: "New Target", alias: "Label" }, "after"),
     );
     expect(result.current.active).toBeNull();
     expect(Node.get(editor, [0, 1])).toMatchObject({
@@ -185,7 +186,9 @@ describe("useWikilinkEditingController", () => {
     const { result } = renderHook(() => useWikilinkEditingController(editor));
 
     act(() => result.current.begin([0, 1], "start", "before"));
-    act(() => result.current.commit({ target: "Target without alias" }, "preserve"));
+    act(() =>
+      result.current.commit({ target: "Target without alias" }, "preserve"),
+    );
 
     expect(Node.get(editor, [0, 1])).toMatchObject({
       type: "wikilink",

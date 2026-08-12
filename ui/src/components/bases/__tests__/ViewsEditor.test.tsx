@@ -460,10 +460,12 @@ describe("ViewsEditor", () => {
     ).toContain("body");
     await user.selectOptions(secondPicker, "body");
     await user.click(screen.getByRole("button", { name: "Add column" }));
-    expect(latest<DraftView[]>(onChange).map(({ columns }) => columns)).toEqual([
-      ["title", "body"],
-      ["title", "body"],
-    ]);
+    expect(latest<DraftView[]>(onChange).map(({ columns }) => columns)).toEqual(
+      [
+        ["title", "body"],
+        ["title", "body"],
+      ],
+    );
   });
 
   it("keeps body out of filter, sort, group, and aggregate capabilities", async () => {

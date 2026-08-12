@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { BaseFilter, SortKey } from "#/api/bases";
 import {
-  EMBED_DEFAULT_LIMIT,
   type BaseEmbedConfig,
   baseViewEvaluationBody,
   capabilityIdentity,
+  EMBED_DEFAULT_LIMIT,
   normalizeEmbedConfiguration,
   predicateIdentity,
   queryIdentity,
@@ -89,7 +89,9 @@ describe("embedded Base configuration identity", () => {
     const initial = config();
     const changedFilter = config({ filter: ratingAtLeastFour });
 
-    expect(predicateIdentity(changedFilter)).not.toBe(predicateIdentity(initial));
+    expect(predicateIdentity(changedFilter)).not.toBe(
+      predicateIdentity(initial),
+    );
     expect(capabilityIdentity(initial, "rev-1")).not.toBe(
       capabilityIdentity(changedFilter, "rev-1"),
     );

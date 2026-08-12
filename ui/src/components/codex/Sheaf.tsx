@@ -11,11 +11,7 @@ import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
-import {
-  type Quire,
-  quireColorVar,
-  sheafSegments,
-} from "#/store/quires";
+import { type Quire, quireColorVar, sheafSegments } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
 import {
   runWorkspaceTransition,

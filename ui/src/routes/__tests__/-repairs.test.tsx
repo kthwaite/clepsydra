@@ -1,10 +1,7 @@
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
+import { parseRepairSearch, repairFiltersToSearch } from "#/routes/repairs";
 import { routeTree } from "#/routeTree.gen";
-import {
-  parseRepairSearch,
-  repairFiltersToSearch,
-} from "#/routes/repairs";
 
 describe("repairs route", () => {
   it("validates every supported search filter", () => {
@@ -70,9 +67,9 @@ describe("repairs route", () => {
       offset: 4294967295,
     });
     expect(parseRepairSearch({ offset: "4294967296" })).toEqual({});
-    expect(parseRepairSearch({ offset: String(Number.MAX_SAFE_INTEGER + 1) })).toEqual(
-      {},
-    );
+    expect(
+      parseRepairSearch({ offset: String(Number.MAX_SAFE_INTEGER + 1) }),
+    ).toEqual({});
     expect(parseRepairSearch({ offset: "1.5" })).toEqual({});
   });
 

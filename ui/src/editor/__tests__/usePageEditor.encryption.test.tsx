@@ -78,10 +78,13 @@ const KNOWN_SECRET = "CLEPSYDRA_UI_SECRET_4a2ec791_日本語_🔐";
 
 function persistedBrowserState(): string {
   return JSON.stringify({
-    localStorage: Array.from({ length: window.localStorage.length }, (_, index) => {
-      const key = window.localStorage.key(index);
-      return key === null ? null : [key, window.localStorage.getItem(key)];
-    }),
+    localStorage: Array.from(
+      { length: window.localStorage.length },
+      (_, index) => {
+        const key = window.localStorage.key(index);
+        return key === null ? null : [key, window.localStorage.getItem(key)];
+      },
+    ),
     sessionStorage: Array.from(
       { length: window.sessionStorage.length },
       (_, index) => {
@@ -377,10 +380,7 @@ describe("usePageEditor encrypted saves", () => {
       expect(result.current.encryptionState.status).toBe("plain"),
     );
     act(() =>
-      result.current.onSlateChange(
-        paragraph(KNOWN_SECRET),
-        astChangeEditor(),
-      ),
+      result.current.onSlateChange(paragraph(KNOWN_SECRET), astChangeEditor()),
     );
 
     await act(async () => {

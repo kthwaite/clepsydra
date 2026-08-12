@@ -118,7 +118,8 @@ const attachmentsAndMediaMeta = {
 const encryptionAndProtectedPagesMeta = {
   slug: "encryption-and-protected-pages",
   title: "Encryption and Protected Pages",
-  description: "Set up encryption and protect, unlock, edit, and recover folios.",
+  description:
+    "Set up encryption and protect, unlock, edit, and recover folios.",
   keywords: ["encryption", "protected pages", "age", "privacy", "recovery"],
 } satisfies DocMeta;
 const configurationMeta = {
@@ -384,12 +385,7 @@ const booksAndReading = page(
   BooksAndReadingGuide,
   booksAndReadingSource,
 );
-const recipes = page(
-  "work-reading",
-  recipesMeta,
-  RecipesGuide,
-  recipesSource,
-);
+const recipes = page("work-reading", recipesMeta, RecipesGuide, recipesSource);
 const codexAndConversationCapture = page(
   "ai-integrations",
   codexAndConversationCaptureMeta,
@@ -430,11 +426,7 @@ export const DOC_GROUPS = [
   {
     id: "links-structured-knowledge",
     label: "Links and structured knowledge",
-    pages: [
-      linksSearchGraphAndRepair,
-      blockReferencesAndTransclusion,
-      bases,
-    ],
+    pages: [linksSearchGraphAndRepair, blockReferencesAndTransclusion, bases],
   },
   {
     id: "work-reading",

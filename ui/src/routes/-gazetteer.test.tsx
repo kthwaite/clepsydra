@@ -246,7 +246,7 @@ describe("Gazetteer route filters", () => {
       }),
     );
     const update = routeMocks.navigate.mock.calls.at(-1)?.[0].search as (
-      current: typeof completeSearch
+      current: typeof completeSearch,
     ) => typeof completeSearch;
     expect(
       update({

@@ -1,6 +1,6 @@
-import type * as Intake from "#/lib/intake";
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
+import type * as Intake from "#/lib/intake";
 
 const {
   refetchAndLookupMock,

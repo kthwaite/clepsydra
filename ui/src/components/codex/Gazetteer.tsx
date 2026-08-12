@@ -6,8 +6,8 @@ import {
   Select,
   Button as SelectButton,
 } from "react-aria-components";
-import { useContentIndex, useTags } from "#/api/index";
 import { formatApiError } from "#/api/error";
+import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
 import type { BulkAssignResponse } from "#/api/types";
 import { shortFolio } from "#/components/codex/folio-utils";

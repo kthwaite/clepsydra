@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { BoardTask } from "#/api/board";
 import {
-  EMPTY_FILTER,
-  isFilterActive,
   applyBoardFilter,
   type BoardFilter,
+  EMPTY_FILTER,
+  isFilterActive,
 } from "../board-filter";
 
 const mockTask = (overrides?: Partial<BoardTask>): BoardTask => ({

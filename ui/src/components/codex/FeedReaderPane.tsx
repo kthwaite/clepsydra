@@ -36,7 +36,9 @@ export function FeedReaderPane({
   const manifestFeedName = useMemo(() => {
     if (!entry) return undefined;
     for (const group of feedsQuery.data?.groups ?? []) {
-      const feed = group.feeds.find((candidate) => candidate.id === entry.feed_id);
+      const feed = group.feeds.find(
+        (candidate) => candidate.id === entry.feed_id,
+      );
       if (feed) return feed.title_override || feed.title;
     }
     return undefined;
@@ -108,7 +110,9 @@ export function FeedReaderPane({
             Choose a dispatch from the river. Its stored copy will open here.
           </p>
         </div>
-      ) : entryQuery.isPending || entryQuery.isLoading || (!entry && !entryQuery.isError) ? (
+      ) : entryQuery.isPending ||
+        entryQuery.isLoading ||
+        (!entry && !entryQuery.isError) ? (
         <div
           role="status"
           className="cl-mono px-4 py-12 text-center text-[10px] uppercase tracking-[0.18em] text-ink-mute"
@@ -125,7 +129,8 @@ export function FeedReaderPane({
       ) : entryQuery.isError ? (
         <div role="alert" className="m-3 border border-hot px-3 py-3 text-hot">
           <p className="text-[12px]">
-            Entry {selectedEntryId} could not be loaded. {errorMessage(entryQuery.error)}
+            Entry {selectedEntryId} could not be loaded.{" "}
+            {errorMessage(entryQuery.error)}
           </p>
           <Button
             className="cl-btn mt-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -144,7 +149,9 @@ export function FeedReaderPane({
           mutationError={localMutationError ?? patchEntry.error}
           onTagDraftChange={setTagDraft}
           onToggleRead={() => void mutate({ read: !entry.read })}
-          onToggleBookmark={() => void mutate({ bookmarked: !entry.bookmarked })}
+          onToggleBookmark={() =>
+            void mutate({ bookmarked: !entry.bookmarked })
+          }
           onEditTags={() => {
             setLocalMutationError(null);
             setTagDraft(entry.tags.join(", "));
@@ -197,7 +204,10 @@ function ReaderArticle({
   const timestamp = entry.published_at ?? entry.fetched_at;
 
   return (
-    <article aria-labelledby={titleId} className="min-w-0 px-4 py-5 md:px-6 md:py-6">
+    <article
+      aria-labelledby={titleId}
+      className="min-w-0 px-4 py-5 md:px-6 md:py-6"
+    >
       <header className="border-b border-rule pb-4">
         <h2
           id={titleId}
@@ -225,13 +235,17 @@ function ReaderArticle({
           />
         ) : (
           <p className="cl-marg">
-            This entry has no stored body. Open the original to continue reading.
+            This entry has no stored body. Open the original to continue
+            reading.
           </p>
         )}
       </div>
 
       {mutationError ? (
-        <div role="alert" className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot">
+        <div
+          role="alert"
+          className="mb-3 border border-hot px-3 py-2 text-[12px] text-hot"
+        >
           {errorMessage(mutationError, "The entry change could not be saved.")}
         </div>
       ) : null}
@@ -310,11 +324,15 @@ function ReaderArticle({
   );
 }
 
-export function safeFeedEntryUrl(value: string | null | undefined): string | null {
+export function safeFeedEntryUrl(
+  value: string | null | undefined,
+): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : null;
+    return url.protocol === "http:" || url.protocol === "https:"
+      ? url.href
+      : null;
   } catch {
     return null;
   }
@@ -330,7 +348,6 @@ export function normalizeFeedEntryTags(value: string) {
     ),
   ];
 }
-
 
 function errorMessage(error: unknown, fallback = "Try again.") {
   if (error instanceof Error) return error.message;

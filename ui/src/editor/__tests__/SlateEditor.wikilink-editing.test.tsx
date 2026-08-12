@@ -14,16 +14,16 @@ import {
   waitFor,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { type Descendant, type Editor, Transforms } from "slate";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type * as BlocksApi from "#/api/blocks";
 import type * as ApiClient from "#/api/client";
 import type * as PagesApi from "#/api/pages";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
-import type * as WikilinkResolution from "#/editor/wikilinkResolution";
-import { type Descendant, type Editor, Transforms } from "slate";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
 import { SlateEditor } from "#/editor/SlateEditor";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
+import type * as WikilinkResolution from "#/editor/wikilinkResolution";
 import { usePreviewStore } from "#/store/preview";
 
 const {
@@ -194,7 +194,6 @@ async function selectSlatePoint(
   });
 }
 
-
 describe("SlateEditor wikilink editing integration", () => {
   it("completes a target, enters from the right, and persists the typed label", async () => {
     const user = userEvent.setup();
@@ -359,9 +358,9 @@ describe("SlateEditor wikilink editing integration", () => {
     );
 
     expect(await screen.findByText(/notes\/my-page\.md/)).toBeInTheDocument();
-    await userEvent.setup().click(
-      screen.getByRole("link", { name: "My Page" }),
-    );
+    await userEvent
+      .setup()
+      .click(screen.getByRole("link", { name: "My Page" }));
 
     expect(
       screen.getByRole("textbox", { name: "Edit wikilink" }),

@@ -1,4 +1,4 @@
-import { createEditor, Editor, Transforms, type Descendant } from "slate";
+import { createEditor, type Descendant, Editor, Transforms } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { slateToMarkdown } from "#/editor/convert";
@@ -114,11 +114,7 @@ describe("withInlinePunctuationBoundary", () => {
     expect(editor.children).toEqual([
       {
         type: "paragraph",
-        children: [
-          { text: "pl" },
-          { text: ",", bold: true },
-          { text: "ain" },
-        ],
+        children: [{ text: "pl" }, { text: ",", bold: true }, { text: "ain" }],
       },
     ]);
   });
@@ -214,10 +210,7 @@ describe("exitTerminalInlineCode", () => {
     const editor = makeEditor([
       {
         type: "paragraph",
-        children: [
-          { text: "code", code: true },
-          { text: " follows" },
-        ],
+        children: [{ text: "code", code: true }, { text: " follows" }],
       },
     ]);
     Transforms.select(editor, { path: [0, 0], offset: 4 });

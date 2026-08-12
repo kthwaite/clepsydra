@@ -1,14 +1,10 @@
 import { useMemo } from "react";
 import {
-  dayOfYear,
-  isLeapYear,
-  julianDay,
-} from "#/lib/time";
-import {
   aphorismForDay,
   daystampLabel,
   formatDotDate,
 } from "#/components/codex/atrium-data";
+import { dayOfYear, isLeapYear, julianDay } from "#/lib/time";
 
 export function useAtriumCalendar(now: Date) {
   const year = now.getFullYear();

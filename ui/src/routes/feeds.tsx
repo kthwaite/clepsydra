@@ -4,8 +4,8 @@ import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
 import { FeedManagement } from "#/components/codex/FeedManagement";
-import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
 import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
+import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 
 type FeedsSearch = FeedRiverFilters & {

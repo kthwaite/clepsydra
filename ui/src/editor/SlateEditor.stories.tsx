@@ -9,8 +9,8 @@ import {
 } from "@tanstack/react-router";
 import { useMemo } from "react";
 import type { Descendant } from "slate";
-import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import { SlateEditor } from "#/editor/SlateEditor";
+import { makeWikilink } from "#/editor/schema/elements/wikilink";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 
 function ProductionEditor() {

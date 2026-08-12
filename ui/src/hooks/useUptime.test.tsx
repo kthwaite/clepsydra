@@ -28,7 +28,9 @@ it("re-renders only when the displayed uptime minute changes", () => {
   }
 
   render(<Consumer />);
-  const initialRenders = Number(screen.getByText(/0h 02m:/).textContent?.split(":")[1]);
+  const initialRenders = Number(
+    screen.getByText(/0h 02m:/).textContent?.split(":")[1],
+  );
 
   for (let second = 0; second < 59; second += 1) {
     act(() => vi.advanceTimersByTime(1000));

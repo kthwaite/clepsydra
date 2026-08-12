@@ -97,9 +97,7 @@ export function MobileConstellation({
       hubs: visibleGraph.nodes
         .filter((node) => (degrees.get(node.id) ?? 0) > 0)
         .map((node) => ({ node, degree: degrees.get(node.id) ?? 0 }))
-        .sort(
-          (a, b) => b.degree - a.degree || compareNodes(a.node, b.node),
-        )
+        .sort((a, b) => b.degree - a.degree || compareNodes(a.node, b.node))
         .slice(0, 6),
       orphans: visibleGraph.nodes
         .filter((node) => !connected.has(node.id))
@@ -134,9 +132,7 @@ export function MobileConstellation({
             aria-label="Anchor page"
             className="cl-mono min-h-11 w-full border border-rule bg-paper-2 px-3 text-[12px] text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
             value={anchorId ?? ""}
-            onChange={(event) =>
-              onAnchorChange(event.target.value || null)
-            }
+            onChange={(event) => onAnchorChange(event.target.value || null)}
           >
             <option value="" disabled>
               Choose a page to focus the map
@@ -179,9 +175,7 @@ export function MobileConstellation({
               type="checkbox"
               role="switch"
               checked={orphansVisible}
-              onChange={(event) =>
-                onOrphansVisibleChange(event.target.checked)
-              }
+              onChange={(event) => onOrphansVisibleChange(event.target.checked)}
             />
             Show orphans
           </label>

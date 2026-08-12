@@ -129,7 +129,8 @@ export function buildHeatmap(
   for (const pages of pagesByDay.values()) {
     pages.sort(
       (a, b) =>
-        b.activityAt.localeCompare(a.activityAt) || a.path.localeCompare(b.path),
+        b.activityAt.localeCompare(a.activityAt) ||
+        a.path.localeCompare(b.path),
     );
   }
 

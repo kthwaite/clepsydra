@@ -2,8 +2,9 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ReferenceRepairApiError, type ReferenceIssue } from "#/api/index";
+import { type ReferenceIssue, ReferenceRepairApiError } from "#/api/index";
 import { RepairWorkspace } from "../RepairWorkspace";
+
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T | PromiseLike<T>) => void;

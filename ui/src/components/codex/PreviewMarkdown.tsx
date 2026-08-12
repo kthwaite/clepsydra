@@ -4,10 +4,7 @@ import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { MathExpression } from "#/components/MathExpression";
 import { classifyLinkResource } from "#/lib/linkResource";
-import {
-  remarkFolioMath,
-  type MathDelimiter,
-} from "#/lib/markdown/folioMath";
+import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
 
 function isMathDelimiter(value: unknown): value is MathDelimiter {
   return value === "$" || value === "$$" || value === "\\(" || value === "\\[";

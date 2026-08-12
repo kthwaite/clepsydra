@@ -24,15 +24,16 @@ export interface RepairSearch {
   offset?: number;
 }
 
-export function parseRepairSearch(search: Record<string, unknown>): RepairSearch {
+export function parseRepairSearch(
+  search: Record<string, unknown>,
+): RepairSearch {
   const rawKinds = Array.isArray(search.kind)
     ? search.kind
     : typeof search.kind === "string"
       ? search.kind.split(",")
       : [];
-  const kind = rawKinds.filter(
-    (value): value is ReferenceIssue["kind"] =>
-      Object.hasOwn(REPAIR_KINDS, value),
+  const kind = rawKinds.filter((value): value is ReferenceIssue["kind"] =>
+    Object.hasOwn(REPAIR_KINDS, value),
   );
   const result: RepairSearch = {};
   if (typeof search.target === "string" && search.target) {

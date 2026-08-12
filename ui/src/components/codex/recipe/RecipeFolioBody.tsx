@@ -1,9 +1,9 @@
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useEffect, useId, useRef } from "react";
 import {
+  TextField as AriaTextField,
   Label,
   TextArea,
-  TextField as AriaTextField,
 } from "react-aria-components";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { Button } from "#/components/ui/button";
@@ -83,8 +83,7 @@ export function RecipeFolioBody({
 
   const addRow = (collection: RecipeCollectionKey) => {
     const values = document[collection];
-    const rowIds =
-      collection === "ingredients" ? ingredientRowIds : stepRowIds;
+    const rowIds = collection === "ingredients" ? ingredientRowIds : stepRowIds;
     rowIds.current.push(`${collection}-${nextRowId.current++}`);
     pendingFocus.current = { collection, index: values.length };
     updateCollection(collection, [...values, ""]);
@@ -97,7 +96,9 @@ export function RecipeFolioBody({
   ) => {
     const values = [...document[collection]];
     const rowIds =
-      collection === "ingredients" ? ingredientRowIds.current : stepRowIds.current;
+      collection === "ingredients"
+        ? ingredientRowIds.current
+        : stepRowIds.current;
     const movingValue = values[index];
     const displacedValue = values[destination];
     const movingRowId = rowIds[index];
@@ -119,8 +120,7 @@ export function RecipeFolioBody({
   };
 
   const removeRow = (collection: RecipeCollectionKey, index: number) => {
-    const rowIds =
-      collection === "ingredients" ? ingredientRowIds : stepRowIds;
+    const rowIds = collection === "ingredients" ? ingredientRowIds : stepRowIds;
     rowIds.current.splice(index, 1);
     updateCollection(
       collection,
@@ -272,10 +272,7 @@ function RecipeReadView({
         </section>
       </div>
 
-      <section
-        aria-labelledby={notesId}
-        className="border-t border-rule pt-5"
-      >
+      <section aria-labelledby={notesId} className="border-t border-rule pt-5">
         <h2
           id={notesId}
           className="cl-mono m-0 mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"

@@ -3,10 +3,9 @@ import { expect, it } from "vitest";
 import { useAtriumCalendar } from "#/components/codex/atrium-time";
 
 it("reuses day-derived values across same-day clock ticks", () => {
-  const { result, rerender } = renderHook(
-    ({ now }) => useAtriumCalendar(now),
-    { initialProps: { now: new Date(2026, 7, 8, 10, 0, 0) } },
-  );
+  const { result, rerender } = renderHook(({ now }) => useAtriumCalendar(now), {
+    initialProps: { now: new Date(2026, 7, 8, 10, 0, 0) },
+  });
   const morning = result.current;
 
   rerender({ now: new Date(2026, 7, 8, 10, 0, 1) });
@@ -31,7 +30,9 @@ it("retains the actual UTC day key in positive-offset zones", () => {
 
     expect(result.current.date).toEqual(new Date(2026, 7, 8));
     expect(result.current.utcDate).toEqual(new Date(Date.UTC(2026, 7, 7)));
-    expect(result.current.utcDate.toISOString().slice(0, 10)).toBe("2026-08-07");
+    expect(result.current.utcDate.toISOString().slice(0, 10)).toBe(
+      "2026-08-07",
+    );
   } finally {
     if (previousTz === undefined) delete process.env.TZ;
     else process.env.TZ = previousTz;

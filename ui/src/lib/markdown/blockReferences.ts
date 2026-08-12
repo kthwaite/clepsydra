@@ -25,7 +25,6 @@ export function blockIdFromHref(href: string): string | null {
   return BLOCK_ID_PATTERN.test(blockId) ? blockId : null;
 }
 
-
 function splitText(value: string): PhrasingContent[] | null {
   const children: PhrasingContent[] = [];
   let endOfLastMatch = 0;
@@ -57,7 +56,6 @@ function splitText(value: string): PhrasingContent[] | null {
   return children;
 }
 
-
 function transformChildren(parent: MutableNode): void {
   const children = parent.children;
   if (!children) return;
@@ -67,11 +65,7 @@ function transformChildren(parent: MutableNode): void {
     if (child.type === "text" && typeof child.value === "string") {
       const replacement = splitText(child.value);
       if (replacement) {
-        children.splice(
-          index,
-          1,
-          ...(replacement as unknown as MutableNode[]),
-        );
+        children.splice(index, 1, ...(replacement as unknown as MutableNode[]));
         index += replacement.length - 1;
       }
       continue;

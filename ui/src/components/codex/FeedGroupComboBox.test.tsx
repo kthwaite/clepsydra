@@ -169,7 +169,11 @@ describe("FeedGroupComboBox", () => {
   it("prevents input and commits while disabled", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    const { input } = renderCombo({ value: "Research", disabled: true, onChange });
+    const { input } = renderCombo({
+      value: "Research",
+      disabled: true,
+      onChange,
+    });
 
     expect(input).toBeDisabled();
     await user.click(input);

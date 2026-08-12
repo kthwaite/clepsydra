@@ -1,9 +1,9 @@
 import type { ElementDescriptor } from "./descriptor";
-import { blockquoteDescriptor } from "./elements/blockquote";
 import { baseEmbedDescriptor } from "./elements/baseEmbed";
+import { blockquoteDescriptor } from "./elements/blockquote";
 import { blockRefDescriptor } from "./elements/blockRef";
-import { conversationTurnDescriptor } from "./elements/conversationTurn";
 import { codeBlockDescriptor } from "./elements/codeBlock";
+import { conversationTurnDescriptor } from "./elements/conversationTurn";
 import { footnoteDefDescriptor } from "./elements/footnoteDef";
 import { footnoteRefDescriptor } from "./elements/footnoteRef";
 import { headingDescriptor } from "./elements/heading";
@@ -15,10 +15,7 @@ import {
   listItemDescriptor,
   numberedListDescriptor,
 } from "./elements/list";
-import {
-  inlineMathDescriptor,
-  mathBlockDescriptor,
-} from "./elements/math";
+import { inlineMathDescriptor, mathBlockDescriptor } from "./elements/math";
 import { paragraphDescriptor } from "./elements/paragraph";
 import { thematicBreakDescriptor } from "./elements/thematicBreak";
 import { wikilinkDescriptor } from "./elements/wikilink";

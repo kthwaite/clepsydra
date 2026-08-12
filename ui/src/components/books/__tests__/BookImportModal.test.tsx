@@ -91,33 +91,33 @@ describe("BookImportModal", () => {
     );
   });
 
-  it.each([
-    "created",
-    "skipped",
-  ])("opens the returned page after a %s response", async (status) => {
-    const user = userEvent.setup();
-    importMutate.mockImplementation((_request, options) =>
-      options?.onSuccess?.({
-        cite_key: "abelson1996structure",
-        status,
-        page_path: "library/books/structure.md",
-      }),
-    );
-    render(<BookImportModal />);
+  it.each(["created", "skipped"])(
+    "opens the returned page after a %s response",
+    async (status) => {
+      const user = userEvent.setup();
+      importMutate.mockImplementation((_request, options) =>
+        options?.onSuccess?.({
+          cite_key: "abelson1996structure",
+          status,
+          page_path: "library/books/structure.md",
+        }),
+      );
+      render(<BookImportModal />);
 
-    await user.type(
-      screen.getByRole("textbox", { name: "ISBN" }),
-      "9780262011532",
-    );
-    await user.click(screen.getByRole("button", { name: "Add book" }));
+      await user.type(
+        screen.getByRole("textbox", { name: "ISBN" }),
+        "9780262011532",
+      );
+      await user.click(screen.getByRole("button", { name: "Add book" }));
 
-    expect(openTabMock).toHaveBeenCalledWith(
-      "page",
-      "library/books/structure.md",
-      "Imported book",
-    );
-    expect(useUiStore.getState().isBookImportOpen).toBe(false);
-  });
+      expect(openTabMock).toHaveBeenCalledWith(
+        "page",
+        "library/books/structure.md",
+        "Imported book",
+      );
+      expect(useUiStore.getState().isBookImportOpen).toBe(false);
+    },
+  );
 
   it("keeps the ISBN after an API error", async () => {
     const user = userEvent.setup();

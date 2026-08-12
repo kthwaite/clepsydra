@@ -113,10 +113,7 @@ const parseListLines = (
     }
   }
 
-  if (
-    hasInvalidItem ||
-    (values.length === 0 && hasUnrecognizedContent)
-  ) {
+  if (hasInvalidItem || (values.length === 0 && hasUnrecognizedContent)) {
     return { ok: false, reason: invalidReason };
   }
   if (hasUnsupportedStructure || hasUnrecognizedContent) {
@@ -130,9 +127,7 @@ export function parseRecipeMarkdown(
   body: string,
   pageTitle: string,
 ): RecipeParseResult {
-  const lines = trimBoundaryBlankLines(
-    normalizeLineEndings(body).split("\n"),
-  );
+  const lines = trimBoundaryBlankLines(normalizeLineEndings(body).split("\n"));
   if (lines[0]?.trim() === pageTitle.trim()) lines.shift();
 
   const markers: SectionMarker[] = [];

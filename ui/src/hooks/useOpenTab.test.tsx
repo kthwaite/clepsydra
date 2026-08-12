@@ -10,11 +10,11 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
 }));
 
+import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   registerWorkspaceTransitionGuard,
   useWorkspaceStore,
 } from "#/store/workspace";
-import { useOpenTab } from "#/hooks/useOpenTab";
 
 beforeEach(() => {
   navigateMock.mockReset();

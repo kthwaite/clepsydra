@@ -81,7 +81,13 @@ describe("buildDocsIndex", () => {
   it("extracts page and heading sections in registry order with rehype-compatible duplicate slugs", () => {
     const index = buildDocsIndex([gettingStarted, bases]);
 
-    expect(index.map(({ page: entry, heading, headingId }) => [entry.slug, heading, headingId])).toEqual([
+    expect(
+      index.map(({ page: entry, heading, headingId }) => [
+        entry.slug,
+        heading,
+        headingId,
+      ]),
+    ).toEqual([
       ["getting-started", undefined, undefined],
       ["getting-started", "Initialize a vault", "initialize-a-vault"],
       ["bases", undefined, undefined],
@@ -94,10 +100,18 @@ describe("buildDocsIndex", () => {
   it("removes metadata, fenced code, links, and inline formatting from indexed body text", () => {
     const index = buildDocsIndex([gettingStarted, bases]);
 
-    expect(index[0]?.text).toContain("Read the linked words and bold text first.");
-    expect(index.some((section) => section.text.includes("metadataonly"))).toBe(false);
-    expect(index.some((section) => section.text.includes("hiddenfence"))).toBe(false);
-    expect(index.some((section) => /\[|\]|\*\*/.test(section.text))).toBe(false);
+    expect(index[0]?.text).toContain(
+      "Read the linked words and bold text first.",
+    );
+    expect(index.some((section) => section.text.includes("metadataonly"))).toBe(
+      false,
+    );
+    expect(index.some((section) => section.text.includes("hiddenfence"))).toBe(
+      false,
+    );
+    expect(index.some((section) => /\[|\]|\*\*/.test(section.text))).toBe(
+      false,
+    );
   });
 
   it("uses rendered heading text for slugs and excludes MDX ESM without dropping prose", () => {
@@ -130,11 +144,13 @@ Image heading body.
     );
     const index = buildDocsIndex([semantic]);
 
-    expect(index.map(({ heading, headingId }) => [heading, headingId])).toEqual([
-      [undefined, undefined],
-      ["Use foo_bar & Docs", "use-foo_bar--docs"],
-      ["Setup", "-setup"],
-    ]);
+    expect(index.map(({ heading, headingId }) => [heading, headingId])).toEqual(
+      [
+        [undefined, undefined],
+        ["Use foo_bar & Docs", "use-foo_bar--docs"],
+        ["Setup", "-setup"],
+      ],
+    );
     expect(searchDocs(index, "prosevisible")).toHaveLength(1);
     expect(searchDocs(index, "esmsecret")).toEqual([]);
     expect(searchDocs(index, "secondsecret")).toEqual([]);
@@ -208,11 +224,14 @@ describe("searchDocs", () => {
         headingId: "work-with-tabs-quires-and-previews",
       },
     },
-  ])("finds distinctive dedicated-guide content for $query", ({ query, expected }) => {
-    const result = searchDocs(buildDocsIndex(DOC_PAGES), query)[0];
+  ])(
+    "finds distinctive dedicated-guide content for $query",
+    ({ query, expected }) => {
+      const result = searchDocs(buildDocsIndex(DOC_PAGES), query)[0];
 
-    expect(result).toMatchObject(expected);
-  });
+      expect(result).toMatchObject(expected);
+    },
+  );
 
   it.each([
     ["stale repair", "links-search-graph-and-repair"],
@@ -256,7 +275,9 @@ describe("searchDocs", () => {
   it("requires every normalized query token in the same section", () => {
     const index = buildDocsIndex([gettingStarted, bases]);
 
-    expect(searchDocs(index, "typed fields").map((result) => result.page.slug)).toEqual(["bases"]);
+    expect(
+      searchDocs(index, "typed fields").map((result) => result.page.slug),
+    ).toEqual(["bases"]);
     expect(searchDocs(index, "typed formulas")).toEqual([]);
     expect(searchDocs(index, "missing token")).toEqual([]);
   });
@@ -284,7 +305,12 @@ describe("searchDocs", () => {
       "Unrelated guide",
       "## Needle\n\nUnrelated copy.",
     );
-    const titleMatch = page("title", "Needle", "Unrelated guide", "Unrelated copy.");
+    const titleMatch = page(
+      "title",
+      "Needle",
+      "Unrelated guide",
+      "Unrelated copy.",
+    );
 
     const results = searchDocs(
       buildDocsIndex([
@@ -305,18 +331,18 @@ describe("searchDocs", () => {
       "body",
     ]);
     expect(results.map((result) => result.score)).toEqual([
-      11_000,
-      300,
-      100,
-      50,
-      10,
+      11_000, 300, 100, 50, 10,
     ]);
-    expect(searchDocs(buildDocsIndex([titleMatch]), "need")[0]?.score).toBe(6_000);
+    expect(searchDocs(buildDocsIndex([titleMatch]), "need")[0]?.score).toBe(
+      6_000,
+    );
   });
 
   it("finds a registry guide by keyword and uses its description excerpt", () => {
     expect(
-      searchDocs(buildDocsIndex(DOC_PAGES), "database").map((result) => result.page.slug),
+      searchDocs(buildDocsIndex(DOC_PAGES), "database").map(
+        (result) => result.page.slug,
+      ),
     ).toContain("bases");
     expect(searchDocs(buildDocsIndex(DOC_PAGES), "database")[0]).toEqual(
       expect.objectContaining({
@@ -333,7 +359,11 @@ describe("searchDocs", () => {
     const index = buildDocsIndex([gettingStarted, bases]);
 
     expect(searchDocs(index, "bases")).toEqual([
-      expect.objectContaining({ page: bases, heading: undefined, headingId: undefined }),
+      expect.objectContaining({
+        page: bases,
+        heading: undefined,
+        headingId: undefined,
+      }),
     ]);
   });
 
@@ -346,7 +376,12 @@ describe("searchDocs", () => {
     );
 
     expect(searchDocs(buildDocsIndex([repeated]), "needle")).toEqual([
-      expect.objectContaining({ page: repeated, heading: "Details", headingId: "details", score: 10 }),
+      expect.objectContaining({
+        page: repeated,
+        heading: "Details",
+        headingId: "details",
+        score: 10,
+      }),
     ]);
   });
 
@@ -363,7 +398,9 @@ describe("searchDocs", () => {
   it("folds query case and returns no results for an empty normalized query", () => {
     const index = buildDocsIndex([gettingStarted, bases]);
 
-    expect(searchDocs(index, "InItIaLiZe")[0]?.headingId).toBe("initialize-a-vault");
+    expect(searchDocs(index, "InItIaLiZe")[0]?.headingId).toBe(
+      "initialize-a-vault",
+    );
     expect(searchDocs(index, "   ---   ")).toEqual([]);
   });
 
@@ -375,11 +412,23 @@ describe("searchDocs", () => {
   });
 
   it("breaks equal-score ties by registry and section order", () => {
-    const first = page("first", "First", "Unrelated", "Needle in the first page.");
-    const second = page("second", "Second", "Unrelated", "Needle in the second page.");
+    const first = page(
+      "first",
+      "First",
+      "Unrelated",
+      "Needle in the first page.",
+    );
+    const second = page(
+      "second",
+      "Second",
+      "Unrelated",
+      "Needle in the second page.",
+    );
 
     expect(
-      searchDocs(buildDocsIndex([first, second]), "needle").map((result) => result.page.slug),
+      searchDocs(buildDocsIndex([first, second]), "needle").map(
+        (result) => result.page.slug,
+      ),
     ).toEqual(["first", "second"]);
   });
 

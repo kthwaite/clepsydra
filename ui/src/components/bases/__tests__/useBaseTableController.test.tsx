@@ -1,4 +1,10 @@
-import { act, render, renderHook, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +17,7 @@ import type {
   SortKey,
 } from "#/api/bases";
 import { EMBED_DEFAULT_LIMIT } from "#/components/bases/embed-query";
+
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
   createMember: vi.fn(),
@@ -102,11 +109,11 @@ vi.mock("#/api/bases", async (importOriginal) => {
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 
-import {
-  useBaseTableController,
-  type BaseTableControllerOptions,
-} from "#/components/bases/useBaseTableController";
 import { BaseTableView } from "#/components/bases/BaseTableView";
+import {
+  type BaseTableControllerOptions,
+  useBaseTableController,
+} from "#/components/bases/useBaseTableController";
 
 const readingFilter: BaseFilter = {
   field: "status",
@@ -194,7 +201,9 @@ beforeEach(() => {
     title: "Created",
     revision: "page-rev-1",
   });
-  mocks.evaluationRefetch.mockResolvedValue({ data: mocks.evaluationState.data });
+  mocks.evaluationRefetch.mockResolvedValue({
+    data: mocks.evaluationState.data,
+  });
 });
 
 describe("useBaseTableController embedded mode", () => {
@@ -244,7 +253,8 @@ describe("useBaseTableController embedded mode", () => {
       expectedNotice: undefined,
     },
     {
-      label: "announces exclusion when only the old query includes the created row",
+      label:
+        "announces exclusion when only the old query includes the created row",
       oldOutput: output(),
       currentOutput: output([]),
       expectedFocus: undefined,
@@ -253,12 +263,7 @@ describe("useBaseTableController embedded mode", () => {
     },
   ])(
     "$label after sort changes while POST is pending",
-    async ({
-      oldOutput,
-      currentOutput,
-      expectedFocus,
-      expectedNotice,
-    }) => {
+    async ({ oldOutput, currentOutput, expectedFocus, expectedNotice }) => {
       const pending = deferred<{
         id: string;
         path: string;
@@ -281,9 +286,7 @@ describe("useBaseTableController embedded mode", () => {
       );
 
       act(() => result.current.onAddMember());
-      act(() =>
-        result.current.onSaveMember({ title: "Created", fields: {} }),
-      );
+      act(() => result.current.onSaveMember({ title: "Created", fields: {} }));
       mocks.evaluationState.data = evaluation({ output: currentOutput });
       rerender({ value: { ...current, sort: newSort } });
       pending.resolve({
@@ -329,12 +332,7 @@ describe("useBaseTableController embedded mode", () => {
     },
   ])(
     "$label after the old refetch is already in flight",
-    async ({
-      staleResult,
-      currentOutput,
-      expectedFocus,
-      expectedNotice,
-    }) => {
+    async ({ staleResult, currentOutput, expectedFocus, expectedNotice }) => {
       type RefreshResult = {
         data?: BaseViewEvaluateResponse;
         error?: { error: string };
@@ -469,7 +467,9 @@ describe("useBaseTableController embedded mode", () => {
     mocks.evaluationState.isLoading = true;
     rerender(<ControllerTable value={{ ...current, sort: firstSort }} />);
     expect(title).toHaveValue("Retained draft");
-    expect(screen.getByRole("button", { name: "Save new member" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Save new member" }),
+    ).toBeDisabled();
 
     mocks.evaluationState.data = evaluation({ revision: "evaluation-rev-2" });
     mocks.evaluationState.isLoading = false;
@@ -596,7 +596,9 @@ describe("useBaseTableController embedded mode", () => {
     "hides a completed capped-exclusion notice when the $label changes query identity",
     async ({ changeQuery }) => {
       mocks.evaluationState.data = evaluation({ output: output([]) });
-      mocks.evaluationRefetch.mockResolvedValue({ data: mocks.evaluationState.data });
+      mocks.evaluationRefetch.mockResolvedValue({
+        data: mocks.evaluationState.data,
+      });
       const current = options({ limit: 1 });
       const { result, rerender } = renderHook(
         ({ value }) => useBaseTableController(value),
@@ -656,7 +658,9 @@ describe("useBaseTableController embedded mode", () => {
         await Promise.resolve();
       });
 
-      await waitFor(() => expect(result.current.focusCreatedId).toBe("created"));
+      await waitFor(() =>
+        expect(result.current.focusCreatedId).toBe("created"),
+      );
       expect(result.current.memberNotice).toBeUndefined();
 
       mocks.evaluationState.data = evaluation({ output: output() });
@@ -733,11 +737,10 @@ describe("useBaseTableController standalone mode", () => {
       }),
     );
 
-    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
-      "reading",
-      "Continues",
-      { sort: "title", dir: "desc" },
-    );
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith("reading", "Continues", {
+      sort: "title",
+      dir: "desc",
+    });
     expect(mocks.useBaseViewEvaluation).toHaveBeenLastCalledWith({
       base: "",
       view: "",

@@ -94,8 +94,16 @@ describe("buildHeatmap", () => {
       count: 2,
       level: 2,
       pages: [
-        { path: "newer.md", title: "Newer", activityAt: "2026-05-02T09:00:00Z" },
-        { path: "older.md", title: "Older", activityAt: "2026-05-02T01:00:00Z" },
+        {
+          path: "newer.md",
+          title: "Newer",
+          activityAt: "2026-05-02T09:00:00Z",
+        },
+        {
+          path: "older.md",
+          title: "Older",
+          activityAt: "2026-05-02T01:00:00Z",
+        },
       ],
     });
     expect(heatDay(heat, "2026-05-01").count).toBe(0);

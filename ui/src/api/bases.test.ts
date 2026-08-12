@@ -1,7 +1,4 @@
-import {
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -19,11 +16,11 @@ import {
   useCreateBaseMember,
   usePropertyCommit,
 } from "#/api/bases";
-import {
-  queryIdentity,
-  type BaseEmbedConfig,
-} from "#/components/bases/embed-query";
 import { fetchClient } from "#/api/client";
+import {
+  type BaseEmbedConfig,
+  queryIdentity,
+} from "#/components/bases/embed-query";
 
 const cachedQueryKeys = {
   baseList: ["get", "/api/vault/bases"] as const,
@@ -40,7 +37,11 @@ const cachedQueryKeys = {
   ] as const,
   query: ["post", "/api/vault/query", { filter: "kind == NOTE" }] as const,
   pageList: ["get", "/api/vault/pages"] as const,
-  pageDetail: ["get", "/api/vault/pages/{path}", { path: "books/dune.md" }] as const,
+  pageDetail: [
+    "get",
+    "/api/vault/pages/{path}",
+    { path: "books/dune.md" },
+  ] as const,
   folderList: ["get", "/api/vault/folders"] as const,
 };
 
@@ -178,9 +179,8 @@ describe("Base member API", () => {
       view: "Reading",
       filter: { field: "rating", op: "contains", value: "4" },
     });
-    const evaluate = options.queryFn as unknown as () => Promise<
-      BaseViewEvaluateResponse
-    >;
+    const evaluate =
+      options.queryFn as unknown as () => Promise<BaseViewEvaluateResponse>;
 
     for (const wireError of errors) {
       post.mockResolvedValueOnce({ error: wireError } as never);
@@ -237,7 +237,11 @@ describe("Base member API", () => {
       [{ scope: "view", message: "invalid path", filter_path: 1 }],
       [
         { scope: "view", message: "valid" },
-        { scope: "field", message: "one invalid entry poisons the array", field: {} },
+        {
+          scope: "field",
+          message: "one invalid entry poisons the array",
+          field: {},
+        },
       ],
     ]) {
       expect(

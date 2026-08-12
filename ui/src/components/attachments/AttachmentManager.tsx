@@ -9,11 +9,11 @@ import {
   useUploadAttachment,
 } from "#/api/attachments";
 import { formatApiError } from "#/api/error";
+import { CopyButton } from "#/components/ui/CopyButton";
 import {
   attachmentReferences,
   canonicalAttachmentPath,
 } from "#/lib/markdown/attachmentReferences";
-import { CopyButton } from "#/components/ui/CopyButton";
 import {
   type PendingAttachmentAction,
   PlaintextAttachmentDialog,
@@ -52,9 +52,7 @@ export function AttachmentManager({
   const missingReferences = useMemo(() => {
     if (!protectedPage || isLoading || error || !attachments) return [];
     const attachmentPaths = new Set(
-      attachments.map((attachment) =>
-        canonicalAttachmentPath(attachment.path),
-      ),
+      attachments.map((attachment) => canonicalAttachmentPath(attachment.path)),
     );
     return attachmentReferences(pageMarkdown ?? "").filter(
       (reference) => !attachmentPaths.has(reference.path),
@@ -86,9 +84,7 @@ export function AttachmentManager({
     await uploadFile(file);
   };
 
-  const acknowledgePendingAction = async (
-    action: PendingAttachmentAction,
-  ) => {
+  const acknowledgePendingAction = async (action: PendingAttachmentAction) => {
     if (pendingActionInFlight.current) return;
     pendingActionInFlight.current = action;
     setIsPendingAction(true);
@@ -152,7 +148,6 @@ export function AttachmentManager({
           </ul>
         </section>
       ) : null}
-
 
       <div className="mb-2">
         <label className="inline-flex cursor-pointer items-center gap-1.5 border border-rule px-2 py-1 uppercase tracking-[0.1em] text-ink-mute hover:border-accent hover:text-accent">

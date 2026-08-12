@@ -1,8 +1,8 @@
 import { ReactEditor, useReadOnly, useSlateStatic } from "slate-react";
 import {
-  formatConversationMarker,
   type ConversationMarker,
   type ConversationRole,
+  formatConversationMarker,
 } from "../../conversation/marker";
 import { useConversationPresentation } from "../../conversation/presentation";
 import {
@@ -34,9 +34,7 @@ function ConversationTurn({
   attributes,
   children,
   element,
-}: Parameters<
-  ElementDescriptor<ConversationTurnElement>["render"]
->[0]) {
+}: Parameters<ElementDescriptor<ConversationTurnElement>["render"]>[0]) {
   const editor = useSlateStatic();
   const presentation = useConversationPresentation();
   const readOnly = useReadOnly();
@@ -46,7 +44,8 @@ function ConversationTurn({
       source: element.source,
       sequence:
         element.origin === "source" ? (element.sourceSequence ?? 1) : null,
-      timestamp: element.origin === "source" ? (element.timestamp ?? null) : null,
+      timestamp:
+        element.origin === "source" ? (element.timestamp ?? null) : null,
       origin: element.origin,
     };
     return (
@@ -66,8 +65,7 @@ function ConversationTurn({
   }
 
   const assistantLabel = assistantDisplayLabel(presentation.provider);
-  const participantLabel =
-    element.role === "user" ? "You" : assistantLabel;
+  const participantLabel = element.role === "user" ? "You" : assistantLabel;
 
   return (
     <article
@@ -155,34 +153,40 @@ function ConversationTurn({
     </article>
   );
 }
-export const conversationTurnDescriptor: ElementDescriptor<ConversationTurnElement> = {
-  type: "conversation-turn",
-  kind: "block",
-  create: ({ children = [{ type: "paragraph", children: [{ text: "" }] }], ...rest }: CreateProps<ConversationTurnElement>) => ({
+export const conversationTurnDescriptor: ElementDescriptor<ConversationTurnElement> =
+  {
     type: "conversation-turn",
-    children,
-    ...rest,
-  }),
-  render: ConversationTurn,
-  toMdast: (node, ctx) => {
-    const marker: ConversationMarker = {
-      role: node.role,
-      source: node.source,
-      sequence: node.origin === "source" ? (node.sourceSequence ?? 1) : null,
-      timestamp: node.origin === "source" ? (node.timestamp ?? null) : null,
-      origin: node.origin,
-    };
-    return {
-      type: "blockquote",
-      children: [
-        {
-          type: "paragraph",
-          children: [{ type: "html", value: formatConversationMarker(marker) }],
-        },
-        ...ctx.blockChildren(node.children),
-      ],
-    };
-  },
-};
+    kind: "block",
+    create: ({
+      children = [{ type: "paragraph", children: [{ text: "" }] }],
+      ...rest
+    }: CreateProps<ConversationTurnElement>) => ({
+      type: "conversation-turn",
+      children,
+      ...rest,
+    }),
+    render: ConversationTurn,
+    toMdast: (node, ctx) => {
+      const marker: ConversationMarker = {
+        role: node.role,
+        source: node.source,
+        sequence: node.origin === "source" ? (node.sourceSequence ?? 1) : null,
+        timestamp: node.origin === "source" ? (node.timestamp ?? null) : null,
+        origin: node.origin,
+      };
+      return {
+        type: "blockquote",
+        children: [
+          {
+            type: "paragraph",
+            children: [
+              { type: "html", value: formatConversationMarker(marker) },
+            ],
+          },
+          ...ctx.blockChildren(node.children),
+        ],
+      };
+    },
+  };
 
 export const makeConversationTurn = conversationTurnDescriptor.create;

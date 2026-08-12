@@ -13,27 +13,27 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
+  type MutableRefObject,
   StrictMode,
   useEffect,
   useMemo,
   useSyncExternalStore,
-  type MutableRefObject,
 } from "react";
-import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
-import { Folio } from "#/components/codex/Folio";
-import { Constellation } from "#/components/codex/Constellation";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CodexFrame } from "#/components/codex/CodexFrame";
+import { Constellation } from "#/components/codex/Constellation";
+import { Folio } from "#/components/codex/Folio";
 import { renderElement } from "#/editor/elements/renderElement";
-import type { CustomEditor } from "#/editor/types";
 import { withSchema } from "#/editor/schema/withSchema";
+import type { CustomEditor } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useConstellationStore } from "#/store/constellation";
-import { useGazetteerStore } from "#/store/gazetteer";
 import { clearFolioRestoration } from "#/store/folioRestoration";
+import { useGazetteerStore } from "#/store/gazetteer";
 import { useWorkspaceStore } from "#/store/workspace";
 
 const {
@@ -224,13 +224,7 @@ vi.mock("#/editor/SlateEditor", () => ({
   },
 }));
 
-function OpenAlpha({
-  origin,
-  blockId,
-}: {
-  origin: string;
-  blockId?: string;
-}) {
+function OpenAlpha({ origin, blockId }: { origin: string; blockId?: string }) {
   const openTab = useOpenTab();
   return (
     <button
@@ -417,7 +411,9 @@ describe("mobile Folio Back", () => {
     });
     renderNavigation("/workspace");
     await screen.findByText("Focused source block");
-    await waitFor(() => expect(editorMountCount.current).toBeGreaterThanOrEqual(2));
+    await waitFor(() =>
+      expect(editorMountCount.current).toBeGreaterThanOrEqual(2),
+    );
     const editor = editorCapture.current;
     if (!editor) throw new Error("Expected the hydrated Slate editor");
 
@@ -434,11 +430,9 @@ describe("mobile Folio Back", () => {
       }),
     );
     act(() => {
-      useWorkspaceStore
-        .getState()
-        .openTab("page", "notes/alpha.md", "Alpha", {
-          blockId: "abc123DEF0",
-        });
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
     });
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
@@ -485,11 +479,9 @@ describe("mobile Folio Back", () => {
     );
     await screen.findByText("Folio not found.");
     act(() => {
-      useWorkspaceStore
-        .getState()
-        .openTab("page", "notes/alpha.md", "Alpha", {
-          blockId: "abc123DEF0",
-        });
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
     });
 
     await waitFor(() =>
@@ -517,11 +509,9 @@ describe("mobile Folio Back", () => {
     await screen.findByText("Focused source block");
 
     act(() => {
-      useWorkspaceStore
-        .getState()
-        .openTab("page", "notes/alpha.md", "Alpha", {
-          blockId: "abc123DEF0",
-        });
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
     });
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
@@ -572,22 +562,18 @@ describe("mobile Folio Back", () => {
   });
 
   it("claims a StrictMode focus request once and accepts a later request for the same block", async () => {
-    useWorkspaceStore
-      .getState()
-      .openTab("page", "notes/alpha.md", "Alpha", {
-        blockId: "abc123DEF0",
-      });
+    useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+      blockId: "abc123DEF0",
+    });
     renderNavigation("/workspace", true);
 
     await screen.findByText("Focused source block");
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
 
     act(() => {
-      useWorkspaceStore
-        .getState()
-        .openTab("page", "notes/alpha.md", "Alpha", {
-          blockId: "abc123DEF0",
-        });
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
     });
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledTimes(2));
@@ -606,21 +592,23 @@ describe("mobile Folio Back", () => {
       ],
       activeTabId: "other",
     });
-    useWorkspaceStore
-      .getState()
-      .openTab("page", "notes/alpha.md", "Alpha", {
-        blockId: "abc123DEF0",
-      });
+    useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+      blockId: "abc123DEF0",
+    });
     renderNavigation("/workspace");
     await screen.findByText(/fetching folio notes\/alpha\.md/);
 
     act(() => useWorkspaceStore.getState().activateTab("other"));
     pageEditorState.isLoading = false;
-    act(() => useWorkspaceStore.getState().activateTab(
+    act(() =>
       useWorkspaceStore
         .getState()
-        .tabs.find((tab) => tab.path === "notes/alpha.md")!.id,
-    ));
+        .activateTab(
+          useWorkspaceStore
+            .getState()
+            .tabs.find((tab) => tab.path === "notes/alpha.md")!.id,
+        ),
+    );
 
     await screen.findByText("Focused source block");
     expect(scrollIntoView).not.toHaveBeenCalled();
@@ -649,15 +637,15 @@ describe("mobile Folio Back", () => {
     await screen.findByText("Focused source block");
 
     act(() => {
-      useWorkspaceStore
-        .getState()
-        .openTab("page", "notes/alpha.md", "Alpha", {
-          blockId: "abc123DEF0",
-        });
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
     });
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
-    expect(document.querySelector('[data-block-id="abc123DEF0"]')).toHaveFocus();
+    expect(
+      document.querySelector('[data-block-id="abc123DEF0"]'),
+    ).toHaveFocus();
     expect(editorCapture.current?.selection).toBeNull();
   });
 
@@ -680,11 +668,9 @@ describe("mobile Folio Back", () => {
     await screen.findByText("Focused source block");
 
     act(() => {
-      useWorkspaceStore
-        .getState()
-        .openTab("page", "notes/alpha.md", "Alpha", {
-          blockId: "abc123DEF0",
-        });
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "abc123DEF0",
+      });
     });
 
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
@@ -710,11 +696,9 @@ describe("mobile Folio Back", () => {
     await screen.findByText("Focused source block");
 
     act(() => {
-      useWorkspaceStore
-        .getState()
-        .openTab("page", "notes/alpha.md", "Alpha", {
-          blockId: "missing123",
-        });
+      useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
+        blockId: "missing123",
+      });
     });
 
     await waitFor(() =>
@@ -900,9 +884,7 @@ describe("mobile Folio Back", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
       target: { value: "Deletion must not discard this draft  \n" },
     });
-    await user.click(
-      screen.getByRole("button", { name: "Document details" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Document details" }));
     await user.click(screen.getByRole("button", { name: "Manage paths" }));
     await user.click(
       await screen.findByRole("button", { name: "Complete page deletion" }),
@@ -924,9 +906,7 @@ describe("mobile Folio Back", () => {
     expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
       "Deletion must not discard this draft  \n",
     );
-    await user.click(
-      screen.getByRole("button", { name: "Document details" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Document details" }));
 
     await user.click(
       screen.getByRole("button", { name: "Complete page deletion" }),

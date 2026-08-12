@@ -61,12 +61,8 @@ describe("SettingsModal appearance", () => {
     expect(screen.getByRole("radiogroup", { name: "Density" })).toBeVisible();
 
     expect(screen.getByRole("radio", { name: "Dark" })).toBeChecked();
-    expect(
-      screen.getByRole("radio", { name: /Barbican/i }),
-    ).toBeChecked();
-    expect(
-      screen.getByRole("radio", { name: /Default/i }),
-    ).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Barbican/i })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Default/i })).toBeChecked();
 
     await user.click(screen.getByRole("radio", { name: "Paper" }));
     expect(mocks.setMode).toHaveBeenCalledWith("light");

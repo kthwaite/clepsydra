@@ -326,7 +326,9 @@ describe("BaseMemberDraft", () => {
     expect(
       screen.getByRole("combobox", { name: "New member — Project" }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Save new member" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Save new member" }),
+    ).toBeDisabled();
     expect(
       screen.getByRole("button", { name: "Cancel new member" }),
     ).toBeDisabled();
@@ -485,7 +487,9 @@ describe("BaseMemberDraft", () => {
     );
 
     await user.tab();
-    expect(screen.getByRole("button", { name: "Save new member" })).toHaveFocus();
+    expect(
+      screen.getByRole("button", { name: "Save new member" }),
+    ).toHaveFocus();
     await user.keyboard("{Enter}");
 
     expect(onSave).toHaveBeenCalledWith({

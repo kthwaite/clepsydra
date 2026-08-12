@@ -10,8 +10,10 @@ export interface ConversationMarker {
 }
 
 const SOURCE_RE = /^sha256:[0-9a-f]{64}$/;
-const LOCAL_RE = /^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const TIMESTAMP_RE = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+const LOCAL_RE =
+  /^local:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TIMESTAMP_RE =
+  /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
 const MARKER_RE = /^\[!AI-(USER|ASSISTANT) ([^\]]+)\]$/;
 
 function isValidTimestamp(value: string): boolean {
@@ -24,7 +26,9 @@ function isValidTimestamp(value: string): boolean {
   const minuteNumber = Number(minute);
   const secondNumber = Number(second);
   if (monthNumber < 1 || monthNumber > 12) return false;
-  const daysInMonth = new Date(Date.UTC(Number(year), monthNumber, 0)).getUTCDate();
+  const daysInMonth = new Date(
+    Date.UTC(Number(year), monthNumber, 0),
+  ).getUTCDate();
   if (dayNumber < 1 || dayNumber > daysInMonth) return false;
   if (hourNumber > 23 || minuteNumber > 59 || secondNumber > 59) return false;
   if (zone !== "Z") {
@@ -36,11 +40,14 @@ function isValidTimestamp(value: string): boolean {
 }
 
 /** Parse one complete canonical conversation marker, or return null. */
-export function parseConversationMarker(text: string): ConversationMarker | null {
+export function parseConversationMarker(
+  text: string,
+): ConversationMarker | null {
   const markerMatch = MARKER_RE.exec(text);
   if (!markerMatch) return null;
 
-  const role: ConversationRole = markerMatch[1] === "USER" ? "user" : "assistant";
+  const role: ConversationRole =
+    markerMatch[1] === "USER" ? "user" : "assistant";
   const attributes = markerMatch[2].split(" ");
   const values = new Map<string, string>();
   for (const attribute of attributes) {
@@ -65,9 +72,14 @@ export function parseConversationMarker(text: string): ConversationMarker | null
   }
 
   const keys = [...values.keys()];
-  const expectedKeys = origin === "source"
-    ? ["source", "sequence", ...(values.has("timestamp") ? ["timestamp"] : [])]
-    : ["source"];
+  const expectedKeys =
+    origin === "source"
+      ? [
+          "source",
+          "sequence",
+          ...(values.has("timestamp") ? ["timestamp"] : []),
+        ]
+      : ["source"];
   if (
     keys.length !== expectedKeys.length ||
     keys.some((key, index) => key !== expectedKeys[index])
@@ -96,8 +108,14 @@ export function parseConversationMarker(text: string): ConversationMarker | null
 export function formatConversationMarker(marker: ConversationMarker): string {
   const role = marker.role === "user" ? "USER" : "ASSISTANT";
   if (marker.origin === "local") {
-    if (marker.sequence !== null || marker.timestamp !== null || !LOCAL_RE.test(marker.source)) {
-      throw new RangeError("Local conversation markers only contain a valid local source");
+    if (
+      marker.sequence !== null ||
+      marker.timestamp !== null ||
+      !LOCAL_RE.test(marker.source)
+    ) {
+      throw new RangeError(
+        "Local conversation markers only contain a valid local source",
+      );
     }
     return `[!AI-${role} source=${marker.source}]`;
   }
@@ -108,9 +126,12 @@ export function formatConversationMarker(marker: ConversationMarker): string {
     marker.sequence <= 0 ||
     (marker.timestamp !== null && !isValidTimestamp(marker.timestamp))
   ) {
-    throw new RangeError("Source conversation markers require a valid hash and sequence");
+    throw new RangeError(
+      "Source conversation markers require a valid hash and sequence",
+    );
   }
-  const timestamp = marker.timestamp === null ? "" : ` timestamp=${marker.timestamp}`;
+  const timestamp =
+    marker.timestamp === null ? "" : ` timestamp=${marker.timestamp}`;
   return `[!AI-${role} source=${marker.source} sequence=${marker.sequence}${timestamp}]`;
 }
 

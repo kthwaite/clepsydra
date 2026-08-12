@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  ReferenceRepairApiError,
   type ReferenceIssue,
+  ReferenceRepairApiError,
   type ReferenceRepairPreview,
   type ReferenceRepairRequest,
   useApplyReferenceRepair,
@@ -64,7 +64,9 @@ export function RepairIssueDetail({
     setPreview(null);
     setPreviewRequest(null);
     await onRefresh();
-    setAlert("This issue changed since it was loaded. The issue list was refreshed.");
+    setAlert(
+      "This issue changed since it was loaded. The issue list was refreshed.",
+    );
   }
 
   async function previewRepair(request: ReferenceRepairRequest) {
@@ -159,8 +161,8 @@ export function RepairIssueDetail({
           </p>
         ) : issue.kind === "isolated_page" ? (
           <p className="mt-2 border-l-2 border-rule px-3 py-2 text-sm text-ink-mute">
-            This page has no incoming or outgoing references. Open the source
-            to reconnect it to the vault.
+            This page has no incoming or outgoing references. Open the source to
+            reconnect it to the vault.
           </p>
         ) : (
           <p className="mt-2 border-l-2 border-rule px-3 py-2 text-sm text-ink-mute">
@@ -250,7 +252,9 @@ export function RepairIssueDetail({
                     action: { type: "create", folder: folder.trim(), body },
                   })
                 }
-                isDisabled={previewMutation.isPending || applyMutation.isPending}
+                isDisabled={
+                  previewMutation.isPending || applyMutation.isPending
+                }
               >
                 Preview page creation
               </Button>
@@ -270,7 +274,10 @@ export function RepairIssueDetail({
       )}
 
       {preview ? (
-        <section aria-labelledby="repair-preview-heading" className="border-t border-rule pt-3">
+        <section
+          aria-labelledby="repair-preview-heading"
+          className="border-t border-rule pt-3"
+        >
           <h3
             id="repair-preview-heading"
             className="cl-mono text-[10px] font-bold uppercase tracking-[0.15em] text-cool"

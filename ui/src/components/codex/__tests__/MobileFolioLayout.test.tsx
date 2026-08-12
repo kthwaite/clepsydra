@@ -47,7 +47,9 @@ describe("MobileFolioLayout", () => {
     expect(details).toHaveTextContent("Document metadata");
     expect(details).toHaveTextContent("Page contents");
 
-    await user.click(screen.getByRole("button", { name: "Page relationships" }));
+    await user.click(
+      screen.getByRole("button", { name: "Page relationships" }),
+    );
     const relationships = screen.getByRole("dialog", {
       name: "Page relationships",
     });

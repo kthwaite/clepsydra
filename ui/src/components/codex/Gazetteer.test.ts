@@ -475,9 +475,7 @@ describe("Gazetteer controller", () => {
     render(createElement(Gazetteer));
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
-    expect(
-      screen.getByRole("button", { name: "✕ 1 selected" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "✕ 1 selected" })).toBeVisible();
 
     await user.type(
       screen.getByRole("combobox", { name: "Project" }),

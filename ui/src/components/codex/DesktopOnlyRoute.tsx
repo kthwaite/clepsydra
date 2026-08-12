@@ -8,10 +8,7 @@ type DesktopOnlyRouteProps = {
   children: ReactNode;
 };
 
-export function DesktopOnlyRoute({
-  name,
-  children,
-}: DesktopOnlyRouteProps) {
+export function DesktopOnlyRoute({ name, children }: DesktopOnlyRouteProps) {
   const mobile = useMobileLayout();
 
   useEffect(() => {

@@ -18,19 +18,16 @@ import {
 } from "#/api/feeds";
 import { formatRelativeTime } from "#/lib/time";
 import {
+  type FeedDisclosurePreferences,
   getFeedDisclosureStorage,
   normalizeFeedGroupIdentity,
   readFeedDisclosurePreferences,
   reconcileFeedDisclosurePreferences,
   writeFeedDisclosurePreferences,
-  type FeedDisclosurePreferences,
 } from "#/store/feedDisclosure";
 import { Card } from "./Card";
 import { CodexModalShell } from "./CodexModalShell";
-import {
-  canonicalFeedGroups,
-  FeedGroupComboBox,
-} from "./FeedGroupComboBox";
+import { canonicalFeedGroups, FeedGroupComboBox } from "./FeedGroupComboBox";
 
 export function FeedManagement() {
   const feedsQuery = useFeeds();
@@ -73,14 +70,9 @@ export function FeedManagement() {
     );
     setActiveDisclosure((current) => {
       const isCurrentNamespace = current?.namespace === namespace;
-      const preferences = isCurrentNamespace
-        ? current.preferences
-        : loaded;
+      const preferences = isCurrentNamespace ? current.preferences : loaded;
       const reconciled = successfulManifest
-        ? reconcileFeedDisclosurePreferences(
-            preferences,
-            successfulManifest,
-          )
+        ? reconcileFeedDisclosurePreferences(preferences, successfulManifest)
         : preferences;
       const shouldPersist =
         (isCurrentNamespace && current.shouldPersist) ||
@@ -233,11 +225,7 @@ export function FeedManagement() {
                   <Disclosure
                     isExpanded={isExpanded}
                     onExpandedChange={(expanded) =>
-                      setDisclosureExpanded(
-                        "groups",
-                        groupIdentity,
-                        expanded,
-                      )
+                      setDisclosureExpanded("groups", groupIdentity, expanded)
                     }
                   >
                     <Heading
@@ -484,10 +472,7 @@ function FeedRow({
 
   return (
     <li className="border-b border-rule">
-      <Disclosure
-        isExpanded={isExpanded}
-        onExpandedChange={onExpandedChange}
-      >
+      <Disclosure isExpanded={isExpanded} onExpandedChange={onExpandedChange}>
         <Heading level={4} className="m-0">
           <Button
             slot="trigger"

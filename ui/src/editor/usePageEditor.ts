@@ -537,7 +537,6 @@ export function usePageEditor(
     }
     const reloadEpoch = lifecycleRef.current;
 
-
     try {
       const result = await refetchPage();
       if (lifecycleRef.current !== reloadEpoch) return;
@@ -709,8 +708,7 @@ export function usePageEditor(
     metaEditGenRef.current > savedMetaGenRef.current;
   const editorRemountPending =
     previousPathRef.current !== path ||
-    (page?.encrypted === true &&
-      previousLockEpochRef.current !== lockEpoch) ||
+    (page?.encrypted === true && previousLockEpochRef.current !== lockEpoch) ||
     (page !== undefined &&
       plainBody !== null &&
       !conflictRef.current &&
@@ -721,9 +719,7 @@ export function usePageEditor(
     !isLoading &&
     (error != null ||
       (isDraft && !editorRemountPending) ||
-      (page !== undefined &&
-        plainBody !== null &&
-        !editorRemountPending));
+      (page !== undefined && plainBody !== null && !editorRemountPending));
 
   // Sent on its own: a metadata-only write is permitted even while the body is
   // still protected, which is what lets a reader unlock an archived page.

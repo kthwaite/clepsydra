@@ -5,9 +5,7 @@ import { PreviewMarkdown } from "#/components/codex/PreviewMarkdown";
 describe("PreviewMarkdown", () => {
   it("marks a recognized resource while keeping preview links non-interactive", () => {
     render(
-      <PreviewMarkdown
-        content="[Wikipedia](https://en.wikipedia.org/wiki/Hypertext)"
-      />,
+      <PreviewMarkdown content="[Wikipedia](https://en.wikipedia.org/wiki/Hypertext)" />,
     );
 
     const text = screen.getByText("Wikipedia");
@@ -33,13 +31,11 @@ w = z^2
 
     expect(container.querySelectorAll(".katex")).toHaveLength(4);
     expect(
-      container.querySelectorAll(
-        "span.folio-math:not(.folio-math--display)",
-      ),
+      container.querySelectorAll("span.folio-math:not(.folio-math--display)"),
     ).toHaveLength(2);
-    expect(
-      container.querySelectorAll("div.folio-math--display"),
-    ).toHaveLength(2);
+    expect(container.querySelectorAll("div.folio-math--display")).toHaveLength(
+      2,
+    );
   });
 
   it("preserves exact invalid source and excludes code from math rendering", () => {
@@ -80,10 +76,11 @@ w = z^2
     expect(math).not.toHaveAttribute("tabindex");
     expect(math?.onclick).toBeNull();
     expect(math?.onkeydown).toBeNull();
-    expect(container.querySelector("a, button, input, textarea, img")).toBeNull();
+    expect(
+      container.querySelector("a, button, input, textarea, img"),
+    ).toBeNull();
     expect(container).toHaveTextContent(rawHtml);
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
   });
-
 });

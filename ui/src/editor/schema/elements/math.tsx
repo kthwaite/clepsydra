@@ -6,10 +6,7 @@ import type {
 } from "#/editor/convert/mdastTypes";
 import { MathElement } from "#/editor/elements/MathElement";
 import type { ElementDescriptor } from "../descriptor";
-import type {
-  InlineMathElement,
-  MathBlockElement,
-} from "../types";
+import type { InlineMathElement, MathBlockElement } from "../types";
 
 function normalizeMath<T extends InlineMathElement | MathBlockElement>(
   entry: Parameters<NonNullable<ElementDescriptor<T>["normalize"]>>[0],
@@ -20,11 +17,9 @@ function normalizeMath<T extends InlineMathElement | MathBlockElement>(
 
   const persisted = node as unknown as Record<string, unknown>;
   if (typeof persisted.tex !== "string") {
-    Transforms.setNodes(
-      editor,
-      { tex: String(persisted.tex ?? "") } as never,
-      { at: path },
-    );
+    Transforms.setNodes(editor, { tex: String(persisted.tex ?? "") } as never, {
+      at: path,
+    });
     return true;
   }
 
@@ -34,19 +29,21 @@ function normalizeMath<T extends InlineMathElement | MathBlockElement>(
     ? delimiter === "$" || delimiter === "\\("
     : delimiter === "$$" || delimiter === "\\[";
   if (!validDelimiter) {
-    Transforms.setNodes(
-      editor,
-      { delimiter: inline ? "$" : "$$" } as never,
-      { at: path },
-    );
+    Transforms.setNodes(editor, { delimiter: inline ? "$" : "$$" } as never, {
+      at: path,
+    });
     return true;
   }
 
   if (node.children.length === 0) {
-    Transforms.insertNodes(editor, { text: "" }, {
-      at: path.concat(0),
-      voids: true,
-    });
+    Transforms.insertNodes(
+      editor,
+      { text: "" },
+      {
+        at: path.concat(0),
+        voids: true,
+      },
+    );
     return true;
   }
   const child = node.children[0];
