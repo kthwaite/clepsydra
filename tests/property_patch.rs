@@ -312,6 +312,7 @@ empty_values = []
 started = 2026-08-01
 seen_at = 2026-08-01T12:30:00Z
 series = ["[[Solar Cycle]]"]
+non_finite = nan
 choice_order = "first"
 conflict_type = 42
 conflict_relation = ["[[Solar Cycle]]"]
@@ -341,6 +342,7 @@ empty_values = { type = "multi_select" }
 started = { type = "date" }
 seen_at = { type = "datetime" }
 series = { type = "relation" }
+non_finite = { type = "number" }
 choice_order = { type = "select", options = ["first", "second"] }
 conflict_type = { type = "text" }
 conflict_relation = { type = "relation", many = false }
@@ -417,6 +419,7 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
             "featured",
             "kind",
             "note",
+            "non_finite",
             "rating",
             "seen_at",
             "series",
@@ -484,12 +487,18 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
         projection_property(&body, "note")["value"],
         serde_json::Value::Null
     );
-    assert_eq!(projection_property(&body, "featured")["value"], false);
-    assert_eq!(projection_property(&body, "rating")["value"], 0);
-    assert_eq!(
-        projection_property(&body, "empty_values")["value"],
-        serde_json::json!([])
-    );
+    let featured = projection_property(&body, "featured");
+    assert_eq!(featured["present"], true);
+    assert_eq!(featured["value"], false);
+    let rating = projection_property(&body, "rating");
+    assert_eq!(rating["present"], true);
+    assert_eq!(rating["value"], 0);
+    let empty_values = projection_property(&body, "empty_values");
+    assert_eq!(empty_values["present"], true);
+    assert_eq!(empty_values["value"], serde_json::json!([]));
+    let non_finite = projection_property(&body, "non_finite");
+    assert_eq!(non_finite["present"], true);
+    assert_eq!(non_finite["value"], serde_json::Value::Null);
     assert_eq!(
         projection_property(&body, "started")["value"],
         "2026-08-01"

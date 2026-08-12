@@ -663,6 +663,13 @@ mod tests {
         );
 
         let board_task = &json["components"]["schemas"]["BoardTask"];
+        let required = board_task["required"]
+            .as_array()
+            .expect("BoardTask.required should be an array");
+        assert!(
+            required.contains(&serde_json::json!("body_excerpt")),
+            "body_excerpt is always serialized and must be required"
+        );
         assert_eq!(
             board_task["properties"]["body_excerpt"]["type"],
             serde_json::json!(["string", "null"]),

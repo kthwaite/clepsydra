@@ -103,16 +103,46 @@ fn openapi_defines_the_page_base_property_projection_contract() {
         schemas["PagePropertyDeclaration"]["properties"]["definition"]["$ref"],
         "#/components/schemas/PropertyDefinition"
     );
+    let page_base_property = &schemas["PageBaseProperty"];
+    let required = page_base_property["required"]
+        .as_array()
+        .expect("PageBaseProperty.required should be an array");
+    for field in ["value", "definition"] {
+        assert!(
+            required.contains(&serde_json::json!(field)),
+            "PageBaseProperty.{field} is always serialized and must be required"
+        );
+    }
+    let value_schema = &page_base_property["properties"]["value"];
+    assert!(
+        value_schema.get("type").is_none(),
+        "the unconstrained PageBaseProperty.value schema must permit JSON null"
+    );
+    let definition_variants = page_base_property["properties"]["definition"]["oneOf"]
+        .as_array()
+        .expect("PageBaseProperty.definition should be a nullable oneOf");
+    assert!(
+        definition_variants
+            .iter()
+            .any(|variant| variant["type"] == "null"),
+        "PageBaseProperty.definition must permit null"
+    );
+    assert!(
+        definition_variants.iter().any(
+            |variant| variant["$ref"] == "#/components/schemas/PropertyDefinition"
+        ),
+        "PageBaseProperty.definition must reference PropertyDefinition"
+    );
     assert_eq!(
-        schemas["PageBaseProperty"]["properties"]["compatibility"]["$ref"],
+        page_base_property["properties"]["compatibility"]["$ref"],
         "#/components/schemas/PagePropertyCompatibility"
     );
     assert_eq!(
-        schemas["PageBaseProperty"]["properties"]["declarations"]["items"]["$ref"],
+        page_base_property["properties"]["declarations"]["items"]["$ref"],
         "#/components/schemas/PagePropertyDeclaration"
     );
     assert_eq!(
-        schemas["PageBaseProperty"]["properties"]["blockers"]["items"]["$ref"],
+        page_base_property["properties"]["blockers"]["items"]["$ref"],
         "#/components/schemas/PagePropertyBlocker"
     );
     assert_eq!(

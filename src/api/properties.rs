@@ -100,10 +100,11 @@ pub struct PageBaseProperty {
     /// Distinguishes an absent declared property from a present JSON `null`.
     pub present: bool,
     /// Current custom frontmatter value. Reserved and absent values are `null`.
-    #[schema(value_type = Option<serde_json::Value>)]
+    #[schema(value_type = Option<serde_json::Value>, required = true)]
     pub value: Option<serde_json::Value>,
     pub compatibility: PagePropertyCompatibility,
     /// Editor-semantic normalized definition; absent for conflicts.
+    #[schema(required = true)]
     pub definition: Option<PropertyDefinition>,
     pub declarations: Vec<PagePropertyDeclaration>,
     /// Backend capability only; Folio lock/read-only state is applied by clients.
