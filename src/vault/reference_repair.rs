@@ -73,14 +73,20 @@ pub fn prepare_reference_repair(
     let source_path = VaultPath::new(&issue.source_path)
         .map_err(|error| ReferenceRepairError::Invalid(error.to_string()))?;
     let source_absolute = vault.resolve(&source_path);
-    let source = fs::read_to_string(&source_absolute)?;
+    let source = match fs::read_to_string(&source_absolute) {
+        Ok(source) => source,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ReferenceRepairError::Stale);
+        }
+        Err(error) => return Err(ReferenceRepairError::Io(error)),
+    };
     if page_revision(&source) != request.source_revision {
         return Err(ReferenceRepairError::Stale);
     }
 
     match request.action {
         ReferenceRepairAction::Create { folder, body } => {
-            prepare_create(vault, issue, source_path, source, folder, body)
+            prepare_create(vault, index, issue, source_path, source, folder, body)
         }
         ReferenceRepairAction::Replace { candidate_page_id } => prepare_replace(
             index,
@@ -108,6 +114,7 @@ fn current_issue(
 
 fn prepare_create(
     vault: &Vault,
+    index: &VaultIndex,
     issue: ReferenceIssue,
     source_path: VaultPath,
     source: String,
@@ -140,35 +147,26 @@ fn prepare_create(
         ));
     }
 
+    let timestamp = source_timestamp(index, &issue.source_id)?;
     let mut meta = PageMeta::new();
+    meta.id = deterministic_page_id(&issue.fingerprint, timestamp);
     meta.title = Some(target.to_string());
+    meta.created_at = Some(timestamp);
+    meta.updated_at = Some(timestamp);
     let created = write_page_content(&meta, body.as_deref().unwrap_or_default()).into_bytes();
-    let source_bytes = source.into_bytes();
-    let create_directories = missing_parent_directories(vault, &destination)?;
 
     let mut plan = MutationPlan::empty();
+    plan.stage_create_file(vault, destination.clone(), created)?;
+    plan.staged_writes.push(super::mutation::StagedWrite {
+        path: vault.resolve(&source_path),
+        expected_bytes: source.as_bytes().to_vec(),
+        content: source,
+    });
     plan.index_events = vec![
-        ChangeEvent::Upsert(destination.clone()),
-        ChangeEvent::Upsert(source_path.clone()),
+        ChangeEvent::Upsert(destination),
+        ChangeEvent::Upsert(source_path),
     ];
-    let command = BatchMutationCommand {
-        intents: vec![
-            BatchPathIntent::Write {
-                path: destination.clone(),
-                expected: ExpectedPathState::Missing,
-                content: created,
-            },
-            BatchPathIntent::Write {
-                path: source_path.clone(),
-                expected: ExpectedPathState::Bytes(source_bytes.clone()),
-                content: source_bytes,
-            },
-        ],
-        create_directories,
-        remove_directories: Vec::new(),
-        index_events: plan.index_events.clone(),
-        moved_pages: Vec::new(),
-    };
+    let command = plan.clone().into_batch_command(vault)?;
 
     Ok(PreparedReferenceRepair {
         fingerprint: issue.fingerprint,
@@ -463,25 +461,39 @@ fn replace_reference_target(
     Err(ReferenceRepairError::Stale)
 }
 
-fn missing_parent_directories(
-    vault: &Vault,
-    path: &VaultPath,
-) -> Result<Vec<VaultPath>, ReferenceRepairError> {
-    let Some(parent) = path.parent() else {
-        return Ok(Vec::new());
-    };
-    let mut current = String::new();
-    let mut directories = Vec::new();
-    for component in parent.split('/') {
-        if !current.is_empty() {
-            current.push('/');
-        }
-        current.push_str(component);
-        let path = VaultPath::new(&current)
-            .map_err(|error| ReferenceRepairError::Invalid(error.to_string()))?;
-        if !vault.resolve(&path).exists() {
-            directories.push(path);
-        }
-    }
-    Ok(directories)
+fn source_timestamp(
+    index: &VaultIndex,
+    source_id: &str,
+) -> Result<chrono::DateTime<chrono::Utc>, ReferenceRepairError> {
+    let (updated_at, created_at): (Option<String>, Option<String>) = index
+        .connection()
+        .query_row(
+            "SELECT updated_at, created_at FROM pages WHERE id = ?1",
+            [source_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(IndexError::Sqlite)?;
+    updated_at
+        .or(created_at)
+        .and_then(|value| chrono::DateTime::parse_from_rfc3339(&value).ok())
+        .map(|value| value.with_timezone(&chrono::Utc))
+        .ok_or_else(|| {
+            ReferenceRepairError::Invalid(
+                "source page has no stable timestamp for deterministic creation".to_string(),
+            )
+        })
+}
+
+fn deterministic_page_id(
+    fingerprint: &str,
+    timestamp: chrono::DateTime<chrono::Utc>,
+) -> uuid::Uuid {
+    let digest = blake3::hash(format!("reference-repair-create\0{fingerprint}").as_bytes());
+    let mut bytes = [0_u8; 16];
+    let millis = u64::try_from(timestamp.timestamp_millis()).unwrap_or_default();
+    bytes[..6].copy_from_slice(&millis.to_be_bytes()[2..]);
+    bytes[6..].copy_from_slice(&digest.as_bytes()[..10]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x70;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    uuid::Uuid::from_bytes(bytes)
 }

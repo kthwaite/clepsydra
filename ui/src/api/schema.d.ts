@@ -2080,7 +2080,7 @@ export interface components {
             source_value?: string | null;
         };
         /** @enum {string} */
-        FileOpKind: "rename" | "delete" | "create_dir";
+        FileOpKind: "rename" | "delete" | "create_dir" | "create_file";
         /** @description Recursive filter AST: all, any, not, or a field comparison */
         Filter: {
             all: components["schemas"]["Filter"][];
@@ -2366,6 +2366,7 @@ export interface components {
             title?: string | null;
         };
         PlannedFileOp: {
+            content_hash?: string | null;
             destination?: string | null;
             kind: components["schemas"]["FileOpKind"];
             path: string;

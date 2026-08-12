@@ -2454,21 +2454,32 @@ fn reference_issues_openapi_registers_route_parameters_and_schemas() {
     );
 }
 
+fn reference_repair_fixture() -> ApiFixture {
+    ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            for (path, content) in [
+                (
+                    "source.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nSee [[Twin|the chosen twin]] and [[Missing Page]].\n",
+                ),
+                (
+                    "twin-a.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000611\ntitle: Twin\n---\nFirst.\n",
+                ),
+                (
+                    "twin-b.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000612\ntitle: Twin\n---\nSecond.\n",
+                ),
+            ] {
+                fs::write(root.join("notes").join(path), content).unwrap();
+            }
+        })
+        .build()
+}
+
 fn reference_repair_server() -> (TestServer, TempDir) {
-    setup_server_with_files(&[
-        (
-            "notes/source.md",
-            "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nSee [[Twin|the chosen twin]] and [[Missing Page]].\n",
-        ),
-        (
-            "notes/twin-a.md",
-            "---\nid: 019fd000-0000-7000-8000-000000000611\ntitle: Twin\n---\nFirst.\n",
-        ),
-        (
-            "notes/twin-b.md",
-            "---\nid: 019fd000-0000-7000-8000-000000000612\ntitle: Twin\n---\nSecond.\n",
-        ),
-    ])
+    reference_repair_fixture().into_server_and_temp()
 }
 
 async fn reference_repair_issue(
@@ -2514,6 +2525,20 @@ fn reference_repair_create_request(issue: &serde_json::Value) -> serde_json::Val
             "body": "Created through reference repair.\n",
         },
     })
+}
+
+async fn reference_repair_apply_through_app(
+    app: Router,
+    request: serde_json::Value,
+) -> axum::response::Response {
+    app.oneshot(
+        Request::post("/api/vault/index/issues/apply")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&request).unwrap()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
 }
 
 #[tokio::test]
@@ -2580,10 +2605,200 @@ async fn reference_repair_apply_rejects_source_changed_after_preview() {
 }
 
 #[tokio::test]
-async fn reference_repair_create_resolves_original_no_match_after_indexing() {
+async fn reference_repair_source_missing_after_preview_is_stale() {
     let (server, tmp) = reference_repair_server();
     let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
     let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    fs::remove_file(tmp.path().join("vault/notes/source.md")).unwrap();
+    let response = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    response.assert_status(StatusCode::CONFLICT);
+    assert!(!tmp.path().join("vault/notes/Missing Page.md").exists());
+}
+
+#[tokio::test]
+async fn reference_repair_genuine_source_io_error_remains_internal() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    fs::remove_file(&source_path).unwrap();
+    fs::create_dir(&source_path).unwrap();
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_internal_server_error();
+    assert!(!tmp.path().join("vault/notes/Missing Page.md").exists());
+}
+
+#[tokio::test]
+async fn reference_repair_candidate_deleted_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue =
+        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let candidate = issue["candidates"][0].clone();
+    let request =
+        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let source_path = fixture.temp_dir.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    fs::remove_file(
+        fixture
+            .temp_dir
+            .path()
+            .join("vault")
+            .join(candidate["path"].as_str().unwrap()),
+    )
+    .unwrap();
+    let removed_path =
+        clepsydra::vault::path::VaultPath::new(candidate["path"].as_str().unwrap()).unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, _| {
+            index.remove_page(&removed_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+}
+
+#[tokio::test]
+async fn reference_repair_candidate_changed_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue =
+        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let candidate = issue["candidates"][0].clone();
+    let request =
+        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let candidate_path = candidate["path"].as_str().unwrap();
+    fs::write(
+        fixture.temp_dir.path().join("vault").join(candidate_path),
+        format!(
+            "---\nid: {}\ntitle: No Longer Twin\n---\nChanged.\n",
+            candidate["page_id"].as_str().unwrap()
+        ),
+    )
+    .unwrap();
+    let indexed_path = clepsydra::vault::path::VaultPath::new(candidate_path).unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, vault| {
+            index.index_page(vault, &indexed_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn reference_repair_competing_canonical_target_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue =
+        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let request = reference_repair_replace_request(
+        &issue,
+        issue["candidates"][0]["page_id"].as_str().unwrap(),
+    );
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let source_path = fixture.temp_dir.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    fs::write(
+        fixture.temp_dir.path().join("vault/notes/twin-c.md"),
+        "---\nid: 019fd000-0000-7000-8000-000000000622\ntitle: Twin\n---\nThird.\n",
+    )
+    .unwrap();
+    let added_path = clepsydra::vault::path::VaultPath::new("notes/twin-c.md").unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, vault| {
+            index.index_page(vault, &added_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+}
+
+#[tokio::test]
+async fn reference_repair_create_resolves_original_no_match_after_indexing() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let mut request = reference_repair_create_request(&issue);
+    request["action"]["folder"] = serde_json::json!("new/nested");
 
     let preview = server
         .post("/api/vault/index/issues/preview")
@@ -2594,7 +2809,31 @@ async fn reference_repair_create_resolves_original_no_match_after_indexing() {
     assert_eq!(preview["before"], "[[Missing Page]]");
     assert_eq!(preview["after"], "[[Missing Page]]");
     assert_eq!(preview["plan"]["text_edits"], serde_json::json!([]));
+    let file_ops = preview["plan"]["file_ops"].as_array().unwrap();
+    assert!(file_ops.iter().any(|op| {
+        op["kind"] == "create_dir" && op["path"] == "new"
+    }));
+    assert!(file_ops.iter().any(|op| {
+        op["kind"] == "create_dir" && op["path"] == "new/nested"
+    }));
+    let create_file = file_ops
+        .iter()
+        .find(|op| op["kind"] == "create_file")
+        .unwrap();
+    assert_eq!(create_file["path"], "new/nested/Missing Page.md");
+    let previewed_hash = create_file["content_hash"].as_str().unwrap();
+    assert_eq!(previewed_hash.len(), 64);
 
+    let second_preview: serde_json::Value = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .json();
+    assert_eq!(
+        second_preview["plan"]["file_ops"],
+        preview["plan"]["file_ops"],
+        "the immutable created-page identity must not be regenerated"
+    );
     let apply = server
         .post("/api/vault/index/issues/apply")
         .json(&request)
@@ -2603,10 +2842,15 @@ async fn reference_repair_create_resolves_original_no_match_after_indexing() {
     let apply: serde_json::Value = apply.json();
     assert_eq!(
         apply["notification"]["upserted"],
-        serde_json::json!(["notes/Missing Page.md", "notes/source.md"])
+        serde_json::json!(["new/nested/Missing Page.md", "notes/source.md"])
     );
-    assert!(tmp.path().join("vault/notes/Missing Page.md").is_file());
-
+    let created_path = tmp.path().join("vault/new/nested/Missing Page.md");
+    let created = fs::read(&created_path).unwrap();
+    assert_eq!(
+        blake3::hash(&created).to_hex().as_str(),
+        previewed_hash,
+        "apply must publish the exact previewed bytes"
+    );
     let issues: serde_json::Value = server
         .get("/api/vault/index/issues?kind=unresolved_page_link&limit=200")
         .await
@@ -2802,6 +3046,17 @@ fn reference_repair_openapi_registers_typed_contracts() {
             "missing OpenAPI schema {schema}"
         );
     }
+    assert!(
+        openapi["components"]["schemas"]["FileOpKind"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("create_file"))
+    );
+    assert!(
+        openapi["components"]["schemas"]["PlannedFileOp"]["properties"]
+            .get("content_hash")
+            .is_some()
+    );
 }
 
 // ---------------------------------------------------------------------------

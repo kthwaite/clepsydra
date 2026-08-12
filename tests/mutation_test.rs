@@ -291,11 +291,13 @@ fn public_rename_and_delete_file_ops_are_converted_to_batch_intents() {
         kind: FileOpKind::Rename,
         path: "source.md".to_string(),
         destination: Some("archive/source.md".to_string()),
+        content_hash: None,
     });
     plan.file_ops.push(PlannedFileOp {
         kind: FileOpKind::Delete,
         path: "obsolete.md".to_string(),
         destination: None,
+        content_hash: None,
     });
 
     let command = plan.into_batch_command(&vault).unwrap();
@@ -439,6 +441,7 @@ fn explicit_create_dir_plan_becomes_preparation_metadata() {
         kind: FileOpKind::CreateDir,
         path: "archive/nested".to_string(),
         destination: None,
+        content_hash: None,
     });
 
     let command = plan.into_batch_command(&vault).unwrap();
@@ -450,6 +453,61 @@ fn explicit_create_dir_plan_becomes_preparation_metadata() {
             .collect::<Vec<_>>(),
         vec!["archive", "archive/nested"]
     );
+}
+
+#[test]
+fn staged_create_file_carries_previewed_content_identity_into_batch() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let path = VaultPath::new("archive/new.md").unwrap();
+    let content = b"immutable created bytes".to_vec();
+    let expected_hash = blake3::hash(&content).to_hex().to_string();
+    let mut plan = MutationPlan::empty();
+    plan.stage_create_file(&vault, path.clone(), content.clone())
+        .unwrap();
+
+    assert_eq!(plan.file_ops.len(), 2);
+    assert!(plan.file_ops.iter().any(|operation| {
+        matches!(operation.kind, FileOpKind::CreateDir)
+            && operation.path == "archive"
+    }));
+    assert!(plan.file_ops.iter().any(|operation| {
+        matches!(operation.kind, FileOpKind::CreateFile)
+            && operation.path == path.as_str()
+            && operation.content_hash.as_deref() == Some(expected_hash.as_str())
+    }));
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    assert!(command.intents.iter().any(|intent| {
+        matches!(
+            intent,
+            BatchPathIntent::Write {
+                path: created_path,
+                expected: ExpectedPathState::Missing,
+                content: created_content,
+            } if created_path == &path && created_content == &content
+        )
+    }));
+}
+
+#[tokio::test]
+async fn global_mutation_exclusion_blocks_new_path_mutations() {
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let exclusion = coordinator.exclude_mutations().await;
+    let waiting_coordinator = Arc::clone(&coordinator);
+    let mut waiter = tokio::spawn(async move {
+        waiting_coordinator
+            .lock_paths(&[VaultPath::new("notes/source.md").unwrap()])
+            .await
+    });
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), &mut waiter)
+            .await
+            .is_err(),
+        "ordinary path mutations must wait behind global revalidation exclusion"
+    );
+    drop(exclusion);
+    let _guard = waiter.await.unwrap();
 }
 
 #[test]

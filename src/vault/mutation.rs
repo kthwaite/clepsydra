@@ -170,6 +170,7 @@ pub struct PlannedFileOp {
     pub kind: FileOpKind,
     pub path: String,
     pub destination: Option<String>,
+    pub content_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -178,6 +179,7 @@ pub enum FileOpKind {
     Rename,
     Delete,
     CreateDir,
+    CreateFile,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -232,6 +234,28 @@ impl MutationPlan {
         }
     }
 
+    pub fn stage_create_file(
+        &mut self,
+        vault: &Vault,
+        path: VaultPath,
+        content: Vec<u8>,
+    ) -> Result<(), IndexError> {
+        collect_missing_parent_directories(vault, &path, &mut self.create_directories)?;
+        self.expose_create_directories();
+        self.file_ops.push(PlannedFileOp {
+            kind: FileOpKind::CreateFile,
+            path: path.as_str().to_string(),
+            destination: None,
+            content_hash: Some(blake3::hash(&content).to_hex().to_string()),
+        });
+        self.primary_intents.push(BatchPathIntent::Write {
+            path,
+            expected: ExpectedPathState::Missing,
+            content,
+        });
+        Ok(())
+    }
+
     fn expose_create_directories(&mut self) {
         for directory in &self.create_directories {
             if !self.file_ops.iter().any(|operation| {
@@ -242,6 +266,7 @@ impl MutationPlan {
                     kind: FileOpKind::CreateDir,
                     path: directory.as_str().to_string(),
                     destination: None,
+                    content_hash: None,
                 });
             }
         }
@@ -282,6 +307,27 @@ impl MutationPlan {
 
         for op in file_ops {
             match op.kind {
+                FileOpKind::CreateFile => {
+                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let represented = primary_intents.iter().any(|intent| {
+                        matches!(
+                            intent,
+                            BatchPathIntent::Write {
+                                path: planned,
+                                expected: ExpectedPathState::Missing,
+                                content,
+                            } if planned == &path
+                                && op.content_hash.as_deref()
+                                    == Some(blake3::hash(content).to_hex().as_str())
+                        )
+                    });
+                    if !represented {
+                        return Err(IndexError::Other(format!(
+                            "create-file plan is missing immutable content for {}",
+                            path.as_str()
+                        )));
+                    }
+                }
                 FileOpKind::CreateDir => {
                     let directory = VaultPath::new(&op.path).map_err(vp_err)?;
                     collect_missing_parent_directories(vault, &directory, &mut create_directories)?;
@@ -447,6 +493,7 @@ impl<'a> MutationPlanner<'a> {
             kind: FileOpKind::Rename,
             path: source.to_string(),
             destination: Some(destination.to_string()),
+            content_hash: None,
         });
         plan.moved_pages.push((source_vp.clone(), dest_vp.clone()));
         collect_missing_parent_directories(
@@ -559,6 +606,7 @@ impl<'a> MutationPlanner<'a> {
             kind: FileOpKind::Delete,
             path: path.to_string(),
             destination: None,
+            content_hash: None,
         });
         plan.primary_intents.push(BatchPathIntent::Delete {
             path: target_vp.clone(),
@@ -670,6 +718,7 @@ impl<'a> MutationPlanner<'a> {
             kind: FileOpKind::Rename,
             path: source.to_string(),
             destination: Some(destination.to_string()),
+            content_hash: None,
         });
 
         // Snapshot the folder exactly once. File intents, directory metadata,

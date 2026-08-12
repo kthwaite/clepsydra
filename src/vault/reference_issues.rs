@@ -377,6 +377,8 @@ struct IssueDraft {
 
 impl IssueDraft {
     fn finish(mut self) -> ReferenceIssue {
+        self.issue.fingerprint =
+            evidence_fingerprint(&self.issue.fingerprint, &self.issue.candidates);
         self.issue.actions = actions_for(
             self.issue.kind,
             self.encrypted,
@@ -528,6 +530,22 @@ fn fingerprint(
         span_end.map_or_else(String::new, |value| value.to_string()),
         target_raw.unwrap_or_default(),
     );
+    blake3::hash(identity.as_bytes()).to_hex().to_string()
+}
+
+fn evidence_fingerprint(base: &str, candidates: &[ReferenceCandidate]) -> String {
+    let mut identity = String::from("v1-evidence\0");
+    identity.push_str(base);
+    for candidate in candidates {
+        identity.push('\0');
+        identity.push_str(&candidate.page_id);
+        identity.push('\0');
+        identity.push_str(&candidate.path);
+        identity.push('\0');
+        identity.push_str(candidate.title.as_deref().unwrap_or_default());
+        identity.push('\0');
+        identity.push_str(&candidate.rationale);
+    }
     blake3::hash(identity.as_bytes()).to_hex().to_string()
 }
 
@@ -1014,11 +1032,12 @@ mod tests {
             })
             .unwrap();
         let issue = &page.items[0];
-        let expected = blake3::hash(
+        let base = blake3::hash(
             b"v1\0broken_block_ref\0source\0rev-1\07\015\0((dead))",
         )
         .to_hex()
         .to_string();
+        let expected = evidence_fingerprint(&base, &[]);
 
         assert_eq!(issue.fingerprint, expected);
         assert_eq!(issue.source_id, "source");
@@ -1127,14 +1146,12 @@ mod tests {
             .iter()
             .find(|issue| issue.kind == ReferenceIssueKind::UnresolvedPageLink)
             .unwrap();
-        assert_eq!(
-            wiki.fingerprint,
-            blake3::hash(
-                b"v1\0unresolved_page_link\0encrypted\0secret-rev\07\017\0[[secret]]"
-            )
-            .to_hex()
-            .to_string()
-        );
+        let base = blake3::hash(
+            b"v1\0unresolved_page_link\0encrypted\0secret-rev\07\017\0[[secret]]",
+        )
+        .to_hex()
+        .to_string();
+        assert_eq!(wiki.fingerprint, evidence_fingerprint(&base, &[]));
     }
 
     #[test]

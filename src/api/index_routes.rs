@@ -631,6 +631,7 @@ pub async fn reference_repair_apply(
     State(state): State<Arc<AppState>>,
     Json(request): Json<ReferenceRepairRequest>,
 ) -> Result<Json<ReferenceRepairApplyResponse>, ApiError> {
+    let exclusion = state.mutation_coordinator.exclude_mutations().await;
     let prepared = state
         .index
         .with_index(move |index, vault| {
@@ -642,7 +643,8 @@ pub async fn reference_repair_apply(
     let fingerprint = prepared.fingerprint;
     let notification = state
         .mutation_coordinator
-        .execute_batch(
+        .execute_batch_excluded(
+            &exclusion,
             &state.vault,
             &state.index,
             Arc::clone(&state.hooks),

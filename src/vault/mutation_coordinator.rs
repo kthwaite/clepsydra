@@ -38,6 +38,7 @@ type BeforeBatchLockHook = dyn Fn(&[VaultPath]) + Send + Sync;
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
+    mutation_gate: Arc<RwLock<()>>,
     locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
     before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
     after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
@@ -463,6 +464,7 @@ fn sync_rollback_parent(_parent: &Path) -> io::Result<()> {
 impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
+            mutation_gate: Arc::new(RwLock::new(())),
             locks: parking_lot::Mutex::new(HashMap::new()),
             before_update_publish_hook: parking_lot::Mutex::new(None),
             after_page_id_lookup_hook: parking_lot::Mutex::new(None),
@@ -538,6 +540,13 @@ impl MutationCoordinator {
     /// subtrees proceed concurrently while a folder deletion excludes all
     /// descendants.
     pub async fn lock_paths(&self, paths: &[VaultPath]) -> MutationGuard {
+        let gate_guard = Arc::clone(&self.mutation_gate).read_owned().await;
+        let mut guard = self.lock_paths_excluded(paths).await;
+        guard._gate_guard = Some(gate_guard);
+        guard
+    }
+
+    async fn lock_paths_excluded(&self, paths: &[VaultPath]) -> MutationGuard {
         let mut requests = BTreeMap::<String, bool>::new();
         for path in paths {
             let components = path.as_str().split('/').collect::<Vec<_>>();
@@ -591,8 +600,15 @@ impl MutationCoordinator {
         }
 
         MutationGuard {
+            _gate_guard: None,
             _guards: guards,
             _locks: locks.into_iter().map(|request| request.lock).collect(),
+        }
+    }
+
+    pub async fn exclude_mutations(&self) -> MutationExclusionGuard {
+        MutationExclusionGuard {
+            _guard: Arc::clone(&self.mutation_gate).write_owned().await,
         }
     }
 
@@ -649,6 +665,38 @@ impl MutationCoordinator {
             hook(&affected_paths);
         }
         let guard = self.lock_paths(&affected_paths).await;
+        self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
+            .await
+    }
+
+    pub async fn execute_batch_excluded(
+        &self,
+        _exclusion: &MutationExclusionGuard,
+        vault: &Vault,
+        index: &IndexHandle,
+        hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
+        command: BatchMutationCommand,
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
+    ) -> Result<MutationNotification, MutationError> {
+        let affected_paths = command.affected_paths();
+        #[cfg(test)]
+        if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
+            hook(&affected_paths);
+        }
+        let guard = self.lock_paths_excluded(&affected_paths).await;
+        self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
+            .await
+    }
+
+    async fn execute_batch_with_guard(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
+        command: BatchMutationCommand,
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
+        guard: MutationGuard,
+    ) -> Result<MutationNotification, MutationError> {
         let root = vault.root().to_path_buf();
         let shield_path = root.clone();
         let index = index.clone();
@@ -1382,7 +1430,12 @@ enum MutationLockGuard {
     Write { _guard: OwnedRwLockWriteGuard<()> },
 }
 
+
+pub struct MutationExclusionGuard {
+    _guard: OwnedRwLockWriteGuard<()>,
+}
 pub struct MutationGuard {
+    _gate_guard: Option<OwnedRwLockReadGuard<()>>,
     _guards: Vec<MutationLockGuard>,
     _locks: Vec<Arc<RwLock<()>>>,
 }
