@@ -479,6 +479,52 @@ describe("Folio invalid-tab recovery", () => {
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
   });
+
+  it("orders recent open Folios by activation without tab pin controls", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "t1",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+          lastActiveAt: 1,
+        },
+        {
+          id: "t2",
+          type: "page",
+          path: "notes/beta.md",
+          label: "Beta",
+          lastActiveAt: 2,
+        },
+      ],
+      activeTabId: "t1",
+      quires: {},
+      openHistory: [],
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const recent = screen.getByText("Recent").parentElement!;
+    expect(
+      within(recent).queryByRole("button", { name: /pin tab/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(recent).getAllByRole("button", { name: "Close tab" }),
+    ).toHaveLength(2);
+
+    const beta = within(recent).getByRole("button", { name: "Beta" });
+    const alpha = within(recent).getByRole("button", { name: "Alpha" });
+    expect(
+      beta.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+
+    await user.click(beta);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t2");
+  });
+
 });
 
 describe("Folio outbound links", () => {

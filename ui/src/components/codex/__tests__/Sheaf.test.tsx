@@ -72,6 +72,22 @@ describe("Sheaf quire rendering", () => {
     await user.click(screen.getByRole("button", { name: /quire thesis/i }));
     expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(true);
   });
+
+  it("keeps activation and close controls without tab pin controls", async () => {
+    const user = userEvent.setup();
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+
+    expect(
+      screen.queryByRole("button", { name: /pin folio/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByRole("button", { name: "close folio" }),
+    ).toHaveLength(3);
+
+    await user.click(screen.getByRole("button", { name: "Alpha" }));
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t1");
+  });
 });
 
 describe("Sheaf creation action", () => {

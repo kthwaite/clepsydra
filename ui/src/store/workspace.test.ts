@@ -185,41 +185,6 @@ describe("useWorkspaceStore block focus requests", () => {
     ).toBeUndefined();
   });
 
-  it("cancels a retained pinned request when close-other-tabs activates another tab", () => {
-    useWorkspaceStore.setState({
-      tabs: [
-        {
-          id: "source",
-          type: "page",
-          path: "source.md",
-          label: "Source",
-          pinned: true,
-          focusBlockId: "abc123DEF0",
-          focusRequestId: "request-1",
-        },
-        {
-          id: "other",
-          type: "page",
-          path: "other.md",
-          label: "Other",
-        },
-      ],
-      activeTabId: "source",
-      navigationMode: "new",
-      openHistory: [],
-      quires: {},
-    });
-
-    useWorkspaceStore.getState().closeOtherTabs("other");
-
-    const source = useWorkspaceStore
-      .getState()
-      .tabs.find((tab) => tab.id === "source");
-    expect(useWorkspaceStore.getState().activeTabId).toBe("other");
-    expect(source?.focusBlockId).toBeUndefined();
-    expect(source?.focusRequestId).toBeUndefined();
-  });
-
   it("retains a pending request when an inactive tab closes", () => {
     useWorkspaceStore.setState({
       tabs: [
@@ -370,9 +335,23 @@ describe("migrateWorkspace", () => {
     expect(out.quires).toEqual({});
   });
 
-  it("passes v3 state through untouched", () => {
-    const v3 = { tabs: [], activeTabId: null, openHistory: [], quires: {} };
-    expect(migrateWorkspace(v3, 3)).toEqual(v3);
+  it("v4 migration strips obsolete persisted pin fields", () => {
+    const migrated = migrateWorkspace(
+      {
+        tabs: [
+          {
+            ...pageTab("old"),
+            pinned: true,
+          },
+        ],
+        quires: {},
+        openHistory: [],
+      },
+      3,
+    );
+
+    expect(migrated.tabs).toHaveLength(1);
+    expect(migrated.tabs?.[0]).not.toHaveProperty("pinned");
   });
 });
 
@@ -386,14 +365,13 @@ function resetStore() {
   });
 }
 
-function pageTab(id: string, quireId?: string, pinned?: boolean) {
+function pageTab(id: string, quireId?: string) {
   return {
     id,
     type: "page" as const,
     path: `${id}.md`,
     label: id,
     quireId,
-    pinned,
   };
 }
 
@@ -494,31 +472,20 @@ describe("quire actions", () => {
     expect(useWorkspaceStore.getState().activeTabId).toBeNull();
   });
 
-  it("closeQuireTabs closes unpinned members; pinned + quire survive", () => {
+  it("closeQuireTabs closes every member and dissolves the quire", () => {
     resetStore();
     useWorkspaceStore.setState({
-      tabs: [pageTab("t1", "q1", true), pageTab("t2", "q1"), pageTab("t3")],
-      activeTabId: "t2",
+      tabs: [pageTab("q1-a", "q1"), pageTab("q1-b", "q1"), pageTab("other")],
+      activeTabId: "q1-a",
       quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
     });
-    useWorkspaceStore.getState().closeQuireTabs("q1");
-    const state = useWorkspaceStore.getState();
-    expect(state.tabs.map((t) => t.id)).toEqual(["t1", "t3"]);
-    expect(state.quires.q1).toBeDefined();
-    expect(state.activeTabId).toBe("t1");
-  });
 
-  it("closeQuireTabs dissolves a fully-unpinned quire", () => {
-    resetStore();
-    useWorkspaceStore.setState({
-      tabs: [pageTab("t1", "q1"), pageTab("t2")],
-      activeTabId: "t2",
-      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
-    });
     useWorkspaceStore.getState().closeQuireTabs("q1");
-    const state = useWorkspaceStore.getState();
-    expect(state.tabs.map((t) => t.id)).toEqual(["t2"]);
-    expect(state.quires.q1).toBeUndefined();
+
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "other",
+    ]);
+    expect(useWorkspaceStore.getState().quires.q1).toBeUndefined();
   });
 
   it("ungroupQuire strips membership and deletes the record", () => {
@@ -669,16 +636,17 @@ describe("visibility-aware closing", () => {
     expect(useWorkspaceStore.getState().quires.q1).toBeUndefined();
   });
 
-  it("closeOtherTabs spares pinned tabs and dead quires dissolve", () => {
+  it("closeOtherTabs closes every tab except the requested survivor", () => {
     resetStore();
     useWorkspaceStore.setState({
-      tabs: [pageTab("t1", "q1"), pageTab("t2", "q1", true), pageTab("t3")],
-      activeTabId: "t3",
-      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+      tabs: [pageTab("old"), pageTab("active")],
+      activeTabId: "active",
     });
-    useWorkspaceStore.getState().closeOtherTabs("t3");
-    const state = useWorkspaceStore.getState();
-    expect(state.tabs.map((t) => t.id)).toEqual(["t2", "t3"]);
-    expect(state.quires.q1).toBeDefined(); // pinned member keeps it alive
+
+    useWorkspaceStore.getState().closeOtherTabs("active");
+
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "active",
+    ]);
   });
 });

@@ -118,40 +118,6 @@ export function cycleTargetId(
   return visible[next].id;
 }
 
-/** Display order for the SHEAF strip: pinned-ungrouped tabs first, then the
- * remaining segments in array order; within each quire run, pinned members
- * first. Assumes quire runs are already contiguous (post-normalize). */
-export function orderSheafTabs(
-  tabs: TabDescriptor[],
-  quires: Record<string, Quire>,
-): TabDescriptor[] {
-  void quires;
-  const pinnedUngrouped = tabs.filter((t) => t.pinned && !t.quireId);
-  const rest: TabDescriptor[] = [];
-  let i = 0;
-  while (i < tabs.length) {
-    const t = tabs[i];
-    if (t.pinned && !t.quireId) {
-      i++;
-    } else if (t.quireId) {
-      const qid = t.quireId;
-      const run: TabDescriptor[] = [];
-      while (i < tabs.length && tabs[i].quireId === qid) {
-        run.push(tabs[i]);
-        i++;
-      }
-      rest.push(
-        ...run.filter((m) => m.pinned),
-        ...run.filter((m) => !m.pinned),
-      );
-    } else {
-      rest.push(t);
-      i++;
-    }
-  }
-  return [...pinnedUngrouped, ...rest];
-}
-
 export type SheafSegment =
   | { kind: "tab"; tab: TabDescriptor }
   | { kind: "quire"; quire: Quire; members: TabDescriptor[] };

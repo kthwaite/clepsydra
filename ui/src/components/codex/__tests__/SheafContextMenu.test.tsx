@@ -71,6 +71,22 @@ describe("SheafContextMenu — tab target", () => {
       useWorkspaceStore.getState().tabs.find((t) => t.id === "t2")?.quireId,
     ).toBeUndefined();
   });
+
+  it("keeps close actions without tab pin actions", () => {
+    seed();
+    render(
+      <SheafContextMenu
+        target={{ kind: "tab", tabId: "t1", x: 10, y: 10 }}
+        onClose={() => {}}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("menuitem", { name: /^(un)?pin$/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "CLOSE" })).toBeVisible();
+    expect(screen.getByRole("menuitem", { name: "CLOSE OTHERS" })).toBeVisible();
+  });
 });
 
 describe("SheafContextMenu — quire target", () => {
@@ -117,7 +133,7 @@ describe("SheafContextMenu — quire target", () => {
     expect(useWorkspaceStore.getState().quires.q1.color).toBe("madder");
   });
 
-  it("closes the quire's unpinned members", async () => {
+  it("closes every quire member", async () => {
     seed();
     const user = userEvent.setup();
     render(

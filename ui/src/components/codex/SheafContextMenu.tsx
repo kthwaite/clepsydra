@@ -63,13 +63,7 @@ export function SheafContextMenu({ target, onClose }: SheafContextMenuProps) {
     if (!tab) return null;
     content = (
       <>
-        <Row
-          label={tab.pinned ? "UNPIN" : "PIN"}
-          onPick={act(() => store().togglePin(tab.id))}
-        />
-        {!tab.pinned && (
-          <Row label="CLOSE" onPick={act(() => store().closeTab(tab.id))} />
-        )}
+        <Row label="CLOSE" onPick={act(() => store().closeTab(tab.id))} />
         <Row
           label="CLOSE OTHERS"
           onPick={act(() => store().closeOtherTabs(tab.id))}

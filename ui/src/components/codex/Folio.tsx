@@ -1736,15 +1736,15 @@ function resolveKindAndColor(path: string) {
 function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
   const tabs = useWorkspaceStore((s) => s.tabs);
   const activateTab = useWorkspaceStore((s) => s.activateTab);
-  const togglePin = useWorkspaceStore((s) => s.togglePin);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const [open, setOpen] = useState(true);
 
-  const pages = tabs.filter((t) => t.type === "page");
-  const pinned = pages.filter((t) => t.pinned);
-  const recent = pages
-    .filter((t) => !t.pinned)
-    .sort((a, b) => (b.lastActiveAt ?? 0) - (a.lastActiveAt ?? 0));
+  const recent = tabs
+    .filter((tab) => tab.type === "page")
+    .sort(
+      (left, right) =>
+        (right.lastActiveAt ?? 0) - (left.lastActiveAt ?? 0),
+    );
 
   return (
     <div className="border-b border-rule-soft px-3 py-3">
@@ -1753,42 +1753,25 @@ function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
         onClick={() => setOpen((o) => !o)}
         className="cl-mono mb-1.5 flex w-full cursor-pointer items-center justify-between text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-ink"
       >
-        <span>Open files · {pages.length}</span>
+        <span>Open files · {recent.length}</span>
         <span>{open ? "⌄" : "›"}</span>
       </button>
       {open && (
-        <>
-          {pinned.length > 0 && (
-            <Section title="Pinned">
-              {pinned.map((t) => (
-                <OpenRow
-                  key={t.id}
-                  t={t}
-                  active={t.id === activeTabId}
-                  onActivate={() => activateTab(t.id)}
-                  onTogglePin={() => togglePin(t.id)}
-                  onClose={() => closeTab(t.id)}
-                />
-              ))}
-            </Section>
+        <Section title="Recent">
+          {recent.length === 0 ? (
+            <p className="cl-marg m-0">None open.</p>
+          ) : (
+            recent.map((tab) => (
+              <OpenRow
+                key={tab.id}
+                t={tab}
+                active={tab.id === activeTabId}
+                onActivate={() => activateTab(tab.id)}
+                onClose={() => closeTab(tab.id)}
+              />
+            ))
           )}
-          <Section title="Recent">
-            {recent.length === 0 && pinned.length === 0 ? (
-              <p className="cl-marg m-0">None open.</p>
-            ) : (
-              recent.map((t) => (
-                <OpenRow
-                  key={t.id}
-                  t={t}
-                  active={t.id === activeTabId}
-                  onActivate={() => activateTab(t.id)}
-                  onTogglePin={() => togglePin(t.id)}
-                  onClose={() => closeTab(t.id)}
-                />
-              ))
-            )}
-          </Section>
-        </>
+        </Section>
       )}
     </div>
   );
@@ -1815,13 +1798,11 @@ function OpenRow({
   t,
   active,
   onActivate,
-  onTogglePin,
   onClose,
 }: {
   t: TabDescriptor;
   active: boolean;
   onActivate: () => void;
-  onTogglePin: () => void;
   onClose: () => void;
 }) {
   const kind = resolveKind({ path: t.path ?? "" });
@@ -1842,20 +1823,6 @@ function OpenRow({
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
           {t.label || t.path || "(untitled)"}
         </span>
-      </button>
-      <button
-        type="button"
-        onClick={onTogglePin}
-        aria-label={t.pinned ? "Unpin tab" : "Pin tab"}
-        title={t.pinned ? "Unpin" : "Pin"}
-        className={cn(
-          "cl-mono flex-shrink-0 cursor-pointer px-1 text-[10px]",
-          t.pinned
-            ? "text-accent"
-            : "text-ink-mute opacity-0 hover:text-ink group-hover:opacity-100",
-        )}
-      >
-        ✶
       </button>
       <button
         type="button"

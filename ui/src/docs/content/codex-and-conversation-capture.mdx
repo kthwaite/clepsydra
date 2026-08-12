@@ -36,13 +36,14 @@ the workspace, but it is not part of the page-tab SHEAF.
 
 On desktop, **SHEAF** is the horizontal page-tab strip:
 
-- choose a tab to activate it; use its pin or close control, or right-click for
-  **PIN**, **CLOSE**, and **CLOSE OTHERS**;
+- choose a tab to activate it; use its close control, or right-click for
+  **CLOSE** and **CLOSE OTHERS**;
 - right-click a page tab and choose **NEW QUIRE…** or add it to an existing
   quire. A quire is only a local tab group, not a vault folder or shared
   collection;
-- choose a quire label to collapse or expand it. Its context menu can rename,
-  recolor, ungroup, or close the quire’s unpinned tabs;
+- choose a quire label to collapse or expand it. Collapsing hides every member
+  without exceptions. Its context menu can rename, recolor, ungroup, or close
+  the quire. **CLOSE QUIRE** closes every member and dissolves the empty quire;
 - a new page opened while an expanded quire member is active inherits that
   quire, creating a self-assembling research context. Graph tabs never join;
 - hover a non-active page tab briefly to open a passive preview of its Folio and
@@ -50,13 +51,12 @@ On desktop, **SHEAF** is the horizontal page-tab strip:
   while a preview is open updates immediately. Preview does not activate or
   edit the page.
 
-Ungrouped pinned tabs render before every remaining segment. A quire keeps its
-place among those remaining segments, and its pinned members render before its
-unpinned members. Pinned quire members survive **CLOSE QUIRE**; pinned tabs are
-not pulled globally ahead of their quire. Activating a tab hidden in a
-collapsed quire expands that quire. The workspace, tab paths and labels, recent
-history, navigation mode, and quire state persist in browser local storage
-under `clepsydra.workspace`; they are not written into Folio Markdown.
+The SHEAF follows workspace order, while each quire keeps its member order.
+Activating a tab hidden in a collapsed quire expands that quire. Recent Folios
+are ordered by activation, newest first, in the open-files accordion. The
+workspace, tab paths and labels, recent history, navigation mode, and quire
+state persist in browser local storage under `clepsydra.workspace`; they are not
+written into Folio Markdown.
 
 ### Read and edit AI conversation Folios
 
