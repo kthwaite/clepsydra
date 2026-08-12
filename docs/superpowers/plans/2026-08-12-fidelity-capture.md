@@ -16,9 +16,11 @@
 - **Size defaults.** `max_blob_size_mb` = **100**, `max_request_size_mb` = **250**. Both hardcoded 100 MB fallbacks (`src/api/mod.rs::api_router`, `src/api/archive.rs::router`) rise to 250 MB with them.
 - **Hash split.** `archive.source_hash` = sha256 of the markdown **as captured** (pre-rewrite); duplicate detection keys on it. `archive.content_hash` = sha256 of the markdown **as stored** (post-rewrite); the read-only justification depends on it.
 - **Strikethrough** stays single-tilde `~text~`, never GFM `~~text~~`.
-- **Never run `biome check --write` across `ui/src`.** The repo is not in a biome-formatted state; it would rewrite ~200 unrelated files. `bun run lint` in `extension/` is scoped to `extension/src` and is safe.
+- **Never reformat files this work does not touch.** Two formatters here will do it if invoked broadly:
+  - **Never run bare `cargo fmt`.** `develop` is **not** `cargo fmt --check` clean — 22 pre-existing files fail it (139 hunks). A workspace-wide format rewrites files this work never touched. Check only what you changed: `rustfmt --check --edition 2024 <changed .rs files>` — and do **not** pass a `mod.rs`, because rustfmt follows `mod` declarations into every child and you are formatting the world again. A one-line `pub mod` addition needs no format check.
+  - **Never run `biome check --write` across `ui/src`.** Same situation: the repo is not in a biome-formatted state and it would rewrite ~200 unrelated files. `bun run lint` in `extension/` is scoped to `extension/src` and is safe.
 - **`bun run openapi` targets `localhost:3000`.** Regenerating against a server running an older binary silently produces a schema missing the new fields that still typechecks. Regenerate against a server built from the working tree (see Task 10).
-- **Verification gates.** `cargo fmt`, `cargo clippy`, `cargo test` for Rust; `bun run typecheck`, `bun run lint`, `bun run test`, `bun run build` in `extension/`. Report results explicitly.
+- **Verification gates.** Scoped `rustfmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` for Rust; `bun run typecheck`, `bun run lint`, `bun run test`, `bun run build` in `extension/`. Report results explicitly.
 
 ## Deliberate deviations from the spec
 
@@ -363,7 +365,7 @@ Expected: 9 passed.
 
 - [ ] **Step 5: Verify the gates**
 
-Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run, as separate commands: `rustfmt --check --edition 2024 src/vault/archive_snapshot.rs`; `cargo clippy --all-targets -- -D warnings`. Do not run bare `cargo fmt`, and do not pass `src/vault/mod.rs` to rustfmt — see Global Constraints.
 Expected: clean.
 
 - [ ] **Step 6: Commit**
@@ -650,7 +652,7 @@ Expected: 20 passed.
 
 - [ ] **Step 5: Verify the gates**
 
-Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run, as separate commands: `rustfmt --check --edition 2024 src/vault/archive_snapshot.rs`; `cargo clippy --all-targets -- -D warnings`. Do not run bare `cargo fmt` — see Global Constraints.
 Expected: clean.
 
 - [ ] **Step 6: Commit**
@@ -1289,7 +1291,7 @@ Expected: all pass, including the seven new integration tests.
 
 - [ ] **Step 9: Verify the gates**
 
-Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | grep -c '^test result: FAILED'`
+Run, as separate commands: `rustfmt --check --edition 2024 src/api/archive.rs src/vault/config.rs src/vault/index.rs tests/archive_test.rs`; `cargo clippy --all-targets -- -D warnings`; `cargo test 2>&1 | grep -c '^test result: FAILED'`. Do not run bare `cargo fmt` — see Global Constraints.
 Expected: clippy clean; the grep prints `0`. Count failures explicitly — parsing the summary line by field position mis-reads the `FAILED.` variant and has reported a green run over an aborted one.
 
 - [ ] **Step 10: Commit**
@@ -2871,7 +2873,8 @@ The two size fields no longer skip an image; they fail a capture. `extension/src
 - [ ] **Step 4: Verify the gates**
 
 ```bash
-cargo fmt --check
+# Scoped: bare `cargo fmt` would rewrite 22 pre-existing files that already fail fmt on develop.
+rustfmt --check --edition 2024 src/vault/archive_snapshot.rs src/api/archive.rs src/vault/config.rs src/vault/index.rs tests/archive_test.rs
 cargo clippy --all-targets -- -D warnings
 cargo test 2>&1 | grep -c '^test result: FAILED'   # expect 0
 cd extension && bun run typecheck && bun run lint && bun run test && bun run build
