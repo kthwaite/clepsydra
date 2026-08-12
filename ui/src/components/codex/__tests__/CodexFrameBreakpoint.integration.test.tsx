@@ -88,6 +88,11 @@ vi.mock("@tanstack/react-router", () => ({
       location: { state: { __TSR_index: 0 } },
     },
   }),
+  useRouterState: ({
+    select,
+  }: {
+    select: (s: { matches: unknown[] }) => unknown;
+  }) => select({ matches: [{ staticData: { codexView: "workspace" } }] }),
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),

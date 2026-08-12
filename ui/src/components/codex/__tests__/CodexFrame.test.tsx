@@ -39,12 +39,39 @@ const {
 vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
 }));
+const TEST_ROUTE_VIEWS: ReadonlyArray<[prefix: string, view: string]> = [
+  ["/workspace", "workspace"],
+  ["/gazetteer", "gazetteer"],
+  ["/tasking", "tasking"],
+  ["/academic", "academic"],
+  ["/bases", "bases"],
+  ["/feeds", "feeds"],
+  ["/docs", "docs"],
+  ["/repairs", "repairs"],
+  ["/agenda", "agenda"],
+];
+
+function testMatches(pathname: string) {
+  const hit = TEST_ROUTE_VIEWS.find(
+    ([p]) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+  return [
+    { staticData: { codexView: "atrium" } },
+    ...(hit ? [{ staticData: { codexView: hit[1] } }] : []),
+  ];
+}
+
 vi.mock("@tanstack/react-router", () => ({
   useLocation: () => {
     locationHookMock();
     return locationState;
   },
   useNavigate: () => navigateMock,
+  useRouterState: ({
+    select,
+  }: {
+    select: (s: { matches: unknown[] }) => unknown;
+  }) => select({ matches: testMatches(locationState.pathname) }),
 }));
 vi.mock("#/api/index", () => ({
   useContentIndex: () => ({ data: { items: [] } }),
@@ -141,11 +168,21 @@ vi.mock("#/store/workspace", () => {
     selector?: (state: typeof workspaceState) => unknown,
   ) => (selector ? selector(workspaceState) : workspaceState);
   useWorkspaceStore.getState = () => workspaceState;
+  const selectActiveTab = (state: typeof workspaceState) =>
+    state.tabs.find((t) => t.id === state.activeTabId);
+  const selectWorkspaceMode = (state: typeof workspaceState) => {
+    const active = selectActiveTab(state);
+    if (active?.type === "graph") return "constellation";
+    if (active?.type === "page" && active.path) return "folio";
+    return "launcher";
+  };
   return {
     runWorkspaceTransition: (transition: () => void) => {
       transition();
       return true;
     },
+    selectActiveTab,
+    selectWorkspaceMode,
     useWorkspaceStore,
   };
 });
@@ -383,6 +420,21 @@ describe("CodexFrame destination integration", () => {
 
     await user.click(academic);
     expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
+  });
+
+  it("shows the launcher state on /workspace with no active tab", () => {
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [];
+    workspaceState.activeTabId = null;
+    renderFrame();
+
+    expect(screen.getByText(/FILE —.*VIEW LAUNCHER/)).toBeInTheDocument();
+    expect(screen.getByTestId("sheaf")).toBeInTheDocument();
+
+    const folioButton = within(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    ).getByRole("button", { name: /01.*FOLIO/i });
+    expect(folioButton).toHaveAttribute("aria-current", "page");
   });
 
   it("retains the reading percentage for Folio", () => {
