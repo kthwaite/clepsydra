@@ -80,7 +80,7 @@ it("returns an empty array for absent data", () => {
 Run:
 
 ```bash
-bun --cwd ui test components/codex/folio-utils.test.ts
+bun test --cwd ui components/codex/folio-utils.test.ts
 ```
 
 Expected: FAIL because `OutlinkEntry` and `visibleFolioOutlinks` are not exported.
@@ -176,7 +176,7 @@ Use the test file's existing render helper and tab-query convention rather than 
 Run:
 
 ```bash
-bun --cwd ui test components/codex/folio-utils.test.ts components/codex/__tests__/Folio.test.tsx
+bun test --cwd ui components/codex/folio-utils.test.ts components/codex/__tests__/Folio.test.tsx
 ```
 
 Expected: both files PASS; the integration test proves count, badge/list source, and metadata-edge exclusion.
@@ -275,7 +275,7 @@ In Sheaf, context-menu, and Folio tests, assert there are no tab `pin`/`unpin` c
 Run:
 
 ```bash
-bun --cwd ui test store/workspace.test.ts store/quires.test.ts components/codex/__tests__/Sheaf.test.tsx components/codex/__tests__/SheafContextMenu.test.tsx components/codex/__tests__/Folio.test.tsx
+bun test --cwd ui store/workspace.test.ts store/quires.test.ts components/codex/__tests__/Sheaf.test.tsx components/codex/__tests__/SheafContextMenu.test.tsx components/codex/__tests__/Folio.test.tsx
 ```
 
 Expected: FAIL because pin actions/controls and pin-preserving close behavior still exist.
@@ -338,7 +338,7 @@ Update `mdx-smoke.test.tsx` to assert the revised close/order contract and remov
 Run:
 
 ```bash
-bun --cwd ui test store/workspace.test.ts store/quires.test.ts components/codex/__tests__/Sheaf.test.tsx components/codex/__tests__/SheafContextMenu.test.tsx components/codex/__tests__/Folio.test.tsx docs/mdx-smoke.test.tsx
+bun test --cwd ui store/workspace.test.ts store/quires.test.ts components/codex/__tests__/Sheaf.test.tsx components/codex/__tests__/SheafContextMenu.test.tsx components/codex/__tests__/Folio.test.tsx docs/mdx-smoke.test.tsx
 ```
 
 Expected: PASS. Then search `ui/src` for tab-only `togglePin` and `TabDescriptor` pin access; only link-preview/feed-domain uses of the word “pinned” may remain.
@@ -409,7 +409,7 @@ In `MobileGazetteer.test.tsx`, click `Filter by tag research` and assert `onSele
 Run:
 
 ```bash
-bun --cwd ui test routes/-gazetteer.test.tsx components/codex/__tests__/MobileGazetteer.test.tsx
+bun test --cwd ui routes/-gazetteer.test.tsx components/codex/__tests__/MobileGazetteer.test.tsx
 ```
 
 Expected: FAIL because result tags are plain spans.
@@ -469,7 +469,7 @@ Use one callback contract on both breakpoints. Active-tag activation must be ine
 Run:
 
 ```bash
-bun --cwd ui test routes/-gazetteer.test.tsx components/codex/__tests__/MobileGazetteer.test.tsx
+bun test --cwd ui routes/-gazetteer.test.tsx components/codex/__tests__/MobileGazetteer.test.tsx
 ```
 
 Expected: PASS, including composition, page reset, deduplication, row-click isolation, and accessibility.
@@ -496,10 +496,10 @@ After all task commits:
 Run the repository gates from `ui/` through Bun's working-directory support:
 
 ```bash
-bun --cwd ui run typecheck
-bun --cwd ui run lint
-bun --cwd ui run test
-bun --cwd ui run build
+bun run --cwd ui typecheck
+bun run --cwd ui lint
+bun run --cwd ui test
+bun run --cwd ui build
 ```
 
 Expected: all commands exit 0. Existing warnings must be reported exactly; new warnings are failures.
