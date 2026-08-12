@@ -33,6 +33,39 @@ const NAV: ReadonlyArray<readonly [CodexView, string]> = [
   ["docs", "DOCS"],
 ];
 
+function UptimeText() {
+  const uptime = useUptime();
+  return (
+    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums opacity-70">
+      up {uptime}
+    </span>
+  );
+}
+
+function UtcClockText() {
+  const clock = formatClock(useClock(), true);
+  return (
+    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums">
+      {clock} UTC
+    </span>
+  );
+}
+
+function useFolioCode(view: CodexView): string {
+  const { tabs, activeTabId } = useWorkspaceStore();
+  if (view === "atrium") return "ATRIUM";
+  if (view === "constellation") return "GRAPH";
+  if (view === "gazetteer") return "INDEX";
+  if (view === "tasking") return "TASKING";
+  if (view === "academic") return "ACADEMIC";
+  if (view === "bases") return "BASES";
+  if (view === "feeds") return "FEEDS";
+  if (view === "docs") return "DOC-001";
+  const active = tabs.find((t) => t.id === activeTabId);
+  if (!active?.path) return "—";
+  return shortFolio(active.path);
+}
+
 export function DesktopCodexFrame({
   bottomSlot,
   forceView,
