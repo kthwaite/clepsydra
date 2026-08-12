@@ -7,5 +7,6 @@ function BaseDefinitionEditRoute() {
 }
 
 export const Route = createFileRoute("/bases/$slug/edit")({
+  staticData: { codexView: "bases" },
   component: BaseDefinitionEditRoute,
 });

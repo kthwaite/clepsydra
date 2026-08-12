@@ -95,6 +95,7 @@ export function repairFiltersToSearch(
 }
 
 export const Route = createFileRoute("/repairs")({
+  staticData: { codexView: "repairs" },
   validateSearch: parseRepairSearch,
   component: RepairsPage,
 });

@@ -19,6 +19,7 @@ type GazetteerSearchPatch = Partial<
 const SORTS: GazetteerSort[] = ["ts", "id", "title", "words"];
 
 export const Route = createFileRoute("/gazetteer")({
+  staticData: { codexView: "gazetteer" },
   validateSearch: (search: Record<string, unknown>): GazetteerSearch => {
     const rawTags = Array.isArray(search.tags)
       ? search.tags

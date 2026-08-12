@@ -12,6 +12,7 @@ import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 import { localDateKey, parseLocalDate } from "#/lib/time";
 
 export const Route = createFileRoute("/agenda")({
+  staticData: { codexView: "agenda" },
   component: AgendaPage,
 });
 

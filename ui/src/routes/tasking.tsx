@@ -49,5 +49,6 @@ function TaskingRoute() {
 }
 
 export const Route = createFileRoute("/tasking")({
+  staticData: { codexView: "tasking" },
   component: TaskingRoute,
 });

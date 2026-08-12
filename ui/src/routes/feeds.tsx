@@ -14,6 +14,7 @@ type FeedsSearch = FeedRiverFilters & {
 };
 
 export const Route = createFileRoute("/feeds")({
+  staticData: { codexView: "feeds" },
   validateSearch: (search: Record<string, unknown>): FeedsSearch => {
     const parsedFeed =
       typeof search.feed === "number"

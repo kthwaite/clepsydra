@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveCodexView } from "#/components/codex/useCodexView";
+import {
+  resolveCodexView,
+  routeViewFromMatches,
+  type RouteView,
+} from "#/components/codex/useCodexView";
 import type { TabDescriptor } from "#/store/workspace";
 
 const pageTab: TabDescriptor = {
@@ -44,5 +48,24 @@ describe("resolveCodexView", () => {
     expect(
       resolveCodexView("/workspace", [pageTab, graphTab], graphTab.id),
     ).toBe("constellation");
+  });
+});
+
+const m = (codexView?: RouteView) => ({ staticData: codexView ? { codexView } : {} });
+
+describe("routeViewFromMatches", () => {
+  it("returns the deepest declared view", () => {
+    expect(routeViewFromMatches([m("atrium"), m("docs")])).toBe("docs");
+  });
+  it("skips undeclared leaf matches and uses the parent", () => {
+    expect(routeViewFromMatches([m("atrium"), m("docs"), m()])).toBe("docs");
+  });
+  it("falls back to atrium when nothing declares", () => {
+    expect(routeViewFromMatches([m()])).toBe("atrium");
+  });
+  it("passes the workspace marker through", () => {
+    expect(routeViewFromMatches([m("atrium"), m("workspace")])).toBe(
+      "workspace",
+    );
   });
 });
