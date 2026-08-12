@@ -548,6 +548,53 @@ describe("TaskCard — keyboard activation", () => {
     // Edit panel must NOT have opened
     expect(useBoardStore.getState().editTaskId).toBeNull();
   });
+
+  it("Enter key on dossier button opens dossier without opening edit panel", async () => {
+    const onOpenDossier = vi.fn();
+    const taskWithLink: BoardTask = {
+      ...tasks[0],
+      id: "t-link",
+      code: "TSK-0020",
+      status: "INTAKE",
+      link: "tasks/alpha",
+    };
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={[taskWithLink]}
+        cycles={cycles}
+        showOp={false}
+        onOpenDossier={onOpenDossier}
+      />,
+    );
+
+    const linkButton = screen.getByText("tasks/alpha");
+    const user = userEvent.setup();
+    linkButton.focus();
+    await user.keyboard("{Enter}");
+
+    // onOpenDossier should be called (native button behavior)
+    expect(onOpenDossier).toHaveBeenCalledWith("tasks/alpha");
+
+    // Edit panel must NOT have opened
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+
+  it("card responds to Enter/Space only when card div itself is focused", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t1");
+    card.focus();
+    fireEvent.keyDown(card, { key: "Enter" });
+    // Card div focused: edit panel should open
+    expect(useBoardStore.getState().editTaskId).toBe("t1");
+  });
 });
 
 // ── + button opens taskModal with status preset ───────────────────────────────
