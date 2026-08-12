@@ -84,6 +84,32 @@ describe("LockedFolio", () => {
     ).toBeNull();
   });
 
+  it("places properties after locked metadata and before unlock controls", () => {
+    render(
+      <LockedFolio
+        path="notes/private.md"
+        title="Private plans"
+        tags={["private"]}
+        state={{ status: "locked" }}
+        properties={
+          <section data-testid="folio-properties">Properties</section>
+        }
+      />,
+    );
+
+    const title = screen.getByRole("heading", { name: "Private plans" });
+    const properties = screen.getByTestId("folio-properties");
+    const unlock = screen.getByLabelText("Encryption password");
+    expect(
+      title.compareDocumentPosition(properties) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(
+      properties.compareDocumentPosition(unlock) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+  });
+
   it("keeps the folio locked after a wrong password", async () => {
     const user = userEvent.setup();
     unlockWithPasswordMock.mockRejectedValue(new Error("SENSITIVE DETAIL"));

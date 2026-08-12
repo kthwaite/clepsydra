@@ -829,6 +829,7 @@ export function Folio({ tabId, path }: FolioProps) {
           />
         </div>
       )}
+      {folioProperties}
       {isAiConversation ? (
         <>
           {rawMarkdownSession ? null : (
@@ -1037,7 +1038,6 @@ export function Folio({ tabId, path }: FolioProps) {
         }
       />
     </Block>
-    {folioProperties}
     </>
   );
 

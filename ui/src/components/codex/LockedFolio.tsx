@@ -80,6 +80,8 @@ export function LockedFolio({
           </p>
         ) : null}
 
+        {properties}
+
         <section className="mt-8 border border-rule bg-paper-2 p-5">
           {state.status === "decrypting" ? (
             <p className="text-sm">Decrypting protected note…</p>
@@ -191,7 +193,6 @@ export function LockedFolio({
             </div>
           )}
         </section>
-        {properties}
       </main>
     </div>
   );
