@@ -2325,7 +2325,7 @@ capture().catch((err) => {
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `bun run test singlefile && bun run typecheck`
-Expected: 8 passed; typecheck clean. `service-worker.ts` will still reference the old `CaptureResult` — that is Task 8; if `typecheck` fails only there, proceed.
+Expected: 9 passed; typecheck clean. `service-worker.ts` will still reference the old `CaptureResult` — that is Task 8; if `typecheck` fails only there, proceed.
 
 - [ ] **Step 7: Commit**
 
