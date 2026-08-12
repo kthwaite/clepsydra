@@ -159,7 +159,8 @@ pub(crate) fn mutation_error(
 
 /// Build the API router mounted at `/api/vault`.
 pub fn api_router() -> Router<Arc<AppState>> {
-    api_router_with_archive_limit(250 * 1024 * 1024) // default 250 MB
+    // Derived from a 250 MB decoded-content budget; see `archive_body_limit_bytes`.
+    api_router_with_archive_limit(archive::archive_body_limit_bytes(250))
 }
 
 /// Build the API router with a custom archive body limit (in bytes).

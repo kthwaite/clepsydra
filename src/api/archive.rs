@@ -214,13 +214,24 @@ fn rollback_cas(primary: ApiError, state: &AppState, hashes: &[String]) -> ApiEr
     rollback_cas_with(primary, hashes, |hash| cas.decrement_ref(hash))
 }
 
+/// The HTTP body limit implied by a decoded-content budget.
+///
+/// `max_request_size_mb` budgets DECODED resource bytes, but the request
+/// carries base64, which inflates by 4/3. Without the multiplier the
+/// transport limit fires first and the reader gets a bare 413 naming
+/// nothing, instead of the 400 from `validate_resource_sizes` that names the
+/// limit it exceeded.
+pub(crate) fn archive_body_limit_bytes(max_request_size_mb: u64) -> usize {
+    (max_request_size_mb as usize) * 4 / 3 * 1024 * 1024
+}
+
 /// Build the archive router.
 ///
 /// The body limit for the ingest endpoint is set by the caller via
 /// `archive_router_with_limit` to respect the configured `max_request_size_mb`.
-/// This default uses 250 MB.
+/// This default derives from a 250 MB decoded budget.
 pub fn router() -> Router<Arc<AppState>> {
-    router_with_body_limit(250 * 1024 * 1024)
+    router_with_body_limit(archive_body_limit_bytes(250))
 }
 
 /// Build the archive router with a specific body size limit (in bytes).
@@ -777,6 +788,18 @@ pub async fn ingest_archive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------------------------------------------------------------------------
+    // archive_body_limit_bytes tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn the_body_limit_exceeds_the_decoded_budget_it_guards() {
+        // If these ever converge, an over-budget capture 413s before
+        // validate_resource_sizes can report which limit it broke.
+        let budget_bytes = 250 * 1024 * 1024;
+        assert!(archive_body_limit_bytes(250) > budget_bytes);
+    }
 
     // ---------------------------------------------------------------------------
     // slugify tests (existing)

@@ -943,8 +943,12 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     let (state, settings) = build_server_state(overrides).await?;
     run_startup_reconcile(&state).await;
     let _watcher = spawn_sync_watcher(&state)?;
+    // `max_request_size_mb` budgets DECODED resource bytes, but the request
+    // carries base64, which inflates by 4/3. Without the multiplier the
+    // transport limit fires first and the reader gets a bare 413 naming
+    // nothing, instead of the 400 that names the limit it exceeded.
     let archive_body_limit =
-        (state.vault.config().archive.max_request_size_mb as usize) * 1024 * 1024;
+        api::archive::archive_body_limit_bytes(state.vault.config().archive.max_request_size_mb);
     let app = build_router(state.clone(), archive_body_limit, settings.server.dev_mode);
     serve_with_feed_scheduler(Arc::clone(&state), serve(app, &settings)).await
 }
