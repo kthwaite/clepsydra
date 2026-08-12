@@ -288,10 +288,7 @@ async fn board_projects_bounded_body_excerpts_in_bulk_and_mutation_read_back() {
     };
 
     let rich_excerpt = task(RICH_ID)["body_excerpt"].as_str().unwrap();
-    assert_eq!(
-        rich_excerpt,
-        "Heading A link label with code and inside."
-    );
+    assert_eq!(rich_excerpt, "Heading A link label with code and inside.");
     assert!(!rich_excerpt.contains("https://example.com"));
     assert!(
         ["#", "`", "<", ">"]
@@ -1398,11 +1395,7 @@ async fn seal_cycle_routes_carryover_to_backlog() {
     };
     assert_eq!(
         upserted,
-        vec![
-            "cycles/S-13.md",
-            "tasks/TSK-0002.md",
-            "tasks/TSK-0003.md"
-        ]
+        vec!["cycles/S-13.md", "tasks/TSK-0002.md", "tasks/TSK-0003.md"]
     );
     assert!(removed.is_empty());
     assert!(

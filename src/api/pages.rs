@@ -17,9 +17,7 @@ use super::AppState;
 use super::error::ApiError;
 use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
-use crate::vault::batch_mutation::{
-    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
-};
+use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::canonical::CanonicalName;
 use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
@@ -1497,8 +1495,8 @@ fn collect_missing_assignment_directories(
     let components = destination.as_str().split('/').collect::<Vec<_>>();
     for end in 1..components.len() {
         let directory = components[..end].join("/");
-        let path = VaultPath::new(&directory)
-            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        let path =
+            VaultPath::new(&directory).map_err(|error| ApiError::bad_request(error.to_string()))?;
         if !state.vault.resolve(&path).exists() {
             directories.insert(directory);
         }

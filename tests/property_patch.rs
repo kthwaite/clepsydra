@@ -285,10 +285,7 @@ async fn unknown_page_is_404() {
 const EMPTY_DECLARATIONS_ID: &str = "0190f8a0-0000-7000-8000-0000000000f2";
 const ENCRYPTED_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f3";
 
-fn projection_property<'a>(
-    response: &'a serde_json::Value,
-    key: &str,
-) -> &'a serde_json::Value {
+fn projection_property<'a>(response: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
     response["properties"]
         .as_array()
         .unwrap()
@@ -393,7 +390,11 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
 
     assert_eq!(body["id"], PAGE_ID);
     assert_eq!(body["path"], "book.md");
-    assert!(body["revision"].as_str().is_some_and(|value| !value.is_empty()));
+    assert!(
+        body["revision"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
     assert_eq!(body["encrypted"], false);
     assert_eq!(
         body["matching_bases"],
@@ -499,10 +500,7 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
     let non_finite = projection_property(&body, "non_finite");
     assert_eq!(non_finite["present"], true);
     assert_eq!(non_finite["value"], serde_json::Value::Null);
-    assert_eq!(
-        projection_property(&body, "started")["value"],
-        "2026-08-01"
-    );
+    assert_eq!(projection_property(&body, "started")["value"], "2026-08-01");
     assert_eq!(
         projection_property(&body, "seen_at")["value"],
         "2026-08-01T12:30:00Z"
@@ -513,10 +511,7 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
         assert_eq!(property["compatibility"], "conflict", "{key}: {property}");
         assert_eq!(property["definition"], serde_json::Value::Null);
         assert_eq!(property["patchable"], false);
-        assert_eq!(
-            property["blockers"],
-            serde_json::json!(["schema_conflict"])
-        );
+        assert_eq!(property["blockers"], serde_json::json!(["schema_conflict"]));
     }
     assert_eq!(projection_property(&body, "choice_order")["value"], "first");
     assert_eq!(projection_property(&body, "conflict_type")["value"], 42);
@@ -536,7 +531,10 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
     let serialized = serde_json::to_string(&body).unwrap();
     assert!(!serialized.contains("private-provider"), "{serialized}");
     assert!(!serialized.contains("private-ledger-hash"), "{serialized}");
-    assert!(!serialized.contains("PRIVATE BODY SENTINEL"), "{serialized}");
+    assert!(
+        !serialized.contains("PRIVATE BODY SENTINEL"),
+        "{serialized}"
+    );
 }
 
 #[tokio::test]
@@ -613,7 +611,10 @@ async fn get_reports_encryption_without_exposing_the_page_body() {
     assert_eq!(body["encrypted"], true);
     assert_eq!(projection_property(&body, "status")["value"], "private");
     let serialized = serde_json::to_string(&body).unwrap();
-    assert!(!serialized.contains("BEGIN AGE ENCRYPTED FILE"), "{serialized}");
+    assert!(
+        !serialized.contains("BEGIN AGE ENCRYPTED FILE"),
+        "{serialized}"
+    );
     assert!(!serialized.contains("YWdlLWVuY3J5cHRpb24"), "{serialized}");
 }
 

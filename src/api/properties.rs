@@ -155,9 +155,7 @@ fn page_base_identity(base: &BaseDefinition) -> PageBaseIdentity {
 
 fn normalized_property_definition(definition: &PropertyDefinition) -> PropertyDefinition {
     let (options, many) = match definition.property_type {
-        PropertyType::Select | PropertyType::MultiSelect => {
-            (definition.options.clone(), None)
-        }
+        PropertyType::Select | PropertyType::MultiSelect => (definition.options.clone(), None),
         PropertyType::Relation => (Vec::new(), Some(definition.many.unwrap_or(true))),
         _ => (Vec::new(), None),
     };
@@ -168,19 +166,14 @@ fn normalized_property_definition(definition: &PropertyDefinition) -> PropertyDe
     }
 }
 
-fn same_editor_semantics(
-    left: &PropertyDefinition,
-    right: &PropertyDefinition,
-) -> bool {
+fn same_editor_semantics(left: &PropertyDefinition, right: &PropertyDefinition) -> bool {
     left.property_type == right.property_type
         && left.options == right.options
         && left.many == right.many
 }
 
 fn is_reserved_property_key(key: &str) -> bool {
-    RESERVED_KEYS.contains(&key)
-        || SYSTEM_FIELDS.contains(&key)
-        || key == BODY_COLUMN
+    RESERVED_KEYS.contains(&key) || SYSTEM_FIELDS.contains(&key) || key == BODY_COLUMN
 }
 
 fn project_matching_bases(
@@ -215,9 +208,7 @@ fn project_matching_bases(
             let compatible =
                 normalized.all(|definition| same_editor_semantics(&candidate, &definition));
             let reserved = is_reserved_property_key(&key);
-            let current = (!reserved)
-                .then(|| page.meta.extra.get(&key))
-                .flatten();
+            let current = (!reserved).then(|| page.meta.extra.get(&key)).flatten();
             let mut blockers = Vec::with_capacity(usize::from(!compatible) + usize::from(reserved));
             if !compatible {
                 blockers.push(PagePropertyBlocker::SchemaConflict);
@@ -263,8 +254,7 @@ pub async fn get_page_base_properties(
     State(state): State<Arc<AppState>>,
     Path(uuid): Path<String>,
 ) -> Result<Json<PageBasePropertiesResponse>, ApiError> {
-    let uuid = Uuid::parse_str(&uuid)
-        .map_err(|_| ApiError::bad_request("malformed page UUID"))?;
+    let uuid = Uuid::parse_str(&uuid).map_err(|_| ApiError::bad_request("malformed page UUID"))?;
     let page_id = uuid.to_string();
     let lookup_id = page_id.clone();
     let path = state

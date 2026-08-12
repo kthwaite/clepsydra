@@ -1,8 +1,8 @@
 use axum::Router;
-use utoipa::openapi::{Ref, RefOr};
 use utoipa::openapi::schema::{
     AdditionalProperties, Array, Object, ObjectBuilder, OneOfBuilder, Schema, SchemaType, Type,
 };
+use utoipa::openapi::{Ref, RefOr};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -540,8 +540,7 @@ mod tests {
             "atomic bulk assignment must not expose per-page failures"
         );
 
-        let responses =
-            &json["paths"]["/api/vault/pages-assign-bulk"]["post"]["responses"];
+        let responses = &json["paths"]["/api/vault/pages-assign-bulk"]["post"]["responses"];
         for status in ["200", "400", "404", "409", "500"] {
             assert!(
                 responses.get(status).is_some(),
