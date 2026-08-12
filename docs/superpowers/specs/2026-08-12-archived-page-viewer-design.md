@@ -1,7 +1,24 @@
 # Archived Page Viewer Design
 
-**Status:** Approved design
+**Status:** Blocked — awaiting the capture spec
 **Date:** 2026-08-12
+
+> **Sequencing changed after approval.** The vault holds one captured page and
+> no further captures will be made until this work is complete, so no corpus of
+> raw-`outerHTML` snapshots will accumulate. The dual-path design below — content-type
+> dispatch, the 415 seam, the unconditional low-fidelity notice — exists only to
+> carry legacy snapshots that will now never exist.
+>
+> The capture spec is therefore promoted ahead of this one, and this document
+> must be revised against its outcome before implementation. The revision hinges
+> on one decision: if capture produces WACZ, the viewer needs server-side record
+> unpacking; if it produces a single inlined self-contained HTML document, the
+> viewer stays a sandboxed iframe over one blob and most of what follows survives
+> unchanged.
+>
+> Sections that survive either way: the route and its placement, the sandbox
+> headers and the four security invariants, the refusal to fetch from the live
+> web, the typed-`archive`-metadata fix, and the banner.
 
 ## Summary
 
