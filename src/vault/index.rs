@@ -1407,7 +1407,7 @@ impl VaultIndex {
         url: &str,
     ) -> Result<Option<(String, String, String)>, IndexError> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, path, json_extract(meta_json, '$.archive.content_hash')
+            "SELECT id, path, json_extract(meta_json, '$.archive.source_hash')
              FROM pages
              WHERE json_extract(meta_json, '$.archive.url') = ?1",
         )?;

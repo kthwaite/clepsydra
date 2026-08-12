@@ -5854,16 +5854,20 @@ async fn archive_post_cas_publication_failure_compensates_every_reference() {
             )
         })));
 
-    let first = b"archive post-CAS first";
-    let second = b"archive post-CAS second";
-    let first_hash = clepsydra::vault::cas::ContentStore::hash_bytes(first);
-    let second_hash = clepsydra::vault::cas::ContentStore::hash_bytes(second);
+    // One inlined image plus the snapshot itself: two blobs per attempt. Both
+    // attempts touch the same bytes, so this still pins "one zero-reference row
+    // per unique blob" rather than one per attempt.
+    let image = b"archive post-CAS image";
     let markdown = "# Post-CAS failure";
     let content_hash = clepsydra::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
     let encode = |bytes: &[u8]| {
         use base64::Engine;
         base64::engine::general_purpose::STANDARD.encode(bytes)
     };
+    let snapshot_html = format!(
+        r#"<html><body><img src="data:image/png;base64,{}"></body></html>"#,
+        encode(image)
+    );
 
     for _ in 0..2 {
         let response = fixture
@@ -5875,21 +5879,9 @@ async fn archive_post_cas_publication_failure_compensates_every_reference() {
                 "title": "Post-CAS failure",
                 "captured_at": "2026-08-11T00:00:00Z",
                 "content_hash": content_hash,
-                "snapshot_hash": second_hash,
+                "snapshot_html": snapshot_html,
                 "markdown_body": markdown,
                 "tags": ["archive"],
-                "blobs": [
-                    {
-                        "hash": first_hash,
-                        "content_type": "application/octet-stream",
-                        "data": encode(first),
-                    },
-                    {
-                        "hash": second_hash,
-                        "content_type": "application/octet-stream",
-                        "data": encode(second),
-                    }
-                ]
             }))
             .await;
         response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
@@ -5933,14 +5925,11 @@ async fn archive_post_page_publication_failure_removes_page_and_cas_references()
         .unwrap()
         .unwrap();
 
-    let blob = b"archive post-page blob";
-    let blob_hash = clepsydra::vault::cas::ContentStore::hash_bytes(blob);
+    // No inlined resources, so the snapshot itself is the only blob touched —
+    // matching the single zero-reference row asserted below.
     let markdown = "# Post-page failure";
     let content_hash = clepsydra::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
-    let encoded = {
-        use base64::Engine;
-        base64::engine::general_purpose::STANDARD.encode(blob)
-    };
+    let snapshot_html = "<html><body><p>ok</p></body></html>";
     let response = fixture
         .server
         .post("/api/vault/archive")
@@ -5950,14 +5939,9 @@ async fn archive_post_page_publication_failure_removes_page_and_cas_references()
             "title": "Post-page failure",
             "captured_at": "2026-08-11T00:00:00Z",
             "content_hash": content_hash,
-            "snapshot_hash": blob_hash,
+            "snapshot_html": snapshot_html,
             "markdown_body": markdown,
             "tags": ["archive"],
-            "blobs": [{
-                "hash": blob_hash,
-                "content_type": "application/octet-stream",
-                "data": encoded,
-            }]
         }))
         .await;
 
