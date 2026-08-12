@@ -15,7 +15,10 @@ Clepsydra uses two config layers:
 
 ### Lookup order
 
-For commands that need app config (`serve`, `new`, `config show`, and `config path`), Clepsydra checks in this order:
+Application config is required by `serve`, `new`, `backup`, `relabel`,
+`migrate`, `grep`, `tree`, `mcp`, and `open-url`. The LSP uses it only when no
+workspace `.clepsydra` root resolves; `doctor` can diagnose its absence. The
+`config show` and `config path` commands use this same lookup. Clepsydra checks:
 
 1. `./config.toml` (current working directory)
 2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
@@ -24,11 +27,11 @@ For commands that need app config (`serve`, `new`, `config show`, and `config pa
 ### Inspecting and creating the file
 
 ```bash
-clepsydra config show
-clepsydra config show --origin
-clepsydra config path
-clepsydra config path --trace
-clepsydra config create
+clep config show
+clep config show --origin
+clep config path
+clep config path --trace
+clep config create
 ```
 
 `config show` prints the first existing file from the lookup order byte for
@@ -102,6 +105,23 @@ fetch_concurrency = 4
 - `dev_mode = false` (default): Clepsydra serves embedded frontend assets from `ui/dist` at `/`.
 - `dev_mode = true`: frontend serving is disabled; use the Vite dev server separately (typically `http://127.0.0.1:5173`).
 
+### API bind and trust boundary (`server.host`)
+
+Clepsydra does not configure API users, sessions, bearer tokens, or API keys.
+Any process that can reach the bound HTTP(S) server can call the API. The
+default `localhost` host keeps the listener on loopback. Binding a LAN, tailnet,
+or wildcard address expands the trust boundary; combine it with a separately
+controlled network policy and TLS valid for the hostname clients use.
+
+Use `http://<client-host>:<port>` when TLS is disabled and
+`https://<client-host>:<port>` when enabled. `client-host` must be a reachable
+name or interface address, not necessarily the raw bind value. In particular,
+`0.0.0.0` and `::` mean “bind all” and are not client destinations; use an
+appropriate interface address or `localhost` from the same machine. Bracket an
+IPv6 literal (`https://[::1]:3000`). Swagger UI and the generated contract are
+served at `/api/docs` and `/api/openapi.json`; see the
+[API Reference](/docs/api-reference).
+
 ### TLS behavior (`server.tls`)
 
 When `server.tls.enabled = true`:
@@ -121,11 +141,10 @@ testing an HTTPS-only client against a machine that already runs a plain server
 — use the `serve` flags instead:
 
 ```bash
-clepsydra serve --tls --port 3443
+clep serve --tls --port 3443
 ```
 
-See [cli.md](/docs/cli#running-an-https-server-for-client-testing), including the
-one-off step to make the iOS Simulator trust the mkcert CA.
+See [CLI](/docs/cli#clep-serve) for the complete flags and failure behavior.
 
 ### RSS/Atom behavior (`feeds`)
 
@@ -153,7 +172,7 @@ respectively.
 
 ### Environment overrides
 
-Application config supports env overrides via `CLEPSYDRA__...`:
+Settings-backed commands support env overrides via `CLEPSYDRA__...`:
 
 - `CLEPSYDRA__SERVER__HOST`
 - `CLEPSYDRA__SERVER__PORT`
@@ -164,27 +183,32 @@ Application config supports env overrides via `CLEPSYDRA__...`:
 - `CLEPSYDRA__VAULT__ROOT`
 - `CLEPSYDRA__FEEDS__FETCH_INTERVAL_MINUTES` (and the same hierarchy for every `[feeds]` key)
 
+`clep new` is intentionally narrower: it uses the same file lookup but reads
+only `[vault].root` from the selected file. For that command the key is required;
+`CLEPSYDRA__VAULT__ROOT` and the Settings default do not apply.
+
 Example:
 
 ```bash
 export CLEPSYDRA__SERVER__DEV_MODE=true
 export CLEPSYDRA__SERVER__PORT=4000
-cargo run -- serve
+cargo run --bin clep -- serve
 ```
 
-Full precedence, later wins: defaults → config file → environment →
-`serve --tls` / `serve --port`.
+For Settings-backed commands, full precedence is: defaults → config file →
+environment → `serve --tls` / `serve --port`.
 
 ### Relative path resolution
 
-- `vault.root`:
+- `vault.root` for Settings-backed commands:
   - absolute → used as-is
-  - relative in `config.toml` → resolved relative to that config file’s directory
+  - relative in `config.toml` → resolved relative to that config file's directory
   - relative from `CLEPSYDRA__VAULT__ROOT` → resolved relative to process working directory
-- `server.tls.cert_path` / `server.tls.key_path`: same rules as `vault.root`
-  (`~` expands to the home directory; relative paths in `config.toml` resolve
-  against the config file’s directory, env-supplied ones against the process
-  working directory)
+  - leading `~` → expanded to the home directory
+- `clep new` resolves a relative file value against the config file's directory,
+  but does not expand `~` or accept the environment override.
+- `server.tls.cert_path` / `server.tls.key_path`: the Settings-backed rules above
+  apply (file-relative or process-relative by source, with `~` expansion).
 
 ---
 
@@ -193,9 +217,9 @@ Full precedence, later wins: defaults → config file → environment →
 Created by:
 
 ```bash
-clepsydra init <path>
+clep init <path>
 # or
-cargo run -- init <path>
+cargo run --bin clep -- init <path>
 ```
 
 Path:
@@ -210,7 +234,7 @@ Path:
 |---|---:|---|---|
 | `attachment_folder` | string | `_attachments` | Attachment root under vault |
 | `excluded_patterns` | string[] | see below | Glob/prefix excludes |
-| `default_page_folder` | string | `""` | Used by `clepsydra new` |
+| `default_page_folder` | string | `""` | Used by `clep new` |
 | `linkable_properties` | string[] | `["tags", "aliases"]` | Frontmatter fields treated as refs |
 | `disambiguation_strategy` | enum | `shortest_path` | `shortest_path`, `closest_directory`, `most_recent` |
 

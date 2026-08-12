@@ -1,5 +1,6 @@
 import { lazy } from "react";
 import academicLibraryAndReadingSource from "#/docs/content/academic-library-and-reading.mdx?raw";
+import apiReferenceSource from "#/docs/content/api-reference.mdx?raw";
 import attachmentsAndMediaSource from "#/docs/content/attachments-and-media.mdx?raw";
 import basesSource from "#/docs/content/bases.mdx?raw";
 import blockReferencesAndTransclusionSource from "#/docs/content/block-references-and-transclusion.mdx?raw";
@@ -23,6 +24,9 @@ export { DEFAULT_DOC_SLUG } from "#/docs/constants";
 
 import type { DocGroup, DocMeta, DocPage } from "#/docs/types";
 
+const ApiReferenceGuide = lazy(
+  () => import("#/docs/content/api-reference.mdx"),
+);
 const GettingStartedGuide = lazy(
   () => import("#/docs/content/getting-started.mdx"),
 );
@@ -122,6 +126,12 @@ const cliMeta = {
   title: "CLI",
   description: "Use Clepsydra’s command-line interface.",
   keywords: ["command line", "commands", "terminal"],
+} satisfies DocMeta;
+const apiReferenceMeta = {
+  slug: "api-reference",
+  title: "API Reference",
+  description: "Call every public Clepsydra HTTP API operation.",
+  keywords: ["API", "OpenAPI", "HTTP", "endpoints", "Swagger"],
 } satisfies DocMeta;
 const linksSearchGraphAndRepairMeta = {
   slug: "links-search-graph-and-repair",
@@ -300,6 +310,12 @@ const troubleshooting = page(
   troubleshootingSource,
 );
 const cli = page("operations-reference", cliMeta, CliGuide, cliSource);
+const apiReference = page(
+  "operations-reference",
+  apiReferenceMeta,
+  ApiReferenceGuide,
+  apiReferenceSource,
+);
 const linksSearchGraphAndRepair = page(
   "links-structured-knowledge",
   linksSearchGraphAndRepairMeta,
@@ -404,7 +420,7 @@ export const DOC_GROUPS = [
   {
     id: "operations-reference",
     label: "Operations and reference",
-    pages: [configuration, troubleshooting, cli],
+    pages: [configuration, troubleshooting, cli, apiReference],
   },
 ] as const satisfies readonly DocGroup[];
 

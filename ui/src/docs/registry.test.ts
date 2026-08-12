@@ -52,13 +52,13 @@ it("declares the approved user-intent hierarchy", () => {
     ["AI and integrations", [...AI_INTEGRATION_GUIDE_SLUGS]],
     [
       "Operations and reference",
-      ["configuration", "troubleshooting", "cli"],
+      ["configuration", "troubleshooting", "cli", "api-reference"],
     ],
   ]);
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(19);
+  expect(DOC_PAGES).toHaveLength(20);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -91,6 +91,7 @@ it("resolves every existing dedicated guide", () => {
     "configuration",
     "troubleshooting",
     "cli",
+    "api-reference",
   ]);
   expect(getDocPage("links-search-graph-and-repair")?.title).toBe(
     "Links, Search, Graph, and Repair",
@@ -101,6 +102,7 @@ it("resolves every existing dedicated guide", () => {
   expect(getDocPage("troubleshooting")?.title).toBe("Troubleshooting");
   expect(getDocPage("browser-extension")?.title).toBe("Browser Extension");
   expect(getDocPage("books-and-reading")?.title).toBe("Books and Reading");
+  expect(getDocPage("api-reference")?.title).toBe("API Reference");
 });
 
 it("derives previous and next guides across group boundaries", () => {
@@ -160,8 +162,12 @@ it("derives previous and next guides across group boundaries", () => {
     previous: { slug: "mcp" },
     next: { slug: "troubleshooting" },
   });
-  expect(getDocNeighbors("cli").previous?.slug).toBe("troubleshooting");
-  expect(getDocNeighbors("cli").next).toBeUndefined();
+  expect(getDocNeighbors("cli")).toMatchObject({
+    previous: { slug: "troubleshooting" },
+    next: { slug: "api-reference" },
+  });
+  expect(getDocNeighbors("api-reference").previous?.slug).toBe("cli");
+  expect(getDocNeighbors("api-reference").next).toBeUndefined();
 });
 
 it("keeps MDX metadata and registry entries aligned", () => {

@@ -1,42 +1,165 @@
 export const meta = {
   slug: "troubleshooting",
   title: "Troubleshooting",
-  description: "Resolve common Clepsydra setup, server, UI, and LSP problems."
+  description: "Resolve common Clepsydra setup, server, UI, API, CLI, and LSP problems."
 }
 
-Use these checks when Clepsydra does not start or a client cannot connect.
+Start with the two behavioral diagnostics:
+
+```bash
+clep config path --trace
+clep doctor
+```
+
+`config path --trace` shows only candidates considered before selection.
+`doctor --strict --full` adds expensive checks and treats warnings as failures;
+`doctor --json` is suitable for captured diagnostics.
 
 ## `no config.toml found`
 
-Create `config.toml` in your current directory, or in
-`$XDG_CONFIG_HOME/clepsydra/config.toml`.
+Clepsydra found none of these application-config candidates:
 
-## Server fails with a TLS auto-cert message
+1. `./config.toml`
+2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
+3. `$HOME/.config/clepsydra/config.toml`
 
-Install `mkcert` and retry, or provide `server.tls.cert_path` and
-`server.tls.key_path`.
+Run `clep config create`, edit the generated file, and set `[vault].root`, or
+place a project-local `config.toml` in the command's working directory. Confirm
+selection with `clep config show --origin`. A config selected from a different
+working directory can point at a different vault.
 
-## UI doesn’t load in single-binary mode
+## Config resolves, but the vault does not
 
-Rebuild the embedded assets:
-
-```bash
-cd ui
-bun run build
-```
-
-## UI can’t reach the backend in Vite mode
-
-Confirm the backend is running on `http://127.0.0.1:3000` and
-`server.dev_mode = true`.
+`vault.root` from a file is relative to that config file's directory. A value
+from `CLEPSYDRA__VAULT__ROOT` is relative to the process working directory.
+Check the resolved path with `clep doctor`. Initialize a new vault with
+`clep init <path>`; do not re-run init over an existing `.clepsydra` directory.
 
 ## `vault already initialized`
 
-Use a new path, or reuse the existing initialized vault.
+`clep init` refuses to replace `PATH/.clepsydra`. Reuse the initialized vault,
+or choose a new path. Do not delete `.clepsydra` merely to suppress the error:
+it contains vault configuration and runtime state.
+
+## The server does not start
+
+Run `clep doctor`, then check these common causes:
+
+- another process already owns the configured host/port;
+- `[vault].root` is missing, unreadable, or is not an initialized vault;
+- the selected config is not the file you edited;
+- TLS certificate and key paths are incomplete or unreadable;
+- automatic TLS needs `mkcert` but it is unavailable.
+
+A temporary port override is useful for separating a bind conflict from a vault
+problem:
+
+```bash
+clep serve --port 3443
+```
+
+`--port` overrides config and environment. `--tls` only turns TLS on; it cannot
+force a TLS-enabled config back to cleartext.
+
+## Server fails with a TLS auto-cert message
+
+Install `mkcert` and retry, or configure both `server.tls.cert_path` and
+`server.tls.key_path`. Setting only one path does not select a partial custom
+TLS configuration. Automatic certificates cover localhost and loopback; a
+client using another hostname needs a certificate valid for that hostname.
+
+## HTTPS works in one client but another rejects it
+
+The rejecting client does not trust the issuing CA, uses a hostname outside the
+certificate, or is still calling `http://`. Trust the intended CA in that
+client, use the hostname named by the certificate, and confirm that its base URL
+matches `[server]` plus `[server.tls]`. Do not disable TLS to hide a remote trust
+failure.
+
+## API or MCP client cannot connect
+
+First prove the same origin outside the client:
+
+```bash
+curl http://localhost:3000/api/vault/uptime
+curl http://localhost:3000/api/openapi.json
+```
+
+Use `https://` and the configured port when TLS is active. If these fail, start
+`clep serve` with the same selected config. If they pass, compare the client's
+host, port, scheme, and certificate trust. `clep mcp` must point at the same
+server; it refuses non-loopback config unless started with `--allow-remote`.
+
+Clepsydra has no API bearer token, API key, session login, or per-operation
+authorization. Do not invent an `Authorization` header. An authentication prompt
+or `401` from a deployed setup comes from a reverse proxy or other network layer,
+not the Clepsydra API contract.
+
+## API request returns `400`
+
+Open `/api/docs` on the running server and compare the exact parameter location,
+content type, and request schema. Vault paths substituted into `{path}` must be
+URL-encoded. BibTeX import uses `text/plain`; most mutation bodies use JSON;
+attachment upload uses multipart form data.
+
+## API mutation returns `409`
+
+A conflict commonly means the resource revision is stale, a destination exists,
+a page has backlinks, or the indexed source changed before an atomic mutation
+committed. Fetch the current resource, review the new revision/state, and retry
+only after reconciling the user's intent. Do not blindly replay stale writes.
+
+## Attachment upload returns `400` for a protected-page workflow
+
+Attachment bytes remain plaintext. The upload form requires
+`plaintext_acknowledged=true` when the client is uploading from the protected
+page flow. That field records disclosure; it does not encrypt or authorize the
+attachment. See [Attachments and Media](/docs/attachments-and-media).
+
+## UI doesn’t load in single-binary mode
+
+Confirm `server.dev_mode = false`, then rebuild the assets embedded by the Rust
+binary:
+
+```bash
+bun run --cwd ui build
+cargo build --bin clep
+```
+
+Restart `clep serve` after rebuilding. A release binary embeds the UI present at
+its build time.
+
+## UI can’t reach the backend in Vite mode
+
+Confirm `server.dev_mode = true`, the API is running at the origin expected by
+the Vite proxy (normally `http://127.0.0.1:3000`), and the browser page is not
+mixing HTTPS with an HTTP backend. Probe `/api/vault/uptime` directly before
+debugging the UI.
+
+## `clep backup` fails
+
+Confirm the selected vault is a directory and the destination is writable. The
+command creates the destination but refuses conflicting partial/final archive
+paths. A live feed database must be snapshot successfully; feed storage path or
+snapshot failures abort rather than producing an inconsistent archive.
+
+## `clep migrate` exits `1` after converting pages
+
+The migration returns `1` whenever it reports any warning, even if other pages
+converted successfully. Review every warning, keep the vault backup or commit,
+and rerun the default dry run before another `--write` pass.
 
 ## Neovim LSP fails to initialize or attaches then stops
 
-No `.clepsydra` directory was found above the workspace root, and no
-`config.toml` resolved either. Check `:LspLog` and run
-`clep config path --trace` from the same directory. See the
+No `.clepsydra` directory was found above the workspace root, and no application
+config resolved. Check `:LspLog` and run `clep config path --trace` from the
+editor's launch directory. The LSP is standalone and does not need the HTTP
+server; stdout must remain reserved for LSP protocol traffic. See the
 [LSP guide](/docs/lsp) for complete setup and diagnostics.
+
+## Still blocked
+
+Capture `clep doctor --json`, the exact CLI invocation or canonical API
+method/path, HTTP status and response body, selected config origin, and whether
+TLS is active. The [CLI](/docs/cli), [API Reference](/docs/api-reference), and
+[Configuration](/docs/configuration) provide the corresponding contracts.

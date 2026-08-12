@@ -4,221 +4,379 @@ export const meta = {
   description: "Use Clepsydra’s command-line interface."
 }
 
-Clepsydra ships a single CLI binary: `clepsydra`.
+The installed Rust binary is `clep`. From a source checkout, substitute
+`cargo run --bin clep --` for `clep` in the examples below. `clep --help` and
+each command's `--help` are the authoritative syntax; `clep --version` prints
+the package version.
 
-If you are developing from source, you can run commands with:
+Commands return `0` on success. Clap rejects an unknown command, unknown option,
+missing required argument, or invalid option value before dispatch: it prints a
+usage error to stderr and returns `2`. Errors after successful parsing are
+printed as `Error: <message>` to stderr and return `1`, except where a command
+documents a more specific status below. Commands that open the vault use the
+normal application-config lookup and build or open the vault index; they do not
+require `clep serve` unless stated otherwise.
 
-```bash
-cargo run -- <subcommand>
-```
+## Application config lookup
 
-Examples in this doc use `clepsydra ...`; replace with `cargo run -- ...` if needed.
-
-## Commands
-
-| Command | Description | Status |
-|---|---|---|
-| `clepsydra init [PATH]` | Initialize a vault directory | ✅ implemented |
-| `clepsydra new <TITLE> [--body TEXT]` | Create a note in configured vault | ✅ implemented |
-| `clepsydra config show` | Print the selected application config verbatim | ✅ implemented |
-| `clepsydra config create` | Create an empty user application config | ✅ implemented |
-| `clepsydra serve` | Start the API server (HTTP, or HTTPS with `--tls`) | ✅ implemented |
-| `clepsydra lsp` | Standalone LSP server on stdio | ✅ implemented |
-| `clepsydra mcp` | MCP server on stdio (proxies the running API server) | ✅ implemented |
-| `clepsydra version` | Print version | ✅ implemented |
-| `clepsydra env` | Environment/config diagnostics | ⚠️ placeholder |
-| `clepsydra doctor` | Health checks | ✅ implemented |
-
----
-
-## `init`
-
-Initialize a vault structure at `PATH` (defaults to current directory).
-
-```bash
-clepsydra init ./my-vault
-```
-
-Creates:
-
-- `.clepsydra/config.toml`
-- `.clepsydra/templates/`
-- `_attachments/`
-
-Fails if `PATH/.clepsydra` already exists.
-
----
-
-## `new`
-
-Create a note in the configured vault:
-
-```bash
-clepsydra new "Daily Log"
-clepsydra new "Inbox" --body "- [ ] follow up"
-```
-
-Behavior:
-
-- Reads vault root from app `config.toml` lookup order:
-  1. `./config.toml`
-  2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
-  3. `$HOME/.config/clepsydra/config.toml`
-- Uses vault setting `vault.default_page_folder` from `<vault>/.clepsydra/config.toml`.
-- Generates filename from title and writes markdown with frontmatter (`id`, timestamps, title).
-
-Common errors:
-
-- `no config.toml found ...`
-- `config ... does not define [vault].root`
-- `note already exists: ...`
-
----
-
-## `config`
-
-Inspect or create the application config. These commands do not operate on the
-vault config at `<vault>/.clepsydra/config.toml`.
-
-```bash
-clepsydra config show
-clepsydra config show --origin
-clepsydra config path
-clepsydra config path --trace
-clepsydra config create
-```
-
-`config show` and `config path` select the first existing application config
-from this lookup order:
+Commands that need application config check, in order:
 
 1. `./config.toml`
 2. `$XDG_CONFIG_HOME/clepsydra/config.toml`
 3. `$HOME/.config/clepsydra/config.toml`
 
-`config show` writes the selected file's bytes to stdout verbatim, with no
-heading, path, or extra newline. It writes nothing to stderr by default.
-`config show --origin` preserves that byte-exact stdout and writes exactly
-`Origin: <selected path>\n` to stderr after styling is removed.
+If no candidate exists, the command fails. Settings-backed commands then merge
+built-in defaults, that file, and `CLEPSYDRA__...` environment overrides.
+`clep new` is the exception: it reads `[vault].root` directly from the selected
+file, requires that key, does not apply a `CLEPSYDRA__VAULT__ROOT` override or
+the normal `./vault` default, and resolves any relative value from the config
+file's directory without `~` expansion. See [Configuration](/docs/configuration).
 
-`config path` writes only `<selected path>\n` to stdout and nothing to stderr.
-`config path --trace` preserves that path-only stdout and traces to stderr only
-the candidates actually considered, in lookup order. Unselected candidates
-start with two spaces; the selected candidate starts with `→ `. Resolution
-stops at the selected file, so later candidates do not appear.
+## Command summary
 
-Origin and trace diagnostics use automatic color on stderr when the stream
-supports it. Redirected stderr is plain text, and `NO_COLOR=1` disables ANSI
-color. Stdout is never styled.
-
-`config create` creates a fully commented application config template at
-`$XDG_CONFIG_HOME/clepsydra/config.toml`, or
-`$HOME/.config/clepsydra/config.toml` when `XDG_CONFIG_HOME` is unset. It
-creates missing parent directories and prints `Created config at <path>`.
-The template documents defaults and precedence and contains commented
-`[server]`, `[server.tls]`, and `[vault]` sections with every example
-assignment still commented. It is therefore non-empty but parses as an empty
-TOML table. The command refuses to overwrite an existing file.
-
----
-
-## `serve`
-
-Start the API server:
-
-```bash
-clepsydra serve
-```
-
-Requires app config (`config.toml`) with at least `[vault].root`.
-
-Useful endpoints once running:
-
-- `GET /` → `ok`
-- `GET /api/docs` → Swagger UI
-- `GET /api/openapi.json` → OpenAPI schema
-
-### Flags
-
-| Flag | Effect |
+| Command | Required input and notable options |
 |---|---|
-| `--tls` | Serve over HTTPS |
-| `--port PORT` | Listen on `PORT` instead of the configured port |
+| `clep init` | `[PATH]`, default `.` |
+| `clep new` | `<TITLE>`, optional `-b, --body <TEXT>` |
+| `clep backup` | `--destination <DIRECTORY>` |
+| `clep config` | nested `show`, `path`, or `create` command |
+| `clep env` | no options; placeholder |
+| `clep doctor` | `--json`, `--strict`, `--full` |
+| `clep serve` | `--tls`, `--port <PORT>` |
+| `clep lsp` | no options |
+| `clep mcp` | `--allow-remote` |
+| `clep open-url` | `<URL>`, optional `--print` |
+| `clep relabel` | optional `--dry-run` |
+| `clep migrate` | optional `--write`; dry run by default |
+| `clep register-url` | optional `--obsidian`; macOS only |
+| `clep grep` | `<QUERY>`, `-n/--limit <N>` (default `20`), `--raw`, `--json` |
+| `clep tree` | optional `--json` |
+| `clep version` | no options |
 
-`--tls` and `--port` override both the config file and the `CLEPSYDRA__*`
-environment variables. `--tls` only ever turns HTTPS *on*: there is no flag to
-force cleartext, so `serve` cannot silently downgrade a TLS config.
+Every command accepts `-h, --help`.
 
-### Running an HTTPS server for client testing
+## `clep init`
 
-The responsive web application and desktop browser client use the same tailnet
-HTTPS origin. Start a TLS server when testing from a browser over the tailnet:
-
-```bash
-clepsydra serve --tls --port 3443
+```text
+clep init [PATH]
 ```
 
-Certificates come from `[server.tls]` when `cert_path` and `key_path` are both
-set; otherwise Clepsydra generates localhost certs with `mkcert` and caches them
-in the app data dir. See [configuration.md](/docs/configuration) for details.
-For tailnet access, use a certificate covering the browser's tailnet hostname
-and ensure the browser trusts its issuing CA.
-
-Run `clepsydra doctor` to check cert state and `mkcert` availability.
-
----
-
-## `lsp`
-
-Start the standalone LSP server on stdio:
+Initializes `PATH`, defaulting to the current directory. A missing path is
+created. The command creates `.clepsydra/config.toml`,
+`.clepsydra/templates/`, and `_attachments/`, then prints the initialized path.
+It fails rather than replacing an existing `PATH/.clepsydra` directory.
 
 ```bash
-clepsydra lsp
+clep init ~/vault
 ```
 
-Read-only, and independent of `clepsydra serve` — it opens its own vault
-state (resolved from the editor's workspace root, falling back to
-`config.toml`) rather than talking to a running server. All tracing output
-goes to stderr; stdout carries only the LSP protocol. See
-[lsp.md](/docs/lsp) for editor setup.
+## `clep new`
 
----
+```text
+clep new [OPTIONS] <TITLE>
+  -b, --body <TEXT>
+```
 
-## `version`
+Creates a Markdown page in the configured vault. The title is stored in
+frontmatter and drives canonical path generation. `--body` supplies optional
+initial body text. The vault's `.clepsydra/config.toml`
+`vault.default_page_folder` selects the destination folder.
+
+This command requires a selected application config whose file explicitly
+defines a non-empty `[vault].root`; unlike Settings-backed commands, it ignores
+`CLEPSYDRA__VAULT__ROOT`, does not fall back to `./vault`, and does not expand
+`~`. It fails for missing or invalid config, a missing root key, an invalid
+vault, invalid title/path generation, or a colliding page instead of overwriting
+an existing file.
 
 ```bash
-clepsydra version
+clep new "Daily Log"
+clep new "Inbox" --body "- [ ] follow up"
 ```
 
-Equivalent to `clepsydra --version`.
+## `clep backup`
 
----
+```text
+clep backup --destination <DIRECTORY>
+```
 
-## `env` and `doctor`
+Requires application config and a readable vault. The destination directory is
+created when needed. The command writes a timestamped
+`clepsydra-backup-YYYYMMDDTHHMMSSZ.tar` and prints its path. It does not follow
+symlinks, excludes the rebuildable index cache and live feed database sidecars,
+and places a consistent feed-database snapshot in the archive when one exists.
+A partial archive is removed after a failed write. Invalid vault roots,
+unreadable files, feed-snapshot failures, destination conflicts, and filesystem
+errors return `1`.
 
-`env` is currently a placeholder and prints:
+```bash
+clep backup --destination ~/Backups
+```
 
-- `env command not implemented yet`
+## `clep config`
 
-`doctor` is implemented and runs the health checks described above.
+```text
+clep config <COMMAND>
+```
 
----
+This parent command requires one nested command. It operates only on application
+config, never `<vault>/.clepsydra/config.toml`.
+
+## `clep config show`
+
+```text
+clep config show [--origin]
+```
+
+Prints the selected config bytes verbatim to stdout, adding no heading or
+newline. With `--origin`, unchanged stdout remains pipe-safe while
+`Origin: <selected path>` is written to stderr. Missing config or read failures
+return `1`.
+
+```bash
+clep config show
+clep config show --origin > selected-config.toml
+```
+
+## `clep config path`
+
+```text
+clep config path [--trace]
+```
+
+Prints only the selected path plus a newline. `--trace` additionally writes the
+candidates actually considered to stderr, stopping at the selected file. Missing
+config returns `1`.
+
+```bash
+clep config path --trace
+```
+
+## `clep config create`
+
+```text
+clep config create
+```
+
+Creates a non-empty, fully commented template at
+`$XDG_CONFIG_HOME/clepsydra/config.toml`, falling back to
+`$HOME/.config/clepsydra/config.toml`. Parent directories are created. The
+command prints the new path and refuses to overwrite any existing file.
+
+## `clep env`
+
+`env` is a placeholder. It prints `env command not implemented yet` and returns
+`0`; it does not inspect or validate the environment yet.
+
+## `clep doctor`
+
+```text
+clep doctor [--json] [--strict] [--full]
+```
+
+Runs checks grouped under server config, server, vault, index, CAS, and runtime.
+Checks report `OK`, `WARN`, `ERR`, `INFO`, or `SKIP`.
+
+- `--json` writes machine-readable JSON instead of the human report.
+- `--strict` makes any warning produce a failing exit status.
+- `--full` enables expensive checks such as CAS statistics.
+
+The exit status is `0` when no check fails, and `1` when a check fails or a
+warning occurs under `--strict`. Unlike most config-dependent commands, doctor
+reports missing or broken prerequisites as checks rather than aborting at the
+first one.
+
+```bash
+clep doctor
+clep doctor --strict --full
+clep doctor --json > doctor.json
+```
+
+## `clep serve`
+
+```text
+clep serve [--tls] [--port <PORT>]
+```
+
+Starts the HTTP API and embedded frontend. It requires application config and a
+usable `[vault].root`. The configured `[server]` defaults are host `localhost`,
+port `3000`, and `dev_mode = false`. `--port` replaces the effective configured
+or environment port. `--tls` only turns TLS on; it never downgrades a config
+where TLS is already enabled.
+
+When TLS is active, Clepsydra uses `[server.tls].cert_path` and `key_path` only
+when both are set. Otherwise it provisions and caches localhost certificates
+with `mkcert`; missing `mkcert`, unreadable certificate files, vault/index
+startup failures, and bind errors fail startup.
+
+There is no built-in API login, bearer token, or API key. Loopback reachability
+is the default trust boundary. If `server.host` exposes the service elsewhere,
+use a separately controlled network boundary and a certificate valid for the
+client-visible hostname.
+
+```bash
+clep serve
+clep serve --tls
+clep serve --tls --port 3443
+```
+
+After startup:
+
+- `GET /api/openapi.json` returns the OpenAPI document.
+- `GET /api/docs` opens Swagger UI.
+- [API Reference](/docs/api-reference) inventories every public operation.
+
+## `clep lsp`
+
+Starts the standalone, read-only language server on stdio. It resolves a vault
+from the editor workspace's `.clepsydra` ancestor, falling back to application
+config. It does not require the HTTP server and can run beside `clep serve`.
+Stdout is reserved for LSP framing; diagnostics and tracing go to stderr. If no
+workspace vault or configured vault can be resolved, initialization fails.
+
+See [LSP](/docs/lsp) for client setup.
+
+## `clep mcp`
+
+```text
+clep mcp [--allow-remote]
+```
+
+Starts an MCP stdio proxy to the HTTP API selected by application config. A
+matching `clep serve` must already be running. By default MCP refuses a
+non-loopback `[server].host`; `--allow-remote` acknowledges that target. TLS mode
+and certificate paths come from the same config. Connection failures include a
+server-start hint, and TLS setup fails when the configured or generated
+certificate cannot be trusted or read.
+
+MCP sends no bearer token, password, or client credential; anyone who can drive
+the MCP host or reach the API is inside the trust boundary.
+
+```json
+{ "mcpServers": { "clepsydra": { "command": "clep", "args": ["mcp"] } } }
+```
+
+See [MCP](/docs/mcp) for the tool inventory and remote-host cautions.
+
+## `clep open-url`
+
+```text
+clep open-url [--print] <URL>
+```
+
+Translates a `clepsydra://` or compatible `obsidian://` URL into the configured
+server's HTTP(S) deep-link URL. On macOS it asks the default browser to open that
+URL. On other platforms, and whenever `--print` is present, it prints the URL
+instead. `--print` only translates; it does not contact the server.
+
+The command requires application config. Invalid config and a failed macOS
+`open` process return `1`; server availability is observed later by the browser.
+
+```bash
+clep open-url "clepsydra://page/Alpha%20Project"
+clep open-url "obsidian://open?vault=brain&file=Note" --print
+```
+
+## `clep relabel`
+
+```text
+clep relabel [--dry-run]
+```
+
+Opens the configured vault and fully derived index, then renames authored pages
+to the canonical `yyyymmdd.slug.shortid.md` scheme and rewrites inbound
+wikilinks. Without `--dry-run`, changes are applied. `--dry-run` prints the plan
+without filesystem changes. The summary reports renamed and skipped counts;
+config, index, path, rewrite, or filesystem failures return `1`.
+
+Run a vault backup or commit before applying a large relabel:
+
+```bash
+clep relabel --dry-run
+clep relabel
+```
+
+## `clep migrate`
+
+```text
+clep migrate [--write]
+```
+
+Sweeps the configured vault for legacy `---` YAML frontmatter. The default is a
+dry run; `--write` converts candidates to `+++` TOML. Conversion preserves the
+page ID, fields, and body but cannot preserve comments inside YAML frontmatter,
+so commit or back up the vault first.
+
+The command prints each conversion and warning. It returns `0` when there are no
+warnings and `1` when any warning is reported, even if other pages converted.
+Config or vault-open failures also return `1`.
+
+```bash
+clep migrate
+clep migrate --write
+```
+
+## `clep register-url`
+
+```text
+clep register-url [--obsidian]
+```
+
+macOS only. Builds and installs
+`~/Applications/Clepsydra URL Handler.app` and registers `clepsydra://` to invoke
+this binary's `open-url` command. `--obsidian` also claims `obsidian://`, which
+competes with Obsidian when installed. Non-macOS execution and app compilation,
+installation, or Launch Services failures return `1`.
+
+## `clep grep`
+
+```text
+clep grep [OPTIONS] <QUERY>
+  -n, --limit <N>  # default: 20
+      --raw
+      --json
+```
+
+Searches the configured vault's full-text index and ranks results by relevance.
+The query is a literal phrase by default. `--raw` passes it to FTS5, enabling
+operators such as phrases, `AND`, `OR`, `NEAR`, and prefix `*`. `--json` emits
+machine-readable output instead of styled text. Invalid raw FTS5 syntax, config,
+vault, or index failures return `1`.
+
+```bash
+clep grep "spaced repetition"
+clep grep chloroplast --limit 5
+clep grep "foo OR bar" --raw --json
+```
+
+## `clep tree`
+
+```text
+clep tree [--json]
+```
+
+Walks the configured vault. Indexed notes include kind, title, tags, and word
+count; other files include size. Dotfiles and `.clepsydra` are hidden. `--json`
+emits machine-readable output. Config, vault, index, and traversal failures
+return `1`.
+
+## `clep version`
+
+Prints the package version followed by a newline. It is equivalent to
+`clep --version`.
+
+```bash
+clep version
+```
 
 ## Typical workflow
 
 ```bash
-# 1) Initialize a vault once
-clepsydra init ./my-vault
-
-# 2) Create an empty user application config
-clepsydra config create
-
-# 3) Edit that config and point [vault].root at the vault
-# [vault]
-# root = "./my-vault"
-
-# 4) Start server
-clepsydra serve
-
-# 5) Create notes from another terminal
-clepsydra new "Research log"
+clep init ~/vault
+clep config create
+# Edit the selected config and set [vault].root = "~/vault".
+clep doctor
+clep serve
+# From another terminal:
+clep new "Research log"
 ```
