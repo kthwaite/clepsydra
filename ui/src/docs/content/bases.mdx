@@ -1,10 +1,26 @@
 export const meta = {
   slug: "bases",
   title: "Bases",
-  description: "Define typed fields and filtered table views."
+  description: "Build saved, non-owning views over typed folio properties."
 }
 
-A base is a saved, non-owning view over pages in a vault. It declares which pages belong to the base, gives their frontmatter properties advisory types, and defines table views over the matching pages. The pages remain ordinary Markdown files: a base does not move, copy, or own them.
+A Base is a saved, non-owning view over pages in a vault. Its `.base.toml` definition owns a membership predicate, advisory property schemas, and one or more saved table views; it never owns the matching rows. The pages remain ordinary Markdown files and may match any number of Bases: a Base does not move, copy, or own them.
+
+## Prerequisites
+
+Start Clepsydra with an initialized vault and at least one Markdown folio whose
+TOML frontmatter contains fields worth filtering or displaying. Use `/bases`
+for guided authoring. Manual definitions must be direct children of
+`<vault>/bases/`, end in `.base.toml`, and contain valid TOML with a `name`.
+
+## Workflow
+
+Create a Base, define its membership predicate and advisory property schemas,
+configure one or more saved table views, preview the draft, then save against
+the revision you loaded. Open `/bases/<slug>` to query the saved view, edit
+frontmatter properties or relation values inline, add a matching member, or
+embed the non-owning view in a Folio. The following sections specify the
+definition format and each authoring path.
 
 ## Create and configure a base
 
@@ -80,11 +96,9 @@ A base requires `name`. `description`, `filter`, `properties`, and `views` are o
 
 ## Page properties and advisory schemas
 
-The `[properties]` table describes page frontmatter keys; it does not create storage separate from the pages. Values retain their native TOML types when indexed. A declaration controls typed filtering, grouping, editing, completions, and warnings.
+The `[properties]` table describes keys stored in page frontmatter; it does not create separate records or storage. Values retain their native TOML types when indexed. A declaration controls typed filtering, grouping, inline editors, LSP completions, and diagnostics for every matching page that carries the key.
 
-Schemas are advisory. A page whose value disagrees with a declaration still indexes, and the declaration does not rewrite or reject it. Clepsydra reports a warning instead. Likewise, `options` constrain diagnostics and completions rather than blocking an unfamiliar value, and `many = false` on a relation warns about multiple targets rather than enforcing a write constraint.
-
-An empty `options` list means an open vocabulary. The LSP can offer values already observed in the vault and does not warn about new ones.
+Schemas are advisory. A page whose value disagrees with a declaration still indexes, and the declaration does not rewrite or reject it. Clepsydra reports a warning instead. Likewise, a non-empty `options` list constrains diagnostics and completions rather than blocking an unfamiliar value, and `many = false` on a relation warns about multiple targets rather than enforcing a write constraint. An empty `options` list means an open vocabulary: the LSP can offer values already observed in the vault and does not warn about new ones.
 
 ## Property types
 
@@ -107,10 +121,10 @@ These are the complete shipped type tokens: `text`, `number`, `bool`, `date`, `d
 The built-in system fields are:
 
 ```text
-id, path, title, kind, project, tags, aliases, created_at, updated_at, journal_date, word_count
+id, path, title, kind, project, tags, aliases, created_at, updated_at, encryption, journal_date, word_count
 ```
 
-They can all be used in columns and with their supported filter operators without property declarations. Use bare names for scalar system columns: shipped query materialization leaves `sys.`-prefixed scalar columns empty. Scalar system fields can also be used for sorting; `tags` and `aliases` cannot be sorted because they are multi-valued. A bare field name resolves system-first, so `kind` means the resolved page kind and `prop.kind` means a raw page property named `kind`. The `sys.` and `prop.` prefixes disambiguate field references in filters, sorts, grouping, and aggregate field references; for example, use `sys.kind` to make the system-field intent explicit in those contexts.
+They can all be used in columns and with their supported filter operators without property declarations. Bare and `sys.`-prefixed scalar names are materialized under the exact requested column key, so `kind` produces a `kind` column and `sys.kind` produces a `sys.kind` column. Scalar system fields can also be used for sorting except `encryption`; `tags` and `aliases` are also non-sortable because they are multi-valued. A bare field name resolves system-first, so `kind` means the resolved page kind and `prop.kind` means a raw page property named `kind`. The `sys.` and `prop.` prefixes disambiguate field references in filters, columns, sorts, grouping, and aggregate field references.
 
 If a page has an extra key whose name collides with a system field, address it as `prop.<name>`. Declaring that colliding key in `[properties]` produces a shadowing diagnostic.
 
@@ -205,7 +219,9 @@ columns = ["title", "author", "rating", "started"]
 
 Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
 
-System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. For a page that already uses TOML `+++` frontmatter, a successful edit surgically patches the frontmatter and updates `updated_at`, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision.
+System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions.
+
+Each commit fetches the page's current revision, sends only the changed property key with its type hint, and updates `updated_at`. For TOML `+++` frontmatter, the server splices that edit into the existing bytes, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision; the table refetches the winning state and reports the failed key.
 
 ### Add members inline
 
@@ -259,11 +275,17 @@ The structured editor is the normal authoring path, but the TOML format remains 
 
 With `clep lsp` attached, completion inside a page's `+++` frontmatter offers property keys declared by bases. Properties from bases that match the current page rank first. Quoted values for `select` and `multi_select` complete from declared options; an open vocabulary can complete from observed vault values. Typing `[[` in a relation value uses normal wikilink completion.
 
-For matching bases, the LSP warns about incompatible native TOML types, values outside a non-empty select vocabulary, multiple relation values when `many = false`, and unresolved relation targets. These are warnings, never indexing errors. Legacy `---` frontmatter does not receive property-schema diagnostics. The LSP completes and checks page frontmatter; it does not provide an editor for `.base.toml` files.
+For matching bases, the LSP warns about incompatible native TOML types, values outside a non-empty select vocabulary, multiple relation values when `many = false`, and missing relation targets. It does not diagnose an ambiguous relation target as ambiguous: ambiguity still appears as `invalid_relation_target` in Reference Repairs. These are warnings, never indexing errors. Legacy `---` frontmatter does not receive property-schema diagnostics. The LSP completes and checks page frontmatter; it does not provide an editor for `.base.toml` files.
 
 See [LSP setup and troubleshooting](/docs/lsp) for client configuration and the complete language-server capability list.
 
-## Validation, troubleshooting, and v1 limits
+### Relation repair
+
+Relation values participate in the same canonical-name resolution as page wikilinks. The LSP warns when a relation target is missing; Reference Repairs projects both missing and ambiguous targets as `invalid_relation_target`. When one or more replacement candidates are available, the repair workspace can preview and patch the property occurrence with the selected page; otherwise it offers source navigation only. It does not enforce `many = false`, because cardinality remains an advisory schema warning.
+
+See [relation repair](/docs/links-search-graph-and-repair#relation-repair) for the six issue classes, exact preview, stale-conflict, and one-at-a-time apply semantics.
+
+## Failures and conflicts
 
 Base files are parsed independently so one broken file does not poison the registry:
 
@@ -275,3 +297,26 @@ Base files are parsed independently so one broken file does not poison the regis
 If a base does not appear, check that it is directly under `<vault>/bases/`, ends in `.base.toml`, contains `name`, and has valid TOML. If `/bases/<slug>` says the base has no views, add at least one `[[views]]` entry. If date or number comparisons behave unexpectedly, verify the page uses native TOML values rather than quoted strings and that the property has the corresponding declaration.
 
 V1 supports table layout only. Unsaved preview requests are capped at 100 rows; saved grouped views cap displayed rows in each group at 50 while retaining the true group total. These limits do not change the non-owning model: pages can match any number of bases, and removing a base never removes pages or page properties.
+
+## Privacy
+
+`.base.toml` definitions are plaintext. Page frontmatter properties and
+relation values are plaintext, and index projections of that metadata are
+plaintext. Base membership, filtering, grouping, aggregation, LSP completion,
+and relation diagnostics can therefore reveal those values to any client or
+process that can read the vault or its running server.
+
+Protected folio bodies do not contribute body-derived word counts, FTS body
+text, block rows, or body-link topology to the index; previously indexed
+body-derived data is removed when a folio becomes protected. Its frontmatter
+remains available to Bases, including title, kind, project, declared
+properties, and relations, because protected-page encryption covers the body
+rather than frontmatter. Do not place secrets in Base definitions or
+frontmatter and assume body protection hides them.
+
+## Related
+
+- [Links, Search, Graph, and Repair](/docs/links-search-graph-and-repair) for relation repair
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Pages and Authoring](/docs/pages-and-authoring) for frontmatter and canonical moves
+- [LSP](/docs/lsp) for property completions and diagnostics

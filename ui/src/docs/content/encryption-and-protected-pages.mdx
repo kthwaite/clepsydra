@@ -1,0 +1,179 @@
+export const meta = {
+  slug: "encryption-and-protected-pages",
+  title: "Encryption and Protected Pages",
+  description: "Set up encryption and protect, unlock, edit, and recover folios."
+}
+
+Protected Folios encrypt one page's Markdown body as a canonical ASCII-armored
+age v1 file. Encryption and decryption happen in the web frontend; this is
+page-body protection, not whole-vault encryption.
+
+## Prerequisites
+
+- Open **Open Status / preferences** (`app.settings`) from the command console,
+  choose **Advanced**, and find **Encrypted notes**.
+- Keep the site and server connection trusted. Use TLS when Clepsydra is
+  accessed over a network.
+- Decide where to store a recovery identity before setup. Losing every usable
+  identity makes protected bodies unrecoverable; Clepsydra has no escrow or
+  password-reset backdoor.
+
+## Workflow
+
+### Set up the vault identity
+
+Choose **Set up encryption**, then use one setup mode.
+
+**Create with password**
+
+1. Enter and confirm a password of at least 12 characters.
+2. Choose **Generate recovery identity**. The browser creates an age identity
+   and wraps it with the password.
+3. Choose **Download recovery identity** and store that plaintext master key
+   separately and securely.
+4. Acknowledge the unrecoverable-loss warning and choose **Finish encryption
+   setup**.
+
+The server receives the public recipient, key ID, and password-wrapped identity.
+It does not receive the setup password or plaintext identity.
+
+**Import existing identity**
+
+1. Paste an `AGE-SECRET-KEY-...` identity and choose **Validate imported
+   identity**.
+2. Acknowledge the loss warning and finish setup.
+
+Import mode stores the public recipient and key ID but no wrapped identity. You
+must import the identity again after a reload or in another browser session.
+The current setup supports one active vault key; it does not rotate page keys or
+add multiple recipients.
+
+### Protect a Folio
+
+1. Unlock the configured vault identity.
+2. In the Folio's Document details, choose **plaintext · protect** under
+   **Protection**.
+3. Review the visible metadata boundary, confirm that recovery material was
+   exported, and choose **Protect note**.
+
+These save, unlock, recovery-export acknowledgment, and protection-confirmation
+checks are shipped frontend safeguards. The frontend first flushes pending
+edits, encrypts the current Markdown, and submits
+`POST /api/vault/pages/by-id/<uuid>/protect` with the expected revision. The
+server validates the encryption descriptor, page state and revision, and the
+complete canonical age v1 armored body; it then stores the descriptor in
+frontmatter, replaces the body with ciphertext, and removes body-derived index
+projections.
+
+### Unlock and edit a protected Folio
+
+A locked Folio still shows its plaintext title, path, and tags, but it does not
+mount the editor or expose ciphertext as editable Markdown. Choose **Unlock
+note** with the password when a wrapped identity exists, or choose **Use
+recovery identity** and then **Import and unlock**.
+
+The identity remains in memory for the current frontend session. After unlock,
+the browser decrypts and mounts the body. Body autosaves are encrypted in the
+browser before the update request is sent; title, tags, and aliases remain
+ordinary frontmatter updates. `Command+S` on macOS or `Ctrl+S` elsewhere still
+flushes immediately.
+
+The complete canonical age v1 armored body—not the plaintext before
+encryption—must be at most 2 MiB. Encryption overhead reduces the usable
+plaintext size below 2 MiB. An oversized initial protection or later protected
+save is rejected; shorten the body and save again.
+
+Choose **lock** in an unlocked protected editor to lock all protected editors.
+Clepsydra first asks every open protected editor to save. If any save fails,
+locking is refused so unsaved plaintext is not silently discarded. A successful
+lock clears the in-memory identity and remounts protected Folios in their locked
+state. Reloading or closing the frontend also clears the identity. The shipped
+frontend has no automatic inactivity lock or `config.toml` idle-lock setting.
+
+### Remove protection or change the password
+
+Choose **encrypted · remove**, review the warning, and choose **Remove
+encryption**. In the shipped frontend, acknowledgment and a successful flush
+are required first. The frontend submits
+`POST /api/vault/pages/by-id/<uuid>/unprotect` with the current revision and
+caller-supplied plaintext body. A successful transition writes that body back
+to disk as plaintext; this is not a temporary view.
+
+For password-based setup, return to **Settings → Advanced → Encrypted notes**
+and choose **Change password**. Supply the current password and a new password
+of at least 12 characters. This rewraps the same identity; it does not rewrite
+existing Folio ciphertext and cannot recover a lost identity.
+
+## Failures and conflicts
+
+- Setup rejects mismatched or short passwords in the frontend, malformed
+  identities or recipients, and an already initialized keyring. After setup,
+  the frontend also refuses a response whose recipient differs from the one it
+  prepared. This response consistency check is not proof that a recipient is
+  owned by the caller.
+- A wrong password, wrong identity, tampered body, or ciphertext for another key
+  leaves the Folio locked. The UI reports a safe authentication error rather
+  than exposing cryptographic detail.
+- The shipped frontend requires an initialized, unlocked key, explicit
+  acknowledgment, and a successful pre-transition save before protect or
+  unprotect. These are not server attestations. The protect API validates the
+  descriptor, complete canonical age v1 armor, current page state, and revision.
+  The unprotect API validates the current protected state and revision, then
+  writes the caller-supplied plaintext.
+- Protection, unprotection, and protected saves are revision checked. On a stale
+  revision, reload the winning page and reapply the intended edit; Clepsydra
+  does not merge age envelopes.
+- The server cannot attest that the browser was unlocked, that the user
+  acknowledged the disclosure, that ciphertext uses the configured recipient,
+  that the caller owns its recipient, or that unprotect plaintext is an
+  authentic decryption. A custom client can bypass frontend confirmations while
+  still satisfying the API's structural and revision checks.
+- A complete armored protected body over 2 MiB is rejected. Because encryption
+  overhead counts toward that limit, usable plaintext is smaller; oversized
+  protected autosaves remain unsaved and report failure.
+- Protected bodies do not participate in server-side full-text body search,
+  snippets, outlinks, backlinks, unresolved links, blocks, word counts, similar
+  content, body-aware tasks/journal mutations, or LSP body features. These
+  surfaces return empty body-derived results or an explicit protected-page
+  conflict rather than parsing ciphertext as Markdown.
+- Age encryption is nondeterministic: even a small body edit replaces the
+  envelope, so Git cannot provide meaningful line diffs, merges, or blame for
+  the protected body. Frontmatter remains diffable.
+- Recovery is impossible after every usable identity is lost. Back up the
+  vault, `.clepsydra/crypto/keyring.toml`, any wrapped
+  `<key-id>.identity.age`, and a separately stored recovery identity.
+
+## Privacy
+
+**Encrypted:** only the Markdown body, including any attachment reference text
+saved in that body. After protection, Clepsydra clears known body text from its
+live search projection and deletes derived links, blocks, word counts, and
+similar-body data.
+
+**Plaintext and metadata-indexable:** the filename and vault-relative path; all
+TOML frontmatter, including UUID, title, tags, aliases, properties, timestamps,
+Kind/Project, and the encryption marker; the public recipient, key ID, and
+keyring metadata; filesystem timestamps, access patterns, and repository
+layout. Protected Folios therefore remain discoverable by their metadata even
+though body-derived indexing is absent.
+
+Attachments are outside the body boundary. Their bytes, filenames, paths,
+reported MIME types, and sizes remain plaintext. Existing Git commits, backups,
+snapshots, swap files, or other copies made before protection are not rewritten.
+Cache scrubbing cannot guarantee physical erasure from storage media,
+copy-on-write filesystems, snapshots, or backups.
+
+While unlocked, the identity and decrypted body exist in browser memory and the
+live DOM/JavaScript objects. The application does not intentionally persist the
+identity, password, or decrypted body to local or session storage, but browser
+developer tools, extensions, accessibility software, crash capture, or malware
+can observe plaintext in the unlocked page. Do not place secrets in logs,
+screenshots, consoles, filenames, or metadata.
+
+## Related
+
+- [Attachments and Media](/docs/attachments-and-media)
+- [Editor Workflows](/docs/editor-workflows)
+- [Pages and Authoring](/docs/pages-and-authoring)
+- [Configuration](/docs/configuration) for keyring files and vault settings
+- `docs/encrypted-notes.md` for recovery storage and age interoperability

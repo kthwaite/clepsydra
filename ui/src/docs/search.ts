@@ -13,6 +13,7 @@ const SCORE = {
   titleToken: 1_000,
   headingToken: 300,
   descriptionToken: 100,
+  keywordToken: 50,
   bodyToken: 10,
 } as const;
 
@@ -29,6 +30,7 @@ type RankedSection = {
 type NormalizedPage = {
   title: string;
   description: string;
+  keywords: readonly string[];
   metadataOnly: boolean;
 };
 
@@ -137,6 +139,7 @@ function rankSection(
       (token) =>
         page.title.includes(token) ||
         page.description.includes(token) ||
+        page.keywords.some((keyword) => keyword.includes(token)) ||
         heading.includes(token) ||
         body.includes(token),
     )
@@ -168,6 +171,10 @@ function rankSection(
       score += SCORE.descriptionToken;
       scoreClass = Math.max(scoreClass, SCORE.descriptionToken);
     }
+    if (page.keywords.some((keyword) => keyword.includes(token))) {
+      score += SCORE.keywordToken;
+      scoreClass = Math.max(scoreClass, SCORE.keywordToken);
+    }
     if (body.includes(token)) {
       score += SCORE.bodyToken;
       scoreClass = Math.max(scoreClass, SCORE.bodyToken);
@@ -178,6 +185,12 @@ function rankSection(
   if (tokens.some((token) => body.includes(token))) {
     excerptText = section.text;
   } else if (tokens.some((token) => page.description.includes(token))) {
+    excerptText = section.page.description;
+  } else if (
+    tokens.some((token) =>
+      page.keywords.some((keyword) => keyword.includes(token)),
+    )
+  ) {
     excerptText = section.page.description;
   } else if (tokens.some((token) => heading.includes(token))) {
     excerptText = section.heading ?? "";
@@ -302,11 +315,16 @@ export function searchDocs(
     }
     const title = normalize(section.page.title);
     const description = normalize(section.page.description);
+    const keywords = section.page.keywords.map(normalize);
     normalizedPages.set(section.page, {
       title,
       description,
+      keywords,
       metadataOnly: tokens.every(
-        (token) => title.includes(token) || description.includes(token),
+        (token) =>
+          title.includes(token) ||
+          description.includes(token) ||
+          keywords.some((keyword) => keyword.includes(token)),
       ),
     });
   }
@@ -322,22 +340,25 @@ export function searchDocs(
     })
     .filter((candidate): candidate is RankedSection => candidate !== undefined);
 
-  const specificClassesByPage = new Map<DocPage, Set<number>>();
+  const bestByPage = new Map<DocPage, RankedSection>();
   for (const candidate of ranked) {
-    if (candidate.section.heading === undefined) {
-      continue;
+    const current = bestByPage.get(candidate.section.page);
+    if (
+      current === undefined ||
+      candidate.score > current.score ||
+      (candidate.score === current.score &&
+        current.section.heading === undefined &&
+        candidate.section.heading !== undefined) ||
+      (candidate.score === current.score &&
+        (current.section.heading === undefined) ===
+          (candidate.section.heading === undefined) &&
+        candidate.section.order < current.section.order)
+    ) {
+      bestByPage.set(candidate.section.page, candidate);
     }
-    const classes = specificClassesByPage.get(candidate.section.page) ?? new Set<number>();
-    classes.add(candidate.scoreClass);
-    specificClassesByPage.set(candidate.section.page, classes);
   }
 
-  return ranked
-    .filter(
-      (candidate) =>
-        candidate.section.heading !== undefined ||
-        !specificClassesByPage.get(candidate.section.page)?.has(candidate.scoreClass),
-    )
+  return [...bestByPage.values()]
     .sort((left, right) => right.score - left.score || left.section.order - right.section.order)
     .map(({ section, score, excerptText }) => ({
       page: section.page,

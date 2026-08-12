@@ -209,12 +209,14 @@ export function DocsSidebar({ activeSlug, onNavigate }: DocsSidebarProps) {
             {DOC_GROUPS.map((group) => {
               const collapsed = collapsedGroups.has(group.id);
               const panelId = `${groupIdPrefix}-${group.id}`;
+              const buttonId = `${panelId}-button`;
 
               return (
                 <section key={group.id}>
                   <h2>
                     <button
                       type="button"
+                      id={buttonId}
                       aria-expanded={!collapsed}
                       aria-controls={panelId}
                       onClick={() => toggleGroup(group.id)}
@@ -228,7 +230,11 @@ export function DocsSidebar({ activeSlug, onNavigate }: DocsSidebarProps) {
                       {group.label}
                     </button>
                   </h2>
-                  <ul id={panelId} hidden={collapsed}>
+                  <ul
+                    id={panelId}
+                    aria-labelledby={buttonId}
+                    hidden={collapsed}
+                  >
                     {group.pages.map((page) => (
                       <li key={page.slug}>
                         <PageLink

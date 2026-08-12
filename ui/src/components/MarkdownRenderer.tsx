@@ -1,13 +1,22 @@
 import { type ReactNode, useRef } from "react";
-import Markdown, { defaultUrlTransform } from "react-markdown";
+import Markdown, {
+  defaultUrlTransform,
+  type UrlTransform,
+} from "react-markdown";
 import remarkGfm from "remark-gfm";
 import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { MathExpression } from "#/components/MathExpression";
+import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
+import {
+  BLOCK_REFERENCE_SCHEME,
+  blockIdFromHref,
+  remarkBlockReferences,
+} from "#/lib/markdown/blockReferences";
 import { isCasResource, resolveResourceUrl } from "#/lib/resourceUrl";
 
 interface MarkdownRendererProps {
@@ -45,6 +54,7 @@ function MarkdownCodeBlock({ children }: { children?: ReactNode }) {
 const remarkPlugins: PluggableList = [
   remarkFolioMath,
   remarkGfm,
+  remarkBlockReferences,
   [
     wikiLinkPlugin,
     {
@@ -54,11 +64,18 @@ const remarkPlugins: PluggableList = [
   ],
 ];
 
-function transformMarkdownUrl(url: string): string {
+const transformMarkdownUrl: UrlTransform = (url, key, node) => {
+  if (
+    key === "href" &&
+    node.tagName === "a" &&
+    url.startsWith(BLOCK_REFERENCE_SCHEME)
+  ) {
+    return url;
+  }
   return isCasResource(url)
     ? resolveResourceUrl(url)
     : defaultUrlTransform(url);
-}
+};
 
 export function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const openTab = useOpenTab();
@@ -95,6 +112,24 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
           return <div {...props}>{children}</div>;
         },
         a: ({ href, children, ...props }) => {
+          const blockId = href ? blockIdFromHref(href) : null;
+          if (blockId) {
+            return (
+              <BlockTransclusion
+                blockId={blockId}
+                onOpenSource={(block) => {
+                  openTab(
+                    "page",
+                    block.page_path,
+                    block.page_title || block.page_path,
+                    { blockId },
+                  );
+                }}
+              />
+            );
+          }
+          if (href?.startsWith(BLOCK_REFERENCE_SCHEME)) return children;
+
           const resource = href ? classifyLinkResource(href) : null;
           if (href?.startsWith("/pages/")) {
             const pagePath = decodeURIComponent(href.replace(/^\/pages\//, ""));

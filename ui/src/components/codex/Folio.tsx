@@ -9,7 +9,13 @@ import {
   useRef,
   useState,
 } from "react";
-import { type Range, Transforms } from "slate";
+import {
+  Editor,
+  Element as SlateElement,
+  type Range,
+  Transforms,
+} from "slate";
+import { ReactEditor } from "slate-react";
 import {
   useBacklinks,
   useOutlinks,
@@ -230,6 +236,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const focusRequestId = useWorkspaceStore(
+    (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
+  );
+  const takeTabFocus = useWorkspaceStore((state) => state.takeTabFocus);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       runWorkspaceTransition(() => {
@@ -350,6 +360,7 @@ export function Folio({ tabId, path }: FolioProps) {
     if (editor.title) updateTabLabel(tabId, editor.title);
   }, [tabId, editor.title, updateTabLabel]);
 
+
   useEffect(() => {
     setProgress(0);
   }, [setProgress]);
@@ -467,6 +478,53 @@ export function Folio({ tabId, path }: FolioProps) {
       );
     }
   };
+  useEffect(() => {
+    if (
+      !focusRequestId ||
+      editor.isLoading ||
+      !editor.isEditorSynchronized
+    ) {
+      return;
+    }
+    const focusBlockId = takeTabFocus(tabId, focusRequestId);
+    if (!focusBlockId) return;
+
+    const target = Array.from(
+      bodyRef.current?.querySelectorAll<HTMLElement>("[data-block-id]") ?? [],
+    ).find((element) => element.dataset.blockId === focusBlockId);
+    if (!target) return;
+
+    target.scrollIntoView({ block: "center", inline: "nearest" });
+    if (!conversationReadOnly && folioEditorRef.current) {
+      const editorInstance = folioEditorRef.current;
+      const entry = Editor.nodes(editorInstance, {
+        at: [],
+        match: (node) =>
+          SlateElement.isElement(node) &&
+          node.type !== "block-ref" &&
+          "blockId" in node &&
+          node.blockId === focusBlockId,
+      }).next().value;
+      if (entry) {
+        Transforms.select(editorInstance, Editor.start(editorInstance, entry[1]));
+        ReactEditor.focus(editorInstance);
+      }
+      return;
+    }
+
+    const hadTabIndex = target.hasAttribute("tabindex");
+    if (!hadTabIndex) target.tabIndex = -1;
+    target.focus({ preventScroll: true });
+    if (!hadTabIndex) target.removeAttribute("tabindex");
+  }, [
+    conversationReadOnly,
+    editor.editorRevision,
+    editor.isLoading,
+    editor.isEditorSynchronized,
+    focusRequestId,
+    tabId,
+    takeTabFocus,
+  ]);
 
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
@@ -1001,6 +1059,7 @@ export function Folio({ tabId, path }: FolioProps) {
                 <div className="mt-2">
                   <AttachmentManager
                     protectedPage={encrypted}
+                    pageMarkdown={editor.bodyMarkdown}
                     onInsertMarkdown={requestAttachmentInsertion}
                   />
                 </div>

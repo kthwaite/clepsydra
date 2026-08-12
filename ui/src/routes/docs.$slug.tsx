@@ -1,14 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { DesktopOnlyRoute } from "#/components/codex/DesktopOnlyRoute";
 import { DocsScreen } from "#/components/docs/DocsScreen";
 
 function DocsRoute() {
   const { slug } = Route.useParams();
-  return (
-    <DesktopOnlyRoute name="Docs">
-      <DocsScreen slug={slug} />
-    </DesktopOnlyRoute>
-  );
+  return <DocsScreen slug={slug} />;
 }
 
 export const Route = createFileRoute("/docs/$slug")({

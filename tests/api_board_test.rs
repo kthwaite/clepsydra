@@ -1331,23 +1331,18 @@ async fn seal_cycle_routes_carryover_to_backlog() {
     else {
         panic!("expected IndexChanged")
     };
-    assert_eq!(upserted, vec!["cycles/S-13.md"]);
-    assert!(removed.is_empty());
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
-    else {
-        panic!("expected IndexChanged")
-    };
-    assert_eq!(upserted, vec!["tasks/TSK-0002.md"]);
-    assert!(removed.is_empty());
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
-    else {
-        panic!("expected IndexChanged")
-    };
-    assert_eq!(upserted, vec!["tasks/TSK-0003.md"]);
+    assert_eq!(
+        upserted,
+        vec![
+            "cycles/S-13.md",
+            "tasks/TSK-0002.md",
+            "tasks/TSK-0003.md"
+        ]
+    );
     assert!(removed.is_empty());
     assert!(
         changes.try_recv().is_err(),
-        "carryover must emit exactly one notification per successful page"
+        "carryover must emit exactly one sorted batch notification"
     );
 
     let vault_root = tmp.path().join("vault");
@@ -1450,39 +1445,19 @@ async fn seal_cycle_without_carry_leaves_tasks() {
 }
 
 #[tokio::test]
-async fn carryover_later_task_failure_preserves_prior_mutations_and_notifications() {
-    let (server, tmp, state) = setup_server_with_state(|root| {
-        std::fs::create_dir_all(root.join("cycles")).unwrap();
-        std::fs::write(
-            root.join("cycles/S-13.md"),
-            "---\nid: 01951234-0000-7000-8000-aaa000000001\ntitle: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
-        )
-        .unwrap();
-        std::fs::create_dir_all(root.join("tasks")).unwrap();
-        std::fs::write(
-            root.join("tasks/TSK-0001.md"),
-            "---\nid: 01951234-0000-7000-8000-bbb000000001\ntitle: First\ntype: TASK\nstatus: FIELD\ncycle: S-13\n---\n",
-        )
-        .unwrap();
-        std::fs::write(
-            root.join("tasks/TSK-0002.md"),
-            "---\nid: 01951234-0000-7000-8000-bbb000000002\ntitle: Later\ntype: TASK\nstatus: FIELD\ncycle: S-13\n---\n",
-        )
-        .unwrap();
-    });
-    state
-        .index
-        .with_index(|index, _| {
-            index
-                .connection()
-                .execute_batch("PRAGMA reverse_unordered_selects = ON")
-        })
-        .await
-        .unwrap()
-        .unwrap();
+async fn closing_cycle_rolls_back_cycle_and_every_carried_task_on_failure() {
+    let (server, tmp, state) = setup_cycle_with_tasks();
     let vault_root = tmp.path().join("vault");
-    std::fs::write(vault_root.join("tasks/TSK-0002.md"), [0xff]).unwrap();
+    let cycle_path = vault_root.join("cycles/S-13.md");
+    let first_task_path = vault_root.join("tasks/TSK-0002.md");
+    let second_task_path = vault_root.join("tasks/TSK-0003.md");
+    let original_cycle = std::fs::read(&cycle_path).unwrap();
+    let original_first_task = std::fs::read(&first_task_path).unwrap();
+    let original_second_task = std::fs::read(&second_task_path).unwrap();
     let mut changes = state.change_tx.subscribe();
+    state
+        .mutation_coordinator
+        .set_batch_publication_fail_after(Some(1));
 
     let response = server
         .patch("/api/vault/board/cycles/01951234-0000-7000-8000-aaa000000001")
@@ -1491,36 +1466,17 @@ async fn carryover_later_task_failure_preserves_prior_mutations_and_notification
             "carry_to": "BACKLOG"
         }))
         .await;
+
     response.assert_status_internal_server_error();
-
-    let cycle = std::fs::read_to_string(vault_root.join("cycles/S-13.md")).unwrap();
-    assert!(cycle.contains("state = \"CLOSED\""));
-    let first = std::fs::read_to_string(vault_root.join("tasks/TSK-0001.md")).unwrap();
-    assert!(
-        !first.contains("cycle:"),
-        "first carryover must remain applied"
-    );
+    assert_eq!(std::fs::read(cycle_path).unwrap(), original_cycle);
+    assert_eq!(std::fs::read(first_task_path).unwrap(), original_first_task);
     assert_eq!(
-        std::fs::read(vault_root.join("tasks/TSK-0002.md")).unwrap(),
-        [0xff],
-        "the failing later task must remain untouched"
+        std::fs::read(second_task_path).unwrap(),
+        original_second_task
     );
-
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
-    else {
-        panic!("expected IndexChanged")
-    };
-    assert_eq!(upserted, vec!["cycles/S-13.md"]);
-    assert!(removed.is_empty());
-    let SyncNotification::IndexChanged { upserted, removed } = recv_change(&mut changes).await
-    else {
-        panic!("expected IndexChanged")
-    };
-    assert_eq!(upserted, vec!["tasks/TSK-0001.md"]);
-    assert!(removed.is_empty());
     assert!(
         changes.try_recv().is_err(),
-        "the failed later task must not emit a notification"
+        "a rolled-back carryover must not emit a notification"
     );
 }
 

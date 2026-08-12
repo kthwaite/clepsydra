@@ -57,11 +57,12 @@ export function useUploadAttachment() {
     }) => {
       const body = new FormData();
       body.append("file", file);
+      body.append("plaintext_acknowledged", "true");
       const { data, error } = await fetchClient.POST(
         "/api/vault/attachments/{path}",
         {
           params: { path: { path } },
-          body: body as unknown as string,
+          body: body as unknown as components["schemas"]["AttachmentUploadForm"],
         },
       );
       if (error) throw error;

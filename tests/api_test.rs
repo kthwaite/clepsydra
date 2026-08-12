@@ -1,4 +1,5 @@
 mod support;
+use std::collections::BTreeSet;
 
 use std::fs;
 use std::future::{Future, poll_fn};
@@ -14,6 +15,8 @@ use axum_test::TestServer;
 use tokio::sync::{Barrier, mpsc};
 
 use clepsydra::api::error::{parse_internal_path, parse_request_path};
+use clepsydra::api::events::SyncNotification;
+use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::Vault;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
@@ -21,6 +24,7 @@ use support::ApiFixture;
 use tempfile::TempDir;
 use tokio_stream::wrappers::ReceiverStream;
 use tower::ServiceExt;
+use utoipa::OpenApi;
 
 /// Set up a test server backed by a fresh vault in a temporary directory.
 fn setup_server() -> (TestServer, TempDir) {
@@ -111,7 +115,9 @@ fn delayed_multipart_request(
     let header = Bytes::from(format!(
         "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"race.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n"
     ));
-    let trailer = Bytes::from(format!("\r\n--{boundary}--\r\n"));
+    let trailer = Bytes::from(format!(
+        "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
+    ));
     let (sender, receiver) = mpsc::channel(1);
 
     tokio::spawn(async move {
@@ -132,6 +138,50 @@ fn delayed_multipart_request(
         )
         .body(Body::from_stream(ReceiverStream::new(receiver)))
         .unwrap()
+}
+
+async fn multipart_upload(
+    server: &TestServer,
+    file_name: &str,
+    payload: &[u8],
+    plaintext_acknowledged: Option<bool>,
+) -> axum_test::TestResponse {
+    let boundary = "----attachmentacknowledgementboundary";
+    let mut body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    )
+    .into_bytes();
+    body.extend_from_slice(payload);
+    if let Some(acknowledged) = plaintext_acknowledged {
+        body.extend_from_slice(
+            format!(
+                "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\n{acknowledged}"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+
+    server
+        .post(&format!("/api/vault/attachments/{file_name}"))
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into())
+        .await
+}
+
+fn assert_no_attachment_temporaries(tmp: &TempDir) {
+    let attachment_dir = tmp.path().join("vault/_attachments");
+    let temporary_names = fs::read_dir(attachment_dir)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name())
+        .filter(|name| name.to_string_lossy().starts_with(".upload-"))
+        .collect::<Vec<_>>();
+    assert!(
+        temporary_names.is_empty(),
+        "temporary upload files remain: {temporary_names:?}"
+    );
 }
 
 #[tokio::test]
@@ -190,6 +240,35 @@ async fn put_location_rejects_out_of_range_latitude() {
         }))
         .await;
     res.assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn put_location_write_failure_preserves_in_memory_location() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir(root.join(".clepsydra/location.toml")).unwrap();
+        })
+        .build();
+
+    let response = fixture
+        .server
+        .put("/api/vault/location")
+        .json(&serde_json::json!({
+            "latitude": 51.5074,
+            "longitude": -0.1278,
+            "label": "London"
+        }))
+        .await;
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = response.json();
+    assert!(body["error"].as_str().unwrap().contains("failed to write"));
+
+    let current = fixture.server.get("/api/vault/location").await;
+    current.assert_status_ok();
+    let current_body: serde_json::Value = current.json();
+    assert!(current_body["latitude"].is_null());
+    assert!(current_body["longitude"].is_null());
+    assert!(current_body["label"].is_null());
 }
 
 #[tokio::test]
@@ -739,8 +818,9 @@ async fn page_move_waits_for_uuid_update_publish_and_preserves_single_identity()
     assert_eq!(updated["body"], "published before move");
     assert_ne!(updated["revision"], original_revision);
 
-    assert_eq!(move_response.status(), StatusCode::OK);
+    let move_status = move_response.status();
     let moved = response_json(move_response).await;
+    assert_eq!(move_status, StatusCode::OK, "move failed: {moved}");
     assert_eq!(moved["meta"]["id"], id);
     assert_eq!(moved["path"], "moved/publish-race.md");
     assert_eq!(moved["body"], "published before move");
@@ -1322,6 +1402,25 @@ async fn create_and_list_folder() {
 }
 
 #[tokio::test]
+async fn folder_create_parent_file_failure_writes_no_directory() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::write(root.join("blocked"), b"existing file").unwrap();
+        })
+        .build();
+    let root = fixture.temp_dir.path().join("vault");
+
+    fixture
+        .server
+        .post("/api/vault/folders/blocked/child")
+        .await
+        .assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+
+    assert_eq!(fs::read(root.join("blocked")).unwrap(), b"existing file");
+    assert!(!root.join("blocked/child").exists());
+}
+
+#[tokio::test]
 async fn lists_folder_contents_sorted() {
     let (server, _tmp) = setup_server_with_files(&[
         ("topic/Beta.md", "# Beta\n"),
@@ -1532,6 +1631,103 @@ async fn move_page_rewrites_backlinks() {
     assert!(
         content.contains("[[renamed]]"),
         "expected [[renamed]] in rewritten content, but found: {content}"
+    );
+}
+
+#[tokio::test]
+async fn page_move_commits_primary_and_backlink_rewrite_before_one_notification() {
+    let fixture = ApiFixture::builder().build();
+    let vault_root = fixture.temp_dir.path().join("vault");
+    fixture
+        .server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/pages/source.md")
+        .json(&serde_json::json!({"title": "Source", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    fixture
+        .server
+        .post("/api/vault/pages-move/target.md")
+        .json(&serde_json::json!({"destination": "renamed.md"}))
+        .await
+        .assert_status(StatusCode::OK);
+
+    assert!(!vault_root.join("target.md").exists());
+    assert!(vault_root.join("renamed.md").exists());
+    let backlink = fs::read_to_string(vault_root.join("source.md")).unwrap();
+    assert!(!backlink.contains("[[Target]]"));
+    assert!(backlink.contains("[[renamed]]"));
+    match notifications.try_recv().expect("move notification") {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert_eq!(
+                upserted.into_iter().collect::<BTreeSet<_>>(),
+                BTreeSet::from(["renamed.md".to_string(), "source.md".to_string()])
+            );
+            assert_eq!(removed, vec!["target.md"]);
+        }
+        notification => panic!("unexpected move notification: {notification:?}"),
+    }
+    assert!(
+        notifications.try_recv().is_err(),
+        "page move must publish exactly one notification"
+    );
+}
+
+#[tokio::test]
+async fn page_delete_commits_primary_and_backlink_rewrite_before_one_notification() {
+    let fixture = ApiFixture::builder().build();
+    let vault_root = fixture.temp_dir.path().join("vault");
+    fixture
+        .server
+        .post("/api/vault/pages/target.md")
+        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/pages/linker.md")
+        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
+        .await
+        .assert_status(StatusCode::CREATED);
+    fixture
+        .server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status_ok();
+    let mut notifications = fixture.state.change_tx.subscribe();
+
+    fixture
+        .server
+        .delete("/api/vault/pages/target.md?force=true&rewrite=plain_text")
+        .await
+        .assert_status(StatusCode::NO_CONTENT);
+
+    assert!(!vault_root.join("target.md").exists());
+    let backlink = fs::read_to_string(vault_root.join("linker.md")).unwrap();
+    assert!(!backlink.contains("[[Target]]"));
+    assert!(backlink.contains("See Target here."));
+    match notifications.try_recv().expect("delete notification") {
+        SyncNotification::IndexChanged { upserted, removed } => {
+            assert_eq!(upserted, vec!["linker.md"]);
+            assert_eq!(removed, vec!["target.md"]);
+        }
+        notification => panic!("unexpected delete notification: {notification:?}"),
+    }
+    assert!(
+        notifications.try_recv().is_err(),
+        "page delete must publish exactly one notification"
     );
 }
 
@@ -2052,6 +2248,859 @@ fn setup_server_with_files(files: &[(&str, &str)]) -> (TestServer, TempDir) {
         .into_server_and_temp()
 }
 
+fn seeded_reference_issue_server() -> (TestServer, TempDir) {
+    setup_server_with_files(&[
+        (
+            "notes/source-a.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000601\ntitle: Source A\ntype: NOTE\nproject: alpha\n---\nBroken ((abc123DEF0)); missing [[Missing Page]].\n",
+        ),
+        (
+            "notes/source-b.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000602\ntitle: Source B\ntype: NOTE\nproject: alpha\n---\nBroken ((fed987CBA0)).\n",
+        ),
+        (
+            "notes/ambiguous-source.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000603\ntitle: Ambiguous Source\ntype: NOTE\nproject: beta\n---\nSee [[Twin]].\n",
+        ),
+        (
+            "notes/twin-a.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000604\ntitle: Twin\ntype: NOTE\nproject: beta\n---\nFirst.\n",
+        ),
+        (
+            "notes/twin-b.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000605\ntitle: Twin\ntype: NOTE\nproject: beta\n---\nSecond.\n",
+        ),
+    ])
+}
+
+#[tokio::test]
+async fn reference_issues_filter_before_paginating() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get(
+            "/api/vault/index/issues?kind=broken_block_ref&project=alpha&page_kind=NOTE&actionable=false&limit=1&offset=0",
+        )
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 2);
+    assert_eq!(response["limit"], 1);
+    assert_eq!(response["offset"], 0);
+    assert_eq!(response["items"].as_array().unwrap().len(), 1);
+    assert_eq!(response["items"][0]["kind"], "broken_block_ref");
+    assert_eq!(response["items"][0]["actions"], serde_json::json!(["open_source"]));
+}
+
+#[tokio::test]
+async fn reference_issues_normalize_repeated_and_comma_separated_kinds() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get(
+            "/api/vault/index/issues?kind=broken_block_ref,unresolved_page_link&kind=ambiguous_page_link&limit=200",
+        )
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 4);
+    let kinds = response["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|issue| issue["kind"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        kinds,
+        BTreeSet::from([
+            "ambiguous_page_link",
+            "broken_block_ref",
+            "unresolved_page_link",
+        ])
+    );
+}
+
+#[tokio::test]
+async fn reference_issues_expose_ranked_candidate_evidence() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let response = server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link")
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    assert_eq!(response["total"], 1);
+    let candidates = response["items"][0]["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0]["path"], "notes/twin-a.md");
+    assert_eq!(candidates[0]["title"], "Twin");
+    assert!(candidates[0]["page_id"].as_str().is_some());
+    assert!(candidates[0]["rationale"].as_str().is_some());
+}
+
+#[tokio::test]
+async fn reference_issues_reject_invalid_filters_and_limits() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let misspelled_kind = server
+        .get("/api/vault/index/issues?kind=broken_block_reff")
+        .await;
+    misspelled_kind.assert_status_bad_request();
+    assert!(
+        !misspelled_kind
+            .json::<serde_json::Value>()
+            .to_string()
+            .contains("broken_block_reff")
+    );
+
+    for query in [
+        "project=",
+        "page_kind=NOT_A_KIND",
+        "actionable=sometimes",
+        "limit=0",
+        "limit=201",
+        "limit=lots",
+        "offset=-1",
+    ] {
+        let response = server
+            .get(&format!("/api/vault/index/issues?{query}"))
+            .await;
+        response.assert_status_bad_request();
+    }
+}
+
+#[tokio::test]
+async fn reference_issues_hide_encrypted_reference_evidence() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(
+                root.join("notes/private.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000606\ntitle: Private\ntype: NOTE\n---\nDo not expose ((sec123RET0)).\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection
+                .execute(
+                    "UPDATE pages SET encrypted = 1 WHERE id = ?1",
+                    ["019fd000-0000-7000-8000-000000000606"],
+                )
+                .unwrap();
+        })
+        .build();
+    let response = fixture
+        .server
+        .get("/api/vault/index/issues?kind=broken_block_ref")
+        .await;
+    response.assert_status_ok();
+    let response: serde_json::Value = response.json();
+
+    let issue = &response["items"][0];
+    assert_eq!(response["total"], 1);
+    assert!(issue["snippet"].is_null());
+    assert!(issue["target_raw"].is_null());
+    assert!(issue["source_field"].is_null());
+    assert!(issue["span_start"].is_null());
+    assert!(issue["span_end"].is_null());
+    assert_eq!(issue["candidates"], serde_json::json!([]));
+    assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
+}
+
+#[tokio::test]
+async fn reference_issues_return_stable_ordering_and_fingerprints() {
+    let (server, _tmp) = seeded_reference_issue_server();
+    let path = "/api/vault/index/issues?limit=200";
+    let first: serde_json::Value = server.get(path).await.json();
+    let second: serde_json::Value = server.get(path).await.json();
+
+    assert_eq!(first, second);
+    assert!(
+        first["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|issue| issue["fingerprint"].as_str().is_some_and(|value| value.len() == 64))
+    );
+}
+
+#[tokio::test]
+async fn reference_issues_do_not_expose_projection_failures() {
+    let fixture = ApiFixture::builder()
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection.execute_batch("DROP TABLE links").unwrap();
+        })
+        .build();
+    let response = fixture.server.get("/api/vault/index/issues").await;
+    response.assert_status_internal_server_error();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["error"], "reference issue inventory unavailable");
+    assert!(!body.to_string().contains("links"));
+    assert!(!body.to_string().contains("sqlite"));
+}
+
+#[test]
+fn reference_issues_openapi_registers_route_parameters_and_schemas() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let operation = &openapi["paths"]["/api/vault/index/issues"]["get"];
+    let parameters = operation["parameters"].as_array().unwrap();
+    let names = parameters
+        .iter()
+        .map(|parameter| parameter["name"].as_str().unwrap())
+        .collect::<BTreeSet<_>>();
+
+    assert_eq!(
+        names,
+        BTreeSet::from(["actionable", "kind", "limit", "offset", "page_kind", "project"])
+    );
+    let limit = parameters
+        .iter()
+        .find(|parameter| parameter["name"] == "limit")
+        .unwrap();
+    assert_eq!(limit["schema"]["minimum"], 1);
+    assert_eq!(limit["schema"]["maximum"], 200);
+    assert_eq!(
+        operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/ReferenceIssuesResponse"
+    );
+    for schema in [
+        "ReferenceCandidateDto",
+        "ReferenceIssueActionDto",
+        "ReferenceIssueDto",
+        "ReferenceIssueKindDto",
+        "ReferenceIssuesResponse",
+    ] {
+        assert!(
+            openapi["components"]["schemas"].get(schema).is_some(),
+            "missing OpenAPI schema {schema}"
+        );
+    }
+    assert_eq!(
+        openapi["components"]["schemas"]["ReferenceIssueKindDto"]["enum"],
+        serde_json::json!([
+            "unresolved_page_link",
+            "ambiguous_page_link",
+            "broken_block_ref",
+            "invalid_relation_target",
+            "orphan_page",
+            "isolated_page"
+        ])
+    );
+    assert_eq!(
+        openapi["components"]["schemas"]["ReferenceIssueActionDto"]["enum"],
+        serde_json::json!(["create", "replace", "open_source", "none"])
+    );
+}
+
+fn reference_repair_fixture() -> ApiFixture {
+    ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            for (path, content) in [
+                (
+                    "source.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nSee [[Twin|the chosen twin]] and [[Missing Page]].\n",
+                ),
+                (
+                    "twin-a.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000611\ntitle: Twin\n---\nFirst.\n",
+                ),
+                (
+                    "twin-b.md",
+                    "---\nid: 019fd000-0000-7000-8000-000000000612\ntitle: Twin\n---\nSecond.\n",
+                ),
+            ] {
+                fs::write(root.join("notes").join(path), content).unwrap();
+            }
+        })
+        .build()
+}
+
+fn reference_repair_server() -> (TestServer, TempDir) {
+    reference_repair_fixture().into_server_and_temp()
+}
+
+async fn reference_repair_issue(
+    server: &TestServer,
+    kind: &str,
+    target: &str,
+) -> serde_json::Value {
+    let response = server
+        .get(&format!("/api/vault/index/issues?kind={kind}&limit=200"))
+        .await;
+    response.assert_status_ok();
+    response
+        .json::<serde_json::Value>()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["target_raw"] == target)
+        .unwrap()
+        .clone()
+}
+
+fn reference_repair_replace_request(
+    issue: &serde_json::Value,
+    candidate_page_id: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "fingerprint": issue["fingerprint"],
+        "source_revision": issue["source_revision"],
+        "action": {
+            "type": "replace",
+            "candidate_page_id": candidate_page_id,
+        },
+    })
+}
+
+fn reference_repair_create_request(issue: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "fingerprint": issue["fingerprint"],
+        "source_revision": issue["source_revision"],
+        "action": {
+            "type": "create",
+            "folder": "notes",
+            "body": "Created through reference repair.\n",
+        },
+    })
+}
+
+async fn reference_repair_apply_through_app(
+    app: Router,
+    request: serde_json::Value,
+) -> axum::response::Response {
+    app.oneshot(
+        Request::post("/api/vault/index/issues/apply")
+            .header("content-type", "application/json")
+            .body(Body::from(serde_json::to_vec(&request).unwrap()))
+            .unwrap(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn reference_repair_preview_and_apply_report_the_same_text_edit() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    let preview = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await;
+    preview.assert_status_ok();
+    let preview: serde_json::Value = preview.json();
+    assert_eq!(preview["fingerprint"], issue["fingerprint"]);
+    assert_eq!(preview["before"], "[[Twin|the chosen twin]]");
+    assert_eq!(
+        preview["after"],
+        format!("[[{candidate_id}|the chosen twin]]")
+    );
+    assert_eq!(preview["plan"]["text_edits"][0]["old_text"], preview["before"]);
+    assert_eq!(preview["plan"]["text_edits"][0]["new_text"], preview["after"]);
+
+    let apply = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    apply.assert_status_ok();
+    let apply: serde_json::Value = apply.json();
+    assert_eq!(apply["fingerprint"], issue["fingerprint"]);
+    assert_eq!(
+        apply["notification"]["upserted"],
+        serde_json::json!(["notes/source.md"])
+    );
+    assert_eq!(apply["notification"]["removed"], serde_json::json!([]));
+
+    let source = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+    assert!(source.contains(preview["after"].as_str().unwrap()));
+}
+
+#[tokio::test]
+async fn reference_repair_apply_rejects_source_changed_after_preview() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    let changed_source = "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nChanged after preview.\n";
+    fs::write(&source_path, changed_source).unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status(StatusCode::CONFLICT);
+    assert_eq!(fs::read_to_string(source_path).unwrap(), changed_source);
+}
+
+#[tokio::test]
+async fn reference_repair_source_missing_after_preview_is_stale() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    fs::remove_file(tmp.path().join("vault/notes/source.md")).unwrap();
+    let response = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    response.assert_status(StatusCode::CONFLICT);
+    assert!(!tmp.path().join("vault/notes/Missing Page.md").exists());
+}
+
+#[tokio::test]
+async fn reference_repair_genuine_source_io_error_remains_internal() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    fs::remove_file(&source_path).unwrap();
+    fs::create_dir(&source_path).unwrap();
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_internal_server_error();
+    assert!(!tmp.path().join("vault/notes/Missing Page.md").exists());
+}
+
+#[tokio::test]
+async fn reference_repair_candidate_deleted_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue =
+        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let candidate = issue["candidates"][0].clone();
+    let request =
+        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let source_path = fixture.temp_dir.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    fs::remove_file(
+        fixture
+            .temp_dir
+            .path()
+            .join("vault")
+            .join(candidate["path"].as_str().unwrap()),
+    )
+    .unwrap();
+    let removed_path =
+        clepsydra::vault::path::VaultPath::new(candidate["path"].as_str().unwrap()).unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, _| {
+            index.remove_page(&removed_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+}
+
+#[tokio::test]
+async fn reference_repair_candidate_changed_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue =
+        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let candidate = issue["candidates"][0].clone();
+    let request =
+        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let candidate_path = candidate["path"].as_str().unwrap();
+    fs::write(
+        fixture.temp_dir.path().join("vault").join(candidate_path),
+        format!(
+            "---\nid: {}\ntitle: No Longer Twin\n---\nChanged.\n",
+            candidate["page_id"].as_str().unwrap()
+        ),
+    )
+    .unwrap();
+    let indexed_path = clepsydra::vault::path::VaultPath::new(candidate_path).unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, vault| {
+            index.index_page(vault, &indexed_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+}
+
+#[tokio::test]
+async fn reference_repair_competing_canonical_target_after_projection_is_stale() {
+    let fixture = reference_repair_fixture();
+    let issue =
+        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let request = reference_repair_replace_request(
+        &issue,
+        issue["candidates"][0]["page_id"].as_str().unwrap(),
+    );
+    fixture
+        .server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+    let exclusion = fixture.state.mutation_coordinator.exclude_mutations().await;
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let apply = tokio::spawn(reference_repair_apply_through_app(
+        fixture.app.clone(),
+        request.clone(),
+    ));
+    tokio::task::yield_now().await;
+    let source_path = fixture.temp_dir.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    fs::write(
+        fixture.temp_dir.path().join("vault/notes/twin-c.md"),
+        "---\nid: 019fd000-0000-7000-8000-000000000622\ntitle: Twin\n---\nThird.\n",
+    )
+    .unwrap();
+    let added_path = clepsydra::vault::path::VaultPath::new("notes/twin-c.md").unwrap();
+    fixture
+        .state
+        .index
+        .with_index(move |index, vault| {
+            index.index_page(vault, &added_path)?;
+            index.resolve_links()
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    drop(exclusion);
+    let response = apply.await.unwrap();
+    assert_eq!(response.status(), StatusCode::CONFLICT);
+    assert!(notifications.try_recv().is_err());
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+}
+
+#[tokio::test]
+async fn reference_repair_create_resolves_original_no_match_after_indexing() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let mut request = reference_repair_create_request(&issue);
+    request["action"]["folder"] = serde_json::json!("new/nested");
+
+    let preview = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await;
+    preview.assert_status_ok();
+    let preview: serde_json::Value = preview.json();
+    assert_eq!(preview["before"], "[[Missing Page]]");
+    assert_eq!(preview["after"], "[[Missing Page]]");
+    assert_eq!(preview["plan"]["text_edits"], serde_json::json!([]));
+    let file_ops = preview["plan"]["file_ops"].as_array().unwrap();
+    assert!(file_ops.iter().any(|op| {
+        op["kind"] == "create_dir" && op["path"] == "new"
+    }));
+    assert!(file_ops.iter().any(|op| {
+        op["kind"] == "create_dir" && op["path"] == "new/nested"
+    }));
+    let create_file = file_ops
+        .iter()
+        .find(|op| op["kind"] == "create_file")
+        .unwrap();
+    assert_eq!(create_file["path"], "new/nested/Missing Page.md");
+    let previewed_hash = create_file["content_hash"].as_str().unwrap();
+    assert_eq!(previewed_hash.len(), 64);
+
+    let second_preview: serde_json::Value = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .json();
+    assert_eq!(
+        second_preview["plan"]["file_ops"],
+        preview["plan"]["file_ops"],
+        "the immutable created-page identity must not be regenerated"
+    );
+    let apply = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    apply.assert_status_ok();
+    let apply: serde_json::Value = apply.json();
+    assert_eq!(
+        apply["notification"]["upserted"],
+        serde_json::json!(["new/nested/Missing Page.md", "notes/source.md"])
+    );
+    let created_path = tmp.path().join("vault/new/nested/Missing Page.md");
+    let created = fs::read(&created_path).unwrap();
+    assert_eq!(
+        blake3::hash(&created).to_hex().as_str(),
+        previewed_hash,
+        "apply must publish the exact previewed bytes"
+    );
+    let issues: serde_json::Value = server
+        .get("/api/vault/index/issues?kind=unresolved_page_link&limit=200")
+        .await
+        .json();
+    assert!(
+        issues["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|current| current["fingerprint"] != issue["fingerprint"])
+    );
+}
+
+#[tokio::test]
+async fn reference_repair_ambiguous_replacement_is_an_explicit_target() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][1]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+    assert!(source.contains(&format!("[[{candidate_id}|the chosen twin]]")));
+    let issues: serde_json::Value = server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link&limit=200")
+        .await
+        .json();
+    assert_eq!(issues["total"], 0);
+}
+
+#[tokio::test]
+async fn reference_repair_encrypted_source_has_no_preview_or_apply_action() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(
+                root.join("notes/private.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000613\ntitle: Private\n---\nSecret [[Twin]].\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("notes/twin-a.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000614\ntitle: Twin\n---\nFirst.\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("notes/twin-b.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000615\ntitle: Twin\n---\nSecond.\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection
+                .execute(
+                    "UPDATE pages SET encrypted = 1 WHERE id = ?1",
+                    ["019fd000-0000-7000-8000-000000000613"],
+                )
+                .unwrap();
+        })
+        .build();
+    let response: serde_json::Value = fixture
+        .server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link")
+        .await
+        .json();
+    let issue = &response["items"][0];
+    assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
+    let request =
+        reference_repair_replace_request(issue, "019fd000-0000-7000-8000-000000000614");
+
+    for endpoint in ["preview", "apply"] {
+        let response = fixture
+            .server
+            .post(&format!("/api/vault/index/issues/{endpoint}"))
+            .json(&request)
+            .await;
+        response.assert_status_bad_request();
+        let body = response.text();
+        assert!(!body.contains("Secret"));
+        assert!(!body.contains("Twin"));
+    }
+}
+
+#[tokio::test]
+async fn reference_repair_create_is_atomic_when_destination_becomes_occupied() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    let destination = tmp.path().join("vault/notes/Missing Page.md");
+    fs::write(&destination, "occupied outside the index\n").unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status(StatusCode::CONFLICT);
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+    assert_eq!(
+        fs::read_to_string(destination).unwrap(),
+        "occupied outside the index\n"
+    );
+}
+
+#[tokio::test]
+async fn reference_repair_property_reference_uses_format_preserving_patch() {
+    let source = "+++\nid = \"019fd000-0000-7000-8000-000000000616\"\ntitle = \"Property Source\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n# preserve this comment\nlink = [\"[[Twin|chosen]]\", \"Other\"]\nstatus = \"draft\" # and this one\n+++\nBody stays byte-for-byte.\n";
+    let twin_a = "+++\nid = \"019fd000-0000-7000-8000-000000000617\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nFirst.\n";
+    let twin_b = "+++\nid = \"019fd000-0000-7000-8000-000000000618\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nSecond.\n";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/property-source.md", source),
+        ("notes/property-twin-a.md", twin_a),
+        ("notes/property-twin-b.md", twin_b),
+    ]);
+    let issue =
+        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let content =
+        fs::read_to_string(tmp.path().join("vault/notes/property-source.md")).unwrap();
+    assert!(content.contains("# preserve this comment"));
+    assert!(content.contains("status = \"draft\" # and this one"));
+    assert!(content.contains("Body stays byte-for-byte."));
+    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(!content.contains("[[Twin|chosen]]"));
+}
+
+#[tokio::test]
+async fn reference_repair_property_reference_can_patch_linkable_system_arrays() {
+    let source = "+++\nid = \"019fd000-0000-7000-8000-000000000619\"\ntitle = \"Tagged Source\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\ntags = [\"[[Twin|chosen]]\", \"other\"]\n+++\nBody.\n";
+    let twin_a = "+++\nid = \"019fd000-0000-7000-8000-000000000620\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nFirst.\n";
+    let twin_b = "+++\nid = \"019fd000-0000-7000-8000-000000000621\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nSecond.\n";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/tagged-source.md", source),
+        ("notes/tagged-twin-a.md", twin_a),
+        ("notes/tagged-twin-b.md", twin_b),
+    ]);
+    let issue =
+        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&reference_repair_replace_request(&issue, candidate_id))
+        .await
+        .assert_status_ok();
+
+    let content =
+        fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
+    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(content.contains("\"other\""));
+}
+
+#[test]
+fn reference_repair_openapi_registers_typed_contracts() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    for endpoint in ["preview", "apply"] {
+        assert!(
+            openapi["paths"][format!("/api/vault/index/issues/{endpoint}")]
+                .get("post")
+                .is_some()
+        );
+    }
+    for schema in [
+        "ReferenceRepairActionDto",
+        "ReferenceRepairApplyResponse",
+        "ReferenceRepairPreviewResponse",
+        "ReferenceRepairRequest",
+    ] {
+        assert!(
+            openapi["components"]["schemas"].get(schema).is_some(),
+            "missing OpenAPI schema {schema}"
+        );
+    }
+    assert!(
+        openapi["components"]["schemas"]["FileOpKind"]["enum"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("create_file"))
+    );
+    assert!(
+        openapi["components"]["schemas"]["PlannedFileOp"]["properties"]
+            .get("content_hash")
+            .is_some()
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Preview mutation (dry-run)
 // ---------------------------------------------------------------------------
@@ -2488,6 +3537,84 @@ Destination body.
             .unwrap()
             .contains("Destination body."),
         "the collision destination must not be overwritten"
+    );
+}
+
+#[tokio::test]
+async fn bulk_assign_rolls_back() {
+    let first = "\
+---
+id: 00000000-0000-0000-0000-000000000220
+title: First
+type: NOTE
+---
+First body.
+";
+    let second = "\
+---
+id: 00000000-0000-0000-0000-000000000221
+title: Second
+type: NOTE
+---
+Second body.
+";
+    let (server, tmp) =
+        setup_server_with_files(&[("notes/first.md", first), ("notes/second.md", second)]);
+    let vault_root = tmp.path().join("vault");
+    let first_path = vault_root.join("notes/first.md");
+    let original_first = fs::read(&first_path).unwrap();
+    fs::remove_file(vault_root.join("notes/second.md")).unwrap();
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes/first.md", "notes//second.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status(StatusCode::CONFLICT);
+    assert_eq!(
+        fs::read(first_path).unwrap(),
+        original_first,
+        "a stale second page must leave the first assignment unchanged"
+    );
+    assert!(
+        !vault_root.join("quotes/first.md").exists(),
+        "the first page must not be relocated"
+    );
+}
+
+#[tokio::test]
+async fn bulk_assign_reports_canonical_paths_for_normalizing_aliases() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000222
+title: Aliased
+type: NOTE
+---
+Aliased body.
+";
+    let (server, tmp) = setup_server_with_files(&[("notes/aliased.md", source)]);
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes//aliased.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert_eq!(
+        body["moved"],
+        serde_json::json!([["notes/aliased.md", "quotes/aliased.md"]])
+    );
+    assert_eq!(body["unchanged"], serde_json::json!([]));
+    assert!(
+        tmp.path().join("vault/quotes/aliased.md").exists(),
+        "the canonical destination must be published"
     );
 }
 
@@ -2971,9 +4098,9 @@ async fn page_mutation_projected_move_invokes_hook_before_notification() {
             _page_id: &uuid::Uuid,
             _vault: &Vault,
             _index: &VaultIndex,
-        ) -> Result<(), Box<dyn std::error::Error>> {
+        ) -> Result<Vec<VaultPath>, Box<dyn std::error::Error>> {
             self.events.lock().push("hook");
-            Ok(())
+            Ok(Vec::new())
         }
     }
 
@@ -4236,12 +5363,157 @@ async fn import_lifecycle_bibtex_dedup_and_verify() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
+async fn attachment_upload_requires_plaintext_acknowledgement() {
+    let (server, _tmp) = setup_server();
+
+    let missing = multipart_upload(&server, "missing.txt", b"secret", None).await;
+    missing.assert_status_bad_request();
+    assert_eq!(
+        missing.json::<serde_json::Value>()["error"],
+        "attachment plaintext storage must be acknowledged"
+    );
+
+    let false_ack = multipart_upload(&server, "false.txt", b"secret", Some(false)).await;
+    false_ack.assert_status_bad_request();
+    assert_eq!(
+        false_ack.json::<serde_json::Value>()["error"],
+        "attachment plaintext storage must be acknowledged"
+    );
+
+    multipart_upload(&server, "accepted.txt", b"secret", Some(true))
+        .await
+        .assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn rejected_attachment_upload_leaves_no_destination_or_temporary_file() {
+    let (server, tmp) = setup_server();
+
+    multipart_upload(&server, "rejected.bin", b"bytes", None)
+        .await
+        .assert_status_bad_request();
+
+    assert!(!tmp.path().join("vault/_attachments/rejected.bin").exists());
+    assert_no_attachment_temporaries(&tmp);
+}
+
+#[tokio::test]
+async fn attachment_upload_accepts_fields_in_arbitrary_order() {
+    let (server, tmp) = setup_server();
+    let boundary = "----acknowledgementfirstboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"ordered.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nbytes\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post("/api/vault/attachments/ordered.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    assert_eq!(
+        fs::read(tmp.path().join("vault/_attachments/ordered.bin")).unwrap(),
+        b"bytes"
+    );
+}
+
+#[tokio::test]
+async fn attachment_upload_rejects_duplicate_named_fields_and_unknown_binary_fields() {
+    let cases = [
+        (
+            "duplicate-file.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"two.bin\"\r\nContent-Type: application/octet-stream\r\n\r\ntwo\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+        (
+            "duplicate-ack.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+        (
+            "unknown-binary.bin",
+            "Content-Disposition: form-data; name=\"file\"; filename=\"one.bin\"\r\nContent-Type: application/octet-stream\r\n\r\none\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"unexpected\"; filename=\"other.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nother\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue",
+        ),
+    ];
+
+    for (destination, parts) in cases {
+        let (server, tmp) = setup_server();
+        let boundary = "----invalidnamedfieldsboundary";
+        let body = format!(
+            "--{boundary}\r\n{}\r\n--{boundary}--\r\n",
+            parts.replace("{boundary}", boundary)
+        );
+
+        server
+            .post(&format!("/api/vault/attachments/{destination}"))
+            .content_type(&format!("multipart/form-data; boundary={boundary}"))
+            .bytes(body.into_bytes().into())
+            .await
+            .assert_status_bad_request();
+
+        assert!(!tmp.path().join("vault/_attachments").join(destination).exists());
+        assert_no_attachment_temporaries(&tmp);
+    }
+}
+
+#[tokio::test]
+async fn attachment_upload_rejects_filename_less_unknown_binary_field() {
+    let (server, tmp) = setup_server();
+    let boundary = "----filenamelessunknownbinaryboundary";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"payload.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"unexpected\"\r\nContent-Type: application/octet-stream\r\n\r\nother\r\n--{boundary}--\r\n"
+    );
+
+    server
+        .post("/api/vault/attachments/filenameless.bin")
+        .content_type(&format!("multipart/form-data; boundary={boundary}"))
+        .bytes(body.into_bytes().into())
+        .await
+        .assert_status_bad_request();
+
+    assert!(
+        !tmp
+            .path()
+            .join("vault/_attachments/filenameless.bin")
+            .exists()
+    );
+    assert_no_attachment_temporaries(&tmp);
+}
+
+#[tokio::test]
+async fn attachment_upload_openapi_documents_named_multipart_fields() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]
+        ["content"]["multipart/form-data"]["schema"];
+    assert_eq!(
+        schema["$ref"],
+        "#/components/schemas/AttachmentUploadForm"
+    );
+    let form = &openapi["components"]["schemas"]["AttachmentUploadForm"];
+    assert_eq!(form["type"], "object");
+    assert_eq!(
+        form["required"],
+        serde_json::json!(["file", "plaintext_acknowledged"])
+    );
+    assert_eq!(form["additionalProperties"], false);
+    assert_eq!(form["properties"]["file"]["type"], "string");
+    assert_eq!(form["properties"]["file"]["format"], "binary");
+    assert_eq!(
+        form["properties"]["plaintext_acknowledged"]["type"],
+        "boolean"
+    );
+    assert_eq!(
+        form["properties"]["plaintext_acknowledged"]["enum"],
+        serde_json::json!([true])
+    );
+}
+
+#[tokio::test]
 async fn upload_and_retrieve_attachment() {
     let (server, _tmp) = setup_server();
 
     let boundary = "----testboundary";
     let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\nhello world\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"test.txt\"\r\nContent-Type: text/plain\r\n\r\nhello world\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
     );
 
     let res = server
@@ -4267,7 +5539,7 @@ async fn upload_attachment_conflict() {
 
     let boundary = "----testboundary";
     let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dup.txt\"\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dup.txt\"\r\nContent-Type: text/plain\r\n\r\nfirst\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
     );
     let ct = format!("multipart/form-data; boundary={boundary}");
 
@@ -4336,7 +5608,7 @@ async fn interrupted_attachment_upload_leaves_no_partial_files() {
     let (server, tmp) = setup_server();
     let boundary = "----interruptedattachmentboundary";
     let incomplete_body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"partial.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nincomplete"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"partial.bin\"\r\nContent-Type: application/octet-stream\r\n\r\nincomplete"
     );
 
     let response = server
@@ -4358,7 +5630,7 @@ async fn cancelled_attachment_upload_removes_temporary_file() {
     let (app, tmp) = setup_app();
     let boundary = "----cancelledattachmentboundary";
     let header = Bytes::from(format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"cancel.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npartial"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"cancel.bin\"\r\nContent-Type: application/octet-stream\r\n\r\npartial"
     ));
     let (sender, receiver) = mpsc::channel(1);
     sender.send(Ok::<_, std::io::Error>(header)).await.unwrap();
@@ -4416,7 +5688,7 @@ async fn attachment_upload_with_long_valid_basename_uses_bounded_temporary_name(
     let boundary = "----longattachmentboundary";
     let file_name = format!("{}.bin", "a".repeat(240));
     let body = format!(
-        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}--\r\n"
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{file_name}\"\r\nContent-Type: application/octet-stream\r\n\r\npayload\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"plaintext_acknowledged\"\r\n\r\ntrue\r\n--{boundary}--\r\n"
     );
 
     server
@@ -4561,6 +5833,159 @@ async fn content_index_includes_word_count() {
     assert_eq!(
         alpha["word_count"], 5,
         "expected 5 words for body 'the quick brown fox jumps'; got {alpha:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Archive compensation audit tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn archive_post_cas_publication_failure_compensates_every_reference() {
+    let fixture = ApiFixture::builder().build();
+    fixture
+        .state
+        .mutation_coordinator
+        .set_create_publication_hook(Some(Arc::new(|_, _| {
+            Err(
+                clepsydra::vault::atomic_file::AtomicPublicationError::NotPublished(
+                    std::io::Error::other("injected archive page publication failure"),
+                ),
+            )
+        })));
+
+    let first = b"archive post-CAS first";
+    let second = b"archive post-CAS second";
+    let first_hash = clepsydra::vault::cas::ContentStore::hash_bytes(first);
+    let second_hash = clepsydra::vault::cas::ContentStore::hash_bytes(second);
+    let markdown = "# Post-CAS failure";
+    let content_hash = clepsydra::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
+    let encode = |bytes: &[u8]| {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    };
+
+    for _ in 0..2 {
+        let response = fixture
+            .server
+            .post("/api/vault/archive")
+            .json(&serde_json::json!({
+                "url": "https://example.com/post-cas",
+                "domain": "example.com",
+                "title": "Post-CAS failure",
+                "captured_at": "2026-08-11T00:00:00Z",
+                "content_hash": content_hash,
+                "snapshot_hash": second_hash,
+                "markdown_body": markdown,
+                "tags": ["archive"],
+                "blobs": [
+                    {
+                        "hash": first_hash,
+                        "content_type": "application/octet-stream",
+                        "data": encode(first),
+                    },
+                    {
+                        "hash": second_hash,
+                        "content_type": "application/octet-stream",
+                        "data": encode(second),
+                    }
+                ]
+            }))
+            .await;
+        response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    let root = fixture.temp_dir.path().join("vault");
+    assert!(
+        !root
+            .join("archive/example.com/post-cas-failure.md")
+            .exists(),
+        "a failed page publication must not leave an archive page"
+    );
+    let pruned = fixture
+        .state
+        .cas
+        .lock()
+        .gc(std::time::Duration::ZERO)
+        .unwrap();
+    assert_eq!(
+        pruned, 2,
+        "repeated compensation must leave one zero-reference row per unique blob"
+    );
+}
+
+#[tokio::test]
+async fn archive_post_page_publication_failure_removes_page_and_cas_references() {
+    let fixture = ApiFixture::builder().build();
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute_batch(
+                "CREATE TRIGGER fail_archive_index_insert
+                 BEFORE INSERT ON pages
+                 BEGIN
+                   SELECT RAISE(FAIL, 'injected after archive page publication');
+                 END;",
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let blob = b"archive post-page blob";
+    let blob_hash = clepsydra::vault::cas::ContentStore::hash_bytes(blob);
+    let markdown = "# Post-page failure";
+    let content_hash = clepsydra::vault::cas::ContentStore::hash_bytes(markdown.as_bytes());
+    let encoded = {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(blob)
+    };
+    let response = fixture
+        .server
+        .post("/api/vault/archive")
+        .json(&serde_json::json!({
+            "url": "https://example.com/post-page",
+            "domain": "example.com",
+            "title": "Post-page failure",
+            "captured_at": "2026-08-11T00:00:00Z",
+            "content_hash": content_hash,
+            "snapshot_hash": blob_hash,
+            "markdown_body": markdown,
+            "tags": ["archive"],
+            "blobs": [{
+                "hash": blob_hash,
+                "content_type": "application/octet-stream",
+                "data": encoded,
+            }]
+        }))
+        .await;
+
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .unwrap()
+            .contains("injected after archive page publication"),
+        "the primary index failure must remain actionable: {error}"
+    );
+    let root = fixture.temp_dir.path().join("vault");
+    assert!(
+        !root
+            .join("archive/example.com/post-page-failure.md")
+            .exists(),
+        "page compensation must remove the published archive page"
+    );
+    assert_eq!(
+        fixture
+            .state
+            .cas
+            .lock()
+            .gc(std::time::Duration::ZERO)
+            .unwrap(),
+        1,
+        "page failure must compensate the CAS reference"
     );
 }
 

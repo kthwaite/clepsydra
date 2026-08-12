@@ -1,0 +1,153 @@
+export const meta = {
+  slug: "codex-and-conversation-capture",
+  title: "Codex and Conversation Capture",
+  description: "Work in the Codex workspace and capture AI conversations as Folios."
+}
+
+Codex is Clepsydra’s web workspace. It keeps open Folios in a persistent tab
+strip, groups related page tabs into quires, and presents `AI_CONVERSATION`
+Folios as readable, portable Markdown transcripts.
+
+## Prerequisites
+
+- Start `clep serve`, open its web UI, and initialize the vault before using
+  the workspace. See [Configuration](/docs/configuration) for server and vault
+  selection.
+- Conversation capture requires a running MCP connection and a host that can
+  supply the complete visible conversation. Set that up in [MCP](/docs/mcp).
+- Decide whether the transcript may be stored as plaintext. Capture creates an
+  ordinary plaintext Folio; protection is a separate action performed later.
+
+## Workflow
+
+### Open the Codex workspace
+
+Choose **FOLIO** in the desktop rail or open a page from the Gazetteer, search,
+a wikilink, or a recent-Folio action. `/workspace` shows the active page tab;
+with no active tab it shows quick actions for search, a new Folio, today’s
+journal, the graph, and up to eight recently opened Folios.
+
+Opening a page that already has a tab focuses that tab rather than duplicating
+it. For a page not already open, **Settings → Navigation** controls whether the
+new page is appended or replaces the active slot. A graph tab can also occupy
+the workspace, but it is not part of the page-tab SHEAF.
+
+### Work with tabs, quires, and previews
+
+On desktop, **SHEAF** is the horizontal page-tab strip:
+
+- choose a tab to activate it; use its pin or close control, or right-click for
+  **PIN**, **CLOSE**, and **CLOSE OTHERS**;
+- right-click a page tab and choose **NEW QUIRE…** or add it to an existing
+  quire. A quire is only a local tab group, not a vault folder or shared
+  collection;
+- choose a quire label to collapse or expand it. Its context menu can rename,
+  recolor, ungroup, or close the quire’s unpinned tabs;
+- a new page opened while an expanded quire member is active inherits that
+  quire, creating a self-assembling research context. Graph tabs never join;
+- hover a non-active page tab briefly to open a passive preview of its Folio and
+  backlinks. The first preview waits about 220 ms; moving across other tabs
+  while a preview is open updates immediately. Preview does not activate or
+  edit the page.
+
+Ungrouped pinned tabs render before every remaining segment. A quire keeps its
+place among those remaining segments, and its pinned members render before its
+unpinned members. Pinned quire members survive **CLOSE QUIRE**; pinned tabs are
+not pulled globally ahead of their quire. Activating a tab hidden in a
+collapsed quire expands that quire. The workspace, tab paths and labels, recent
+history, navigation mode, and quire state persist in browser local storage
+under `clepsydra.workspace`; they are not written into Folio Markdown.
+
+### Read and edit AI conversation Folios
+
+An `AI_CONVERSATION` Folio opens in **Read** mode. Read mode makes the title,
+metadata, transcript, attachments, organization controls, and save shortcut
+non-mutating. Canonical Markdown callouts render as participant turns, with the
+assistant label derived from the stored provider.
+
+Choose **Edit** to change text or participant roles, add and reorder turns, edit
+page metadata, manage attachments or paths, and protect the Folio. Saving emits
+portable blockquote callouts such as `> [!AI-USER …]` and
+`> [!AI-ASSISTANT …]`. Switching back to Read does not save by itself, and
+opening another conversation resets its mode to Read.
+
+There is no chat-export importer or automatic conversion of arbitrary provider
+files. A Markdown file copied into the vault or a normal Folio assigned the
+`AI_CONVERSATION` kind is treated as a conversation only when it has that kind.
+Valid canonical callouts receive the transcript presentation. Missing or
+malformed markers remain visible as original Markdown with an Edit recovery
+warning; Clepsydra does not guess participant boundaries.
+
+### Capture or append a visible conversation
+
+Ask the connected agent to send the conversation to Clepsydra. The host must
+call `vault_capture_conversation` with a non-empty title and every complete,
+visible `user` and `assistant` turn in source order. Clepsydra cannot fetch the
+host’s history and does not accept hidden system/developer prompts, tool traces,
+attachment contents, omitted turns, summaries, or invented placeholders.
+
+With both `provider` and `host_conversation_id`, Clepsydra stores the normalized
+provider and a namespaced SHA-256 identity hash, never the raw host ID. A later
+capture for the same identity must include the exact earlier prefix; it appends
+only the unseen suffix. An identical capture is unchanged. A shorter,
+reordered, or divergent prefix returns `409` without writing. Without a host
+conversation ID, every call creates a new Folio rather than guessing a match.
+See [MCP](/docs/mcp#capture-a-conversation) for the exact fields and results.
+
+### Protect a captured transcript
+
+Capture always creates plaintext Markdown. In **Edit**, use
+**plaintext · protect** after saving and review the encryption warning. Once
+protected, the on-disk body is age ciphertext and Codex requires an in-memory
+identity to unlock it.
+
+Protection deliberately stops later conversation capture from appending to the
+matching Folio: the server cannot decrypt the protected body, and a browser-only
+unlock does not change that. Keep the transcript plaintext while it must receive
+new captures, or remove protection before a later append. The provider and
+hashed conversation ledger remain frontmatter metadata and are not encrypted.
+
+## Failures and conflicts
+
+- **Workspace is empty** — open a recent Folio, search, inscribe a new one, or
+  open the graph. Closing the active tab selects a nearby visible tab when one
+  exists.
+- **Preview does not appear** — previews require a non-active page tab with a
+  real vault path. They do not open for the active tab or graph tab. Page or
+  backlink request failures can leave the preview incomplete; activate the
+  Folio and use [Troubleshooting](/docs/troubleshooting) to check the server.
+- **Conversation warning is shown** — choose Edit and repair the preserved
+  Markdown markers. Assigning another kind returns the page to the generic
+  editor without deleting marker text.
+- **Capture conflicts** — re-run from a host context that contains the complete
+  prior visible prefix. Do not overwrite or fuzzy-match. Multiple Folios with
+  the same identity and a protected matching Folio also conflict.
+- **Page changed on disk** — Read mode reports the stale revision. Reload before
+  editing so a subsequent save does not overwrite an external change.
+
+## Privacy
+
+Unprotected Folio bodies, titles, tags, aliases, project names, conversation
+turns, provider names, and conversation-ledger hashes are plaintext vault data.
+The web UI can read that data from the local server. Tab paths and labels,
+recent history, navigation mode, and quires also persist as plaintext browser
+local storage. A quire is organizational UI state, not an encryption boundary.
+
+Protection encrypts the Folio body only. Frontmatter metadata, filenames,
+paths, attachment metadata and bytes, and browser workspace state remain
+plaintext. While a protected Folio is unlocked, its identity and decrypted body
+exist in browser memory and can be observed by browser extensions, developer
+tools, accessibility software, crash capture, or malware.
+
+Conversation capture sends the supplied visible turns through the MCP host and
+local server before any later protection. Only send a conversation when both
+the host agent and the Clepsydra server are trusted with its plaintext. No
+plugin API, collaboration service, or publication workflow is involved.
+
+## Related
+
+- [MCP](/docs/mcp) for agent setup, tool families, and capture fields
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Configuration](/docs/configuration) for the local server and vault root
+- [Troubleshooting](/docs/troubleshooting) for UI, server, and stale-page checks
+- [Pages and Authoring](/docs/pages-and-authoring) for ordinary Folio lifecycle

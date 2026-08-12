@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo } from "react";
@@ -15,6 +16,7 @@ import {
   Text,
 } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type * as AttachmentsApi from "#/api/attachments";
 import type { TagCount } from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
 
@@ -25,12 +27,15 @@ import type { CustomEditor } from "#/editor/types";
 const {
   blockerState,
   journalTodayState,
+  attachmentRemoveMock,
+  attachmentUploadMock,
   mobileLayoutState,
   mountedSlateEditors,
   navigateMock,
   restorationFrames,
   routerHistory,
   useBlockerMock,
+  useAttachmentsMock,
   useCollapsibleRailMock,
   usePageEditorMock,
   useTagSuggestionsMock,
@@ -53,6 +58,8 @@ const {
   },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
+  attachmentRemoveMock: vi.fn(),
+  attachmentUploadMock: vi.fn(),
   navigateMock: vi.fn(),
   restorationFrames: [] as FrameRequestCallback[],
   routerHistory: {
@@ -76,6 +83,11 @@ const {
     }),
   ),
   useBlockerMock: vi.fn(),
+  useAttachmentsMock: vi.fn(() => ({
+    data: [],
+    isLoading: false,
+    error: null,
+  })),
   usePageEditorMock: vi.fn(),
   useScrollSpyMock: vi.fn(() => ({
     activeIndex: -1,
@@ -109,6 +121,21 @@ vi.mock("#/api/index", () => ({
   useTagSuggestions: useTagSuggestionsMock,
   useTags: useTagsMock,
 }));
+vi.mock("#/api/attachments", async (importOriginal) => {
+  const actual = await importOriginal<typeof AttachmentsApi>();
+  return {
+    ...actual,
+    useAttachments: useAttachmentsMock,
+    useUploadAttachment: () => ({
+      mutateAsync: attachmentUploadMock,
+      isPending: false,
+    }),
+    useDeleteAttachment: () => ({
+      mutateAsync: attachmentRemoveMock,
+      isPending: false,
+    }),
+  };
+});
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
 }));
@@ -217,6 +244,17 @@ beforeEach(() => {
       { tag: "ritual", count: 1, computed_count: 0 },
     ],
   });
+  useAttachmentsMock.mockReturnValue({
+    data: [],
+    isLoading: false,
+    error: null,
+  });
+  attachmentUploadMock.mockReset().mockResolvedValue({
+    name: "diagram.png",
+    path: "diagram.png",
+    size: 5,
+  });
+  attachmentRemoveMock.mockReset().mockResolvedValue(undefined);
 });
 
 function errorEditor() {
@@ -839,6 +877,84 @@ describe("Folio raw Markdown mode", () => {
   });
 });
 
+
+describe("Folio attachment protection plumbing", () => {
+  beforeEach(() => {
+    mobileLayoutState.matches = false;
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+  });
+
+  it("gates encrypted-page uploads while plaintext-page uploads remain immediate", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      encrypted: true,
+    });
+    const protectedView = render(
+      <Folio tabId="t1" path="notes/alpha.md" />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Manage attachments" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Upload attachment"), {
+      target: {
+        files: [
+          new File(["image"], "diagram.png", { type: "image/png" }),
+        ],
+      },
+    });
+    expect(
+      screen.getByRole("dialog", { name: "Store plaintext attachment?" }),
+    ).toBeVisible();
+    expect(attachmentUploadMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    protectedView.unmount();
+
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(
+      screen.getByRole("button", { name: "Manage attachments" }),
+    );
+    fireEvent.change(await screen.findByLabelText("Upload attachment"), {
+      target: {
+        files: [
+          new File(["image"], "diagram.png", { type: "image/png" }),
+        ],
+      },
+    });
+
+    await waitFor(() => expect(attachmentUploadMock).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("hands decrypted Markdown to the protected attachment audit without mutating", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      encrypted: true,
+      bodyMarkdown:
+        "[Missing paper](/api/vault/attachments/private/missing%20paper.pdf)",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(
+      screen.getByRole("button", { name: "Manage attachments" }),
+    );
+
+    const audit = await screen.findByRole("region", {
+      name: "Plaintext attachment references",
+    });
+    expect(within(audit).getByText("private/missing paper.pdf")).toBeVisible();
+    expect(attachmentUploadMock).not.toHaveBeenCalled();
+    expect(attachmentRemoveMock).not.toHaveBeenCalled();
+  });
+});
 describe("Folio mobile presentation", () => {
   beforeEach(() => {
     vi.clearAllMocks();

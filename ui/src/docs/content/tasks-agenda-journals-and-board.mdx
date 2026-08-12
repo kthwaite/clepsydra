@@ -1,0 +1,137 @@
+export const meta = {
+  slug: "tasks-agenda-journals-and-board",
+  title: "Tasks, Agenda, Journals, and Board",
+  description: "Plan work with Markdown tasks, agenda views, daily journals, and atomic board cycles."
+}
+
+Clepsydra derives task and board views from Markdown in the vault. The page
+files remain authoritative; the agenda and Tasking workspace are indexed views
+and mutations over those files, not a second task store.
+
+## Prerequisites
+
+- Run the server and let the vault index finish.
+- Open `/agenda` for due work and `/tasking` for project and cycle planning.
+- Use checkbox list items such as `- [ ] Draft proposal`. Inline properties use
+  the Markdown form `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
+  `[priority:: P1]`.
+- Enter task `due` and `scheduled` values and board-cycle start and end strings
+  as exact `YYYY-MM-DD`. They are not validated as dates by the server. For
+  agenda tasks, the API compares their indexed strings lexicographically, so
+  another spelling can be misplaced instead of rejected.
+
+## Workflow
+
+### Track Markdown tasks and statuses
+
+An unchecked checkbox is `todo`, `[x]` is `done`, and `[-]` is `cancelled`.
+Task queries can filter by status, due or scheduled bounds, priority, tag, source
+page, and whether a due date is absent. Changing a task status rewrites that
+checkbox in the source page and then reindexes it.
+
+The status mutation addresses a checkbox by source path and indexed byte offset;
+it does not verify the task's identity at that offset. If an external edit shifts
+offsets before reindexing, the endpoint can rewrite a different nearby checkbox.
+Wait for reindexing, then reload the page, board, or agenda before changing
+status.
+Tasks inside protected pages are visible only according to the protected-page
+index boundary and cannot be changed through the task-status endpoint.
+
+### Use Today, Upcoming, and Inbox
+
+Open `/agenda`:
+
+- **Today** obtains overdue tasks separately, but `/agenda/today` also includes
+  overdue work in its task list. The current UI can therefore show an overdue
+  task in both **Overdue** and **Due Today**; the latter also includes work due
+  or scheduled today and incomplete tasks in today's journal.
+- **Upcoming** groups due strings from today through seven days ahead. It is a
+  due-property view; a merely scheduled future task is not included there.
+- **Inbox** shows `todo` tasks without a `due` property. A scheduled-but-undated
+  task therefore still belongs to this query.
+
+The server computes these calendar boundaries in UTC. If your local day differs
+from UTC near midnight, the agenda boundary can differ from the date displayed
+by the browser.
+
+### Open and capture into journals
+
+Run **Today's journal** from the command palette or choose **Open today’s
+journal** in the Atrium. If today's page does not exist, Clepsydra opens the
+canonical draft path and creates the page on first write. The server's journal
+clock decides the canonical date; the browser constructs the initial draft path
+from its local date, so keep client and server clocks aligned.
+
+The journal rail provides **previous entry**, **Today**, **next entry**, and a
+14-day recent calendar. Previous and next skip unwritten dates. Only today can
+be opened as an unwritten draft from that rail; other journal API lookups accept
+an exact `YYYY-MM-DD`, not natural-language dates.
+
+Run **Capture aside** to append to today's journal. Plain prose becomes a timed
+list entry; an existing list item, task, heading, blockquote, or code fence keeps
+its Markdown shape. `GET /journal/today` also returns incomplete tasks from the
+previous seven journal dates as `carried_forward`; it does not copy them into
+today's file.
+
+### Plan on the Tasking board
+
+Open `/tasking`, choose **NEW TASKING**, and set the project, disposition,
+priority, cycle, due date, and optional checklist. The five persisted board
+statuses are `INTAKE`, `TRIAGE`, `FIELD`, `REVIEW`, and `SEALED`; priorities are
+`P0` through `P3`. Switch among **CARD**, **BACKLOG**, **CYCLE**, and **TIMELINE**
+without changing task files. Dragging a card or editing its panel persists the
+corresponding task-page metadata.
+
+Create a cycle from the plus control beside the cycle list. A cycle can be
+`PLANNED`, `ACTIVE`, or `CLOSED`. When closing one, choose one of the shipped
+carryover outcomes:
+
+- **BACKLOG** removes the cycle from every non-`SEALED` task in that cycle;
+- a next planned cycle reassigns those tasks to its cycle code;
+- leaving tasks in place closes the cycle without a `carry_to` value.
+
+The cycle close and every selected carryover update are one P1 atomic batch.
+They are all committed and indexed, or all original cycle and task files are
+restored; a failed batch emits no successful change notification. `SEALED`
+tasks are not carried. The guarantee covers this one server-side close request,
+not unrelated edits from other clients before or after it.
+
+## Failures and conflicts
+
+- Invalid task statuses, priorities, and relevant cycle codes are rejected, but
+  malformed date strings can instead sort incorrectly. Correct the source value,
+  wait for reindexing, and reload the board or agenda.
+- A task status update does not reject every stale span: a shifted offset can
+  select another checkbox near that byte position. Reindex and reload before
+  retrying after external edits.
+- A task status change returns a conflict for a protected page. Unlock and edit
+  the source Folio instead; the endpoint does not decrypt it.
+- Board creation can reject a generated destination collision. Existing task
+  and cycle pages are not overwritten.
+- Carryover is valid only while closing a cycle. The target must be `BACKLOG` or
+  an existing, different cycle. Unknown or self-referential targets are rejected
+  before the batch starts.
+- If any filesystem commit or index step fails during cycle close, the atomic
+  batch rolls back the cycle and every carried task. Verify the returned
+  error, then reload before retrying.
+- Agenda and Tasking are projections. If files were edited outside Clepsydra,
+  wait for reindexing or run the documented index recovery before treating a
+  stale view as authoritative.
+
+## Privacy
+
+Tasks, statuses, due dates, projects, assignees, journal dates, and board-cycle
+metadata are plaintext in ordinary Markdown and in the local index. Journal
+capture is not a private inbox by default. Protect a Folio only when you accept
+that protected-page task mutation and indexing are deliberately limited.
+
+The shipped work model is local file coordination. It does not provide CRDT or
+multi-user collaborative editing; concurrent clients can still race outside the
+atomic boundary of one accepted mutation.
+
+## Related
+
+- [Pages and Authoring](/docs/pages-and-authoring)
+- [Editor Workflows](/docs/editor-workflows)
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Capture, Feeds, and Archives](/docs/capture-feeds-and-archives) for backup boundaries

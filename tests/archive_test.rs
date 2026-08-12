@@ -39,6 +39,55 @@ fn content_hash(body: &str) -> String {
 }
 
 #[test]
+fn archive_delete_hook_reports_cas_decrement_failure() {
+    use clepsydra::vault::hooks::PostDeleteHook;
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    let (_server, _tmp, state) = setup_server();
+    let valid_hash = state
+        .cas
+        .lock()
+        .store(b"valid sibling", "application/octet-stream")
+        .unwrap()
+        .hash;
+    let mut archive = toml::Table::new();
+    archive.insert(
+        "snapshot_hash".to_string(),
+        toml::Value::String("invalid".to_string()),
+    );
+    archive.insert(
+        "blobs".to_string(),
+        toml::Value::Array(vec![toml::Value::String(valid_hash)]),
+    );
+    let mut meta = PageMeta::new();
+    meta.extra
+        .insert("archive".to_string(), toml::Value::Table(archive));
+    let hook = ArchiveDeleteHook {
+        cas: Arc::clone(&state.cas),
+    };
+
+    let error = hook
+        .on_page_deleted(
+            &VaultPath::new("archive/invalid.md").unwrap(),
+            &uuid::Uuid::now_v7(),
+            &meta,
+        )
+        .unwrap_err();
+
+    assert!(error.to_string().contains("hash must start with 'sha256:'"));
+    assert_eq!(
+        state
+            .cas
+            .lock()
+            .gc(std::time::Duration::ZERO)
+            .unwrap(),
+        1,
+        "a failing decrement must not prevent later references from being compensated"
+    );
+}
+
+#[test]
 fn rollback_fault_injection_attempts_all_hashes_and_reports_each_failure() {
     let hashes = vec![
         "sha256:first".to_string(),

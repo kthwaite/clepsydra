@@ -94,4 +94,22 @@ mod tests {
             "expected 'already initialized', got: {err}"
         );
     }
+
+    #[test]
+    fn late_scaffold_failure_retains_documented_partial_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("vault");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("_attachments"), b"blocks directory creation").unwrap();
+
+        let error = init_vault(&root).unwrap_err();
+
+        assert!(matches!(error, InitError::Io(_)));
+        assert!(root.join(".clepsydra/templates").is_dir());
+        assert!(root.join(".clepsydra/config.toml").is_file());
+        assert_eq!(
+            fs::read(root.join("_attachments")).unwrap(),
+            b"blocks directory creation"
+        );
+    }
 }

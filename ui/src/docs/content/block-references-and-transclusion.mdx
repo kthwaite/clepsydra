@@ -1,0 +1,101 @@
+export const meta = {
+  slug: "block-references-and-transclusion",
+  title: "Block References and Transclusion",
+  description: "Assign stable block IDs and transclude one source block without recursive expansion."
+}
+
+A block reference stores a stable block ID in Markdown and renders the referenced source block in place. The source remains authoritative: a reference neither copies the block into the current Folio nor makes the rendered text editable.
+
+## Prerequisites
+
+Start Clepsydra with an indexed vault and open an editable, unprotected source
+Folio. The picker needs at least two search characters and can only discover
+indexed blocks; protected body content is intentionally unavailable.
+
+## Workflow
+
+Give the authoritative source block a valid stable ID, insert its
+`((blockId))` reference in another Folio, and save normally. The rendered
+reference is a read-only, single-block view with a **Source** control. Edit the
+source—not the transclusion—and let vault notifications refresh consumers.
+
+## Block IDs and reference syntax
+
+A source block carries a terminal caret marker. Clepsydra accepts 10–12 ASCII letters or digits; generated IDs contain 11 base-62 characters.
+
+```markdown
+A paragraph that can be referenced. ^0VvF4aB7cD9
+
+- A list item that can be referenced. ^0VvF4aB7cE0
+```
+
+A reference uses the same ID inside double parentheses:
+
+```markdown
+The source says ((0VvF4aB7cD9)).
+```
+
+The marker belongs to the source block. Moving the source block while retaining its marker preserves the reference; changing or removing the marker breaks it. IDs are expected to identify one indexed block, but the current detail endpoint returns the first matching row when an ID is duplicated. Until the duplicate is repaired, a displayed transclusion can therefore disagree with graph and Reference Repairs projections, which require a unique target. Assign distinct IDs before relying on either display.
+
+Paragraphs, headings, list items, blockquotes, and fenced code blocks can carry block IDs in the editor's document model. The normal search picker returns indexed paragraphs, headings, and list items; a manually authored valid reference can still resolve any indexed block that has that ID.
+
+## Insert a reference in Folio
+
+In an editable Folio:
+
+1. Type `((` and at least two search characters.
+2. Choose a source block from the suggestion list. Each result shows its content, source folio, and existing ID when present.
+3. If the chosen block has no ID, Clepsydra assigns the ID to the source block at its current byte span, refreshes the affected folio, and then inserts the reference token.
+4. Save the referencing Folio normally.
+
+The assignment is a guarded mutation, not a blind text append. A changed span or protected source is rejected with a conflict, and no reference is inserted. Reload the source and search again. Concurrent assignments are coordinated so every successful mutation is based on current source bytes.
+
+You can also author both forms directly in Markdown: append ` ^blockId` to the source block and type `((blockId))` at the reference site. A marker shorter than 10 characters, longer than 12, or containing punctuation is plain text rather than a valid block ID.
+
+## What transclusion renders
+
+A resolved reference renders one read-only block plus a **Source** control. The control opens the source Folio and requests focus for that block ID.
+
+The renderer displays the endpoint's normalized block content as inert text. It does not parse the result as Markdown or HTML. Nested reference tokens remain inert, so a source such as `Outer ((nested1234))` displays those parentheses literally rather than fetching another block. This single-block, non-recursive rule prevents transclusion chains and keeps the privacy boundary inspectable.
+
+The rendered content is not an embedded editor. To change it, open **Source**, edit the authoritative block, and save that Folio. Vault change notifications reset cached block details for affected page paths and invalidate block queries so references can refetch current content.
+
+## Loading, unavailable, and retry states
+
+A reference initially reports **Loading referenced block**. A successful response with non-empty normalized content replaces that state.
+
+A missing ID, a block removed from the index, an empty normalized result, and a protected source all render **Referenced block unavailable**. For a definitive `404`, Clepsydra does not offer a Retry button or automatically retry the lookup. A transient request failure uses the same unavailable wording but offers **Retry** and can retry automatically within the query policy.
+
+The unavailable state intentionally preserves the `((blockId))` token in the document. Repair or restore the source; do not replace the reference merely to hide the state. For index-level evidence and candidate repair, open [Reference Repairs](/repairs) and review the `broken_block_ref` issue one occurrence at a time.
+
+## Privacy
+
+### Privacy boundary for protected folios
+
+Protected folio bodies are not indexed as blocks. Block search therefore cannot reveal their plaintext, and the block-ID assignment endpoint rejects protected pages. If a formerly plaintext source becomes protected, change handling clears retained block-detail data for that page before refetch can repopulate it.
+
+A lookup cannot be used to test whether a protected block exists: protected and missing targets are indistinguishable to the reference renderer. Both return the same not-found boundary and show **Referenced block unavailable** without source metadata. Unlocking a protected Folio in the browser does not publish its decrypted blocks to the server index, so it does not make them transclusion targets.
+
+Do not put sensitive information in an unprotected source and assume that referencing it elsewhere hides it. The referenced plaintext is returned to any client that can read that unprotected block endpoint.
+
+## Read-only Markdown and the editor
+
+The Folio editor stores a block reference as an inline, read-only token. It can sit beside ordinary text, but the transcluded content itself cannot receive Slate editing input. Read-only Markdown rendering uses the same non-recursive transclusion component and source navigation contract.
+
+Raw HTML, code spans, links, and fenced code are opaque while read-only Markdown scans for `((blockId))` tokens. A token inside one of those nodes remains literal. This avoids turning code examples or existing links into live block lookups.
+
+## Failures and conflicts
+
+| Symptom | Meaning | Next action |
+| --- | --- | --- |
+| No suggestions after `((` | The query has fewer than two characters, no indexed block matches, or the source is protected. | Continue typing; open the source to confirm it is unprotected and indexed. |
+| ID assignment conflicts | The selected source span changed or the source became protected. | Reload and select the current block again. |
+| **Referenced block unavailable** with no Retry | The server returned not found, or no usable block content exists. | Inspect [Reference Repairs](/repairs) or open the expected source manually. |
+| **Referenced block unavailable** with Retry | The request failed transiently. | Retry after connectivity or server health recovers. |
+| Nested `((…))` remains visible | This is the shipped non-recursive behavior. | Open the nested source directly if you need it; transclusions do not expand it. |
+
+## Related
+
+- [Links, Search, Graph, and Repair](/docs/links-search-graph-and-repair)
+- [Editor Workflows](/docs/editor-workflows)
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)

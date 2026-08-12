@@ -5,14 +5,17 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
+use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+use utoipa::ToSchema;
 
 use super::Vault;
 use super::atomic_file::{
     AtomicPublicationError, ConditionalPublicationError, atomic_create, atomic_replace,
     atomic_replace_if_unchanged,
 };
+use super::batch_mutation::{self, BatchMutationCommand, BatchMutationError};
 use super::hooks::PostMoveHook;
 use super::index::IndexError;
 use super::index_handle::IndexHandle;
@@ -20,6 +23,7 @@ use super::index_policy::{IndexMutation, IndexPolicyError};
 use super::page::{Page, PageMeta, write_page_content};
 use super::path::VaultPath;
 use super::projection::{project_path, project_path_cleared};
+use super::sync::{ChangeEvent, SyncEngine};
 use super::task_history::{heal_task_replacement, heal_task_update, initialize_task_history};
 
 type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
@@ -27,19 +31,29 @@ type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
 type CreatePublicationHook =
     dyn Fn(&Path, &[u8]) -> Result<(), AtomicPublicationError> + Send + Sync;
 type CreateRollbackSyncHook = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
+#[cfg(test)]
+type BeforeLockAcquireHook = dyn Fn(&VaultPath) + Send + Sync;
+#[cfg(test)]
+type BeforeBatchLockHook = dyn Fn(&[VaultPath]) + Send + Sync;
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
+    mutation_gate: Arc<RwLock<()>>,
     locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
     before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
     after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
     create_publication_hook: parking_lot::Mutex<Option<Arc<CreatePublicationHook>>>,
     create_rollback_sync_hook: parking_lot::Mutex<Option<Arc<CreateRollbackSyncHook>>>,
+    #[cfg(test)]
+    before_lock_acquire_hook: parking_lot::Mutex<Option<Arc<BeforeLockAcquireHook>>>,
+    #[cfg(test)]
+    before_batch_lock_hook: parking_lot::Mutex<Option<Arc<BeforeBatchLockHook>>>,
+    batch_publication_failure: parking_lot::Mutex<Option<usize>>,
 }
 
 /// A transport-independent description of the index change emitted after a
 /// successful filesystem and index mutation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct MutationNotification {
     pub upserted: Vec<String>,
     pub removed: Vec<String>,
@@ -114,6 +128,14 @@ pub struct DeleteFolderResult {
     pub hook_targets: Vec<(VaultPath, PageMeta)>,
 }
 
+
+#[derive(Debug, Error)]
+pub enum BatchRecoveryError {
+    #[error("index reconciliation failed: {0}")]
+    Index(#[source] IndexError),
+    #[error("transaction workspace cleanup failed: {0}")]
+    Workspace(#[source] BatchMutationError),
+}
 #[derive(Debug, Error)]
 pub enum MutationError {
     #[error("invalid mutation input: {0}")]
@@ -177,6 +199,32 @@ pub enum MutationError {
         filesystem_applied: bool,
         message: String,
     },
+    #[error("batch preparation failed: {source}")]
+    BatchPrepare {
+        directory: Option<PathBuf>,
+        #[source]
+        source: BatchMutationError,
+    },
+    #[error("batch publication failed and was rolled back: {source}")]
+    BatchPublish {
+        #[source]
+        source: BatchMutationError,
+    },
+    #[error(
+        "batch publication failed and rollback failed for transaction {directory}: publication error: {publish}; rollback error: {rollback}"
+    )]
+    BatchRollback {
+        directory: PathBuf,
+        publish: Box<BatchMutationError>,
+        #[source]
+        rollback: Box<BatchMutationError>,
+    },
+    #[error("batch recovery required for retained transaction {directory}: {source}")]
+    BatchRecovery {
+        directory: PathBuf,
+        #[source]
+        source: BatchRecoveryError,
+    },
 }
 
 impl MutationError {
@@ -194,8 +242,13 @@ impl MutationError {
             | Self::Hook {
                 filesystem_applied, ..
             } => *filesystem_applied,
-            Self::FilesystemRollback { .. } | Self::IndexRollback { .. } => true,
+            Self::FilesystemRollback { .. }
+            | Self::IndexRollback { .. }
+            | Self::BatchRollback { .. }
+            | Self::BatchRecovery { .. } => true,
             Self::IndexCompensation { .. }
+            | Self::BatchPrepare { .. }
+            | Self::BatchPublish { .. }
             | Self::InvalidInput(_)
             | Self::NotFound(_)
             | Self::Conflict(_)
@@ -239,6 +292,134 @@ where
             path,
             source: io::Error::other(format!("shielded mutation task failed: {error}")),
         })?
+}
+
+fn batch_prepare_error(source: BatchMutationError) -> MutationError {
+    match source.stale_vault_path() {
+        Some(path) => MutationError::Stale(path),
+        None => {
+            let directory = source.retained_directory().map(Path::to_path_buf);
+            MutationError::BatchPrepare { directory, source }
+        }
+    }
+}
+
+fn batch_blocking_error(
+    operation: &'static str,
+    path: &Path,
+    source: tokio::task::JoinError,
+) -> BatchMutationError {
+    BatchMutationError::Filesystem {
+        operation,
+        path: path.to_path_buf(),
+        source: io::Error::other(source.to_string()),
+    }
+}
+
+fn batch_notification(events: &[ChangeEvent]) -> MutationNotification {
+    let mut notification = MutationNotification {
+        upserted: Vec::new(),
+        removed: Vec::new(),
+    };
+    for event in events {
+        match event {
+            ChangeEvent::Upsert(path) => {
+                notification.upserted.push(path.as_str().to_owned());
+            }
+            ChangeEvent::Remove(path) => {
+                notification.removed.push(path.as_str().to_owned());
+            }
+            ChangeEvent::BaseChanged => {}
+        }
+    }
+    notification
+}
+
+fn publish_batch(
+    root: &Path,
+    command: &BatchMutationCommand,
+    publication_failure: Option<usize>,
+) -> Result<batch_mutation::PreparedBatch, MutationError> {
+    let mut prepared = batch_mutation::prepare(root, command).map_err(batch_prepare_error)?;
+    let directory = prepared.directory().to_path_buf();
+    let publication = match publication_failure {
+        Some(intent_index) => prepared.publish_with_failure_at(intent_index),
+        None => prepared.publish(),
+    };
+    if let Err(publish) = publication.and_then(|()| prepared.mark_filesystem_committed()) {
+        return match prepared.rollback() {
+            Ok(()) => Err(MutationError::BatchPublish { source: publish }),
+            Err(rollback) => Err(MutationError::BatchRollback {
+                directory,
+                publish: Box::new(publish),
+                rollback: Box::new(rollback),
+            }),
+        };
+    }
+    Ok(prepared)
+}
+
+#[derive(Clone, Copy)]
+enum MovedPageIdentity {
+    Source,
+    Destination,
+}
+
+fn reconcile_batch_index(
+    vault: &Vault,
+    index: &mut super::index::VaultIndex,
+    hooks: &[Box<dyn PostMoveHook>],
+    index_events: &[ChangeEvent],
+    moved_pages: &[(VaultPath, VaultPath)],
+    identity: MovedPageIdentity,
+) -> Result<(), IndexError> {
+    let mut hook_events = Vec::new();
+    for (old_path, new_path) in moved_pages {
+        let identity_path = match identity {
+            MovedPageIdentity::Source => old_path,
+            MovedPageIdentity::Destination => new_path,
+        };
+        let page_id = match index.connection().query_row(
+            "SELECT id FROM pages WHERE path = ?1",
+            rusqlite::params![identity_path.as_str()],
+            |row| row.get::<_, String>(0),
+        ) {
+            Ok(value) => value.parse::<uuid::Uuid>().map_err(|source| {
+                IndexError::Other(format!(
+                    "invalid indexed page UUID for {}: {source}",
+                    identity_path.as_str()
+                ))
+            })?,
+            Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+            Err(source) => return Err(IndexError::Sqlite(source)),
+        };
+        for hook in hooks {
+            hook_events.extend(
+                hook.on_page_moved(old_path, new_path, &page_id, vault, index)
+                    .map_err(|error| IndexError::Other(error.to_string()))?
+                    .into_iter()
+                    .map(ChangeEvent::Upsert),
+            );
+        }
+    }
+    SyncEngine::process_events(index_events, vault, index)?;
+    SyncEngine::process_events(&hook_events, vault, index).map(|_| ())
+}
+
+pub(crate) fn reconcile_recovered_batch_index(
+    vault: &Vault,
+    index: &mut super::index::VaultIndex,
+    hooks: &[Box<dyn PostMoveHook>],
+    recovered: &batch_mutation::RecoveredBatch,
+) -> Result<(), IndexError> {
+    reconcile_batch_index(
+        vault,
+        index,
+        hooks,
+        &recovered.index_events,
+        &recovered.moved_pages,
+        MovedPageIdentity::Destination,
+    )
 }
 
 fn rollback_created_publication(
@@ -289,11 +470,17 @@ fn sync_rollback_parent(_parent: &Path) -> io::Result<()> {
 impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
+            mutation_gate: Arc::new(RwLock::new(())),
             locks: parking_lot::Mutex::new(HashMap::new()),
             before_update_publish_hook: parking_lot::Mutex::new(None),
             after_page_id_lookup_hook: parking_lot::Mutex::new(None),
             create_publication_hook: parking_lot::Mutex::new(None),
             create_rollback_sync_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            before_lock_acquire_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            before_batch_lock_hook: parking_lot::Mutex::new(None),
+            batch_publication_failure: parking_lot::Mutex::new(None),
         }
     }
 
@@ -323,6 +510,15 @@ impl MutationCoordinator {
         *self.create_rollback_sync_hook.lock() = hook;
     }
 
+    /// Inject one deterministic batch publication failure for integration tests.
+    ///
+    /// `Some(index)` fails immediately before publishing that zero-based intent;
+    /// `None` clears a pending failure.
+    #[doc(hidden)]
+    pub fn set_batch_publication_fail_after(&self, intent_index: Option<usize>) {
+        *self.batch_publication_failure.lock() = intent_index;
+    }
+
     pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
         let hook = self.after_page_id_lookup_hook.lock().clone();
         if let Some(hook) = hook {
@@ -330,11 +526,33 @@ impl MutationCoordinator {
         }
     }
 
+    #[cfg(test)]
+    fn set_before_lock_acquire_hook(&self, hook: Option<Arc<BeforeLockAcquireHook>>) {
+        *self.before_lock_acquire_hook.lock() = hook;
+    }
+
+    #[cfg(test)]
+    fn set_before_batch_lock_hook(&self, hook: Option<Arc<BeforeBatchLockHook>>) {
+        *self.before_batch_lock_hook.lock() = hook;
+    }
+
+    #[cfg(test)]
+    fn fail_next_batch_publication_at(&self, intent_index: usize) {
+        self.set_batch_publication_fail_after(Some(intent_index));
+    }
+
     /// Lock the requested paths for mutation and every ancestor for subtree
     /// exclusion. Ancestors use shared locks, so mutations in sibling
     /// subtrees proceed concurrently while a folder deletion excludes all
     /// descendants.
     pub async fn lock_paths(&self, paths: &[VaultPath]) -> MutationGuard {
+        let gate_guard = Arc::clone(&self.mutation_gate).read_owned().await;
+        let mut guard = self.lock_paths_excluded(paths).await;
+        guard._gate_guard = Some(gate_guard);
+        guard
+    }
+
+    async fn lock_paths_excluded(&self, paths: &[VaultPath]) -> MutationGuard {
         let mut requests = BTreeMap::<String, bool>::new();
         for path in paths {
             let components = path.as_str().split('/').collect::<Vec<_>>();
@@ -351,6 +569,8 @@ impl MutationCoordinator {
                 .into_iter()
                 .map(|(key, write)| {
                     let key = VaultPath::new(&key).expect("normalized path prefix");
+                    #[cfg(test)]
+                    let observed_path = key.clone();
                     let lock = if let Some(lock) = table.get(&key).and_then(Weak::upgrade) {
                         lock
                     } else {
@@ -358,33 +578,214 @@ impl MutationCoordinator {
                         table.insert(key, Arc::downgrade(&lock));
                         lock
                     };
-                    (lock, write)
+                    MutationLockRequest {
+                        #[cfg(test)]
+                        observed_path,
+                        lock,
+                        write,
+                    }
                 })
                 .collect::<Vec<_>>()
         };
 
         let mut guards = Vec::with_capacity(locks.len());
-        for (lock, write) in &locks {
-            guards.push(if *write {
+        for request in &locks {
+            #[cfg(test)]
+            if let Some(hook) = self.before_lock_acquire_hook.lock().clone() {
+                hook(&request.observed_path);
+            }
+            guards.push(if request.write {
                 MutationLockGuard::Write {
-                    _guard: Arc::clone(lock).write_owned().await,
+                    _guard: Arc::clone(&request.lock).write_owned().await,
                 }
             } else {
                 MutationLockGuard::Read {
-                    _guard: Arc::clone(lock).read_owned().await,
+                    _guard: Arc::clone(&request.lock).read_owned().await,
                 }
             });
         }
 
         MutationGuard {
+            _gate_guard: None,
+            _exclusion_guard: None,
             _guards: guards,
-            _locks: locks.into_iter().map(|(lock, _)| lock).collect(),
+            _locks: locks.into_iter().map(|request| request.lock).collect(),
+        }
+    }
+
+    pub async fn exclude_mutations(&self) -> MutationExclusionGuard {
+        MutationExclusionGuard {
+            gate: Arc::clone(&self.mutation_gate),
+            _guard: Arc::clone(&self.mutation_gate).write_owned().await,
         }
     }
 
     /// Exclude every mutation below `folder` until the returned guard drops.
     pub async fn lock_subtree(&self, folder: &VaultPath) -> MutationGuard {
         self.lock_paths(std::slice::from_ref(folder)).await
+    }
+
+    /// Execute a durable batch against an already-open offline index.
+    ///
+    /// This uses the same publication, hook, index-reconciliation, retained
+    /// workspace, and cleanup path as [`Self::execute_batch`] without creating
+    /// a second coordinator or Tokio index worker.
+    pub fn execute_batch_direct(
+        vault: &Vault,
+        index: &mut super::index::VaultIndex,
+        hooks: &[Box<dyn PostMoveHook>],
+        command: BatchMutationCommand,
+    ) -> Result<MutationNotification, MutationError> {
+        let notification = batch_notification(&command.index_events);
+        let prepared = publish_batch(vault.root(), &command, None)?;
+        let directory = prepared.directory().to_path_buf();
+        if let Err(source) = reconcile_batch_index(
+            vault,
+            index,
+            hooks,
+            &command.index_events,
+            &command.moved_pages,
+            MovedPageIdentity::Source,
+        ) {
+            return Err(MutationError::BatchRecovery {
+                directory,
+                source: BatchRecoveryError::Index(source),
+            });
+        }
+        prepared.finish().map_err(|source| MutationError::BatchRecovery {
+            directory,
+            source: BatchRecoveryError::Workspace(source),
+        })?;
+        Ok(notification)
+    }
+
+    pub async fn execute_batch(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
+        command: BatchMutationCommand,
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
+    ) -> Result<MutationNotification, MutationError> {
+        let affected_paths = command.affected_paths();
+        #[cfg(test)]
+        if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
+            hook(&affected_paths);
+        }
+        let guard = self.lock_paths(&affected_paths).await;
+        self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
+            .await
+    }
+
+    pub async fn execute_batch_excluded(
+        &self,
+        exclusion: MutationExclusionGuard,
+        vault: &Vault,
+        index: &IndexHandle,
+        hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
+        command: BatchMutationCommand,
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
+    ) -> Result<MutationNotification, MutationError> {
+        if !Arc::ptr_eq(&self.mutation_gate, &exclusion.gate) {
+            return Err(MutationError::InvalidInput(
+                "mutation exclusion belongs to another coordinator".to_string(),
+            ));
+        }
+        let affected_paths = command.affected_paths();
+        #[cfg(test)]
+        if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
+            hook(&affected_paths);
+        }
+        let mut guard = self.lock_paths_excluded(&affected_paths).await;
+        guard._exclusion_guard = Some(exclusion);
+        self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
+            .await
+    }
+
+    async fn execute_batch_with_guard(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
+        command: BatchMutationCommand,
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
+        guard: MutationGuard,
+    ) -> Result<MutationNotification, MutationError> {
+        let root = vault.root().to_path_buf();
+        let shield_path = root.clone();
+        let index = index.clone();
+        let notification = batch_notification(&command.index_events);
+        let index_events = command.index_events.clone();
+        let moved_pages = command.moved_pages.clone();
+        let batch_publication_failure = self.batch_publication_failure.lock().take();
+
+        run_shielded_mutation(shield_path, move |filesystem_applied| async move {
+            let blocking_root = root.clone();
+            let blocking_error_path = root.clone();
+            let blocking_applied = Arc::clone(&filesystem_applied);
+            let prepared = tokio::task::spawn_blocking(move || {
+                let prepared = publish_batch(
+                    &blocking_root,
+                    &command,
+                    batch_publication_failure,
+                )?;
+                blocking_applied.store(true, Ordering::Release);
+                Ok::<_, MutationError>((guard, prepared))
+            })
+            .await
+            .map_err(|source| MutationError::Filesystem {
+                filesystem_applied: filesystem_applied.load(Ordering::Acquire),
+                path: blocking_error_path.clone(),
+                source: io::Error::other(format!(
+                    "blocking batch publication task failed: {source}"
+                )),
+            })??;
+
+            let (guard, prepared) = prepared;
+            let directory = prepared.directory().to_path_buf();
+            let reconciliation = index
+                .with_index(move |vault_index, index_vault| {
+                    reconcile_batch_index(
+                        index_vault,
+                        vault_index,
+                        hooks.as_ref(),
+                        &index_events,
+                        &moved_pages,
+                        MovedPageIdentity::Source,
+                    )
+                })
+                .await
+                .and_then(|result| result);
+            if let Err(source) = reconciliation {
+                return Err(MutationError::BatchRecovery {
+                    directory,
+                    source: BatchRecoveryError::Index(source),
+                });
+            }
+
+            let cleanup_directory = directory.clone();
+            tokio::task::spawn_blocking(move || {
+                let _guard = guard;
+                prepared.finish()
+            })
+            .await
+            .map_err(|source| MutationError::BatchRecovery {
+                directory: directory.clone(),
+                source: BatchRecoveryError::Workspace(batch_blocking_error(
+                    "finish batch transaction",
+                    &directory,
+                    source,
+                )),
+            })?
+            .map_err(|source| MutationError::BatchRecovery {
+                directory: cleanup_directory,
+                source: BatchRecoveryError::Workspace(source),
+            })?;
+
+            notify(notification.clone());
+            Ok(notification)
+        })
+        .await
     }
 
     pub async fn create_page(
@@ -1033,13 +1434,28 @@ impl Default for MutationCoordinator {
     }
 }
 
+struct MutationLockRequest {
+    #[cfg(test)]
+    observed_path: VaultPath,
+    lock: Arc<RwLock<()>>,
+    write: bool,
+}
+
 /// An owned set of path locks. The locks are released when this guard drops.
 enum MutationLockGuard {
     Read { _guard: OwnedRwLockReadGuard<()> },
     Write { _guard: OwnedRwLockWriteGuard<()> },
 }
 
+
+pub struct MutationExclusionGuard {
+    gate: Arc<RwLock<()>>,
+    _guard: OwnedRwLockWriteGuard<()>,
+}
+
 pub struct MutationGuard {
+    _gate_guard: Option<OwnedRwLockReadGuard<()>>,
+    _exclusion_guard: Option<MutationExclusionGuard>,
     _guards: Vec<MutationLockGuard>,
     _locks: Vec<Arc<RwLock<()>>>,
 }
@@ -1047,6 +1463,590 @@ pub struct MutationGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::vault::batch_mutation::{
+        BatchMutationCommand, BatchPathIntent, ExpectedPathState,
+    };
+    use crate::vault::sync::ChangeEvent;
+
+    struct BatchFixture {
+        _temp: tempfile::TempDir,
+        vault: Vault,
+        index: IndexHandle,
+        coordinator: Arc<MutationCoordinator>,
+    }
+
+    impl BatchFixture {
+        fn new(files: &[(&str, &str)]) -> Self {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path().join("vault");
+            crate::vault::init::init_vault(&root).unwrap();
+            for (path, content) in files {
+                let path = root.join(path);
+                if let Some(parent) = path.parent() {
+                    fs::create_dir_all(parent).unwrap();
+                }
+                fs::write(path, content).unwrap();
+            }
+            let vault = Vault::open(&root).unwrap();
+            let mut raw_index =
+                crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+            raw_index.build(&vault).unwrap();
+            let index = IndexHandle::spawn(raw_index, vault.clone());
+            Self {
+                _temp: temp,
+                vault,
+                index,
+                coordinator: Arc::new(MutationCoordinator::new()),
+            }
+        }
+
+        fn root(&self) -> &Path {
+            self.vault.root()
+        }
+    }
+
+    fn batch_page(id: &str, title: &str, body: &str) -> String {
+        format!("+++\nid = \"{id}\"\ntitle = \"{title}\"\n+++\n{body}\n")
+    }
+
+    fn replace_batch(replacements: &[(&str, &str, &str)]) -> BatchMutationCommand {
+        BatchMutationCommand {
+            intents: replacements
+                .iter()
+                .map(|(path, expected, content)| BatchPathIntent::Write {
+                    path: VaultPath::new(path).unwrap(),
+                    expected: ExpectedPathState::Bytes(expected.as_bytes().to_vec()),
+                    content: content.as_bytes().to_vec(),
+                })
+                .collect(),
+            create_directories: Vec::new(),
+            remove_directories: Vec::new(),
+            index_events: replacements
+                .iter()
+                .map(|(path, _, _)| ChangeEvent::Upsert(VaultPath::new(path).unwrap()))
+                .collect(),
+            moved_pages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn batch_prepare_cleanup_error_exposes_retained_directory() {
+        let directory = PathBuf::from("/vault/.clepsydra/transactions/test");
+        let error = batch_prepare_error(BatchMutationError::PreparationCleanup {
+            directory: directory.clone(),
+            retained: true,
+            source: Box::new(BatchMutationError::Validation("prepare failed".to_owned())),
+            cleanup: Box::new(BatchMutationError::Validation("cleanup failed".to_owned())),
+        });
+
+        assert!(matches!(
+            error,
+            MutationError::BatchPrepare {
+                directory: Some(retained),
+                ..
+            } if retained == directory
+        ));
+    }
+
+    #[tokio::test]
+    async fn batch_revalidates_every_path_after_lock_acquisition() {
+        let original_a = batch_page(
+            "019fd000-0000-7000-8000-000000000001",
+            "A",
+            "one",
+        );
+        let original_b = batch_page(
+            "019fd000-0000-7000-8000-000000000002",
+            "B",
+            "two",
+        );
+        let fixture = BatchFixture::new(&[("a.md", &original_a), ("b.md", &original_b)]);
+        let original_a = fs::read_to_string(fixture.root().join("a.md")).unwrap();
+        let original_b = fs::read_to_string(fixture.root().join("b.md")).unwrap();
+        let replacement_a = original_a.replace("one", "ONE");
+        let replacement_b = original_b.replace("two", "TWO");
+        let external_b = original_b.replace("two", "external");
+        let held = fixture
+            .coordinator
+            .lock_paths(&[VaultPath::new("a.md").unwrap()])
+            .await;
+        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
+        let waiting_tx = Arc::new(parking_lot::Mutex::new(Some(waiting_tx)));
+        let observed_wait = Arc::clone(&waiting_tx);
+        fixture
+            .coordinator
+            .set_before_lock_acquire_hook(Some(Arc::new(move |path| {
+                if path.as_str() == "a.md"
+                    && let Some(waiting_tx) = observed_wait.lock().take()
+                {
+                    let _ = waiting_tx.send(());
+                }
+            })));
+        let coordinator = Arc::clone(&fixture.coordinator);
+        let vault = fixture.vault.clone();
+        let index = fixture.index.clone();
+        let command = replace_batch(&[
+            ("a.md", &original_a, &replacement_a),
+            ("b.md", &original_b, &replacement_b),
+        ]);
+        let pending = tokio::spawn(async move {
+            coordinator
+                .execute_batch(
+                    &vault,
+                    &index,
+                    Arc::new(Vec::new()),
+                    command,
+                    Arc::new(|_| panic!("stale batch must not notify")),
+                )
+                .await
+        });
+
+        waiting_rx
+            .await
+            .expect("batch did not reach the held path lock");
+        fs::write(fixture.root().join("b.md"), &external_b).unwrap();
+        drop(held);
+        let error = pending.await.unwrap().unwrap_err();
+
+        assert!(matches!(error, MutationError::Stale(path) if path.as_str() == "b.md"));
+        assert_eq!(
+            fs::read_to_string(fixture.root().join("a.md")).unwrap(),
+            original_a
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.root().join("b.md")).unwrap(),
+            external_b
+        );
+    }
+
+    #[tokio::test]
+    async fn plan_derived_move_rolls_back_backlink_before_primary_failure_without_notification() {
+        let target = batch_page(
+            "019fd000-0000-7000-8000-000000000009",
+            "Target",
+            "target body",
+        );
+        let backlink = batch_page(
+            "019fd000-0000-7000-8000-000000000010",
+            "Backlink",
+            "See [[Target]].",
+        );
+        let fixture = BatchFixture::new(&[("target.md", &target), ("backlink.md", &backlink)]);
+        let original_target = fs::read(fixture.root().join("target.md")).unwrap();
+        let original_backlink = fs::read(fixture.root().join("backlink.md")).unwrap();
+        let command = fixture
+            .index
+            .with_index(|index, vault| {
+                crate::vault::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::vault::mutation::MutationOp::MovePage {
+                        source: "target.md".to_string(),
+                        destination: "renamed.md".to_string(),
+                    })?
+                    .into_batch_command(vault)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(command.intents.len(), 2);
+        fixture.coordinator.fail_next_batch_publication_at(1);
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+
+        let error = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                command,
+                Arc::new(move |notification| observed.lock().push(notification)),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MutationError::BatchPublish { .. }));
+        assert_eq!(
+            fs::read(fixture.root().join("target.md")).unwrap(),
+            original_target
+        );
+        assert_eq!(
+            fs::read(fixture.root().join("backlink.md")).unwrap(),
+            original_backlink
+        );
+        assert!(!fixture.root().join("renamed.md").exists());
+        assert!(notifications.lock().is_empty());
+        let indexed_paths = fixture
+            .index
+            .with_index(|index, _| {
+                let mut statement = index
+                    .connection()
+                    .prepare("SELECT path FROM pages ORDER BY path")
+                    .unwrap();
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))
+                    .unwrap()
+                    .collect::<Result<Vec<_>, _>>()
+                    .unwrap()
+            })
+            .await
+            .unwrap();
+        assert_eq!(indexed_paths, vec!["backlink.md", "target.md"]);
+    }
+
+    #[tokio::test]
+    async fn folder_batch_rolls_back_when_unexpected_source_content_blocks_cleanup() {
+        let page = batch_page(
+            "019fd000-0000-7000-8000-000000000013",
+            "Nested",
+            "body",
+        );
+        let fixture = BatchFixture::new(&[("notes/nested/page.md", &page)]);
+        let original = fs::read(fixture.root().join("notes/nested/page.md")).unwrap();
+        let command = fixture
+            .index
+            .with_index(|index, vault| {
+                crate::vault::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::vault::mutation::MutationOp::MoveFolder {
+                        source: "notes".to_string(),
+                        destination: "archive/notes".to_string(),
+                    })?
+                    .into_batch_command(vault)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        fs::write(fixture.root().join("notes/late.txt"), "external").unwrap();
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+
+        let error = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                command,
+                Arc::new(move |notification| observed.lock().push(notification)),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, MutationError::BatchPublish { .. }));
+        assert_eq!(
+            fs::read(fixture.root().join("notes/nested/page.md")).unwrap(),
+            original
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.root().join("notes/late.txt")).unwrap(),
+            "external"
+        );
+        assert!(!fixture.root().join("archive").exists());
+        assert!(notifications.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_notifies_once_after_every_file_and_index_commit() {
+        let original_a = batch_page(
+            "019fd000-0000-7000-8000-000000000011",
+            "A",
+            "one",
+        );
+        let original_b = batch_page(
+            "019fd000-0000-7000-8000-000000000012",
+            "B",
+            "two",
+        );
+        let fixture = BatchFixture::new(&[("a.md", &original_a), ("b.md", &original_b)]);
+        let original_a = fs::read_to_string(fixture.root().join("a.md")).unwrap();
+        let original_b = fs::read_to_string(fixture.root().join("b.md")).unwrap();
+        let replacement_a = original_a.replace("one", "ONE");
+        let replacement_b = original_b.replace("two", "TWO");
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+        let notification_root = fixture.root().to_path_buf();
+        let expected_hashes = [
+            (
+                "a.md",
+                blake3::hash(replacement_a.as_bytes()).to_hex().to_string(),
+            ),
+            (
+                "b.md",
+                blake3::hash(replacement_b.as_bytes()).to_hex().to_string(),
+            ),
+        ];
+
+        let returned = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                replace_batch(&[
+                    ("a.md", &original_a, &replacement_a),
+                    ("b.md", &original_b, &replacement_b),
+                ]),
+                Arc::new(move |notification| {
+                    let database =
+                        rusqlite::Connection::open(notification_root.join(".clepsydra/cache.db"))
+                            .unwrap();
+                    for (path, expected_hash) in &expected_hashes {
+                        assert_eq!(
+                            blake3::hash(&fs::read(notification_root.join(path)).unwrap())
+                                .to_hex()
+                                .as_str(),
+                            expected_hash
+                        );
+                        let indexed_hash = database
+                            .query_row(
+                                "SELECT content_hash FROM pages WHERE path = ?1",
+                                [path],
+                                |row| row.get::<_, String>(0),
+                            )
+                            .unwrap();
+                        assert_eq!(&indexed_hash, expected_hash);
+                    }
+                    observed.lock().push(notification);
+                }),
+            )
+            .await
+            .unwrap();
+
+        let expected = MutationNotification {
+            upserted: vec!["a.md".into(), "b.md".into()],
+            removed: Vec::new(),
+        };
+        assert_eq!(returned, expected);
+        assert_eq!(notifications.lock().as_slice(), &[expected]);
+        assert_eq!(
+            fs::read_to_string(fixture.root().join("a.md")).unwrap(),
+            replacement_a
+        );
+        assert_eq!(
+            fs::read_to_string(fixture.root().join("b.md")).unwrap(),
+            replacement_b
+        );
+        let indexed_paths = fixture
+            .index
+            .with_index(|index, _| {
+                let mut statement = index
+                    .connection()
+                    .prepare("SELECT path FROM pages WHERE path IN ('a.md', 'b.md') ORDER BY path")?;
+                statement
+                    .query_map([], |row| row.get::<_, String>(0))?
+                    .collect::<Result<Vec<_>, _>>()
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(indexed_paths, ["a.md".to_string(), "b.md".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn batch_index_failure_retains_committed_workspace_without_notification() {
+        let original = batch_page(
+            "019fd000-0000-7000-8000-000000000021",
+            "A",
+            "before",
+        );
+        let fixture = BatchFixture::new(&[("a.md", &original)]);
+        let original = fs::read_to_string(fixture.root().join("a.md")).unwrap();
+        let replacement = original.replace("before", "after");
+        fs::create_dir(fixture.root().join("broken-index-target")).unwrap();
+        let mut command = replace_batch(&[("a.md", &original, &replacement)]);
+        command.index_events = vec![ChangeEvent::Upsert(
+            VaultPath::new("broken-index-target").unwrap(),
+        )];
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+
+        let error = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                command,
+                Arc::new(move |notification| observed.lock().push(notification)),
+            )
+            .await
+            .unwrap_err();
+
+        let directory = match error {
+            MutationError::BatchRecovery { directory, .. } => directory,
+            error => panic!("expected retained batch recovery error, got {error:?}"),
+        };
+        assert!(directory.is_dir());
+        assert_eq!(
+            fs::read_to_string(fixture.root().join("a.md")).unwrap(),
+            replacement
+        );
+        assert!(notifications.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_invalid_indexed_move_uuid_retains_workspace_without_notification() {
+        let seeded_source = batch_page(
+            "019fd000-0000-7000-8000-000000000029",
+            "Source",
+            "body",
+        );
+        let fixture = BatchFixture::new(&[("source.md", &seeded_source)]);
+        let source_content =
+            fs::read_to_string(fixture.root().join("source.md")).unwrap();
+        fixture
+            .index
+            .with_index(|index, _| {
+                index.connection().execute_batch(
+                    "PRAGMA foreign_keys = OFF;
+                     UPDATE pages SET id = 'not-a-uuid' WHERE path = 'source.md';
+                     PRAGMA foreign_keys = ON;",
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let source = VaultPath::new("source.md").unwrap();
+        let destination = VaultPath::new("destination.md").unwrap();
+        let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed = Arc::clone(&notifications);
+
+        let error = fixture
+            .coordinator
+            .execute_batch(
+                &fixture.vault,
+                &fixture.index,
+                Arc::new(Vec::new()),
+                BatchMutationCommand {
+                    intents: vec![BatchPathIntent::Move {
+                        source: source.clone(),
+                        destination: destination.clone(),
+                        expected_source: source_content.as_bytes().to_vec(),
+                    }],
+                    create_directories: Vec::new(),
+                    remove_directories: Vec::new(),
+                    index_events: vec![
+                        ChangeEvent::Remove(source.clone()),
+                        ChangeEvent::Upsert(destination.clone()),
+                    ],
+                    moved_pages: vec![(source.clone(), destination.clone())],
+                },
+                Arc::new(move |notification| observed.lock().push(notification)),
+            )
+            .await
+            .unwrap_err();
+
+        let directory = match error {
+            MutationError::BatchRecovery { directory, .. } => directory,
+            error => panic!("expected retained batch recovery error, got {error:?}"),
+        };
+        assert!(directory.is_dir());
+        assert!(!fixture.root().join(source.as_str()).exists());
+        assert_eq!(
+            fs::read_to_string(fixture.root().join(destination.as_str())).unwrap(),
+            source_content
+        );
+        assert!(notifications.lock().is_empty());
+    }
+
+    #[tokio::test]
+    async fn batch_overlaps_with_reversed_input_order_without_deadlock() {
+        let original_a = batch_page(
+            "019fd000-0000-7000-8000-000000000031",
+            "A",
+            "zero",
+        );
+        let original_b = batch_page(
+            "019fd000-0000-7000-8000-000000000032",
+            "B",
+            "zero",
+        );
+        let fixture = BatchFixture::new(&[("a.md", &original_a), ("b.md", &original_b)]);
+        let original_a = fs::read_to_string(fixture.root().join("a.md")).unwrap();
+        let original_b = fs::read_to_string(fixture.root().join("b.md")).unwrap();
+        let first_a = original_a.replace("zero", "first");
+        let first_b = original_b.replace("zero", "first");
+        let second_a = original_a.replace("zero", "second");
+        let second_b = original_b.replace("zero", "second");
+        let lock_requests = Arc::new(parking_lot::Mutex::new(Vec::new()));
+        let observed_requests = Arc::clone(&lock_requests);
+        fixture
+            .coordinator
+            .set_before_batch_lock_hook(Some(Arc::new(move |paths| {
+                observed_requests.lock().push(
+                    paths
+                        .iter()
+                        .map(|path| path.as_str().to_owned())
+                        .collect::<Vec<_>>(),
+                );
+            })));
+        let notify_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let first_notify_count = Arc::clone(&notify_count);
+        let second_notify_count = Arc::clone(&notify_count);
+        let first_coordinator = Arc::clone(&fixture.coordinator);
+        let second_coordinator = Arc::clone(&fixture.coordinator);
+        let first_vault = fixture.vault.clone();
+        let second_vault = fixture.vault.clone();
+        let first_index = fixture.index.clone();
+        let second_index = fixture.index.clone();
+        let first_command = replace_batch(&[
+            ("a.md", &original_a, &first_a),
+            ("b.md", &original_b, &first_b),
+        ]);
+        let second_command = replace_batch(&[
+            ("b.md", &original_b, &second_b),
+            ("a.md", &original_a, &second_a),
+        ]);
+        let first = tokio::spawn(async move {
+            first_coordinator
+                .execute_batch(
+                    &first_vault,
+                    &first_index,
+                    Arc::new(Vec::new()),
+                    first_command,
+                    Arc::new(move |_| {
+                        first_notify_count.fetch_add(1, Ordering::SeqCst);
+                    }),
+                )
+                .await
+        });
+        let second = tokio::spawn(async move {
+            second_coordinator
+                .execute_batch(
+                    &second_vault,
+                    &second_index,
+                    Arc::new(Vec::new()),
+                    second_command,
+                    Arc::new(move |_| {
+                        second_notify_count.fetch_add(1, Ordering::SeqCst);
+                    }),
+                )
+                .await
+        });
+
+        let (first_result, second_result) =
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                (first.await.unwrap(), second.await.unwrap())
+            })
+            .await
+            .expect("overlapping reversed-order batches deadlocked");
+
+        let stale = match (first_result, second_result) {
+            (Err(stale), Ok(_)) | (Ok(_), Err(stale)) => stale,
+            (first_result, second_result) => panic!(
+                "expected exactly one stale batch result, got {first_result:?} and {second_result:?}"
+            ),
+        };
+        assert!(matches!(stale, MutationError::Stale(_)));
+        assert_eq!(notify_count.load(Ordering::SeqCst), 1);
+        let requests = lock_requests.lock();
+        assert_eq!(requests.len(), 2);
+        assert!(
+            requests
+                .iter()
+                .all(|paths| paths == &["a.md".to_string(), "b.md".to_string()])
+        );
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cancelling_blocking_phase_keeps_path_locked_until_io_finishes() {

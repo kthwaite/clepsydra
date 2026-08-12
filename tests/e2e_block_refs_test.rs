@@ -179,3 +179,25 @@ async fn full_block_refs_workflow() {
         body["content"]
     );
 }
+
+#[tokio::test]
+async fn protected_block_id_is_indistinguishable_from_an_unknown_id() {
+    const PROTECTED_BLOCK_ID: &str = "privateABC12";
+    const UNKNOWN_BLOCK_ID: &str = "unknownABC12";
+
+    let (server, _tmp) = setup_server_with_files(|vault_root| {
+        let protected_page = format!(
+            "+++\nid = \"019fd000-0000-7000-8000-000000000061\"\ntitle = \"Protected block\"\nencryption = {{ format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }}\n+++\n-----BEGIN AGE ENCRYPTED FILE-----\nciphertext marker ^{PROTECTED_BLOCK_ID}\n-----END AGE ENCRYPTED FILE-----\n"
+        );
+        std::fs::write(vault_root.join("protected.md"), protected_page).unwrap();
+    });
+
+    server
+        .get(&format!("/api/vault/blocks/{PROTECTED_BLOCK_ID}"))
+        .await
+        .assert_status_not_found();
+    server
+        .get(&format!("/api/vault/blocks/{UNKNOWN_BLOCK_ID}"))
+        .await
+        .assert_status_not_found();
+}

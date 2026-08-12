@@ -42,13 +42,18 @@ function ListItem({
   const isTask = checked !== undefined && checked !== null;
 
   if (!isTask) {
-    return <li {...attributes}>{children}</li>;
+    return (
+      <li {...attributes} data-block-id={element.blockId}>
+        {children}
+      </li>
+    );
   }
   const label = Node.string(element);
 
   return (
     <li
       {...attributes}
+      data-block-id={element.blockId}
       className={cn(
         "flex items-baseline",
         checked === true && "line-through text-muted-foreground",

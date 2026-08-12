@@ -62,6 +62,17 @@ pub fn legacy_pages(vault: &Vault) -> Vec<VaultPath> {
 /// Unparseable frontmatter is reported and left alone — the sweep never
 /// destroys what it cannot read.
 pub fn migrate(vault: &Vault, write: bool) -> MigrateReport {
+    migrate_with_publication(vault, write, atomic_replace)
+}
+
+fn migrate_with_publication(
+    vault: &Vault,
+    write: bool,
+    mut publish: impl FnMut(
+        &std::path::Path,
+        &[u8],
+    ) -> Result<(), super::atomic_file::AtomicPublicationError>,
+) -> MigrateReport {
     let mut report = MigrateReport {
         dry_run: !write,
         ..Default::default()
@@ -89,7 +100,7 @@ pub fn migrate(vault: &Vault, write: bool) -> MigrateReport {
 
         if write {
             let new_content = write_page_content(&meta, &body);
-            if let Err(e) = atomic_replace(&abs, new_content.as_bytes()) {
+            if let Err(e) = publish(&abs, new_content.as_bytes()) {
                 report
                     .warnings
                     .push(format!("{}: write failed: {e}", vault_path.as_str()));
@@ -195,5 +206,35 @@ mod tests {
         let pages = legacy_pages(&vault);
         let paths: Vec<&str> = pages.iter().map(|p| p.as_str()).collect();
         assert_eq!(paths, vec!["a.md", "sub/b.md"]);
+    }
+
+    #[test]
+    fn publication_failure_preserves_page_and_continues() {
+        let (_tmp, vault) = make_vault(&[("a.md", LEGACY), ("b.md", LEGACY)]);
+
+        let report = migrate_with_publication(&vault, true, |path, content| {
+            if path.ends_with("a.md") {
+                Err(
+                    crate::vault::atomic_file::AtomicPublicationError::NotPublished(
+                        std::io::Error::other("injected migration publication failure"),
+                    ),
+                )
+            } else {
+                crate::vault::atomic_file::atomic_replace(path, content)
+            }
+        });
+
+        assert_eq!(report.converted, vec!["b.md"]);
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].contains("injected migration publication failure"));
+        assert_eq!(
+            std::fs::read_to_string(vault.root().join("a.md")).unwrap(),
+            LEGACY
+        );
+        assert!(
+            std::fs::read_to_string(vault.root().join("b.md"))
+                .unwrap()
+                .starts_with("+++\n")
+        );
     }
 }

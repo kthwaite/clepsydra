@@ -1,3 +1,4 @@
+use std::fmt;
 use std::sync::Arc;
 
 use axum::Json;
@@ -7,7 +8,8 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use rusqlite::params;
-use serde::{Deserialize, Serialize};
+use serde::de::{Error as _, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
@@ -16,10 +18,22 @@ use super::pages::page_detail;
 use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
-use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
-use crate::vault::mutation_coordinator::CreatePageCommand;
+use crate::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
+use crate::vault::kind::Kind;
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
+use crate::vault::reference_issues::{
+    ReferenceCandidate as VaultReferenceCandidate, ReferenceIssue as VaultReferenceIssue,
+    ReferenceIssueAction as VaultReferenceIssueAction,
+    ReferenceIssueFilter as VaultReferenceIssueFilter,
+    ReferenceIssueKind as VaultReferenceIssueKind,
+};
+use crate::vault::reference_repair::{
+    ReferenceRepairAction as VaultReferenceRepairAction,
+    ReferenceRepairError as VaultReferenceRepairError,
+    ReferenceRepairRequest as VaultReferenceRepairRequest, prepare_reference_repair,
+};
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -184,6 +198,331 @@ pub struct SimilarResponse {
     pub items: Vec<SimilarEntry>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(rename_all = "snake_case")]
+pub enum ReferenceIssueKindDto {
+    UnresolvedPageLink,
+    AmbiguousPageLink,
+    BrokenBlockRef,
+    InvalidRelationTarget,
+    OrphanPage,
+    IsolatedPage,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(rename_all = "snake_case")]
+pub enum ReferenceIssueActionDto {
+    Create,
+    Replace,
+    OpenSource,
+    None,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReferenceCandidateDto {
+    pub page_id: String,
+    pub path: String,
+    pub title: Option<String>,
+    pub rationale: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReferenceIssueDto {
+    pub fingerprint: String,
+    pub kind: ReferenceIssueKindDto,
+    pub source_id: String,
+    pub source_path: String,
+    pub source_title: Option<String>,
+    pub source_revision: String,
+    pub span_start: Option<i64>,
+    pub span_end: Option<i64>,
+    pub source_field: Option<String>,
+    pub snippet: Option<String>,
+    pub target_raw: Option<String>,
+    pub candidates: Vec<ReferenceCandidateDto>,
+    pub actions: Vec<ReferenceIssueActionDto>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReferenceIssuesResponse {
+    pub items: Vec<ReferenceIssueDto>,
+    pub total: u64,
+    pub limit: u32,
+    pub offset: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReferenceRepairActionDto {
+    Create { folder: String, body: Option<String> },
+    Replace { candidate_page_id: String },
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ReferenceRepairRequest {
+    pub fingerprint: String,
+    pub source_revision: String,
+    pub action: ReferenceRepairActionDto,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReferenceRepairPreviewResponse {
+    pub fingerprint: String,
+    pub before: String,
+    pub after: String,
+    pub plan: MutationPlan,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReferenceRepairApplyResponse {
+    pub fingerprint: String,
+    pub notification: MutationNotification,
+}
+
+impl From<ReferenceRepairRequest> for VaultReferenceRepairRequest {
+    fn from(value: ReferenceRepairRequest) -> Self {
+        let action = match value.action {
+            ReferenceRepairActionDto::Create { folder, body } => {
+                VaultReferenceRepairAction::Create { folder, body }
+            }
+            ReferenceRepairActionDto::Replace { candidate_page_id } => {
+                VaultReferenceRepairAction::Replace { candidate_page_id }
+            }
+        };
+        Self {
+            fingerprint: value.fingerprint,
+            source_revision: value.source_revision,
+            action,
+        }
+    }
+}
+
+#[derive(Debug, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ReferenceIssuesParams {
+    /// Issue kinds. The parameter may be repeated and each value may be comma-separated.
+    pub kind: Option<Vec<ReferenceIssueKindDto>>,
+    pub project: Option<String>,
+    pub page_kind: Option<Kind>,
+    pub actionable: Option<bool>,
+    /// Page size. Defaults to 50.
+    #[param(minimum = 1, maximum = 200)]
+    pub limit: Option<u32>,
+    /// Zero-based result offset. Defaults to 0.
+    pub offset: Option<u32>,
+}
+
+#[derive(Debug, Default)]
+pub struct ReferenceIssuesQuery {
+    kind: Vec<String>,
+    project: Vec<String>,
+    page_kind: Vec<String>,
+    actionable: Vec<String>,
+    limit: Vec<String>,
+    offset: Vec<String>,
+}
+
+impl<'de> Deserialize<'de> for ReferenceIssuesQuery {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ReferenceIssuesQueryVisitor;
+
+        impl<'de> Visitor<'de> for ReferenceIssuesQueryVisitor {
+            type Value = ReferenceIssuesQuery;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("reference issue query parameters")
+            }
+
+            fn visit_map<M>(self, mut map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                let mut query = ReferenceIssuesQuery::default();
+                while let Some((key, value)) = map.next_entry::<String, String>()? {
+                    match key.as_str() {
+                        "kind" => query.kind.push(value),
+                        "project" => query.project.push(value),
+                        "page_kind" => query.page_kind.push(value),
+                        "actionable" => query.actionable.push(value),
+                        "limit" => query.limit.push(value),
+                        "offset" => query.offset.push(value),
+                        _ => {
+                            return Err(M::Error::custom(format!(
+                                "unknown query parameter '{key}'"
+                            )));
+                        }
+                    }
+                }
+                Ok(query)
+            }
+        }
+
+        deserializer.deserialize_map(ReferenceIssuesQueryVisitor)
+    }
+}
+
+impl ReferenceIssuesQuery {
+    fn into_filter(self) -> Result<VaultReferenceIssueFilter, ApiError> {
+        let mut kinds = Vec::new();
+        for value in self.kind {
+            for token in value.split(',') {
+                let token = token.trim();
+                let kind = match token {
+                    "unresolved_page_link" => VaultReferenceIssueKind::UnresolvedPageLink,
+                    "ambiguous_page_link" => VaultReferenceIssueKind::AmbiguousPageLink,
+                    "broken_block_ref" => VaultReferenceIssueKind::BrokenBlockRef,
+                    "invalid_relation_target" => VaultReferenceIssueKind::InvalidRelationTarget,
+                    "orphan_page" => VaultReferenceIssueKind::OrphanPage,
+                    "isolated_page" => VaultReferenceIssueKind::IsolatedPage,
+                    _ => {
+                        return Err(ApiError::bad_request("invalid reference issue kind"));
+                    }
+                };
+                if !kinds.contains(&kind) {
+                    kinds.push(kind);
+                }
+            }
+        }
+
+        let project = take_single_query_value(self.project, "project")?
+            .map(|value| {
+                let value = value.trim();
+                if value.is_empty() {
+                    Err(ApiError::bad_request("project must not be empty"))
+                } else {
+                    Ok(value.to_owned())
+                }
+            })
+            .transpose()?;
+        let page_kind = take_single_query_value(self.page_kind, "page_kind")?
+            .map(|value| {
+                Kind::from_token(&value)
+                    .ok_or_else(|| ApiError::bad_request("invalid page_kind"))
+            })
+            .transpose()?;
+        let actionable = take_single_query_value(self.actionable, "actionable")?
+            .map(|value| match value.as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(ApiError::bad_request("invalid actionable value")),
+            })
+            .transpose()?;
+        let limit = parse_u32_query_value(self.limit, "limit", 50)?;
+        if !(1..=200).contains(&limit) {
+            return Err(ApiError::bad_request("limit must be between 1 and 200"));
+        }
+        let offset = parse_u32_query_value(self.offset, "offset", 0)?;
+
+        Ok(VaultReferenceIssueFilter {
+            kinds,
+            project,
+            page_kind,
+            actionable,
+            limit,
+            offset,
+        })
+    }
+}
+
+fn take_single_query_value(
+    mut values: Vec<String>,
+    name: &'static str,
+) -> Result<Option<String>, ApiError> {
+    if values.len() > 1 {
+        return Err(ApiError::bad_request(format!(
+            "'{name}' may be specified only once"
+        )));
+    }
+    Ok(values.pop())
+}
+
+fn parse_u32_query_value(
+    values: Vec<String>,
+    name: &'static str,
+    default: u32,
+) -> Result<u32, ApiError> {
+    take_single_query_value(values, name)?
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map_err(|_| ApiError::bad_request(format!("invalid {name}")))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+}
+
+impl From<VaultReferenceIssueKind> for ReferenceIssueKindDto {
+    fn from(value: VaultReferenceIssueKind) -> Self {
+        match value {
+            VaultReferenceIssueKind::UnresolvedPageLink => Self::UnresolvedPageLink,
+            VaultReferenceIssueKind::AmbiguousPageLink => Self::AmbiguousPageLink,
+            VaultReferenceIssueKind::BrokenBlockRef => Self::BrokenBlockRef,
+            VaultReferenceIssueKind::InvalidRelationTarget => Self::InvalidRelationTarget,
+            VaultReferenceIssueKind::OrphanPage => Self::OrphanPage,
+            VaultReferenceIssueKind::IsolatedPage => Self::IsolatedPage,
+        }
+    }
+}
+
+impl From<VaultReferenceIssueAction> for ReferenceIssueActionDto {
+    fn from(value: VaultReferenceIssueAction) -> Self {
+        match value {
+            VaultReferenceIssueAction::Create => Self::Create,
+            VaultReferenceIssueAction::Replace => Self::Replace,
+            VaultReferenceIssueAction::OpenSource => Self::OpenSource,
+            VaultReferenceIssueAction::None => Self::None,
+        }
+    }
+}
+
+impl From<VaultReferenceCandidate> for ReferenceCandidateDto {
+    fn from(value: VaultReferenceCandidate) -> Self {
+        Self {
+            page_id: value.page_id,
+            path: value.path,
+            title: value.title,
+            rationale: value.rationale,
+        }
+    }
+}
+
+impl From<VaultReferenceIssue> for ReferenceIssueDto {
+    fn from(value: VaultReferenceIssue) -> Self {
+        Self {
+            fingerprint: value.fingerprint,
+            kind: value.kind.into(),
+            source_id: value.source_id,
+            source_path: value.source_path,
+            source_title: value.source_title,
+            source_revision: value.source_revision,
+            span_start: value.span_start,
+            span_end: value.span_end,
+            source_field: value.source_field,
+            snippet: value.snippet,
+            target_raw: value.target_raw,
+            candidates: value.candidates.into_iter().map(Into::into).collect(),
+            actions: value.actions.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+fn reference_repair_error(error: VaultReferenceRepairError) -> ApiError {
+    match error {
+        VaultReferenceRepairError::Invalid(message) => ApiError::bad_request(message),
+        VaultReferenceRepairError::Stale => {
+            ApiError::conflict("reference issue changed since it was selected")
+        }
+        VaultReferenceRepairError::Index(_) | VaultReferenceRepairError::Io(_) => {
+            ApiError::internal("reference repair could not be prepared")
+        }
+    }
+}
+
 fn default_rewrite_mode() -> String {
     "plain_text".to_string()
 }
@@ -198,6 +537,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/similar/{*path}", get(similar))
         .route("/outlinks/{*path}", get(outlinks))
         .route("/unresolved", get(unresolved))
+        .route("/issues", get(reference_issues))
+        .route("/issues/preview", post(reference_repair_preview))
+        .route("/issues/apply", post(reference_repair_apply))
         .route("/ambiguous", get(ambiguous))
         .route("/warnings", get(warnings))
         .route("/tags", get(tags))
@@ -213,6 +555,120 @@ pub fn router() -> Router<Arc<AppState>> {
 // ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
+
+#[utoipa::path(
+    get,
+    path = "/index/issues",
+    context_path = "/api/vault",
+    tag = "Index",
+    params(ReferenceIssuesParams),
+    responses(
+        (status = 200, description = "Paginated reference issue inventory", body = ReferenceIssuesResponse),
+        (status = 400, description = "Invalid filter or pagination value", body = ApiError),
+        (status = 500, description = "Reference issue inventory unavailable", body = ApiError)
+    )
+)]
+pub async fn reference_issues(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ReferenceIssuesQuery>,
+) -> Result<Json<ReferenceIssuesResponse>, ApiError> {
+    let filter = query.into_filter()?;
+    let limit = filter.limit;
+    let offset = filter.offset;
+    let page = state
+        .index
+        .with_index(move |index, _vault| index.reference_issues(filter))
+        .await
+        .map_err(|_| ApiError::internal("reference issue inventory unavailable"))?
+        .map_err(|_| ApiError::internal("reference issue inventory unavailable"))?;
+
+    Ok(Json(ReferenceIssuesResponse {
+        items: page.items.into_iter().map(Into::into).collect(),
+        total: page.total,
+        limit,
+        offset,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/index/issues/preview",
+    context_path = "/api/vault",
+    tag = "Index",
+    request_body = ReferenceRepairRequest,
+    responses(
+        (status = 200, description = "Reference repair preview", body = ReferenceRepairPreviewResponse),
+        (status = 400, description = "Action is unavailable or invalid", body = ApiError),
+        (status = 409, description = "Issue or source revision is stale", body = ApiError),
+        (status = 500, description = "Reference repair could not be prepared", body = ApiError)
+    )
+)]
+pub async fn reference_repair_preview(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ReferenceRepairRequest>,
+) -> Result<Json<ReferenceRepairPreviewResponse>, ApiError> {
+    let prepared = state
+        .index
+        .with_index(move |index, vault| {
+            prepare_reference_repair(vault, index, request.into())
+        })
+        .await
+        .map_err(|_| ApiError::internal("reference repair could not be prepared"))?
+        .map_err(reference_repair_error)?;
+
+    Ok(Json(ReferenceRepairPreviewResponse {
+        fingerprint: prepared.fingerprint,
+        before: prepared.before,
+        after: prepared.after,
+        plan: prepared.plan,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/index/issues/apply",
+    context_path = "/api/vault",
+    tag = "Index",
+    request_body = ReferenceRepairRequest,
+    responses(
+        (status = 200, description = "Committed reference repair", body = ReferenceRepairApplyResponse),
+        (status = 400, description = "Action is unavailable or invalid", body = ApiError),
+        (status = 409, description = "Issue, source revision, or path state is stale", body = ApiError),
+        (status = 500, description = "Reference repair could not be committed", body = ApiError)
+    )
+)]
+pub async fn reference_repair_apply(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ReferenceRepairRequest>,
+) -> Result<Json<ReferenceRepairApplyResponse>, ApiError> {
+    let exclusion = state.mutation_coordinator.exclude_mutations().await;
+    let prepared = state
+        .index
+        .with_index(move |index, vault| {
+            prepare_reference_repair(vault, index, request.into())
+        })
+        .await
+        .map_err(|_| ApiError::internal("reference repair could not be prepared"))?
+        .map_err(reference_repair_error)?;
+    let fingerprint = prepared.fingerprint;
+    let notification = state
+        .mutation_coordinator
+        .execute_batch_excluded(
+            exclusion,
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            prepared.command,
+            super::mutation_notifier(state.as_ref()),
+        )
+        .await
+        .map_err(super::mutation_error)?;
+
+    Ok(Json(ReferenceRepairApplyResponse {
+        fingerprint,
+        notification,
+    }))
+}
 
 #[utoipa::path(
     get,

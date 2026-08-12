@@ -39,6 +39,11 @@ interface Marks {
   subscript?: true;
 }
 
+interface ConversionContext {
+  blockRefsEnabled: boolean;
+  definitions: ReadonlyMap<string, string>;
+}
+
 /**
  * The remark-wiki-link plugin produces nodes with this shape.
  * Not part of the standard mdast types, so we define it here.
@@ -71,8 +76,18 @@ export function mdastToSlate(markdown: string): Descendant[] {
   const tree = processor.runSync(processor.parse(markdown), {
     value: markdown,
   }) as Root;
+  const definitions = new Map<string, string>();
+  for (const node of tree.children) {
+    if (node.type === "definition") {
+      definitions.set(node.identifier, node.url);
+    }
+  }
+  const context: ConversionContext = {
+    blockRefsEnabled: true,
+    definitions,
+  };
 
-  const result = convertChildren(tree.children, markdown, true, true);
+  const result = convertChildren(tree.children, markdown, context, true, true);
 
   // Slate invariant: document must have at least one block
   if (result.length === 0) {
@@ -90,6 +105,7 @@ export function mdastToSlate(markdown: string): Descendant[] {
 function convertChildren(
   nodes: RootContent[],
   source: string,
+  context: ConversionContext,
   extractMetadata = true,
   recognizeJournalTime = false,
   insideBlockquote = false,
@@ -99,6 +115,7 @@ function convertChildren(
     const converted = convertBlockNode(
       node,
       source,
+      context,
       extractMetadata,
       recognizeJournalTime,
       insideBlockquote,
@@ -153,6 +170,7 @@ function conversationMarkerFromBlockquote(
 function convertBlockNode(
   node: RootContent,
   source: string,
+  context: ConversionContext,
   extractMetadata = true,
   recognizeJournalTime = false,
   insideBlockquote = false,
@@ -161,7 +179,7 @@ function convertBlockNode(
     case "paragraph": {
       const el = {
         type: "paragraph" as const,
-        children: convertPhrasingContent(node.children, {}),
+        children: convertPhrasingContent(node.children, {}, context),
       };
       return extractMetadata ? extractBlockMetadata(el) : el;
     }
@@ -183,7 +201,7 @@ function convertBlockNode(
       const el = {
         type: "heading" as const,
         level: node.depth,
-        children: convertPhrasingContent(node.children, {}),
+        children: convertPhrasingContent(node.children, {}, context),
       };
       return extractMetadata ? extractBlockMetadata(el) : el;
     }
@@ -191,10 +209,18 @@ function convertBlockNode(
     case "code": {
       const baseEmbed = baseEmbedFromCode(node, source);
       if (baseEmbed) return baseEmbed;
+      const blockIdMatch = CODE_BLOCK_ID_RE.exec(node.value);
       return {
         type: "code-block",
         ...(node.lang ? { language: node.lang } : {}),
-        children: [{ text: node.value }],
+        ...(blockIdMatch ? { blockId: blockIdMatch[1] } : {}),
+        children: [
+          {
+            text: blockIdMatch
+              ? node.value.slice(0, blockIdMatch.index)
+              : node.value,
+          },
+        ],
       };
     }
 
@@ -204,6 +230,7 @@ function convertBlockNode(
         const children = convertChildren(
           conversation.body,
           source,
+          context,
           true,
           false,
           true,
@@ -230,6 +257,7 @@ function convertBlockNode(
         children: convertChildren(
           node.children as RootContent[],
           source,
+          context,
           true,
           false,
           true,
@@ -240,7 +268,9 @@ function convertBlockNode(
     case "list":
       return {
         type: node.ordered ? "numbered-list" : "bulleted-list",
-        children: node.children.map((item) => convertListItem(item, source)),
+        children: node.children.map((item) =>
+          convertListItem(item, source, context),
+        ),
       };
 
     case "math": {
@@ -299,7 +329,11 @@ function convertBlockNode(
       return {
         type: "footnote-def",
         identifier: (node as { identifier: string }).identifier,
-        children: convertChildren(node.children as RootContent[], source),
+        children: convertChildren(
+          node.children as RootContent[],
+          source,
+          context,
+        ),
       };
 
     // Node types we intentionally skip
@@ -325,6 +359,7 @@ function convertListItem(
     children: RootContent[];
   },
   source: string,
+  context: ConversionContext,
 ): ListItemElement {
   // remark-gfm does not classify a terminal task marker with no following
   // content as a task; it leaves the marker as the paragraph's literal text.
@@ -349,7 +384,12 @@ function convertListItem(
   // Convert children WITHOUT metadata extraction — we extract at the list-item level
   const el: ListItemElement = {
     type: "list-item",
-    children: convertChildren(node.children as RootContent[], source, false),
+    children: convertChildren(
+      node.children as RootContent[],
+      source,
+      context,
+      false,
+    ),
   };
 
   // Propagate checkbox state from GFM task list items
@@ -386,6 +426,7 @@ const SUB_CLOSE_RE = /^<\/sub\s*>$/i;
 function convertPhrasingContent(
   nodes: readonly (RootContent | WikiLinkMdastNode)[],
   marks: Marks,
+  context: ConversionContext,
 ): Descendant[] {
   const result: Descendant[] = [];
   let underlineDepth = 0;
@@ -426,7 +467,7 @@ function convertPhrasingContent(
       ...(superscriptDepth > 0 ? { superscript: true } : {}),
       ...(subscriptDepth > 0 ? { subscript: true } : {}),
     };
-    const converted = convertPhrasingNode(node, effectiveMarks);
+    const converted = convertPhrasingNode(node, effectiveMarks, context);
     for (const item of converted) {
       result.push(item);
     }
@@ -446,21 +487,26 @@ function convertPhrasingContent(
 function convertPhrasingNode(
   node: RootContent | WikiLinkMdastNode,
   marks: Marks,
+  context: ConversionContext,
 ): Descendant[] {
   switch (node.type) {
     case "text":
-      return splitBlockRefs(node.value, marks);
+      return context.blockRefsEnabled
+        ? splitBlockRefs(node.value, marks)
+        : [textNode(node.value, marks)];
 
     case "strong":
       return convertPhrasingContent(
         node.children as (RootContent | WikiLinkMdastNode)[],
         { ...marks, bold: true },
+        context,
       );
 
     case "emphasis":
       return convertPhrasingContent(
         node.children as (RootContent | WikiLinkMdastNode)[],
         { ...marks, italic: true },
+        context,
       );
 
     case "inlineCode":
@@ -474,9 +520,28 @@ function convertPhrasingNode(
           children: convertPhrasingContent(
             node.children as (RootContent | WikiLinkMdastNode)[],
             marks,
+            { ...context, blockRefsEnabled: false },
           ),
         } satisfies LinkElement as unknown as Descendant,
       ];
+
+    case "linkReference": {
+      const children = convertPhrasingContent(
+        node.children as (RootContent | WikiLinkMdastNode)[],
+        marks,
+        { ...context, blockRefsEnabled: false },
+      );
+      const url = context.definitions.get(node.identifier);
+      return url
+        ? [
+            {
+              type: "link",
+              url,
+              children,
+            } satisfies LinkElement as unknown as Descendant,
+          ]
+        : children;
+    }
 
     case "wikiLink": {
       const wl = node as unknown as WikiLinkMdastNode;
@@ -514,6 +579,7 @@ function convertPhrasingNode(
           | WikiLinkMdastNode
         )[],
         { ...marks, strikethrough: true },
+        context,
       );
 
     case "image":
@@ -610,6 +676,7 @@ function splitBlockRefs(value: string, marks: Marks): Descendant[] {
 
 /** Pattern for block IDs: whitespace + ^ + 10-12 alphanumeric chars at end of text */
 const BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})$/;
+const CODE_BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})\s*$/;
 
 /**
  * Pattern for inline properties: [key:: value]

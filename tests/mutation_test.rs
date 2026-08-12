@@ -1,7 +1,11 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::sync::Arc;
 
 use clepsydra::vault::Vault;
+use clepsydra::vault::batch_mutation::{
+    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
+};
 use clepsydra::vault::atomic_file::{
     AtomicPublicationError, atomic_create, atomic_create_owner_only, atomic_replace,
     atomic_replace_with,
@@ -9,10 +13,15 @@ use clepsydra::vault::atomic_file::{
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
-use clepsydra::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
-use clepsydra::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator};
+use clepsydra::vault::mutation::{
+    FileOpKind, MutationOp, MutationPlan, MutationPlanner, PlannedFileOp, RewriteMode,
+};
+use clepsydra::vault::mutation_coordinator::{
+    CreatePageCommand, MutationCoordinator, MutationError,
+};
 use clepsydra::vault::page::{PageMeta, parse_or_repair_frontmatter};
 use clepsydra::vault::path::VaultPath;
+use clepsydra::vault::sync::ChangeEvent;
 
 use tempfile::TempDir;
 
@@ -29,6 +38,63 @@ fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
     }
     let vault = Vault::open(&root).unwrap();
     (tmp, vault)
+}
+
+fn preview_paths(plan: &MutationPlan) -> BTreeSet<String> {
+    plan.file_ops
+        .iter()
+        .flat_map(|operation| {
+            std::iter::once(operation.path.clone()).chain(operation.destination.clone())
+        })
+        .chain(plan.text_edits.iter().map(|edit| edit.path.clone()))
+        .collect()
+}
+
+#[tokio::test]
+async fn batch_publication_failure_rolls_back_without_notification() {
+    let source_content = "+++\nid = \"019fd000-0000-7000-8000-000000000041\"\ntitle = \"Source\"\n+++\nbody\n";
+    let (_tmp, vault) = setup_vault(&[("source.md", source_content)]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let source_content = fs::read_to_string(vault.root().join("source.md")).unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&notifications);
+    let source = VaultPath::new("source.md").unwrap();
+    let destination = VaultPath::new("missing/destination.md").unwrap();
+
+    let error = coordinator
+        .execute_batch(
+            &vault,
+            &index,
+            Arc::new(Vec::new()),
+            BatchMutationCommand {
+                intents: vec![BatchPathIntent::Move {
+                    source: source.clone(),
+                    destination: destination.clone(),
+                    expected_source: source_content.as_bytes().to_vec(),
+                }],
+                create_directories: Vec::new(),
+                remove_directories: Vec::new(),
+                index_events: vec![
+                    ChangeEvent::Remove(source.clone()),
+                    ChangeEvent::Upsert(destination.clone()),
+                ],
+                moved_pages: vec![(source.clone(), destination.clone())],
+            },
+            Arc::new(move |notification| observed.lock().push(notification)),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, MutationError::BatchPublish { .. }));
+    assert_eq!(
+        fs::read_to_string(vault.resolve(&source)).unwrap(),
+        source_content
+    );
+    assert!(!vault.resolve(&destination).exists());
+    assert!(notifications.lock().is_empty());
 }
 
 fn encrypted_referrer(id: &str, title: &str, link: &str) -> String {
@@ -131,16 +197,360 @@ Content.
         })
         .unwrap();
 
-    // Should have 1 file op (rename beta.md -> archive/beta.md)
-    assert_eq!(plan.file_ops.len(), 1);
+    // The preview includes the rename and its missing destination directory.
+    assert_eq!(plan.file_ops.len(), 2);
     assert_eq!(plan.file_ops[0].path, "beta.md");
     assert_eq!(
         plan.file_ops[0].destination.as_deref(),
         Some("archive/beta.md")
     );
+    assert!(matches!(plan.file_ops[1].kind, FileOpKind::CreateDir));
+    assert_eq!(plan.file_ops[1].path, "archive");
 
     // Should have index events
     assert!(!plan.index_events.is_empty());
+}
+
+#[test]
+fn move_plan_batch_intents_cover_every_previewed_path_with_exact_expected_bytes() {
+    let alpha = "\
+---
+id: 00000000-0000-0000-0000-000000000110
+title: Alpha
+---
+Link to [[Beta]].
+";
+    let beta = "\
+---
+id: 00000000-0000-0000-0000-000000000111
+title: Beta
+---
+Content.
+";
+    let gamma = "\
+---
+id: 00000000-0000-0000-0000-000000000112
+title: Gamma
+---
+Another link to [Beta](beta.md).
+";
+    let (_tmp, vault) =
+        setup_vault(&[("alpha.md", alpha), ("beta.md", beta), ("gamma.md", gamma)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MovePage {
+            source: "beta.md".to_string(),
+            destination: "archive/renamed.md".to_string(),
+        })
+        .unwrap();
+    assert_eq!(plan.staged_writes.len(), 2);
+    let preview_paths = preview_paths(&plan);
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    let command_paths = command
+        .affected_paths()
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(preview_paths, command_paths);
+
+    for intent in command.intents {
+        match intent {
+            BatchPathIntent::Write { path, expected, .. } => {
+                assert_eq!(
+                    expected,
+                    ExpectedPathState::Bytes(fs::read(vault.resolve(&path)).unwrap())
+                );
+            }
+            BatchPathIntent::Move {
+                source,
+                expected_source,
+                ..
+            } => {
+                assert_eq!(expected_source, fs::read(vault.resolve(&source)).unwrap());
+            }
+            BatchPathIntent::Delete { path, expected } => {
+                assert_eq!(expected, fs::read(vault.resolve(&path)).unwrap());
+            }
+        }
+    }
+}
+
+#[test]
+fn public_rename_and_delete_file_ops_are_converted_to_batch_intents() {
+    let (_tmp, vault) = setup_vault(&[
+        ("source.md", "source snapshot"),
+        ("obsolete.md", "obsolete snapshot"),
+    ]);
+    let mut plan = MutationPlan::empty();
+    plan.file_ops.push(PlannedFileOp {
+        kind: FileOpKind::Rename,
+        path: "source.md".to_string(),
+        destination: Some("archive/source.md".to_string()),
+        content_hash: None,
+    });
+    plan.file_ops.push(PlannedFileOp {
+        kind: FileOpKind::Delete,
+        path: "obsolete.md".to_string(),
+        destination: None,
+        content_hash: None,
+    });
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    assert!(command.intents.iter().any(|intent| {
+        matches!(
+            intent,
+            BatchPathIntent::Move {
+                source,
+                destination,
+                expected_source,
+            } if source.as_str() == "source.md"
+                && destination.as_str() == "archive/source.md"
+                && expected_source == b"source snapshot"
+        )
+    }));
+    assert!(command.intents.iter().any(|intent| {
+        matches!(
+            intent,
+            BatchPathIntent::Delete { path, expected }
+                if path.as_str() == "obsolete.md" && expected == b"obsolete snapshot"
+        )
+    }));
+}
+
+#[test]
+fn move_plan_batch_expected_bytes_are_from_the_rewrite_snapshot() {
+    let alpha = "---\nid: 00000000-0000-0000-0000-000000000113\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+    let beta = "---\nid: 00000000-0000-0000-0000-000000000114\ntitle: Beta\n---\nContent.\n";
+    let (_tmp, vault) = setup_vault(&[("alpha.md", alpha), ("beta.md", beta)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let snapshot = fs::read(vault.root().join("alpha.md")).unwrap();
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MovePage {
+            source: "beta.md".to_string(),
+            destination: "renamed.md".to_string(),
+        })
+        .unwrap();
+    fs::write(vault.root().join("alpha.md"), "concurrent replacement").unwrap();
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    let expected = command
+        .intents
+        .iter()
+        .find_map(|intent| match intent {
+            BatchPathIntent::Write {
+                path,
+                expected: ExpectedPathState::Bytes(expected),
+                ..
+            } if path.as_str() == "alpha.md" => Some(expected.as_slice()),
+            _ => None,
+        })
+        .expect("backlink write intent");
+    assert_eq!(expected, snapshot);
+    let error =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap_err();
+    assert!(matches!(error, MutationError::Stale(path) if path.as_str() == "alpha.md"));
+    assert_eq!(
+        fs::read_to_string(vault.root().join("alpha.md")).unwrap(),
+        "concurrent replacement"
+    );
+    assert!(vault.root().join("beta.md").is_file());
+    assert!(!vault.root().join("renamed.md").exists());
+}
+
+#[test]
+fn folder_plan_batch_uses_the_planner_inventory_without_rewalking() {
+    let alpha = "---\nid: 00000000-0000-0000-0000-000000000115\ntitle: Alpha\n---\n";
+    let (_tmp, vault) = setup_vault(&[("notes/alpha.md", alpha)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MoveFolder {
+            source: "notes".to_string(),
+            destination: "archive/notes".to_string(),
+        })
+        .unwrap();
+    fs::write(vault.root().join("notes/late.md"), "late arrival").unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+
+    let paths = command
+        .affected_paths()
+        .into_iter()
+        .map(|path| path.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        paths,
+        BTreeSet::from([
+            "archive".to_string(),
+            "archive/notes".to_string(),
+            "archive/notes/alpha.md".to_string(),
+            "notes".to_string(),
+            "notes/alpha.md".to_string(),
+        ])
+    );
+    assert!(!paths.contains("notes/late.md"));
+    assert!(!paths.contains("archive/notes/late.md"));
+}
+
+#[test]
+fn empty_folder_plan_does_not_adopt_a_late_file_during_conversion() {
+    let (_tmp, vault) = setup_vault(&[]);
+    fs::create_dir(vault.root().join("notes")).unwrap();
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::MoveFolder {
+            source: "notes".to_string(),
+            destination: "archive/notes".to_string(),
+        })
+        .unwrap();
+    fs::write(vault.root().join("notes/late.md"), "late arrival").unwrap();
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    assert!(command.intents.is_empty());
+    assert!(command.index_events.is_empty());
+    assert!(command.moved_pages.is_empty());
+    assert_eq!(
+        command
+            .affected_paths()
+            .into_iter()
+            .map(|path| path.as_str().to_string())
+            .collect::<BTreeSet<_>>(),
+        BTreeSet::from([
+            "archive".to_string(),
+            "archive/notes".to_string(),
+            "notes".to_string(),
+        ])
+    );
+}
+
+#[test]
+fn explicit_create_dir_plan_becomes_preparation_metadata() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let mut plan = MutationPlan::empty();
+    plan.file_ops.push(PlannedFileOp {
+        kind: FileOpKind::CreateDir,
+        path: "archive/nested".to_string(),
+        destination: None,
+        content_hash: None,
+    });
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    assert_eq!(
+        command
+            .create_directories
+            .iter()
+            .map(VaultPath::as_str)
+            .collect::<Vec<_>>(),
+        vec!["archive", "archive/nested"]
+    );
+}
+
+#[test]
+fn staged_create_file_carries_previewed_content_identity_into_batch() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let path = VaultPath::new("archive/new.md").unwrap();
+    let content = b"immutable created bytes".to_vec();
+    let expected_hash = blake3::hash(&content).to_hex().to_string();
+    let mut plan = MutationPlan::empty();
+    plan.stage_create_file(&vault, path.clone(), content.clone())
+        .unwrap();
+
+    assert_eq!(plan.file_ops.len(), 2);
+    assert!(plan.file_ops.iter().any(|operation| {
+        matches!(operation.kind, FileOpKind::CreateDir)
+            && operation.path == "archive"
+    }));
+    assert!(plan.file_ops.iter().any(|operation| {
+        matches!(operation.kind, FileOpKind::CreateFile)
+            && operation.path == path.as_str()
+            && operation.content_hash.as_deref() == Some(expected_hash.as_str())
+    }));
+
+    let command = plan.into_batch_command(&vault).unwrap();
+    assert!(command.intents.iter().any(|intent| {
+        matches!(
+            intent,
+            BatchPathIntent::Write {
+                path: created_path,
+                expected: ExpectedPathState::Missing,
+                content: created_content,
+            } if created_path == &path && created_content == &content
+        )
+    }));
+}
+
+#[tokio::test]
+async fn global_mutation_exclusion_blocks_new_path_mutations() {
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let exclusion = coordinator.exclude_mutations().await;
+    let waiting_coordinator = Arc::clone(&coordinator);
+    let mut waiter = tokio::spawn(async move {
+        waiting_coordinator
+            .lock_paths(&[VaultPath::new("notes/source.md").unwrap()])
+            .await
+    });
+
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(20), &mut waiter)
+            .await
+            .is_err(),
+        "ordinary path mutations must wait behind global revalidation exclusion"
+    );
+    drop(exclusion);
+    let _guard = waiter.await.unwrap();
+}
+
+#[test]
+fn delete_plan_batch_paths_and_expected_bytes_match_the_planner_snapshot() {
+    let target = "---\nid: 00000000-0000-0000-0000-000000000116\ntitle: Target\n---\nTarget.\n";
+    let linker = "---\nid: 00000000-0000-0000-0000-000000000117\ntitle: Linker\n---\nSee [[Target]].\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target), ("linker.md", linker)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+    let target_snapshot = fs::read(vault.root().join("target.md")).unwrap();
+    let linker_snapshot = fs::read(vault.root().join("linker.md")).unwrap();
+
+    let plan = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::DeletePage {
+            path: "target.md".to_string(),
+            rewrite: RewriteMode::PlainText,
+        })
+        .unwrap();
+    fs::write(vault.root().join("target.md"), "concurrent target").unwrap();
+    fs::write(vault.root().join("linker.md"), "concurrent linker").unwrap();
+    let preview_paths = preview_paths(&plan);
+    let command = plan.into_batch_command(&vault).unwrap();
+
+    assert_eq!(
+        command
+            .affected_paths()
+            .into_iter()
+            .map(|path| path.as_str().to_string())
+            .collect::<BTreeSet<_>>(),
+        preview_paths
+    );
+    for intent in command.intents {
+        match intent {
+            BatchPathIntent::Write { path, expected, .. } if path.as_str() == "linker.md" => {
+                assert_eq!(expected, ExpectedPathState::Bytes(linker_snapshot.clone()));
+            }
+            BatchPathIntent::Delete { path, expected } if path.as_str() == "target.md" => {
+                assert_eq!(expected, target_snapshot);
+            }
+            intent => panic!("unexpected delete-plan intent: {intent:?}"),
+        }
+    }
 }
 
 #[test]
@@ -167,7 +577,10 @@ No links here.
         })
         .unwrap();
 
-    assert_eq!(plan.file_ops.len(), 1);
+    assert_eq!(plan.file_ops.len(), 2);
+    assert!(plan.file_ops.iter().any(|operation| {
+        matches!(operation.kind, FileOpKind::CreateDir) && operation.path == "archive"
+    }));
     assert!(plan.text_edits.is_empty());
     assert!(plan.staged_writes.is_empty());
 }
@@ -347,13 +760,13 @@ fn encrypted_page_move_skips_protected_referrers_but_rewrites_plain_referrers() 
     assert!(
         plan.staged_writes
             .iter()
-            .any(|(path, _)| path.ends_with("plain-ref.md")),
+            .any(|write| write.path.ends_with("plain-ref.md")),
         "plaintext backlink should still be rewritten"
     );
     assert!(
         plan.staged_writes
             .iter()
-            .all(|(path, _)| !path.ends_with("protected-ref.md")),
+            .all(|write| !write.path.ends_with("protected-ref.md")),
         "protected armor must never be staged for rewrite"
     );
 }
@@ -465,19 +878,19 @@ fn encrypted_page_delete_skips_protected_referrers_but_rewrites_plain_referrers(
     assert!(
         plan.staged_writes
             .iter()
-            .any(|(path, _)| path.ends_with("plain-ref.md")),
+            .any(|write| write.path.ends_with("plain-ref.md")),
         "plaintext backlink should still be rewritten"
     );
     assert!(
         plan.staged_writes
             .iter()
-            .all(|(path, _)| !path.ends_with("protected-ref.md")),
+            .all(|write| !write.path.ends_with("protected-ref.md")),
         "protected armor must never be staged for rewrite"
     );
 }
 
 // ---------------------------------------------------------------------------
-// Task 5: MutationPlan::execute() tests
+// Batch command execution tests
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -500,7 +913,8 @@ fn execute_plan_moves_file_and_rewrites() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     // Verify file moved
     use clepsydra::vault::path::VaultPath;
@@ -543,7 +957,8 @@ fn execute_plan_deletes_file_and_rewrites() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     // Verify file deleted
     use clepsydra::vault::path::VaultPath;
@@ -633,13 +1048,13 @@ fn encrypted_folder_move_skips_protected_referrers_but_rewrites_plain_referrers(
     assert!(
         plan.staged_writes
             .iter()
-            .any(|(path, _)| path.ends_with("plain-ref.md")),
+            .any(|write| write.path.ends_with("plain-ref.md")),
         "plaintext backlink should still be rewritten"
     );
     assert!(
         plan.staged_writes
             .iter()
-            .all(|(path, _)| !path.ends_with("protected-ref.md")),
+            .all(|write| !write.path.ends_with("protected-ref.md")),
         "protected armor must never be staged for rewrite"
     );
 }
@@ -667,7 +1082,8 @@ fn delete_page_with_self_link_does_not_recreate_file() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     let abs_path = vault.resolve(&VaultPath::new("selfie.md").unwrap());
     assert!(
@@ -695,7 +1111,8 @@ fn move_page_with_self_link_no_orphan_at_old_path() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     let old_path = vault.resolve(&VaultPath::new("original.md").unwrap());
     let new_path = vault.resolve(&VaultPath::new("moved.md").unwrap());
@@ -728,7 +1145,8 @@ fn folder_move_internal_refs_no_orphan_outside() {
         })
         .unwrap();
 
-    plan.execute(&vault, &mut index, &[]).unwrap();
+    let command = plan.into_batch_command(&vault).unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap();
 
     // Old paths should not exist
     let old_b = vault.resolve(&VaultPath::new("notes/b.md").unwrap());
@@ -992,6 +1410,96 @@ async fn cancelled_create_finishes_indexing_after_filesystem_publication() {
     })
     .await
     .expect("cancelled request left the published file unindexed");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_excluded_batch_retains_global_exclusion_through_reconciliation() {
+    let original = "original";
+    let replacement = "replacement";
+    let (tmp, index_vault) = setup_vault(&[("source.md", original)]);
+    let db_path = index_vault.root().join(".clepsydra/exclusion-cancel.db");
+    let mut vault_index = VaultIndex::open(&db_path).unwrap();
+    vault_index.build(&index_vault).unwrap();
+    let index = IndexHandle::spawn(vault_index, index_vault);
+    let mutation_vault = Vault::open(&tmp.path().join("vault")).unwrap();
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let source_path = VaultPath::new("source.md").unwrap();
+    let expected_source = fs::read(mutation_vault.resolve(&source_path)).unwrap();
+
+    let (index_entered_tx, index_entered_rx) = std::sync::mpsc::channel();
+    let (index_release_tx, index_release_rx) = std::sync::mpsc::channel();
+    let blocking_index = index.clone();
+    let index_blocker = tokio::spawn(async move {
+        blocking_index
+            .with_index(move |_, _| {
+                index_entered_tx.send(()).unwrap();
+                index_release_rx.recv().unwrap();
+            })
+            .await
+    });
+    index_entered_rx.recv().unwrap();
+
+    let exclusion = coordinator.exclude_mutations().await;
+    let mutation_coordinator = Arc::clone(&coordinator);
+    let mutation_index = index.clone();
+    let mutation_source = source_path.clone();
+    let observed_vault = mutation_vault.clone();
+    let mutation = tokio::spawn(async move {
+        mutation_coordinator
+            .execute_batch_excluded(
+                exclusion,
+                &mutation_vault,
+                &mutation_index,
+                Arc::new(Vec::new()),
+                BatchMutationCommand {
+                    intents: vec![BatchPathIntent::Write {
+                        path: mutation_source.clone(),
+                        expected: ExpectedPathState::Bytes(expected_source),
+                        content: replacement.as_bytes().to_vec(),
+                    }],
+                    create_directories: Vec::new(),
+                    remove_directories: Vec::new(),
+                    index_events: vec![ChangeEvent::Upsert(mutation_source)],
+                    moved_pages: Vec::new(),
+                },
+                Arc::new(|_| {}),
+            )
+            .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while fs::read_to_string(observed_vault.resolve(&source_path)).unwrap() != replacement {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("excluded batch did not publish");
+    mutation.abort();
+    assert!(mutation.await.unwrap_err().is_cancelled());
+
+    let waiting_coordinator = Arc::clone(&coordinator);
+    let mut waiter = tokio::spawn(async move {
+        waiting_coordinator
+            .lock_paths(&[VaultPath::new("unrelated.md").unwrap()])
+            .await
+    });
+    let exclusion_released_early =
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut waiter)
+            .await
+            .is_ok();
+
+    index_release_tx.send(()).unwrap();
+    index_blocker.await.unwrap().unwrap();
+    if !exclusion_released_early {
+        let _guard = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("global exclusion was not released after reconciliation")
+            .unwrap();
+    }
+    assert!(
+        !exclusion_released_early,
+        "cancellation dropped global exclusion while shielded reconciliation continued"
+    );
 }
 
 #[test]

@@ -1,5 +1,5 @@
 import { File, Image, Paperclip, Trash2, Upload } from "lucide-react";
-import { type ChangeEvent, useState } from "react";
+import { type ChangeEvent, useMemo, useRef, useState } from "react";
 import {
   type AttachmentInfo,
   attachmentMarkdown,
@@ -9,11 +9,20 @@ import {
   useUploadAttachment,
 } from "#/api/attachments";
 import { formatApiError } from "#/api/error";
+import {
+  attachmentReferences,
+  canonicalAttachmentPath,
+} from "#/lib/markdown/attachmentReferences";
 import { CopyButton } from "#/components/ui/CopyButton";
+import {
+  type PendingAttachmentAction,
+  PlaintextAttachmentDialog,
+} from "./PlaintextAttachmentDialog";
 
 interface AttachmentManagerProps {
   onInsertMarkdown?: (markdown: string) => void;
   protectedPage?: boolean;
+  pageMarkdown?: string;
 }
 
 function formatSize(bytes: number): string {
@@ -28,6 +37,7 @@ function isImage(attachment: AttachmentInfo): boolean {
 
 export function AttachmentManager({
   onInsertMarkdown,
+  pageMarkdown,
   protectedPage = false,
 }: AttachmentManagerProps) {
   const { data: attachments, isLoading, error } = useAttachments();
@@ -35,20 +45,76 @@ export function AttachmentManager({
   const remove = useDeleteAttachment();
   const [deletePath, setDeletePath] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] =
+    useState<PendingAttachmentAction | null>(null);
+  const pendingActionInFlight = useRef<PendingAttachmentAction | null>(null);
+  const [isPendingAction, setIsPendingAction] = useState(false);
+  const missingReferences = useMemo(() => {
+    if (!protectedPage || isLoading || error || !attachments) return [];
+    const attachmentPaths = new Set(
+      attachments.map((attachment) =>
+        canonicalAttachmentPath(attachment.path),
+      ),
+    );
+    return attachmentReferences(pageMarkdown ?? "").filter(
+      (reference) => !attachmentPaths.has(reference.path),
+    );
+  }, [attachments, error, isLoading, pageMarkdown, protectedPage]);
 
-  const onUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const uploadFile = async (file: File): Promise<AttachmentInfo | null> => {
     setActionError(null);
     try {
-      await upload.mutateAsync({ file });
+      return await upload.mutateAsync({ file });
     } catch (uploadError) {
       setActionError(
         formatApiError(uploadError, `Could not upload ${file.name}.`),
       );
-    } finally {
-      event.target.value = "";
+      return null;
     }
+  };
+
+  const onUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    event.target.value = "";
+    setActionError(null);
+    if (protectedPage) {
+      setPendingAction({ kind: "upload", file });
+      return;
+    }
+
+    await uploadFile(file);
+  };
+
+  const acknowledgePendingAction = async (
+    action: PendingAttachmentAction,
+  ) => {
+    if (pendingActionInFlight.current) return;
+    pendingActionInFlight.current = action;
+    setIsPendingAction(true);
+    let succeeded = false;
+    try {
+      if (action.kind === "upload") {
+        const attachment = await uploadFile(action.file);
+        if (!attachment) return;
+        onInsertMarkdown?.(attachmentMarkdown(attachment));
+      } else {
+        onInsertMarkdown?.(action.markdown);
+      }
+      succeeded = true;
+    } finally {
+      pendingActionInFlight.current = null;
+      setIsPendingAction(false);
+      if (succeeded) {
+        setPendingAction((current) => (current === action ? null : current));
+      }
+    }
+  };
+
+  const cancelPendingAction = () => {
+    if (pendingActionInFlight.current) return;
+    setPendingAction(null);
+    setActionError(null);
   };
 
   const confirmDelete = async (attachment: AttachmentInfo) => {
@@ -72,18 +138,41 @@ export function AttachmentManager({
           Attachments are not encrypted. Only the note body is protected.
         </p>
       ) : null}
+      {missingReferences.length ? (
+        <section
+          aria-label="Plaintext attachment references"
+          className="mb-2 border-l-2 border-warning pl-2 text-warning"
+        >
+          <p className="font-semibold">Plaintext attachment references</p>
+          <p>These references do not match the current attachment inventory:</p>
+          <ul className="m-0 list-disc pl-4">
+            {missingReferences.map((reference) => (
+              <li key={reference.path}>{reference.path}</li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
-      <label className="mb-2 inline-flex cursor-pointer items-center gap-1.5 border border-rule px-2 py-1 uppercase tracking-[0.1em] text-ink-mute hover:border-accent hover:text-accent">
-        <Upload aria-hidden size={12} />
-        {upload.isPending ? "Uploading…" : "Upload"}
-        <input
-          type="file"
-          aria-label="Upload attachment"
-          className="sr-only"
-          disabled={upload.isPending}
-          onChange={(event) => void onUpload(event)}
-        />
-      </label>
+
+      <div className="mb-2">
+        <label className="inline-flex cursor-pointer items-center gap-1.5 border border-rule px-2 py-1 uppercase tracking-[0.1em] text-ink-mute hover:border-accent hover:text-accent">
+          <Upload aria-hidden size={12} />
+          {upload.isPending ? "Uploading…" : "Upload"}
+          <input
+            type="file"
+            aria-label="Upload attachment"
+            className="sr-only"
+            disabled={upload.isPending}
+            onChange={(event) => void onUpload(event)}
+          />
+        </label>
+        {!protectedPage ? (
+          <p className="mt-1 text-ink-mute">
+            Attachment bytes, filename, path, MIME type, and size are stored as
+            plaintext and are not encrypted.
+          </p>
+        ) : null}
+      </div>
 
       {actionError ? (
         <p role="alert" className="mb-2 text-danger">
@@ -138,7 +227,17 @@ export function AttachmentManager({
                     <button
                       type="button"
                       className="cursor-pointer uppercase tracking-[0.08em] text-accent hover:underline"
-                      onClick={() => onInsertMarkdown(markdown)}
+                      onClick={() => {
+                        if (protectedPage) {
+                          setPendingAction({
+                            kind: "insert",
+                            attachment,
+                            markdown,
+                          });
+                        } else {
+                          onInsertMarkdown(markdown);
+                        }
+                      }}
                     >
                       <Paperclip
                         aria-hidden
@@ -183,6 +282,13 @@ export function AttachmentManager({
           })}
         </ul>
       )}
+      <PlaintextAttachmentDialog
+        action={pendingAction}
+        error={actionError}
+        isPending={isPendingAction}
+        onCancel={cancelPendingAction}
+        onAcknowledge={(action) => void acknowledgePendingAction(action)}
+      />
     </section>
   );
 }

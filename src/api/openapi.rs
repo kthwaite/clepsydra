@@ -1,14 +1,14 @@
 use axum::Router;
-use utoipa::openapi::Ref;
+use utoipa::openapi::{Ref, RefOr};
 use utoipa::openapi::schema::{
     AdditionalProperties, Array, Object, ObjectBuilder, OneOfBuilder, Schema, SchemaType, Type,
 };
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
-struct FilterSchema;
+struct SchemaOverrides;
 
-impl Modify for FilterSchema {
+impl Modify for SchemaOverrides {
     fn modify(&self, openapi: &mut utoipa::openapi::OpenApi) {
         let Some(components) = openapi.components.as_mut() else {
             return;
@@ -46,12 +46,19 @@ impl Modify for FilterSchema {
         components
             .schemas
             .insert("Filter".to_owned(), Schema::OneOf(filter).into());
+
+        if let Some(RefOr::T(Schema::Object(upload_form))) =
+            components.schemas.get_mut("AttachmentUploadForm")
+        {
+            upload_form.additional_properties =
+                Some(Box::new(AdditionalProperties::FreeForm(false)));
+        }
     }
 }
 /// OpenAPI document for the clepsydra vault API used by the UI.
 #[derive(OpenApi)]
 #[openapi(
-    modifiers(&FilterSchema),
+    modifiers(&SchemaOverrides),
     info(
         title = "Clepsydra API",
         version = "0.0.0",
@@ -113,6 +120,9 @@ impl Modify for FilterSchema {
         crate::api::index_routes::backlinks,
         crate::api::index_routes::outlinks,
         crate::api::index_routes::unresolved,
+        crate::api::index_routes::reference_issues,
+        crate::api::index_routes::reference_repair_preview,
+        crate::api::index_routes::reference_repair_apply,
         crate::api::index_routes::ambiguous,
         crate::api::index_routes::warnings,
         crate::api::index_routes::tags,
@@ -270,6 +280,7 @@ impl Modify for FilterSchema {
             crate::api::folders::MoveFolderRequest,
             // Attachments
             crate::api::attachments::AttachmentInfo,
+            crate::api::attachments::AttachmentUploadForm,
             // Events
             crate::api::events::SyncNotification,
             // Index
@@ -277,6 +288,20 @@ impl Modify for FilterSchema {
             crate::api::index_routes::OutlinkEntry,
             crate::api::index_routes::UnresolvedLink,
             crate::api::index_routes::CandidateEntry,
+            crate::api::index_routes::ReferenceIssueKindDto,
+            crate::api::index_routes::ReferenceIssueActionDto,
+            crate::api::index_routes::ReferenceCandidateDto,
+            crate::api::index_routes::ReferenceIssueDto,
+            crate::api::index_routes::ReferenceIssuesResponse,
+            crate::api::index_routes::ReferenceRepairActionDto,
+            crate::api::index_routes::ReferenceRepairRequest,
+            crate::api::index_routes::ReferenceRepairPreviewResponse,
+            crate::api::index_routes::ReferenceRepairApplyResponse,
+            crate::vault::mutation::MutationPlan,
+            crate::vault::mutation::PlannedFileOp,
+            crate::vault::mutation::PlannedTextEdit,
+            crate::vault::mutation::FileOpKind,
+            crate::vault::mutation_coordinator::MutationNotification,
             crate::api::index_routes::BacklinkEntry,
             crate::api::index_routes::CreateFromLinkRequest,
             crate::api::index_routes::AmbiguousName,
@@ -494,6 +519,28 @@ mod tests {
             responses.get("409").is_some(),
             "page update should document revision conflicts"
         );
+    }
+
+    #[test]
+    fn bulk_assignment_documents_atomic_success_or_typed_error() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let response = &json["components"]["schemas"]["BulkAssignResponse"];
+        assert!(response["properties"].get("moved").is_some());
+        assert!(response["properties"].get("unchanged").is_some());
+        assert!(
+            response["properties"].get("failed").is_none(),
+            "atomic bulk assignment must not expose per-page failures"
+        );
+
+        let responses =
+            &json["paths"]["/api/vault/pages-assign-bulk"]["post"]["responses"];
+        for status in ["200", "400", "404", "409", "500"] {
+            assert!(
+                responses.get(status).is_some(),
+                "bulk assignment should document response {status}"
+            );
+        }
     }
 
     #[test]

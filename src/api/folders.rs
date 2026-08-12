@@ -565,10 +565,8 @@ pub async fn move_folder(
         )));
     }
 
-    // Recheck both endpoints while holding deterministic subtree exclusions.
-    // Descendant page mutations take shared ancestor locks and therefore cannot
-    // race the folder plan or its filesystem/index publication.
-    let _folder_guard = state
+    // Hold subtree exclusions while the plan snapshots exact expected bytes.
+    let planning_guard = state
         .mutation_coordinator
         .lock_paths(&[source_vp.clone(), dest_vp.clone()])
         .await;
@@ -581,33 +579,33 @@ pub async fn move_folder(
             body.destination
         )));
     }
-
     // Plan and execute
     let op = MutationOp::MoveFolder {
         source: path.clone(),
         destination: body.destination.clone(),
     };
-    let hooks = Arc::clone(&state.hooks);
-    state
+    let command = state
         .index
         .with_index(move |index, vault| {
-            let planner = MutationPlanner::new(vault, index);
-            let plan = planner
-                .plan(&op)
-                .map_err(|e| crate::vault::index::IndexError::Other(format!("plan failed: {e}")))?;
-            plan.execute(vault, index, &hooks).map_err(|e| {
-                crate::vault::index::IndexError::Other(format!("execute failed: {e}"))
-            })?;
-            Ok::<_, crate::vault::index::IndexError>(())
+            MutationPlanner::new(vault, index)
+                .plan(&op)?
+                .into_batch_command(vault)
         })
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![body.destination.clone()],
-        removed: vec![path.clone()],
-    });
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+    drop(planning_guard);
+    state
+        .mutation_coordinator
+        .execute_batch(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            command,
+            super::mutation_notifier(&state),
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     Ok(StatusCode::OK.into_response())
 }

@@ -9,6 +9,7 @@ const gettingStarted = {
   slug: "getting-started",
   title: "Getting Started",
   description: "Set up a local vault.",
+  keywords: ["setup", "vault"],
   groupId: "start-here",
   source: `export const meta = {
   slug: "getting-started",
@@ -32,6 +33,7 @@ const bases = {
   slug: "bases",
   title: "Bases",
   description: "Work with structured records.",
+  keywords: ["records", "fields"],
   groupId: "features",
   source: `import {
   unusedFixtureValue
@@ -68,6 +70,7 @@ function page(
     slug,
     title,
     description,
+    keywords: [slug],
     groupId: "test",
     source,
     Component: NoopDoc,
@@ -157,10 +160,97 @@ describe("searchDocs", () => {
         headingId: "content-changed-conflict",
       },
     },
+    {
+      query: "no bulk apply",
+      expected: {
+        page: { slug: "links-search-graph-and-repair" },
+        heading: "Preview, apply, and stale conflicts",
+        headingId: "preview-apply-and-stale-conflicts",
+      },
+    },
+    {
+      query: "protected and missing targets indistinguishable",
+      expected: {
+        page: { slug: "block-references-and-transclusion" },
+        heading: "Privacy boundary for protected folios",
+        headingId: "privacy-boundary-for-protected-folios",
+      },
+    },
+    {
+      query: "all original cycle task files restored",
+      expected: {
+        page: { slug: "tasks-agenda-journals-and-board" },
+        heading: "Plan on the Tasking board",
+        headingId: "plan-on-the-tasking-board",
+      },
+    },
+    {
+      query: "whole Zotero BibTeX run not one",
+      expected: {
+        page: { slug: "academic-library-and-reading" },
+        heading: "Import BibTeX, DOI, ISBN, and Zotero",
+        headingId: "import-bibtex-doi-isbn-and-zotero",
+      },
+    },
+    {
+      query: "timestamped uncompressed tar consistent snapshot",
+      expected: {
+        page: { slug: "capture-feeds-and-archives" },
+        heading: "Back up and recover shipped state",
+        headingId: "back-up-and-recover-shipped-state",
+      },
+    },
+    {
+      query: "self-assembling research context",
+      expected: {
+        page: { slug: "codex-and-conversation-capture" },
+        heading: "Work with tabs, quires, and previews",
+        headingId: "work-with-tabs-quires-and-previews",
+      },
+    },
   ])("finds distinctive dedicated-guide content for $query", ({ query, expected }) => {
     const result = searchDocs(buildDocsIndex(DOC_PAGES), query)[0];
 
     expect(result).toMatchObject(expected);
+  });
+
+  it.each([
+    ["stale repair", "links-search-graph-and-repair"],
+    ["protected attachment", "attachments-and-media"],
+    ["board carryover", "tasks-agenda-journals-and-board"],
+    ["zotero conflict", "academic-library-and-reading"],
+    ["block transclusion", "block-references-and-transclusion"],
+    ["MCP server", "mcp"],
+    ["CAS archive", "capture-feeds-and-archives"],
+  ])("ranks the canonical guide first for %s", (query, expectedSlug) => {
+    expect(searchDocs(buildDocsIndex(DOC_PAGES), query)[0]?.page.slug).toBe(
+      expectedSlug,
+    );
+  });
+
+  it("deduplicates a page while retaining its best heading deep link", () => {
+    const repeated = page(
+      "repeated-sections",
+      "Repeated sections",
+      "Unrelated",
+      [
+        "## First match",
+        "",
+        "Needle appears here.",
+        "",
+        "## Second match",
+        "",
+        "Needle appears here too.",
+      ].join("\n"),
+    );
+
+    expect(searchDocs(buildDocsIndex([repeated]), "needle")).toEqual([
+      expect.objectContaining({
+        page: repeated,
+        heading: "First match",
+        headingId: "first-match",
+      }),
+    ]);
   });
 
   it("requires every normalized query token in the same section", () => {
@@ -171,14 +261,39 @@ describe("searchDocs", () => {
     expect(searchDocs(index, "missing token")).toEqual([]);
   });
 
-  it("ranks title matches ahead of heading, description, and body matches", () => {
-    const bodyMatch = page("body", "Body guide", "Unrelated guide", "The needle appears in body copy.");
-    const descriptionMatch = page("description", "Description guide", "Needle reference", "Unrelated copy.");
-    const headingMatch = page("heading", "Heading guide", "Unrelated guide", "## Needle\n\nUnrelated copy.");
+  it("ranks title matches ahead of heading, description, keywords, and body matches", () => {
+    const bodyMatch = page(
+      "body",
+      "Body guide",
+      "Unrelated guide",
+      "The needle appears in body copy.",
+    );
+    const keywordMatch = {
+      ...page("keyword", "Keyword guide", "Unrelated guide", "Unrelated copy."),
+      keywords: ["needle"],
+    };
+    const descriptionMatch = page(
+      "description",
+      "Description guide",
+      "Needle reference",
+      "Unrelated copy.",
+    );
+    const headingMatch = page(
+      "heading",
+      "Heading guide",
+      "Unrelated guide",
+      "## Needle\n\nUnrelated copy.",
+    );
     const titleMatch = page("title", "Needle", "Unrelated guide", "Unrelated copy.");
 
     const results = searchDocs(
-      buildDocsIndex([bodyMatch, descriptionMatch, headingMatch, titleMatch]),
+      buildDocsIndex([
+        bodyMatch,
+        keywordMatch,
+        descriptionMatch,
+        headingMatch,
+        titleMatch,
+      ]),
       "needle",
     );
 
@@ -186,10 +301,32 @@ describe("searchDocs", () => {
       "title",
       "heading",
       "description",
+      "keyword",
       "body",
     ]);
-    expect(results.map((result) => result.score)).toEqual([11_000, 300, 100, 10]);
+    expect(results.map((result) => result.score)).toEqual([
+      11_000,
+      300,
+      100,
+      50,
+      10,
+    ]);
     expect(searchDocs(buildDocsIndex([titleMatch]), "need")[0]?.score).toBe(6_000);
+  });
+
+  it("finds a registry guide by keyword and uses its description excerpt", () => {
+    expect(
+      searchDocs(buildDocsIndex(DOC_PAGES), "database").map((result) => result.page.slug),
+    ).toContain("bases");
+    expect(searchDocs(buildDocsIndex(DOC_PAGES), "database")[0]).toEqual(
+      expect.objectContaining({
+        page: expect.objectContaining({ slug: "bases" }),
+        heading: undefined,
+        headingId: undefined,
+        excerpt: "Build saved, non-owning views over typed folio properties.",
+        score: 50,
+      }),
+    );
   });
 
   it("returns one page-level result when metadata alone satisfies the query", () => {

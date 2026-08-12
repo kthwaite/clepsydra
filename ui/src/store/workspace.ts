@@ -11,6 +11,9 @@ import {
 
 export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
+export interface OpenTabTarget {
+  blockId?: string;
+}
 
 type WorkspaceTransitionGuard = (proceed: () => void) => boolean;
 
@@ -90,6 +93,10 @@ export interface TabDescriptor {
   lastActiveAt?: number;
   /** Membership in a quire (tab group). Members are kept contiguous. */
   quireId?: string;
+  /** One-shot request to reveal a source block. Never persisted. */
+  focusBlockId?: string;
+  /** Identity used to claim a focus request at most once. Never persisted. */
+  focusRequestId?: string;
 }
 
 interface WorkspaceState {
@@ -101,13 +108,20 @@ interface WorkspaceState {
 }
 
 interface WorkspaceActions {
-  openTab: (type: TabType, path?: string, label?: string) => void;
+  openTab: (
+    type: TabType,
+    path?: string,
+    label?: string,
+    target?: OpenTabTarget,
+  ) => void;
   addTab: (tab: TabDescriptor) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
   activateTab: (tabId: string) => void;
   /** Drop focus without closing any tab — surfaces the empty-state launcher. */
   clearActiveTab: () => void;
+  clearTabFocus: (tabId: string) => void;
+  takeTabFocus: (tabId: string, requestId: string) => string | undefined;
   togglePin: (tabId: string) => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
   updateTabLabel: (tabId: string, label: string) => void;
@@ -125,6 +139,17 @@ interface WorkspaceActions {
 
 function tabKey(type: TabType, path?: string): string {
   return type === "graph" ? "graph" : `page:${path}`;
+}
+
+function withoutTabFocus(tab: TabDescriptor): TabDescriptor {
+  if (
+    tab.focusBlockId === undefined &&
+    tab.focusRequestId === undefined
+  ) {
+    return tab;
+  }
+  const { focusBlockId: _, focusRequestId: __, ...rest } = tab;
+  return rest;
 }
 
 /** Re-establish quire invariants after a mutation; merge any extra changes. */
@@ -147,7 +172,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       openHistory: [],
       quires: {},
 
-      openTab(type, path, label) {
+      openTab(type, path, label, target) {
         const state = get();
         const key = tabKey(type, path);
 
@@ -157,7 +182,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           workspaceTransitionDepth === 0 &&
           existing?.id !== state.activeTabId
         ) {
-          runWorkspaceTransition(() => get().openTab(type, path, label));
+          runWorkspaceTransition(() =>
+            get().openTab(type, path, label, target),
+          );
           return;
         }
 
@@ -170,7 +197,18 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           set({
             activeTabId: existing.id,
             tabs: state.tabs.map((t) =>
-              t.id === existing.id ? { ...t, lastActiveAt: Date.now() } : t,
+              t.id === existing.id
+                ? {
+                    ...t,
+                    lastActiveAt: Date.now(),
+                    focusBlockId:
+                      existing.type === "page" ? target?.blockId : undefined,
+                    focusRequestId:
+                      existing.type === "page" && target?.blockId
+                        ? crypto.randomUUID()
+                        : undefined,
+                  }
+                : withoutTabFocus(t),
             ),
             quires: quire?.collapsed
               ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
@@ -204,6 +242,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           path: type === "page" ? path : undefined,
           label: label ?? path ?? "Graph",
           lastActiveAt: Date.now(),
+          focusBlockId: type === "page" ? target?.blockId : undefined,
+          focusRequestId:
+            type === "page" && target?.blockId
+              ? crypto.randomUUID()
+              : undefined,
         };
 
         const nextHistory =
@@ -224,7 +267,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
               state.tabs.map((t) =>
                 t.id === state.activeTabId
                   ? { ...newTab, id: t.id, quireId: t.quireId }
-                  : t,
+                  : withoutTabFocus(t),
               ),
               state.quires,
               { openHistory: nextHistory },
@@ -234,7 +277,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           // "new" or "smart" — append; normalize gathers it to its quire run.
           set(
             normalized(
-              [...state.tabs, { ...newTab, quireId: inheritedQuireId }],
+              [
+                ...state.tabs.map(withoutTabFocus),
+                { ...newTab, quireId: inheritedQuireId },
+              ],
               state.quires,
               { activeTabId: newTab.id, openHistory: nextHistory },
             ),
@@ -254,7 +300,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         // quire — addTab activates the tab and would break the
         // active-tab-is-never-hidden invariant.
         set((state) =>
-          normalized([...state.tabs, tab], state.quires, {
+          normalized([...state.tabs.map(withoutTabFocus), tab], state.quires, {
             activeTabId: tab.id,
           }),
         );
@@ -288,7 +334,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
                 );
         }
 
-        set(normalized(nextTabs, state.quires, { activeTabId: nextActive }));
+        set(
+          normalized(nextTabs, state.quires, {
+            activeTabId: nextActive,
+          }),
+        );
       },
 
       closeOtherTabs(tabId) {
@@ -301,7 +351,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         }
         set((state) =>
           normalized(
-            state.tabs.filter((t) => t.id === tabId || t.pinned),
+            state.tabs
+              .filter((t) => t.id === tabId || t.pinned)
+              .map((t) => (t.id === tabId ? t : withoutTabFocus(t))),
             state.quires,
             { activeTabId: tabId },
           ),
@@ -323,7 +375,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           return {
             activeTabId: tabId,
             tabs: state.tabs.map((t) =>
-              t.id === tabId ? { ...t, lastActiveAt: Date.now() } : t,
+              t.id === tabId
+                ? { ...t, lastActiveAt: Date.now() }
+                : withoutTabFocus(t),
             ),
             quires: quire?.collapsed
               ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
@@ -344,7 +398,35 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           runWorkspaceTransition(() => get().clearActiveTab());
           return;
         }
-        set({ activeTabId: null });
+        set((state) => ({
+          activeTabId: null,
+          tabs: state.tabs.map(withoutTabFocus),
+        }));
+      },
+
+      clearTabFocus(tabId) {
+        set((state) => ({
+          tabs: state.tabs.map((tab) =>
+            tab.id === tabId ? withoutTabFocus(tab) : tab,
+          ),
+        }));
+      },
+
+      takeTabFocus(tabId, requestId) {
+        const state = get();
+        const tab = state.tabs.find((candidate) => candidate.id === tabId);
+        if (
+          tab?.focusRequestId !== requestId ||
+          tab.focusBlockId === undefined
+        ) {
+          return undefined;
+        }
+        set({
+          tabs: state.tabs.map((candidate) =>
+            candidate.id === tabId ? withoutTabFocus(candidate) : candidate,
+          ),
+        });
+        return tab.focusBlockId;
       },
 
       togglePin(tabId) {
@@ -576,6 +658,10 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       version: 3,
       migrate: (persisted, version): Partial<WorkspaceState> =>
         migrateWorkspace(persisted, version),
+      partialize: (state) => ({
+        ...state,
+        tabs: state.tabs.map(withoutTabFocus),
+      }),
     },
   ),
 );

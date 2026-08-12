@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fs;
 use std::sync::Arc;
 
@@ -16,6 +17,9 @@ use super::AppState;
 use super::error::ApiError;
 use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
+use crate::vault::batch_mutation::{
+    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
+};
 use crate::vault::canonical::CanonicalName;
 use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
@@ -23,8 +27,11 @@ use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
 };
 use crate::vault::new_note::build_note_path;
-use crate::vault::page::{Page, PageMeta, page_revision};
+use crate::vault::page::{Page, PageMeta, page_revision, parse_frontmatter, write_page_content};
 use crate::vault::path::VaultPath;
+use crate::vault::projection::{project_path, project_path_cleared};
+use crate::vault::sync::ChangeEvent;
+use crate::vault::task_history::heal_task_update;
 
 // ---------------------------------------------------------------------------
 // Response / request types
@@ -236,7 +243,7 @@ pub struct AssignRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct BulkAssignRequest {
-    /// Page paths to assign. Each is processed independently.
+    /// Page paths assigned as one atomic mutation.
     pub paths: Vec<String>,
     /// Declared kind token applied to every path (see `AssignRequest::kind`).
     #[serde(default)]
@@ -251,12 +258,10 @@ pub struct BulkAssignRequest {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct BulkAssignResponse {
-    /// `original -> final` for each page that actually relocated.
+    /// `original -> final` for every page relocated by the atomic assignment.
     pub moved: Vec<(String, String)>,
-    /// Paths that were assigned successfully but did NOT relocate.
+    /// Paths assigned successfully without relocation.
     pub unchanged: Vec<String>,
-    /// `path -> error` for failures (best-effort: one bad page doesn't abort).
-    pub failed: Vec<(String, String)>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1238,24 +1243,31 @@ pub async fn delete_page(
         _ => RewriteMode::PlainText,
     };
 
-    {
-        let op = MutationOp::DeletePage {
-            path: path.clone(),
-            rewrite: rewrite_mode,
-        };
-        let hooks = Arc::clone(&state.hooks);
-        state
-            .index
-            .with_index(move |index, vault| {
-                let planner = MutationPlanner::new(vault, index);
-                let plan = planner.plan(&op)?;
-                plan.execute(vault, index, &hooks)?;
-                Ok::<_, crate::vault::index::IndexError>(())
-            })
-            .await
-            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?
-            .map_err(|e| ApiError::internal(format!("mutation failed: {e}")))?;
-    }
+    let op = MutationOp::DeletePage {
+        path: path.clone(),
+        rewrite: rewrite_mode,
+    };
+    let command = state
+        .index
+        .with_index(move |index, vault| {
+            MutationPlanner::new(vault, index)
+                .plan(&op)?
+                .into_batch_command(vault)
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?
+        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?;
+    state
+        .mutation_coordinator
+        .execute_batch(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            command,
+            super::mutation_notifier(&state),
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     // Run post-delete hooks (e.g. CAS ref_count cleanup for archive pages)
     if let Some(ref meta) = page_meta {
@@ -1265,11 +1277,6 @@ pub async fn delete_page(
             }
         }
     }
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![],
-        removed: vec![path.clone()],
-    });
 
     Ok(StatusCode::NO_CONTENT.into_response())
 }
@@ -1300,7 +1307,7 @@ pub async fn move_page(
 ) -> Result<Json<PageDetail>, ApiError> {
     let source_vp = crate::api::error::parse_request_path(&path, "invalid path")?;
     let dest_vp = crate::api::error::parse_request_path(&body.destination, "invalid destination")?;
-    let _guard = state
+    let planning_guard = state
         .mutation_coordinator
         .lock_paths(&[source_vp.clone(), dest_vp.clone()])
         .await;
@@ -1322,23 +1329,28 @@ pub async fn move_page(
         source: path.clone(),
         destination: body.destination.clone(),
     };
-    let hooks = Arc::clone(&state.hooks);
-    state
+    let command = state
         .index
         .with_index(move |index, vault| {
-            let planner = MutationPlanner::new(vault, index);
-            let plan = planner.plan(&op)?;
-            plan.execute(vault, index, &hooks)?;
-            Ok::<_, crate::vault::index::IndexError>(())
+            MutationPlanner::new(vault, index)
+                .plan(&op)?
+                .into_batch_command(vault)
         })
         .await
         .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?
         .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?;
-
-    let _ = state.change_tx.send(SyncNotification::IndexChanged {
-        upserted: vec![body.destination],
-        removed: vec![path],
-    });
+    drop(planning_guard);
+    state
+        .mutation_coordinator
+        .execute_batch(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            command,
+            super::mutation_notifier(&state),
+        )
+        .await
+        .map_err(super::mutation_error)?;
 
     let page = Page::from_file(&dest_abs, dest_vp)
         .map_err(|error| ApiError::internal(format!("failed to read moved page: {error}")))?;
@@ -1448,6 +1460,173 @@ pub async fn assign_page(
     Ok(Json(page_detail(result)))
 }
 
+fn read_assignment_page_once(
+    state: &AppState,
+    path: &VaultPath,
+    indexed_paths: &BTreeSet<String>,
+) -> Result<(String, PageMeta, String), ApiError> {
+    let expected = fs::read(state.vault.resolve(path)).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            if indexed_paths.contains(path.as_str()) {
+                ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
+            } else {
+                ApiError::not_found(format!("page not found: {}", path.as_str()))
+            }
+        } else {
+            ApiError::internal(format!("failed to read page {}: {error}", path.as_str()))
+        }
+    })?;
+    let expected = String::from_utf8(expected).map_err(|error| {
+        ApiError::internal(format!(
+            "failed to read page {} as UTF-8: {error}",
+            path.as_str()
+        ))
+    })?;
+    let (meta, body) = parse_frontmatter(&expected).map_err(|error| {
+        ApiError::internal(format!("failed to parse page {}: {error}", path.as_str()))
+    })?;
+    Ok((expected, meta, body))
+}
+
+fn collect_missing_assignment_directories(
+    state: &AppState,
+    destination: &VaultPath,
+    directories: &mut BTreeSet<String>,
+) -> Result<(), ApiError> {
+    let components = destination.as_str().split('/').collect::<Vec<_>>();
+    for end in 1..components.len() {
+        let directory = components[..end].join("/");
+        let path = VaultPath::new(&directory)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        if !state.vault.resolve(&path).exists() {
+            directories.insert(directory);
+        }
+    }
+    Ok(())
+}
+
+fn plan_bulk_assignment(
+    state: &AppState,
+    body: &BulkAssignRequest,
+    paths: &[VaultPath],
+    indexed_paths: &BTreeSet<String>,
+    now: chrono::DateTime<Utc>,
+) -> Result<BatchMutationCommand, ApiError> {
+    let assigned_kind = body
+        .kind
+        .as_deref()
+        .map(|token| {
+            crate::vault::kind::Kind::from_token(token)
+                .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))
+        })
+        .transpose()?;
+    if let Some(project) = &body.project
+        && !body.clear_project
+    {
+        validate_project_slug(project).map_err(ApiError::bad_request)?;
+    }
+
+    let source_paths = paths
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .collect::<BTreeSet<_>>();
+    let mut final_paths = BTreeSet::new();
+    let mut intents = Vec::with_capacity(paths.len() * 2);
+    let mut directories = BTreeSet::new();
+    let mut upserted = BTreeSet::new();
+    let mut removed = BTreeSet::new();
+    let mut moved_pages = Vec::new();
+
+    for path in paths {
+        let path = path.clone();
+        let (expected, mut meta, page_body) =
+            read_assignment_page_once(state, &path, indexed_paths)?;
+        if let Some(kind) = assigned_kind {
+            meta.kind = Some(kind);
+        }
+        if body.clear_project {
+            meta.project = None;
+        } else if let Some(project) = &body.project {
+            meta.project = Some(project.clone());
+        }
+        meta.updated_at = Some(now);
+        heal_task_update(&path, &expected, &mut meta).map_err(ApiError::bad_request)?;
+        let content = write_page_content(&meta, &page_body).into_bytes();
+        let projected = if body.clear_project {
+            project_path_cleared(path.as_str(), meta.kind)
+        } else {
+            project_path(path.as_str(), meta.kind, meta.project.as_deref())
+        };
+
+        if let Some(destination) = projected {
+            let destination =
+                crate::api::error::parse_internal_path(&destination, "invalid projected path")?;
+            if source_paths.contains(destination.as_str()) && destination != path {
+                return Err(ApiError::conflict(format!(
+                    "assignment destination is also a source: {}",
+                    destination.as_str()
+                )));
+            }
+            if !final_paths.insert(destination.as_str().to_string()) {
+                return Err(ApiError::conflict(format!(
+                    "duplicate assignment destination: {}",
+                    destination.as_str()
+                )));
+            }
+            collect_missing_assignment_directories(state, &destination, &mut directories)?;
+            intents.push(BatchPathIntent::Delete {
+                path: path.clone(),
+                expected: expected.into_bytes(),
+            });
+            intents.push(BatchPathIntent::Write {
+                path: destination.clone(),
+                expected: ExpectedPathState::Missing,
+                content,
+            });
+            removed.insert(path.as_str().to_string());
+            upserted.insert(destination.as_str().to_string());
+            moved_pages.push((path, destination));
+        } else {
+            if !final_paths.insert(path.as_str().to_string()) {
+                return Err(ApiError::conflict(format!(
+                    "duplicate assignment destination: {}",
+                    path.as_str()
+                )));
+            }
+            upserted.insert(path.as_str().to_string());
+            intents.push(BatchPathIntent::Write {
+                path,
+                expected: ExpectedPathState::Bytes(expected.into_bytes()),
+                content,
+            });
+        }
+    }
+
+    let mut index_events = Vec::with_capacity(upserted.len() + removed.len());
+    for path in upserted {
+        index_events.push(ChangeEvent::Upsert(
+            VaultPath::new(&path).map_err(|error| ApiError::internal(error.to_string()))?,
+        ));
+    }
+    for path in removed {
+        index_events.push(ChangeEvent::Remove(
+            VaultPath::new(&path).map_err(|error| ApiError::internal(error.to_string()))?,
+        ));
+    }
+    let create_directories = directories
+        .into_iter()
+        .map(|path| VaultPath::new(&path).map_err(|error| ApiError::internal(error.to_string())))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(BatchMutationCommand {
+        intents,
+        create_directories,
+        remove_directories: Vec::new(),
+        index_events,
+        moved_pages,
+    })
+}
+
 #[utoipa::path(
     post,
     path = "/pages-assign-bulk",
@@ -1455,7 +1634,10 @@ pub async fn assign_page(
     tag = "Pages",
     request_body = BulkAssignRequest,
     responses(
-        (status = 200, description = "Per-path assign results", body = BulkAssignResponse),
+        (status = 200, description = "All pages assigned atomically", body = BulkAssignResponse),
+        (status = 400, description = "Invalid path, kind, project, or duplicate", body = ApiError),
+        (status = 404, description = "Page not found", body = ApiError),
+        (status = 409, description = "Destination or stale mutation conflict", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
@@ -1463,31 +1645,100 @@ pub async fn assign_bulk(
     State(state): State<Arc<AppState>>,
     Json(body): Json<BulkAssignRequest>,
 ) -> Result<Json<BulkAssignResponse>, ApiError> {
-    let mut moved = Vec::new();
-    let mut unchanged = Vec::new();
-    let mut failed = Vec::new();
-    for path in body.paths {
-        let req = AssignRequest {
-            kind: body.kind.clone(),
-            project: body.project.clone(),
-            clear_project: body.clear_project,
-        };
-        match assign_page(State(Arc::clone(&state)), Path(path.clone()), Json(req)).await {
-            Ok(detail) => {
-                if detail.0.path != path {
-                    moved.push((path, detail.0.path));
-                } else {
-                    unchanged.push(path);
+    if body.paths.is_empty() {
+        return Ok(Json(BulkAssignResponse {
+            moved: Vec::new(),
+            unchanged: Vec::new(),
+        }));
+    }
+
+    let mut seen_paths = BTreeSet::new();
+    let mut normalized_paths = Vec::with_capacity(body.paths.len());
+    for requested in &body.paths {
+        let path = crate::api::error::parse_request_path(requested, "invalid path")?;
+        if !seen_paths.insert(path.as_str().to_string()) {
+            return Err(ApiError::bad_request(format!(
+                "duplicate assignment path: {}",
+                path.as_str()
+            )));
+        }
+        normalized_paths.push(path);
+    }
+    let requested_paths = normalized_paths
+        .iter()
+        .map(|path| path.as_str().to_string())
+        .collect::<Vec<_>>();
+    let indexed_paths = state
+        .index
+        .with_index(move |index, _vault| {
+            let mut indexed = BTreeSet::new();
+            let mut statement = index
+                .connection()
+                .prepare("SELECT 1 FROM pages WHERE path = ?1")?;
+            for path in requested_paths {
+                if statement.exists([path.as_str()])? {
+                    indexed.insert(path);
                 }
             }
-            Err(e) => failed.push((path, e.error)),
+            Ok::<_, rusqlite::Error>(indexed)
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    if body.kind.is_none() && body.project.is_none() && !body.clear_project {
+        for path in &normalized_paths {
+            read_assignment_page_once(&state, path, &indexed_paths)?;
         }
+        return Ok(Json(BulkAssignResponse {
+            moved: Vec::new(),
+            unchanged: normalized_paths
+                .into_iter()
+                .map(|path| path.as_str().to_string())
+                .collect(),
+        }));
     }
-    Ok(Json(BulkAssignResponse {
-        moved,
-        unchanged,
-        failed,
-    }))
+
+    let command = plan_bulk_assignment(
+        &state,
+        &body,
+        &normalized_paths,
+        &indexed_paths,
+        state.clock.now(),
+    )?;
+    let moved = command
+        .moved_pages
+        .iter()
+        .map(|(source, destination)| {
+            (
+                source.as_str().to_string(),
+                destination.as_str().to_string(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let moved_sources = moved
+        .iter()
+        .map(|(source, _)| source.as_str())
+        .collect::<BTreeSet<_>>();
+    let unchanged = normalized_paths
+        .iter()
+        .filter(|path| !moved_sources.contains(path.as_str()))
+        .map(|path| path.as_str().to_string())
+        .collect();
+
+    state
+        .mutation_coordinator
+        .execute_batch(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            command,
+            super::mutation_notifier(&state),
+        )
+        .await
+        .map_err(super::mutation_error)?;
+
+    Ok(Json(BulkAssignResponse { moved, unchanged }))
 }
 
 // ---------------------------------------------------------------------------
@@ -1891,7 +2142,6 @@ Some quoted text.\n";
 
         assert_eq!(resp.0.moved.len(), 2);
         assert!(resp.0.unchanged.is_empty());
-        assert!(resp.0.failed.is_empty());
         assert!(
             state
                 .vault
@@ -1907,7 +2157,7 @@ Some quoted text.\n";
     }
 
     #[tokio::test]
-    async fn bulk_assign_reports_failures() {
+    async fn bulk_assign_rejects_the_whole_request_when_a_page_is_missing() {
         let (state, _tmp) = make_state().await;
         seed_and_index(
             &state,
@@ -1915,8 +2165,10 @@ Some quoted text.\n";
             "---\nid: 0190f8a0-0000-7000-8000-000000000011\n---\nb\n",
         )
         .await;
+        let source = VaultPath::new("notes/a.md").unwrap();
+        let original = fs::read(state.vault.resolve(&source)).unwrap();
 
-        let resp = assign_bulk(
+        let error = assign_bulk(
             State(Arc::clone(&state)),
             Json(BulkAssignRequest {
                 paths: vec!["notes/a.md".into(), "notes/missing.md".into()],
@@ -1926,11 +2178,16 @@ Some quoted text.\n";
             }),
         )
         .await
-        .unwrap();
+        .unwrap_err();
 
-        assert_eq!(resp.0.moved.len(), 1, "the valid page should move");
-        assert_eq!(resp.0.failed.len(), 1, "the missing page should fail");
-        assert_eq!(resp.0.failed[0].0, "notes/missing.md");
+        assert_eq!(error.status, StatusCode::NOT_FOUND.as_u16());
+        assert_eq!(fs::read(state.vault.resolve(&source)).unwrap(), original);
+        assert!(
+            !state
+                .vault
+                .resolve(&VaultPath::new("quotes/a.md").unwrap())
+                .exists()
+        );
     }
 
     #[tokio::test]
@@ -1958,6 +2215,5 @@ Some quoted text.\n";
 
         assert!(resp.0.moved.is_empty(), "no relocation should occur");
         assert_eq!(resp.0.unchanged, vec!["quotes/q.md".to_string()]);
-        assert!(resp.0.failed.is_empty());
     }
 }

@@ -920,6 +920,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/index/issues": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["reference_issues"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/index/issues/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reference_repair_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/index/issues/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reference_repair_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/index/outlinks/{path}": {
         parameters: {
             query?: never;
@@ -1530,6 +1578,12 @@ export interface components {
             /** Format: int64 */
             size: number;
         };
+        AttachmentUploadForm: {
+            /** Format: binary */
+            file: string;
+            /** @enum {boolean} */
+            plaintext_acknowledged: true;
+        };
         BacklinkEntry: {
             context: string;
             kind: string;
@@ -1750,23 +1804,18 @@ export interface components {
             clear_project?: boolean;
             /** @description Declared kind token applied to every path (see `AssignRequest::kind`). */
             kind?: string | null;
-            /** @description Page paths to assign. Each is processed independently. */
+            /** @description Page paths assigned as one atomic mutation. */
             paths: string[];
             /** @description Declared project applied to every path (see `AssignRequest::project`). */
             project?: string | null;
         };
         BulkAssignResponse: {
-            /** @description `path -> error` for failures (best-effort: one bad page doesn't abort). */
-            failed: [
-                string,
-                string
-            ][];
-            /** @description `original -> final` for each page that actually relocated. */
+            /** @description `original -> final` for every page relocated by the atomic assignment. */
             moved: [
                 string,
                 string
             ][];
-            /** @description Paths that were assigned successfully but did NOT relocate. */
+            /** @description Paths assigned successfully without relocation. */
             unchanged: string[];
         };
         CandidateEntry: {
@@ -2034,6 +2083,8 @@ export interface components {
             local_value?: string | null;
             source_value?: string | null;
         };
+        /** @enum {string} */
+        FileOpKind: "rename" | "delete" | "create_dir" | "create_file";
         /** @description Recursive filter AST: all, any, not, or a field comparison */
         Filter: {
             all: components["schemas"]["Filter"][];
@@ -2119,6 +2170,7 @@ export interface components {
             manifest_revision: string;
         };
         ImportResponse: {
+            checkpoint_error?: string | null;
             results: components["schemas"]["ImportResult"][];
         };
         ImportResult: {
@@ -2193,6 +2245,18 @@ export interface components {
         };
         MovePageRequest: {
             destination: string;
+        };
+        /**
+         * @description A transport-independent description of the index change emitted after a
+         *     successful filesystem and index mutation.
+         */
+        MutationNotification: {
+            removed: string[];
+            upserted: string[];
+        };
+        MutationPlan: {
+            file_ops: components["schemas"]["PlannedFileOp"][];
+            text_edits: components["schemas"]["PlannedTextEdit"][];
         };
         /**
          * @description Comparison operators for filter predicates.
@@ -2309,6 +2373,17 @@ export interface components {
             /** @description Leave absent to keep current title. */
             title?: string | null;
         };
+        PlannedFileOp: {
+            content_hash?: string | null;
+            destination?: string | null;
+            kind: components["schemas"]["FileOpKind"];
+            path: string;
+        };
+        PlannedTextEdit: {
+            new_text: string;
+            old_text: string;
+            path: string;
+        };
         PreviewMutationRequest: {
             destination?: string;
             operation: string;
@@ -2422,6 +2497,67 @@ export interface components {
             pages_removed: number;
             pages_skipped: number;
             warnings: string[];
+        };
+        ReferenceCandidateDto: {
+            page_id: string;
+            path: string;
+            rationale: string;
+            title?: string | null;
+        };
+        /** @enum {string} */
+        ReferenceIssueActionDto: "create" | "replace" | "open_source" | "none";
+        ReferenceIssueDto: {
+            actions: components["schemas"]["ReferenceIssueActionDto"][];
+            candidates: components["schemas"]["ReferenceCandidateDto"][];
+            fingerprint: string;
+            kind: components["schemas"]["ReferenceIssueKindDto"];
+            snippet?: string | null;
+            source_field?: string | null;
+            source_id: string;
+            source_path: string;
+            source_revision: string;
+            source_title?: string | null;
+            /** Format: int64 */
+            span_end?: number | null;
+            /** Format: int64 */
+            span_start?: number | null;
+            target_raw?: string | null;
+        };
+        /** @enum {string} */
+        ReferenceIssueKindDto: "unresolved_page_link" | "ambiguous_page_link" | "broken_block_ref" | "invalid_relation_target" | "orphan_page" | "isolated_page";
+        ReferenceIssuesResponse: {
+            items: components["schemas"]["ReferenceIssueDto"][];
+            /** Format: int32 */
+            limit: number;
+            /** Format: int32 */
+            offset: number;
+            /** Format: int64 */
+            total: number;
+        };
+        ReferenceRepairActionDto: {
+            body?: string | null;
+            folder: string;
+            /** @enum {string} */
+            type: "create";
+        } | {
+            candidate_page_id: string;
+            /** @enum {string} */
+            type: "replace";
+        };
+        ReferenceRepairApplyResponse: {
+            fingerprint: string;
+            notification: components["schemas"]["MutationNotification"];
+        };
+        ReferenceRepairPreviewResponse: {
+            after: string;
+            before: string;
+            fingerprint: string;
+            plan: components["schemas"]["MutationPlan"];
+        };
+        ReferenceRepairRequest: {
+            action: components["schemas"]["ReferenceRepairActionDto"];
+            fingerprint: string;
+            source_revision: string;
         };
         RefreshFeedsResponse: {
             scheduled: number;
@@ -3528,7 +3664,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "multipart/form-data": string;
+                "multipart/form-data": components["schemas"]["AttachmentUploadForm"];
             };
         };
         responses: {
@@ -5707,6 +5843,156 @@ export interface operations {
             };
         };
     };
+    reference_issues: {
+        parameters: {
+            query?: {
+                /** @description Issue kinds. The parameter may be repeated and each value may be comma-separated. */
+                kind?: components["schemas"]["ReferenceIssueKindDto"][];
+                project?: string;
+                page_kind?: components["schemas"]["Kind"];
+                actionable?: boolean;
+                /** @description Page size. Defaults to 50. */
+                limit?: number;
+                /** @description Zero-based result offset. Defaults to 0. */
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Paginated reference issue inventory */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceIssuesResponse"];
+                };
+            };
+            /** @description Invalid filter or pagination value */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Reference issue inventory unavailable */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reference_repair_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceRepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Committed reference repair */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceRepairApplyResponse"];
+                };
+            };
+            /** @description Action is unavailable or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Issue, source revision, or path state is stale */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Reference repair could not be committed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reference_repair_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceRepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Reference repair preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceRepairPreviewResponse"];
+                };
+            };
+            /** @description Action is unavailable or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Issue or source revision is stale */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Reference repair could not be prepared */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     outlinks: {
         parameters: {
             query?: never;
@@ -6437,13 +6723,40 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Per-path assign results */
+            /** @description All pages assigned atomically */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["BulkAssignResponse"];
+                };
+            };
+            /** @description Invalid path, kind, project, or duplicate */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Page not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Destination or stale mutation conflict */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Internal server error */

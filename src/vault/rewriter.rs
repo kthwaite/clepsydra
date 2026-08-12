@@ -1,5 +1,4 @@
 use std::ops::Range;
-use std::path::PathBuf;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
@@ -156,51 +155,4 @@ fn apply_edits(content: &str, mut edits: Vec<Edit>) -> String {
         result.replace_range(edit.range, &edit.replacement);
     }
     result
-}
-
-// ---------------------------------------------------------------------------
-// Staged writes
-// ---------------------------------------------------------------------------
-
-/// Atomically write multiple files via a tmp-then-rename strategy.
-///
-/// 1. For each `(path, content)`, write to `{path}.clepsydra-tmp`.
-/// 2. After **all** tmp files are written, rename each to its final path.
-/// 3. On failure at any step, clean up all tmp files.
-pub fn apply_staged_writes(writes: &[(PathBuf, String)]) -> Result<(), std::io::Error> {
-    let tmp_paths: Vec<PathBuf> = writes
-        .iter()
-        .map(|(path, _)| {
-            let mut tmp = path.as_os_str().to_owned();
-            tmp.push(".clepsydra-tmp");
-            PathBuf::from(tmp)
-        })
-        .collect();
-
-    // Phase 1: write all tmp files
-    let cleanup = |created_up_to: usize| {
-        for tmp in &tmp_paths[..created_up_to] {
-            let _ = std::fs::remove_file(tmp);
-        }
-    };
-
-    for (i, ((_, content), tmp)) in writes.iter().zip(tmp_paths.iter()).enumerate() {
-        if let Err(e) = std::fs::write(tmp, content) {
-            cleanup(i);
-            return Err(e);
-        }
-    }
-
-    // Phase 2: rename tmp -> final (atomic on POSIX)
-    for (i, (tmp, (final_path, _))) in tmp_paths.iter().zip(writes.iter()).enumerate() {
-        if let Err(e) = std::fs::rename(tmp, final_path) {
-            // Best-effort cleanup of remaining tmp files
-            for remaining_tmp in &tmp_paths[i..] {
-                let _ = std::fs::remove_file(remaining_tmp);
-            }
-            return Err(e);
-        }
-    }
-
-    Ok(())
 }

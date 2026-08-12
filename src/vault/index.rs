@@ -22,6 +22,7 @@ use super::derivers::tags::TagDeriver;
 use super::link::{Link, extract_links, extract_property_refs};
 use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
+use super::reference_issues::{ReferenceIssueFilter, ReferenceIssuePage};
 
 // ---------------------------------------------------------------------------
 // IndexError
@@ -408,6 +409,13 @@ impl VaultIndex {
     /// Borrow the underlying connection (primarily for test inspection).
     pub fn connection(&self) -> &Connection {
         &self.conn
+    }
+    /// Project the current index truth into typed, deterministic repair issues.
+    pub fn reference_issues(
+        &self,
+        filter: ReferenceIssueFilter,
+    ) -> Result<ReferenceIssuePage, IndexError> {
+        super::reference_issues::project(&self.conn, filter)
     }
 
     /// Mutably borrow the underlying connection for internal transactional work.
@@ -1440,28 +1448,16 @@ fn resolve_outgoing_wikilinks(
     drop(stmt);
 
     for (source_id, span_start, target_canonical) in &outgoing {
-        let mut lookup = tx.prepare(
-            "SELECT cn.page_id, p.path
-             FROM canonical_names cn
-             JOIN pages p ON p.id = cn.page_id
-             WHERE cn.canonical_name = ?1",
-        )?;
-        let matches: Vec<(String, String)> = lookup
-            .query_map(params![target_canonical], |row| {
-                Ok((row.get(0)?, row.get(1)?))
-            })?
-            .collect::<Result<_, _>>()?;
-        drop(lookup);
+        let Some((target_id, target_path)) = unique_link_target(tx, target_canonical)? else {
+            continue;
+        };
 
-        if matches.len() == 1 {
-            let (target_id, target_path) = &matches[0];
-            tx.execute(
-                "UPDATE links SET target_id = ?1, target_path = ?2
-                 WHERE source_id = ?3 AND span_start = ?4",
-                params![target_id, target_path, source_id, span_start],
-            )?;
-            *count += 1;
-        }
+        tx.execute(
+            "UPDATE links SET target_id = ?1, target_path = ?2
+             WHERE source_id = ?3 AND span_start = ?4",
+            params![target_id, target_path, source_id, span_start],
+        )?;
+        *count += 1;
     }
 
     Ok(())
@@ -1517,6 +1513,18 @@ fn resolve_incoming_wikilinks(
     page_id: &str,
     count: &mut usize,
 ) -> Result<(), IndexError> {
+    let page_path: String = tx.query_row(
+        "SELECT path FROM pages WHERE id = ?1",
+        params![page_id],
+        |row| row.get(0),
+    )?;
+    let direct_count = tx.execute(
+        "UPDATE links SET target_id = ?1, target_path = ?2
+         WHERE target_id IS NULL AND target_canonical = ?1",
+        params![page_id, page_path],
+    )?;
+    *count += direct_count;
+
     let mut cn_stmt =
         tx.prepare("SELECT canonical_name FROM canonical_names WHERE page_id = ?1")?;
     let canonical_names: Vec<String> = cn_stmt
@@ -1763,6 +1771,19 @@ fn unique_link_target(
     conn: &Connection,
     target_canonical: &str,
 ) -> Result<Option<(String, String)>, IndexError> {
+    if let Ok(target_id) = Uuid::parse_str(target_canonical) {
+        let exact = conn
+            .query_row(
+                "SELECT id, path FROM pages WHERE id = ?1",
+                params![target_id.hyphenated().to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        if exact.is_some() {
+            return Ok(exact);
+        }
+    }
+
     let mut stmt = conn.prepare(
         "SELECT cn.page_id, p.path
          FROM canonical_names cn
@@ -2513,6 +2534,35 @@ mod kind_index_tests {
         assert!(
             repaired.contains("created_at = "),
             "repair must persist created_at"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn build_repair_write_failure_preserves_page_and_reports_warning() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let page = root.join("Loose.md");
+        let original = "# Loose\n\nbody\n";
+        fs::write(&page, original).unwrap();
+        fs::set_permissions(&page, fs::Permissions::from_mode(0o400)).unwrap();
+
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        let stats = index.build(&vault).unwrap();
+
+        fs::set_permissions(&page, fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(fs::read_to_string(&page).unwrap(), original);
+        assert!(
+            stats
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("cannot rewrite frontmatter in Loose.md")),
+            "repair publication failure must remain actionable: {:?}",
+            stats.warnings
         );
     }
 

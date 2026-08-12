@@ -142,6 +142,21 @@ describe("markdownToSlate", () => {
         },
       ]);
     });
+
+    it("extracts a terminal valid block ID from fenced code", () => {
+      const result = markdownToSlate(
+        "```typescript\nconst answer = 42;\n^abc123DEF0\n```",
+      );
+
+      expect(result).toEqual([
+        {
+          type: "code-block",
+          language: "typescript",
+          blockId: "abc123DEF0",
+          children: [{ text: "const answer = 42;" }],
+        },
+      ]);
+    });
   });
 
   describe("blockquotes", () => {
@@ -290,6 +305,59 @@ describe("markdownToSlate", () => {
               type: "link",
               url: "https://example.com",
               children: [{ text: "bold link", bold: true }],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("keeps block references literal throughout ordinary link labels", () => {
+      const result = markdownToSlate(
+        "[**See ~((abc123DEF0))~**](https://example.com)",
+      );
+
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "link",
+              url: "https://example.com",
+              children: [
+                {
+                  text: "See ",
+                  bold: true,
+                },
+                {
+                  text: "((abc123DEF0))",
+                  bold: true,
+                  strikethrough: true,
+                },
+              ],
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("resolves link references without converting their labels to block refs", () => {
+      const result = markdownToSlate(
+        "[**See ((abc123DEF0))**][source]\n\n[source]: notes/source.md",
+      );
+
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            {
+              type: "link",
+              url: "notes/source.md",
+              children: [
+                {
+                  text: "See ((abc123DEF0))",
+                  bold: true,
+                },
+              ],
             },
           ],
         },

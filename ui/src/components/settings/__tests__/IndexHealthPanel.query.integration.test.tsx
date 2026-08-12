@@ -5,17 +5,27 @@ import {
   useQuery,
 } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
+
+const { navigateMock } = vi.hoisted(() => ({
+  navigateMock: vi.fn(),
+}));
+
+vi.mock("@tanstack/react-router", () => ({
+  useNavigate: () => navigateMock,
+}));
 
 vi.mock("#/api/client", () => ({
   $api: {
     useMutation: () =>
       useMutation({
         mutationFn: async () => ({
-          id: "created",
-          path: "created.md",
-          title: "Created",
+          pages_indexed: 0,
+          pages_removed: 0,
+          pages_skipped: 0,
+          warnings: [],
         }),
       }),
     useQuery: (
@@ -27,24 +37,7 @@ vi.mock("#/api/client", () => ({
       useQuery({
         queryKey: [method, path],
         queryFn: async () => {
-          if (path.endsWith("/ambiguous")) {
-            throw new Error("ambiguous endpoint unavailable");
-          }
-          if (path.endsWith("/unresolved")) {
-            return [
-              {
-                source_id: "source-1",
-                source_path: "notes/source.md",
-                target_raw: "Ghost",
-                target_canonical: "ghost",
-                kind: "wikilink",
-                span_start: 12,
-                reason: "no_match",
-                candidates: [],
-              },
-            ];
-          }
-          return ["Healthy warning stream"];
+          throw new Error("warnings endpoint unavailable");
         },
         retry: false,
         ...options,
@@ -74,7 +67,8 @@ class TestErrorBoundary extends Component<
 }
 
 describe("IndexHealthPanel query integration", () => {
-  it("renders successful diagnostics when one query fails under the app error policy", async () => {
+  it("keeps repairs usable when warnings fail under the app error policy", async () => {
+    const user = userEvent.setup();
     const client = new QueryClient({
       defaultOptions: {
         queries: { retry: false, throwOnError: true },
@@ -89,13 +83,17 @@ describe("IndexHealthPanel query integration", () => {
       </QueryClientProvider>,
     );
 
-    expect(await screen.findByText("notes/source.md")).toBeVisible();
-    expect(screen.getByText("Healthy warning stream")).toBeVisible();
     expect(
-      screen.getByRole("alert", {
-        name: "Ambiguous names could not be loaded.",
+      await screen.findByRole("alert", {
+        name: "Index warnings could not be loaded.",
       }),
-    ).toBeVisible();
+    ).toHaveTextContent("warnings endpoint unavailable");
     expect(screen.queryByText("Settings crashed.")).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Open Reference Repairs" }),
+    );
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/repairs" });
   });
 });

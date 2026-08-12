@@ -16,7 +16,7 @@ import { Route as DocsRouteImport } from './routes/docs'
 import { Route as FeedsRouteImport } from './routes/feeds'
 import { Route as GazetteerRouteImport } from './routes/gazetteer'
 import { Route as GraphRouteImport } from './routes/graph'
-import { Route as LinkMissRouteImport } from './routes/link-miss'
+import { Route as RepairsRouteImport } from './routes/repairs'
 import { Route as TaskingRouteImport } from './routes/tasking'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as BasesIndexRouteImport } from './routes/bases.index'
@@ -60,9 +60,9 @@ const GraphRoute = GraphRouteImport.update({
   path: '/graph',
   getParentRoute: () => rootRouteImport,
 } as any)
-const LinkMissRoute = LinkMissRouteImport.update({
-  id: '/link-miss',
-  path: '/link-miss',
+const RepairsRoute = RepairsRouteImport.update({
+  id: '/repairs',
+  path: '/repairs',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TaskingRoute = TaskingRouteImport.update({
@@ -109,7 +109,7 @@ export interface FileRoutesByFullPath {
   '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
-  '/link-miss': typeof LinkMissRoute
+  '/repairs': typeof RepairsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/bases/$slug': typeof BasesSlugRouteWithChildren
@@ -126,7 +126,7 @@ export interface FileRoutesByTo {
   '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
-  '/link-miss': typeof LinkMissRoute
+  '/repairs': typeof RepairsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/bases/$slug': typeof BasesSlugRouteWithChildren
@@ -144,7 +144,7 @@ export interface FileRoutesById {
   '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
-  '/link-miss': typeof LinkMissRoute
+  '/repairs': typeof RepairsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/bases/$slug': typeof BasesSlugRouteWithChildren
@@ -163,7 +163,7 @@ export interface FileRouteTypes {
     | '/feeds'
     | '/gazetteer'
     | '/graph'
-    | '/link-miss'
+    | '/repairs'
     | '/tasking'
     | '/workspace'
     | '/bases/$slug'
@@ -180,7 +180,7 @@ export interface FileRouteTypes {
     | '/feeds'
     | '/gazetteer'
     | '/graph'
-    | '/link-miss'
+    | '/repairs'
     | '/tasking'
     | '/workspace'
     | '/bases/$slug'
@@ -197,7 +197,7 @@ export interface FileRouteTypes {
     | '/feeds'
     | '/gazetteer'
     | '/graph'
-    | '/link-miss'
+    | '/repairs'
     | '/tasking'
     | '/workspace'
     | '/bases/$slug'
@@ -215,7 +215,7 @@ export interface RootRouteChildren {
   FeedsRoute: typeof FeedsRoute
   GazetteerRoute: typeof GazetteerRoute
   GraphRoute: typeof GraphRoute
-  LinkMissRoute: typeof LinkMissRoute
+  RepairsRoute: typeof RepairsRoute
   TaskingRoute: typeof TaskingRoute
   WorkspaceRoute: typeof WorkspaceRoute
   BasesSlugRoute: typeof BasesSlugRouteWithChildren
@@ -274,11 +274,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof GraphRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/link-miss': {
-      id: '/link-miss'
-      path: '/link-miss'
-      fullPath: '/link-miss'
-      preLoaderRoute: typeof LinkMissRouteImport
+    '/repairs': {
+      id: '/repairs'
+      path: '/repairs'
+      fullPath: '/repairs'
+      preLoaderRoute: typeof RepairsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/tasking': {
@@ -363,7 +363,7 @@ const rootRouteChildren: RootRouteChildren = {
   FeedsRoute: FeedsRoute,
   GazetteerRoute: GazetteerRoute,
   GraphRoute: GraphRoute,
-  LinkMissRoute: LinkMissRoute,
+  RepairsRoute: RepairsRoute,
   TaskingRoute: TaskingRoute,
   WorkspaceRoute: WorkspaceRoute,
   BasesSlugRoute: BasesSlugRouteWithChildren,

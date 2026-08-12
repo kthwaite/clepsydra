@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
+import { clearBlockDetailsForPagePaths } from "./blocks";
 import { $api } from "./client";
 import { invalidateByPath, invalidatePageContent, queryKeys } from "./keys";
 
@@ -37,7 +38,10 @@ export function useRewrapIdentity() {
 export function useProtectPage() {
   const queryClient = useQueryClient();
   return $api.useMutation("post", "/api/vault/pages/by-id/{uuid}/protect", {
-    onSuccess: (page) => invalidateProtectedPage(queryClient, page.path),
+    onSuccess: (page) => {
+      void clearBlockDetailsForPagePaths(queryClient, [page.path]);
+      invalidateProtectedPage(queryClient, page.path);
+    },
   });
 }
 

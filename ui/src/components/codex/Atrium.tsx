@@ -1,7 +1,12 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useBcl } from "#/api/bcl";
-import { useContentIndex, useStats, useTags } from "#/api/index";
+import {
+  useContentIndex,
+  useReferenceIssues,
+  useStats,
+  useTags,
+} from "#/api/index";
 import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
 import { useClock } from "#/hooks/useClock";
@@ -29,11 +34,16 @@ import { ReadingContinuesPanel } from "./ReadingContinues";
 import { SkyCard } from "./SkyCard";
 import { deriveSky, hasCoords } from "./sky";
 
+const REFERENCE_ISSUE_COUNT_FILTERS = { limit: 1, offset: 0 };
+
 export function Atrium() {
   const navigate = useNavigate();
   const { data: tags } = useTags();
   const { data: stats } = useStats();
   const { data: content } = useContentIndex({ limit: 500 });
+  const { data: referenceIssues } = useReferenceIssues(
+    REFERENCE_ISSUE_COUNT_FILTERS,
+  );
   const { data: bcl } = useBcl();
 
   const { data: journalToday } = useJournalToday();
@@ -171,6 +181,23 @@ export function Atrium() {
         className="col-span-12"
         label="Vessel · Inventory"
         caption="FIG. I — STEADY-STATE TELEMETRY"
+        action={
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/repairs" })}
+            aria-label={
+              referenceIssues
+                ? `Open Reference Repairs, ${referenceIssues.total.toLocaleString("en-US")} issues`
+                : "Open Reference Repairs"
+            }
+            className="cl-mono border-l border-rule pl-2.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+          >
+            {referenceIssues
+              ? `${referenceIssues.total.toLocaleString("en-US")} issues`
+              : "Repairs"}{" "}
+            →
+          </button>
+        }
         tight
       >
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8">

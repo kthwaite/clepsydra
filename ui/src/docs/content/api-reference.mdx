@@ -1,0 +1,347 @@
+export const meta = {
+  slug: "api-reference",
+  title: "API Reference",
+  description: "Call every public Clepsydra HTTP API operation."
+}
+
+The HTTP API is served by `clep serve`. Initialize a vault, select it with the
+normal application `config.toml`, and start the server before calling these
+operations. Use `http://` unless TLS is enabled in `[server.tls]` or with
+`clep serve --tls`; then use `https://`. The client must both trust the
+configured or generated certificate's issuer and use a hostname or IP address
+covered by that certificate. Build the client origin from that reachable name
+or address and the effective port. A wildcard bind (`0.0.0.0` or `::`) is not a
+client destination; substitute a reachable interface address or `localhost`
+when calling from the server machine. Enclose an IPv6 literal in brackets, for
+example `https://[::1]:3000`.
+
+## Discovery, trust, and errors
+
+- OpenAPI JSON: `GET /api/openapi.json`.
+- Interactive Swagger UI: `GET /api/docs`.
+- Clepsydra implements no bearer token, API key, session login, or per-operation
+  authorization layer. Do not invent an `Authorization` header. Network
+  reachability is the API trust boundary; keep the default loopback host unless
+  access is constrained by a separately controlled network boundary.
+- JSON request bodies use `Content-Type: application/json`; the BibTeX import
+  uses `text/plain`, attachment upload uses `multipart/form-data`, event delivery
+  uses server-sent events, and blob/attachment reads return bytes.
+- Attachment upload requires multipart fields `file` and
+  `plaintext_acknowledged=true`. Attachment bytes, names, paths, MIME types, and
+  sizes remain plaintext even when referenced by a protected page. The
+  acknowledgment records disclosure; it does not encrypt or authorize the
+  upload. See [Attachments and Media](/docs/attachments-and-media).
+- Documented JSON errors contain `{ "status": 409, "error": "..." }`.
+  `detail` and `hint` appear only when the error supplies them. The status lists
+  below come directly from the application OpenAPI document.
+
+Path values are vault-relative and must be URL-encoded when substituted for a
+`{path}` parameter. Successful writes can return `201 Created`, `202 Accepted`,
+or `204 No Content`, not only `200 OK`. Revision-bearing mutations reject stale
+clients with `409 Conflict`; fetch the current resource and retry deliberately.
+
+## Examples
+
+```bash
+# Server health/data request
+curl http://127.0.0.1:3000/api/vault/uptime
+
+# Search (URL-encode query values)
+curl "http://127.0.0.1:3000/api/vault/index/search?q=water%20clock&limit=20"
+
+# Create a page in the configured default page folder
+curl -X POST http://127.0.0.1:3000/api/vault/pages \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Research log","body":"First observation"}'
+
+# Upload plaintext attachment bytes (acknowledgment is mandatory)
+curl -X POST http://127.0.0.1:3000/api/vault/attachments/images%2Fclock.jpg \
+  -F "file=@clock.jpg" \
+  -F "plaintext_acknowledged=true"
+```
+
+For exact request and response schemas, defaults, parameter locations, and live
+examples, use the OpenAPI JSON or Swagger UI exposed by the same running binary.
+The canonical inventory below remains stable and searchable in this guide.
+
+## Academic
+
+### `POST /api/vault/academic/annotations`
+Create annotation. Responses: `201` Annotation created; `400` Invalid request; `404` Work not found; `409` Conflict; `500` Internal server error.
+### `POST /api/vault/academic/import/bibtex`
+Import BibTeX. Responses: `200` BibTeX import results; `400` Invalid BibTeX; `500` Internal server error.
+### `POST /api/vault/academic/import/doi`
+Import DOI. Responses: `200` Work already exists; `201` Work imported; `400` Invalid DOI request; `500` Internal server error.
+### `POST /api/vault/academic/import/isbn`
+Import ISBN. Responses: `200` Work already exists; `201` Work imported; `400` Invalid ISBN request; `500` Internal server error.
+### `POST /api/vault/academic/import/zotero`
+Import Zotero data. Responses: `200` Import results; `400` Invalid request; `500` Internal server error.
+### `GET /api/vault/academic/works`
+List works. Responses: `200` List works; `500` Internal server error.
+### `POST /api/vault/academic/works`
+Create work. Responses: `201` Work created; `400` Invalid request; `409` Conflict; `422` Validation error; `500` Internal server error.
+### `GET /api/vault/academic/works/by-id/{uuid}`
+Get work. Responses: `200` Work detail; `404` Work not found; `500` Internal server error.
+### `PUT /api/vault/academic/works/by-id/{uuid}`
+Update work. Responses: `200` Updated work; `404` Work not found; `409` Cite key conflict; `422` Validation error; `500` Internal server error.
+### `GET /api/vault/academic/works/by-id/{uuid}/annotations`
+List annotations. Responses: `200` List annotations for work; `404` Work not found; `500` Internal server error.
+
+## Agenda
+
+### `GET /api/vault/agenda/cycle-burndown`
+Get cycle burndown. Responses: `200` Historical cycle burndown; `400` Invalid cycle dates or telemetry scope; `404` Cycle not found; `500` Internal server error.
+### `GET /api/vault/agenda/overdue`
+List overdue tasks. Responses: `200` Overdue tasks; `500` Internal server error.
+### `GET /api/vault/agenda/today`
+Get today's agenda. Responses: `200` Today's agenda; `500` Internal server error.
+### `GET /api/vault/agenda/week`
+Get the seven-day agenda. Responses: `200` Seven-day agenda; `500` Internal server error.
+
+## Archive
+
+### `POST /api/vault/archive`
+Ingest archive. Responses: `200` Archive already exists; `201` Archive created; `400` Invalid archive payload; `403` Archiving disabled; `409` Archive content conflict; `500` Internal server error.
+### `GET /api/vault/archive/status`
+Get archive status. Responses: `200` Archive service status; `500` Internal server error.
+### `GET /api/vault/cas/{hash}`
+Serve blob. Responses: `200` Archived blob bytes; `404` Blob not found; `500` Internal server error.
+
+## Attachments
+
+### `GET /api/vault/attachments`
+List attachments. Responses: `200` List attachments; `500` Internal server error.
+### `DELETE /api/vault/attachments/{path}`
+Delete attachment. Responses: `204` Attachment deleted; `400` Invalid path; `404` Attachment not found; `500` Internal server error.
+### `GET /api/vault/attachments/{path}`
+Get attachment. Responses: `200` Attachment bytes; `400` Invalid path; `404` Attachment not found; `500` Internal server error.
+### `POST /api/vault/attachments/{path}`
+Upload multipart fields `file` and `plaintext_acknowledged=true`. Missing,
+duplicate, file-valued, or non-`true` acknowledgment is `400`, and no file is
+installed. Attachment bytes and metadata remain plaintext even when a protected
+page contains the reference; see
+[Attachments and Media](/docs/attachments-and-media). Responses: `201`
+Attachment uploaded; `400` Invalid request; `409` Attachment already exists;
+`500` Internal server error.
+
+## Bases
+
+### `GET /api/vault/bases`
+List bases. Responses: `200`.
+### `POST /api/vault/bases`
+Create base. Responses: `200`; `400`; `409`; `500`.
+### `DELETE /api/vault/bases/{slug}`
+Delete base. Responses: `200` Base definition deleted; `400`; `404`; `409`; `500`.
+### `GET /api/vault/bases/{slug}`
+Get base. Responses: `200`; `400`; `404`; `409`; `500`.
+### `PUT /api/vault/bases/{slug}`
+Update base. Responses: `200`; `400`; `404`; `409`; `500`.
+### `POST /api/vault/bases/{slug}/members`
+Create base member. Responses: `201` Base member created; `400` Malformed or unsupported input; `404` Base or view not found; `409` Stale Base revision or exhausted path retries; `422` Candidate does not match Base membership or selected view; `500` Internal server error.
+### `GET /api/vault/bases/{slug}/views/{view}`
+Evaluate view. Responses: `200`; `404` Unknown base or view.
+### `POST /api/vault/bases/{slug}/views/{view}/evaluate`
+Evaluate embedded view. Responses: `200`; `400`; `404`; `409`; `500`.
+### `POST /api/vault/bases/preview`
+Preview base. Responses: `200`.
+### `PATCH /api/vault/pages/by-id/{uuid}/properties`
+Patch properties. Responses: `200`; `400` Reserved key or unrepresentable value; `404` Unknown page; `409` Stale `expected_revision`.
+### `POST /api/vault/query`
+Run query. Responses: `200`; `400` Invalid filter, field, or value.
+
+## BCL
+
+### `GET /api/vault/bcl`
+Get BCL countdown. Responses: `200` BCL countdown (fields null when unconfigured).
+
+## Blocks
+
+### `GET /api/vault/blocks/{block_id}`
+Get block. Responses: `200` Block detail; `404` Block not found; `500` Internal server error.
+### `POST /api/vault/blocks/assign-id`
+Assign block ID. Responses: `200` Assigned block ID; `400` Invalid block target; `409` Block target is stale or protected; `500` Internal server error.
+### `GET /api/vault/blocks/search`
+Search blocks. Responses: `200` Matching blocks; `500` Internal server error.
+
+## Board
+
+### `GET /api/vault/board`
+Get board. Responses: `200` Board read model; `500` Internal server error.
+### `POST /api/vault/board/cycles`
+Create cycle. Responses: `201` Cycle created; `400` Invalid input; `409` Cycle already exists; `500` Internal server error.
+### `PATCH /api/vault/board/cycles/{id}`
+Patch cycle. Responses: `200` Cycle updated; `400` Invalid input; `404` Cycle not found; `500` Internal server error.
+### `POST /api/vault/board/tasks`
+Create task. Responses: `201` Task created; `400` Invalid input; `500` Internal server error.
+### `PATCH /api/vault/board/tasks/{id}`
+Patch task. Responses: `200` Task updated; `400` Invalid input; `404` Task not found; `409` Destination or stale mutation conflict; `500` Internal server error.
+
+## Conversations
+
+### `POST /api/vault/conversations/capture`
+Capture conversation. Responses: `200` Conversation appended or unchanged; `201` Conversation created; `400` Invalid capture request; `409` Conversation identity or content conflict; `500` Internal server error.
+
+## Deeplink
+
+### `GET /api/vault/resolve`
+Resolve URL. Responses: `200` Resolved page path; `400` Unparseable link; `404` No page matches.
+
+## Encryption
+
+### `GET /api/vault/encryption`
+Get encryption config. Responses: `200` Vault encryption configuration; `500` Invalid or unreadable keyring.
+### `POST /api/vault/encryption/setup`
+Set up encryption. Responses: `201` Vault encryption initialized; `400` Invalid public key or wrapped identity; `409` Vault encryption already initialized; `500` Keyring persistence failed.
+### `PUT /api/vault/encryption/wrapped-identity`
+Replace wrapped identity. Responses: `200` Wrapped identity replaced; `400` Invalid wrapped identity; `404` Vault encryption is not initialized; `409` Keyring revision conflict; `500` Keyring persistence failed.
+
+## Events
+
+### `GET /api/vault/events`
+Open the server-sent events stream. Responses: `200` Server-sent events stream.
+
+## Feeds
+
+### `GET /api/vault/feeds`
+List feeds. Responses: `200`; `400`; `500`.
+### `POST /api/vault/feeds`
+Subscribe to a feed. Responses: `201`; `400`; `409`; `500`.
+### `DELETE /api/vault/feeds/{id}`
+Delete feed. Responses: `200`; `400`; `404`; `409`; `500`.
+### `PATCH /api/vault/feeds/{id}`
+Update feed. Responses: `200`; `400`; `404`; `409`; `500`.
+### `GET /api/vault/feeds/entries`
+List entries. Responses: `200`; `400`; `500`.
+### `GET /api/vault/feeds/entries/{id}`
+Get one entry. Responses: `200`; `404`; `500`.
+### `PATCH /api/vault/feeds/entries/{id}`
+Patch entry. Responses: `200`; `400`; `404`; `500`.
+### `POST /api/vault/feeds/entries/mark-read`
+Mark entries read. Responses: `200`; `400`; `500`.
+### `GET /api/vault/feeds/export`
+Export OPML. Responses: `200`; `500`.
+### `POST /api/vault/feeds/import`
+Import OPML. Responses: `200`; `400`; `409`; `500`.
+### `POST /api/vault/feeds/refresh`
+Refresh feeds. Responses: `202`; `500`.
+### `POST /api/vault/feeds/refresh/{id}`
+Refresh feed. Responses: `202`; `404`; `500`.
+
+## Folders
+
+### `GET /api/vault/folders`
+List folders. Responses: `200` List top-level folders; `500` Internal server error.
+### `POST /api/vault/folders-move/{path}`
+Move folder. Responses: `200` Folder moved; `400` Invalid input; `404` Folder not found; `409` Destination conflict; `500` Internal server error.
+### `DELETE /api/vault/folders/{path}`
+Delete folder. Responses: `204` Folder deleted; `400` Invalid path; `404` Folder not found; `409` Folder not empty; `500` Internal server error.
+### `GET /api/vault/folders/{path}`
+List folder contents. Responses: `200` Folder contents; `400` Invalid path; `404` Folder not found; `500` Internal server error.
+### `POST /api/vault/folders/{path}`
+Create folder. Responses: `201` Folder created; `400` Invalid path; `500` Internal server error.
+### `GET /api/vault/folders/tree`
+List folder tree. Responses: `200` All non-hidden folder paths; `500` Internal server error.
+
+## Index
+
+### `GET /api/vault/index/ambiguous`
+List ambiguous canonical names. Responses: `200` Ambiguous canonical names; `500` Internal server error.
+### `GET /api/vault/index/backlinks/{path}`
+Get backlinks. Responses: `200` Backlinks; `400` Invalid path; `500` Internal server error.
+### `GET /api/vault/index/content-index`
+Get content index. Responses: `200` Content index; `500` Internal server error.
+### `POST /api/vault/index/create-from-link`
+Create from link. Responses: `201` Page created from unresolved link; `400` Invalid request; `409` Page already exists; `500` Internal server error.
+### `GET /api/vault/index/graph`
+Get graph. Responses: `200` Resolved link graph; `500` Internal server error.
+### `GET /api/vault/index/issues`
+List reference issues. Responses: `200` Paginated reference issue inventory; `400` Invalid filter or pagination value; `500` Reference issue inventory unavailable.
+### `POST /api/vault/index/issues/apply`
+Apply reference repair. Responses: `200` Committed reference repair; `400` Action is unavailable or invalid; `409` Issue, source revision, or path state is stale; `500` Reference repair could not be committed.
+### `POST /api/vault/index/issues/preview`
+Preview reference repair. Responses: `200` Reference repair preview; `400` Action is unavailable or invalid; `409` Issue or source revision is stale; `500` Reference repair could not be prepared.
+### `GET /api/vault/index/outlinks/{path}`
+Get outlinks. Responses: `200` Outlinks; `400` Invalid path; `404` Page not found; `500` Internal server error.
+### `POST /api/vault/index/preview-mutation`
+Preview mutation. Responses: `200` Mutation preview; `400` Invalid operation; `500` Internal server error.
+### `POST /api/vault/index/rebuild`
+Rebuild index. Responses: `200` Index rebuilt; `500` Internal server error.
+### `GET /api/vault/index/search`
+Search. Responses: `200` Search results; `400` Invalid query; `500` Internal server error.
+### `GET /api/vault/index/similar/{path}`
+Find similar pages. Responses: `200` Similar pages by tag overlap; `400` Invalid path; `500` Internal server error.
+### `GET /api/vault/index/stats`
+Get stats. Responses: `200` Vault statistics; `500` Internal server error.
+### `GET /api/vault/index/tags`
+List tags. Responses: `200` Tag counts; `500` Internal server error.
+### `GET /api/vault/index/unresolved`
+List unresolved links. Responses: `200` Unresolved links; `500` Internal server error.
+### `GET /api/vault/index/warnings`
+List warnings. Responses: `200` Index warnings; `500` Internal server error.
+
+## Journal
+
+### `GET /api/vault/journal/{date}`
+Get journal by date. Responses: `200` Journal page; `400` Invalid date; `404` Journal not found; `500` Internal server error.
+### `GET /api/vault/journal/range`
+Get date range. Responses: `200` Journals in date range; `400` Invalid date range; `500` Internal server error.
+### `GET /api/vault/journal/recent`
+Get recent journals. Responses: `200` Recent journals; `500` Internal server error.
+### `GET /api/vault/journal/today`
+Get today's journal. Responses: `200` Today's journal; `404` Journal not found; `500` Internal server error.
+### `POST /api/vault/journal/today`
+Ensure today's journal exists. Responses: `200` Existing journal; `201` Created journal; `500` Internal server error.
+### `POST /api/vault/journal/today/capture`
+Capture into today's journal. Responses: `200` Updated journal; `409` Protected journal; `500` Internal server error.
+
+## Location
+
+### `GET /api/vault/geocode`
+Search geocoding candidates. Responses: `200` Geocoding candidates; `400` Blank query; `502` Upstream geocoding service failure.
+### `GET /api/vault/location`
+Get location. Responses: `200` Vault location (fields null when unconfigured).
+### `PUT /api/vault/location`
+Update location. Responses: `200` Updated vault location; `400` Latitude or longitude out of range.
+
+## Pages
+
+### `GET /api/vault/pages`
+List pages. Responses: `200` List pages; `400` Unknown kind token; `500` Internal server error.
+### `POST /api/vault/pages`
+Create a page in the default folder. Responses: `201` Page created; `400` Invalid input; `409` Page already exists; `500` Internal server error.
+### `POST /api/vault/pages-assign-bulk`
+Assign pages in one atomic batch. Responses: `200` All pages assigned atomically; `400` Invalid path, kind, project, or duplicate; `404` Page not found; `409` Destination or stale mutation conflict; `500` Internal server error.
+### `POST /api/vault/pages-assign/{path}`
+Assign page. Responses: `200` Assigned and reconciled; `400` Invalid path or unknown kind; `404` Page not found; `409` Destination or stale mutation conflict; `500` Internal server error.
+### `POST /api/vault/pages-move/{path}`
+Move page. Responses: `200` Moved page; `400` Invalid input; `404` Page not found; `409` Destination conflict; `500` Internal server error.
+### `DELETE /api/vault/pages/{path}`
+Delete page. Responses: `204` Page deleted; `400` Invalid input; `404` Page not found; `409` Conflict (backlinks exist); `500` Internal server error.
+### `GET /api/vault/pages/{path}`
+Get page. Responses: `200` Page detail; `400` Invalid path; `404` Page not found; `500` Internal server error.
+### `POST /api/vault/pages/{path}`
+Create page at a path. Responses: `201` Page created; `400` Invalid input; `409` Page already exists; `500` Internal server error.
+### `PUT /api/vault/pages/{path}`
+Update page at a path. Responses: `200` Updated page; `400` Invalid input; `404` Page not found; `409` Page changed since it was loaded; `500` Internal server error.
+### `GET /api/vault/pages/by-id/{uuid}`
+Get page by ID. Responses: `200` Page detail; `404` Page not found; `500` Internal server error.
+### `PUT /api/vault/pages/by-id/{uuid}`
+Update page by ID. Responses: `200` Updated page; `400` Invalid input; `404` Page not found; `409` Page changed since it was loaded; `500` Internal server error.
+### `POST /api/vault/pages/by-id/{uuid}/protect`
+Protect page by ID. Responses: `200` Protected page; `400` Invalid encryption descriptor or body; `404` Page not found; `409` Page changed since it was loaded; `500` Page protected but cache maintenance failed.
+### `POST /api/vault/pages/by-id/{uuid}/unprotect`
+Unprotect page by ID. Responses: `200` Unprotected page; `400` Page is not protected; `404` Page not found; `409` Page changed since it was loaded; `500` Internal server error.
+
+## Tasks
+
+### `GET /api/vault/tasks`
+List tasks. Responses: `200` Task list; `500` Internal server error.
+### `GET /api/vault/tasks/history`
+Get task completion history. Responses: `200` Daily sealed task counts; `400` Invalid telemetry scope; `500` Internal server error.
+### `PUT /api/vault/tasks/status`
+Update task status. Responses: `200` Updated task; `400` Invalid task update; `404` Page not found; `409` Task target is stale or protected; `500` Internal server error.
+
+## Uptime
+
+### `GET /api/vault/uptime`
+Get uptime. Responses: `200` Server uptime in seconds.

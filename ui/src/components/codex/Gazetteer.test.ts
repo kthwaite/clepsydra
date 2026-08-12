@@ -7,6 +7,7 @@ import { useGazetteerStore } from "#/store/gazetteer";
 import { Gazetteer, toggleInSet } from "./Gazetteer";
 
 const {
+  bulkMutateMock,
   contentQueryState,
   contentState,
   layoutState,
@@ -20,6 +21,7 @@ const {
     total: 0,
   };
   return {
+    bulkMutateMock: vi.fn(),
     contentQueryState: {
       data: contentState as typeof contentState | undefined,
       error: null as Error | null,
@@ -50,11 +52,12 @@ vi.mock("#/api/index", () => ({
   useTags: () => tagQueryState,
 }));
 vi.mock("#/api/pages", () => ({
-  useAssignBulk: () => ({ isPending: false, mutate: vi.fn() }),
+  useAssignBulk: () => ({ isPending: false, mutate: bulkMutateMock }),
 }));
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => layoutState.mobile,
 }));
+
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab:
     () =>
@@ -110,6 +113,7 @@ beforeEach(() => {
   tagQueryState.isFetching = false;
   tagQueryState.error = null;
   tagQueryState.refetch.mockReset();
+  bulkMutateMock.mockReset();
   contentState.items = Array.from({ length: 25 }, (_, index) =>
     makeContentEntry(index),
   );
@@ -448,5 +452,49 @@ describe("Gazetteer controller", () => {
       "status",
     );
     expect(screen.getByText("#legacy-url-tag")).toBeVisible();
+  });
+  it("accepts an atomic moved-and-unchanged bulk response and clears the selection", async () => {
+    layoutState.mobile = false;
+    bulkMutateMock.mockImplementation(
+      (
+        _request: unknown,
+        options: {
+          onSuccess: (response: {
+            moved: [string, string][];
+            unchanged: string[];
+          }) => void;
+        },
+      ) => {
+        options.onSuccess({
+          moved: [["notes/alpha.md", "quotes/alpha.md"]],
+          unchanged: [],
+        });
+      },
+    );
+    const user = userEvent.setup();
+    render(createElement(Gazetteer));
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    expect(
+      screen.getByRole("button", { name: "✕ 1 selected" }),
+    ).toBeVisible();
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Project" }),
+      "Atlas{Enter}",
+    );
+
+    expect(bulkMutateMock).toHaveBeenCalledWith(
+      {
+        body: {
+          paths: ["notes/alpha.md"],
+          project: "Atlas",
+        },
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
+    expect(
+      screen.queryByRole("button", { name: "✕ 1 selected" }),
+    ).not.toBeInTheDocument();
   });
 });

@@ -5,6 +5,7 @@ export interface DocMeta {
   slug: string;
   title: string;
   description: string;
+  keywords: readonly string[];
 }
 
 export interface DocPage extends DocMeta {

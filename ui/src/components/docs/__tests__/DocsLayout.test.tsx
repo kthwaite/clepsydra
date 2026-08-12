@@ -160,11 +160,15 @@ describe("DocsLayout", () => {
       within(dialog).getByRole("searchbox", {
         name: "Search documentation",
       }),
-      "setup neovim",
+      "configure neovim",
     );
     const headingResult = within(dialog)
       .getAllByRole("link")
-      .find((link) => link.getAttribute("href") === "/docs/lsp#setup-neovim-011");
+      .find(
+        (link) =>
+          link.getAttribute("href") ===
+          "/docs/lsp#configure-neovim-011-or-newer",
+      );
     expect(headingResult).toBeDefined();
 
     let locationAtClose: { pathname: string; hash: string } | undefined;
@@ -181,7 +185,7 @@ describe("DocsLayout", () => {
     await user.click(headingResult as HTMLAnchorElement);
     expect(dialog).toBeInTheDocument();
     expect(router.state.location.pathname).toBe("/docs/lsp");
-    expect(router.state.location.hash).toBe("setup-neovim-011");
+    expect(router.state.location.hash).toBe("configure-neovim-011-or-newer");
 
     releaseNavigation();
     await waitFor(() => {
@@ -190,7 +194,7 @@ describe("DocsLayout", () => {
       ).not.toBeInTheDocument();
       expect(locationAtClose).toEqual({
         pathname: "/docs/lsp",
-        hash: "setup-neovim-011",
+        hash: "configure-neovim-011-or-newer",
       });
     });
     closeObserver.disconnect();

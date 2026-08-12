@@ -84,15 +84,24 @@ async fn deeplink_redirects_to_page_on_hit() {
 }
 
 #[tokio::test]
-async fn deeplink_redirects_to_link_miss_on_miss() {
+async fn deeplink_redirects_unknown_targets_to_repairs_with_target_context() {
     let fx = ApiFixture::builder().build();
-    let res = fx
-        .server
-        .get("/deeplink")
-        .add_query_param("url", "clepsydra://page/nope")
-        .await;
-    res.assert_status(StatusCode::TEMPORARY_REDIRECT);
-    let loc = res.header("location");
-    let loc = loc.to_str().unwrap();
-    assert!(loc.starts_with("/link-miss?target="), "got {loc}");
+    for (url, expected_location) in [
+        (
+            "clepsydra://page/nope",
+            "/repairs?target=clepsydra%3A%2F%2Fpage%2Fnope",
+        ),
+        (
+            "clepsydra://frobnicate/nope",
+            "/repairs?target=clepsydra%3A%2F%2Ffrobnicate%2Fnope",
+        ),
+    ] {
+        let res = fx
+            .server
+            .get("/deeplink")
+            .add_query_param("url", url)
+            .await;
+        res.assert_status(StatusCode::TEMPORARY_REDIRECT);
+        assert_eq!(res.header("location"), expected_location);
+    }
 }
