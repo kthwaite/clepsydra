@@ -24,6 +24,23 @@ export type ReferenceRepairRequest =
   components["schemas"]["ReferenceRepairRequest"];
 export type ReferenceRepairResult =
   components["schemas"]["ReferenceRepairApplyResponse"];
+export class ReferenceRepairApiError extends Error {
+  readonly cause: components["schemas"]["ApiError"];
+  readonly payload: components["schemas"]["ApiError"];
+  readonly status: number;
+
+  constructor(
+    payload: components["schemas"]["ApiError"],
+    status: number,
+    fallback: string,
+  ) {
+    super(payload.error || fallback);
+    this.name = "ReferenceRepairApiError";
+    this.cause = payload;
+    this.payload = payload;
+    this.status = status;
+  }
+}
 
 export interface ReferenceIssueFilters {
   kind?: ReferenceIssue["kind"][];
@@ -169,9 +186,10 @@ function referenceIssueQuery(
 
 function referenceRepairError(
   error: components["schemas"]["ApiError"],
+  status: number,
   fallback: string,
-): Error {
-  return new Error(error.error || fallback);
+): ReferenceRepairApiError {
+  return new ReferenceRepairApiError(error, status, fallback);
 }
 
 export function useReferenceIssues(
@@ -181,13 +199,14 @@ export function useReferenceIssues(
   return useQuery({
     queryKey: queryKeys.index.issues(query),
     queryFn: async () => {
-      const { data, error } = await fetchClient.GET(
+      const { data, error, response } = await fetchClient.GET(
         queryKeys.index.issuesPath,
         { params: { query } },
       );
       if (error) {
         throw referenceRepairError(
           error,
+          response.status,
           "Failed to load reference issues.",
         );
       }
@@ -204,13 +223,14 @@ export function usePreviewReferenceRepair(): UseMutationResult<
 > {
   return useMutation({
     mutationFn: async (body) => {
-      const { data, error } = await fetchClient.POST(
+      const { data, error, response } = await fetchClient.POST(
         "/api/vault/index/issues/preview",
         { body },
       );
       if (error) {
         throw referenceRepairError(
           error,
+          response.status,
           "Failed to preview reference repair.",
         );
       }
@@ -236,12 +256,16 @@ export function useApplyReferenceRepair(): UseMutationResult<
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (body) => {
-      const { data, error } = await fetchClient.POST(
+      const { data, error, response } = await fetchClient.POST(
         "/api/vault/index/issues/apply",
         { body },
       );
       if (error) {
-        throw referenceRepairError(error, "Failed to apply reference repair.");
+        throw referenceRepairError(
+          error,
+          response.status,
+          "Failed to apply reference repair.",
+        );
       }
       if (!data) throw new Error("Reference repair result was empty.");
       return data;

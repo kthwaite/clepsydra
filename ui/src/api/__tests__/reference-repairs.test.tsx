@@ -1,15 +1,35 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
 import { fetchClient } from "#/api/client";
 import {
+  ReferenceRepairApiError,
   type ReferenceIssueFilters,
   useApplyReferenceRepair,
   usePreviewReferenceRepair,
   useReferenceIssues,
 } from "#/api/index";
 import { queryKeys } from "#/api/keys";
+
+const transport = vi.hoisted(() => {
+  const fetch = vi.fn<typeof globalThis.fetch>();
+  const NativeRequest = globalThis.Request;
+  class SameOriginRequest extends NativeRequest {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(
+        typeof input === "string" && input.startsWith("/")
+          ? new URL(input, "http://localhost")
+          : input,
+        init,
+      );
+    }
+  }
+  vi.stubGlobal("Request", SameOriginRequest);
+  vi.stubGlobal("fetch", fetch);
+  return { fetch };
+});
 
 const issue = {
   actions: ["replace" as const],
@@ -54,15 +74,17 @@ function harness() {
   };
 }
 
+beforeEach(() => transport.fetch.mockReset());
 afterEach(() => vi.restoreAllMocks());
 
 describe("useReferenceIssues", () => {
-  it("serializes every filter into the generated request and cache key", async () => {
-    const get = vi.spyOn(fetchClient, "GET").mockResolvedValue({
-      data: issuesResponse,
-      error: undefined,
-      response: new Response(null, { status: 200 }),
-    } as never);
+  it("serializes every filter into the transport URL and cache key", async () => {
+    transport.fetch.mockResolvedValue(
+      new Response(JSON.stringify(issuesResponse), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     const filters: ReferenceIssueFilters = {
       kind: ["unresolved_page_link", "orphan_page"],
       project: "Atlas",
@@ -84,9 +106,12 @@ describe("useReferenceIssues", () => {
       limit: 25,
       offset: 50,
     };
-    expect(get).toHaveBeenCalledWith("/api/vault/index/issues", {
-      params: { query },
-    });
+    expect(transport.fetch).toHaveBeenCalledTimes(1);
+    const sentRequest = transport.fetch.mock.calls[0]?.[0] as Request;
+    const sentUrl = new URL(sentRequest.url);
+    expect(`${sentUrl.pathname}${sentUrl.search}`).toBe(
+      "/api/vault/index/issues?kind=unresolved_page_link&kind=orphan_page&project=Atlas&page_kind=PROJECT&actionable=false&limit=25&offset=50",
+    );
     expect(client.getQueryCache().getAll()[0]?.queryKey).toEqual(
       queryKeys.index.issues(query),
     );
@@ -94,11 +119,12 @@ describe("useReferenceIssues", () => {
   });
 
   it("omits empty filters and reuses the cache entry across object identities", async () => {
-    const get = vi.spyOn(fetchClient, "GET").mockResolvedValue({
-      data: { ...issuesResponse, limit: 50, offset: 0 },
-      error: undefined,
-      response: new Response(null, { status: 200 }),
-    } as never);
+    transport.fetch.mockResolvedValue(
+      new Response(JSON.stringify({ ...issuesResponse, limit: 50, offset: 0 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
     const { client, wrapper } = harness();
     const { result, rerender } = renderHook(
       ({ filters }: { filters: ReferenceIssueFilters }) =>
@@ -112,10 +138,12 @@ describe("useReferenceIssues", () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     rerender({ filters: { kind: [], project: "" } });
 
-    expect(get).toHaveBeenCalledTimes(1);
-    expect(get).toHaveBeenCalledWith("/api/vault/index/issues", {
-      params: { query: {} },
-    });
+    expect(transport.fetch).toHaveBeenCalledTimes(1);
+    const sentRequest = transport.fetch.mock.calls[0]?.[0] as Request;
+    const sentUrl = new URL(sentRequest.url);
+    expect(`${sentUrl.pathname}${sentUrl.search}`).toBe(
+      "/api/vault/index/issues",
+    );
     expect(client.getQueryCache().getAll()).toHaveLength(1);
     expect(client.getQueryCache().getAll()[0]?.queryKey).toEqual(
       queryKeys.index.issues({}),
@@ -202,13 +230,19 @@ describe("reference repair mutations", () => {
     expect(client.getQueryData(issuesKey)).toEqual(issuesResponse);
   });
 
-  it("surfaces preview and apply errors without invalidating cached data", async () => {
-    const serverError = { error: "stale reference", status: 409 };
-    vi.spyOn(fetchClient, "POST").mockResolvedValue({
-      data: undefined,
-      error: serverError,
-      response: new Response(null, { status: 409 }),
-    } as never);
+  it("preserves typed preview and apply HTTP errors without invalidating cached data", async () => {
+    const serverError = {
+      detail: { fingerprint: "fp-1" },
+      error: "stale reference",
+      hint: "Refresh the issue inventory.",
+      status: 409,
+    };
+    transport.fetch.mockImplementation(async () => {
+      return new Response(JSON.stringify(serverError), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
     const { client, wrapper } = harness();
     const issuesKey = queryKeys.index.issues({});
     client.setQueryData(issuesKey, issuesResponse);
@@ -218,19 +252,28 @@ describe("reference repair mutations", () => {
 
     await expect(
       preview.result.current.mutateAsync(request),
-    ).rejects.toThrow("stale reference");
+    ).rejects.toBeInstanceOf(ReferenceRepairApiError);
     await expect(
       apply.result.current.mutateAsync(request),
-    ).rejects.toThrow("stale reference");
+    ).rejects.toBeInstanceOf(ReferenceRepairApiError);
     await waitFor(() => {
       expect(preview.result.current.isError).toBe(true);
       expect(apply.result.current.isError).toBe(true);
     });
 
-    expect(preview.result.current.error).toBeInstanceOf(Error);
-    expect(preview.result.current.error?.message).toBe("stale reference");
-    expect(apply.result.current.error).toBeInstanceOf(Error);
-    expect(apply.result.current.error?.message).toBe("stale reference");
+    for (const error of [
+      preview.result.current.error,
+      apply.result.current.error,
+    ]) {
+      expect(error).toBeInstanceOf(ReferenceRepairApiError);
+      if (!(error instanceof ReferenceRepairApiError)) {
+        throw new Error("Expected a typed reference repair error.");
+      }
+      expect(error.message).toBe("stale reference");
+      expect(error.status).toBe(409);
+      expect(error.payload).toEqual(serverError);
+      expect(error.cause).toEqual(serverError);
+    }
     expect(invalidate).not.toHaveBeenCalled();
     expect(client.getQueryData(issuesKey)).toEqual(issuesResponse);
   });
