@@ -542,12 +542,16 @@ describe("BaseTableView", () => {
     expect(props.onCommitCell).not.toHaveBeenCalled();
   });
 
-  it("keeps a projected body column outside the declared-property edit boundary", async () => {
+  it("opens a flat body excerpt in Folio without editing, sorting, or fetching", async () => {
     const user = userEvent.setup();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
     const props = renderView({
       definition: {
         ...definition,
-        properties: { author: definition.properties.author },
+        properties: {
+          ...definition.properties,
+          body: { type: "text" },
+        },
         views: [
           {
             name: "Continues",
@@ -570,14 +574,116 @@ describe("BaseTableView", () => {
         ],
       },
     });
-    const body = screen.getByText("Projected body excerpt");
 
-    expect(body.tagName).toBe("SPAN");
-    expect(body.closest("button")).toBeNull();
+    try {
+      const body = await screen.findByRole("button", {
+        name: "Open body excerpt for The Book of the New Sun in Folio",
+      });
+      expect(body).toHaveTextContent("Projected body excerpt");
+      expect(body).toHaveClass("w-full", "min-w-0", "truncate");
+      expect(
+        screen.getByRole("columnheader", { name: "body" }),
+      ).not.toHaveClass("cursor-pointer");
+
+      await user.click(body);
+      await user.click(screen.getByRole("columnheader", { name: "body" }));
+
+      expect(props.onOpenPage).toHaveBeenCalledWith("book.md");
+      expect(props.onCommitCell).not.toHaveBeenCalled();
+      expect(props.onSortChange).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("opens a grouped body excerpt through the same Folio control", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Shelf",
+            layout: "table",
+            group_by: "status",
+            columns: ["title", "body"],
+          },
+        ],
+      },
+      activeView: "Shelf",
+      output: {
+        shape: "grouped",
+        groups: [
+          {
+            key: "reading",
+            total: 1,
+            aggregates: [],
+            rows: [
+              {
+                ...row,
+                columns: { body: "A grouped body excerpt" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const body = await screen.findByRole("button", {
+      name: "Open body excerpt for The Book of the New Sun in Folio",
+    });
+    expect(body).toHaveTextContent("A grouped body excerpt");
+
     await user.click(body);
 
-    expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+    expect(props.onOpenPage).toHaveBeenCalledWith("book.md");
     expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
+
+  it("renders protected null and empty body values without content or editors", () => {
+    renderView({
+      definition: {
+        ...definition,
+        properties: {
+          ...definition.properties,
+          body: { type: "text" },
+        },
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "body"],
+          },
+        ],
+      },
+      output: {
+        shape: "flat",
+        total: 2,
+        rows: [
+          {
+            ...row,
+            id: "protected",
+            path: "protected.md",
+            title: "Protected",
+            columns: { body: null },
+          },
+          {
+            ...row,
+            id: "empty",
+            path: "empty.md",
+            title: "Empty",
+            columns: { body: "" },
+          },
+        ],
+      },
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /Open body excerpt/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Edit body")).not.toBeInTheDocument();
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
   });
 
   it("displays only the first sort key and replaces all keys on header sort", async () => {

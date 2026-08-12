@@ -114,6 +114,7 @@ const SYSTEM_COLUMNS: Record<string, boolean> = {
   title: true,
   kind: true,
   project: true,
+  body: false,
   tags: false,
   aliases: false,
   created_at: true,
@@ -121,6 +122,33 @@ const SYSTEM_COLUMNS: Record<string, boolean> = {
   journal_date: true,
   word_count: true,
 };
+
+interface BodyExcerptCellProps {
+  value: CellValue;
+  pageLabel: string;
+  path: string;
+  onOpenPage: (path: string) => void;
+}
+
+function BodyExcerptCell({
+  value,
+  pageLabel,
+  path,
+  onOpenPage,
+}: BodyExcerptCellProps) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+
+  return (
+    <button
+      type="button"
+      aria-label={`Open body excerpt for ${pageLabel} in Folio`}
+      className="cl-mono block w-full min-w-0 cursor-pointer truncate px-1 py-0.5 text-left text-[12px] text-ink-2 underline-offset-2 hover:text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      onClick={() => onOpenPage(path)}
+    >
+      {value}
+    </button>
+  );
+}
 
 const EMPTY_PROPERTIES: NonNullable<BaseDetailResponse["properties"]> = {};
 
@@ -536,8 +564,10 @@ export const BaseTableView = forwardRef<
         {columns.map((column) => {
           const allowsSorting =
             !readOnly &&
-            (SYSTEM_COLUMNS[column] === true ||
-              (properties[column] != null && canSort(properties[column].type)));
+            (SYSTEM_COLUMNS[column] !== undefined
+              ? SYSTEM_COLUMNS[column]
+              : properties[column] != null &&
+                canSort(properties[column].type));
           return (
             <Column
               key={column}
@@ -604,6 +634,15 @@ export const BaseTableView = forwardRef<
                       {row.title ?? row.path}
                     </button>
                   )
+                ) : column === "body" ? (
+                  <BodyExcerptCell
+                    value={
+                      (row.columns as Record<string, CellValue>).body ?? null
+                    }
+                    pageLabel={row.title ?? row.path}
+                    path={row.path}
+                    onOpenPage={onOpenPage}
+                  />
                 ) : !readOnly &&
                   !memberDraftOpen &&
                   SYSTEM_COLUMNS[column] === undefined &&
