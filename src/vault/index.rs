@@ -1401,7 +1401,10 @@ impl VaultIndex {
 
     /// Find an existing archive page by its original URL.
     ///
-    /// Returns `Some((page_id, vault_path, content_hash))` if found.
+    /// Returns `Some((page_id, vault_path, source_hash))` if found. It is
+    /// `source_hash` — the hash of the markdown as captured, before image
+    /// rewriting — and not `content_hash`, because duplicate detection must
+    /// compare what was submitted, not what happened to be stored.
     pub fn find_by_archive_url(
         &self,
         url: &str,

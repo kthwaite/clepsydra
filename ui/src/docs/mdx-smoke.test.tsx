@@ -232,6 +232,15 @@ it("renders self-contained browser extension setup", () => {
   expect(
     screen.getByText("on_content_changed", { exact: true }),
   ).toBeInTheDocument();
+  // Pin what the worker's fallback Markdown actually emits (no snapshot
+  // link — buildFallbackMarkdown only records the URL and capture time) so
+  // this doc can't drift from extension/src/background/service-worker.ts
+  // again without failing here.
+  expect(
+    screen.getByText(
+      /noting that the captured snapshot is still archived and viewable/,
+    ),
+  ).toBeInTheDocument();
 });
 
 it("renders the Books and Reading workflow", () => {

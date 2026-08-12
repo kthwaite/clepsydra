@@ -127,9 +127,10 @@ worker fetch, which sends browser credentials for the target origin.
 The background worker then:
 
 1. converts the extracted article HTML to Markdown when Readability found at
-   least 200 characters of text, or emits fallback Markdown that links the
-   snapshot when it did not — image URLs in that Markdown are left exactly as
-   Readability resolved them;
+   least 200 characters of text — image URLs in that Markdown are left exactly
+   as Readability resolved them — or, when it did not, emits fallback Markdown
+   recording the page's URL and capture time and noting that the captured
+   snapshot is still archived and viewable;
 2. adds `archive`, domain, current-month, and configured default tags; and
 3. posts one archive manifest containing `url`, optional `canonical_url`,
    `domain`, `title`, optional `description`, `captured_at`, `content_hash`

@@ -589,6 +589,10 @@ pub async fn ingest_archive(
     let max_blob_size_mb = archive_config.max_blob_size_mb;
     let max_request_size_mb = archive_config.max_request_size_mb;
 
+    // Serializes the whole ingest: the duplicate-URL check, path-collision
+    // resolution, the CAS/file writes, and the index commit. Without it, two
+    // concurrent captures of the same URL could both pass the duplicate check
+    // and race to create two pages for one archive.
     let _ingest_guard = state.archive_ingest_lock.lock().await;
 
     // 1. Check for existing archive of this URL via the index
@@ -771,7 +775,7 @@ pub async fn ingest_archive(
         ));
     }
 
-    // 8. Return response
+    // 5. Return response
     Ok((
         StatusCode::CREATED,
         Json(ArchiveResponse {

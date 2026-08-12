@@ -851,6 +851,63 @@ fn fidelity_payload(url: &str, markdown: &str) -> serde_json::Value {
     })
 }
 
+/// Like `fidelity_payload`, but the image's original URL carries a
+/// two-parameter query string. SingleFile's `data-sf-original-src` is
+/// serialized via `outerHTML`, which HTML-escapes `&` as `&amp;`; the
+/// markdown carries the literal, decoded `&` turndown read from the DOM.
+/// Regression fixture for the C1 join failure: `original_url_map` used to
+/// key on the escaped form and never match the decoded markdown URL.
+fn fidelity_payload_with_query_image(url: &str, markdown: &str) -> serde_json::Value {
+    let snapshot = format!(
+        concat!(
+            r#"<html><!-- {} --><body><img "#,
+            r#"data-sf-original-src="https://cdn.example.com/a.png?w=800&amp;q=75" "#,
+            r#"src="data:image/png;base64,iVBORw0KGgo="></body></html>"#
+        ),
+        url
+    );
+    serde_json::json!({
+        "url": url,
+        "domain": "example.com",
+        "title": "Fidelity Article",
+        "captured_at": "2026-08-12T12:00:00Z",
+        "content_hash": content_hash(markdown),
+        "snapshot_html": snapshot,
+        "markdown_body": markdown,
+        "tags": ["archive", "example.com"],
+    })
+}
+
+#[tokio::test]
+async fn ingest_rewrites_an_image_whose_original_url_had_an_entity_escaped_query_string() {
+    let (server, _tmp, _state) = setup_server();
+    let markdown = "![a](https://cdn.example.com/a.png?w=800&q=75)";
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload_with_query_image(
+            "https://example.com/query-image",
+            markdown,
+        ))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let path = res.json::<serde_json::Value>()["vault_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let detail: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    let body = detail["body"].as_str().unwrap();
+    assert!(
+        body.contains("cas:"),
+        "expected the image rewritten to a cas: reference, got: {body}"
+    );
+    assert!(
+        !body.contains("cdn.example.com"),
+        "the original URL should not remain in the stored body: {body}"
+    );
+}
+
 #[tokio::test]
 async fn ingest_deconstructs_the_snapshot_into_the_cas() {
     let (server, _tmp, _state) = setup_server();
@@ -1022,7 +1079,8 @@ async fn two_pages_sharing_an_image_store_one_blob() {
     let body: serde_json::Value = res.json();
 
     // The shared image dedupes; only the second snapshot is a new blob. The two
-    // snapshots differ because `fidelity_payload` embeds each page's own title.
+    // snapshots differ because `fidelity_payload` embeds each page's own URL
+    // in an HTML comment.
     assert_eq!(body["blobs_deduped"], 1);
     assert_eq!(body["blobs_stored"], 1);
     assert_eq!(

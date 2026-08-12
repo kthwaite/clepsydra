@@ -52,15 +52,13 @@ function decodeBase64(base64: string): ArrayBuffer {
 }
 
 function encodeBase64(bytes: Uint8Array): string {
-	const CHUNK_SIZE = 0x8000; // 32KB, to stay under the argument-count limit
+	// String.fromCharCode(...bytes) spreads one argument per byte, which blows
+	// the engine's argument-count limit for anything but a small image. Batch
+	// the spread into 32KB chunks, each safely under that limit.
+	const CHUNK_SIZE = 0x8000; // 32KB
 	const parts: string[] = [];
 	for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-		const end = Math.min(i + CHUNK_SIZE, bytes.length);
-		let chunk = "";
-		for (let j = i; j < end; j++) {
-			chunk += String.fromCharCode(bytes[j]);
-		}
-		parts.push(chunk);
+		parts.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK_SIZE)));
 	}
 	return btoa(parts.join(""));
 }

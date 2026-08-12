@@ -157,10 +157,94 @@ pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> 
         if raw.is_empty() {
             continue;
         }
-        let key = absolutise(raw, base_url).unwrap_or_else(|| raw.to_string());
+        // `data-sf-original-src` was written into the DOM and then serialized
+        // via `outerHTML`, which HTML-escapes the attribute value — a query
+        // string like `?w=800&q=75` comes back as `&amp;q=75`. The markdown is
+        // produced by turndown reading the *decoded* DOM attribute, so it still
+        // says `&q=75`. Without decoding here, the two never compare equal and
+        // the image silently keeps pointing at the live web.
+        let decoded = decode_html_entities(raw);
+        if decoded.is_empty() {
+            continue;
+        }
+        let key = absolutise(&decoded, base_url).unwrap_or_else(|| decoded.into_owned());
         map.insert(key, hash[1].to_string());
     }
     map
+}
+
+/// Decode the handful of HTML entities SingleFile's serialization can
+/// introduce into an attribute value: the five named entities `outerHTML`
+/// actually emits, plus numeric character references (`&#NN;`, `&#xHH;`) for
+/// anything a hand-authored page might contribute.
+///
+/// A single left-to-right scan, not a chain of sequential `replace` calls —
+/// decoding `&amp;` first in a chain would corrupt the literal text
+/// `&amp;lt;` into `<`, when it should decode to the literal text `&lt;`
+/// (an ampersand followed by the four characters `lt;`). Scanning finds `&`,
+/// consumes the longest match starting there, and moves on, which mirrors how
+/// an HTML parser reads entities and gets both cases right.
+fn decode_html_entities(input: &str) -> std::borrow::Cow<'_, str> {
+    if !input.contains('&') {
+        return std::borrow::Cow::Borrowed(input);
+    }
+    let mut out = String::with_capacity(input.len());
+    let mut rest = input;
+    while let Some(amp_pos) = rest.find('&') {
+        out.push_str(&rest[..amp_pos]);
+        let tail = &rest[amp_pos..];
+        match match_entity(tail) {
+            Some((decoded, consumed)) => {
+                out.push(decoded);
+                rest = &tail[consumed..];
+            }
+            None => {
+                out.push('&');
+                rest = &tail[1..];
+            }
+        }
+    }
+    out.push_str(rest);
+    std::borrow::Cow::Owned(out)
+}
+
+/// If `s` (which starts with `&`) opens a known entity, return the decoded
+/// character and how many bytes of `s` it consumed.
+fn match_entity(s: &str) -> Option<(char, usize)> {
+    const NAMED: &[(&str, char)] = &[
+        ("&amp;", '&'),
+        ("&lt;", '<'),
+        ("&gt;", '>'),
+        ("&quot;", '"'),
+        ("&apos;", '\''),
+    ];
+    for (pattern, ch) in NAMED {
+        if s.starts_with(pattern) {
+            return Some((*ch, pattern.len()));
+        }
+    }
+
+    let digits_start = s.strip_prefix("&#")?;
+    let (is_hex, digits_part) = match digits_start
+        .strip_prefix('x')
+        .or_else(|| digits_start.strip_prefix('X'))
+    {
+        Some(hex) => (true, hex),
+        None => (false, digits_start),
+    };
+    let end = digits_part.find(';')?;
+    let digits = &digits_part[..end];
+    if digits.is_empty() {
+        return None;
+    }
+    let value = if is_hex {
+        u32::from_str_radix(digits, 16).ok()?
+    } else {
+        digits.parse::<u32>().ok()?
+    };
+    let ch = char::from_u32(value)?;
+    let prefix_len = 2 + usize::from(is_hex);
+    Some((ch, prefix_len + digits.len() + 1))
 }
 
 /// Point every archived image in `markdown` at its blob.
@@ -460,5 +544,66 @@ mod tests {
 
         let hash = &deconstructed.resources[0].hash;
         assert_eq!(out, format!("![a](cas:{hash})"));
+    }
+
+    // -------------------------------------------------------------------
+    // C1 regression: entity-escaped original URLs must still join.
+    // -------------------------------------------------------------------
+
+    #[test]
+    fn maps_an_original_url_whose_query_string_was_entity_escaped() {
+        // `outerHTML` serialization escapes `&` as `&amp;` in the attribute
+        // SingleFile wrote, but turndown reads the decoded DOM attribute for
+        // the markdown, so the markdown still carries a literal `&`. The map
+        // has to bridge that or every multi-parameter query URL misses.
+        let html = concat!(
+            r#"<img data-sf-original-src="https://cdn.example.com/a.png?w=800&amp;q=75" "#,
+            r#"src="cas:sha256:aa">"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(
+            map.get("https://cdn.example.com/a.png?w=800&q=75"),
+            Some(&"sha256:aa".to_string())
+        );
+    }
+
+    #[test]
+    fn rewrite_end_to_end_survives_an_entity_escaped_query_string() {
+        // The full join: a snapshot attribute HTML-escaped by `outerHTML`
+        // (`&` -> `&amp;`), paired against markdown carrying the *decoded*
+        // URL turndown reads from the live DOM. `original_url_map` has to
+        // decode the snapshot's copy, or this pairing never matches and the
+        // image is left pointing at the live web.
+        let html = concat!(
+            r#"<img data-sf-original-src="https://cdn.example.com/a.png?w=800&amp;q=75" "#,
+            r#"src="cas:sha256:aa">"#
+        );
+        let map = original_url_map(html, BASE);
+
+        let out =
+            rewrite_markdown_images("![a](https://cdn.example.com/a.png?w=800&q=75)", &map, BASE);
+
+        assert_eq!(out, "![a](cas:sha256:aa)");
+    }
+
+    #[test]
+    fn decode_html_entities_handles_named_and_numeric_references() {
+        assert_eq!(decode_html_entities("a&amp;b"), "a&b");
+        assert_eq!(decode_html_entities("a&lt;b&gt;c"), "a<b>c");
+        assert_eq!(decode_html_entities(r#"a&quot;b&apos;c"#), r#"a"b'c"#);
+        assert_eq!(decode_html_entities("a&#39;b"), "a'b");
+        assert_eq!(decode_html_entities("a&#x26;b"), "a&b");
+    }
+
+    #[test]
+    fn decode_html_entities_does_not_double_decode_amp_lt() {
+        // `&amp;lt;` in serialized markup is the literal text "&lt;" (an
+        // ampersand followed by "lt;") — the page never contained a `<`. A
+        // naive sequential replace (expand `&amp;` everywhere, then `&lt;`
+        // everywhere) would corrupt this into `<`. A single left-to-right scan
+        // must not.
+        assert_eq!(decode_html_entities("&amp;lt;"), "&lt;");
     }
 }
