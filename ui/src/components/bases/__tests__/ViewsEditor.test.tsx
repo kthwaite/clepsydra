@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -216,6 +216,247 @@ describe("ViewsEditor", () => {
     expect(removeTitle.querySelector("svg")).not.toBeNull();
     await user.click(removeTitle);
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual(["status"]);
+  });
+
+  it("presents visible columns as a compact semantic table", () => {
+    renderViews({
+      views: [
+        view({
+          id: "view-all",
+          columns: ["title", "rating", "status"],
+        }),
+      ],
+    });
+
+    const table = screen.getByRole("table", { name: "Visible column order" });
+    expect(
+      within(table)
+        .getAllByRole("columnheader")
+        .map((cell) => cell.textContent),
+    ).toEqual(["Order", "Column", "Actions"]);
+    expect(
+      within(table)
+        .getAllByRole("rowheader")
+        .map((cell) => cell.textContent),
+    ).toEqual(["title", "rating", "status"]);
+  });
+
+  it("reorders visible columns from a pointer drag on the named handle", () => {
+    const onChange = renderViews({
+      views: [
+        view({
+          id: "view-all",
+          columns: ["title", "rating", "status"],
+        }),
+      ],
+    });
+
+    fireEvent.dragStart(
+      screen.getByRole("button", { name: "Reorder rating column" }),
+    );
+    fireEvent.dragOver(screen.getByRole("row", { name: /status/i }));
+    fireEvent.drop(screen.getByRole("row", { name: /status/i }));
+
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "title",
+      "status",
+      "rating",
+    ]);
+  });
+
+  it("clears a cancelled column drag before a later drop", () => {
+    const onChange = renderViews({
+      views: [
+        view({
+          id: "view-all",
+          columns: ["title", "rating", "status"],
+        }),
+      ],
+    });
+    const handle = screen.getByRole("button", {
+      name: "Reorder rating column",
+    });
+
+    fireEvent.dragStart(handle);
+    fireEvent.dragEnd(handle);
+    fireEvent.drop(screen.getByRole("row", { name: /status/i }));
+
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the keyboard column handle focused and announces its new position", async () => {
+    const onChange = renderViews({
+      views: [
+        view({
+          id: "view-all",
+          columns: ["title", "rating", "status"],
+        }),
+      ],
+    });
+    const handle = screen.getByRole("button", {
+      name: "Reorder rating column",
+    });
+    expect(handle).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowUp Alt+ArrowDown",
+    );
+    handle.focus();
+
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
+
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "rating",
+      "title",
+      "status",
+    ]);
+    expect(
+      screen.getByRole("button", { name: "Reorder rating column" }),
+    ).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved rating to position 1 of 3.",
+    );
+  });
+
+  it("does not move a keyboard column handle beyond a boundary", async () => {
+    const onChange = renderViews({
+      views: [
+        view({
+          id: "view-all",
+          columns: ["title", "rating"],
+        }),
+      ],
+    });
+    const handle = screen.getByRole("button", {
+      name: "Reorder title column",
+    });
+    handle.focus();
+
+    await userEvent.keyboard("{Alt>}{ArrowUp}{/Alt}");
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(handle).toHaveFocus();
+    expect(screen.getByRole("status")).toBeEmptyDOMElement();
+  });
+
+  it("keeps deterministic column actions usable at boundaries and narrow widths", async () => {
+    const previousWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: 360,
+    });
+    window.dispatchEvent(new Event("resize"));
+    const onChange = renderViews({
+      views: [
+        view({
+          id: "view-all",
+          columns: ["title", "rating"],
+        }),
+      ],
+    });
+    const titleRow = screen.getByRole("row", { name: /title/i });
+    const ratingRow = screen.getByRole("row", { name: /rating/i });
+    expect(
+      within(titleRow).getByRole("button", { name: "Move title up" }),
+    ).toBeDisabled();
+    expect(
+      within(ratingRow).getByRole("button", { name: "Move rating down" }),
+    ).toBeDisabled();
+    expect(
+      within(ratingRow).getByRole("button", {
+        name: "Remove rating column",
+      }),
+    ).toBeVisible();
+    expect(ratingRow.closest(".overflow-x-auto")).toBeNull();
+
+    await userEvent.click(
+      within(ratingRow).getByRole("button", { name: "Move rating up" }),
+    );
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "rating",
+      "title",
+    ]);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Remove rating column" }),
+    );
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual(["title"]);
+
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      value: previousWidth,
+    });
+  });
+
+  it("offers body once per view while keeping it independently available in another view", async () => {
+    const onChange = renderViews({
+      views: [
+        view({ id: "all", name: "All", columns: ["title"] }),
+        view({ id: "later", name: "Later", columns: ["title"] }),
+      ],
+    });
+    const user = userEvent.setup();
+    const firstPicker = screen.getByLabelText("Column to add");
+    expect(
+      Array.from(firstPicker.querySelectorAll("option")).map(
+        (option) => option.value,
+      ),
+    ).toContain("body");
+    await user.selectOptions(firstPicker, "body");
+    await user.click(screen.getByRole("button", { name: "Add column" }));
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual(["title", "body"]);
+    expect(
+      Array.from(
+        screen.getByLabelText("Column to add").querySelectorAll("option"),
+      ).map((option) => option.value),
+    ).not.toContain("body");
+
+    await user.click(screen.getByRole("button", { name: "Select Later" }));
+    const secondPicker = screen.getByLabelText("Column to add");
+    expect(
+      Array.from(secondPicker.querySelectorAll("option")).map(
+        (option) => option.value,
+      ),
+    ).toContain("body");
+    await user.selectOptions(secondPicker, "body");
+    await user.click(screen.getByRole("button", { name: "Add column" }));
+    expect(latest<DraftView[]>(onChange).map(({ columns }) => columns)).toEqual([
+      ["title", "body"],
+      ["title", "body"],
+    ]);
+  });
+
+  it("keeps body out of filter, sort, group, aggregate, and inline-edit capabilities", async () => {
+    renderViews({
+      views: [view({ id: "view-all", columns: ["title", "body"] })],
+    });
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Add sort" }));
+    await user.click(
+      screen.getByRole("button", { name: "Add Match all group" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add condition to Match all" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Add aggregate" }));
+    await user.selectOptions(
+      screen.getByLabelText("Aggregate function 1"),
+      "sum",
+    );
+
+    for (const picker of [
+      screen.getByLabelText("Sort field 1"),
+      screen.getByLabelText("Field for condition 1"),
+      screen.getByLabelText("Group by"),
+      screen.getByLabelText("Aggregate field 1"),
+    ]) {
+      expect(
+        Array.from(picker.querySelectorAll("option")).map(
+          (option) => option.value,
+        ),
+      ).not.toContain("body");
+    }
+    expect(
+      screen.queryByRole("button", { name: /edit body/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("authors ordered sort keys and preserves their order", async () => {

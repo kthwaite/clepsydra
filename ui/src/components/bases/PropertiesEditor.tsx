@@ -29,7 +29,7 @@ export const SYSTEM_PROPERTY_FIELDS = [
 ] as const;
 
 const RESERVED_PROPERTY_FIELDS: Record<
-  (typeof SYSTEM_PROPERTY_FIELDS)[number],
+  (typeof SYSTEM_PROPERTY_FIELDS)[number] | "body",
   true
 > = {
   id: true,
@@ -44,6 +44,7 @@ const RESERVED_PROPERTY_FIELDS: Record<
   encryption: true,
   journal_date: true,
   word_count: true,
+  body: true,
 };
 
 const TYPE_LABELS: Record<PropertyType, string> = {

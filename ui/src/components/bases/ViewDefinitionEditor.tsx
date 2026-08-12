@@ -1,5 +1,10 @@
-import { ArrowDown, ArrowUp, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
+import {
+  type KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { Aggregate, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
@@ -71,14 +76,22 @@ export function ViewDefinitionEditor({
   registerFocus,
 }: ViewDefinitionEditorProps) {
   const [columnToAdd, setColumnToAdd] = useState("");
+  const [moveAnnouncement, setMoveAnnouncement] = useState("");
+  const [focusColumn, setFocusColumn] = useState<string>();
+  const draggedColumn = useRef<string>();
+  const reorderHandles = useRef(new Map<string, HTMLButtonElement>());
   const fields = fieldCapabilities(properties);
+  const columnFields: FieldCapability[] = [
+    ...fields,
+    { key: "body", type: undefined },
+  ];
   const viewPath = `views[${viewIndex}]`;
   const unsupportedLayout = (view.layout as string) !== "table";
   const groupFields = fields.filter(
     ({ type }) =>
       type !== "system-multi" && type !== "word_count" && canGroup(type),
   );
-  const unselectedColumns = fields.filter(
+  const unselectedColumns = columnFields.filter(
     ({ key }) => !view.columns.includes(key),
   );
   const nameDiagnostics = diagnostics.filter(
@@ -100,6 +113,56 @@ export function ViewDefinitionEditor({
   const layoutInvalid = layoutDiagnostics.some(
     (diagnostic) => diagnostic.severity === "error",
   );
+
+  useEffect(() => {
+    if (!focusColumn) return;
+    const handle = reorderHandles.current.get(focusColumn);
+    if (!handle) return;
+    handle.focus();
+    setFocusColumn(undefined);
+  }, [focusColumn, view.columns]);
+
+  function moveColumn(from: number, to: number) {
+    if (
+      from < 0 ||
+      to < 0 ||
+      from >= view.columns.length ||
+      to >= view.columns.length
+    )
+      return;
+    const moved = view.columns[from];
+    if (!moved || from === to) return;
+    setFocusColumn(moved);
+    setMoveAnnouncement(
+      `Moved ${moved} to position ${to + 1} of ${view.columns.length}.`,
+    );
+    onChange({
+      ...view,
+      columns: moveItem(view.columns, from, to),
+    });
+  }
+
+  function dropColumn(target: string) {
+    const dragged = draggedColumn.current;
+    draggedColumn.current = undefined;
+    if (!dragged) return;
+    moveColumn(view.columns.indexOf(dragged), view.columns.indexOf(target));
+  }
+
+  function handleKeyboardMove(
+    event: KeyboardEvent<HTMLButtonElement>,
+    index: number,
+  ) {
+    if (!event.altKey) return;
+    if (event.key === "ArrowUp" && index > 0) {
+      event.preventDefault();
+      moveColumn(index, index - 1);
+    }
+    if (event.key === "ArrowDown" && index < view.columns.length - 1) {
+      event.preventDefault();
+      moveColumn(index, index + 1);
+    }
+  }
 
   function replaceAggregate(index: number, aggregate: Aggregate) {
     onChange({
@@ -214,58 +277,115 @@ export function ViewDefinitionEditor({
         <p className="mt-1 text-xs leading-5 text-muted-foreground">
           Columns render from left to right in this exact order.
         </p>
-        <ol className="mt-3 grid gap-2" aria-label="Visible column order">
-          {view.columns.map((column, index) => (
-            <li
-              key={`${column}-${index}`}
-              className="flex items-center gap-2 border-b border-border py-2"
-            >
-              <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">
-                {column}
-              </span>
-              <IconButton
-                aria-label={`Move ${column} up`}
-                variant="ghost"
-                isDisabled={index === 0}
-                onPress={() =>
-                  onChange({
-                    ...view,
-                    columns: moveItem(view.columns, index, index - 1),
-                  })
-                }
+        <table
+          className="mt-3 w-full table-fixed border-collapse"
+          aria-label="Visible column order"
+        >
+          <thead>
+            <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              <th scope="col" className="w-10 px-1 py-2 sm:px-2">
+                <span className="sr-only">Order</span>
+              </th>
+              <th scope="col" className="px-2 py-2 sm:px-3">
+                Column
+              </th>
+              <th
+                scope="col"
+                className="w-28 px-1 py-2 text-right sm:w-36 sm:px-2"
               >
-                <ArrowUp />
-              </IconButton>
-              <IconButton
-                aria-label={`Move ${column} down`}
-                variant="ghost"
-                isDisabled={index === view.columns.length - 1}
-                onPress={() =>
-                  onChange({
-                    ...view,
-                    columns: moveItem(view.columns, index, index + 1),
-                  })
-                }
+                Actions
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {view.columns.map((column, index) => (
+              <tr
+                key={column}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  dropColumn(column);
+                }}
+                className="border-b border-border align-top"
               >
-                <ArrowDown />
-              </IconButton>
-              <IconButton
-                aria-label={`Remove ${column} column`}
-                variant="ghost"
-                onPress={() =>
-                  onChange({
-                    ...view,
-                    columns: view.columns.filter(
-                      (_, position) => position !== index,
-                    ),
-                  })
-                }
-              >
-                <Trash2 />
-              </IconButton>
-            </li>
-          ))}
-        </ol>
+                <td className="w-10 px-1 py-2 align-top sm:px-2">
+                  <button
+                    ref={(element) => {
+                      if (element) reorderHandles.current.set(column, element);
+                      else reorderHandles.current.delete(column);
+                    }}
+                    type="button"
+                    aria-label={`Reorder ${column} column`}
+                    aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
+                    title={`Drag to reorder ${column}. Alt + Up or Down also reorders.`}
+                    draggable
+                    onDragStart={() => {
+                      draggedColumn.current = column;
+                    }}
+                    onDragEnd={() => {
+                      draggedColumn.current = undefined;
+                    }}
+                    onKeyDown={(event) => handleKeyboardMove(event, index)}
+                    className="inline-flex h-7 w-7 cursor-grab items-center justify-center border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 active:cursor-grabbing [&_svg]:h-4 [&_svg]:w-4"
+                  >
+                    <GripVertical aria-hidden="true" />
+                  </button>
+                </td>
+                <th
+                  scope="row"
+                  className="break-words px-2 py-2 text-left font-mono text-xs font-semibold text-foreground sm:px-3"
+                >
+                  {column}
+                </th>
+                <td className="w-28 px-1 py-2 sm:w-36 sm:px-2">
+                  <div
+                    className="flex flex-wrap justify-end gap-1"
+                    aria-label={`Actions for ${column}`}
+                  >
+                    <IconButton
+                      aria-label={`Move ${column} up`}
+                      variant="ghost"
+                      isDisabled={index === 0}
+                      onPress={() => moveColumn(index, index - 1)}
+                    >
+                      <ArrowUp />
+                    </IconButton>
+                    <IconButton
+                      aria-label={`Move ${column} down`}
+                      variant="ghost"
+                      isDisabled={index === view.columns.length - 1}
+                      onPress={() => moveColumn(index, index + 1)}
+                    >
+                      <ArrowDown />
+                    </IconButton>
+                    <IconButton
+                      aria-label={`Remove ${column} column`}
+                      variant="ghost"
+                      onPress={() =>
+                        onChange({
+                          ...view,
+                          columns: view.columns.filter(
+                            (_, position) => position !== index,
+                          ),
+                        })
+                      }
+                    >
+                      <Trash2 />
+                    </IconButton>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          className="sr-only"
+        >
+          {moveAnnouncement}
+        </p>
         <div className="mt-3 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <label className={labelClass}>
             Column to add
