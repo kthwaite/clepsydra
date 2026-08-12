@@ -335,23 +335,39 @@ describe("migrateWorkspace", () => {
     expect(out.quires).toEqual({});
   });
 
-  it("v4 migration strips obsolete persisted pin fields", () => {
+  it("v4 migration preserves supported tab fields and strips obsolete data", () => {
     const migrated = migrateWorkspace(
       {
         tabs: [
           {
-            ...pageTab("old"),
+            ...pageTab("old", "q1"),
+            lastActiveAt: 42,
+            focusBlockId: "abc123DEF0",
+            focusRequestId: "request-1",
             pinned: true,
+            unrelatedLegacyKey: "discard",
           },
         ],
-        quires: {},
+        quires: {
+          q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+        },
         openHistory: [],
       },
       3,
     );
 
-    expect(migrated.tabs).toHaveLength(1);
-    expect(migrated.tabs?.[0]).not.toHaveProperty("pinned");
+    expect(migrated.tabs).toStrictEqual([
+      {
+        id: "old",
+        type: "page",
+        path: "old.md",
+        label: "old",
+        lastActiveAt: 42,
+        quireId: "q1",
+        focusBlockId: "abc123DEF0",
+        focusRequestId: "request-1",
+      },
+    ]);
   });
 });
 
@@ -472,20 +488,33 @@ describe("quire actions", () => {
     expect(useWorkspaceStore.getState().activeTabId).toBeNull();
   });
 
-  it("closeQuireTabs closes every member and dissolves the quire", () => {
+  it("closeQuireTabs activates the nearest remaining visible tab", () => {
     resetStore();
     useWorkspaceStore.setState({
-      tabs: [pageTab("q1-a", "q1"), pageTab("q1-b", "q1"), pageTab("other")],
+      tabs: [
+        pageTab("left"),
+        pageTab("q1-a", "q1"),
+        pageTab("q1-b", "q1"),
+        pageTab("hidden", "q2"),
+        pageTab("right"),
+      ],
       activeTabId: "q1-a",
-      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+      quires: {
+        q1: { id: "q1", name: "Q1", color: "sepia", collapsed: false },
+        q2: { id: "q2", name: "Q2", color: "slate", collapsed: true },
+      },
     });
 
     useWorkspaceStore.getState().closeQuireTabs("q1");
 
-    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
-      "other",
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual([
+      "left",
+      "hidden",
+      "right",
     ]);
-    expect(useWorkspaceStore.getState().quires.q1).toBeUndefined();
+    expect(state.quires.q1).toBeUndefined();
+    expect(state.activeTabId).toBe("right");
   });
 
   it("ungroupQuire strips membership and deletes the record", () => {
@@ -636,17 +665,26 @@ describe("visibility-aware closing", () => {
     expect(useWorkspaceStore.getState().quires.q1).toBeUndefined();
   });
 
-  it("closeOtherTabs closes every tab except the requested survivor", () => {
+  it("closeOtherTabs activates the sole survivor and retains its focus request", () => {
     resetStore();
     useWorkspaceStore.setState({
-      tabs: [pageTab("old"), pageTab("active")],
+      tabs: [
+        pageTab("active"),
+        {
+          ...pageTab("survivor"),
+          focusBlockId: "abc123DEF0",
+          focusRequestId: "request-1",
+        },
+      ],
       activeTabId: "active",
     });
 
-    useWorkspaceStore.getState().closeOtherTabs("active");
+    useWorkspaceStore.getState().closeOtherTabs("survivor");
 
-    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
-      "active",
-    ]);
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["survivor"]);
+    expect(state.activeTabId).toBe("survivor");
+    expect(state.tabs[0].focusBlockId).toBe("abc123DEF0");
+    expect(state.tabs[0].focusRequestId).toBe("request-1");
   });
 });
