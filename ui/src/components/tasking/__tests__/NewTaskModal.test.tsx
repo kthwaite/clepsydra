@@ -339,28 +339,38 @@ describe("NewTaskModal — submit payload", () => {
     });
   });
 
-  it("sends UNTITLED TASKING when title is left blank", async () => {
+  it("commit button is disabled when title is empty", () => {
     const stub = makeCreateStub();
     wrap(stub);
 
-    await userEvent.click(screen.getByTestId("new-task-commit"));
+    const commitBtn = screen.getByTestId<HTMLButtonElement>("new-task-commit");
+    expect(commitBtn).toBeDisabled();
+  });
 
-    await waitFor(() => {
-      const postCalls = stub.mock.calls.filter(
-        ([, opts]) => opts?.method === "POST",
-      );
-      expect(postCalls.length).toBe(1);
-      const body = JSON.parse(postCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.title).toBe("UNTITLED TASKING");
-    });
+  it("clicking commit button when title is empty does not fire POST", async () => {
+    const stub = makeCreateStub();
+    stub.mockClear();
+    wrap(stub);
+
+    // Title is empty by default
+    const commitBtn = screen.getByTestId<HTMLButtonElement>("new-task-commit");
+    expect(commitBtn).toBeDisabled();
+
+    // Try to click (it won't fire due to disabled state)
+    await userEvent.click(commitBtn);
+
+    const postCalls = stub.mock.calls.filter(
+      ([, opts]) => opts?.method === "POST",
+    );
+    expect(postCalls.length).toBe(0);
   });
 
   it("sends cycle as null when BACKLOG is selected", async () => {
     const stub = makeCreateStub();
     wrap(stub);
+
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
 
     // BACKLOG is the default; click commit directly
     await userEvent.click(screen.getByTestId("new-task-commit"));
@@ -381,6 +391,9 @@ describe("NewTaskModal — submit payload", () => {
     const stub = makeCreateStub();
     wrap(stub);
 
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
+
     // Select UNFILED (default empty)
     await userEvent.selectOptions(screen.getByTestId("new-task-operation"), "");
     await userEvent.click(screen.getByTestId("new-task-commit"));
@@ -400,6 +413,9 @@ describe("NewTaskModal — submit payload", () => {
   it("sends null for empty optional fields (no noise on the wire)", async () => {
     const stub = makeCreateStub();
     wrap(stub);
+
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
 
     await userEvent.click(screen.getByTestId("new-task-commit"));
 
@@ -488,9 +504,33 @@ describe("NewTaskModal — close behaviour", () => {
     expect(useBoardStore.getState().taskModal).toBeNull();
   });
 
-  it("clicking the backdrop closes the modal", async () => {
+  it("clicking the backdrop closes the modal when form is pristine", async () => {
     wrap();
     await userEvent.click(screen.getByTestId("new-task-modal-backdrop"));
+    expect(useBoardStore.getState().taskModal).toBeNull();
+  });
+
+  it("clicking the backdrop does NOT close the modal when form is dirty", async () => {
+    wrap();
+    // Make form dirty by filling a field
+    await userEvent.type(screen.getByTestId("new-task-assignee"), "Kit");
+
+    // Try to close via backdrop
+    await userEvent.click(screen.getByTestId("new-task-modal-backdrop"));
+
+    // Modal should still be open
+    expect(screen.getByTestId("new-task-modal")).toBeInTheDocument();
+    expect(useBoardStore.getState().taskModal).not.toBeNull();
+  });
+
+  it("ESC always closes the modal even when dirty", async () => {
+    wrap();
+    // Make form dirty by filling a field
+    await userEvent.type(screen.getByTestId("new-task-assignee"), "Kit");
+
+    // ESC should still close
+    await userEvent.keyboard("{Escape}");
+
     expect(useBoardStore.getState().taskModal).toBeNull();
   });
 });
@@ -503,6 +543,9 @@ describe("NewTaskModal — success callback", () => {
   it("on success: closes modal and sets editTaskId to the new task id", async () => {
     const stub = makeCreateStub("new-task-abc");
     wrap(stub);
+
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "New Task");
 
     await userEvent.click(screen.getByTestId("new-task-commit"));
 

@@ -105,8 +105,20 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
     ? (operations.find((op) => opKey(op) === project)?.code ?? project)
     : "UNFILED";
 
+  const dirty =
+    title !== "" ||
+    assignee !== "" ||
+    estimate !== "" ||
+    due !== "" ||
+    start !== "" ||
+    tags !== "" ||
+    checklist !== "" ||
+    link !== "";
+
   const commit = () => {
-    const finalTitle = title.trim() || "UNTITLED TASKING";
+    const finalTitle = title.trim();
+    if (!finalTitle) return;
+
     const tagsArr = tags
       .split(",")
       .map((t) => t.trim())
@@ -156,6 +168,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
       onClose={closeTaskModal}
       onKeyDown={handleKeyDown}
       constrainHeight
+      isDismissable={!dirty}
     >
       {/* Header */}
       <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
@@ -355,7 +368,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
             type="button"
             className="cl-btn cl-btn-hot"
             onClick={commit}
-            disabled={create.isPending}
+            disabled={create.isPending || title.trim() === ""}
             data-testid="new-task-commit"
           >
             {create.isPending ? "COMMITTING…" : "COMMIT TASK"}

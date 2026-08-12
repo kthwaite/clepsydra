@@ -14,6 +14,7 @@ export interface BoardModalFrameProps {
   onClose: () => void;
   onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
   constrainHeight?: boolean;
+  isDismissable?: boolean;
   children: ReactNode;
 }
 
@@ -25,6 +26,7 @@ export function BoardModalFrame({
   onClose,
   onKeyDown,
   constrainHeight = false,
+  isDismissable = true,
   children,
 }: BoardModalFrameProps) {
   return (
@@ -33,7 +35,7 @@ export function BoardModalFrame({
       onOpenChange={(open) => {
         if (!open) onClose();
       }}
-      isDismissable
+      isDismissable={isDismissable}
       className="fixed inset-0 z-[9000] flex justify-center bg-black/60 pt-[9vh] backdrop-blur-[2px]"
       data-testid={backdropTestId}
     >

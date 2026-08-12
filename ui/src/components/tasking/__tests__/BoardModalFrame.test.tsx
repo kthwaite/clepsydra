@@ -66,3 +66,44 @@ it("forwards keyboard events from modal content", async () => {
 
   expect(onKeyDown).toHaveBeenCalled();
 });
+
+it("defaults isDismissable to true so backdrop click closes", async () => {
+  const onClose = vi.fn();
+
+  render(
+    <BoardModalFrame
+      ariaLabel="Test Board Dialog"
+      widthClassName="w-[460px]"
+      backdropTestId="test-backdrop"
+      modalTestId="test-panel"
+      onClose={onClose}
+    >
+      <button type="button">Inside</button>
+    </BoardModalFrame>,
+  );
+
+  await userEvent.click(screen.getByTestId("test-backdrop"));
+
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("when isDismissable={false}, backdrop click does not close", async () => {
+  const onClose = vi.fn();
+
+  render(
+    <BoardModalFrame
+      ariaLabel="Test Board Dialog"
+      widthClassName="w-[460px]"
+      backdropTestId="test-backdrop"
+      modalTestId="test-panel"
+      onClose={onClose}
+      isDismissable={false}
+    >
+      <button type="button">Inside</button>
+    </BoardModalFrame>,
+  );
+
+  await userEvent.click(screen.getByTestId("test-backdrop"));
+
+  expect(onClose).not.toHaveBeenCalled();
+});
