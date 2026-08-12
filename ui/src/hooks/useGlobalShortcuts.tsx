@@ -38,6 +38,14 @@ type Binding = {
 const inWorkspace = () => window.location.pathname.startsWith("/workspace");
 const inTasking = () => window.location.pathname.startsWith("/tasking");
 
+/** Shortcuts exempted from the open-dialog guard: a dialog's own controlling
+ *  toggle must keep working while it's open (⌘K must still close the command
+ *  palette it just opened), even though every other global shortcut stays
+ *  suppressed underneath a dialog. */
+const DIALOG_EXEMPT_IDS: ReadonlySet<GlobalShortcutId> = new Set([
+  "palette.toggle",
+]);
+
 function cycleTab(dir: 1 | -1) {
   const { tabs, quires, activeTabId, activateTab } =
     useWorkspaceStore.getState();
@@ -140,10 +148,13 @@ export function useGlobalShortcuts() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       // A modal or popover dialog owns keyboard input while it's open — no
-      // global shortcut should fire underneath it.
-      if (document.querySelector('[role="dialog"]')) return;
+      // global shortcut should fire underneath it, except a dialog's own
+      // controlling toggle (DIALOG_EXEMPT_IDS), which must keep working so
+      // e.g. ⌘K can still close the command palette it opened.
+      const dialogOpen = document.querySelector('[role="dialog"]') !== null;
       for (const id of GLOBAL_SHORTCUT_IDS) {
         if (!matchesChord(e, SHORTCUTS[id].chord)) continue;
+        if (dialogOpen && !DIALOG_EXEMPT_IDS.has(id)) continue;
         const chord: Chord = SHORTCUTS[id].chord;
         const bareKey = !chord.mod && !chord.ctrl && !chord.alt;
         if (bareKey && isEditableTarget(e.target)) continue;

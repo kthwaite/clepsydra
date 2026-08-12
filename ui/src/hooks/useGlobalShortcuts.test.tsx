@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const { navigateMock, openTabMock, toggleThemeMock } = vi.hoisted(() => ({
@@ -198,10 +198,17 @@ describe("useGlobalShortcuts", () => {
       expect(useBoardStore.getState().taskModal).toEqual({});
     });
 
-    it("N does nothing outside /tasking", () => {
+    it("tasking chords fall through (no preventDefault) outside /tasking", () => {
       renderHook(() => useGlobalShortcuts());
-      press("n");
+      // outside /tasking: every gated chord is ignored, not even
+      // preventDefault — mirrors the workspace-tabs off-route assertion above.
+      for (const key of ["n", "1", "2", "3", "4", "/", "["]) {
+        const ignored = press(key);
+        expect(ignored.defaultPrevented).toBe(false);
+      }
       expect(useBoardStore.getState().taskModal).toBeNull();
+      expect(useBoardStore.getState().mode).toBe("card");
+      expect(useBoardStore.getState().railOpen).toBe(true);
     });
 
     it("2 switches to backlog mode", () => {
@@ -280,6 +287,28 @@ describe("useGlobalShortcuts", () => {
         renderHook(() => useGlobalShortcuts());
         press("n", { metaKey: true });
         expect(useUiStore.getState().isInscribeOpen).toBe(false);
+      } finally {
+        document.body.removeChild(dialog);
+      }
+    });
+
+    it("⌘K is exempt from the open-dialog guard (can still close the palette it opened), unlike other shortcuts", () => {
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      document.body.appendChild(dialog);
+      try {
+        renderHook(() => useGlobalShortcuts());
+
+        act(() => {
+          press("k", { metaKey: true });
+        });
+        expect(useUiStore.getState().isSearchOpen).toBe(true);
+
+        // A non-exempt shortcut still does NOT fire while the dialog is open.
+        act(() => {
+          press("h", { metaKey: true });
+        });
+        expect(navigateMock).not.toHaveBeenCalled();
       } finally {
         document.body.removeChild(dialog);
       }
