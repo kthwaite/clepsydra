@@ -302,6 +302,10 @@ chrome.runtime.onMessage.addListener(
 				),
 			);
 			if (!started) {
+				// Without this the tab keeps the non-clearing `processing` badge
+				// forever: the capture that owns the terminal phase is running for
+				// a different tab.
+				reportPhase(pending.tabId, "duplicate");
 				showNotification(
 					"Capture In Progress",
 					`${pending.metadata.title} is already being archived.`,
