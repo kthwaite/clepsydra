@@ -14,7 +14,7 @@ import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { TimelineView } from "../TimelineView";
 import { parseDay, pct, windowOf } from "../timeline-math";
-import { BOARD_FIXTURE, stubBoardFetch } from "./fixtures";
+import { BOARD_FIXTURE, FIXTURE_COL_LABEL, stubBoardFetch } from "./fixtures";
 
 // ── fixture helpers ───────────────────────────────────────────────────────────
 
@@ -188,6 +188,7 @@ describe("TimelineView — empty state", () => {
     ];
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={undatedCycles}
@@ -202,6 +203,7 @@ describe("TimelineView — empty state", () => {
   it("shows empty state when no tasks have a due date", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_UNSCHEDULED]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -211,13 +213,25 @@ describe("TimelineView — empty state", () => {
   });
 
   it("shows empty state with empty tasks array", () => {
-    wrap(<TimelineView tasks={[]} operations={TL_OPS} cycles={TL_CYCLES} />);
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[]}
+        operations={TL_OPS}
+        cycles={TL_CYCLES}
+      />,
+    );
     expect(screen.getByTestId("tl-empty")).toBeInTheDocument();
   });
 
   it("shows empty state with empty cycles array", () => {
     wrap(
-      <TimelineView tasks={[TL_TASK_ALPHA]} operations={TL_OPS} cycles={[]} />,
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[TL_TASK_ALPHA]}
+        operations={TL_OPS}
+        cycles={[]}
+      />,
     );
     expect(screen.getByTestId("tl-empty")).toBeInTheDocument();
   });
@@ -231,6 +245,7 @@ describe("TimelineView — axis bands", () => {
   it("renders a band per dated cycle", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -243,6 +258,7 @@ describe("TimelineView — axis bands", () => {
   it("ACTIVE cycle band shows cycle code in the band label", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -255,6 +271,7 @@ describe("TimelineView — axis bands", () => {
   it("ACTIVE cycle band has ACTIVE class", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -267,6 +284,7 @@ describe("TimelineView — axis bands", () => {
   it("PLANNED cycle band has PLANNED class", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -292,6 +310,7 @@ describe("TimelineView — axis bands", () => {
     ];
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={mixedCycles}
@@ -310,6 +329,7 @@ describe("TimelineView — operation groups", () => {
     // Only alpha has a due date
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNSCHEDULED]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -323,6 +343,7 @@ describe("TimelineView — operation groups", () => {
   it("renders group header with op code and name", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -336,6 +357,7 @@ describe("TimelineView — operation groups", () => {
   it("renders both groups when both ops have scheduled tasks", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_BETA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -354,6 +376,7 @@ describe("TimelineView — UNFILED group", () => {
   it("renders UNFILED group for tasks with null project", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNFILED]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -365,6 +388,7 @@ describe("TimelineView — UNFILED group", () => {
   it("UNFILED group header shows UNFILED code and label", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_UNFILED]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -377,6 +401,7 @@ describe("TimelineView — UNFILED group", () => {
   it("does not render UNFILED group when there are no unfiled scheduled tasks", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -388,6 +413,7 @@ describe("TimelineView — UNFILED group", () => {
   it("UNFILED group appears after named operation groups", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNFILED]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -412,6 +438,7 @@ describe("TimelineView — bar positioning", () => {
   it("bar left% is computed from pct(taskStart, window)", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -446,6 +473,7 @@ describe("TimelineView — bar positioning", () => {
     };
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[pointTask]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -462,6 +490,7 @@ describe("TimelineView — bar positioning", () => {
   it("bar has correct status class", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -474,6 +503,7 @@ describe("TimelineView — bar positioning", () => {
   it("positions bars absolutely inside a relative track", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -487,6 +517,7 @@ describe("TimelineView — bar positioning", () => {
   it("bar has hold class when task.hold is set", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_HOLD]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -499,6 +530,7 @@ describe("TimelineView — bar positioning", () => {
   it("bar shows code and status label text", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -512,6 +544,7 @@ describe("TimelineView — bar positioning", () => {
   it("bar has title attribute set to task title", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -530,6 +563,7 @@ describe("TimelineView — bar click", () => {
   it("clicking a bar sets editTaskId via store", async () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -544,6 +578,7 @@ describe("TimelineView — bar click", () => {
     const spy = vi.fn();
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -566,6 +601,7 @@ describe("TimelineView — unscheduled footer", () => {
   it("shows footer when there are unscheduled tasks", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNSCHEDULED]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -589,6 +625,7 @@ describe("TimelineView — unscheduled footer", () => {
     ];
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, ...twoUnscheduled]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -602,6 +639,7 @@ describe("TimelineView — unscheduled footer", () => {
   it("footer shows descriptive subtitle", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNSCHEDULED]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -613,6 +651,7 @@ describe("TimelineView — unscheduled footer", () => {
   it("does not render footer when all tasks are scheduled", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -637,6 +676,7 @@ describe("TimelineView — UNFILED non-null project", () => {
     };
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, orphanTask]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -660,6 +700,7 @@ describe("TimelineView — gridlines per row", () => {
   it("renders one gridline per dated cycle in each task row", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -674,6 +715,7 @@ describe("TimelineView — gridlines per row", () => {
   it("gridlines have a left% style derived from cycle start", () => {
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -707,6 +749,7 @@ describe("TimelineView — row order within group by start", () => {
 
     wrap(
       <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
         // Pass laterTask first in the array — the view should still sort it after
         tasks={[laterTask, earlierTask]}
         operations={TL_OPS}

@@ -20,7 +20,7 @@ import { useMemo } from "react";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { COL_LABEL, fmtCycleWindow, HealthDot } from "./board-constants";
+import { type ColLabelFn, fmtCycleWindow, HealthDot } from "./board-constants";
 import { parseDay, pct, taskRange, windowOf } from "./timeline-math";
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -93,6 +93,8 @@ export interface TimelineViewProps {
   cycles: BoardCycle[];
   /** Override for edit handler; defaults to store setEditTaskId. */
   onEditTask?: (id: string) => void;
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
 export function TimelineView({
@@ -100,6 +102,7 @@ export function TimelineView({
   operations,
   cycles,
   onEditTask,
+  colLabel,
 }: TimelineViewProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const handleEditTask = onEditTask ?? setEditTaskId;
@@ -313,7 +316,7 @@ export function TimelineView({
                           style={{ background: tlPriColor(t.priority) }}
                         />
                         <span className="cl-mono whitespace-nowrap text-[var(--fs-xs)] tracking-[0.04em] text-[var(--ink-2)]">
-                          {t.code} · {COL_LABEL[t.status] ?? t.status}
+                          {t.code} · {colLabel(t.status)}
                         </span>
                       </button>
                     </div>

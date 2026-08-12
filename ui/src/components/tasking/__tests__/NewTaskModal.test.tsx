@@ -14,7 +14,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { NewTaskModal } from "../NewTaskModal";
-import { BOARD_FIXTURE, BOARD_FIXTURE_WITH_CLOSED_CYCLE, NO_SLUG_OP } from "./fixtures";
+import {
+  BOARD_FIXTURE,
+  BOARD_FIXTURE_WITH_CLOSED_CYCLE,
+  FIXTURE_COL_LABEL,
+  NO_SLUG_OP,
+} from "./fixtures";
 
 const { operations, cycles } = BOARD_FIXTURE;
 
@@ -34,7 +39,11 @@ function wrap(
 
   return render(
     <QueryClientProvider client={qc}>
-      <NewTaskModal operations={operations} cycles={cycles} />
+      <NewTaskModal
+        colLabel={FIXTURE_COL_LABEL}
+        operations={operations}
+        cycles={cycles}
+      />
     </QueryClientProvider>,
   );
 }
@@ -97,7 +106,11 @@ describe("NewTaskModal — render", () => {
     });
     render(
       <QueryClientProvider client={qc}>
-        <NewTaskModal operations={operations} cycles={cycles} />
+        <NewTaskModal
+          colLabel={FIXTURE_COL_LABEL}
+          operations={operations}
+          cycles={cycles}
+        />
       </QueryClientProvider>,
     );
     expect(screen.queryByTestId("new-task-modal")).not.toBeInTheDocument();
@@ -146,9 +159,7 @@ describe("NewTaskModal — render", () => {
       "data-[selected]:font-bold",
     );
     // Active state: has bg-[var(--ink)] class from RADIO_CLS_ON
-    expect(fieldLabel?.className).toContain(
-      "bg-[var(--ink)]",
-    );
+    expect(fieldLabel?.className).toContain("bg-[var(--ink)]");
   });
 
   it("defaults DISPOSITION to INTAKE when no status preset", () => {
@@ -224,6 +235,7 @@ describe("NewTaskModal — render", () => {
     render(
       <QueryClientProvider client={qc}>
         <NewTaskModal
+          colLabel={FIXTURE_COL_LABEL}
           operations={BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations}
           cycles={BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles}
         />
@@ -257,6 +269,7 @@ describe("NewTaskModal — render", () => {
     render(
       <QueryClientProvider client={qc}>
         <NewTaskModal
+          colLabel={FIXTURE_COL_LABEL}
           operations={[...operations, NO_SLUG_OP]}
           cycles={cycles}
         />

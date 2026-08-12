@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -188,7 +189,6 @@ describe("TaskingScreen smoke", () => {
 
     expect(await screen.findByTestId("kb-col-INTAKE")).toBeInTheDocument();
   });
-
 
   it("renders the board shell when data loads successfully", async () => {
     stubBoardFetch();
@@ -559,6 +559,31 @@ describe("TaskingScreen — text/priority/hold filtering", () => {
     expect(screen.getByText("Beta task")).toBeInTheDocument();
     expect(screen.queryByText("Alpha task")).not.toBeInTheDocument();
     expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+  });
+});
+
+// ── column labels sourced from the server ─────────────────────────────────────
+
+describe("TaskingScreen — column labels come from the server", () => {
+  it("BACKLOG mode renders the server's FIELD column label, not a hardcoded one", async () => {
+    const relabeled: BoardResponse = {
+      ...BOARD_FIXTURE,
+      columns: BOARD_FIXTURE.columns.map((c) =>
+        c.id === "FIELD" ? { ...c, label: "DEPLOYED" } : c,
+      ),
+    };
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch(relabeled);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    // t1 is FIELD-status in BOARD_FIXTURE — its disposition cell must show
+    // the server-supplied label, not the old hardcoded "IN-FIELD". Scoped to
+    // the row itself: BoardHeader's unrelated "IN-FIELD" stat label is a
+    // separate, hardcoded metric name and out of scope here.
+    const row = screen.getByTestId("bk-row-t1");
+    expect(within(row).getByText("DEPLOYED")).toBeInTheDocument();
+    expect(within(row).queryByText("IN-FIELD")).not.toBeInTheDocument();
   });
 });
 

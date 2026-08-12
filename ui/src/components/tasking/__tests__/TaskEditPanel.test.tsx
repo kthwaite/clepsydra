@@ -31,6 +31,7 @@ import { TaskEditPanel } from "../TaskEditPanel";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
+  FIXTURE_COL_LABEL,
   NO_SLUG_OP,
   SEALED_IN_CLOSED_CYCLE_TASK,
 } from "./fixtures";
@@ -109,6 +110,7 @@ function wrap({
           task={task}
           operations={opsOverride}
           cycles={cyclesOverride}
+          colLabel={FIXTURE_COL_LABEL}
           onClose={onClose}
           onOpenPage={onOpenPage}
           onOpenDossier={onOpenDossier}
@@ -236,8 +238,7 @@ describe("TaskEditPanel — render", () => {
 
   it("START input is a date field", () => {
     wrap();
-    const startInput =
-      screen.getByTestId<HTMLInputElement>("edit-panel-start");
+    const startInput = screen.getByTestId<HTMLInputElement>("edit-panel-start");
     expect(startInput).toHaveAttribute("type", "date");
   });
 
@@ -255,7 +256,8 @@ describe("TaskEditPanel — render", () => {
       operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
       cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
     });
-    const cycleSelect = screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
+    const cycleSelect =
+      screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
     // C-01 and C-02 should be present
     expect(cycleSelect).toHaveTextContent("C-01");
     expect(cycleSelect).toHaveTextContent("C-02");
@@ -270,7 +272,8 @@ describe("TaskEditPanel — render", () => {
       operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
       cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
     });
-    const cycleSelect = screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
+    const cycleSelect =
+      screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
     // C-00 (CLOSED) should be present because the task is in it
     expect(cycleSelect).toHaveTextContent("C-00");
     // Verify it's selected
@@ -348,9 +351,9 @@ describe("TaskEditPanel — immediate patches", () => {
     const stub = makeStub();
     wrap({ fetchStub: stub, seedBoard: true });
     const priority = screen.getByRole("radiogroup", { name: "Priority" });
-    expect(
-      within(priority).getByTestId("edit-panel-priority-P0"),
-    ).toHaveRole("radio");
+    expect(within(priority).getByTestId("edit-panel-priority-P0")).toHaveRole(
+      "radio",
+    );
 
     await userEvent.click(screen.getByTestId("edit-panel-priority-P0"));
 
@@ -599,6 +602,7 @@ describe("TaskEditPanel — hold toggle", () => {
           task={updatedTask}
           operations={operations}
           cycles={cycles}
+          colLabel={FIXTURE_COL_LABEL}
           onClose={vi.fn()}
           onOpenPage={vi.fn()}
           onOpenDossier={vi.fn()}
@@ -606,7 +610,9 @@ describe("TaskEditPanel — hold toggle", () => {
       </QueryClientProvider>,
     );
 
-    const reason = screen.getByTestId("edit-panel-hold-reason") as HTMLInputElement;
+    const reason = screen.getByTestId(
+      "edit-panel-hold-reason",
+    ) as HTMLInputElement;
     expect(document.activeElement).toBe(reason);
     expect(reason.selectionStart).toBe(0);
     expect(reason.selectionEnd).toBe("BLOCKED".length);
@@ -614,7 +620,9 @@ describe("TaskEditPanel — hold toggle", () => {
 
   it("does NOT focus the reason input when opening panel on an already-held task", () => {
     wrap({ task: HELD_TASK });
-    const reason = screen.getByTestId("edit-panel-hold-reason") as HTMLInputElement;
+    const reason = screen.getByTestId(
+      "edit-panel-hold-reason",
+    ) as HTMLInputElement;
     // Focus should be on the panel itself (tabIndex=-1), not on the reason input
     expect(document.activeElement).not.toBe(reason);
   });

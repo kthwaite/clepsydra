@@ -38,7 +38,7 @@ import { FocusScope } from "react-aria";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { useDeleteTask, usePatchTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
-import { opKey } from "./board-constants";
+import { type ColLabelFn, opKey, priColor } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import {
@@ -49,22 +49,6 @@ import {
   RADIO_CLS_BASE,
   SELECT_CLS,
 } from "./fields";
-
-// ── priority colour helpers (mirrors TaskCard) ────────────────────────────────
-
-const PRI_BAR_COLOR: Record<string, string> = {
-  P0: "var(--hot)",
-  P1: "var(--warn)",
-  P2: "var(--cool)",
-  P3: "var(--ink-4)",
-};
-
-const PRI_TEXT_COLOR: Record<string, string> = {
-  P0: "var(--hot)",
-  P1: "var(--warn)",
-  P2: "var(--cool)",
-  P3: "var(--ink-mute)",
-};
 
 /** How long the armed "CONFIRM DESTROY?" state persists before auto-disarm. */
 const DESTROY_DISARM_MS = 3000;
@@ -125,6 +109,7 @@ export interface TaskEditPanelProps {
   task: BoardTask;
   operations: BoardOperation[];
   cycles: BoardCycle[];
+  colLabel: ColLabelFn;
   onClose: () => void;
   onOpenPage?: (path: string) => void;
   onOpenDossier?: (link: string) => void;
@@ -134,6 +119,7 @@ export function TaskEditPanel({
   task,
   operations,
   cycles,
+  colLabel,
   onClose,
   onOpenPage,
   onOpenDossier,
@@ -336,8 +322,7 @@ export function TaskEditPanel({
     isComplete,
   } = checklistProgress(task.checks);
 
-  const barColor = PRI_BAR_COLOR[task.priority] ?? "var(--ink-3)";
-  const priTextColor = PRI_TEXT_COLOR[task.priority] ?? "var(--ink-mute)";
+  const { bar: barColor, text: priTextColor } = priColor(task.priority);
 
   // A board:true PROJECT page with no project: frontmatter has no valid
   // filter/assignment key (filterTasks compares t.project === opFilter, and
@@ -456,6 +441,7 @@ export function TaskEditPanel({
                 value={task.status}
                 onChange={(colId) => patchNow({ status: colId })}
                 testIdPrefix="edit-panel"
+                colLabel={colLabel}
               />
             </EdField>
 

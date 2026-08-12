@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import type { BoardResponse } from "#/api/board";
+import type { ColLabelFn } from "../board-constants";
 
 /** Minimal BoardResponse fixture reused across tasking view tests. */
 export const BOARD_FIXTURE: BoardResponse = {
@@ -189,6 +190,15 @@ export const BOARD_FIXTURE_WITH_CLOSED_CYCLE: BoardResponse = {
   cycles: [...BOARD_FIXTURE.cycles, CLOSED_CYCLE],
   tasks: [...BOARD_FIXTURE.tasks, SEALED_IN_CLOSED_CYCLE_TASK],
 };
+
+/**
+ * colLabel resolver built from BOARD_FIXTURE.columns — mirrors what
+ * TaskingScreen derives from live server data (see board-constants
+ * ColLabelFn), for tests that render a view component directly without
+ * going through TaskingScreen.
+ */
+export const FIXTURE_COL_LABEL: ColLabelFn = (id) =>
+  BOARD_FIXTURE.columns.find((c) => c.id === id)?.label ?? id;
 
 /** Stub fetch to resolve with the given board (defaults to BOARD_FIXTURE) */
 export function stubBoardFetch(board: BoardResponse = BOARD_FIXTURE) {

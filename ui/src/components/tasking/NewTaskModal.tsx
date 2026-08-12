@@ -31,7 +31,7 @@ import type { BoardCycle, BoardOperation } from "#/api/board";
 import { useCreateTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { BoardModalFrame } from "./BoardModalFrame";
-import { opKey } from "./board-constants";
+import { type ColLabelFn, opKey } from "./board-constants";
 import {
   DispositionRow,
   EdField,
@@ -45,9 +45,15 @@ import {
 interface NewTaskModalProps {
   operations: BoardOperation[];
   cycles: BoardCycle[];
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
-export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
+export function NewTaskModal({
+  operations,
+  cycles,
+  colLabel,
+}: NewTaskModalProps) {
   const taskModal = useBoardStore((s) => s.taskModal);
   const closeTaskModal = useBoardStore((s) => s.closeTaskModal);
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
@@ -247,6 +253,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
             value={status}
             onChange={setStatus}
             testIdPrefix="new-task"
+            colLabel={colLabel}
           />
         </EdField>
 

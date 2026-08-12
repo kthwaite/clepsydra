@@ -5,7 +5,7 @@ import { useCycleBurndown, useTaskCompletionHistory } from "#/api/tasks";
 import { useBoardStore } from "#/store/board";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
-import { opKey } from "./board-constants";
+import { type ColLabelFn, opKey } from "./board-constants";
 import { applyBoardFilter } from "./board-filter";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
@@ -133,6 +133,14 @@ export function TaskingScreen({
     telemetryUnfiled,
     telemetryEnabled,
   );
+  // Column labels are sourced from the server (BoardColumn.label), not
+  // hardcoded — built once here and threaded to every view that renders a
+  // disposition label.
+  const colLabel: ColLabelFn = useMemo(() => {
+    const m = new Map(data?.columns.map((c) => [c.id, c.label] as const) ?? []);
+    return (id) => m.get(id) ?? id;
+  }, [data]);
+
   const selectedCycle = data ? resolveCycle(cycleSel, cycles) : null;
   const cycleBurndown = useCycleBurndown(
     mode === "cycle" && selectedCycle?.code !== "BACKLOG"
@@ -172,7 +180,11 @@ export function TaskingScreen({
     <>
       {/* Creation modal — rendered at root level so it's not clipped */}
       {taskModal !== null && (
-        <NewTaskModal operations={operations} cycles={cycles} />
+        <NewTaskModal
+          operations={operations}
+          cycles={cycles}
+          colLabel={colLabel}
+        />
       )}
 
       {/* Cycle lifecycle modals */}
@@ -226,7 +238,9 @@ export function TaskingScreen({
                 onOpenDossier={onOpenDossier}
               />
             )}
-            {mode === "backlog" && <BacklogView tasks={visibleTasks} />}
+            {mode === "backlog" && (
+              <BacklogView tasks={visibleTasks} colLabel={colLabel} />
+            )}
             {mode === "cycle" && (
               <CycleView
                 cycle={resolveCycle(cycleSel, cycles)}
@@ -240,6 +254,7 @@ export function TaskingScreen({
                 burndownPending={cycleBurndown.isPending && telemetryEnabled}
                 burndownError={cycleBurndown.isError}
                 burndownApplicable={telemetryApplicable}
+                colLabel={colLabel}
               />
             )}
             {mode === "timeline" && (
@@ -253,6 +268,7 @@ export function TaskingScreen({
                       : []
                 }
                 cycles={cycles}
+                colLabel={colLabel}
               />
             )}
 
@@ -265,6 +281,7 @@ export function TaskingScreen({
                 task={editTask}
                 operations={operations}
                 cycles={cycles}
+                colLabel={colLabel}
                 onClose={() => setEditTaskId(null)}
                 onOpenPage={onOpenPage}
                 onOpenDossier={onOpenDossier}

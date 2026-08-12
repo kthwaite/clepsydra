@@ -19,8 +19,8 @@ import { Spark } from "#/components/ui/spark";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
-  COL_LABEL,
   COL_ORDER,
+  type ColLabelFn,
   fmtCycleWindow,
   HoldTag,
   PRI_ORDER,
@@ -101,6 +101,8 @@ export interface CycleViewProps {
   burndownPending?: boolean;
   burndownError?: boolean;
   burndownApplicable?: boolean;
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
 export function CycleView({
@@ -112,6 +114,7 @@ export function CycleView({
   burndownPending = false,
   burndownError = false,
   burndownApplicable = true,
+  colLabel,
 }: CycleViewProps) {
   // Store actions — field-selector pattern (no ephemeral re-renders)
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
@@ -369,7 +372,7 @@ export function CycleView({
               <div className="mb-[4px] flex items-center gap-[6px] border-b border-[var(--rule)] pb-[5px]">
                 <StatePip col={g.cid} />
                 <span className="cl-display text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--ink)]">
-                  {COL_LABEL[g.cid]}
+                  {colLabel(g.cid)}
                 </span>
                 <span
                   className="ml-auto text-[var(--fs-xs)] [font-variant-numeric:tabular-nums] text-[var(--ink-3)]"

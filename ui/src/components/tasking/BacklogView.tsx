@@ -19,12 +19,13 @@ import type { BoardTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
-  COL_LABEL,
   COL_ORDER,
+  type ColLabelFn,
   HoldTag,
   PRI_LABEL,
   PRI_ORDER,
   PriChip,
+  priColor,
   StatePip,
 } from "./board-constants";
 import { checklistProgress } from "./board-stats";
@@ -72,9 +73,11 @@ export function groupBacklog(tasks: BoardTask[]): BacklogGroup[] {
 export interface BacklogViewProps {
   /** Pre-filtered visible tasks (same as KanbanView.tasks). */
   tasks: BoardTask[];
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
-export function BacklogView({ tasks }: BacklogViewProps) {
+export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
 
   const groups = useMemo(() => groupBacklog(tasks), [tasks]);
@@ -148,16 +151,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
           >
             <span
               className="cl-display text-[14px] font-black tracking-[0.06em]"
-              style={{
-                color:
-                  g.pri === "P0"
-                    ? "var(--hot)"
-                    : g.pri === "P1"
-                      ? "var(--warn)"
-                      : g.pri === "P2"
-                        ? "var(--cool)"
-                        : "var(--ink-3)",
-              }}
+              style={{ color: priColor(g.pri).text }}
             >
               {g.pri}
             </span>
@@ -232,7 +226,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
                     <span className="flex items-center gap-[7px]">
                       <StatePip col={t.status} />
                       <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-                        {COL_LABEL[t.status] ?? t.status}
+                        {colLabel(t.status)}
                       </span>
                     </span>
                   </InlineEditPopover>

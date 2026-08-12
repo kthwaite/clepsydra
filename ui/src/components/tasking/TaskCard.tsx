@@ -6,26 +6,10 @@
  */
 
 import type { BoardTask } from "#/api/board";
-import { StatePip } from "./board-constants";
+import { priColor, StatePip } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
-
-// ── priority colour maps ──────────────────────────────────────────────────────
-
-const PRI_BAR_COLOR: Record<string, string> = {
-  P0: "var(--hot)",
-  P1: "var(--warn)",
-  P2: "var(--cool)",
-  P3: "var(--ink-4)",
-};
-
-const PRI_TEXT_COLOR: Record<string, string> = {
-  P0: "var(--hot)",
-  P1: "var(--warn)",
-  P2: "var(--cool)",
-  P3: "var(--ink-mute)",
-};
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
 
@@ -56,8 +40,7 @@ export function TaskCard({
     isComplete: checksDone,
   } = checklistProgress(t.checks);
 
-  const priColor = PRI_TEXT_COLOR[t.priority] ?? "var(--ink-mute)";
-  const barColor = PRI_BAR_COLOR[t.priority] ?? "var(--ink-3)";
+  const { bar: barColor, text: priTextColor } = priColor(t.priority);
 
   return (
     <div
@@ -111,7 +94,7 @@ export function TaskCard({
         <InlineEditPopover task={t} field="priority" testIdPrefix="kb">
           <span
             className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
-            style={{ color: priColor, borderColor: priColor }}
+            style={{ color: priTextColor, borderColor: priTextColor }}
           >
             {t.priority}
           </span>

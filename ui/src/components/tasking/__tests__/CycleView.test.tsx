@@ -19,6 +19,7 @@ import { TaskingScreen } from "../TaskingScreen";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_NO_SLUG_OP,
+  FIXTURE_COL_LABEL,
   stubBoardFetch,
 } from "./fixtures";
 
@@ -250,7 +251,10 @@ function renderCycleView(
   items: BoardTask[] = C01_TASKS,
   fetchStub?: ReturnType<typeof vi.fn>,
 ) {
-  return wrap(<CycleView cycle={cycle} tasks={items} />, fetchStub);
+  return wrap(
+    <CycleView colLabel={FIXTURE_COL_LABEL} cycle={cycle} tasks={items} />,
+    fetchStub,
+  );
 }
 
 // ── action buttons per cycle state ────────────────────────────────────────────
@@ -358,7 +362,12 @@ describe("CycleView — metrics and burndown", () => {
 
   it("renders the Spark SVG for burndown", () => {
     wrap(
-      <CycleView cycle={ACTIVE_CYCLE} tasks={C01_TASKS} burndown={[3, 2, 1]} />,
+      <CycleView
+        colLabel={FIXTURE_COL_LABEL}
+        cycle={ACTIVE_CYCLE}
+        tasks={C01_TASKS}
+        burndown={[3, 2, 1]}
+      />,
     );
     // Spark renders an SVG polyline
     const svg = document.querySelector("svg");
@@ -575,7 +584,14 @@ describe("CycleView — empty state", () => {
   });
 
   it("COMMIT TASK includes project when activeProject prop is set", async () => {
-    wrap(<CycleView cycle={ACTIVE_CYCLE} tasks={[]} activeProject="alpha" />);
+    wrap(
+      <CycleView
+        colLabel={FIXTURE_COL_LABEL}
+        cycle={ACTIVE_CYCLE}
+        tasks={[]}
+        activeProject="alpha"
+      />,
+    );
     await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
     expect(useBoardStore.getState().taskModal).toEqual({
       cycle: "C-01",
@@ -584,7 +600,13 @@ describe("CycleView — empty state", () => {
   });
 
   it("COMMIT TASK omits project when activeProject prop is absent", async () => {
-    wrap(<CycleView cycle={ACTIVE_CYCLE} tasks={[]} />);
+    wrap(
+      <CycleView
+        colLabel={FIXTURE_COL_LABEL}
+        cycle={ACTIVE_CYCLE}
+        tasks={[]}
+      />,
+    );
     await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
     const modal = useBoardStore.getState().taskModal;
     expect(modal).toEqual({ cycle: "C-01" });
