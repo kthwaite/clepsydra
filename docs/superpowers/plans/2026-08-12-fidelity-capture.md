@@ -2770,7 +2770,14 @@ if (!contentSource.includes("saveOriginalURLs")) {
 // every site would fail. The size check above catches the common case (an
 // externalised SingleFile collapses the bundle to ~40 KB), but check directly
 // too, and confirm no sibling chunk was emitted alongside it.
-if (/\bimport\s*\(/.test(contentSource)) {
+// The match REQUIRES a string or template-literal argument. A bare
+// `\bimport\s*\(` also matches single-file-core's zip worker bootstrap, which
+// embeds `await import(t)` as literal STRING content — the source of a Blob it
+// turns into a Worker — where the specifier is a variable evaluated in that
+// worker's own scope, not a gap in this module graph. A real bundler-emitted
+// chunk reference always has a static specifier, because Rollup can only split
+// what it can resolve statically.
+if (/\bimport\s*\(\s*["'`]/.test(contentSource)) {
 	failures.push(
 		"content bundle contains an unresolved dynamic import() — it will " +
 			"resolve against the page origin at injection time and 404",
