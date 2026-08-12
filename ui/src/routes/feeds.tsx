@@ -62,6 +62,7 @@ function FeedsPage() {
   const listRegionRef = useRef<HTMLElement>(null);
   const readerRegionRef = useRef<HTMLDivElement>(null);
   const previousEntryId = useRef<number | undefined>(undefined);
+  const mobileListScrollTop = useRef(0);
   const [tagDraft, setTagDraft] = useState(search.tag ?? "");
   useEffect(() => setTagDraft(search.tag ?? ""), [search.tag]);
   const filters: FeedRiverFilters = {
@@ -90,15 +91,25 @@ function FeedsPage() {
       return;
     }
     if (search.entry === undefined && previous !== undefined) {
+      if (isMobile) {
+        const main = listRegionRef.current?.closest("main");
+        if (main) {
+          const scrollTop = mobileListScrollTop.current;
+          main.scrollTop = scrollTop;
+          requestAnimationFrame(() => {
+            if (previousEntryId.current === undefined) main.scrollTop = scrollTop;
+          });
+        }
+      }
       const selectedRow = listRegionRef.current?.querySelector<HTMLElement>(
         `[data-feed-entry-id="${previous}"]`,
       );
       (selectedRow ?? listRegionRef.current)?.focus();
     }
-  }, [search.entry]);
+  }, [isMobile, search.entry]);
 
   return (
-    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:h-full md:grid-rows-[auto_auto_minmax(0,1fr)] md:overflow-hidden md:px-4 md:py-4">
+    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:h-full md:grid-rows-[auto_auto_minmax(0,1fr)] md:contain-paint md:overflow-hidden md:px-4 md:py-4">
       <section className="cl-grid-texture border border-rule bg-paper-2 px-4 py-4 md:px-6 md:py-5">
         <div className="cl-mono flex flex-wrap items-center gap-3 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
           <span aria-hidden="true" className="h-[7px] w-[7px] bg-accent" />
@@ -248,7 +259,13 @@ function FeedsPage() {
               <FeedRiver
                 filters={filters}
                 selectedEntryId={search.entry}
-                onSelectEntry={(entry) => updateSearch({ entry })}
+                onSelectEntry={(entry) => {
+                  if (isMobile) {
+                    mobileListScrollTop.current =
+                      listRegionRef.current?.closest("main")?.scrollTop ?? 0;
+                  }
+                  updateSearch({ entry });
+                }}
               />
             </section>
             <div

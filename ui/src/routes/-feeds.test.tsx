@@ -337,6 +337,41 @@ describe("feeds route controls", () => {
     expect(document.activeElement).toBe(row);
   });
 
+  it("restores the mobile list scroll after the explicit back action", async () => {
+    routeMocks.mobile = true;
+    const page = render(
+      <CodexFrame forceView="feeds">
+        <FeedsPage />
+      </CodexFrame>,
+    );
+    const main = screen.getByRole("main");
+    main.scrollTop = 700;
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /select direct entry/i }),
+    );
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+    page.rerender(
+      <CodexFrame forceView="feeds">
+        <FeedsPage />
+      </CodexFrame>,
+    );
+    main.scrollTop = 0;
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: "Back to entries" }),
+    );
+    routeMocks.search.entry = undefined;
+    page.rerender(
+      <CodexFrame forceView="feeds">
+        <FeedsPage />
+      </CodexFrame>,
+    );
+
+    expect(main.scrollTop).toBe(700);
+  });
+
   it("hands browser-history focus to the list region when the selected row is unavailable", () => {
     routeMocks.mobile = true;
     routeMocks.search.entry = 501;
@@ -387,6 +422,7 @@ describe("feeds route controls", () => {
     const routePage = main.querySelector(".mx-auto");
     const reader = screen.getByRole("region", { name: "Feed reader" });
     expect(routePage).toHaveClass("md:h-full");
+    expect(routePage).toHaveClass("md:contain-paint");
     expect(routePage).not.toHaveClass("md:h-dvh");
     expect(reader.parentElement).toHaveClass("md:h-full");
     expect(reader).toHaveClass("md:h-full", "overflow-y-auto");
