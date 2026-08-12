@@ -22,6 +22,10 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/blocks/search", "get"),
     ("/api/vault/blocks/assign-id", "post"),
     ("/api/vault/blocks/{block_id}", "get"),
+    (
+        "/api/vault/pages/by-id/{uuid}/properties",
+        "get",
+    ),
     ("/api/vault/bases/{slug}/views/{view}/evaluate", "post"),
 ];
 
@@ -59,8 +63,65 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 108,
-        "OpenAPI should document all 108 registered /api/vault operations"
+        operation_count, 109,
+        "OpenAPI should document all 109 registered /api/vault operations"
+    );
+}
+
+#[test]
+fn openapi_defines_the_page_base_property_projection_contract() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let operation =
+        &document["paths"]["/api/vault/pages/by-id/{uuid}/properties"]["get"];
+    assert_eq!(operation["operationId"], "get_page_base_properties");
+    assert_eq!(
+        operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageBasePropertiesResponse"
+    );
+    for status in ["400", "404", "500"] {
+        assert_eq!(
+            operation["responses"][status]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/ApiError",
+            "missing ApiError response schema for {status}"
+        );
+    }
+
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["PagePropertyCompatibility"]["enum"],
+        serde_json::json!(["compatible", "conflict"])
+    );
+    assert_eq!(
+        schemas["PagePropertyBlocker"]["enum"],
+        serde_json::json!(["schema_conflict", "reserved_key"])
+    );
+    assert_eq!(
+        schemas["PagePropertyDeclaration"]["properties"]["base"]["$ref"],
+        "#/components/schemas/PageBaseIdentity"
+    );
+    assert_eq!(
+        schemas["PagePropertyDeclaration"]["properties"]["definition"]["$ref"],
+        "#/components/schemas/PropertyDefinition"
+    );
+    assert_eq!(
+        schemas["PageBaseProperty"]["properties"]["compatibility"]["$ref"],
+        "#/components/schemas/PagePropertyCompatibility"
+    );
+    assert_eq!(
+        schemas["PageBaseProperty"]["properties"]["declarations"]["items"]["$ref"],
+        "#/components/schemas/PagePropertyDeclaration"
+    );
+    assert_eq!(
+        schemas["PageBaseProperty"]["properties"]["blockers"]["items"]["$ref"],
+        "#/components/schemas/PagePropertyBlocker"
+    );
+    assert_eq!(
+        schemas["PageBasePropertiesResponse"]["properties"]["matching_bases"]["items"]["$ref"],
+        "#/components/schemas/PageBaseIdentity"
+    );
+    assert_eq!(
+        schemas["PageBasePropertiesResponse"]["properties"]["properties"]["items"]["$ref"],
+        "#/components/schemas/PageBaseProperty"
     );
 }
 

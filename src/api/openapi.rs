@@ -196,6 +196,7 @@ impl Modify for SchemaOverrides {
         crate::api::bases::delete_base,
         crate::api::base_members::create_base_member,
         crate::api::query::run_query,
+        crate::api::properties::get_page_base_properties,
         crate::api::properties::patch_properties,
         // Feeds
         crate::api::feeds::list_feeds,
@@ -253,6 +254,12 @@ impl Modify for SchemaOverrides {
             crate::api::base_members::BaseMemberCreateResponse,
             crate::api::base_members::BaseMemberValidationDetail,
             crate::api::query::QueryRequest,
+            crate::api::properties::PageBaseIdentity,
+            crate::api::properties::PagePropertyDeclaration,
+            crate::api::properties::PagePropertyCompatibility,
+            crate::api::properties::PagePropertyBlocker,
+            crate::api::properties::PageBaseProperty,
+            crate::api::properties::PageBasePropertiesResponse,
             crate::api::properties::PropertyPatchRequest,
             crate::api::properties::PropertyPatchResponse,
             // Pages

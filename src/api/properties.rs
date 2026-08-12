@@ -1,13 +1,14 @@
-//! The property patch: the one new write path of the bases system.
+//! The Base-aware property projection and its one mutation path.
 //!
-//! A patch is a *splice*, not a rewrite: the raw page content goes through
-//! `toml_patch::splice_frontmatter`, so comments and untouched keys survive
-//! byte-for-byte, then rides `ReplacePageContentCommand` for optimistic
-//! concurrency. A legacy `---` page heals to TOML first (full
-//! serialization) — the one documented exception to comment preservation,
-//! and only during the transition.
+//! GET evaluates authoritative Base membership and groups declared properties
+//! without making any Base authoritative over another. PATCH is a splice, not
+//! a rewrite: the raw page content goes through `toml_patch::splice_frontmatter`,
+//! so comments and untouched keys survive byte-for-byte, then rides
+//! `ReplacePageContentCommand` for optimistic concurrency. A legacy `---` page
+//! heals to TOML first (full serialization) — the one documented exception to
+//! comment preservation, and only during the transition.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 use axum::Json;
@@ -19,10 +20,15 @@ use uuid::Uuid;
 use super::AppState;
 use super::error::ApiError;
 use super::events::SyncNotification;
-use crate::vault::base::PropertyType;
+use crate::vault::base::{
+    BODY_COLUMN, BaseDefinition, BaseRegistry, Filter, Op, PropertyDefinition, PropertyType,
+    SYSTEM_FIELDS,
+};
 use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
-use crate::vault::page::{page_revision, parse_or_repair_frontmatter, write_page_content};
+use crate::vault::page::{Page, page_revision, parse_or_repair_frontmatter, write_page_content};
 use crate::vault::path::VaultPath;
+use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+use crate::vault::toml_json::toml_value_to_json;
 use crate::vault::toml_patch::{FrontmatterEdits, SpliceError, ValueHint, splice_frontmatter};
 
 // NOTE: the board's tri-state `Option<Option<T>>` deserializer is not reused
@@ -57,6 +63,65 @@ pub struct PropertyPatchResponse {
     pub properties: serde_json::Map<String, serde_json::Value>,
 }
 
+/// Identity and display label for one matching Base.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PageBaseIdentity {
+    pub slug: String,
+    pub name: String,
+}
+
+/// One original property declaration and the Base that supplied it.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PagePropertyDeclaration {
+    pub base: PageBaseIdentity,
+    pub definition: PropertyDefinition,
+}
+
+/// Whether every declaration for a key has the same editor semantics.
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PagePropertyCompatibility {
+    Compatible,
+    Conflict,
+}
+
+/// Backend-authoritative reasons that a projected property cannot be patched.
+#[derive(Debug, Clone, Copy, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PagePropertyBlocker {
+    SchemaConflict,
+    ReservedKey,
+}
+
+/// One property key grouped across every matching Base declaration.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PageBaseProperty {
+    pub key: String,
+    /// Distinguishes an absent declared property from a present JSON `null`.
+    pub present: bool,
+    /// Current custom frontmatter value. Reserved and absent values are `null`.
+    #[schema(value_type = Option<serde_json::Value>)]
+    pub value: Option<serde_json::Value>,
+    pub compatibility: PagePropertyCompatibility,
+    /// Editor-semantic normalized definition; absent for conflicts.
+    pub definition: Option<PropertyDefinition>,
+    pub declarations: Vec<PagePropertyDeclaration>,
+    /// Backend capability only; Folio lock/read-only state is applied by clients.
+    pub patchable: bool,
+    pub blockers: Vec<PagePropertyBlocker>,
+}
+
+/// Authoritative Base property projection for one current page.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PageBasePropertiesResponse {
+    pub id: String,
+    pub path: String,
+    pub revision: String,
+    pub encrypted: bool,
+    pub matching_bases: Vec<PageBaseIdentity>,
+    pub properties: Vec<PageBaseProperty>,
+}
+
 fn hint_for(ty: Option<&PropertyType>) -> Option<ValueHint> {
     match ty {
         Some(PropertyType::Date) => Some(ValueHint::Date),
@@ -79,6 +144,221 @@ const RESERVED_KEYS: [&str; 10] = [
     "encryption",
     "conversation",
 ];
+
+fn page_base_identity(base: &BaseDefinition) -> PageBaseIdentity {
+    PageBaseIdentity {
+        slug: base.slug.clone(),
+        name: base.file.name.clone(),
+    }
+}
+
+fn normalized_property_definition(definition: &PropertyDefinition) -> PropertyDefinition {
+    let (options, many) = match definition.property_type {
+        PropertyType::Select | PropertyType::MultiSelect => {
+            (definition.options.clone(), None)
+        }
+        PropertyType::Relation => (Vec::new(), Some(definition.many.unwrap_or(true))),
+        _ => (Vec::new(), None),
+    };
+    PropertyDefinition {
+        property_type: definition.property_type,
+        options,
+        many,
+    }
+}
+
+fn same_editor_semantics(
+    left: &PropertyDefinition,
+    right: &PropertyDefinition,
+) -> bool {
+    left.property_type == right.property_type
+        && left.options == right.options
+        && left.many == right.many
+}
+
+fn is_reserved_property_key(key: &str) -> bool {
+    RESERVED_KEYS.contains(&key)
+        || SYSTEM_FIELDS.contains(&key)
+        || key == BODY_COLUMN
+}
+
+fn project_matching_bases(
+    matching: &[BaseDefinition],
+    page: &Page,
+) -> (Vec<PageBaseIdentity>, Vec<PageBaseProperty>) {
+    let mut identities = Vec::with_capacity(matching.len());
+    let mut declarations: BTreeMap<String, Vec<PagePropertyDeclaration>> = BTreeMap::new();
+    for base in matching {
+        let identity = page_base_identity(base);
+        identities.push(identity.clone());
+        for (key, definition) in &base.file.properties {
+            declarations
+                .entry(key.clone())
+                .or_default()
+                .push(PagePropertyDeclaration {
+                    base: identity.clone(),
+                    definition: definition.clone(),
+                });
+        }
+    }
+
+    let properties = declarations
+        .into_iter()
+        .map(|(key, declarations)| {
+            let mut normalized = declarations
+                .iter()
+                .map(|declaration| normalized_property_definition(&declaration.definition));
+            let candidate = normalized
+                .next()
+                .expect("grouped declarations are never empty");
+            let compatible =
+                normalized.all(|definition| same_editor_semantics(&candidate, &definition));
+            let reserved = is_reserved_property_key(&key);
+            let current = (!reserved)
+                .then(|| page.meta.extra.get(&key))
+                .flatten();
+            let mut blockers = Vec::with_capacity(usize::from(!compatible) + usize::from(reserved));
+            if !compatible {
+                blockers.push(PagePropertyBlocker::SchemaConflict);
+            }
+            if reserved {
+                blockers.push(PagePropertyBlocker::ReservedKey);
+            }
+            PageBaseProperty {
+                key,
+                present: current.is_some(),
+                value: current.map(toml_value_to_json),
+                compatibility: if compatible {
+                    PagePropertyCompatibility::Compatible
+                } else {
+                    PagePropertyCompatibility::Conflict
+                },
+                definition: compatible.then_some(candidate),
+                declarations,
+                patchable: compatible && !reserved,
+                blockers,
+            }
+        })
+        .collect();
+
+    (identities, properties)
+}
+
+/// Project matching Base declarations and current custom values for one page.
+#[utoipa::path(
+    get,
+    path = "/by-id/{uuid}/properties",
+    context_path = "/api/vault/pages",
+    tag = "Bases",
+    params(("uuid" = String, Path, description = "Page UUID")),
+    responses(
+        (status = 200, description = "Authoritative Base property projection", body = PageBasePropertiesResponse),
+        (status = 400, description = "Malformed page UUID", body = ApiError),
+        (status = 404, description = "Unknown page", body = ApiError),
+        (status = 500, description = "Page read or Base evaluation failed", body = ApiError)
+    )
+)]
+pub async fn get_page_base_properties(
+    State(state): State<Arc<AppState>>,
+    Path(uuid): Path<String>,
+) -> Result<Json<PageBasePropertiesResponse>, ApiError> {
+    let uuid = Uuid::parse_str(&uuid)
+        .map_err(|_| ApiError::bad_request("malformed page UUID"))?;
+    let page_id = uuid.to_string();
+    let lookup_id = page_id.clone();
+    let path = state
+        .index
+        .with_index(move |index, _vault| {
+            index.connection().query_row(
+                "SELECT path FROM pages WHERE id = ?1",
+                rusqlite::params![lookup_id],
+                |row| row.get::<_, String>(0),
+            )
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("index error: {error}")))?
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => {
+                ApiError::not_found(format!("no page with id {page_id}"))
+            }
+            error => ApiError::internal(format!("page lookup failed: {error}")),
+        })?;
+    let vault_path = VaultPath::new(&path)
+        .map_err(|error| ApiError::internal(format!("bad indexed path: {error}")))?;
+    let absolute_path = state.vault.resolve(&vault_path);
+    let page = Page::from_file(&absolute_path, vault_path).map_err(|error| match error {
+        crate::vault::page::FrontmatterError::Io(error)
+            if error.kind() == std::io::ErrorKind::NotFound =>
+        {
+            ApiError::not_found(format!("page file missing: {path}"))
+        }
+        error => ApiError::internal(format!("failed to read page: {error}")),
+    })?;
+    if page.meta.id != uuid {
+        return Err(ApiError::internal(format!(
+            "indexed page identity mismatch for id: {page_id}"
+        )));
+    }
+
+    let bases = BaseRegistry::load(state.vault.root()).bases;
+    let membership_id = page_id.clone();
+    let matching = state
+        .index
+        .with_index(move |index, _vault| {
+            bases
+                .into_iter()
+                .filter_map(|base| {
+                    let identity_filter = Filter::Cmp {
+                        field: "sys.id".to_string(),
+                        op: Op::Eq,
+                        value: serde_json::Value::String(membership_id.clone()),
+                    };
+                    let filter = match base.file.filter.clone() {
+                        Some(base_filter) => Filter::All(vec![base_filter, identity_filter]),
+                        None => identity_filter,
+                    };
+                    let spec = QuerySpec {
+                        filter: Some(filter),
+                        limit: Some(0),
+                        ..Default::default()
+                    };
+                    let result =
+                        evaluate(index.connection(), &spec, &QueryContext::for_base(&base));
+                    match result {
+                        Ok(QueryOutput::Flat { total: 1, .. }) => Some(Ok(base)),
+                        Ok(QueryOutput::Flat { total: 0, .. }) => None,
+                        Ok(QueryOutput::Flat { total, .. }) => Some(Err(format!(
+                            "identity-constrained Base `{}` returned {total} pages",
+                            base.slug
+                        ))),
+                        Ok(QueryOutput::Grouped { .. }) => Some(Err(format!(
+                            "identity-constrained Base `{}` returned grouped output",
+                            base.slug
+                        ))),
+                        Err(error) => Some(Err(format!(
+                            "Base `{}` membership evaluation failed: {error}",
+                            base.slug
+                        ))),
+                    }
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .await
+        .map_err(|error| ApiError::internal(format!("index error: {error}")))?
+        .map_err(ApiError::internal)?;
+
+    let revision = page_revision(&page.raw_content);
+    let encrypted = page.meta.encryption.is_some();
+    let (matching_bases, properties) = project_matching_bases(&matching, &page);
+    Ok(Json(PageBasePropertiesResponse {
+        id: page_id,
+        path,
+        revision,
+        encrypted,
+        matching_bases,
+        properties,
+    }))
+}
 
 /// Apply a property patch to the page with the given id.
 #[utoipa::path(
