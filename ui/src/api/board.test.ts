@@ -1,20 +1,18 @@
-import {
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoardResponse, BoardTask } from "#/api/board";
 import {
   applyTaskPatch,
-  useCreateTask,
-  usePatchTask,
-  useDeleteTask,
   useCreateCycle,
+  useCreateTask,
+  useDeleteTask,
   usePatchCycle,
+  usePatchTask,
 } from "#/api/board";
-import { toast } from "sonner";
+import { queryKeys } from "#/api/keys";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn() },
@@ -201,11 +199,9 @@ describe("Board mutation error toasts", () => {
       operations: [],
       tasks: [makeTask({ id: "task-1", status: "BACKLOG" })],
     };
-    queryClient.setQueryData(["board", "all"], board);
+    queryClient.setQueryData(queryKeys.board.all, board);
 
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(
-      new Error("Network error"),
-    );
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network error"));
 
     const { result } = renderHook(() => usePatchTask(), {
       wrapper: wrapper(queryClient),
@@ -225,25 +221,22 @@ describe("Board mutation error toasts", () => {
     });
 
     // Verify rollback occurred: data should be back to original
-    const cachedBoard = queryClient.getQueryData<BoardResponse>([
-      "board",
-      "all",
-    ]);
+    const cachedBoard = queryClient.getQueryData<BoardResponse>(
+      queryKeys.board.all,
+    );
     expect(cachedBoard?.tasks[0].status).toBe("BACKLOG");
   });
 
   it("toasts when create task fails", async () => {
     const queryClient = freshQueryClient();
-    queryClient.setQueryData(["board", "all"], {
+    queryClient.setQueryData(queryKeys.board.all, {
       columns: [],
       cycles: [],
       operations: [],
       tasks: [],
     });
 
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(
-      new Error("Network error"),
-    );
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network error"));
 
     const { result } = renderHook(() => useCreateTask(), {
       wrapper: wrapper(queryClient),
@@ -264,16 +257,14 @@ describe("Board mutation error toasts", () => {
 
   it("toasts when delete task fails", async () => {
     const queryClient = freshQueryClient();
-    queryClient.setQueryData(["board", "all"], {
+    queryClient.setQueryData(queryKeys.board.all, {
       columns: [],
       cycles: [],
       operations: [],
       tasks: [makeTask()],
     });
 
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(
-      new Error("Network error"),
-    );
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network error"));
 
     const { result } = renderHook(() => useDeleteTask(), {
       wrapper: wrapper(queryClient),
@@ -294,16 +285,14 @@ describe("Board mutation error toasts", () => {
 
   it("toasts when create cycle fails", async () => {
     const queryClient = freshQueryClient();
-    queryClient.setQueryData(["board", "all"], {
+    queryClient.setQueryData(queryKeys.board.all, {
       columns: [],
       cycles: [],
       operations: [],
       tasks: [],
     });
 
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(
-      new Error("Network error"),
-    );
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network error"));
 
     const { result } = renderHook(() => useCreateCycle(), {
       wrapper: wrapper(queryClient),
@@ -326,16 +315,14 @@ describe("Board mutation error toasts", () => {
 
   it("toasts when patch cycle fails", async () => {
     const queryClient = freshQueryClient();
-    queryClient.setQueryData(["board", "all"], {
+    queryClient.setQueryData(queryKeys.board.all, {
       columns: [],
       cycles: [],
       operations: [],
       tasks: [],
     });
 
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(
-      new Error("Network error"),
-    );
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network error"));
 
     const { result } = renderHook(() => usePatchCycle(), {
       wrapper: wrapper(queryClient),
