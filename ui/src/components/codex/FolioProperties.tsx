@@ -372,7 +372,6 @@ export function FolioProperties({
 
                           <ul
                             id={provenanceId}
-                            aria-label={`${property.key} declarations`}
                             className="sr-only"
                             style={{ opacity: 0 }}
                           >

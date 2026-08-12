@@ -217,6 +217,15 @@ describe("FolioProperties", () => {
     const text = definition("text");
     projectionState.data = projection(
       [
+        property("author", "text", {
+          value: "Ursula Le Guin",
+          declarations: [
+            {
+              base: { slug: "library", name: "Library" },
+              definition: text,
+            },
+          ],
+        }),
         property("status", "text", {
           value: "reading",
           declarations: [
@@ -262,6 +271,12 @@ describe("FolioProperties", () => {
     renderPanel();
 
     const shared = screen.getByRole("region", { name: "Shared" });
+    const library = screen.getByRole("region", { name: "Library" });
+    expect(
+      library.compareDocumentPosition(shared) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(within(library).getByText("author")).toBeVisible();
     expect(
       within(shared).getAllByRole("button", {
         name: "Edit status property",
@@ -274,6 +289,10 @@ describe("FolioProperties", () => {
       within(shared).getByText("number / text", { selector: "span" }),
     ).toBeVisible();
     expect(within(shared).getByText("Schema conflict")).toBeVisible();
+    expect(within(shared).getByText('{"raw":4}')).toBeVisible();
+    expect(
+      within(shared).queryByRole("button", { name: "Edit rating property" }),
+    ).toBeNull();
     expect(screen.getAllByText("status", { selector: "h4" })).toHaveLength(1);
   });
 
@@ -596,6 +615,9 @@ describe("FolioProperties", () => {
     expect(
       screen.getByRole("textbox", { name: "status property" }),
     ).toHaveValue("finished");
+    expect(input).toHaveAccessibleDescription(
+      /Library \(library\) · text.*network unavailable/,
+    );
     await user.tab();
     const retry = screen.getByRole("button", {
       name: "Retry saving status",
@@ -626,7 +648,8 @@ describe("FolioProperties", () => {
     ]);
 
     const view = renderPanel({ locked: true });
-    expect(screen.getByText("reading")).toBeVisible();
+    const statusValue = screen.getByText("reading");
+    expect(statusValue).toBeVisible();
     const statusRow = screen
       .getByRole("heading", { name: "status" })
       .closest("li");
@@ -636,9 +659,9 @@ describe("FolioProperties", () => {
         selector: "span",
       }),
     ).toBeVisible();
-    const provenance = within(statusRow as HTMLElement).getByLabelText(
-      "status declarations",
-    );
+    const provenanceId = statusValue.getAttribute("aria-describedby");
+    expect(provenanceId).toBeTruthy();
+    const provenance = document.getElementById(provenanceId as string);
     expect(provenance).toHaveClass("sr-only");
     expect(provenance).toHaveTextContent("Library (library) · select");
     expect(provenance).not.toBeVisible();
@@ -716,10 +739,17 @@ describe("FolioProperties", () => {
     expect(provenance).toHaveTextContent("Reading (reading) · text");
     expect(provenance).toHaveTextContent("Library (library) · text");
     expect(provenance).not.toBeVisible();
+    expect(provenance).not.toHaveAccessibleName();
+    expect(edit).toHaveAccessibleDescription(
+      "Reading (reading) · text Library (library) · text",
+    );
 
     await user.keyboard("{Enter}");
     const input = screen.getByRole("textbox", { name: "status property" });
     expect(input).toHaveAttribute("aria-describedby", descriptionId);
+    expect(input).toHaveAccessibleDescription(
+      "Reading (reading) · text Library (library) · text",
+    );
     await user.keyboard("{Escape}");
     expect(
       screen.getByRole("button", { name: "Edit status property" }),
