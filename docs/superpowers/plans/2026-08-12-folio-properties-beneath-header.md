@@ -108,7 +108,7 @@ This covers malformed custom declarations. Legitimate Base view columns named `b
 Run:
 
 ```bash
-bun --cwd ui run test -- src/components/codex/__tests__/FolioProperties.test.tsx
+bun run --cwd ui test -- src/components/codex/__tests__/FolioProperties.test.tsx
 ```
 
 Expected: FAIL because the successful no-match projection still renders “No matching Bases.” The malformed-body test should already pass or expose any accidental editor path; do not weaken it.
@@ -158,7 +158,7 @@ Place the property heading plus read-only/blocker badges in the first grid cell.
 Run:
 
 ```bash
-bun --cwd ui run test -- src/components/codex/__tests__/FolioProperties.test.tsx
+bun run --cwd ui test -- src/components/codex/__tests__/FolioProperties.test.tsx
 ```
 
 Expected: PASS, including hidden no-match, loading, no-declarations, typed edits, conflicts, retry, focus, read-only, and malformed `body` declaration coverage.
@@ -273,7 +273,7 @@ This verifies the locked variant without mounting body content or weakening encr
 Run:
 
 ```bash
-bun --cwd ui run test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/LockedFolio.test.tsx
+bun run --cwd ui test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/LockedFolio.test.tsx
 ```
 
 Expected: FAIL because desktop properties remain inside the metadata `aside`, mobile properties remain inside the details dialog, and locked properties follow the unlock panel.
@@ -309,7 +309,7 @@ Keep the complete persisted-tags and derived-tags blocks immediately above this 
 Run:
 
 ```bash
-bun --cwd ui run test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/LockedFolio.test.tsx src/components/codex/__tests__/FolioProperties.test.tsx
+bun run --cwd ui test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/LockedFolio.test.tsx src/components/codex/__tests__/FolioProperties.test.tsx
 ```
 
 Expected: PASS. Confirm the property projection failure test still leaves the normal body editor visible.
@@ -337,7 +337,7 @@ git commit -m "feat(codex): place Folio properties beneath header"
 Run:
 
 ```bash
-bun --cwd ui x biome check --write src/components/codex/FolioProperties.tsx src/components/codex/Folio.tsx src/components/codex/LockedFolio.tsx src/components/codex/__tests__/FolioProperties.test.tsx src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/LockedFolio.test.tsx
+bun run --cwd ui format -- src/components/codex/FolioProperties.tsx src/components/codex/Folio.tsx src/components/codex/LockedFolio.tsx src/components/codex/__tests__/FolioProperties.test.tsx src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/LockedFolio.test.tsx
 ```
 
 Expected: exit 0. Review only formatter changes in touched files; do not reformat unrelated files.
@@ -347,7 +347,7 @@ Expected: exit 0. Review only formatter changes in touched files; do not reforma
 Run:
 
 ```bash
-bun --cwd ui run typecheck
+bun run --cwd ui typecheck
 ```
 
 Expected: exit 0 with no TypeScript diagnostics.
@@ -357,7 +357,7 @@ Expected: exit 0 with no TypeScript diagnostics.
 Run:
 
 ```bash
-bun --cwd ui run lint
+bun run --cwd ui lint
 ```
 
 Expected: exit 0 with no Biome diagnostics.
@@ -367,14 +367,14 @@ Expected: exit 0 with no Biome diagnostics.
 Run:
 
 ```bash
-bun --cwd ui run test
+bun run --cwd ui test
 ```
 
 Expected: exit 0; all Vitest suites pass.
 
 - [ ] **Step 5: Smoke-test the desktop editing path in a real browser**
 
-Start the backend with `cargo run -- serve` from the repository root and the Vite frontend with `bun --cwd ui run dev`. Open the reported Vite URL, then open an editable Folio that matches at least one Base and has a compatible declared property. At desktop width:
+Start the backend with `cargo run -- serve` from the repository root and the Vite frontend with `bun run --cwd ui dev`. Open the reported Vite URL, then open an editable Folio that matches at least one Base and has a compatible declared property. At desktop width:
 
 1. Confirm the Properties heading and rows appear below title/tags/aliases and above the body.
 2. Confirm the left metadata rail contains Document/Chronology/Vitals but no Properties section.
