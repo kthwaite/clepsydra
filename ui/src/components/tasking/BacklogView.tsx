@@ -86,21 +86,21 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
     <div className="h-full overflow-auto text-[var(--fs-s)]">
       {/* ── QuickAddRow ──────────────────────────────────────────────────── */}
       <div
-        className="sticky top-0 z-[4] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad,12px)] py-[5px]"
-        style={{ minHeight: "var(--row-h, 32px)" }}
+        className="sticky top-0 z-[4] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[5px]"
+        style={{ minHeight: "var(--row-h)" }}
       >
         <QuickAddRow preset={{}} testId="qa-backlog" />
       </div>
 
       {/* ── Header row ──────────────────────────────────────────────────── */}
       <div
-        className="cl-mono sticky z-[3] grid w-full border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad,12px)] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]"
+        className="cl-mono sticky z-[3] grid w-full border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]"
         style={{
           gridTemplateColumns: BK_COLS,
           gap: "12px",
-          minHeight: "var(--row-h, 32px)",
+          minHeight: "var(--row-h)",
           alignItems: "center",
-          top: "var(--row-h, 32px)",
+          top: "var(--row-h)",
         }}
       >
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
@@ -132,6 +132,16 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
         </span>
       </div>
 
+      {/* ── Empty state ─────────────────────────────────────────────────── */}
+      {groups.length === 0 && (
+        <div
+          className="cl-mono border border-dashed border-[var(--rule)] px-[8px] py-[16px] text-center text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-4)]"
+          data-testid="bk-empty"
+        >
+          — NONE —
+        </div>
+      )}
+
       {/* ── Priority groups ──────────────────────────────────────────────── */}
       {groups.map((g, idx) => (
         <div key={g.pri}>
@@ -141,9 +151,9 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
               child of its own group wrapper). */}
           <div
             data-testid={`bk-grp-hd-${g.pri}`}
-            className="sticky z-[4] flex items-center gap-[12px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad,12px)] py-[7px]"
+            className="sticky z-[4] flex items-center gap-[12px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad)] py-[7px]"
             style={{
-              top: "calc(2 * var(--row-h, 32px))",
+              top: "calc(2 * var(--row-h))",
               borderTopStyle: idx === 0 ? "none" : "solid",
               borderTopWidth: idx === 0 ? 0 : "1px",
               borderTopColor: "var(--rule)",
@@ -173,12 +183,12 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                 role="button"
                 tabIndex={0}
                 data-testid={`bk-row-${t.id}`}
-                className="cl-mono grid w-full cursor-pointer border-b border-dotted border-[var(--rule)] px-[var(--pad,12px)] py-[5px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
+                className="cl-mono grid w-full cursor-pointer border-b border-dotted border-[var(--rule)] px-[var(--pad)] py-[5px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
                 style={{
                   gridTemplateColumns: BK_COLS,
                   gap: "12px",
                   alignItems: "center",
-                  minHeight: "var(--row-h, 32px)",
+                  minHeight: "var(--row-h)",
                 }}
                 onClick={() => setEditTaskId(t.id)}
                 onKeyDown={(e) => {
@@ -210,7 +220,10 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                       <HoldTag />
                     </span>
                   )}
-                  <span className="overflow-hidden text-ellipsis whitespace-nowrap">
+                  <span
+                    className="overflow-hidden text-ellipsis whitespace-nowrap"
+                    title={t.title}
+                  >
                     {t.title}
                   </span>
                 </span>

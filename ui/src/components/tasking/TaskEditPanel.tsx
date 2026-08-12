@@ -53,6 +53,9 @@ import {
 /** How long the armed "CONFIRM DESTROY?" state persists before auto-disarm. */
 const DESTROY_DISARM_MS = 3000;
 
+/** Debounce delay for text-field patches (title, assignee, estimate, …). */
+const DEBOUNCE_MS = 300;
+
 // ── useDebounce ───────────────────────────────────────────────────────────────
 
 function useDebounced(
@@ -176,6 +179,7 @@ export function TaskEditPanel({
 
   // Sync local mirrors when the task identity changes (different editTaskId)
   const taskId = task.id;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
     setTitleVal(task.title);
     setAssigneeVal(task.assignee ?? "");
@@ -186,7 +190,7 @@ export function TaskEditPanel({
     setLinkVal(task.link ?? "");
     setTagsVal(task.tags.join(", "));
     setDestroying(false);
-  }, [taskId]); // eslint-disable-line react-hooks/exhaustive-deps — intentional
+  }, [taskId]);
 
   // Escape closes
   useEffect(() => {
@@ -234,7 +238,7 @@ export function TaskEditPanel({
   // Debounced patches (300ms)
   useDebounced(
     titleVal,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       if (v.trim() && v !== task.title) patchNow({ title: v.trim() });
     },
@@ -242,7 +246,7 @@ export function TaskEditPanel({
   );
   useDebounced(
     assigneeVal,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       const trimmed = v.trim() || null;
       if (trimmed !== (task.assignee ?? null)) patchNow({ assignee: trimmed });
@@ -251,7 +255,7 @@ export function TaskEditPanel({
   );
   useDebounced(
     estimateVal,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       const trimmed = v.trim() || null;
       if (trimmed !== (task.estimate ?? null)) patchNow({ estimate: trimmed });
@@ -260,7 +264,7 @@ export function TaskEditPanel({
   );
   useDebounced(
     dueVal,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       const trimmed = v.trim() || null;
       if (trimmed !== (task.due ?? null)) patchNow({ due: trimmed });
@@ -269,7 +273,7 @@ export function TaskEditPanel({
   );
   useDebounced(
     startVal,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       const trimmed = v.trim() || null;
       if (trimmed !== (task.start ?? null)) patchNow({ start: trimmed });
@@ -282,7 +286,7 @@ export function TaskEditPanel({
   // toggle's job (hold: null), never a side effect of editing the reason.
   useDebounced(
     holdReason,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       if (task.hold && v !== task.hold)
         patchNow({ hold: v.trim() || task.hold });
@@ -291,7 +295,7 @@ export function TaskEditPanel({
   );
   useDebounced(
     linkVal,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       const trimmed = v.trim() || null;
       if (trimmed !== (task.link ?? null)) patchNow({ link: trimmed });
@@ -302,7 +306,7 @@ export function TaskEditPanel({
   // Tags: comma-sep input → debounced 300ms like the other text fields
   useDebounced(
     tagsVal,
-    300,
+    DEBOUNCE_MS,
     (v) => {
       const arr = v
         .split(",")

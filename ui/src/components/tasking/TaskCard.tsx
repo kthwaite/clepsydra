@@ -151,7 +151,7 @@ export function TaskCard({
         </div>
       )}
 
-      {/* Tags — up to 3 */}
+      {/* Tags — up to 3, with a +N overflow chip */}
       {t.tags.length > 0 && (
         <div className="mb-[7px] flex flex-wrap gap-[3px]">
           {t.tags.slice(0, 3).map((tag) => (
@@ -162,6 +162,14 @@ export function TaskCard({
               {tag}
             </span>
           ))}
+          {t.tags.length > 3 && (
+            <span
+              data-testid={`task-tags-more-${t.id}`}
+              className="cl-mono border border-[var(--rule)] px-[4px] text-[var(--fs-xs)] text-[var(--ink-3)]"
+            >
+              +{t.tags.length - 3}
+            </span>
+          )}
         </div>
       )}
 

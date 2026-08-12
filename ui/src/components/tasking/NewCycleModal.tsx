@@ -15,7 +15,11 @@ import type { BoardCycle } from "#/api/board";
 import { useCreateCycle } from "#/api/board";
 import { isoAddDays } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { BoardModalFrame } from "./BoardModalFrame";
+import {
+  BOARD_MODAL_WIDTHS,
+  BoardModalFrame,
+  ModalEscChip,
+} from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { EdField, INPUT_CLS, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
 
@@ -105,6 +109,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
   const todayISO = now ?? new Date().toISOString().slice(0, 10);
 
   // Re-initialise on open
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
     if (!isOpen) return;
     const pf = newCyclePrefill(cycles, todayISO);
@@ -116,7 +121,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
     setGoal("");
     // Focus label after state flush
     setTimeout(() => labelRef.current?.focus(), 0);
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps — intentional: only on open
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -148,7 +153,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
   return (
     <BoardModalFrame
       ariaLabel="New Cycle"
-      widthClassName="w-[600px]"
+      widthClassName={BOARD_MODAL_WIDTHS.cycle}
       backdropTestId="new-cycle-modal-backdrop"
       modalTestId="new-cycle-modal"
       onClose={closeCycleModal}
@@ -171,14 +176,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
           {windowLabel} · OPEN A CADENCE WINDOW
         </span>
-        <button
-          type="button"
-          className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-          onClick={closeCycleModal}
-          data-testid="new-cycle-close-btn"
-        >
-          ESC
-        </button>
+        <ModalEscChip onClose={closeCycleModal} testId="new-cycle-close-btn" />
       </div>
 
       {/* Body */}

@@ -529,6 +529,18 @@ describe("BacklogView — empty state", () => {
     // No group headers
     expect(screen.queryByText("CRITICAL")).not.toBeInTheDocument();
   });
+
+  it("renders the dashed — NONE — empty-state block when no tasks are provided", () => {
+    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
+    const empty = screen.getByTestId("bk-empty");
+    expect(empty).toBeInTheDocument();
+    expect(empty).toHaveTextContent("— NONE —");
+  });
+
+  it("does not render the empty-state block when tasks are present", () => {
+    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
+    expect(screen.queryByTestId("bk-empty")).not.toBeInTheDocument();
+  });
 });
 
 describe("BacklogView — QuickAddRow wiring", () => {

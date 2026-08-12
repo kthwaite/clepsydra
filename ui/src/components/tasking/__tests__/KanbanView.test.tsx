@@ -368,6 +368,59 @@ describe("TaskCard — card anatomy", () => {
     expect(fill).toHaveStyle({ background: "var(--cool)" });
   });
 
+  it("renders up to 3 tag chips with no overflow chip when tags.length <= 3", () => {
+    const taskWithTags: BoardTask = {
+      ...tasks[0],
+      id: "t-tags-3",
+      code: "TSK-0030",
+      status: "INTAKE",
+      tags: ["alpha", "beta", "gamma"],
+    };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithTags]}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText("beta")).toBeInTheDocument();
+    expect(screen.getByText("gamma")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(`task-tags-more-${taskWithTags.id}`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders only the first 3 tags plus a +N overflow chip when tags.length > 3", () => {
+    const taskWithManyTags: BoardTask = {
+      ...tasks[0],
+      id: "t-tags-5",
+      code: "TSK-0031",
+      status: "INTAKE",
+      tags: ["alpha", "beta", "gamma", "delta", "epsilon"],
+    };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithManyTags]}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText("beta")).toBeInTheDocument();
+    expect(screen.getByText("gamma")).toBeInTheDocument();
+    expect(screen.queryByText("delta")).not.toBeInTheDocument();
+    expect(screen.queryByText("epsilon")).not.toBeInTheDocument();
+    const overflow = screen.getByTestId(
+      `task-tags-more-${taskWithManyTags.id}`,
+    );
+    expect(overflow).toHaveTextContent("+2");
+  });
+
   it("does not render checklist section when checks array is empty", () => {
     // t1 has checks=[] — no d/total text
     wrap(

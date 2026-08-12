@@ -226,7 +226,6 @@ export function TaskingScreen({
             sealHistoryApplicable={telemetryApplicable}
           />
 
-          {/* Body router — Tasks 9-12 replace each placeholder */}
           <div className="relative min-h-0 flex-1 overflow-hidden">
             {mode === "card" && (
               <KanbanView

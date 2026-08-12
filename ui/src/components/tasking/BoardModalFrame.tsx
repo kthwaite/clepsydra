@@ -6,6 +6,33 @@ import {
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
 
+/** Shared modal width variants — the only sizes board modals use. */
+export const BOARD_MODAL_WIDTHS = {
+  task: "w-[660px]",
+  cycle: "w-[600px]",
+  confirm: "w-[460px]",
+} as const;
+
+/** The header ESC chip every board modal renders (copy-pasted today). */
+export function ModalEscChip({
+  onClose,
+  testId,
+}: {
+  onClose: () => void;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
+      onClick={onClose}
+      data-testid={testId}
+    >
+      ESC
+    </button>
+  );
+}
+
 export interface BoardModalFrameProps {
   ariaLabel: string;
   widthClassName: string;

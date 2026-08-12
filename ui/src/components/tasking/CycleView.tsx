@@ -185,7 +185,7 @@ export function CycleView({
   }
 
   return (
-    <div className="cl-mono h-full overflow-y-auto px-[var(--pad,12px)] py-[16px]">
+    <div className="cl-mono h-full overflow-y-auto px-[var(--pad)] py-[16px]">
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="mb-[16px] flex items-start justify-between gap-[24px]">
         {/* Left */}
@@ -439,7 +439,10 @@ export function CycleView({
                           <HoldTag />
                         </span>
                       )}
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-s)] text-[var(--ink)]">
+                      <span
+                        className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-s)] text-[var(--ink)]"
+                        title={t.title}
+                      >
                         {t.title}
                       </span>
                     </span>

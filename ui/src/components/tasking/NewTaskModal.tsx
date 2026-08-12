@@ -30,7 +30,11 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { BoardCycle, BoardOperation } from "#/api/board";
 import { useCreateTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
-import { BoardModalFrame } from "./BoardModalFrame";
+import {
+  BOARD_MODAL_WIDTHS,
+  BoardModalFrame,
+  ModalEscChip,
+} from "./BoardModalFrame";
 import { type ColLabelFn, opKey } from "./board-constants";
 import {
   DispositionRow,
@@ -77,6 +81,7 @@ export function NewTaskModal({
   const isOpen = taskModal !== null;
 
   // Reinitialise on open
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
     if (!isOpen) return;
     setTitle("");
@@ -93,7 +98,7 @@ export function NewTaskModal({
     setLink("");
     // Focus title after state flush
     setTimeout(() => titleRef.current?.focus(), 0);
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps — intentional: only on open
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -168,7 +173,7 @@ export function NewTaskModal({
   return (
     <BoardModalFrame
       ariaLabel="New Tasking"
-      widthClassName="w-[660px]"
+      widthClassName={BOARD_MODAL_WIDTHS.task}
       backdropTestId="new-task-modal-backdrop"
       modalTestId="new-task-modal"
       onClose={closeTaskModal}
@@ -187,14 +192,7 @@ export function NewTaskModal({
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
           {opLabel} · COMMIT TO REGISTER
         </span>
-        <button
-          type="button"
-          className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-          onClick={closeTaskModal}
-          data-testid="new-task-close-btn"
-        >
-          ESC
-        </button>
+        <ModalEscChip onClose={closeTaskModal} testId="new-task-close-btn" />
       </div>
 
       {/* Body */}

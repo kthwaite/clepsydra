@@ -176,7 +176,7 @@ export function BoardHeader({
       <div className="flex items-center gap-[18px] px-[var(--pad)] pb-[10px] pt-[12px]">
         {/* Title block */}
         <div className="flex flex-col gap-[1px]">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+          <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
             OPS REGISTER / {operations.length} OPERATIONS · {cycles.length}{" "}
             CYCLES
           </span>
@@ -197,7 +197,7 @@ export function BoardHeader({
               role="tab"
               aria-selected={mode === m.id}
               className={cn(
-                "cl-mono inline-flex cursor-pointer items-center gap-[7px] border-r border-[var(--rule)] px-[14px] py-[5px] text-[9px] uppercase tracking-[0.18em] transition-colors last:border-r-0",
+                "cl-mono inline-flex cursor-pointer items-center gap-[7px] border-r border-[var(--rule)] px-[14px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] transition-colors last:border-r-0",
                 mode === m.id
                   ? "bg-[var(--ink)] text-[var(--paper)]"
                   : "text-[var(--ink-mute)] hover:bg-[var(--paper-edge)] hover:text-[var(--ink-2)]",
@@ -214,7 +214,7 @@ export function BoardHeader({
         <div className="ml-auto flex items-center gap-[22px]">
           {/* OPEN */}
           <div className="flex flex-col gap-[1px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               OPEN
             </span>
             <span className="font-sans text-[20px] font-black leading-none tabular-nums text-[var(--ink)]">
@@ -224,7 +224,7 @@ export function BoardHeader({
 
           {/* IN-FIELD */}
           <div className="flex flex-col gap-[1px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               IN-FIELD
             </span>
             <span
@@ -237,7 +237,7 @@ export function BoardHeader({
 
           {/* ON HOLD */}
           <div className="flex flex-col gap-[1px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               ON HOLD
             </span>
             <span
@@ -250,21 +250,30 @@ export function BoardHeader({
 
           {/* SEAL RATE 14d sparkline */}
           <div className="flex flex-col gap-[1px] pb-[2px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               SEAL RATE 14d
             </span>
             {!sealHistoryApplicable ? (
-              <span className="text-[9px] text-[var(--ink-mute)]">
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
                 NOT APPLICABLE
               </span>
             ) : sealHistoryPending ? (
-              <span className="text-[9px] text-[var(--ink-mute)]">LOADING</span>
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                LOADING
+              </span>
             ) : sealHistoryError ? (
-              <span className="text-[9px] text-[var(--hot)]">UNAVAILABLE</span>
-            ) : sealHistory.length === 0 || sealHistory.every((count) => count === 0) ? (
-              <span className="text-[9px] text-[var(--ink-mute)]">NO SEALS</span>
+              <span className="text-[var(--fs-xs)] text-[var(--hot)]">
+                UNAVAILABLE
+              </span>
+            ) : sealHistory.length === 0 ||
+              sealHistory.every((count) => count === 0) ? (
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                NO SEALS
+              </span>
             ) : (
-              <div aria-label={`14-day seal history: ${sealHistory.join(", ")}`}>
+              <div
+                aria-label={`14-day seal history: ${sealHistory.join(", ")}`}
+              >
                 <Spark
                   data={sealHistory}
                   width={96}
@@ -306,7 +315,7 @@ export function BoardHeader({
                 aria-pressed={on}
                 data-testid={`board-filter-pri-${p}`}
                 className={cn(
-                  "cl-mono border px-[7px] py-[3px] text-[9px] uppercase tracking-[0.1em] transition-colors",
+                  "cl-mono border px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] transition-colors",
                   on
                     ? "border-[var(--hot)] bg-[var(--hot)] text-[var(--paper)]"
                     : "border-[var(--rule)] text-[var(--ink-mute)] hover:text-[var(--ink-2)]",
@@ -329,7 +338,7 @@ export function BoardHeader({
             aria-pressed={filter.holdOnly}
             data-testid="board-filter-hold"
             className={cn(
-              "cl-mono border px-[7px] py-[3px] text-[9px] uppercase tracking-[0.1em] transition-colors",
+              "cl-mono border px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] transition-colors",
               filter.holdOnly
                 ? "border-[var(--hot)] bg-[var(--hot)] text-[var(--paper)]"
                 : "border-[var(--rule)] text-[var(--ink-mute)] hover:text-[var(--ink-2)]",
@@ -343,7 +352,7 @@ export function BoardHeader({
         {isFilterActive(filter) && (
           <span
             data-testid="board-filter-count"
-            className="cl-mono ml-auto text-[9px] uppercase tracking-[0.15em] text-[var(--ink-mute)]"
+            className="cl-mono ml-auto text-[var(--fs-xs)] uppercase tracking-[0.15em] text-[var(--ink-mute)]"
           >
             {pad2(filteredCount)} OF {pad2(opFilteredCount)}
           </span>
@@ -352,7 +361,7 @@ export function BoardHeader({
 
       {/* Op-meta line — only when a real op is selected */}
       {activeOp && (
-        <div className="flex items-center gap-[14px] overflow-hidden whitespace-nowrap border-t border-[var(--rule-soft)] bg-[var(--paper)] px-[var(--pad)] py-[7px] text-[9px] uppercase tracking-[0.12em] text-[var(--ink-mute)]">
+        <div className="flex items-center gap-[14px] overflow-hidden whitespace-nowrap border-t border-[var(--rule-soft)] bg-[var(--paper)] px-[var(--pad)] py-[7px] text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-mute)]">
           <HealthDot health={activeOp.health} />
           <span className="font-medium text-[var(--ink)]">{activeOp.name}</span>
           <span className="text-[var(--ink-faint)]">·</span>
@@ -365,7 +374,10 @@ export function BoardHeader({
           <span className="text-[var(--ink-faint)]">·</span>
           <span>
             HEALTH
-            <b className="ml-[5px] font-medium" style={{ color: opHealthColor }}>
+            <b
+              className="ml-[5px] font-medium"
+              style={{ color: opHealthColor }}
+            >
               {activeOp.health}
             </b>
           </span>
@@ -394,7 +406,7 @@ export function BoardHeader({
           {activeOp.note && (
             <>
               <span className="text-[var(--ink-faint)]">·</span>
-              <span className="overflow-hidden text-ellipsis text-[9px] normal-case tracking-[0.02em] text-[var(--ink-2)]">
+              <span className="overflow-hidden text-ellipsis text-[var(--fs-xs)] normal-case tracking-[0.02em] text-[var(--ink-2)]">
                 {activeOp.note}
               </span>
             </>
