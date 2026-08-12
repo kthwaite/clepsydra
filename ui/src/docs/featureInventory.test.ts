@@ -125,18 +125,38 @@ describe("feature documentation inventory", () => {
     }
   });
 
-  it("maps every integration manifest entry to a registered guide", () => {
-    const registeredSlugs = new Set(DOC_PAGES.map((page) => page.slug));
+  it("maps every integration manifest entry to a registered structured guide", () => {
     const integrations = FEATURE_INVENTORY.filter(
       (entry) => entry.surface === "integration",
     );
-
-    expect(integrations.length).toBeGreaterThan(0);
     for (const integration of integrations) {
       expect(integration.disposition.kind).toBe("guide");
-      if (integration.disposition.kind === "guide") {
-        expect(registeredSlugs.has(integration.disposition.slug)).toBe(true);
+    }
+    const integrationSlugs = [
+      ...new Set(
+        integrations.flatMap((entry) =>
+          entry.disposition.kind === "guide"
+            ? [entry.disposition.slug]
+            : [],
+        ),
+      ),
+    ];
+
+    expect(integrationSlugs.length).toBeGreaterThan(0);
+    for (const slug of integrationSlugs) {
+      const source = DOC_PAGES.find((page) => page.slug === slug)?.source;
+      expect(source, `${slug} must be registered`).toBeDefined();
+      for (const heading of [
+        "Prerequisites",
+        "Workflow",
+        "Failures and conflicts",
+        "Privacy",
+        "Related",
+      ]) {
+        expect(source).toMatch(new RegExp(`^## ${heading}$`, "m"));
       }
+      expect(source).toContain("(/docs/configuration)");
+      expect(source).toContain("(/docs/troubleshooting)");
     }
   });
 

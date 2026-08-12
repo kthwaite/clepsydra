@@ -106,13 +106,21 @@ The injected script records URL, canonical URL when present, title,
 description, and `document.documentElement.outerHTML`; it runs Readability on a
 cloned document. The background worker:
 
-1. hashes and includes the HTML snapshot;
-2. fetches at most 50 distinct reader-mode image URLs with the page’s browser
-   credentials, ignores failed image requests, and includes successful blobs;
-3. converts a readable article of at least 200 text characters to Markdown, or
-   emits fallback Markdown linking the HTML snapshot;
-4. adds `archive`, domain, current-month, and configured default tags;
-5. posts the manifest and blobs to the running server.
+1. extracts every distinct base64 `data:` URI found in the full serialized DOM
+   into a separate CAS blob. The extension imposes no count cap on these inline
+   resources; the archive API’s request/blob limits still apply;
+2. considers at most the first 50 raw `src` strings from reader-mode `<img>`
+   elements, resolves them against the page URL, fetches them with the page’s
+   browser credentials, and omits failed requests;
+3. hashes every resource and deduplicates blobs by hash. It also hashes and
+   includes the full HTML snapshot as its own `text/html` blob;
+4. converts a readable article of at least 200 text characters to Markdown, or
+   emits fallback Markdown linking the snapshot;
+5. adds `archive`, domain, current-month, and configured default tags; and
+6. posts one archive manifest containing `url`, optional `canonical_url`,
+   `domain`, `title`, optional `description`, `captured_at`, `content_hash`,
+   `snapshot_hash`, `markdown_body`, `tags`, and `blobs`. Every blob carries
+   exactly `hash`, `content_type`, and base64 `data`.
 
 The HTML snapshot is the current serialized DOM, not a complete SingleFile
 bundle: live JavaScript state and unfetched external assets are not preserved.

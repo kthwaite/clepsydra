@@ -50,7 +50,10 @@ On desktop, **SHEAF** is the horizontal page-tab strip:
   while a preview is open updates immediately. Preview does not activate or
   edit the page.
 
-Pinned tabs sort first and survive **CLOSE QUIRE**. Activating a tab hidden in a
+Ungrouped pinned tabs render before every remaining segment. A quire keeps its
+place among those remaining segments, and its pinned members render before its
+unpinned members. Pinned quire members survive **CLOSE QUIRE**; pinned tabs are
+not pulled globally ahead of their quire. Activating a tab hidden in a
 collapsed quire expands that quire. The workspace, tab paths and labels, recent
 history, navigation mode, and quire state persist in browser local storage
 under `clepsydra.workspace`; they are not written into Folio Markdown.

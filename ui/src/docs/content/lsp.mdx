@@ -53,8 +53,22 @@ vim.api.nvim_create_autocmd('FileType', {
 })
 ```
 
-For Helix, use the equivalent `languages.toml` command and arguments:
-`command = "clep"` with `args = ["lsp"]`.
+For Helix, add the server and extend Markdown in `languages.toml`:
+
+```toml
+[language-server.clepsydra]
+command = "clep"
+args = ["lsp"]
+
+[[language]]
+name = "markdown"
+language-servers = ["marksman", "markdown-oxide", "rumdl", "clepsydra"]
+```
+
+Defining `language-servers` overrides that field, so keep the built-in Markdown
+servers you use and append `clepsydra`; do not replace the list with only
+Clepsydra. The example preserves Helix’s current Marksman, Markdown Oxide, and
+rumdl entries. Check `hx --health markdown` after restarting Helix.
 
 Root resolution checks every workspace folder, then the deprecated `rootUri`,
 walking each ancestor chain for `.clepsydra`. If none has the marker, it uses

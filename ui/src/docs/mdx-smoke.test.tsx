@@ -16,6 +16,7 @@ import source from "#/docs/content/getting-started.mdx?raw";
 import Troubleshooting, {
   meta as troubleshootingMeta,
 } from "#/docs/content/troubleshooting.mdx";
+import { FEATURE_INVENTORY } from "#/docs/featureInventory";
 import { DOC_PAGES } from "#/docs/registry";
 
 const WORKFLOW_GUIDE_SLUGS = [
@@ -26,6 +27,7 @@ const WORKFLOW_GUIDE_SLUGS = [
   "tasks-agenda-journals-and-board",
   "academic-library-and-reading",
   "capture-feeds-and-archives",
+  "codex-and-conversation-capture",
 ] as const;
 
 const WORKFLOW_GUIDE_HEADINGS = [
@@ -37,11 +39,14 @@ const WORKFLOW_GUIDE_HEADINGS = [
 ] as const;
 
 const INTEGRATION_GUIDE_SLUGS = [
-  "codex-and-conversation-capture",
-  "lsp",
-  "mcp",
-  "browser-extension",
-] as const;
+  ...new Set(
+    FEATURE_INVENTORY.filter(
+      (entry) => entry.surface === "integration",
+    ).flatMap((entry) =>
+      entry.disposition.kind === "guide" ? [entry.disposition.slug] : [],
+    ),
+  ),
+];
 
 it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   render(<Guide />);
@@ -246,6 +251,75 @@ it("renders repository-only guide references as non-clickable source paths", () 
 function registeredGuideSource(slug: string): string {
   return DOC_PAGES.find((page) => page.slug === slug)?.source ?? "";
 }
+
+it("documents exact SHEAF pin and quire ordering", () => {
+  const source = registeredGuideSource("codex-and-conversation-capture");
+
+  expect(source).toContain(
+    "Ungrouped pinned tabs render before every remaining segment",
+  );
+  expect(source).toMatch(
+    /quire keeps its\s+place[\s\S]*pinned members render before its\s+unpinned members/,
+  );
+  expect(source).toContain("Pinned quire members survive **CLOSE QUIRE**");
+  expect(source).toContain("not pulled globally ahead of their quire");
+});
+
+it("documents executable Helix LSP setup without dropping current servers", () => {
+  const source = registeredGuideSource("lsp");
+
+  expect(source).toContain("[language-server.clepsydra]");
+  expect(source).toContain('command = "clep"');
+  expect(source).toContain('args = ["lsp"]');
+  expect(source).toContain('name = "markdown"');
+  expect(source).toContain(
+    'language-servers = ["marksman", "markdown-oxide", "rumdl", "clepsydra"]',
+  );
+  expect(source).toContain("do not replace the list with only");
+});
+
+it("documents conversation results and exact MCP stale-guard ownership", () => {
+  const source = registeredGuideSource("mcp");
+
+  for (const field of [
+    "`path`",
+    "`page_id`",
+    "`operation`",
+    "`appended_turns`",
+    "`skipped_turns`",
+    "`warnings`",
+  ]) {
+    expect(source).toContain(field);
+  }
+  expect(source).toContain("`created`, `appended`, or `unchanged`");
+  expect(source).toMatch(
+    /Only `vault_update_page`, `vault_edit_page`, and\s+`vault_append_page` read and send `expected_revision`/,
+  );
+  expect(source).toContain("atomic\n  no-overwrite creation");
+  expect(source).toContain("do not send a revision");
+});
+
+it("documents the exact extension manifest and blob construction", () => {
+  const source = registeredGuideSource("browser-extension");
+
+  expect(source).toContain("every distinct base64 `data:` URI");
+  expect(source).toContain("no count cap on these inline");
+  expect(source).toContain("first 50 raw `src` strings");
+  expect(source).toContain("deduplicates blobs by hash");
+  expect(source).toContain("full HTML snapshot as its own `text/html` blob");
+  for (const field of [
+    "`domain`",
+    "`captured_at`",
+    "`content_hash`",
+    "`snapshot_hash`",
+    "`markdown_body`",
+    "`hash`",
+    "`content_type`",
+    "base64 `data`",
+  ]) {
+    expect(source).toContain(field);
+  }
+});
 
 it("documents task date, stale-span, and current Today projection boundaries", () => {
   const source = registeredGuideSource(

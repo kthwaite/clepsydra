@@ -92,6 +92,33 @@ call creates a new Folio. See
 [Codex and Conversation Capture](/docs/codex-and-conversation-capture#capture-or-append-a-visible-conversation)
 for Read/Edit and protection behavior.
 
+The compact request contract is:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `title` | yes | Non-blank title used if a Folio must be created. |
+| `turns` | yes | Non-empty, source-ordered complete visible turns. |
+| `turns[].role` | yes | Exactly `user` or `assistant`. |
+| `turns[].content` | yes | Non-blank visible Markdown, verbatim. |
+| `turns[].source_turn_id` | no | Stable host turn ID, when the host exposes one. |
+| `turns[].timestamp` | no | Host-supplied RFC 3339 timestamp. |
+| `provider` | no | Normalized host provider; required with `host_conversation_id`. |
+| `host_conversation_id` | no | Stable host chat ID; hashed for identity lookup and never stored raw. |
+
+The response contract and outcomes are:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | Vault-relative conversation Folio path. |
+| `page_id` | Stable Folio UUID. |
+| `operation` | `created`, `appended`, or `unchanged`. |
+| `appended_turns` | Turns written by this call: all on create, only the new suffix on append, zero when unchanged. |
+| `skipped_turns` | Existing exact-prefix turns not rewritten; all submitted turns when unchanged. |
+| `warnings` | Non-fatal capture warnings; currently returned as an array. |
+
+`created` returns HTTP 201 for a new Folio. `appended` and `unchanged` return
+HTTP 200. A conflict has no success response and writes nothing.
+
 ## Failures and conflicts
 
 - **Server unreachable** — MCP reports the configured base URL and tells the
@@ -104,8 +131,12 @@ for Read/Edit and protection behavior.
 - **`404`** — a page may have moved after assignment. The tool error recommends
   locating it with `vault_search`; do not keep writing the stale path.
 - **`409` stale revision** — re-read with `vault_get_page`, reconsider the
-  intended change, and retry. Page-write tools send the full-content revision
-  they read; the server checks it under the mutation path lock.
+  intended change, and retry. Only `vault_update_page`, `vault_edit_page`, and
+  `vault_append_page` read and send `expected_revision`; the server checks it
+  under the mutation path lock. `vault_create_page` instead uses atomic
+  no-overwrite creation. Assignment, move, and delete operate against the
+  mutation coordinator’s current server state; they do not send a revision
+  copied from an earlier MCP page read.
 - **`409` backlink refusal** — review the returned linking pages with the user.
   Only then rerun `vault_delete_page` with `force: true` and the intended link
   rewrite. This is not an automatic stale-write retry.
