@@ -36,6 +36,13 @@ const WORKFLOW_GUIDE_HEADINGS = [
   "Related",
 ] as const;
 
+const INTEGRATION_GUIDE_SLUGS = [
+  "codex-and-conversation-capture",
+  "lsp",
+  "mcp",
+  "browser-extension",
+] as const;
+
 it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   render(<Guide />);
   expect(
@@ -71,6 +78,20 @@ it.each(WORKFLOW_GUIDE_SLUGS)(
     for (const heading of WORKFLOW_GUIDE_HEADINGS) {
       expect(source).toMatch(new RegExp(`^## ${heading}$`, "m"));
     }
+  },
+);
+
+it.each(INTEGRATION_GUIDE_SLUGS)(
+  "$slug follows the integration guide structure and links operational help",
+  (slug) => {
+    const source = DOC_PAGES.find((page) => page.slug === slug)?.source;
+
+    expect(source, `${slug} must be registered`).toBeDefined();
+    for (const heading of WORKFLOW_GUIDE_HEADINGS) {
+      expect(source).toMatch(new RegExp(`^## ${heading}$`, "m"));
+    }
+    expect(source).toContain("(/docs/configuration)");
+    expect(source).toContain("(/docs/troubleshooting)");
   },
 );
 

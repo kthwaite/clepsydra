@@ -1,137 +1,173 @@
 export const meta = {
   slug: "browser-extension",
   title: "Browser Extension",
-  description: "Build, install, configure, and use the Clepsydra web archive extension."
+  description: "Install, trust, and recover Clepsydra browser capture."
 }
 
-The Clepsydra browser extension archives the page you are viewing into your
-local vault. This guide covers building, installing, configuring, and using
-the extension in Chromium-based browsers and Firefox.
+The Clepsydra Web Archive extension captures the current HTTP or HTTPS page and
+sends an archive manifest to a running Clepsydra server. Chromium uses a
+Manifest V3 bundle; Firefox uses a temporary Manifest V2 bundle.
 
 ## Prerequisites
 
-Install [Bun](https://bun.sh/), then start the Clepsydra server from the
-repository root:
+- Install [Bun](https://bun.sh/) and put `clep` on `PATH`.
+- Start the intended local server with `clep serve`. The extension requires
+  `GET /api/vault/archive/status` and `POST /api/vault/archive`.
+- Review the requested site and server permissions before loading the bundle.
+  The extension can read the active page and fetch HTTP/HTTPS resources.
+- Confirm archive/CAS limits in [Configuration](/docs/configuration). Captured
+  pages and blobs are plaintext; web archive capture does not protect a Folio.
+
+## Workflow
+
+### Build the browser bundles
+
+From the repository root:
 
 ```bash
-cargo run -- serve
+bun install --cwd extension
+bun run --cwd extension typecheck
+bun run --cwd extension build
+bun run --cwd extension build:firefox
 ```
 
-The extension requires the running server to provide both archive endpoints:
-
-- `GET /api/vault/archive/status`
-- `POST /api/vault/archive`
-
-## Build the extension
-
-Run the extension commands from the `extension/` directory:
-
-```bash
-cd extension
-bun install
-bun run typecheck
-bun run build
-bun run build:firefox
-```
-
-`bun run build` creates the Chromium Manifest V3 bundle at `extension/dist/`.
-`bun run build:firefox` creates the Firefox Manifest V2 bundle at
+`build` writes the Chromium Manifest V3 bundle to `extension/dist/`.
+`build:firefox` writes the Firefox Manifest V2 bundle to
 `extension/dist-firefox/`.
 
-## Install in Chrome, Chromium, Brave, or Edge
-
-1. Open the browser's extensions page:
-   - Chrome or Chromium: `chrome://extensions`
-   - Brave: `brave://extensions`
-   - Edge: `edge://extensions`
-2. Enable **Developer mode**.
-3. Select **Load unpacked**.
-4. Select the `extension/dist` folder.
-5. Optionally pin the extension to the browser toolbar.
-
-## Install temporarily in Firefox
-
-Build the Firefox bundle first from the repository root:
-
-```bash
-cd extension
-bun run build:firefox
-```
-
-Then install it for the current Firefox session:
-
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Select **Load Temporary Add-on...**.
-3. Select `extension/dist-firefox/manifest.json`.
-
-Firefox removes temporary add-ons when it restarts, so repeat these steps after
-each restart.
-
-## First-time setup
-
-1. Select the extension icon, then open **Settings**.
-2. Set **Server URL**. The default is `http://localhost:3000`.
-3. Optionally set default tags and notification preferences.
-4. Select **Save**.
-5. Confirm that the status box shows **Connected**.
-
-## Capture a page
-
-Open a normal web page and choose **Capture This Page** in the extension popup.
-You can also use the keyboard shortcut:
-
-- Windows or Linux: `Ctrl+Shift+S`
-- macOS: `Command+Shift+S`
-
-## Development workflow
-
-`bun run dev` watches only the Chromium bundle and writes changes to
-`extension/dist/`:
-
-```bash
-cd extension
-bun run dev
-```
-
-After a change, return to the Chromium-based browser's extensions page and
-select **Reload**.
+For Chromium development, `bun run --cwd extension dev` watches only
+`extension/dist/`; reload the unpacked extension after a change.
 
 ### Firefox: rebuild before reloading
 
-The watch command does not update `extension/dist-firefox/`. After every
-extension code change you want to test in Firefox, rebuild the Firefox bundle:
+The development watcher does not update Firefox. Re-run `build:firefox` and
+reload the temporary add-on for every Firefox change.
+
+### Install in Chrome, Chromium, Brave, or Edge
+
+1. Open `chrome://extensions`, `brave://extensions`, or
+   `edge://extensions`.
+2. Enable **Developer mode** and choose **Load unpacked**.
+3. Select `extension/dist`; optionally pin the toolbar action.
+
+### Install temporarily in Firefox
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Choose **Load Temporary Add-on…**.
+3. Select `extension/dist-firefox/manifest.json`.
+
+Firefox removes this temporary add-on at restart. Load it again for each
+session. Neither bundle is a signed/store-installed release.
+
+### Understand the permissions
+
+| Permission | Why it is requested |
+| --- | --- |
+| `activeTab` | Work with the page selected for capture after the user invokes the extension. |
+| `scripting` (Chromium MV3) | Inject `content/capture.js` into that active tab. Firefox MV2 uses `tabs.executeScript` instead. |
+| `storage` | Store the server URL, default tags, notification preferences, and the currently unused content-change preference in `browser.storage.sync`. |
+| `notifications` | Report created, duplicate, changed-content, extraction, and server failures. |
+| `http://*/*`, `https://*/*` | Call the configured Clepsydra server and fetch reader-mode image resources from captured sites. Chromium declares these as `host_permissions`; Firefox includes them in `permissions`. |
+
+The broad HTTP/HTTPS host access is real. Load the extension only in a browser
+profile where Clepsydra and every installed extension are trusted with the
+pages you capture.
+
+### Configure the local server trust
+
+Open the extension’s **Settings**, enter the exact server origin, optionally
+set default tags and notifications, choose **Save**, and require the status box
+to show **Connected**. The default is `http://localhost:3000`.
+
+The extension sends no bearer token, password, or client credential. Anyone
+who can reach the configured API is within the server trust boundary. Keep the
+default server loopback-only unless a separately controlled network boundary
+is in place.
+
+For HTTPS, start a matching server, for example:
 
 ```bash
-cd extension
-bun run build:firefox
+clep serve --tls --port 3443
 ```
 
-Then reload the temporary add-on from
-`about:debugging#/runtime/this-firefox`, loading it again if needed.
+Then set **Server URL** to `https://localhost:3443`. The browser, not the
+extension, must trust the server certificate. Clepsydra’s automatic TLS uses
+mkcert; install/trust its local CA and open the status URL in the same browser
+profile to diagnose a certificate warning. Do not configure an `http://` URL
+for an HTTPS port or accept an unexpected certificate. TLS encrypts transport
+but does not add user authentication.
 
-## Troubleshooting
+### Capture a page
 
-### Server unreachable
+Open a normal `http://` or `https://` page and choose **Capture This Page**, or
+use `Ctrl+Shift+S` (Windows/Linux) or `Command+Shift+S` (macOS).
 
-If the popup or options page reports **Server unreachable**, verify that the
-server is running:
+The injected script records URL, canonical URL when present, title,
+description, and `document.documentElement.outerHTML`; it runs Readability on a
+cloned document. The background worker:
 
-```bash
-cargo run -- serve
-```
+1. hashes and includes the HTML snapshot;
+2. fetches at most 50 distinct reader-mode image URLs with the page’s browser
+   credentials, ignores failed image requests, and includes successful blobs;
+3. converts a readable article of at least 200 text characters to Markdown, or
+   emits fallback Markdown linking the HTML snapshot;
+4. adds `archive`, domain, current-month, and configured default tags;
+5. posts the manifest and blobs to the running server.
 
-Then verify that
-`http://localhost:3000/api/vault/archive/status` is reachable.
+The HTML snapshot is the current serialized DOM, not a complete SingleFile
+bundle: live JavaScript state and unfetched external assets are not preserved.
+Choose the archived Folio and CAS snapshot with that limit in mind.
 
-### Capture does not run
+## Failures and conflicts
 
-Reload the extension after rebuilding it. Capture only works on a normal
-`http://` or `https://` web page.
+- **Server unreachable** — confirm `clep serve` is running and open
+  `<server-url>/api/vault/archive/status`. Check the saved scheme, host, and
+  port; for HTTPS, resolve the browser certificate warning. Continue with
+  [Troubleshooting](/docs/troubleshooting) if the API itself is unavailable.
+- **Capture does not start** — reload the extension after rebuilding. Injection
+  is limited to normal HTTP/HTTPS tabs; browser-internal pages, extension pages,
+  and other restricted schemes cannot be captured.
+- **Capture Failed / Archive Failed** — the notification contains the
+  extraction or server error. Fix the page/server condition and invoke capture
+  again; the extension has no background retry queue.
+- **Readability cannot extract an article** — capture can still succeed with
+  fallback Markdown and the HTML snapshot. Failed remote images are omitted
+  rather than failing the whole capture.
+- **Already Archived** — the server returned the existing archive unchanged.
+  The duplicate notification appears only when that preference is enabled.
 
 ### Content Changed conflict
 
-When `POST /api/vault/archive` returns `HTTP 409`, the current extension
-behavior is **notification only**: it shows **Content Changed** and does not
-update or retry the existing archive. The Settings page saves an
-`on_content_changed` value, but the capture path does not consume that setting,
-so changing it currently has no effect on conflict behavior.
+When `POST /api/vault/archive` returns `HTTP 409`, current behavior is
+**notification only**: the extension does not update or retry the existing
+archive. Settings stores `on_content_changed`, but the capture path does not
+read it, so changing that option has no effect.
+
+- **Firefox stopped capturing after restart** — reload the temporary add-on;
+  rebuilding is necessary only when bundle contents changed.
+
+## Privacy
+
+Captured URL, canonical URL, title, description, full serialized DOM, readable
+article content, tags, HTML snapshot, and fetched resource bytes are sent to the
+configured server as plaintext before storage. Reader-image fetches use
+`credentials: \"include\"`; a captured page can therefore cause requests carrying
+that site’s browser credentials. Review sensitive/private pages before capture.
+
+Archive Folios and CAS blobs are plaintext. CAS hashing and deduplication do not
+encrypt content. Protected-Folio encryption does not retroactively protect an
+archive or its blobs, and the extension has no protect/unlock capability.
+
+The server URL, default tags, notification preferences, and content-change
+preference are plaintext `browser.storage.sync` settings and may sync with the
+browser account. Host permissions cover all HTTP and HTTPS origins, not just
+localhost. HTTP leaves extension-to-server traffic unencrypted even on
+loopback; HTTPS protects the connection only after the browser trusts the
+expected certificate.
+
+## Related
+
+- [Configuration](/docs/configuration) for server, TLS, archive, and CAS limits
+- [Troubleshooting](/docs/troubleshooting) for server and UI diagnosis
+- [Capture, Feeds, and Archives](/docs/capture-feeds-and-archives)
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)

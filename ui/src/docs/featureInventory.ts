@@ -335,13 +335,13 @@ export const FEATURE_INVENTORY = [
     id: "workflow.codex",
     label: "Codex workspace",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "codex-and-conversation-capture" },
   },
   {
     id: "workflow.conversation-capture",
     label: "AI conversation capture",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "mcp" },
+    disposition: { kind: "guide", slug: "codex-and-conversation-capture" },
   },
   {
     id: "workflow.lsp",

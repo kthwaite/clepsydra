@@ -1,45 +1,42 @@
 export const meta = {
   slug: "lsp",
   title: "LSP",
-  description: "Use Clepsydra’s language server in Markdown editors."
+  description: "Set up Clepsydra’s local language server for Markdown editors."
 }
 
-`clep lsp` is a standalone language server on stdio. It opens its own
-read-only vault state — a private, in-memory index built once at startup and
-kept fresh by its own file watcher — and never writes vault files. Editing a
-vault in Neovim (or Helix, or any LSP client) gets completion, hover
-previews, go-to-definition, link diagnostics, project-wide rename, and
-references.
+`clep lsp` is a standalone Language Server Protocol process over stdio. It
+opens the vault directly, builds a private in-memory index at startup, and
+watches the vault so Markdown editors can understand Clepsydra links and
+metadata without depending on `clep serve`.
 
-Because it's read-only and keeps its index in memory rather than talking to
-a running server, `clep lsp` is independent of `clep serve`: run both at once
-against the same vault. `clep serve` is what powers the web UI and owns all
-writes (including the folder-follows-metadata reconcile — see "Save
-behavior" below); `clep lsp` is a second, disposable reader that Neovim
-starts and stops on its own.
+## Prerequisites
 
-Design notes: docs/plans/archive/2026-02-15-lsp-design.md (pre-dates the
-standalone split described here).
+- Put `clep` on `PATH` and initialize a vault.
+- Open the vault as the editor workspace. An ancestor `.clepsydra` directory is
+  the preferred root marker; otherwise the LSP uses the normal application
+  [configuration](/docs/configuration) lookup.
+- Use an LSP client that negotiates UTF-8 positions. Neovim does this
+  automatically; Clepsydra advertises `PositionEncodingKind::UTF8`.
 
-## Setup (Neovim 0.11+)
+## Workflow
 
-1. Put `clep` on `PATH` (`cargo install --path .` or symlink the build).
-2. Register the server in `init.lua`:
+### Configure Neovim 0.11 or newer
 
-   ```lua
-   vim.lsp.config['clepsydra'] = {
-     cmd = { 'clep', 'lsp' },
-     filetypes = { 'markdown' },
-     -- Attach only inside a vault: a `.clepsydra` directory marks the root.
-     root_dir = function(bufnr, on_dir)
-       local root = vim.fs.root(bufnr, '.clepsydra')
-       if root then on_dir(root) end
-     end,
-   }
-   vim.lsp.enable('clepsydra')
-   ```
+Add this to `init.lua`:
 
-On Neovim 0.10, use `vim.lsp.start` in a `FileType` autocmd instead:
+```lua
+vim.lsp.config['clepsydra'] = {
+  cmd = { 'clep', 'lsp' },
+  filetypes = { 'markdown' },
+  root_dir = function(bufnr, on_dir)
+    local root = vim.fs.root(bufnr, '.clepsydra')
+    if root then on_dir(root) end
+  end,
+}
+vim.lsp.enable('clepsydra')
+```
+
+For Neovim 0.10, start it from a Markdown `FileType` autocmd:
 
 ```lua
 vim.api.nvim_create_autocmd('FileType', {
@@ -56,75 +53,101 @@ vim.api.nvim_create_autocmd('FileType', {
 })
 ```
 
-The server speaks UTF-8 positions only (`PositionEncodingKind::UTF8`);
-Neovim negotiates this automatically. Helix works with the equivalent
-`languages.toml` entry (`command = "clep"`, `args = ["lsp"]`).
+For Helix, use the equivalent `languages.toml` command and arguments:
+`command = "clep"` with `args = ["lsp"]`.
 
-Root resolution (in order): the workspace folder(s) the editor sends (or the
-deprecated `rootUri` if that's all it sends), each searched up its ancestor
-chain for a `.clepsydra` directory; if none carries the marker, the server
-falls back to the same app-config lookup as `clep serve`/`clep new`
-(`./config.toml` → `$XDG_CONFIG_HOME/clepsydra/config.toml` →
-`$HOME/.config/clepsydra/config.toml`), reading `[vault].root` from whichever
-resolves. Because resolution keys off the workspace root the editor hands it,
-multiple vaults just work: open each vault as its own Neovim workspace and
-every instance of `clep lsp` resolves its own root independently — no
-`cmd_cwd` juggling needed.
+Root resolution checks every workspace folder, then the deprecated `rootUri`,
+walking each ancestor chain for `.clepsydra`. If none has the marker, it uses
+the same app-config order as the CLI:
+`./config.toml` → `$XDG_CONFIG_HOME/clepsydra/config.toml` →
+`$HOME/.config/clepsydra/config.toml`, and reads `[vault].root`. Open separate
+vaults as separate editor workspaces so each LSP process resolves independently.
 
-## Capabilities
+### Use the shipped capabilities
 
-| Capability | What it does |
+| Capability | Shipped behavior |
 | --- | --- |
-| Completion | `[[` completes page links by canonical name; `#` completes tags from the vault vocabulary; inside `+++` frontmatter fences, property keys and quoted string values complete against declared base properties |
-| Hover | Preview of the linked page: title, path, first lines of the body; unresolved links say so |
-| Go to definition | Jump from a wikilink under the cursor to the target page |
-| Diagnostics | Unresolved wikilinks; ambiguous links (multiple candidate pages); frontmatter property type warnings, checked against each base whose filter matches the page |
-| Code actions | `Create page: <target>` for an unresolved link; `Resolve to: <path>` per candidate for an ambiguous one |
-| Rename | Rename a page from its title line or from any link to it: one workspace edit updates the frontmatter title, renames the file on disk, and rewrites every referring wikilink |
-| References | Every wikilink to the page under the cursor, vault-wide |
-| Document symbols | Heading outline of the open page |
-| Workspace symbols | Page lookup by title across the vault |
-| Code lens | An `N references` lens on each page, resolving to find-references |
+| Completion | `[[` completes canonical page names; `#` completes indexed tags. Inside `+++` TOML frontmatter, declared Base property keys and quoted values complete; relation values use wikilink completion. |
+| Hover | Shows the linked Folio’s title, path, and leading body lines, or reports an unresolved link. |
+| Go to definition | Opens the resolved wikilink target. |
+| References | Returns every indexed wikilink to the page under the cursor. |
+| Diagnostics | Reports unresolved and ambiguous links. For plaintext pages, also reports matching Base property type warnings. |
+| Code actions | Creates a page for an unresolved link or rewrites an ambiguous link to a selected candidate path. |
+| Rename | Returns one editor-applied workspace edit that updates the target title, renames its file, and rewrites indexed referrers. |
+| Document symbols | Lists headings in the open document. |
+| Workspace symbols | Lists up to 50 indexed pages, filtered by the query. |
+| Code lens | Shows an `N references` lens for the current page and resolves it to find-references. |
 
-See [the Bases guide](/docs/bases) for base schemas, matching, property
-completions, and diagnostics.
+The LSP process itself never writes vault files. Code actions and rename return
+LSP `WorkspaceEdit` operations; the editor applies those file creates, edits,
+and renames. Normal buffer saves are also editor writes. If `clep serve` is
+running, its watcher sees those external changes and performs any required
+folder-follows-metadata reconciliation.
 
-## Save behavior
+### Understand saves and external edits
 
-On save, `did_save` reindexes the page in the LSP's own in-memory index —
-links re-resolve and diagnostics refresh immediately — but it does **not**
-reconcile folder placement: the standalone LSP is read-only by design (ADR
-0001), so it never moves a file even if the saved frontmatter's `kind`/
-`project` now disagrees with the folder it's in.
+`didSave` reindexes the saved path in the LSP’s in-memory index, resolves its
+links, clears the document’s dirty flag, refreshes canonical names, and
+republishes diagnostics. It does not move a file whose declared kind or project
+disagrees with its folder.
 
-Folder-follows-metadata healing is `clep serve`'s job (ADR 0001 layer 2): its
-own file watcher sees the same save and, after reindexing its batch, runs
-the reconcile pass that moves a drifted page to its projected folder. If
-`clep serve` is running alongside `clep lsp`, that move lands almost
-immediately — `clep lsp`'s independent watcher then notices the resulting
-remove/add pair, reindexes, and (for any open buffer at the old path) logs
-`clepsydra: <old> moved to <new> (folder follows kind/project); reopen the
-file` to `:LspLog`. The buffer itself keeps pointing at the old path; reopen
-the file at its new location. If `clep serve` is *not* running, drift is
-left alone until the next `clep serve` startup, which sweeps the whole vault
-and heals it then.
+An independent filesystem watcher batches changes with a 500 ms debounce,
+reindexes them, and republishes diagnostics for open buffers. The watcher does
+not replace an editor buffer with externally changed text. Reload a stale open
+buffer in the editor before saving it.
 
-## Troubleshooting
+When `clep serve` moves a page to reconcile kind/project metadata, the LSP
+usually observes a same-filename remove/add pair and logs
+`clepsydra: <old> moved to <new> (folder follows kind/project); reopen the file`.
+The editor buffer remains attached to the old URI; reopen the new path. If
+`clep serve` is not running, folder drift remains until its next startup sweep.
 
-- **`initialize` fails / client attaches then immediately stops** — the
-  server couldn't resolve a vault root: no ancestor of the workspace folder
-  has a `.clepsydra` directory, and no `config.toml` resolved either. Check
-  `:LspLog` for the error, and run `clep config path --trace` from the same
-  directory Neovim was started in to see which app config (if any) would be
-  selected.
-- **No completions inside `[[ ]]`** — completion is prefix-filtered on
-  canonical names; confirm the workspace root actually contains the vault
-  (see the root-resolution order above) and that the page you're linking to
-  has been indexed (it's on disk under that root).
-- **Renamed/moved file, buffer went stale** — expected for now; see "Save
-  behavior" above. Automatic buffer retargeting via
-  `workspace/didRenameFiles` is a known follow-up.
-- **Diagnostics or rename don't reflect a very recent external edit** — the
-  LSP's index updates from its own watcher (roughly every 500ms, debounced)
-  or on `did_save` for the open buffer; an edit from another process needs
-  one debounce cycle to show up.
+## Failures and conflicts
+
+- **Initialize fails or the client immediately stops** — no workspace ancestor
+  contains `.clepsydra` and no app config resolves. Check `:LspLog` and run
+  `clep config path --trace` from the editor’s launch directory. See
+  [Troubleshooting](/docs/troubleshooting).
+- **No `[[` or tag completions** — verify the selected vault root and allow the
+  initial index build to finish. Completion only returns indexed canonical
+  names and tags that match the typed prefix.
+- **A code action or rename is refused** — creation uses no-overwrite semantics,
+  rename rejects an existing destination, and an editor may reject unsupported
+  resource operations. Re-read the current files before retrying; the LSP does
+  not provide the API server’s path locks or revision guard.
+- **Diagnostics or references lag an external edit** — wait for the 500 ms
+  watch debounce. If the affected file is open, reload it: the index refresh
+  does not replace the buffer.
+- **A moved buffer is stale** — reopen the logged destination. Automatic client
+  buffer retargeting is not shipped.
+- **A protected Folio reports `encrypted-body-unavailable`** — expected. The
+  LSP retains plaintext frontmatter but suppresses every projection of the age
+  armored body, including links, completion, hover content, rename, and Base
+  diagnostics for that body.
+
+## Privacy
+
+`clep lsp` is local, uses stdio, and does not call the Clepsydra HTTP server.
+It reads the selected vault directly. Every unprotected title, metadata field,
+body, link, and tag needed by the index is available in plaintext to the LSP
+process and may be returned to the editor in completion, hover, diagnostics,
+symbols, references, or workspace edits. The in-memory index is disposable,
+not an encrypted cache.
+
+Protected Folio bodies remain age ciphertext and are not indexed by the LSP.
+Their filenames, paths, titles, encryption descriptor, and other frontmatter
+remain plaintext and visible to the process and editor. Running `clep serve`
+beside the LSP does not grant the LSP the browser’s in-memory decryption
+identity.
+
+LSP resource operations are trusted local-editor actions. Review rename and
+create-page workspace edits before applying them when the editor offers a
+preview; they do not pass through the server’s atomic mutation coordinator.
+
+## Related
+
+- [Configuration](/docs/configuration) for vault-root and config precedence
+- [Troubleshooting](/docs/troubleshooting) for root, startup, and stale-index checks
+- [Bases](/docs/bases) for typed property completion and diagnostics
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Codex and Conversation Capture](/docs/codex-and-conversation-capture) for the web workspace

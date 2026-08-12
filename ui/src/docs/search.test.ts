@@ -200,6 +200,14 @@ describe("searchDocs", () => {
         headingId: "back-up-and-recover-shipped-state",
       },
     },
+    {
+      query: "self-assembling research context",
+      expected: {
+        page: { slug: "codex-and-conversation-capture" },
+        heading: "Work with tabs, quires, and previews",
+        headingId: "work-with-tabs-quires-and-previews",
+      },
+    },
   ])("finds distinctive dedicated-guide content for $query", ({ query, expected }) => {
     const result = searchDocs(buildDocsIndex(DOC_PAGES), query)[0];
 

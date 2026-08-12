@@ -31,6 +31,12 @@ const CAPTURE_GUIDE_SLUGS = [
   "browser-extension",
 ] as const;
 
+const AI_INTEGRATION_GUIDE_SLUGS = [
+  "codex-and-conversation-capture",
+  "lsp",
+  "mcp",
+] as const;
+
 it("declares the approved user-intent hierarchy", () => {
   expect(
     DOC_GROUPS.map((group) => [
@@ -43,7 +49,7 @@ it("declares the approved user-intent hierarchy", () => {
     ["Links and structured knowledge", [...KNOWLEDGE_GUIDE_SLUGS]],
     ["Work and reading", [...WORK_READING_GUIDE_SLUGS]],
     ["Capture, feeds, and archives", [...CAPTURE_GUIDE_SLUGS]],
-    ["AI and integrations", ["lsp", "mcp"]],
+    ["AI and integrations", [...AI_INTEGRATION_GUIDE_SLUGS]],
     [
       "Operations and reference",
       ["configuration", "troubleshooting", "cli"],
@@ -52,7 +58,7 @@ it("declares the approved user-intent hierarchy", () => {
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(18);
+  expect(DOC_PAGES).toHaveLength(19);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -81,8 +87,7 @@ it("resolves every existing dedicated guide", () => {
     ...KNOWLEDGE_GUIDE_SLUGS,
     ...WORK_READING_GUIDE_SLUGS,
     ...CAPTURE_GUIDE_SLUGS,
-    "lsp",
-    "mcp",
+    ...AI_INTEGRATION_GUIDE_SLUGS,
     "configuration",
     "troubleshooting",
     "cli",
@@ -141,6 +146,10 @@ it("derives previous and next guides across group boundaries", () => {
   });
   expect(getDocNeighbors("browser-extension")).toMatchObject({
     previous: { slug: "capture-feeds-and-archives" },
+    next: { slug: "codex-and-conversation-capture" },
+  });
+  expect(getDocNeighbors("codex-and-conversation-capture")).toMatchObject({
+    previous: { slug: "browser-extension" },
     next: { slug: "lsp" },
   });
   expect(getDocNeighbors("mcp")).toMatchObject({

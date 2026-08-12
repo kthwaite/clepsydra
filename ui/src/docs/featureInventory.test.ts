@@ -49,6 +49,14 @@ const WORKFLOW_GUIDE_ASSIGNMENTS = {
   "workflow.backup": "capture-feeds-and-archives",
 } as const;
 
+const TASK_6_GUIDE_ASSIGNMENTS = {
+  "workflow.codex": "codex-and-conversation-capture",
+  "workflow.conversation-capture": "codex-and-conversation-capture",
+  "workflow.lsp": "lsp",
+  "workflow.mcp": "mcp",
+  "workflow.browser-extension": "browser-extension",
+} as const;
+
 function routePaths(): string[] {
   const router = createRouter({
     routeTree,
@@ -100,6 +108,35 @@ describe("feature documentation inventory", () => {
         kind: "guide",
         slug,
       });
+    }
+  });
+
+  it("maps Codex, conversation capture, and integrations to their dedicated guides", () => {
+    const entriesById: ReadonlyMap<
+      string,
+      (typeof FEATURE_INVENTORY)[number]
+    > = new Map(FEATURE_INVENTORY.map((entry) => [entry.id, entry]));
+
+    for (const [id, slug] of Object.entries(TASK_6_GUIDE_ASSIGNMENTS)) {
+      expect(entriesById.get(id)?.disposition).toEqual({
+        kind: "guide",
+        slug,
+      });
+    }
+  });
+
+  it("maps every integration manifest entry to a registered guide", () => {
+    const registeredSlugs = new Set(DOC_PAGES.map((page) => page.slug));
+    const integrations = FEATURE_INVENTORY.filter(
+      (entry) => entry.surface === "integration",
+    );
+
+    expect(integrations.length).toBeGreaterThan(0);
+    for (const integration of integrations) {
+      expect(integration.disposition.kind).toBe("guide");
+      if (integration.disposition.kind === "guide") {
+        expect(registeredSlugs.has(integration.disposition.slug)).toBe(true);
+      }
     }
   });
 

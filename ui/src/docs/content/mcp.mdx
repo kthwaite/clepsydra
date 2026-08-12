@@ -1,166 +1,151 @@
 export const meta = {
   slug: "mcp",
   title: "MCP",
-  description: "Connect agents to Clepsydra through the Model Context Protocol."
+  description: "Connect trusted agents to a running Clepsydra server."
 }
 
-`clep mcp` exposes the vault to MCP clients — Claude Code, Cowork, Claude
-Desktop, or anything else that speaks the Model Context Protocol — as a set
-of `vault_*` tools. It runs on stdio and proxies every call to the running
-`clep serve` HTTP API, so the server remains the single writer: path locks,
-stale-write detection, link rewriting, hooks, and SSE notifications all
-apply to agent edits exactly as they do to UI edits.
+`clep mcp` is a stdio Model Context Protocol server for agent hosts. It does
+not open the vault itself: every `vault_*` tool proxies to the HTTP API of a
+running `clep serve`, preserving that server’s revision checks, path locks,
+link rewrites, hooks, folder projection, and event notifications.
 
-Design and milestones: docs/plans/2026-08-03-vault-mcp-server-and-skill.md.
+## Prerequisites
 
-## Setup
-
-1. Make sure `clep` is on `PATH` (`cargo install --path .` or symlink the
-   build) and the API server is running: `clep serve`.
-2. Register the MCP server with your client. This repo ships a project-level
-   `.mcp.json`:
+1. Put `clep` on `PATH`.
+2. Select the intended vault with the normal app
+   [configuration](/docs/configuration), then start `clep serve`.
+3. Register the stdio command with the MCP host. This repository’s `.mcp.json`
+   has the required shape:
 
    ```json
-   { "mcpServers": { "clepsydra": { "command": "clep", "args": ["mcp"] } } }
+   {
+     "mcpServers": {
+       "clepsydra": {
+         "command": "clep",
+         "args": ["mcp"]
+       }
+     }
+   }
    ```
 
-   - **Claude Code**: picks up `.mcp.json` from the project root
-     automatically, or add it globally with
-     `claude mcp add clepsydra -- clep mcp`.
-   - **Cowork / Claude Desktop**: add the same command/args entry under
-     `mcpServers` in the app's MCP settings.
+   Claude Code reads a project `.mcp.json`, or can register the same command
+   globally with `claude mcp add clepsydra -- clep mcp`. Other MCP hosts need
+   an equivalent command/arguments entry.
 
-3. Agents in this repository also get the `vault` skill
-   (`.claude/skills/vault/SKILL.md`), which teaches the vault's vocabulary
-   and safe workflows.
+The MCP process and `clep serve` must resolve the same `config.toml`. Lookup is
+`./config.toml` → `$XDG_CONFIG_HOME/clepsydra/config.toml` →
+`$HOME/.config/clepsydra/config.toml`. Run `clep config path --trace` when the
+selected vault is unclear.
 
-`clep mcp` discovers the API server through the usual config lookup
-(`./config.toml`, then `$XDG_CONFIG_HOME/clepsydra/config.toml`, then
-`~/.config/clepsydra/config.toml`) — run it from the directory whose
-`config.toml` points at the vault you want. With `[server].tls.enabled`,
-it trusts the server's own mkcert certificate. It refuses a non-loopback
-`[server].host` unless started with `--allow-remote`.
+## Workflow
 
-## Tools
+### Connect to the running server
 
-| Tool | Kind | Purpose |
+By default, `clep mcp` accepts only a configured loopback host such as
+`localhost`, `127.0.0.1`, or `::1`. A non-loopback `[server].host` is refused
+because the agent would operate on a remote vault; `clep mcp --allow-remote`
+is the explicit override. Bind-all values are still considered non-loopback
+for this safety check, even though the HTTP connect target is normalized to
+`localhost`.
+
+The URL scheme and port come from `[server]`. Plain configuration uses
+`http://<host>:<port>`. When `[server.tls].enabled = true`, MCP uses HTTPS and
+adds the configured or auto-generated server certificate as a trusted root.
+Start `clep serve` once to generate automatic mkcert files before starting MCP.
+TLS verifies the server and protects transport; it does not add an agent login.
+
+### Choose the narrowest tool family
+
+| Family | Tools | Use |
 | --- | --- | --- |
-| `vault_search` | read | Full-text search (FTS5) over titles and bodies |
-| `vault_get_page` | read | One page by path or id: meta, kind, project, body |
-| `vault_list_pages` | read | Paginated page listing, filterable by kind, tag, and project |
-| `vault_tree` | read | Folder tree, or one folder's contents |
-| `vault_links` | read | Backlinks, outlinks, or similar pages |
-| `vault_tags` | read | Tag vocabulary with usage counts |
-| `vault_create_page` | write | New page in one atomic mutation; derives the canonical `yyyymmdd.slug.shortid.md` path, declares kind/project |
-| `vault_update_page` | write | Whole-field replacement of title/tags/aliases/body, guarded by the current revision |
-| `vault_edit_page` | write | Exact-match string edit of the body, guarded by the current revision |
-| `vault_append_page` | write | Append to the page or to a heading's section (revision-guarded, one retry) |
-| `vault_journal_capture` | write | Quick-capture into today's journal |
-| `vault_capture_conversation` | write | Create or safely append a visible user/assistant chat as an `AI_CONVERSATION` Folio |
-| `vault_assign` | organise | Declare kind/project (single or bulk); the vault relocates files |
-| `vault_move_page` | organise | Explicit rename/relocate with link rewriting |
-| `vault_folder` | organise | Create / delete (`recursive` opt-in) / move folders |
-| `vault_delete_page` | organise | Delete; refuses backlinked pages until `force: true` |
-| `vault_preview_mutation` | read | Dry-run a move/delete: the plan, including link rewrites |
+| Discover and read | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` | Locate a page before acting; inspect content, structure, graph, and vocabulary. Oversized `vault_get_page` bodies are truncated and flagged. |
+| Create and edit | `vault_create_page`, `vault_update_page`, `vault_edit_page`, `vault_append_page` | Create in one projected mutation; replace whole fields; exact-match a body span; or append to the page/a heading section. |
+| Capture | `vault_journal_capture`, `vault_capture_conversation` | Add a fleeting journal entry or capture complete visible conversation turns. |
+| Organize | `vault_assign`, `vault_move_page`, `vault_folder` | Declare kind/project, explicitly move a page, or create/move/delete folders. |
+| Review and delete | `vault_preview_mutation`, `vault_delete_page` | Preview move/delete link impact, then delete with backlink protection. |
 
-Errors are written for agents: 404s suggest `vault_search` (the page may
-have been refiled), stale-write 409s say re-read and retry, and the delete
-tool's backlink refusal includes the linking pages so the agent can review
-them before forcing.
+Search before creating. Prefer `vault_edit_page` for a targeted unique body
+change, `vault_append_page` for additive capture, and `vault_update_page` only
+when replacing a whole field is intentional. Prefer `vault_assign` for
+kind/project filing; it computes the projected location. `vault_move_page` is
+for an explicit destination that assignment cannot express.
 
-Page-write tools read the page's current full-content revision and send it
-as `expected_revision` on `PUT /pages/{path}`. The server rejects the write
-with 409 if the page changed since that read, and the mutation coordinator's
-path lock carries the check through to the write itself — a concurrent edit
-cannot be silently overwritten. `vault_create_page`
-declares kind/project inside the create mutation itself, and its `folder`
-parameter is constrained to locations the metadata-projected layout
-(ADR-0001) would not immediately move the page out of.
+Preview is read-only and is a snapshot, not a reservation. Re-read before the
+real mutation. Bulk assignment is all-or-none. Recursive folder deletion is a
+separate destructive operation and does not gain page-delete backlink checks
+from `vault_delete_page`.
 
-## Capture a conversation
+### Capture a conversation
 
-Ask the agent directly:
+Use `vault_capture_conversation`, not generic page creation. The request
+requires a non-blank `title` and a non-empty ordered `turns` array whose roles
+are exactly `user` or `assistant` and whose content is complete visible
+Markdown. Optional `source_turn_id` and RFC 3339 `timestamp` values must come
+from the host. `host_conversation_id` requires `provider`.
 
-```text
-Send this conversation to Clepsydra.
-Send this conversation to Clepsydra as “AI conversation Folio design”.
-```
+The host must supply every complete visible user/assistant turn in source order,
+verbatim. Clepsydra cannot fetch missing history and does not accept hidden
+prompts, tool traces/results, attachment contents, summaries, or placeholder
+turns. With provider plus host ID, later calls append only an exact unseen
+suffix; truncated or divergent history conflicts. Without the host ID, every
+call creates a new Folio. See
+[Codex and Conversation Capture](/docs/codex-and-conversation-capture#capture-or-append-a-visible-conversation)
+for Read/Edit and protection behavior.
 
-Both requests map to `vault_capture_conversation`, not
-`vault_create_page`. Generic page creation does not write the conversation
-identity and prefix ledger, so it cannot safely append later turns to the
-same chat.
+## Failures and conflicts
 
-The MCP host must expose and send every complete visible user and assistant
-turn in source order, verbatim. Clepsydra does not fetch chat history and
-cannot retrieve omitted or truncated turns, hidden system/developer prompts,
-tool calls or results, or attachment contents. Do not summarize missing
-context or include invented placeholder turns.
+- **Server unreachable** — MCP reports the configured base URL and tells the
+  agent to start `clep serve`. Confirm the server and MCP process resolve the
+  same config, host, port, and TLS mode. Follow
+  [Troubleshooting](/docs/troubleshooting).
+- **TLS certificate cannot be read or verified** — start the TLS server once so
+  automatic certificates exist, or correct both configured certificate paths.
+  Do not disable TLS to hide a remote trust failure.
+- **`404`** — a page may have moved after assignment. The tool error recommends
+  locating it with `vault_search`; do not keep writing the stale path.
+- **`409` stale revision** — re-read with `vault_get_page`, reconsider the
+  intended change, and retry. Page-write tools send the full-content revision
+  they read; the server checks it under the mutation path lock.
+- **`409` backlink refusal** — review the returned linking pages with the user.
+  Only then rerun `vault_delete_page` with `force: true` and the intended link
+  rewrite. This is not an automatic stale-write retry.
+- **Validation or protocol error** — invalid paths, kinds, projects, tool
+  fields, JSON, or unexpected response bodies are returned to the agent.
+  Correct the request rather than guessing.
+- **Protected content** — MCP has no unlock, protect, or unprotect tool.
+  `vault_get_page` can report metadata and the stored age-armored body, not
+  decrypted plaintext. Body edits cannot operate on the hidden plaintext, and
+  conversation capture refuses to append to a protected matching Folio.
 
-The tool arguments are:
+`vault_append_page` alone performs one targeted stale-write retry. Other
+mutations do not silently replay, and no tool should turn an uncertain error
+into an assumed success.
 
-| Field | Required | Value |
-| --- | --- | --- |
-| `title` | yes | Non-blank Folio title; used when creation is required |
-| `provider` | no | Host provider, such as `claude`; required with `host_conversation_id` |
-| `host_conversation_id` | no | Stable ID exposed by the host; enables identity lookup with `provider` |
-| `turns` | yes | Non-empty array of complete visible turns in source order |
-| `turns[].role` | yes | Exactly `user` or `assistant` |
-| `turns[].content` | yes | Non-blank visible Markdown, verbatim |
-| `turns[].source_turn_id` | no | Stable turn ID exposed by the host |
-| `turns[].timestamp` | no | RFC 3339 timestamp exposed by the host |
+## Privacy
 
-For a three-turn visible chat, valid arguments are:
+The MCP host and its agent can see every tool argument and result. Unprotected
+titles, metadata, bodies, search snippets, links, tags, folder names, and
+conversation turns are plaintext. They cross stdio between the host and
+`clep mcp`, and cross HTTP between `clep mcp` and `clep serve`. Loopback HTTP is
+still unencrypted transport; HTTPS encrypts that hop.
 
-```json
-{
-  "title": "AI conversation Folio design",
-  "provider": "claude",
-  "host_conversation_id": "host-conversation-42",
-  "turns": [
-    {
-      "role": "user",
-      "content": "What will Read mode do?",
-      "source_turn_id": "turn-1"
-    },
-    {
-      "role": "assistant",
-      "content": "AI conversation Folios open in Read mode; choose Edit to change them.",
-      "source_turn_id": "turn-2"
-    },
-    {
-      "role": "user",
-      "content": "Send this conversation to Clepsydra as “AI conversation Folio design”.",
-      "source_turn_id": "turn-3"
-    }
-  ]
-}
-```
+The MCP HTTP client sends no bearer token, password, or other application
+credential. Loopback reachability is the default trust boundary. Treat every
+local process allowed to drive the MCP host and every process able to reach the
+configured API as trusted with the accessible vault data. For a remote server,
+`--allow-remote` records intent but provides no user authorization; use HTTPS
+and a separately controlled network boundary.
 
-When both identity fields are available, Clepsydra persists the normalized
-provider and a hash derived from the provider and host conversation ID in
-Folio metadata, not the raw host ID; the result omits it too. The first
-capture returns
-`operation: "created"`. A later submission with the same identity matches
-earlier turns by their ordered roles, content, and source turn identities,
-then appends only the new suffix and returns `operation: "appended"`.
-Timestamps are stored but do not affect prefix matching. A submission with
-no new turns returns `operation: "unchanged"`. The result also reports
-`path`, `page_id`,
-`appended_turns`, `skipped_turns`, and `warnings`.
+Protected Folio bodies remain ciphertext because MCP has no browser decryption
+identity. Filenames, paths, titles, tags, projects, encryption descriptors,
+conversation provider and ledger hashes, and attachment metadata remain
+plaintext. MCP tools do not make unprotected pages, attachments, archives, or
+backups encrypted.
 
-Without `host_conversation_id`, each call creates a new Folio. A shorter
-submission or one whose earlier prefix diverges returns a conflict instead
-of guessing. Ask the user to re-run from a host context that contains the
-complete earlier prefix; do not fuzzy-match or overwrite the existing Folio.
+## Related
 
-AI conversation Folios open in **Read**, a non-mutating editorial transcript
-view. Choose **Edit** to change participant roles or content, reorder, add,
-or remove turns, and save through the normal revision guard. On disk, turns
-remain portable Markdown blockquote callouts.
-
-## Evaluation
-
-`tests/mcp_evals/` contains a fixture vault and ten verified read-only Q&A
-pairs for measuring whether an agent can navigate a vault with these tools;
-see the README there for how to run them.
+- [Configuration](/docs/configuration) for server, TLS, and vault selection
+- [Troubleshooting](/docs/troubleshooting) for server and config diagnosis
+- [Codex and Conversation Capture](/docs/codex-and-conversation-capture)
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Links, Search, Graph, and Repair](/docs/links-search-graph-and-repair)

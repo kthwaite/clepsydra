@@ -7,6 +7,7 @@ import booksAndReadingSource from "#/docs/content/books-and-reading.mdx?raw";
 import browserExtensionSource from "#/docs/content/browser-extension.mdx?raw";
 import captureFeedsAndArchivesSource from "#/docs/content/capture-feeds-and-archives.mdx?raw";
 import cliSource from "#/docs/content/cli.mdx?raw";
+import codexAndConversationCaptureSource from "#/docs/content/codex-and-conversation-capture.mdx?raw";
 import configurationSource from "#/docs/content/configuration.mdx?raw";
 import editorWorkflowsSource from "#/docs/content/editor-workflows.mdx?raw";
 import encryptionAndProtectedPagesSource from "#/docs/content/encryption-and-protected-pages.mdx?raw";
@@ -59,6 +60,9 @@ const AcademicLibraryAndReadingGuide = lazy(
 );
 const BooksAndReadingGuide = lazy(
   () => import("#/docs/content/books-and-reading.mdx"),
+);
+const CodexAndConversationCaptureGuide = lazy(
+  () => import("#/docs/content/codex-and-conversation-capture.mdx"),
 );
 const LspGuide = lazy(() => import("#/docs/content/lsp.mdx"));
 const McpGuide = lazy(() => import("#/docs/content/mcp.mdx"));
@@ -182,25 +186,59 @@ const booksAndReadingMeta = {
     "Add books from an ISBN or camera barcode and understand imported metadata.",
   keywords: ["books", "reading", "ISBN", "barcode", "metadata"],
 } satisfies DocMeta;
+const codexAndConversationCaptureMeta = {
+  slug: "codex-and-conversation-capture",
+  title: "Codex and Conversation Capture",
+  description:
+    "Work in the Codex workspace and capture AI conversations as Folios.",
+  keywords: [
+    "Codex",
+    "workspace",
+    "tabs",
+    "quires",
+    "conversation capture",
+    "AI conversation",
+    "transcript",
+  ],
+} satisfies DocMeta;
 const lspMeta = {
   slug: "lsp",
   title: "LSP",
-  description: "Use Clepsydra’s language server in Markdown editors.",
-  keywords: ["language server", "editor", "Markdown", "autocomplete"],
+  description: "Set up Clepsydra’s local language server for Markdown editors.",
+  keywords: [
+    "language server",
+    "Neovim",
+    "completion",
+    "diagnostics",
+    "rename",
+    "external edits",
+  ],
 } satisfies DocMeta;
 const mcpMeta = {
   slug: "mcp",
   title: "MCP",
-  description:
-    "Connect agents to Clepsydra through the Model Context Protocol.",
-  keywords: ["Model Context Protocol", "agents", "AI", "tools"],
+  description: "Connect trusted agents to a running Clepsydra server.",
+  keywords: [
+    "Model Context Protocol",
+    "agents",
+    "vault tools",
+    "conversation capture",
+    "running server",
+    "stale revision",
+  ],
 } satisfies DocMeta;
 const browserExtensionMeta = {
   slug: "browser-extension",
   title: "Browser Extension",
-  description:
-    "Build, install, configure, and use the Clepsydra web archive extension.",
-  keywords: ["browser", "extension", "web archive", "capture"],
+  description: "Install, trust, and recover Clepsydra browser capture.",
+  keywords: [
+    "browser",
+    "extension",
+    "web archive",
+    "permissions",
+    "HTTPS",
+    "Firefox",
+  ],
 } satisfies DocMeta;
 const captureFeedsAndArchivesMeta = {
   slug: "capture-feeds-and-archives",
@@ -298,6 +336,12 @@ const booksAndReading = page(
   BooksAndReadingGuide,
   booksAndReadingSource,
 );
+const codexAndConversationCapture = page(
+  "ai-integrations",
+  codexAndConversationCaptureMeta,
+  CodexAndConversationCaptureGuide,
+  codexAndConversationCaptureSource,
+);
 const lsp = page("ai-integrations", lspMeta, LspGuide, lspSource);
 const mcp = page("ai-integrations", mcpMeta, McpGuide, mcpSource);
 const browserExtension = page(
@@ -355,7 +399,7 @@ export const DOC_GROUPS = [
   {
     id: "ai-integrations",
     label: "AI and integrations",
-    pages: [lsp, mcp],
+    pages: [codexAndConversationCapture, lsp, mcp],
   },
   {
     id: "operations-reference",
