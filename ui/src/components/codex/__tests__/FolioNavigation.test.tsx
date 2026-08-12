@@ -22,6 +22,7 @@ import {
 } from "react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import "./FolioProperties.mock";
 import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
 import { Folio } from "#/components/codex/Folio";

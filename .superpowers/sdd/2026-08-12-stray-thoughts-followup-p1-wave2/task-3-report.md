@@ -96,3 +96,16 @@ Fresh focused verification:
 - `npm run typecheck` — passed with zero diagnostics.
 - Focused Vitest command covering every changed test file plus both vault-event files — **15 files, 390 tests, 0 failures**.
 - Formatter, linter, build, and broad suites were intentionally skipped per the focused-fix assignment.
+
+## Full UI suite regression correction — 2026-08-12
+
+The full UI suite exposed 29 regressions in six Folio-oriented files after the property panel was integrated. Those suites render `Folio` or `CodexFrame` below component-specific mocks rather than the production application root, so they do not install the production `QueryClientProvider`. The new real `FolioProperties` boundary consequently reached `usePageBaseProperties` without a query client before the prior Folio behavior could be exercised.
+
+The existing authoritative `Folio.test.tsx` convention already isolates the property-panel boundary, while `FolioProperties.test.tsx` covers the real panel against deterministic projection states. A shared `FolioProperties.mock.tsx` now applies that same projected-properties boundary to the six unrelated Folio suites instead of adding a fake query provider or issuing unmocked API requests. No production behavior changed and no broad fixtures were rewritten.
+
+Verification:
+
+- The pre-fix focused run reproduced **6 failed files, 29 failed tests**.
+- The post-fix focused run passed **6 files, 60 tests, 0 failures**.
+- `bun run --cwd ui test` passed **265 files, 3,450 tests, 0 failures**.
+- `bun run --cwd ui typecheck` passed with zero diagnostics.

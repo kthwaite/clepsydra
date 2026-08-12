@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Descendant } from "slate";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
+import "./FolioProperties.mock";
 import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import { serializeRecipeMarkdown } from "#/recipe/recipeCodec";
 

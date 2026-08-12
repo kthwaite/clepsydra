@@ -9,6 +9,7 @@ import userEvent from "@testing-library/user-event";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createEditor, Node, type Descendant, type Editor } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import "./FolioProperties.mock";
 import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import { useConversationPresentation } from "#/editor/conversation/presentation";
 import type { CustomEditor } from "#/editor/types";
