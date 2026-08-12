@@ -183,8 +183,18 @@ mod tests {
     }
 
     #[test]
-    fn leaves_malformed_base64_verbatim() {
+    fn leaves_an_empty_payload_verbatim() {
         let html = r#"<img src="data:image/png;base64,!!!!"><p>after</p>"#;
+
+        let result = deconstruct(html);
+
+        assert!(result.resources.is_empty());
+        assert_eq!(result.html, html);
+    }
+
+    #[test]
+    fn leaves_undecodable_base64_verbatim() {
+        let html = r#"<img src="data:image/png;base64,A!!!"><p>after</p>"#;
 
         let result = deconstruct(html);
 
