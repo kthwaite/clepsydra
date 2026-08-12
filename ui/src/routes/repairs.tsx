@@ -12,6 +12,7 @@ const REPAIR_KINDS: Record<ReferenceIssue["kind"], true> = {
   isolated_page: true,
 };
 const PAGE_LIMIT = 100;
+const MAX_U32 = 0xffffffff;
 
 export interface RepairSearch {
   target?: string;
@@ -58,7 +59,12 @@ export function parseRepairSearch(search: Record<string, unknown>): RepairSearch
       : typeof search.offset === "string"
         ? Number(search.offset)
         : undefined;
-  if (offset !== undefined && Number.isInteger(offset) && offset >= 0) {
+  if (
+    offset !== undefined &&
+    Number.isSafeInteger(offset) &&
+    offset >= 0 &&
+    offset <= MAX_U32
+  ) {
     result.offset = offset;
   }
   const limit =

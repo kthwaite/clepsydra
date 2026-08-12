@@ -65,6 +65,17 @@ describe("repairs route", () => {
     ).toEqual({});
   });
 
+  it("bounds offsets to the backend u32 contract", () => {
+    expect(parseRepairSearch({ offset: "4294967295" })).toEqual({
+      offset: 4294967295,
+    });
+    expect(parseRepairSearch({ offset: "4294967296" })).toEqual({});
+    expect(parseRepairSearch({ offset: String(Number.MAX_SAFE_INTEGER + 1) })).toEqual(
+      {},
+    );
+    expect(parseRepairSearch({ offset: "1.5" })).toEqual({});
+  });
+
   it("matches /repairs and no longer exposes /link-miss", async () => {
     const repairsRouter = createRouter({
       routeTree,

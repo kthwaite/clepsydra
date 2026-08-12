@@ -400,6 +400,53 @@ describe("RepairWorkspace", () => {
     );
   });
 
+  it("clamps a deep-linked empty page to the last valid offset", async () => {
+    mocks.issues = [];
+    mocks.total = 250;
+    const onFiltersChange = vi.fn();
+    renderWorkspace({
+      filters: { limit: 100, offset: 4294967200 },
+      onFiltersChange,
+    });
+
+    await waitFor(() =>
+      expect(onFiltersChange).toHaveBeenCalledWith({
+        limit: 100,
+        offset: 200,
+      }),
+    );
+  });
+
+  it("returns from an emptied final page after apply invalidation", async () => {
+    mocks.total = 201;
+    const onFiltersChange = vi.fn();
+    const user = userEvent.setup();
+    const { rerender } = renderWorkspace({
+      filters: { limit: 100, offset: 200 },
+      onFiltersChange,
+    });
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Apply previewed repair" }));
+
+    mocks.issues = [];
+    mocks.total = 200;
+    rerender(
+      <RepairWorkspace
+        filters={{ limit: 100, offset: 200 }}
+        onFiltersChange={onFiltersChange}
+      />,
+    );
+    await waitFor(() =>
+      expect(onFiltersChange).toHaveBeenCalledWith({
+        limit: 100,
+        offset: 100,
+      }),
+    );
+  });
+
   it("describes topology issues without claiming their source is encrypted", async () => {
     mocks.issues = [orphanIssue];
     const user = userEvent.setup();
@@ -435,6 +482,25 @@ describe("RepairWorkspace", () => {
     const dialog = screen.getByRole("dialog", { name: "Repair issue" });
     expect(dialog).toBeVisible();
     expect(within(dialog).getByText("notes/source.md")).toBeVisible();
+  });
+
+  it("closes mobile detail after apply and restores row focus", async () => {
+    mocks.mobile = true;
+    const user = userEvent.setup();
+    renderWorkspace();
+    const row = screen.getByRole("button", { name: /Unresolved Target/ });
+    await user.click(row);
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Apply previewed repair" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Repair issue" }),
+      ).not.toBeInTheDocument(),
+    );
+    await waitFor(() => expect(row).toHaveFocus());
   });
   it("keeps selection while a refreshed result is not yet available", async () => {
     const user = userEvent.setup();

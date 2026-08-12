@@ -47,6 +47,28 @@ export function RepairWorkspace({
     }
   }, [issues, issuesQuery.data, selectedFingerprint]);
 
+  useEffect(() => {
+    if (!issuesQuery.data) return;
+    const offset = queryFilters.offset ?? 0;
+    if (offset === 0) return;
+    const limit = queryFilters.limit ?? 100;
+    const lastOffset =
+      issuesQuery.data.total === 0
+        ? 0
+        : Math.floor((issuesQuery.data.total - 1) / limit) * limit;
+    if (offset <= lastOffset) return;
+    const next = { ...filters, limit, offset: lastOffset };
+    if (!controlledFilters) setLocalFilters(next);
+    onFiltersChange?.(next);
+  }, [
+    controlledFilters,
+    filters,
+    issuesQuery.data,
+    onFiltersChange,
+    queryFilters.limit,
+    queryFilters.offset,
+  ]);
+
   const selectedIssue = selectedFingerprint
     ? (issues.find((issue) => issue.fingerprint === selectedFingerprint) ?? null)
     : null;
@@ -71,10 +93,21 @@ export function RepairWorkspace({
     onFiltersChange?.(next);
   }
 
-  function restoreRowFocus() {
-    if (!selectedFingerprint) return;
+  function restoreRowFocus(fingerprint = selectedFingerprint) {
+    if (!fingerprint) return;
     requestAnimationFrame(() => {
-      rowRefs.current.get(selectedFingerprint)?.focus();
+      rowRefs.current.get(fingerprint)?.focus();
+    });
+  }
+
+  function closeMobileDetail() {
+    const fingerprint = selectedFingerprint;
+    setSelectedFingerprint(null);
+    if (!fingerprint) return;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        rowRefs.current.get(fingerprint)?.focus();
+      });
     });
   }
 
@@ -128,6 +161,23 @@ export function RepairWorkspace({
             <p className="mt-1 text-xs text-ink-mute">
               Clear filters to inspect the complete repair ledger.
             </p>
+            {(queryFilters.offset ?? 0) > 0 ? (
+              <Button
+                className="mt-3"
+                size="sm"
+                variant="ghost"
+                onPress={() =>
+                  changePage(
+                    Math.max(
+                      0,
+                      (queryFilters.offset ?? 0) - (queryFilters.limit ?? 100),
+                    ),
+                  )
+                }
+              >
+                Previous page
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : (
@@ -226,10 +276,7 @@ export function RepairWorkspace({
         <Dialog
           isOpen={selectedIssue !== null}
           onOpenChange={(isOpen) => {
-            if (!isOpen) {
-              restoreRowFocus();
-              setSelectedFingerprint(null);
-            }
+            if (!isOpen) closeMobileDetail();
           }}
           title="Repair issue"
           description="Inspect evidence and preview the exact change before applying it."
@@ -240,7 +287,7 @@ export function RepairWorkspace({
             <RepairIssueDetail
               issue={selectedIssue}
               onRefresh={() => issuesQuery.refetch()}
-              onApplied={restoreRowFocus}
+              onApplied={closeMobileDetail}
             />
           ) : null}
         </Dialog>
