@@ -363,6 +363,42 @@ describe("FolioProperties", () => {
     expect(screen.getByText("Archive (archive) · bool")).toBeVisible();
   });
 
+  it("returns focus to the edited property after a successful refetch", async () => {
+    const user = userEvent.setup();
+    let resolveRefetch: (() => void) | undefined;
+    const refetchGate = new Promise<void>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    projectionState.data = projection([
+      property("status", "text", { value: "reading" }),
+    ]);
+    projectionState.refetch.mockImplementation(async () => {
+      await refetchGate;
+      projectionState.data = projection([
+        property("status", "text", { value: "finished" }),
+      ]);
+      return { data: projectionState.data };
+    });
+
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
+    const input = screen.getByRole("textbox", { name: "status property" });
+    await user.clear(input);
+    await user.type(input, "finished{Enter}");
+
+    await waitFor(() => expect(projectionState.refetch).toHaveBeenCalledOnce());
+    expect(input).toHaveFocus();
+    expect(resolveRefetch).toBeTypeOf("function");
+    resolveRefetch?.();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Edit status property" }),
+      ).toHaveFocus();
+    });
+  });
+
   it("clears a present property as key removal and forwards date hints", async () => {
     const user = userEvent.setup();
     projectionState.data = projection([
