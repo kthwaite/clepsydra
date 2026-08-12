@@ -4,9 +4,7 @@ use std::time::Duration;
 
 use chrono::{TimeZone, Utc};
 use clepsydra::feeds::scheduler::reconcile_feed_manifest;
-use clepsydra::feeds::types::{
-    EntryFilters, EntryPatch, EntryView, FetchOutcome, FetchedEntry,
-};
+use clepsydra::feeds::types::{EntryFilters, EntryPatch, EntryView, FetchOutcome, FetchedEntry};
 use serde_json::Value;
 use support::ApiFixture;
 
@@ -87,40 +85,20 @@ async fn feed_fixture() -> FeedFixture {
 #[tokio::test]
 async fn entry_detail_returns_the_list_projection_without_scheduling_refresh() {
     let fixture = feed_fixture().await;
-    let list_response = fixture
-        .api
-        .server
-        .get("/api/vault/feeds/entries")
-        .await;
+    let list_response = fixture.api.server.get("/api/vault/feeds/entries").await;
     list_response.assert_status_ok();
     let listed = list_response.json::<Value>()["entries"][0].clone();
-    let due_before = fixture
-        .api
-        .state
-        .feeds
-        .due_feeds(Utc::now())
-        .await
-        .unwrap();
+    let due_before = fixture.api.state.feeds.due_feeds(Utc::now()).await.unwrap();
 
     let detail_response = fixture
         .api
         .server
-        .get(&format!(
-            "/api/vault/feeds/entries/{}",
-            fixture.entry_id
-        ))
+        .get(&format!("/api/vault/feeds/entries/{}", fixture.entry_id))
         .await;
 
     detail_response.assert_status_ok();
     let detail = detail_response.json::<Value>();
-    for field in [
-        "id",
-        "title",
-        "content_html",
-        "read",
-        "bookmarked",
-        "tags",
-    ] {
+    for field in ["id", "title", "content_html", "read", "bookmarked", "tags"] {
         assert_eq!(detail[field], listed[field], "mismatched {field}");
     }
     assert_eq!(detail["content_html"], "<p>safe content</p>");
@@ -128,13 +106,7 @@ async fn entry_detail_returns_the_list_projection_without_scheduling_refresh() {
     assert_eq!(detail["bookmarked"], true);
     assert_eq!(detail["tags"], serde_json::json!(["fixture", "saved"]));
 
-    let due_after = fixture
-        .api
-        .state
-        .feeds
-        .due_feeds(Utc::now())
-        .await
-        .unwrap();
+    let due_after = fixture.api.state.feeds.due_feeds(Utc::now()).await.unwrap();
     assert_eq!(
         due_after.iter().map(|feed| feed.id).collect::<Vec<_>>(),
         due_before.iter().map(|feed| feed.id).collect::<Vec<_>>()

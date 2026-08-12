@@ -739,11 +739,7 @@ pub async fn get_entry(
     State(state): State<Arc<AppState>>,
     Path(id): Path<i64>,
 ) -> Result<Json<FeedEntryDto>, ApiError> {
-    let entry = state
-        .feeds
-        .get_entry(id)
-        .await
-        .map_err(feed_store_error)?;
+    let entry = state.feeds.get_entry(id).await.map_err(feed_store_error)?;
     Ok(Json(entry.into()))
 }
 
