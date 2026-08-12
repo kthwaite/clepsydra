@@ -29,6 +29,9 @@ pub const SYSTEM_FIELDS: &[&str] = &[
     "word_count",
 ];
 
+/// View-only system column projected from the indexed Markdown body.
+pub const BODY_COLUMN: &str = "body";
+
 /// Closed set of declarable property types (v1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
@@ -986,6 +989,16 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         );
     }
 
+    for (key, _) in &base.file.properties {
+        if key == BODY_COLUMN {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("properties.{key}")),
+                format!("property name `{BODY_COLUMN}` is reserved"),
+            );
+        }
+    }
+
     // Filter fields referencing undeclared properties are a warning (the
     // vault may legitimately carry keys the base doesn't declare); op/type
     // mismatches are hard facts.
@@ -1021,6 +1034,16 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 ),
             );
         }
+        let mut body_seen = false;
+        for (column_index, column) in view.columns.iter().enumerate() {
+            if column == BODY_COLUMN && std::mem::replace(&mut body_seen, true) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!("views[{view_index}].columns[{column_index}]")),
+                    format!("duplicate `{BODY_COLUMN}` column in view `{}`", view.name),
+                );
+            }
+        }
         if let Some(filter) = &view.filter {
             validate_filter(
                 base,
@@ -1040,6 +1063,25 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             );
         }
         if let Some(group_by) = &view.group_by
+            && matches!(
+                crate::vault::query::resolve_field(
+                    group_by,
+                    &crate::vault::query::QueryContext::for_base(base)
+                ),
+                Err(crate::vault::query::QueryError::ProjectionOnlyBody)
+            )
+        {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("views[{view_index}].group_by")),
+                format!(
+                    "view `{}` group: {}",
+                    view.name,
+                    crate::vault::query::QueryError::ProjectionOnlyBody
+                ),
+            );
+        }
+        if let Some(group_by) = &view.group_by
             && let Some(def) = base.property(group_by)
             && matches!(
                 def.property_type,
@@ -1056,6 +1098,27 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             );
         }
         for (aggregate_index, aggregate) in view.aggregates.iter().enumerate() {
+            if aggregate.field.as_deref().is_some_and(|field| {
+                matches!(
+                    crate::vault::query::resolve_field(
+                        field,
+                        &crate::vault::query::QueryContext::for_base(base)
+                    ),
+                    Err(crate::vault::query::QueryError::ProjectionOnlyBody)
+                )
+            }) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!(
+                        "views[{view_index}].aggregates[{aggregate_index}].field"
+                    )),
+                    format!(
+                        "view `{}` aggregate: {}",
+                        view.name,
+                        crate::vault::query::QueryError::ProjectionOnlyBody
+                    ),
+                );
+            }
             if !matches!(aggregate.function, AggregateFn::Count) && aggregate.field.is_none() {
                 push(
                     BaseDiagnosticSeverity::Warning,
@@ -1130,6 +1193,18 @@ fn validate_filter(
             validate_filter(base, child, &format!("{path}.not"), context, push);
         }
         Filter::Cmp { field, op, value } => {
+
+            if matches!(
+                resolve_field(field, &QueryContext::for_base(base)),
+                Err(QueryError::ProjectionOnlyBody)
+            ) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!("{path}.field")),
+                    format!("{context}: {}", QueryError::ProjectionOnlyBody),
+                );
+                return;
+            }
             if *op == Op::Contains {
                 use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 
@@ -1177,7 +1252,9 @@ fn validate_filter(
                     return;
                 }
             }
-            use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+            use crate::vault::query::{
+                QueryContext, QueryError, ResolvedField, resolve_field,
+            };
 
             match resolve_field(field, &QueryContext::for_base(base)) {
                 Ok(ResolvedField::Sys(_)) => {}
@@ -1781,6 +1858,99 @@ rating = { type = "number" }
         assert_eq!(
             errors[1].message,
             "filter: op `contains` is not valid for non-text field `prop.rating`"
+        );
+    }
+    #[test]
+    fn body_is_reserved_against_property_declarations() {
+        let content = r#"
+name = "X"
+
+[properties]
+body = { type = "text" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(base.is_some());
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("properties.body")
+                && diagnostic.message == "property name `body` is reserved"
+        }));
+    }
+
+    #[test]
+    fn body_column_may_appear_once_in_each_view() {
+        let content = r#"
+name = "X"
+
+[[views]]
+name = "First"
+columns = ["title", "body"]
+
+[[views]]
+name = "Second"
+columns = ["body", "updated_at"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(
+            diagnostics.is_empty(),
+            "one body column per view is valid: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_body_columns_in_one_view_are_a_diagnostic() {
+        let content = r#"
+name = "X"
+
+[[views]]
+name = "All"
+columns = ["body", "title", "body"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("views[0].columns[2]")
+                && diagnostic.message == "duplicate `body` column in view `All`"
+        }));
+    }
+
+    #[test]
+    fn body_is_rejected_as_a_saved_view_query_capability() {
+        let content = r#"
+name = "X"
+
+[filter]
+field = "body"
+op = "contains"
+value = "secret"
+
+[[views]]
+name = "All"
+filter = { field = "body", op = "contains", value = "secret" }
+sort = [{ field = "body" }]
+group_by = "body"
+aggregates = [{ fn = "count", field = "body" }]
+columns = ["body"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let paths = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paths,
+            vec![
+                "filter.field",
+                "views[0].filter.field",
+                "views[0].sort[0].field",
+                "views[0].group_by",
+                "views[0].aggregates[0].field",
+            ]
         );
     }
 }

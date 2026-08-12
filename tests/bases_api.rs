@@ -218,6 +218,25 @@ fn seed(root: &Path) {
     .unwrap();
 }
 
+fn seed_body_projection(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/excerpts.base.toml"),
+        r#"name = "Excerpts"
+
+[[views]]
+name = "All"
+columns = ["title", "body"]
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("excerpt.md"),
+        "+++\nid = \"0190f8a0-0000-7000-8000-0000000000b2\"\ntitle = \"Excerpt\"\ntype = \"NOTE\"\n+++\nA **readable** [label](https://example.com).\n",
+    )
+    .unwrap();
+}
+
 fn seed_grouped_limit_base(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
     fs::write(
@@ -873,6 +892,26 @@ async fn view_evaluation_honors_view_filter_and_sort() {
         .get("/api/vault/bases/reading/views/nope")
         .await
         .assert_status_not_found();
+}
+
+#[tokio::test]
+async fn saved_view_returns_body_excerpt_without_a_page_detail_request() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_body_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get("/api/vault/bases/excerpts/views/all")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["rows"][0]["columns"]["title"], "Excerpt");
+    assert_eq!(
+        body["rows"][0]["columns"]["body"],
+        "A readable label."
+    );
 }
 
 #[tokio::test]

@@ -10,11 +10,13 @@
 
 use std::collections::HashMap;
 
+use pulldown_cmark::{Event, Options, Parser, TagEnd};
 use rusqlite::Connection;
 use thiserror::Error;
 
 use super::base::{
-    Aggregate, AggregateFn, BaseDefinition, Filter, Op, PropertyType, SortDir, SortKey,
+    Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, Filter, Op, PropertyType, SortDir,
+    SortKey,
 };
 use super::canonical::CanonicalName;
 use super::link::normalize_links_to_target;
@@ -152,6 +154,10 @@ impl<'a> QueryContext<'a> {
 pub enum QueryError {
     #[error("unknown system field `{0}`")]
     UnknownSystemField(String),
+    #[error(
+        "`body` is projection-only and cannot be used as a filter, sort key, group, or aggregate"
+    )]
+    ProjectionOnlyBody,
     #[error("op `{op:?}` is not valid for field `{field}`")]
     InvalidOp { field: String, op: Op },
     #[error("invalid value for field `{field}`: {reason}")]
@@ -169,6 +175,12 @@ pub enum QueryError {
 /// Resolve a field reference. Bare names bind system-first; `sys.<name>` /
 /// `prop.<name>` disambiguate.
 pub fn resolve_field(field: &str, ctx: &QueryContext) -> Result<ResolvedField, QueryError> {
+    if field == BODY_COLUMN
+        || field.strip_prefix("sys.") == Some(BODY_COLUMN)
+        || field.strip_prefix("prop.") == Some(BODY_COLUMN)
+    {
+        return Err(QueryError::ProjectionOnlyBody);
+    }
     if let Some(name) = field.strip_prefix("sys.") {
         return SysField::from_name(name)
             .map(ResolvedField::Sys)
@@ -692,6 +704,16 @@ pub fn evaluate(
     spec: &QuerySpec,
     ctx: &QueryContext,
 ) -> Result<QueryOutput, QueryError> {
+    for aggregate in &spec.aggregates {
+        if let Some(field) = aggregate.field.as_deref()
+            && matches!(
+                resolve_field(field, ctx),
+                Err(QueryError::ProjectionOnlyBody)
+            )
+        {
+            return Err(QueryError::ProjectionOnlyBody);
+        }
+    }
     match &spec.group_by {
         Some(group_key) => evaluate_grouped(conn, spec, ctx, group_key),
         None => evaluate_flat(conn, spec, ctx),
@@ -755,6 +777,9 @@ fn evaluate_grouped(
     let mut agg_joins = String::new();
     let mut agg_params: Vec<SqlValue> = Vec::new();
     for (i, agg) in spec.aggregates.iter().enumerate() {
+        if let Some(field) = agg.field.as_deref() {
+            resolve_field(field, ctx)?;
+        }
         match (agg.function, &agg.field) {
             (AggregateFn::Count, _) => agg_exprs.push("COUNT(*)".to_string()),
             (function, Some(field)) => {
@@ -888,6 +913,76 @@ fn sql_value_to_json(v: rusqlite::types::Value) -> serde_json::Value {
     }
 }
 
+const BODY_EXCERPT_MAX_CHARS: usize = 240;
+
+fn append_excerpt_text(
+    excerpt: &mut String,
+    scalar_count: &mut usize,
+    pending_space: &mut bool,
+    text: &str,
+) -> bool {
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            *pending_space |= !excerpt.is_empty();
+            continue;
+        }
+        if *pending_space && *scalar_count + 1 < BODY_EXCERPT_MAX_CHARS {
+            excerpt.push(' ');
+            *scalar_count += 1;
+        }
+        *pending_space = false;
+        if *scalar_count == BODY_EXCERPT_MAX_CHARS {
+            return true;
+        }
+        excerpt.push(ch);
+        *scalar_count += 1;
+        if *scalar_count == BODY_EXCERPT_MAX_CHARS {
+            return true;
+        }
+    }
+    false
+}
+
+fn body_excerpt(markdown: &str) -> String {
+    let mut excerpt = String::with_capacity(BODY_EXCERPT_MAX_CHARS);
+    let mut scalar_count = 0;
+    let mut pending_space = false;
+    for event in Parser::new_ext(markdown, Options::all()) {
+        let full = match event {
+            Event::Text(text) | Event::Code(text) => append_excerpt_text(
+                &mut excerpt,
+                &mut scalar_count,
+                &mut pending_space,
+                &text,
+            ),
+            Event::FootnoteReference(label) => append_excerpt_text(
+                &mut excerpt,
+                &mut scalar_count,
+                &mut pending_space,
+                &label,
+            ),
+            Event::SoftBreak | Event::HardBreak | Event::Rule => {
+                pending_space |= !excerpt.is_empty();
+                false
+            }
+            Event::End(TagEnd::Paragraph | TagEnd::Heading(_) | TagEnd::CodeBlock) => {
+                pending_space |= !excerpt.is_empty();
+                false
+            }
+            _ => false,
+        };
+        if full {
+            break;
+        }
+    }
+    excerpt
+}
+
+enum AppendedColumn {
+    Json(String),
+    Body,
+}
+
 /// Fetch result rows: filter + optional group restriction + sort + paging,
 /// with requested columns materialized from `ord = 0` projections.
 fn fetch_rows(
@@ -899,28 +994,41 @@ fn fetch_rows(
     limit: Option<u32>,
     offset: u32,
 ) -> Result<Vec<QueryRow>, QueryError> {
-    // Column joins for requested property columns. Tags come from their
-    // effective index projection; aliases still come from meta_json.
+    // Requested property columns and the body projection are joined into this
+    // one set-based query. No page files or detail endpoints are read.
     let mut select_cols =
         "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.encrypted, p.journal_date, p.word_count"
             .to_string();
     let mut column_joins = String::new();
     let mut column_params: Vec<SqlValue> = Vec::new();
-    // Requested column name → position among the appended (json) columns.
-    let mut json_columns: Vec<String> = Vec::new();
+    // Position and decoding mode for each appended select column.
+    let mut appended_columns: Vec<AppendedColumn> = Vec::new();
     let mut system_columns: Vec<(String, SysField)> = Vec::new();
+    let mut body_joined = false;
     for (i, name) in spec.columns.iter().enumerate() {
+        if name == BODY_COLUMN {
+            if !body_joined {
+                column_joins
+                    .push_str(" LEFT JOIN pages_fts body_fts ON body_fts.page_id = p.id");
+                body_joined = true;
+            }
+            select_cols.push_str(
+                ", CASE WHEN p.encrypted = 1 THEN NULL ELSE body_fts.body END",
+            );
+            appended_columns.push(AppendedColumn::Body);
+            continue;
+        }
         match resolve_field(name, ctx)? {
             ResolvedField::Sys(SysField::Tags) => {
                 select_cols.push_str(
                     ", (SELECT json_group_array(tag) FROM
                        (SELECT tag FROM tags WHERE page_id = p.id ORDER BY computed, rowid))",
                 );
-                json_columns.push(name.clone());
+                appended_columns.push(AppendedColumn::Json(name.clone()));
             }
             ResolvedField::Sys(SysField::Aliases) => {
                 select_cols.push_str(", json_extract(p.meta_json, '$.aliases')");
-                json_columns.push(name.clone());
+                appended_columns.push(AppendedColumn::Json(name.clone()));
             }
             ResolvedField::Sys(sys) => system_columns.push((name.clone(), sys)),
             ResolvedField::Prop { key, .. } => {
@@ -930,7 +1038,7 @@ fn fetch_rows(
                 ));
                 column_params.push(SqlValue::Text(key));
                 select_cols.push_str(&format!(", {alias}.value_json"));
-                json_columns.push(name.clone());
+                appended_columns.push(AppendedColumn::Json(name.clone()));
             }
         }
     }
@@ -1013,12 +1121,22 @@ fn fetch_rows(
                 columns.insert(requested_name.clone(), value.clone());
             }
         }
-        for (i, name) in json_columns.iter().enumerate() {
+        for (i, column) in appended_columns.iter().enumerate() {
             let raw: Option<String> = row.get(n_fixed + i)?;
-            let value = raw
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or(serde_json::Value::Null);
-            columns.insert(name.clone(), value);
+            match column {
+                AppendedColumn::Json(name) => {
+                    let value = raw
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                        .unwrap_or(serde_json::Value::Null);
+                    columns.insert(name.clone(), value);
+                }
+                AppendedColumn::Body => {
+                    let value = raw
+                        .map(|markdown| serde_json::Value::String(body_excerpt(&markdown)))
+                        .unwrap_or(serde_json::Value::Null);
+                    columns.insert(BODY_COLUMN.to_string(), value);
+                }
+            }
         }
         Ok(QueryRow {
             id: row.get(0)?,
@@ -1948,5 +2066,121 @@ moment  = { type = "datetime" }
             unprotected_rows[0].columns["sys.encryption"],
             serde_json::Value::Bool(false)
         );
+    }
+    #[test]
+    fn body_column_projects_bounded_normalized_plain_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::write(tmp.path().join("bases/reading.base.toml"), READING_BASE).unwrap();
+        let markdown_body = format!(
+            "# Heading\n\nA [link label](https://example.com) with `code`.\n\n{}\n",
+            "界".repeat(300)
+        );
+        std::fs::write(
+            tmp.path().join("excerpt.md"),
+            format!(
+                "+++\nid = \"0190f8a0-0000-7000-8000-0000000000b0\"\ntitle = \"Excerpt\"\ntype = \"BOOK\"\n+++\n{markdown_body}"
+            ),
+        )
+        .unwrap();
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("reading").unwrap();
+        let output = evaluate(
+            index.connection(),
+            &QuerySpec {
+                columns: vec!["body".into()],
+                ..Default::default()
+            },
+            &QueryContext::for_base(base),
+        )
+        .unwrap();
+        let QueryOutput::Flat { rows, .. } = output else {
+            panic!("expected flat output");
+        };
+        let excerpt = rows[0].columns["body"].as_str().unwrap();
+
+        assert!(excerpt.starts_with("Heading A link label with code. 界"));
+        assert_eq!(excerpt.chars().count(), 240);
+        assert!(!excerpt.contains("https://example.com"));
+        assert!(!excerpt.contains('\n'));
+        assert!(!excerpt.contains('`'));
+    }
+
+    #[test]
+    fn protected_body_column_is_null_and_never_serializes_armored_content() {
+        let (_tmp, index, base) = encryption_fixture();
+        let output = evaluate(
+            index.connection(),
+            &QuerySpec {
+                columns: vec!["body".into()],
+                ..Default::default()
+            },
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat { rows, .. } = output else {
+            panic!("expected flat output");
+        };
+        let protected = rows
+            .iter()
+            .find(|row| row.path == "protected.md")
+            .unwrap();
+        let serialized = serde_json::to_string(protected).unwrap();
+        let unprotected = rows
+            .iter()
+            .find(|row| row.path == "unprotected.md")
+            .unwrap();
+
+        assert_eq!(unprotected.columns["body"], serde_json::json!("body"));
+
+        assert_eq!(protected.columns["body"], serde_json::Value::Null);
+        assert!(!serialized.contains("BEGIN AGE ENCRYPTED FILE"));
+        assert!(!serialized.contains("YWdlLWVuY3J5cHRpb24"));
+    }
+
+    #[test]
+    fn body_is_projection_only_not_a_general_query_field() {
+        let (_tmp, index, base) = fixture();
+        let context = QueryContext::for_base(&base);
+        for field in ["body", "sys.body", "prop.body"] {
+            assert!(
+                resolve_field(field, &context).is_err(),
+                "{field} unexpectedly resolved as a query field"
+            );
+        }
+
+        let filter = Filter::Cmp {
+            field: "body".into(),
+            op: Op::Contains,
+            value: serde_json::json!("body"),
+        };
+        assert!(compile_filter(&filter, &context).is_err());
+
+        let sort = QuerySpec {
+            sort: vec![SortKey {
+                field: "body".into(),
+                dir: SortDir::Asc,
+            }],
+            ..Default::default()
+        };
+        assert!(evaluate(index.connection(), &sort, &context).is_err());
+
+        let group = QuerySpec {
+            group_by: Some("body".into()),
+            ..Default::default()
+        };
+        assert!(evaluate(index.connection(), &group, &context).is_err());
+
+        let aggregate = QuerySpec {
+            aggregates: vec![Aggregate {
+                function: AggregateFn::Count,
+                field: Some("body".into()),
+            }],
+            ..Default::default()
+        };
+        assert!(evaluate(index.connection(), &aggregate, &context).is_err());
     }
 }
