@@ -175,7 +175,9 @@ vi.mock("#/components/codex/FolioProperties", () => ({
       );
     }
     folioPropertiesMock(props);
-    return <section data-testid="folio-properties">Projected properties</section>;
+    return (
+      <section data-testid="folio-properties">Projected properties</section>
+    );
   },
 }));
 vi.mock("#/editor/SlateEditor", () => ({
@@ -1003,7 +1005,7 @@ describe("Folio raw Markdown mode", () => {
 });
 
 describe("Folio property placement", () => {
-  it("places projected properties in the desktop metadata rail with page authority", () => {
+  it("places projected properties between the desktop header and body", () => {
     mobileLayoutState.matches = false;
     usePageEditorMock.mockReturnValue(editableEditor());
     useWorkspaceStore.setState({
@@ -1015,16 +1017,76 @@ describe("Folio property placement", () => {
 
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
-    expect(screen.getByTestId("folio-properties").closest("aside")).not.toBeNull();
+    const title = screen.getByRole("textbox", { name: "Page title" });
+    const properties = screen.getByTestId("folio-properties");
+    const body = screen.getByRole("textbox", { name: "Page body" });
+    expect(
+      title.compareDocumentPosition(properties) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(
+      properties.compareDocumentPosition(body) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(properties.closest("aside")).toBeNull();
+    expect(screen.getAllByTestId("folio-properties")).toHaveLength(1);
+    expect(screen.getAllByRole("textbox", { name: "Page body" })).toHaveLength(
+      1,
+    );
     expect(folioPropertiesMock).toHaveBeenLastCalledWith({
       pageId: "page-alpha",
       path: "notes/alpha.md",
       locked: false,
       readOnly: false,
     });
-    expect(screen.getByRole("textbox", { name: "Page body" })).toBeVisible();
   });
 
+  it("places projected properties between the read-only header and body", () => {
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      readonly: true,
+      setReadonly: vi.fn().mockResolvedValue(undefined),
+    });
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const header = screen.getByRole("region", { name: "Page metadata" });
+    const properties = screen.getByTestId("folio-properties");
+    const body = screen.getByRole("textbox", { name: "Page body" });
+    expect(
+      within(header).getByRole("heading", { name: "Alpha", level: 1 }),
+    ).toBeVisible();
+    expect(properties).toBeVisible();
+    expect(body).toBeVisible();
+    expect(
+      header.compareDocumentPosition(properties) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(
+      properties.compareDocumentPosition(body) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(screen.getAllByRole("region", { name: "Page metadata" })).toHaveLength(
+      1,
+    );
+    expect(screen.getAllByTestId("folio-properties")).toHaveLength(1);
+    expect(screen.getAllByRole("textbox", { name: "Page body" })).toHaveLength(
+      1,
+    );
+    expect(folioPropertiesMock).toHaveBeenLastCalledWith({
+      pageId: "page-alpha",
+      path: "notes/alpha.md",
+      locked: false,
+      readOnly: true,
+    });
+  });
 
   it("keeps the normal Folio usable when the property projection fails", () => {
     mobileLayoutState.matches = false;
@@ -1135,23 +1197,30 @@ describe("Folio mobile presentation", () => {
     const user = userEvent.setup();
     render(<Folio tabId="t1" path="notes/alpha.md" />);
 
-    expect(screen.getByRole("textbox", { name: "Page title" })).toHaveValue(
-      "Alpha",
-    );
+    const title = screen.getByRole("textbox", { name: "Page title" });
+    const properties = screen.getByTestId("folio-properties");
+    const body = screen.getByRole("textbox", { name: "Page body" });
+    expect(
+      title.compareDocumentPosition(properties) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(
+      properties.compareDocumentPosition(body) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(screen.getAllByTestId("folio-properties")).toHaveLength(1);
     expect(
       screen.queryByRole("button", { name: "collapse panel" }),
     ).not.toBeInTheDocument();
     expect(useCollapsibleRailMock).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Document details" }));
-    expect(
-      screen.getByRole("dialog", { name: "Document details" }),
-    ).toBeVisible();
+    const detailsDialog = screen.getByRole("dialog", {
+      name: "Document details",
+    });
+    expect(detailsDialog).toBeVisible();
     expect(screen.getByText("notes/alpha.md")).toBeVisible();
-    expect(
-      within(screen.getByRole("dialog", { name: "Document details" }))
-        .getByTestId("folio-properties"),
-    ).toBeVisible();
+    expect(within(detailsDialog).queryByTestId("folio-properties")).toBeNull();
     expect(folioPropertiesMock).toHaveBeenLastCalledWith({
       pageId: "page-alpha",
       path: "notes/alpha.md",

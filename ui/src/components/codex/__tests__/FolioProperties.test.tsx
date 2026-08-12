@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -107,23 +113,32 @@ beforeEach(() => {
 });
 
 describe("FolioProperties", () => {
-  it("distinguishes a page with no matching Bases", () => {
+  it("hides the section after an authoritative no-match projection", () => {
     projectionState.data = projection([], []);
+
+    const view = renderPanel();
+
+    expect(view.container).toBeEmptyDOMElement();
+    expect(screen.queryByRole("heading", { name: "Properties" })).toBeNull();
+  });
+
+  it("shows loading before the authoritative projection is available", () => {
+    projectionState.isLoading = true;
 
     renderPanel();
 
     expect(screen.getByRole("heading", { name: "Properties" })).toBeVisible();
-    expect(screen.getByText("No matching Bases")).toBeVisible();
-    expect(
-      screen.getByText("This page does not currently match any Base."),
-    ).toBeVisible();
+    expect(screen.getByText("Loading properties…")).toBeVisible();
   });
 
   it("distinguishes matching Bases that declare no properties", () => {
-    projectionState.data = projection([], [
-      { slug: "reading", name: "Reading" },
-      { slug: "library", name: "Library" },
-    ]);
+    projectionState.data = projection(
+      [],
+      [
+        { slug: "reading", name: "Reading" },
+        { slug: "library", name: "Library" },
+      ],
+    );
 
     renderPanel();
 
@@ -158,8 +173,12 @@ describe("FolioProperties", () => {
     ).toHaveLength(1);
     const item = screen.getByRole("heading", { name: "status" }).closest("li");
     expect(item).not.toBeNull();
-    expect(within(item as HTMLElement).getByText("Reading (reading) · text")).toBeVisible();
-    expect(within(item as HTMLElement).getByText("Library (library) · text")).toBeVisible();
+    expect(
+      within(item as HTMLElement).getByText("Reading (reading) · text"),
+    ).toBeVisible();
+    expect(
+      within(item as HTMLElement).getByText("Library (library) · text"),
+    ).toBeVisible();
   });
 
   it("shows conflicting and reserved values with provenance but no editors", () => {
@@ -197,7 +216,32 @@ describe("FolioProperties", () => {
     expect(screen.getByText("Reviews (reviews) · text")).toBeVisible();
     expect(screen.getByText("Not exposed")).toBeVisible();
     expect(screen.getByText("Reserved property")).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Edit (rating|conversation) property/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", {
+        name: /Edit (rating|conversation) property/,
+      }),
+    ).toBeNull();
+  });
+
+  it("never exposes or edits body content from a malformed body declaration", () => {
+    projectionState.data = projection([
+      property("body", "text", {
+        present: false,
+        value: null,
+        patchable: false,
+        blockers: ["reserved_key"],
+      }),
+    ]);
+
+    renderPanel();
+
+    expect(screen.getByRole("heading", { name: "body" })).toBeVisible();
+    expect(screen.getByText("Not exposed")).toBeVisible();
+    expect(screen.getByText("Reserved property")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Edit body property" }),
+    ).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "body property" })).toBeNull();
   });
 
   it("routes every supported property type through the shared editor family", async () => {
@@ -214,9 +258,24 @@ describe("FolioProperties", () => {
       { key: "rating", type: "number", tag: "INPUT", inputType: "number" },
       { key: "finished", type: "bool", tag: "SELECT" },
       { key: "started", type: "date", tag: "INPUT", inputType: "date" },
-      { key: "reviewed_at", type: "datetime", tag: "INPUT", inputType: "datetime-local" },
-      { key: "status", type: "select", definition: { options: ["reading"] }, tag: "SELECT" },
-      { key: "genres", type: "multi_select", definition: { options: ["fiction"] }, tag: "SELECT" },
+      {
+        key: "reviewed_at",
+        type: "datetime",
+        tag: "INPUT",
+        inputType: "datetime-local",
+      },
+      {
+        key: "status",
+        type: "select",
+        definition: { options: ["reading"] },
+        tag: "SELECT",
+      },
+      {
+        key: "genres",
+        type: "multi_select",
+        definition: { options: ["fiction"] },
+        tag: "SELECT",
+      },
       { key: "author", type: "relation", tag: "INPUT" },
     ];
     projectionState.data = projection(
@@ -243,7 +302,8 @@ describe("FolioProperties", () => {
       );
       const control = screen.getByLabelText(`${entry.key} property`);
       expect(control.tagName).toBe(entry.tag);
-      if (entry.inputType) expect(control).toHaveAttribute("type", entry.inputType);
+      if (entry.inputType)
+        expect(control).toHaveAttribute("type", entry.inputType);
       await user.keyboard("{Escape}");
       expect(
         screen.getByRole("button", { name: `Edit ${entry.key} property` }),
@@ -253,29 +313,37 @@ describe("FolioProperties", () => {
 
   it("uses present as authoritative when adding an absent key and refetches membership after save", async () => {
     const user = userEvent.setup();
-    projectionState.data = projection([
-      property("status", "text", {
-        present: false,
-        value: "stale transport value must not become the draft",
-      }),
-    ], [{ slug: "reading", name: "Reading" }]);
-    projectionState.refetch.mockImplementation(async () => {
-      projectionState.data = projection([
-        property("archived", "bool", {
-          value: false,
-          declarations: [
-            {
-              base: { slug: "archive", name: "Archive" },
-              definition: definition("bool"),
-            },
-          ],
+    projectionState.data = projection(
+      [
+        property("status", "text", {
+          present: false,
+          value: "stale transport value must not become the draft",
         }),
-      ], [{ slug: "archive", name: "Archive" }]);
+      ],
+      [{ slug: "reading", name: "Reading" }],
+    );
+    projectionState.refetch.mockImplementation(async () => {
+      projectionState.data = projection(
+        [
+          property("archived", "bool", {
+            value: false,
+            declarations: [
+              {
+                base: { slug: "archive", name: "Archive" },
+                definition: definition("bool"),
+              },
+            ],
+          }),
+        ],
+        [{ slug: "archive", name: "Archive" }],
+      );
       return { data: projectionState.data };
     });
 
     renderPanel();
-    await user.click(screen.getByRole("button", { name: "Edit status property" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
     const input = screen.getByRole("textbox", { name: "status property" });
     expect(input).toHaveValue("");
     await user.type(input, "finished{Enter}");
@@ -295,6 +363,42 @@ describe("FolioProperties", () => {
     expect(screen.getByText("Archive (archive) · bool")).toBeVisible();
   });
 
+  it("returns focus to the edited property after a successful refetch", async () => {
+    const user = userEvent.setup();
+    let resolveRefetch: (() => void) | undefined;
+    const refetchGate = new Promise<void>((resolve) => {
+      resolveRefetch = resolve;
+    });
+    projectionState.data = projection([
+      property("status", "text", { value: "reading" }),
+    ]);
+    projectionState.refetch.mockImplementation(async () => {
+      await refetchGate;
+      projectionState.data = projection([
+        property("status", "text", { value: "finished" }),
+      ]);
+      return { data: projectionState.data };
+    });
+
+    renderPanel();
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
+    const input = screen.getByRole("textbox", { name: "status property" });
+    await user.clear(input);
+    await user.type(input, "finished{Enter}");
+
+    await waitFor(() => expect(projectionState.refetch).toHaveBeenCalledOnce());
+    expect(input).toHaveFocus();
+    expect(resolveRefetch).toBeTypeOf("function");
+    resolveRefetch?.();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "Edit status property" }),
+      ).toHaveFocus();
+    });
+  });
+
   it("clears a present property as key removal and forwards date hints", async () => {
     const user = userEvent.setup();
     projectionState.data = projection([
@@ -303,7 +407,9 @@ describe("FolioProperties", () => {
     ]);
 
     renderPanel();
-    await user.click(screen.getByRole("button", { name: "Edit status property" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
     const status = screen.getByRole("textbox", { name: "status property" });
     await user.clear(status);
     await user.keyboard("{Enter}");
@@ -317,7 +423,9 @@ describe("FolioProperties", () => {
       );
     });
 
-    await user.click(screen.getByRole("button", { name: "Edit started property" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit started property" }),
+    );
     const started = screen.getByLabelText("started property");
     fireEvent.change(started, { target: { value: "2026-08-12" } });
     fireEvent.keyDown(started, { key: "Enter" });
@@ -344,13 +452,19 @@ describe("FolioProperties", () => {
     });
 
     renderPanel();
-    await user.click(screen.getByRole("button", { name: "Edit status property" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
     const input = screen.getByRole("textbox", { name: "status property" });
     await user.clear(input);
     await user.type(input, "finished{Enter}");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("revision conflict");
-    expect(screen.getByRole("textbox", { name: "status property" })).toHaveValue("finished");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "revision conflict",
+    );
+    expect(
+      screen.getByRole("textbox", { name: "status property" }),
+    ).toHaveValue("finished");
     await user.tab();
     const reload = screen.getByRole("button", {
       name: "Reload current properties",
@@ -358,7 +472,9 @@ describe("FolioProperties", () => {
     expect(reload).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(projectionState.refetch).toHaveBeenCalledOnce();
-    expect(screen.getByRole("textbox", { name: "status property" })).toHaveValue("finished");
+    expect(
+      screen.getByRole("textbox", { name: "status property" }),
+    ).toHaveValue("finished");
 
     await user.tab();
     const discard = screen.getByRole("button", {
@@ -366,8 +482,12 @@ describe("FolioProperties", () => {
     });
     expect(discard).toHaveFocus();
     await user.keyboard("{Enter}");
-    expect(screen.queryByRole("textbox", { name: "status property" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Edit status property" })).toHaveFocus();
+    expect(
+      screen.queryByRole("textbox", { name: "status property" }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Edit status property" }),
+    ).toHaveFocus();
   });
 
   it("retains a failed network draft and retries the exact attempted value", async () => {
@@ -385,13 +505,19 @@ describe("FolioProperties", () => {
       });
 
     renderPanel();
-    await user.click(screen.getByRole("button", { name: "Edit status property" }));
+    await user.click(
+      screen.getByRole("button", { name: "Edit status property" }),
+    );
     const input = screen.getByRole("textbox", { name: "status property" });
     await user.clear(input);
     await user.type(input, "finished{Enter}");
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("network unavailable");
-    expect(screen.getByRole("textbox", { name: "status property" })).toHaveValue("finished");
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "network unavailable",
+    );
+    expect(
+      screen.getByRole("textbox", { name: "status property" }),
+    ).toHaveValue("finished");
     await user.tab();
     const retry = screen.getByRole("button", {
       name: "Retry saving status",
@@ -408,7 +534,9 @@ describe("FolioProperties", () => {
       "projection-rev-1",
     ]);
     expect(projectionState.refetch).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("textbox", { name: "status property" })).toBeNull();
+    expect(
+      screen.queryByRole("textbox", { name: "status property" }),
+    ).toBeNull();
   });
 
   it("renders values and provenance without controls when locked or declaratively read-only", () => {
@@ -423,7 +551,9 @@ describe("FolioProperties", () => {
     expect(screen.getByText("reading")).toBeVisible();
     expect(screen.getByText("Library (library) · select")).toBeVisible();
     expect(screen.getByText("Page is locked")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Edit status property" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Edit status property" }),
+    ).toBeNull();
 
     view.rerender(
       <FolioProperties
@@ -434,7 +564,9 @@ describe("FolioProperties", () => {
       />,
     );
     expect(screen.getByText("Folio is read-only")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Edit status property" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Edit status property" }),
+    ).toBeNull();
   });
 
   it("contains projection failure with a named bounded retry", async () => {
@@ -444,8 +576,12 @@ describe("FolioProperties", () => {
 
     renderPanel();
 
-    expect(screen.getByRole("alert")).toHaveTextContent("projection unavailable");
-    const retry = screen.getByRole("button", { name: "Retry loading properties" });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "projection unavailable",
+    );
+    const retry = screen.getByRole("button", {
+      name: "Retry loading properties",
+    });
     retry.focus();
     expect(retry).toHaveFocus();
     await user.click(retry);
