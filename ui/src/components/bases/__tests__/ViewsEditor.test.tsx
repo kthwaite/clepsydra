@@ -360,7 +360,6 @@ describe("ViewsEditor", () => {
     const firstBodyRow = bodyHandles[0].closest("tr");
     const laterBodyHandle = bodyHandles[1];
     expect(firstBodyRow).not.toBeNull();
-    laterBodyHandle.focus();
 
     fireEvent.dragStart(laterBodyHandle);
     fireEvent.dragOver(firstBodyRow!);

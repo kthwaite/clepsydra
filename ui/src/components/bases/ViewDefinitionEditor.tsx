@@ -159,6 +159,7 @@ export function ViewDefinitionEditor({
       return;
     const movedRow = columnRows[from];
     if (!movedRow || from === to) return;
+    setFocusColumnId(movedRow.id);
     setColumnRows(moveItem(columnRows, from, to));
     setMoveAnnouncement(
       `Moved ${movedRow.column} to position ${to + 1} of ${view.columns.length}.`,
