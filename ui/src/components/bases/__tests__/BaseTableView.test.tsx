@@ -542,6 +542,44 @@ describe("BaseTableView", () => {
     expect(props.onCommitCell).not.toHaveBeenCalled();
   });
 
+  it("keeps a projected body column outside the declared-property edit boundary", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        properties: { author: definition.properties.author },
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "body", "author"],
+          },
+        ],
+      },
+      output: {
+        shape: "flat",
+        total: 1,
+        rows: [
+          {
+            ...row,
+            columns: {
+              body: "Projected body excerpt",
+              author: "Gene Wolfe",
+            },
+          },
+        ],
+      },
+    });
+    const body = screen.getByText("Projected body excerpt");
+
+    expect(body.tagName).toBe("SPAN");
+    expect(body.closest("button")).toBeNull();
+    await user.click(body);
+
+    expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
+
   it("displays only the first sort key and replaces all keys on header sort", async () => {
     const user = userEvent.setup();
     const props = renderView({

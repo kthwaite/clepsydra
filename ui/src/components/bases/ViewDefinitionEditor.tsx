@@ -77,9 +77,16 @@ export function ViewDefinitionEditor({
 }: ViewDefinitionEditorProps) {
   const [columnToAdd, setColumnToAdd] = useState("");
   const [moveAnnouncement, setMoveAnnouncement] = useState("");
-  const [focusColumn, setFocusColumn] = useState<string>();
-  const draggedColumn = useRef<string>();
+  const [focusColumnId, setFocusColumnId] = useState<string>();
+  const draggedColumnId = useRef<string>();
   const reorderHandles = useRef(new Map<string, HTMLButtonElement>());
+  const nextColumnId = useRef(view.columns.length);
+  const [columnRows, setColumnRows] = useState(() =>
+    view.columns.map((column, index) => ({
+      id: `column-${index}`,
+      column,
+    })),
+  );
   const fields = fieldCapabilities(properties);
   const columnFields: FieldCapability[] = [
     ...fields,
@@ -94,6 +101,27 @@ export function ViewDefinitionEditor({
   const unselectedColumns = columnFields.filter(
     ({ key }) => !view.columns.includes(key),
   );
+  useEffect(() => {
+    setColumnRows((current) => {
+      if (
+        current.length === view.columns.length &&
+        current.every(
+          ({ column }, index) => column === view.columns[index],
+        )
+      )
+        return current;
+      const available = [...current];
+      return view.columns.map((column) => {
+        const matchIndex = available.findIndex(
+          (candidate) => candidate.column === column,
+        );
+        if (matchIndex >= 0) return available.splice(matchIndex, 1)[0];
+        const id = `column-${nextColumnId.current}`;
+        nextColumnId.current += 1;
+        return { id, column };
+      });
+    });
+  }, [view.columns]);
   const nameDiagnostics = diagnostics.filter(
     (diagnostic) => diagnostic.path === `${viewPath}.name`,
   );
@@ -115,13 +143,12 @@ export function ViewDefinitionEditor({
   );
 
   useEffect(() => {
-    if (!focusColumn) return;
-    const handle = reorderHandles.current.get(focusColumn);
+    if (!focusColumnId) return;
+    const handle = reorderHandles.current.get(focusColumnId);
     if (!handle) return;
     handle.focus();
-    setFocusColumn(undefined);
-  }, [focusColumn, view.columns]);
-
+    setFocusColumnId(undefined);
+  }, [focusColumnId, view.columns]);
   function moveColumn(from: number, to: number) {
     if (
       from < 0 ||
@@ -130,11 +157,11 @@ export function ViewDefinitionEditor({
       to >= view.columns.length
     )
       return;
-    const moved = view.columns[from];
-    if (!moved || from === to) return;
-    setFocusColumn(moved);
+    const movedRow = columnRows[from];
+    if (!movedRow || from === to) return;
+    setColumnRows(moveItem(columnRows, from, to));
     setMoveAnnouncement(
-      `Moved ${moved} to position ${to + 1} of ${view.columns.length}.`,
+      `Moved ${movedRow.column} to position ${to + 1} of ${view.columns.length}.`,
     );
     onChange({
       ...view,
@@ -142,11 +169,14 @@ export function ViewDefinitionEditor({
     });
   }
 
-  function dropColumn(target: string) {
-    const dragged = draggedColumn.current;
-    draggedColumn.current = undefined;
-    if (!dragged) return;
-    moveColumn(view.columns.indexOf(dragged), view.columns.indexOf(target));
+  function dropColumn(targetId: string) {
+    const draggedId = draggedColumnId.current;
+    draggedColumnId.current = undefined;
+    if (!draggedId) return;
+    moveColumn(
+      columnRows.findIndex(({ id }) => id === draggedId),
+      columnRows.findIndex(({ id }) => id === targetId),
+    );
   }
 
   function handleKeyboardMove(
@@ -162,6 +192,16 @@ export function ViewDefinitionEditor({
       event.preventDefault();
       moveColumn(index, index + 1);
     }
+  }
+
+  function removeColumn(index: number) {
+    setColumnRows((current) =>
+      current.filter((_, position) => position !== index),
+    );
+    onChange({
+      ...view,
+      columns: view.columns.filter((_, position) => position !== index),
+    });
   }
 
   function replaceAggregate(index: number, aggregate: Aggregate) {
@@ -298,21 +338,21 @@ export function ViewDefinitionEditor({
             </tr>
           </thead>
           <tbody>
-            {view.columns.map((column, index) => (
+            {columnRows.map(({ id, column }, index) => (
               <tr
-                key={column}
+                key={id}
                 onDragOver={(event) => event.preventDefault()}
                 onDrop={(event) => {
                   event.preventDefault();
-                  dropColumn(column);
+                  dropColumn(id);
                 }}
                 className="border-b border-border align-top"
               >
                 <td className="w-10 px-1 py-2 align-top sm:px-2">
                   <button
                     ref={(element) => {
-                      if (element) reorderHandles.current.set(column, element);
-                      else reorderHandles.current.delete(column);
+                      if (element) reorderHandles.current.set(id, element);
+                      else reorderHandles.current.delete(id);
                     }}
                     type="button"
                     aria-label={`Reorder ${column} column`}
@@ -320,10 +360,10 @@ export function ViewDefinitionEditor({
                     title={`Drag to reorder ${column}. Alt + Up or Down also reorders.`}
                     draggable
                     onDragStart={() => {
-                      draggedColumn.current = column;
+                      draggedColumnId.current = id;
                     }}
                     onDragEnd={() => {
-                      draggedColumn.current = undefined;
+                      draggedColumnId.current = undefined;
                     }}
                     onKeyDown={(event) => handleKeyboardMove(event, index)}
                     className="inline-flex h-7 w-7 cursor-grab items-center justify-center border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 active:cursor-grabbing [&_svg]:h-4 [&_svg]:w-4"
@@ -361,14 +401,7 @@ export function ViewDefinitionEditor({
                     <IconButton
                       aria-label={`Remove ${column} column`}
                       variant="ghost"
-                      onPress={() =>
-                        onChange({
-                          ...view,
-                          columns: view.columns.filter(
-                            (_, position) => position !== index,
-                          ),
-                        })
-                      }
+                      onPress={() => removeColumn(index)}
                     >
                       <Trash2 />
                     </IconButton>
@@ -408,6 +441,12 @@ export function ViewDefinitionEditor({
             isDisabled={!columnToAdd}
             onPress={() => {
               if (!columnToAdd) return;
+              const id = `column-${nextColumnId.current}`;
+              nextColumnId.current += 1;
+              setColumnRows((current) => [
+                ...current,
+                { id, column: columnToAdd },
+              ]);
               onChange({ ...view, columns: [...view.columns, columnToAdd] });
               setColumnToAdd("");
             }}

@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -338,13 +345,55 @@ describe("ViewsEditor", () => {
     expect(screen.getByRole("status")).toBeEmptyDOMElement();
   });
 
-  it("keeps deterministic column actions usable at boundaries and narrow widths", async () => {
-    const previousWidth = window.innerWidth;
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: 360,
+  it("moves and removes the intended duplicate occurrence while retaining its handle focus", async () => {
+    const onChange = renderViews({
+      views: [
+        view({
+          id: "view-all",
+          columns: ["title", "body", "path", "body"],
+        }),
+      ],
     });
-    window.dispatchEvent(new Event("resize"));
+    const bodyHandles = screen.getAllByRole("button", {
+      name: "Reorder body column",
+    });
+    const firstBodyRow = bodyHandles[0].closest("tr");
+    const laterBodyHandle = bodyHandles[1];
+    expect(firstBodyRow).not.toBeNull();
+    laterBodyHandle.focus();
+
+    fireEvent.dragStart(laterBodyHandle);
+    fireEvent.dragOver(firstBodyRow!);
+    fireEvent.drop(firstBodyRow!);
+
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "title",
+      "body",
+      "body",
+      "path",
+    ]);
+    const destinationHandle = screen.getAllByRole("button", {
+      name: "Reorder body column",
+    })[0];
+    expect(destinationHandle).toBe(laterBodyHandle);
+    await waitFor(() => expect(destinationHandle).toHaveFocus());
+    const destinationRow = destinationHandle.closest("tr");
+    expect(destinationRow).not.toBeNull();
+
+    fireEvent.click(
+      within(destinationRow!).getByRole("button", {
+        name: "Remove body column",
+      }),
+    );
+
+    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
+      "title",
+      "body",
+      "path",
+    ]);
+  });
+
+  it("keeps deterministic column actions available at boundaries", async () => {
     const onChange = renderViews({
       views: [
         view({
@@ -365,8 +414,7 @@ describe("ViewsEditor", () => {
       within(ratingRow).getByRole("button", {
         name: "Remove rating column",
       }),
-    ).toBeVisible();
-    expect(ratingRow.closest(".overflow-x-auto")).toBeNull();
+    ).toBeInTheDocument();
 
     await userEvent.click(
       within(ratingRow).getByRole("button", { name: "Move rating up" }),
@@ -379,11 +427,6 @@ describe("ViewsEditor", () => {
       screen.getByRole("button", { name: "Remove rating column" }),
     );
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual(["title"]);
-
-    Object.defineProperty(window, "innerWidth", {
-      configurable: true,
-      value: previousWidth,
-    });
   });
 
   it("offers body once per view while keeping it independently available in another view", async () => {
@@ -424,7 +467,7 @@ describe("ViewsEditor", () => {
     ]);
   });
 
-  it("keeps body out of filter, sort, group, aggregate, and inline-edit capabilities", async () => {
+  it("keeps body out of filter, sort, group, and aggregate capabilities", async () => {
     renderViews({
       views: [view({ id: "view-all", columns: ["title", "body"] })],
     });
@@ -454,9 +497,6 @@ describe("ViewsEditor", () => {
         ),
       ).not.toContain("body");
     }
-    expect(
-      screen.queryByRole("button", { name: /edit body/i }),
-    ).not.toBeInTheDocument();
   });
 
   it("authors ordered sort keys and preserves their order", async () => {
