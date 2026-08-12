@@ -74,29 +74,51 @@ it.each(DOC_PAGES)(
   },
 );
 
-it("resolves every internal documentation link to a registered guide and heading", () => {
-  const pagesBySlug = new Map(DOC_PAGES.map((page) => [page.slug, page]));
-  const docsLink = /\]\(\/docs\/([^)\s#]+)(?:#([^)\s]+))?\)/g;
+it("resolves every rendered internal documentation link to a registered guide and heading", async () => {
+  const renderedLinks: Array<{ sourceSlug: string; href: string }> = [];
 
   for (const sourcePage of DOC_PAGES) {
-    for (const match of sourcePage.source.matchAll(docsLink)) {
-      const [, targetSlug, targetHeadingId] = match;
-      const targetPage = pagesBySlug.get(targetSlug ?? "");
-      expect(
-        targetPage,
-        `${sourcePage.slug} links to unregistered guide ${targetSlug}`,
-      ).toBeDefined();
+    const rendered = render(<sourcePage.Component />);
+    await waitFor(() => expect(rendered.container).not.toBeEmptyDOMElement());
+    for (const anchor of rendered.container.querySelectorAll<HTMLAnchorElement>(
+      'a[href="/docs"], a[href^="/docs/"], a[href^="/docs#"]',
+    )) {
+      renderedLinks.push({
+        sourceSlug: sourcePage.slug,
+        href: anchor.getAttribute("href") ?? "",
+      });
+    }
+    rendered.unmount();
+  }
 
-      if (targetPage && targetHeadingId) {
-        const rendered = render(<targetPage.Component />);
-        expect(
-          rendered.container.querySelector(
-            `#${CSS.escape(targetHeadingId)}`,
-          ),
-          `${sourcePage.slug} links to missing heading ${targetSlug}#${targetHeadingId}`,
-        ).not.toBeNull();
-        rendered.unmount();
-      }
+  const fragmentLinks = renderedLinks.filter(({ href }) => href.includes("#"));
+  expect(renderedLinks.length).toBeGreaterThan(0);
+  expect(fragmentLinks.length).toBeGreaterThan(0);
+
+  for (const { sourceSlug, href } of renderedLinks) {
+    const target = new URL(href, "https://clepsydra.invalid");
+    const targetSlug =
+      target.pathname === "/docs"
+        ? "getting-started"
+        : target.pathname.slice("/docs/".length);
+    const targetPage = DOC_PAGES.find((page) => page.slug === targetSlug);
+    expect(
+      targetPage,
+      `${sourceSlug} renders unresolved documentation link ${href}`,
+    ).toBeDefined();
+
+    if (targetPage && target.hash) {
+      const renderedTarget = render(<targetPage.Component />);
+      await waitFor(() =>
+        expect(renderedTarget.container).not.toBeEmptyDOMElement(),
+      );
+      expect(
+        renderedTarget.container.querySelector(
+          `#${CSS.escape(target.hash.slice(1))}`,
+        ),
+        `${sourceSlug} renders unresolved documentation fragment ${href}`,
+      ).not.toBeNull();
+      renderedTarget.unmount();
     }
   }
 });

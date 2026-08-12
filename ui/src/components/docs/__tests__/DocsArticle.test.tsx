@@ -114,7 +114,7 @@ describe("DocsArticle", () => {
     expect(screen.getByText(page.description)).toBeInTheDocument();
     expect(
       screen.getByRole("navigation", { name: /breadcrumb/i }),
-    ).toHaveTextContent("Start Here");
+    ).toHaveTextContent("Start");
 
     const heading = screen.getByRole("heading", { level: 2, name: /Fields/ });
     expect(heading).toHaveAttribute("id", "fields");
@@ -167,8 +167,8 @@ describe("DocsArticle", () => {
       screen.getByRole("region", { name: "Scrollable table" }),
     ).toHaveAttribute("tabindex", "0");
     expect(
-      screen.getByRole("link", { name: /Next: Configuration/i }),
-    ).toHaveAttribute("href", "/docs/configuration");
+      screen.getByRole("link", { name: /Next: Pages and Authoring/i }),
+    ).toHaveAttribute("href", "/docs/pages-and-authoring");
     expect(
       screen.queryByRole("link", { name: /Previous:/i }),
     ).not.toBeInTheDocument();
