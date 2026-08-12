@@ -110,8 +110,12 @@ export function cycleTargetId(
   backwards: boolean,
 ): string | null {
   const visible = tabs.filter((t) => !isTabHidden(t, quires));
-  if (visible.length < 2) return null;
+  if (visible.length === 0) return null;
   const idx = visible.findIndex((t) => t.id === activeTabId);
+  // Active tab not in the candidate list (e.g. the graph tab while cycling
+  // page tabs): enter the ring at its start/end instead of wrapping math.
+  if (idx === -1) return visible[backwards ? visible.length - 1 : 0].id;
+  if (visible.length < 2) return null;
   const next = backwards
     ? (idx - 1 + visible.length) % visible.length
     : (idx + 1) % visible.length;

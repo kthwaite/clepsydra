@@ -1,5 +1,7 @@
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouter } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
+import { routeViewFromMatches } from "#/components/codex/useCodexView";
+import { goToView } from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
@@ -35,9 +37,6 @@ type Binding = {
   when?: () => boolean;
 };
 
-const inWorkspace = () => window.location.pathname.startsWith("/workspace");
-const inTasking = () => window.location.pathname.startsWith("/tasking");
-
 /** Shortcuts exempted from the open-dialog guard: a dialog's own controlling
  *  toggle must keep working while it's open (⌘K must still close the command
  *  palette it just opened), even though every other global shortcut stays
@@ -49,7 +48,8 @@ const DIALOG_EXEMPT_IDS: ReadonlySet<GlobalShortcutId> = new Set([
 function cycleTab(dir: 1 | -1) {
   const { tabs, quires, activeTabId, activateTab } =
     useWorkspaceStore.getState();
-  const target = cycleTargetId(tabs, quires, activeTabId, dir === -1);
+  const pageTabs = tabs.filter((t) => t.type === "page");
+  const target = cycleTargetId(pageTabs, quires, activeTabId, dir === -1);
   if (target) activateTab(target);
 }
 
@@ -61,6 +61,7 @@ function cycleTab(dir: 1 | -1) {
  */
 export function useGlobalShortcuts() {
   const navigate = useNavigate();
+  const router = useRouter();
   const toggleSearch = useUiStore((s) => s.toggleSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
   const openCaptureAside = useUiStore((s) => s.openCaptureAside);
@@ -72,17 +73,24 @@ export function useGlobalShortcuts() {
 
   // Exhaustive over GlobalShortcutId: adding a `scope: "global"` registry
   // entry without a binding here is a compile error.
-  const bindings = useMemo<Record<GlobalShortcutId, Binding>>(
-    () => ({
+  const bindings = useMemo<Record<GlobalShortcutId, Binding>>(() => {
+    const inWorkspace = () =>
+      routeViewFromMatches(router.state.matches) === "workspace";
+    const inTasking = () =>
+      routeViewFromMatches(router.state.matches) === "tasking";
+    return {
       "palette.toggle": { run: toggleSearch },
-      "nav.atrium": { run: () => navigate({ to: "/" }) },
+      "nav.atrium": { run: () => goToView("atrium", { navigate, openTab }) },
       "journal.today": { run: openTodayJournal },
-      "nav.constellation": { run: () => openTab("graph") },
-      "nav.gazetteer": {
-        run: () =>
-          navigate({ to: "/gazetteer", search: { sort: "ts", page: 1 } }),
+      "nav.constellation": {
+        run: () => goToView("constellation", { navigate, openTab }),
       },
-      "nav.tasking": { run: () => navigate({ to: "/tasking" }) },
+      "nav.gazetteer": {
+        run: () => goToView("gazetteer", { navigate, openTab }),
+      },
+      "nav.tasking": {
+        run: () => goToView("tasking", { navigate, openTab }),
+      },
       "app.inscribe": { run: openInscribe },
       "journal.capture": { run: openCaptureAside },
       "app.settings": { run: () => openSettings("appearance") },
@@ -130,19 +138,19 @@ export function useGlobalShortcuts() {
           s.setRailOpen(!s.railOpen);
         },
       },
-    }),
-    [
-      navigate,
-      toggleSearch,
-      openInscribe,
-      openCaptureAside,
-      openSettings,
-      openShortcutHelp,
-      toggleTheme,
-      openTab,
-      openTodayJournal,
-    ],
-  );
+    };
+  }, [
+    navigate,
+    router,
+    toggleSearch,
+    openInscribe,
+    openCaptureAside,
+    openSettings,
+    openShortcutHelp,
+    toggleTheme,
+    openTab,
+    openTodayJournal,
+  ]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
