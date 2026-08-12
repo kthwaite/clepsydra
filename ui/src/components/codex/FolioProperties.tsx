@@ -85,8 +85,8 @@ function groupProperties(
 
   const groups = projection.matching_bases
     .map((base) => bySlug.get(base.slug))
-    .filter(
-      (group): group is PropertyGroup => Boolean(group?.properties.length),
+    .filter((group): group is PropertyGroup =>
+      Boolean(group?.properties.length),
     );
   if (shared.properties.length > 0) groups.push(shared);
   return groups;
@@ -303,11 +303,7 @@ export function FolioProperties({
                         ? "Folio is read-only"
                         : null;
                     const blockers = property.blockers.map(blockerLabel);
-                    if (
-                      !canEdit &&
-                      !readOnlyReason &&
-                      blockers.length === 0
-                    ) {
+                    if (!canEdit && !readOnlyReason && blockers.length === 0) {
                       blockers.push("Read-only property");
                     }
 
