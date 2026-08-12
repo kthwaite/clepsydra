@@ -22,29 +22,34 @@ export const Route = createFileRoute("/feeds")({
   validateSearch: (
     search: Record<string, unknown> & SearchSchemaInput,
   ): FeedsSearch => {
-    // Cast to Record to allow direct function calls in tests
-    const s = search as Record<string, unknown>;
     const parsedFeed =
-      typeof s.feed === "number"
-        ? s.feed
-        : typeof s.feed === "string"
-          ? Number(s.feed)
+      typeof search.feed === "number"
+        ? search.feed
+        : typeof search.feed === "string"
+          ? Number(search.feed)
           : undefined;
     const parsedEntry =
-      typeof s.entry === "number"
-        ? s.entry
-        : typeof s.entry === "string"
-          ? Number(s.entry)
+      typeof search.entry === "number"
+        ? search.entry
+        : typeof search.entry === "string"
+          ? Number(search.entry)
           : undefined;
     return {
-      view: s.view === "unread" || s.view === "saved" ? s.view : "all",
-      group: typeof s.group === "string" && s.group ? s.group : undefined,
+      view:
+        search.view === "unread" || search.view === "saved"
+          ? search.view
+          : "all",
+      group:
+        typeof search.group === "string" && search.group
+          ? search.group
+          : undefined,
       feed:
         parsedFeed !== undefined && Number.isFinite(parsedFeed)
           ? parsedFeed
           : undefined,
-      tag: typeof s.tag === "string" && s.tag ? s.tag : undefined,
-      manage: s.manage === true || s.manage === "true",
+      tag:
+        typeof search.tag === "string" && search.tag ? search.tag : undefined,
+      manage: search.manage === true || search.manage === "true",
       entry:
         parsedEntry !== undefined &&
         Number.isSafeInteger(parsedEntry) &&
