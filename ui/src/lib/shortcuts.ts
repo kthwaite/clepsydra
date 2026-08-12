@@ -21,7 +21,7 @@ export type Chord = {
   alt?: boolean;
 };
 
-export type ShortcutGroup = "Navigate" | "Workspace" | "Editor";
+export type ShortcutGroup = "Navigate" | "Workspace" | "Editor" | "Tasking";
 export type ShortcutScope = "global" | "editor" | "contextual";
 
 export type ShortcutDef = {
@@ -219,6 +219,55 @@ export const SHORTCUTS = {
     group: "Editor",
     scope: "editor",
   },
+  "tasking.newTask": {
+    chord: { key: "n" },
+    label: "New task",
+    group: "Tasking",
+    scope: "global",
+    note: "tasking view",
+  },
+  "tasking.modeCard": {
+    chord: { key: "1" },
+    label: "Card view",
+    group: "Tasking",
+    scope: "global",
+    note: "tasking view",
+  },
+  "tasking.modeBacklog": {
+    chord: { key: "2" },
+    label: "Backlog view",
+    group: "Tasking",
+    scope: "global",
+    note: "tasking view",
+  },
+  "tasking.modeCycle": {
+    chord: { key: "3" },
+    label: "Cycle view",
+    group: "Tasking",
+    scope: "global",
+    note: "tasking view",
+  },
+  "tasking.modeTimeline": {
+    chord: { key: "4" },
+    label: "Timeline view",
+    group: "Tasking",
+    scope: "global",
+    note: "tasking view",
+  },
+  "tasking.focusFilter": {
+    chord: { key: "/" },
+    label: "Focus filter",
+    group: "Tasking",
+    scope: "global",
+    note: "tasking view",
+  },
+  "tasking.toggleRail": {
+    chord: { key: "[" },
+    label: "Toggle rail",
+    group: "Tasking",
+    scope: "global",
+    note: "tasking view",
+  },
 } as const satisfies Record<string, ShortcutDef>;
 
 export type ShortcutId = keyof typeof SHORTCUTS;
@@ -303,7 +352,12 @@ export function formatChord(chord: Chord, isMac: boolean = IS_MAC): string {
   return [...mods, glyph].join(isMac ? "" : "+");
 }
 
-const GROUP_ORDER: ShortcutGroup[] = ["Navigate", "Workspace", "Editor"];
+const GROUP_ORDER: ShortcutGroup[] = [
+  "Navigate",
+  "Workspace",
+  "Editor",
+  "Tasking",
+];
 
 /** Registry entries in help-modal order, grouped. */
 export function shortcutsByGroup(): Array<

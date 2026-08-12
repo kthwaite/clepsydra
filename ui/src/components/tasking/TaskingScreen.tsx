@@ -5,7 +5,8 @@ import { useCycleBurndown, useTaskCompletionHistory } from "#/api/tasks";
 import { useBoardStore } from "#/store/board";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
-import { opKey } from "./board-constants";
+import { type ColLabelFn, opKey } from "./board-constants";
+import { applyBoardFilter } from "./board-filter";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
 import { NewCycleModal } from "./NewCycleModal";
@@ -58,10 +59,11 @@ export function TaskingScreen({
   onOpenDossier?: (link: string) => void;
   onOpenPage?: (path: string) => void;
 } = {}) {
-  const { data, isLoading, isError } = useBoard();
+  const { data, isLoading, isError, refetch } = useBoard();
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const opFilter = useBoardStore((s) => s.opFilter);
+  const filter = useBoardStore((s) => s.filter);
   const cycleSel = useBoardStore((s) => s.cycleSel);
   const railOpen = useBoardStore((s) => s.railOpen);
   const editTaskId = useBoardStore((s) => s.editTaskId);
@@ -80,36 +82,46 @@ export function TaskingScreen({
     }
   }, [data, opFilter, setOpFilter]);
 
-  const { operations, cycles, tasks, activeOp, visibleTasks, editTask } =
-    useMemo(() => {
-      if (!data) {
-        return {
-          operations: [],
-          cycles: [],
-          tasks: [],
-          activeOp: null,
-          visibleTasks: [],
-          editTask: null,
-        };
-      }
-
-      const filtered = filterTasks(data.tasks, data.operations, opFilter);
-      const active =
-        opFilter !== "ALL" && opFilter !== "UNFILED"
-          ? (data.operations.find((op) => opKey(op) === opFilter) ?? null)
-          : null;
-
+  const {
+    operations,
+    cycles,
+    tasks,
+    activeOp,
+    visibleTasks,
+    opFilteredCount,
+    editTask,
+  } = useMemo(() => {
+    if (!data) {
       return {
-        operations: data.operations,
-        cycles: data.cycles,
-        tasks: data.tasks,
-        activeOp: active,
-        visibleTasks: filtered,
-        editTask: editTaskId
-          ? (data.tasks.find((t) => t.id === editTaskId) ?? null)
-          : null,
+        operations: [],
+        cycles: [],
+        tasks: [],
+        activeOp: null,
+        visibleTasks: [],
+        opFilteredCount: 0,
+        editTask: null,
       };
-    }, [data, opFilter, editTaskId]);
+    }
+
+    const opFiltered = filterTasks(data.tasks, data.operations, opFilter);
+    const filtered = applyBoardFilter(opFiltered, filter);
+    const active =
+      opFilter !== "ALL" && opFilter !== "UNFILED"
+        ? (data.operations.find((op) => opKey(op) === opFilter) ?? null)
+        : null;
+
+    return {
+      operations: data.operations,
+      cycles: data.cycles,
+      tasks: data.tasks,
+      activeOp: active,
+      visibleTasks: filtered,
+      opFilteredCount: opFiltered.length,
+      editTask: editTaskId
+        ? (data.tasks.find((t) => t.id === editTaskId) ?? null)
+        : null,
+    };
+  }, [data, opFilter, filter, editTaskId]);
 
   const telemetryProject = activeOp?.project ?? undefined;
   const telemetryUnfiled = opFilter === "UNFILED";
@@ -121,6 +133,14 @@ export function TaskingScreen({
     telemetryUnfiled,
     telemetryEnabled,
   );
+  // Column labels are sourced from the server (BoardColumn.label), not
+  // hardcoded — built once here and threaded to every view that renders a
+  // disposition label.
+  const colLabel: ColLabelFn = useMemo(() => {
+    const m = new Map(data?.columns.map((c) => [c.id, c.label] as const) ?? []);
+    return (id) => m.get(id) ?? id;
+  }, [data]);
+
   const selectedCycle = data ? resolveCycle(cycleSel, cycles) : null;
   const cycleBurndown = useCycleBurndown(
     mode === "cycle" && selectedCycle?.code !== "BACKLOG"
@@ -141,8 +161,11 @@ export function TaskingScreen({
 
   if (isError || !data) {
     return (
-      <div className="cl-mono flex h-full items-center justify-center text-[11px] uppercase tracking-[0.18em] text-[var(--hot)]">
+      <div className="cl-mono flex h-full flex-col items-center justify-center gap-[12px] text-[11px] uppercase tracking-[0.18em] text-[var(--hot)]">
         ERROR — board unavailable
+        <button type="button" className="cl-btn" onClick={() => refetch()}>
+          RETRY
+        </button>
       </div>
     );
   }
@@ -157,7 +180,11 @@ export function TaskingScreen({
     <>
       {/* Creation modal — rendered at root level so it's not clipped */}
       {taskModal !== null && (
-        <NewTaskModal operations={operations} cycles={cycles} />
+        <NewTaskModal
+          operations={operations}
+          cycles={cycles}
+          colLabel={colLabel}
+        />
       )}
 
       {/* Cycle lifecycle modals */}
@@ -186,6 +213,8 @@ export function TaskingScreen({
             cycles={cycles}
             tasks={visibleTasks}
             activeOp={activeOp}
+            filteredCount={visibleTasks.length}
+            opFilteredCount={opFilteredCount}
             onOpenDossier={onOpenDossier}
             sealHistory={
               telemetryApplicable
@@ -197,7 +226,6 @@ export function TaskingScreen({
             sealHistoryApplicable={telemetryApplicable}
           />
 
-          {/* Body router — Tasks 9-12 replace each placeholder */}
           <div className="relative min-h-0 flex-1 overflow-hidden">
             {mode === "card" && (
               <KanbanView
@@ -207,9 +235,12 @@ export function TaskingScreen({
                 showOp={opFilter === "ALL"}
                 activeProject={activeOp?.project ?? undefined}
                 onOpenDossier={onOpenDossier}
+                colLabel={colLabel}
               />
             )}
-            {mode === "backlog" && <BacklogView tasks={visibleTasks} />}
+            {mode === "backlog" && (
+              <BacklogView tasks={visibleTasks} colLabel={colLabel} />
+            )}
             {mode === "cycle" && (
               <CycleView
                 cycle={resolveCycle(cycleSel, cycles)}
@@ -223,6 +254,7 @@ export function TaskingScreen({
                 burndownPending={cycleBurndown.isPending && telemetryEnabled}
                 burndownError={cycleBurndown.isError}
                 burndownApplicable={telemetryApplicable}
+                colLabel={colLabel}
               />
             )}
             {mode === "timeline" && (
@@ -236,6 +268,7 @@ export function TaskingScreen({
                       : []
                 }
                 cycles={cycles}
+                colLabel={colLabel}
               />
             )}
 
@@ -248,6 +281,7 @@ export function TaskingScreen({
                 task={editTask}
                 operations={operations}
                 cycles={cycles}
+                colLabel={colLabel}
                 onClose={() => setEditTaskId(null)}
                 onOpenPage={onOpenPage}
                 onOpenDossier={onOpenDossier}

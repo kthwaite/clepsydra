@@ -17,7 +17,11 @@ import { useEffect, useState } from "react";
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { usePatchCycle } from "#/api/board";
 import { useBoardStore } from "#/store/board";
-import { BoardModalFrame } from "./BoardModalFrame";
+import {
+  BOARD_MODAL_WIDTHS,
+  BoardModalFrame,
+  ModalEscChip,
+} from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { CycleMetric } from "./board-presentation";
 import { sealStats } from "./board-stats";
@@ -89,7 +93,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
   return (
     <BoardModalFrame
       ariaLabel="Seal Cycle"
-      widthClassName="w-[460px]"
+      widthClassName={BOARD_MODAL_WIDTHS.confirm}
       backdropTestId="seal-cycle-modal-backdrop"
       modalTestId="seal-cycle-modal"
       onClose={closeCycleModal}
@@ -105,14 +109,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
           {cycle.code} · {windowLabel}
         </span>
-        <button
-          type="button"
-          className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-          onClick={closeCycleModal}
-          data-testid="seal-cycle-close-btn"
-        >
-          ESC
-        </button>
+        <ModalEscChip onClose={closeCycleModal} testId="seal-cycle-close-btn" />
       </div>
 
       {/* Body */}

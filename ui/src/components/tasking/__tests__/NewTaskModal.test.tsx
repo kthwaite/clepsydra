@@ -14,7 +14,12 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { NewTaskModal } from "../NewTaskModal";
-import { BOARD_FIXTURE } from "./fixtures";
+import {
+  BOARD_FIXTURE,
+  BOARD_FIXTURE_WITH_CLOSED_CYCLE,
+  FIXTURE_COL_LABEL,
+  NO_SLUG_OP,
+} from "./fixtures";
 
 const { operations, cycles } = BOARD_FIXTURE;
 
@@ -34,7 +39,11 @@ function wrap(
 
   return render(
     <QueryClientProvider client={qc}>
-      <NewTaskModal operations={operations} cycles={cycles} />
+      <NewTaskModal
+        colLabel={FIXTURE_COL_LABEL}
+        operations={operations}
+        cycles={cycles}
+      />
     </QueryClientProvider>,
   );
 }
@@ -97,7 +106,11 @@ describe("NewTaskModal — render", () => {
     });
     render(
       <QueryClientProvider client={qc}>
-        <NewTaskModal operations={operations} cycles={cycles} />
+        <NewTaskModal
+          colLabel={FIXTURE_COL_LABEL}
+          operations={operations}
+          cycles={cycles}
+        />
       </QueryClientProvider>,
     );
     expect(screen.queryByTestId("new-task-modal")).not.toBeInTheDocument();
@@ -146,9 +159,7 @@ describe("NewTaskModal — render", () => {
       "data-[selected]:font-bold",
     );
     // Active state: has bg-[var(--ink)] class from RADIO_CLS_ON
-    expect(fieldLabel?.className).toContain(
-      "bg-[var(--ink)]",
-    );
+    expect(fieldLabel?.className).toContain("bg-[var(--ink)]");
   });
 
   it("defaults DISPOSITION to INTAKE when no status preset", () => {
@@ -215,6 +226,59 @@ describe("NewTaskModal — render", () => {
     expect(cycleSelect).toHaveTextContent("C-01");
     expect(cycleSelect).toHaveTextContent("C-02");
   });
+
+  it("omits CLOSED cycles from the CYCLE dropdown", () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    useBoardStore.setState({ taskModal: {} });
+    render(
+      <QueryClientProvider client={qc}>
+        <NewTaskModal
+          colLabel={FIXTURE_COL_LABEL}
+          operations={BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations}
+          cycles={BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles}
+        />
+      </QueryClientProvider>,
+    );
+    const cycleSelect = screen.getByTestId("new-task-cycle");
+    // C-01 (ACTIVE) and C-02 (PLANNED) should be present
+    expect(cycleSelect).toHaveTextContent("C-01");
+    expect(cycleSelect).toHaveTextContent("C-02");
+    // C-00 (CLOSED) should NOT be present
+    expect(cycleSelect).not.toHaveTextContent("C-00");
+  });
+
+  it("DUE input is a date field", () => {
+    wrap();
+    const dueInput = screen.getByTestId<HTMLInputElement>("new-task-due");
+    expect(dueInput).toHaveAttribute("type", "date");
+  });
+
+  it("START input is a date field", () => {
+    wrap();
+    const startInput = screen.getByTestId<HTMLInputElement>("new-task-start");
+    expect(startInput).toHaveAttribute("type", "date");
+  });
+
+  it("omits slug-less operations from the OPERATION dropdown", () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    useBoardStore.setState({ taskModal: {} });
+    render(
+      <QueryClientProvider client={qc}>
+        <NewTaskModal
+          colLabel={FIXTURE_COL_LABEL}
+          operations={[...operations, NO_SLUG_OP]}
+          cycles={cycles}
+        />
+      </QueryClientProvider>,
+    );
+    const opSelect = screen.getByTestId("new-task-operation");
+    expect(opSelect).toHaveTextContent("OPS-1");
+    expect(opSelect).not.toHaveTextContent("OPS-3");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -247,6 +311,7 @@ describe("NewTaskModal — submit payload", () => {
     // Fill text fields
     await user.type(screen.getByTestId("new-task-assignee"), "Kit");
     await user.type(screen.getByTestId("new-task-estimate"), "2h");
+    await user.type(screen.getByTestId("new-task-start"), "2026-08-01");
     await user.type(screen.getByTestId("new-task-due"), "2026-12-31");
     await user.type(screen.getByTestId("new-task-tags"), "INFRA, DOCS");
     // Note: userEvent interprets "[" as a special key modifier.
@@ -279,6 +344,7 @@ describe("NewTaskModal — submit payload", () => {
       expect(body.cycle).toBe("C-01");
       expect(body.assignee).toBe("Kit");
       expect(body.estimate).toBe("2h");
+      expect(body.start).toBe("2026-08-01");
       expect(body.due).toBe("2026-12-31");
       expect(body.tags).toEqual(["INFRA", "DOCS"]);
       expect(body.link).toBe("[[alpha-dossier]]");
@@ -286,28 +352,38 @@ describe("NewTaskModal — submit payload", () => {
     });
   });
 
-  it("sends UNTITLED TASKING when title is left blank", async () => {
+  it("commit button is disabled when title is empty", () => {
     const stub = makeCreateStub();
     wrap(stub);
 
-    await userEvent.click(screen.getByTestId("new-task-commit"));
+    const commitBtn = screen.getByTestId<HTMLButtonElement>("new-task-commit");
+    expect(commitBtn).toBeDisabled();
+  });
 
-    await waitFor(() => {
-      const postCalls = stub.mock.calls.filter(
-        ([, opts]) => opts?.method === "POST",
-      );
-      expect(postCalls.length).toBe(1);
-      const body = JSON.parse(postCalls[0][1]!.body as string) as Record<
-        string,
-        unknown
-      >;
-      expect(body.title).toBe("UNTITLED TASKING");
-    });
+  it("clicking commit button when title is empty does not fire POST", async () => {
+    const stub = makeCreateStub();
+    stub.mockClear();
+    wrap(stub);
+
+    // Title is empty by default
+    const commitBtn = screen.getByTestId<HTMLButtonElement>("new-task-commit");
+    expect(commitBtn).toBeDisabled();
+
+    // Try to click (it won't fire due to disabled state)
+    await userEvent.click(commitBtn);
+
+    const postCalls = stub.mock.calls.filter(
+      ([, opts]) => opts?.method === "POST",
+    );
+    expect(postCalls.length).toBe(0);
   });
 
   it("sends cycle as null when BACKLOG is selected", async () => {
     const stub = makeCreateStub();
     wrap(stub);
+
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
 
     // BACKLOG is the default; click commit directly
     await userEvent.click(screen.getByTestId("new-task-commit"));
@@ -327,6 +403,9 @@ describe("NewTaskModal — submit payload", () => {
   it("sends project as null when UNFILED is selected", async () => {
     const stub = makeCreateStub();
     wrap(stub);
+
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
 
     // Select UNFILED (default empty)
     await userEvent.selectOptions(screen.getByTestId("new-task-operation"), "");
@@ -348,6 +427,9 @@ describe("NewTaskModal — submit payload", () => {
     const stub = makeCreateStub();
     wrap(stub);
 
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
+
     await userEvent.click(screen.getByTestId("new-task-commit"));
 
     await waitFor(() => {
@@ -360,6 +442,7 @@ describe("NewTaskModal — submit payload", () => {
       >;
       expect(body.assignee).toBeNull();
       expect(body.estimate).toBeNull();
+      expect(body.start).toBeNull();
       expect(body.due).toBeNull();
       expect(body.tags).toBeNull();
       expect(body.link).toBeNull();
@@ -434,9 +517,33 @@ describe("NewTaskModal — close behaviour", () => {
     expect(useBoardStore.getState().taskModal).toBeNull();
   });
 
-  it("clicking the backdrop closes the modal", async () => {
+  it("clicking the backdrop closes the modal when form is pristine", async () => {
     wrap();
     await userEvent.click(screen.getByTestId("new-task-modal-backdrop"));
+    expect(useBoardStore.getState().taskModal).toBeNull();
+  });
+
+  it("clicking the backdrop does NOT close the modal when form is dirty", async () => {
+    wrap();
+    // Make form dirty by filling a field
+    await userEvent.type(screen.getByTestId("new-task-assignee"), "Kit");
+
+    // Try to close via backdrop
+    await userEvent.click(screen.getByTestId("new-task-modal-backdrop"));
+
+    // Modal should still be open
+    expect(screen.getByTestId("new-task-modal")).toBeInTheDocument();
+    expect(useBoardStore.getState().taskModal).not.toBeNull();
+  });
+
+  it("ESC always closes the modal even when dirty", async () => {
+    wrap();
+    // Make form dirty by filling a field
+    await userEvent.type(screen.getByTestId("new-task-assignee"), "Kit");
+
+    // ESC should still close
+    await userEvent.keyboard("{Escape}");
+
     expect(useBoardStore.getState().taskModal).toBeNull();
   });
 });
@@ -449,6 +556,9 @@ describe("NewTaskModal — success callback", () => {
   it("on success: closes modal and sets editTaskId to the new task id", async () => {
     const stub = makeCreateStub("new-task-abc");
     wrap(stub);
+
+    // Add a title so commit is enabled
+    await userEvent.type(screen.getByTestId("new-task-title"), "New Task");
 
     await userEvent.click(screen.getByTestId("new-task-commit"));
 

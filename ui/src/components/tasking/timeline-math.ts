@@ -21,6 +21,12 @@ export interface TLWindow {
 
 const DAY_MS = 864e5; // 24 * 60 * 60 * 1000
 
+/** Days of padding added before/after the cycle-derived display window. */
+export const TL_WINDOW_PAD_DAYS = 2;
+
+/** Default bar span (days) when a task has a due date but no explicit start. */
+export const TL_DEFAULT_BAR_DAYS = 2;
+
 /**
  * Parse an ISO YYYY-MM-DD string to a local-midnight ms epoch.
  * Returns null for any other format or falsy input.
@@ -58,9 +64,9 @@ export function windowOf(cycles: BoardCycle[]): TLWindow | null {
 
   if (minStart === null && maxEnd === null) return null;
 
-  // Use whichever bound we have; fall back to the other bound ±2d
-  const start = (minStart ?? maxEnd!) - 2 * DAY_MS;
-  const end = (maxEnd ?? minStart!) + 2 * DAY_MS;
+  // Use whichever bound we have; fall back to the other bound ±TL_WINDOW_PAD_DAYS
+  const start = (minStart ?? maxEnd!) - TL_WINDOW_PAD_DAYS * DAY_MS;
+  const end = (maxEnd ?? minStart!) + TL_WINDOW_PAD_DAYS * DAY_MS;
 
   return { start, end };
 }
@@ -93,6 +99,6 @@ export interface TLTaskRange {
 export function taskRange(t: BoardTask): TLTaskRange | null {
   const e = parseDay(t.due);
   if (e === null) return null;
-  const s = parseDay(t.start) ?? e - 2 * DAY_MS;
+  const s = parseDay(t.start) ?? e - TL_DEFAULT_BAR_DAYS * DAY_MS;
   return { s, e };
 }

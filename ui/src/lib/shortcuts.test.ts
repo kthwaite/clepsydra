@@ -152,9 +152,14 @@ describe("registry", () => {
     expect([...GLOBAL_SHORTCUT_IDS].sort()).toEqual(allGlobalIds.sort());
   });
 
-  it("groups are ordered Navigate, Workspace, Editor with stable entries", () => {
+  it("groups are ordered Navigate, Workspace, Editor, Tasking with stable entries", () => {
     const groups = shortcutsByGroup();
-    expect(groups.map(([g]) => g)).toEqual(["Navigate", "Workspace", "Editor"]);
+    expect(groups.map(([g]) => g)).toEqual([
+      "Navigate",
+      "Workspace",
+      "Editor",
+      "Tasking",
+    ]);
     expect(groups[0][1][0].id).toBe("palette.toggle");
   });
 });

@@ -8,7 +8,12 @@
 
 import { useLayoutEffect, useRef } from "react";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
-import { COL_LABEL, COL_ORDER, PRI_ORDER } from "./board-constants";
+import {
+  COL_ORDER,
+  type ColLabelFn,
+  PRI_ORDER,
+  priColor,
+} from "./board-constants";
 
 // ── EdField ───────────────────────────────────────────────────────────────────
 
@@ -59,23 +64,29 @@ const RADIO_CLS_OFF_HOVER =
   "hover:text-[var(--ink)] hover:border-[var(--ink-3)] data-[hovered]:bg-transparent data-[hovered]:text-[var(--ink)] data-[hovered]:border-[var(--ink-3)]";
 
 /** Priority on-state fills with the priority colour (cap-radio.pri-*.on). */
-export const PRI_ON_STYLE: Record<string, React.CSSProperties> = {
-  P0: { background: "var(--hot)", borderColor: "var(--hot)", color: "#000" },
-  P1: { background: "var(--warn)", borderColor: "var(--warn)", color: "#000" },
-  P2: { background: "var(--cool)", borderColor: "var(--cool)", color: "#000" },
-  P3: {
-    background: "var(--ink-3)",
-    borderColor: "var(--ink-3)",
-    color: "#000",
-  },
-};
+export const PRI_ON_STYLE: Record<string, React.CSSProperties> =
+  Object.fromEntries(
+    PRI_ORDER.map((p) => {
+      const { bar } = priColor(p);
+      return [p, { background: bar, borderColor: bar, color: "#000" }];
+    }),
+  );
 
-export const PRI_OFF_STYLE: Record<string, React.CSSProperties> = {
-  P0: { color: "var(--hot)", borderColor: "var(--hot)" },
-  P1: { color: "var(--warn)", borderColor: "var(--warn)" },
-  P2: { color: "var(--cool)", borderColor: "var(--cool)" },
-  P3: { color: "var(--ink-mute)", borderColor: "var(--rule)" },
-};
+/**
+ * Priority off-state outlines with the priority colour, except P3 whose
+ * border stays the neutral rule colour rather than a barely-visible mute
+ * outline (explicit exception).
+ */
+export const PRI_OFF_STYLE: Record<string, React.CSSProperties> =
+  Object.fromEntries(
+    PRI_ORDER.map((p) => {
+      const { text } = priColor(p);
+      return [
+        p,
+        { color: text, borderColor: p === "P3" ? "var(--rule)" : text },
+      ];
+    }),
+  );
 
 function TaskRadio({
   value,
@@ -118,10 +129,13 @@ export function DispositionRow({
   value,
   onChange,
   testIdPrefix,
+  colLabel,
 }: {
   value: string;
   onChange: (colId: string) => void;
   testIdPrefix: string;
+  /** Resolves a column id to its display label. */
+  colLabel: ColLabelFn;
 }) {
   return (
     <RadioGroup
@@ -137,7 +151,7 @@ export function DispositionRow({
           className={`${RADIO_CLS_BASE} ${value === colId ? RADIO_CLS_ON : RADIO_CLS_OFF_HOVER}`}
           data-testid={`${testIdPrefix}-status-${colId}`}
         >
-          {COL_LABEL[colId] ?? colId}
+          {colLabel(colId)}
         </TaskRadio>
       ))}
     </RadioGroup>

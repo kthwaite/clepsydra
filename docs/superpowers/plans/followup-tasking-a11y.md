@@ -6,7 +6,9 @@
 
 ### 1. TaskCard keyboard activation
 
-`TaskCard` renders as a `<div>` with `onClick`. It needs `role="button"`, `tabIndex={0}`, and a `keyDown` handler for Enter/Space to open the edit panel. Currently only mouse-accessible.
+**Status: DONE** (commits: 91f95eab–1f29d4e8; 2026-08-12)
+
+`TaskCard` now renders with `role="button"`, `tabIndex={0}`, and a `keyDown` handler for Enter/Space to open the edit panel. Target guard prevents the handler from firing when focus is on a descendant (dossier button, priority/status chips). The dossier footer link is now a real `<button>` element. Regression test ensures RAC Buttons (priority badge, state pip) don't bubble keyboard activation to the card. Keyboard tests verify dossier button isolation.
 
 ### 2. Keyboard DnD for TaskCard
 
@@ -14,7 +16,11 @@ HTML5 drag-and-drop (`draggable` / `onDragStart`) is not keyboard-accessible. A 
 
 ### 3. TaskEditPanel focus containment vs aria-modal
 
-The edit panel uses hand-rolled focus handling (focus on open, restore on close, `role=dialog aria-modal`). It does not currently trap focus within the panel — a keyboard user can Tab out of the panel into the scrim or board body. Fix: implement a focus trap (e.g. `inert` on the backdrop, or a `<FocusTrap>` wrapper, or the RAC `FocusScope` with `contain`).
+**Status: DONE** (commit: 9c04fc9b; 2026-08-12)
+
+The panel now wraps its contents in react-aria's `FocusScope` (`contain restoreFocus autoFocus`), replacing the hand-rolled focus-on-open/restore-on-close effect. Tab/Shift-Tab now cycle only within the panel while it is open (verified by tabbing well past the panel's focusable count and asserting `document.activeElement` never leaves it); focus still restores to the opener on close. `role=dialog` + `aria-modal` and the Escape-to-close listener are unchanged. `react-aria` was promoted from a transitive dependency (via `react-aria-components`) to a direct one.
+
+Item 2 (keyboard DnD for TaskCard) remains open — this fix only addressed the edit panel's focus trap, not drag-and-drop keyboard accessibility.
 
 ### 4. Cycle modal chrome extraction (CycleModalShell)
 
@@ -28,5 +34,5 @@ These are UI polish/a11y concerns that don't block the core tasking workflow. Ke
 
 1. **TaskCard keyboard** — `role="button"` + `tabIndex={0}` + Enter/Space opens edit panel; axe-core `aria-required-children` clean.
 2. **Keyboard DnD** — drag handles operable without a pointer device; ARIA live region announces position changes.
-3. **TaskEditPanel focus trap** — Tab/Shift-Tab cycles only within the panel while it is open; `inert` or equivalent applied to the sibling board body.
+3. **TaskEditPanel focus trap** — Tab/Shift-Tab cycles only within the panel while it is open; `inert` or equivalent applied to the sibling board body. **DONE** (via `FocusScope contain`, commit 9c04fc9b).
 4. **CycleModalShell** — all three cycle modals share one shell component; no duplicated focus/escape logic; RTL tests confirm Escape closes each modal.

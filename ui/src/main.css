@@ -125,6 +125,18 @@
     --fs: 11px;
     --fs-s: 10px;
     --fs-xs: 9px;
+
+    /* Board-prototype token aliases — the TASKING board components (ported
+       from docs/pkm-redesign/project/styles-board.css) were written against
+       a --bg/--ink-3/--ink-4 vocabulary that was never defined here. Bridge
+       them onto the real Vessel tokens instead of rewriting every call site;
+       kept in this same :root block (not a separate one) so .paper's
+       overrides of the right-hand tokens propagate through automatically. */
+    --bg: var(--paper);
+    --bg-2: var(--paper-2);
+    --bg-3: var(--paper-edge);
+    --ink-3: var(--ink-mute);
+    --ink-4: var(--ink-faint);
 }
 
 /* "Paper" light mode — printed-dossier inversion. Toggled by adding `.paper`

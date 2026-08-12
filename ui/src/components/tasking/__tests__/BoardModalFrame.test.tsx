@@ -1,7 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { expect, it, vi } from "vitest";
-import { BoardModalFrame } from "../BoardModalFrame";
+import { describe, expect, it, vi } from "vitest";
+import {
+  BOARD_MODAL_WIDTHS,
+  BoardModalFrame,
+  ModalEscChip,
+} from "../BoardModalFrame";
 
 it("renders the accessible modal shell with the requested contract", () => {
   const onClose = vi.fn();
@@ -65,4 +69,70 @@ it("forwards keyboard events from modal content", async () => {
   await userEvent.keyboard("{Enter}");
 
   expect(onKeyDown).toHaveBeenCalled();
+});
+
+it("defaults isDismissable to true so backdrop click closes", async () => {
+  const onClose = vi.fn();
+
+  render(
+    <BoardModalFrame
+      ariaLabel="Test Board Dialog"
+      widthClassName="w-[460px]"
+      backdropTestId="test-backdrop"
+      modalTestId="test-panel"
+      onClose={onClose}
+    >
+      <button type="button">Inside</button>
+    </BoardModalFrame>,
+  );
+
+  await userEvent.click(screen.getByTestId("test-backdrop"));
+
+  expect(onClose).toHaveBeenCalledOnce();
+});
+
+it("when isDismissable={false}, backdrop click does not close", async () => {
+  const onClose = vi.fn();
+
+  render(
+    <BoardModalFrame
+      ariaLabel="Test Board Dialog"
+      widthClassName="w-[460px]"
+      backdropTestId="test-backdrop"
+      modalTestId="test-panel"
+      onClose={onClose}
+      isDismissable={false}
+    >
+      <button type="button">Inside</button>
+    </BoardModalFrame>,
+  );
+
+  await userEvent.click(screen.getByTestId("test-backdrop"));
+
+  expect(onClose).not.toHaveBeenCalled();
+});
+
+describe("BOARD_MODAL_WIDTHS", () => {
+  it("defines the three width variants board modals use", () => {
+    expect(BOARD_MODAL_WIDTHS).toEqual({
+      task: "w-[660px]",
+      cycle: "w-[600px]",
+      confirm: "w-[460px]",
+    });
+  });
+});
+
+describe("ModalEscChip", () => {
+  it("renders ESC with the given test id", () => {
+    render(<ModalEscChip onClose={vi.fn()} testId="esc-chip-test" />);
+    const chip = screen.getByTestId("esc-chip-test");
+    expect(chip).toHaveTextContent("ESC");
+  });
+
+  it("calls onClose when clicked", async () => {
+    const onClose = vi.fn();
+    render(<ModalEscChip onClose={onClose} testId="esc-chip-test" />);
+    await userEvent.click(screen.getByTestId("esc-chip-test"));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });

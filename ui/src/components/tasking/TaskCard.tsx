@@ -6,24 +6,10 @@
  */
 
 import type { BoardTask } from "#/api/board";
+import { type ColLabelFn, priColor, StatePip } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
-
-// ── priority colour maps ──────────────────────────────────────────────────────
-
-const PRI_BAR_COLOR: Record<string, string> = {
-  P0: "var(--hot)",
-  P1: "var(--warn)",
-  P2: "var(--cool)",
-  P3: "var(--ink-4)",
-};
-
-const PRI_TEXT_COLOR: Record<string, string> = {
-  P0: "var(--hot)",
-  P1: "var(--warn)",
-  P2: "var(--cool)",
-  P3: "var(--ink-mute)",
-};
+import { InlineEditPopover } from "./InlineEditPopover";
 
 // ── TaskCard ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +22,8 @@ export interface TaskCardProps {
   onDragEnd: (e: React.DragEvent) => void;
   onClick: () => void;
   onOpenDossier?: (link: string) => void;
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
 export function TaskCard({
@@ -46,6 +34,7 @@ export function TaskCard({
   onDragEnd,
   onClick,
   onOpenDossier,
+  colLabel,
 }: TaskCardProps) {
   const {
     done,
@@ -54,17 +43,32 @@ export function TaskCard({
     isComplete: checksDone,
   } = checklistProgress(t.checks);
 
-  const priColor = PRI_TEXT_COLOR[t.priority] ?? "var(--ink-mute)";
-  const barColor = PRI_BAR_COLOR[t.priority] ?? "var(--ink-3)";
+  const { bar: barColor, text: priTextColor } = priColor(t.priority);
 
   return (
     <div
       className="group relative cursor-grab border border-[var(--rule)] bg-[var(--bg)] p-[9px_11px_9px_14px] transition-[border-color,background,transform] duration-[80ms,120ms,80ms] hover:border-[var(--hot)] hover:bg-[var(--bg-3)] active:cursor-grabbing"
       style={isDragging ? { opacity: 0.35, borderStyle: "dashed" } : undefined}
       draggable
-      onDragStart={onDragStart}
+      role="button"
+      tabIndex={0}
+      onDragStart={(e) => {
+        // Firefox refuses to initiate an HTML5 drag without setData.
+        if (e.dataTransfer) {
+          e.dataTransfer.setData("text/plain", t.id);
+          e.dataTransfer.effectAllowed = "move";
+        }
+        onDragStart(e);
+      }}
       onDragEnd={onDragEnd}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       data-testid={`task-card-${t.id}`}
     >
       {/* Left priority bar */}
@@ -90,12 +94,27 @@ export function TaskCard({
         <span className="cl-mono font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-2)]">
           {t.code}
         </span>
-        <span
-          className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
-          style={{ color: priColor, borderColor: priColor }}
+        <InlineEditPopover
+          task={t}
+          field="priority"
+          testIdPrefix="kb"
+          colLabel={colLabel}
         >
-          {t.priority}
-        </span>
+          <span
+            className="cl-mono border px-[4px] py-0 text-[var(--fs-xs)] tracking-[0.08em]"
+            style={{ color: priTextColor, borderColor: priTextColor }}
+          >
+            {t.priority}
+          </span>
+        </InlineEditPopover>
+        <InlineEditPopover
+          task={t}
+          field="status"
+          testIdPrefix="kb"
+          colLabel={colLabel}
+        >
+          <StatePip col={t.status} />
+        </InlineEditPopover>
         {showOp && t.project && (
           <span className="cl-mono ml-auto border border-[var(--rule)] px-[4px] text-[var(--fs-xs)] tracking-[0.1em] text-[var(--ink-3)]">
             {t.project}
@@ -132,7 +151,7 @@ export function TaskCard({
         </div>
       )}
 
-      {/* Tags — up to 3 */}
+      {/* Tags — up to 3, with a +N overflow chip */}
       {t.tags.length > 0 && (
         <div className="mb-[7px] flex flex-wrap gap-[3px]">
           {t.tags.slice(0, 3).map((tag) => (
@@ -143,6 +162,14 @@ export function TaskCard({
               {tag}
             </span>
           ))}
+          {t.tags.length > 3 && (
+            <span
+              data-testid={`task-tags-more-${t.id}`}
+              className="cl-mono border border-[var(--rule)] px-[4px] text-[var(--fs-xs)] text-[var(--ink-3)]"
+            >
+              +{t.tags.length - 3}
+            </span>
+          )}
         </div>
       )}
 
@@ -155,7 +182,8 @@ export function TaskCard({
           <span className="font-variant-numeric">{t.estimate}</span>
         )}
         {t.link && (
-          <span
+          <button
+            type="button"
             className="cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
             onClick={(e) => {
               e.stopPropagation();
@@ -163,7 +191,7 @@ export function TaskCard({
             }}
           >
             {t.link}
-          </span>
+          </button>
         )}
         <span
           className="ml-auto font-variant-numeric"

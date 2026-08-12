@@ -712,6 +712,87 @@ async fn create_task_persists_all_optional_fields() {
 }
 
 // ---------------------------------------------------------------------------
+// POST /board/tasks — start date round-trips through create, GET /board
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_with_start_round_trips() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "T",
+            "start": "2026-08-01",
+            "due": "2026-08-15"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["start"], "2026-08-01", "start: {body}");
+
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "board should have 1 task");
+    assert_eq!(
+        tasks[0]["start"], "2026-08-01",
+        "board task start: {tasks:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// PATCH /board/tasks/{id} — start tri-state (set / clear / leave unchanged)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn patch_task_start_tri_state() {
+    let (server, _tmp) = setup_patch_target();
+
+    // Absent on creation: patching with a value sets it.
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "start": "2026-08-02" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["start"], "2026-08-02", "start should be set: {body}");
+
+    // null clears it — and it should be absent from the GET /board DTO.
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "start": null }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["start"].is_null(), "start should be cleared: {body}");
+
+    let board_res = server.get("/api/vault/board").await;
+    board_res.assert_status_ok();
+    let board: serde_json::Value = board_res.json();
+    let tasks = board["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1, "board should have 1 task");
+    assert!(
+        tasks[0]["start"].is_null(),
+        "board task start should be absent/null after clear: {tasks:?}"
+    );
+
+    // Absent field on the PATCH body: start stays unchanged (still cleared).
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "title": "unrelated update" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["start"].is_null(),
+        "start should remain unchanged (still null): {body}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // PATCH /board/tasks/{id} — project change A→B physically moves the file
 // ---------------------------------------------------------------------------
 

@@ -19,8 +19,8 @@ import { Spark } from "#/components/ui/spark";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
-  COL_LABEL,
   COL_ORDER,
+  type ColLabelFn,
   fmtCycleWindow,
   HoldTag,
   PRI_ORDER,
@@ -28,6 +28,7 @@ import {
   StatePip,
 } from "./board-constants";
 import { checklistProgress, cycleStats } from "./board-stats";
+import { InlineEditPopover } from "./InlineEditPopover";
 
 // ── resolveCycle ──────────────────────────────────────────────────────────────
 
@@ -100,6 +101,8 @@ export interface CycleViewProps {
   burndownPending?: boolean;
   burndownError?: boolean;
   burndownApplicable?: boolean;
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
 export function CycleView({
@@ -111,6 +114,7 @@ export function CycleView({
   burndownPending = false,
   burndownError = false,
   burndownApplicable = true,
+  colLabel,
 }: CycleViewProps) {
   // Store actions — field-selector pattern (no ephemeral re-renders)
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
@@ -181,7 +185,7 @@ export function CycleView({
   }
 
   return (
-    <div className="cl-mono h-full overflow-y-auto px-[var(--pad,12px)] py-[16px]">
+    <div className="cl-mono h-full overflow-y-auto px-[var(--pad)] py-[16px]">
       {/* ── Header ─────────────────────────────────────────────────── */}
       <div className="mb-[16px] flex items-start justify-between gap-[24px]">
         {/* Left */}
@@ -301,14 +305,25 @@ export function CycleView({
                 NOT APPLICABLE
               </span>
             ) : burndownPending ? (
-              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">LOADING</span>
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                LOADING
+              </span>
             ) : burndownError ? (
-              <span className="text-[var(--fs-xs)] text-[var(--hot)]">UNAVAILABLE</span>
+              <span className="text-[var(--fs-xs)] text-[var(--hot)]">
+                UNAVAILABLE
+              </span>
             ) : burndown.length === 0 ? (
-              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">NO HISTORY</span>
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                NO HISTORY
+              </span>
             ) : (
               <div aria-label={`Cycle burndown: ${burndown.join(", ")}`}>
-                <Spark data={burndown} width={150} height={30} accent="var(--hot)" />
+                <Spark
+                  data={burndown}
+                  width={150}
+                  height={30}
+                  accent="var(--hot)"
+                />
               </div>
             )}
           </div>
@@ -357,7 +372,7 @@ export function CycleView({
               <div className="mb-[4px] flex items-center gap-[6px] border-b border-[var(--rule)] pb-[5px]">
                 <StatePip col={g.cid} />
                 <span className="cl-display text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--ink)]">
-                  {COL_LABEL[g.cid]}
+                  {colLabel(g.cid)}
                 </span>
                 <span
                   className="ml-auto text-[var(--fs-xs)] [font-variant-numeric:tabular-nums] text-[var(--ink-3)]"
@@ -372,21 +387,47 @@ export function CycleView({
                 const { done: d, total } = checklistProgress(t.checks);
 
                 return (
-                  <button
+                  <div
                     key={t.id}
-                    type="button"
+                    role="button"
+                    tabIndex={0}
                     data-testid={`cv-row-${t.id}`}
                     className="flex w-full cursor-pointer items-center gap-[8px] border-b border-dotted border-[var(--rule)] py-[5px] px-[2px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
                     onClick={() => handleEditTask(t.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleEditTask(t.id);
+                      }
+                    }}
                   >
                     {/* Priority chip */}
                     <span className="flex-shrink-0">
-                      <PriChip pri={t.priority} />
+                      <InlineEditPopover
+                        task={t}
+                        field="priority"
+                        testIdPrefix="cv"
+                        colLabel={colLabel}
+                      >
+                        <PriChip pri={t.priority} />
+                      </InlineEditPopover>
                     </span>
 
                     {/* Code */}
                     <span className="flex-shrink-0 text-[var(--fs-s)] [font-variant-numeric:tabular-nums] text-[var(--ink)]">
                       {t.code}
+                    </span>
+
+                    {/* Status pip */}
+                    <span className="flex-shrink-0">
+                      <InlineEditPopover
+                        task={t}
+                        field="status"
+                        testIdPrefix="cv"
+                        colLabel={colLabel}
+                      >
+                        <StatePip col={t.status} />
+                      </InlineEditPopover>
                     </span>
 
                     {/* Title + HOLD tag */}
@@ -399,7 +440,10 @@ export function CycleView({
                           <HoldTag />
                         </span>
                       )}
-                      <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-s)] text-[var(--ink)]">
+                      <span
+                        className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-s)] text-[var(--ink)]"
+                        title={t.title}
+                      >
                         {t.title}
                       </span>
                     </span>
@@ -418,7 +462,7 @@ export function CycleView({
                     <span className="flex-shrink-0 text-right text-[var(--fs-xs)] [font-variant-numeric:tabular-nums] text-[var(--ink-3)]">
                       {total ? `${d}/${total}` : "—"}
                     </span>
-                  </button>
+                  </div>
                 );
               })}
             </div>

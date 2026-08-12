@@ -45,6 +45,7 @@
     "openapi-fetch": "^0.15.2",
     "openapi-react-query": "^0.5.4",
     "react": "^19.2.8",
+    "react-aria": "^3.51.0",
     "react-aria-components": "^1.20.0",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",

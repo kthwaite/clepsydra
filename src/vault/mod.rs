@@ -10,6 +10,7 @@ pub mod base_member;
 pub mod bcl;
 pub mod block;
 pub mod block_id;
+pub mod board_vocab;
 pub mod canonical;
 pub mod cas;
 pub mod checkpoint;

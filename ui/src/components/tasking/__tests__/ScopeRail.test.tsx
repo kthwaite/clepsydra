@@ -265,4 +265,25 @@ describe("ScopeRail — op with null project", () => {
     await userEvent.click(btn);
     expect(useBoardStore.getState().taskModal).toEqual({});
   });
+
+  it("badge for a slug-less op matches what clicking reveals (zero)", () => {
+    // Three tasks with project: null must NOT count toward the slug-less
+    // op's badge — only a task whose project equals the op's own key (its
+    // code) would, and none do here. t.project === op.project (null===null)
+    // is the bug this guards against.
+    const nullProjectTasks = [
+      { ...tasks[0], id: "null-1", project: null },
+      { ...tasks[1], id: "null-2", project: null },
+      { ...tasks[2], id: "null-3", project: null },
+    ];
+    wrap(
+      <ScopeRail
+        operations={opsWithNoSlug}
+        cycles={cycles}
+        tasks={nullProjectTasks}
+      />,
+    );
+    const row = screen.getByText("OPS-3").closest("button")!;
+    expect(within(row).getByText("0")).toBeInTheDocument();
+  });
 });

@@ -4,14 +4,28 @@ import { useTheme } from "#/components/ThemeProvider";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import {
+  type Chord,
   GLOBAL_SHORTCUT_IDS,
   type GlobalShortcutId,
   matchesChord,
   SHORTCUTS,
 } from "#/lib/shortcuts";
+import { useBoardStore } from "#/store/board";
 import { cycleTargetId } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
+
+/** Bare-key chords (no mod/ctrl/alt) must not fire while the user is typing
+ *  — buttons and other non-form elements are not "editable" and stay live. */
+export function isEditableTarget(t: EventTarget | null): boolean {
+  if (!(t instanceof HTMLElement)) return false;
+  return (
+    t instanceof HTMLInputElement ||
+    t instanceof HTMLTextAreaElement ||
+    t instanceof HTMLSelectElement ||
+    t.isContentEditable
+  );
+}
 
 type Binding = {
   run: () => void;
@@ -22,6 +36,15 @@ type Binding = {
 };
 
 const inWorkspace = () => window.location.pathname.startsWith("/workspace");
+const inTasking = () => window.location.pathname.startsWith("/tasking");
+
+/** Shortcuts exempted from the open-dialog guard: a dialog's own controlling
+ *  toggle must keep working while it's open (⌘K must still close the command
+ *  palette it just opened), even though every other global shortcut stays
+ *  suppressed underneath a dialog. */
+const DIALOG_EXEMPT_IDS: ReadonlySet<GlobalShortcutId> = new Set([
+  "palette.toggle",
+]);
 
 function cycleTab(dir: 1 | -1) {
   const { tabs, quires, activeTabId, activateTab } =
@@ -74,6 +97,39 @@ export function useGlobalShortcuts() {
       },
       "tabs.next": { when: inWorkspace, run: () => cycleTab(1) },
       "tabs.prev": { when: inWorkspace, run: () => cycleTab(-1) },
+      // Tasking bindings read/write the board store via getState(), so they
+      // need no reactive dependency in this memo.
+      "tasking.newTask": {
+        when: inTasking,
+        run: () => useBoardStore.getState().openTaskModal({}),
+      },
+      "tasking.modeCard": {
+        when: inTasking,
+        run: () => useBoardStore.getState().setMode("card"),
+      },
+      "tasking.modeBacklog": {
+        when: inTasking,
+        run: () => useBoardStore.getState().setMode("backlog"),
+      },
+      "tasking.modeCycle": {
+        when: inTasking,
+        run: () => useBoardStore.getState().setMode("cycle"),
+      },
+      "tasking.modeTimeline": {
+        when: inTasking,
+        run: () => useBoardStore.getState().setMode("timeline"),
+      },
+      "tasking.focusFilter": {
+        when: inTasking,
+        run: () => document.getElementById("tasking-filter")?.focus(),
+      },
+      "tasking.toggleRail": {
+        when: inTasking,
+        run: () => {
+          const s = useBoardStore.getState();
+          s.setRailOpen(!s.railOpen);
+        },
+      },
     }),
     [
       navigate,
@@ -91,8 +147,17 @@ export function useGlobalShortcuts() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
+      // A modal or popover dialog owns keyboard input while it's open — no
+      // global shortcut should fire underneath it, except a dialog's own
+      // controlling toggle (DIALOG_EXEMPT_IDS), which must keep working so
+      // e.g. ⌘K can still close the command palette it opened.
+      const dialogOpen = document.querySelector('[role="dialog"]') !== null;
       for (const id of GLOBAL_SHORTCUT_IDS) {
         if (!matchesChord(e, SHORTCUTS[id].chord)) continue;
+        if (dialogOpen && !DIALOG_EXEMPT_IDS.has(id)) continue;
+        const chord: Chord = SHORTCUTS[id].chord;
+        const bareKey = !chord.mod && !chord.ctrl && !chord.alt;
+        if (bareKey && isEditableTarget(e.target)) continue;
         const binding = bindings[id];
         if (binding.when && !binding.when()) continue;
         e.preventDefault();

@@ -13,7 +13,11 @@
 import type { BoardCycle, BoardTask } from "#/api/board";
 import { usePatchCycle } from "#/api/board";
 import { useBoardStore } from "#/store/board";
-import { BoardModalFrame } from "./BoardModalFrame";
+import {
+  BOARD_MODAL_WIDTHS,
+  BoardModalFrame,
+  ModalEscChip,
+} from "./BoardModalFrame";
 import { fmtCycleWindow } from "./board-constants";
 import { CycleMetric } from "./board-presentation";
 import { cycleStats } from "./board-stats";
@@ -61,7 +65,7 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
   return (
     <BoardModalFrame
       ariaLabel="Open Cycle"
-      widthClassName="w-[460px]"
+      widthClassName={BOARD_MODAL_WIDTHS.confirm}
       backdropTestId="open-cycle-modal-backdrop"
       modalTestId="open-cycle-modal"
       onClose={closeCycleModal}
@@ -80,14 +84,7 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
           {cycle.code} · {windowLabel}
         </span>
-        <button
-          type="button"
-          className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-          onClick={closeCycleModal}
-          data-testid="open-cycle-close-btn"
-        >
-          ESC
-        </button>
+        <ModalEscChip onClose={closeCycleModal} testId="open-cycle-close-btn" />
       </div>
 
       {/* Body */}

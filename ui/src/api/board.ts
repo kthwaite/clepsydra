@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import type { components } from "#/api/schema";
 import { invalidatePageStructure, queryKeys } from "./keys";
 
@@ -26,7 +27,7 @@ function invalidateTaskingTelemetry(qc: ReturnType<typeof useQueryClient>) {
 
 /**
  * Apply a PatchTaskRequest to a BoardResponse, returning a new BoardResponse.
- * Tri-state semantics for cycle/assignee/estimate/due/hold/link:
+ * Tri-state semantics for cycle/assignee/estimate/due/start/hold/link:
  *   - key absent in patch → leave current value unchanged
  *   - key present as null → clear to null
  *   - key present as string → set to that value
@@ -77,6 +78,7 @@ export function applyTaskPatch(
     assignee: triState(task.assignee, "assignee"),
     estimate: triState(task.estimate, "estimate"),
     due: triState(task.due, "due"),
+    start: triState(task.start, "start"),
     hold: triState(task.hold, "hold"),
     link: triState(task.link, "link"),
     // Tags: absent = keep, present = replace
@@ -119,6 +121,7 @@ export function useCreateTask() {
       if (!res.ok) throw new Error("Failed to create task");
       return res.json() as Promise<BoardTask>;
     },
+    onError: () => toast.error("TASK CREATION FAILED"),
     onSuccess: () => invalidateTaskingTelemetry(qc),
   });
 }
@@ -155,6 +158,7 @@ export function usePatchTask() {
       if (ctx?.previous !== undefined) {
         qc.setQueryData(queryKeys.board.all, ctx.previous);
       }
+      toast.error("TASK EDIT FAILED — REVERTED");
     },
     onSettled: () => invalidateTaskingTelemetry(qc),
   });
@@ -183,6 +187,7 @@ export function useDeleteTask() {
         throw new Error("Failed to delete task");
       }
     },
+    onError: () => toast.error("TASK DESTROY FAILED"),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.board.all });
       invalidatePageStructure(qc);
@@ -202,6 +207,7 @@ export function useCreateCycle() {
       if (!res.ok) throw new Error("Failed to create cycle");
       return res.json() as Promise<BoardCycle>;
     },
+    onError: () => toast.error("CYCLE CREATION FAILED"),
     onSuccess: () => invalidateTaskingTelemetry(qc),
   });
 }
@@ -222,6 +228,7 @@ export function usePatchCycle() {
       if (!res.ok) throw new Error("Failed to patch cycle");
       return res.json() as Promise<BoardCycle>;
     },
+    onError: () => toast.error("CYCLE UPDATE FAILED"),
     onSuccess: () => invalidateTaskingTelemetry(qc),
   });
 }

@@ -15,7 +15,8 @@ import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { PRI_ORDER } from "./board-constants";
+import { type ColLabelFn, PRI_ORDER } from "./board-constants";
+import { QuickAddRow } from "./QuickAddRow";
 import { TaskCard } from "./TaskCard";
 
 // ── sealed-cycle filter (Decision 8) ─────────────────────────────────────────
@@ -60,6 +61,8 @@ export interface KanbanViewProps {
    */
   activeProject?: string;
   onOpenDossier?: (link: string) => void;
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
 export function KanbanView({
@@ -69,6 +72,7 @@ export function KanbanView({
   showOp,
   activeProject,
   onOpenDossier,
+  colLabel,
 }: KanbanViewProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const openTaskModal = useBoardStore((s) => s.openTaskModal);
@@ -130,7 +134,7 @@ export function KanbanView({
             data-testid={`kb-col-${col.id}`}
           >
             {/* Column header */}
-            <div className="sticky top-0 z-[2] flex items-center gap-[8px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad,12px)] py-[8px]">
+            <div className="sticky top-0 z-[2] flex items-center gap-[8px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[8px]">
               <span className="cl-display whitespace-nowrap text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--ink)]">
                 {col.label}
               </span>
@@ -140,6 +144,7 @@ export function KanbanView({
                 </span>
               )}
               <button
+                type="button"
                 className="inline-flex h-[16px] w-[16px] items-center justify-center border border-[var(--rule)] text-[13px] leading-[1] text-[var(--ink-3)] transition-[color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:text-[var(--hot)]"
                 title={`New task in ${col.label}`}
                 onClick={() =>
@@ -190,7 +195,7 @@ export function KanbanView({
             )}
 
             {/* Column body */}
-            <div className="flex flex-1 flex-col gap-[9px] overflow-y-auto p-[var(--pad,12px)] min-h-0">
+            <div className="flex flex-1 flex-col gap-[9px] overflow-y-auto p-[var(--pad)] min-h-0">
               {items.length === 0 ? (
                 <div
                   className="cl-mono border border-dashed border-[var(--rule)] px-[8px] py-[16px] text-center text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-4)]"
@@ -212,9 +217,18 @@ export function KanbanView({
                     }}
                     onClick={() => setEditTaskId(t.id)}
                     onOpenDossier={onOpenDossier}
+                    colLabel={colLabel}
                   />
                 ))
               )}
+              <QuickAddRow
+                preset={
+                  activeProject
+                    ? { status: col.id, project: activeProject }
+                    : { status: col.id }
+                }
+                testId={`qa-${col.id}`}
+              />
             </div>
           </div>
         );

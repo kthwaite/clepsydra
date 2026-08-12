@@ -65,15 +65,15 @@ function CycleNavRow({
       onClick={onSelect}
     >
       <CycleStatePip state={state} />
-      <span className="flex-shrink-0 text-[10px] tracking-[0.06em] text-[var(--ink)]">
+      <span className="flex-shrink-0 text-[var(--fs-s)] tracking-[0.06em] text-[var(--ink)]">
         {displayCode}
       </span>
-      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] tracking-[0.04em] text-[var(--ink-mute)]">
+      <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] tracking-[0.04em] text-[var(--ink-mute)]">
         {windowLabel}
       </span>
       <span
         className={cn(
-          "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[9px] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
+          "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[var(--fs-xs)] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
           active && "border-[var(--ink-mute)] text-[var(--ink)]",
         )}
       >
@@ -141,7 +141,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
     return (
       <button
         type="button"
-        className="absolute left-0 top-3 z-20 inline-flex cursor-pointer items-center gap-1.5 border border-l-0 border-[var(--rule)] bg-[var(--paper-2)] px-[9px] py-[7px] text-[9px] uppercase tracking-[0.18em] text-[var(--ink-2)] transition-colors hover:border-[var(--hot)] hover:text-[var(--hot)]"
+        className="absolute left-0 top-3 z-20 inline-flex cursor-pointer items-center gap-1.5 border border-l-0 border-[var(--rule)] bg-[var(--paper-2)] px-[9px] py-[7px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-2)] transition-colors hover:border-[var(--hot)] hover:text-[var(--hot)]"
         onClick={() => setRailOpen(true)}
         title="Open scope rail"
       >
@@ -154,12 +154,12 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
     <aside className="flex min-w-0 flex-col overflow-y-auto border-r border-[var(--rule)] bg-[var(--paper-2)]">
       {/* Header */}
       <div className="sticky top-0 z-[2] flex items-center justify-between border-b border-[var(--rule)] bg-[var(--paper-2)] px-[var(--pad)] py-[10px]">
-        <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+        <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
           SCOPE
         </span>
         <button
           type="button"
-          className="cl-mono cursor-pointer text-[11px] text-[var(--ink-mute)] hover:text-[var(--ink)]"
+          className="cl-mono cursor-pointer text-[var(--fs-s)] text-[var(--ink-mute)] hover:text-[var(--ink)]"
           title="Collapse"
           onClick={() => setRailOpen(false)}
         >
@@ -170,7 +170,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
       {/* NEW TASKING */}
       <button
         type="button"
-        className="mx-[var(--pad)] my-[10px] flex cursor-pointer items-center gap-2 border border-[var(--hot)] px-[10px] py-[8px] text-[10px] uppercase tracking-[0.18em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
+        className="mx-[var(--pad)] my-[10px] flex cursor-pointer items-center gap-2 border border-[var(--hot)] px-[10px] py-[8px] text-[var(--fs-s)] uppercase tracking-[0.18em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
         onClick={handleNewTasking}
       >
         <span className="text-[14px] font-bold leading-none">+</span>
@@ -180,10 +180,10 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
       {/* OPERATIONS section */}
       <div className="pb-[10px] pt-1">
         <div className="mx-0 mb-1 mt-1 flex items-center justify-between border-b border-[var(--rule)] px-[var(--pad)] pb-[5px] pt-1">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+          <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
             OPERATIONS
           </span>
-          <span className="cl-mono text-[9px] tabular-nums tracking-[0.1em] text-[var(--ink-mute)]">
+          <span className="cl-mono text-[var(--fs-xs)] tabular-nums tracking-[0.1em] text-[var(--ink-mute)]">
             {operations.length}
           </span>
         </div>
@@ -201,12 +201,12 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
         >
           {/* neutral square dot */}
           <span className="inline-block h-[7px] w-[7px] flex-shrink-0 border border-[var(--ink-mute)]" />
-          <span className="text-[10px] tracking-[0.08em] text-[var(--ink)]">
+          <span className="text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
             ALL OPS
           </span>
           <span
             className={cn(
-              "ml-auto min-w-[20px] border border-[var(--rule)] px-[4px] text-center text-[9px] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
+              "ml-auto min-w-[20px] border border-[var(--rule)] px-[4px] text-center text-[var(--fs-xs)] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
               opFilter === "ALL" &&
                 "border-[var(--ink-mute)] text-[var(--ink)]",
             )}
@@ -217,8 +217,13 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
 
         {/* Per-operation rows */}
         {operations.map((op) => {
-          const count = tasks.filter((t) => t.project === op.project).length;
-          const active = opFilter === opKey(op);
+          // Count by opKey, not op.project — a slug-less op's own project
+          // is null, and null===null would otherwise match every unfiled
+          // task (the same key filterTasks/opFilter use, so the badge
+          // always matches what clicking the row reveals).
+          const key = opKey(op);
+          const count = tasks.filter((t) => t.project === key).length;
+          const active = opFilter === key;
           return (
             <button
               key={op.id}
@@ -232,15 +237,18 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
               onClick={() => setOpFilter(opKey(op))}
             >
               <HealthDot health={op.health} />
-              <span className="text-[10px] tracking-[0.08em] text-[var(--ink)]">
+              <span className="text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
                 {op.code}
               </span>
-              <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] uppercase tracking-[0.04em] text-[var(--ink-mute)]">
+              <span
+                className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.04em] text-[var(--ink-mute)]"
+                title={op.name}
+              >
                 {op.name}
               </span>
               <span
                 className={cn(
-                  "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[9px] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
+                  "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[var(--fs-xs)] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
                   active && "border-[var(--ink-mute)] text-[var(--ink)]",
                 )}
               >
@@ -263,12 +271,12 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
             onClick={() => setOpFilter("UNFILED")}
           >
             <span className="inline-block h-[7px] w-[7px] flex-shrink-0 border border-[var(--ink-mute)]" />
-            <span className="text-[10px] tracking-[0.08em] text-[var(--ink)]">
+            <span className="text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
               UNFILED
             </span>
             <span
               className={cn(
-                "ml-auto min-w-[20px] border border-[var(--rule)] px-[4px] text-center text-[9px] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
+                "ml-auto min-w-[20px] border border-[var(--rule)] px-[4px] text-center text-[var(--fs-xs)] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",
                 opFilter === "UNFILED" &&
                   "border-[var(--ink-mute)] text-[var(--ink)]",
               )}
@@ -282,7 +290,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
       {/* CYCLES section */}
       <div className="pb-[10px] pt-1">
         <div className="mx-0 mb-1 mt-1 flex items-center justify-between border-b border-[var(--rule)] px-[var(--pad)] pb-[5px] pt-1">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+          <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
             CYCLES
           </span>
           <span className="flex items-center gap-2">
@@ -294,7 +302,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
             >
               +
             </button>
-            <span className="cl-mono text-[9px] tabular-nums tracking-[0.1em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] tabular-nums tracking-[0.1em] text-[var(--ink-mute)]">
               {cycles.length}
             </span>
           </span>

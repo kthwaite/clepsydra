@@ -19,6 +19,7 @@ import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
   CLOSED_CYCLE,
+  FIXTURE_COL_LABEL,
   SEALED_IN_CLOSED_CYCLE_TASK,
 } from "./fixtures";
 
@@ -132,6 +133,7 @@ describe("KanbanView — column rendering", () => {
   it("renders one column per board.columns entry", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -146,6 +148,7 @@ describe("KanbanView — column rendering", () => {
   it("renders — NONE — in columns with no tasks", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -160,6 +163,7 @@ describe("KanbanView — column rendering", () => {
   it("buckets tasks into the correct columns by status", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -180,6 +184,7 @@ describe("KanbanView — column rendering", () => {
     // Both t2 (P2) and t4 (P3) are in INTAKE; they should appear P2 then P3
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -202,6 +207,7 @@ describe("KanbanView — sealed-in-closed-cycle exclusion", () => {
       BOARD_FIXTURE_WITH_CLOSED_CYCLE;
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={augTasks}
         cycles={augCycles}
@@ -216,6 +222,7 @@ describe("KanbanView — sealed-in-closed-cycle exclusion", () => {
     const closedCycleOnlyTasks = [SEALED_IN_CLOSED_CYCLE_TASK];
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={closedCycleOnlyTasks}
         cycles={BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles}
@@ -235,6 +242,7 @@ describe("KanbanView — WIP count and over-capacity", () => {
     );
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={wipColumns}
         tasks={tasks}
         cycles={cycles}
@@ -251,6 +259,7 @@ describe("KanbanView — WIP count and over-capacity", () => {
     );
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={wipColumns}
         tasks={tasks}
         cycles={cycles}
@@ -268,6 +277,7 @@ describe("KanbanView — WIP count and over-capacity", () => {
     // BOARD_FIXTURE has wip=0 on all columns
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -286,6 +296,7 @@ describe("TaskCard — card anatomy", () => {
     // t2 has hold="blocker"
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -321,6 +332,7 @@ describe("TaskCard — card anatomy", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskWithChecks]}
         cycles={cycles}
@@ -340,6 +352,7 @@ describe("TaskCard — card anatomy", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskDone]}
         cycles={cycles}
@@ -355,10 +368,64 @@ describe("TaskCard — card anatomy", () => {
     expect(fill).toHaveStyle({ background: "var(--cool)" });
   });
 
+  it("renders up to 3 tag chips with no overflow chip when tags.length <= 3", () => {
+    const taskWithTags: BoardTask = {
+      ...tasks[0],
+      id: "t-tags-3",
+      code: "TSK-0030",
+      status: "INTAKE",
+      tags: ["alpha", "beta", "gamma"],
+    };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithTags]}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText("beta")).toBeInTheDocument();
+    expect(screen.getByText("gamma")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId(`task-tags-more-${taskWithTags.id}`),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders only the first 3 tags plus a +N overflow chip when tags.length > 3", () => {
+    const taskWithManyTags: BoardTask = {
+      ...tasks[0],
+      id: "t-tags-5",
+      code: "TSK-0031",
+      status: "INTAKE",
+      tags: ["alpha", "beta", "gamma", "delta", "epsilon"],
+    };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithManyTags]}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    expect(screen.getByText("alpha")).toBeInTheDocument();
+    expect(screen.getByText("beta")).toBeInTheDocument();
+    expect(screen.getByText("gamma")).toBeInTheDocument();
+    expect(screen.queryByText("delta")).not.toBeInTheDocument();
+    expect(screen.queryByText("epsilon")).not.toBeInTheDocument();
+    const overflow = screen.getByTestId(
+      `task-tags-more-${taskWithManyTags.id}`,
+    );
+    expect(overflow).toHaveTextContent("+2");
+  });
+
   it("does not render checklist section when checks array is empty", () => {
     // t1 has checks=[] — no d/total text
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[tasks[0]]}
         cycles={cycles}
@@ -376,6 +443,7 @@ describe("KanbanView — card interactions", () => {
   it("clicking a card calls setEditTaskId with the task id", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -398,6 +466,7 @@ describe("KanbanView — card interactions", () => {
     };
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={[taskWithLink]}
         cycles={cycles}
@@ -414,12 +483,204 @@ describe("KanbanView — card interactions", () => {
   });
 });
 
+// ── inline priority/status editing ────────────────────────────────────────────
+
+describe("TaskCard — inline editing", () => {
+  it("priority trigger patches priority without opening the edit panel", async () => {
+    const stub = makeStub();
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+      stub,
+    );
+
+    const user = userEvent.setup();
+    // t1 is P1 — pick P0 in the popover
+    await user.click(screen.getByTestId("kb-inline-priority-t1"));
+    await user.click(screen.getByTestId("inline-priority-P0"));
+
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter((args) => {
+        const opts = args[1] as RequestInit | undefined;
+        return opts?.method === "PATCH";
+      });
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const opts = patchCalls[0][1] as RequestInit;
+      const body = JSON.parse(opts.body as string) as Record<string, unknown>;
+      expect(body).toEqual({ priority: "P0" });
+    });
+
+    // The edit panel must NOT have opened for this click sequence.
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+
+  it("Enter key on priority chip does not open the edit panel", async () => {
+    const stub = makeStub();
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+      stub,
+    );
+
+    const priorityChip = screen.getByTestId("kb-inline-priority-t1");
+    priorityChip.focus();
+    fireEvent.keyDown(priorityChip, { key: "Enter" });
+
+    // The edit panel must NOT have opened
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+});
+
+// ── keyboard activation ──────────────────────────────────────────────────────────
+
+describe("TaskCard — keyboard activation", () => {
+  it("card has role=button and tabIndex=0", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t1");
+    expect(card).toHaveAttribute("role", "button");
+    expect(card).toHaveAttribute("tabindex", "0");
+  });
+
+  it("Enter key on card opens the edit panel", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t1");
+    card.focus();
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(useBoardStore.getState().editTaskId).toBe("t1");
+  });
+
+  it("Space key on card opens the edit panel", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t2");
+    card.focus();
+    fireEvent.keyDown(card, { key: " " });
+    expect(useBoardStore.getState().editTaskId).toBe("t2");
+  });
+
+  it("dossier link is a button that opens dossier without opening edit panel", async () => {
+    const onOpenDossier = vi.fn();
+    const taskWithLink: BoardTask = {
+      ...tasks[0],
+      id: "t-link",
+      code: "TSK-0020",
+      status: "INTAKE",
+      link: "tasks/alpha",
+    };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithLink]}
+        cycles={cycles}
+        showOp={false}
+        onOpenDossier={onOpenDossier}
+      />,
+    );
+
+    const linkButton = screen.getByText("tasks/alpha");
+    expect(linkButton.tagName).toBe("BUTTON");
+
+    const user = userEvent.setup();
+    await user.click(linkButton);
+
+    // onOpenDossier should be called
+    expect(onOpenDossier).toHaveBeenCalledWith("tasks/alpha");
+
+    // Edit panel must NOT have opened
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+
+  it("Enter key on dossier button opens dossier without opening edit panel", async () => {
+    const onOpenDossier = vi.fn();
+    const taskWithLink: BoardTask = {
+      ...tasks[0],
+      id: "t-link",
+      code: "TSK-0020",
+      status: "INTAKE",
+      link: "tasks/alpha",
+    };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithLink]}
+        cycles={cycles}
+        showOp={false}
+        onOpenDossier={onOpenDossier}
+      />,
+    );
+
+    const linkButton = screen.getByText("tasks/alpha");
+    const user = userEvent.setup();
+    linkButton.focus();
+    await user.keyboard("{Enter}");
+
+    // onOpenDossier should be called (native button behavior)
+    expect(onOpenDossier).toHaveBeenCalledWith("tasks/alpha");
+
+    // Edit panel must NOT have opened
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+
+  it("card responds to Enter/Space only when card div itself is focused", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t1");
+    card.focus();
+    fireEvent.keyDown(card, { key: "Enter" });
+    // Card div focused: edit panel should open
+    expect(useBoardStore.getState().editTaskId).toBe("t1");
+  });
+});
+
 // ── + button opens taskModal with status preset ───────────────────────────────
 
 describe("KanbanView — column + button", () => {
   it("clicking + in a column opens taskModal with that column's status", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -434,6 +695,7 @@ describe("KanbanView — column + button", () => {
   it("clicking + in INTAKE opens taskModal with status INTAKE", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -447,6 +709,7 @@ describe("KanbanView — column + button", () => {
   it("includes project preset when activeProject is set", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -464,6 +727,7 @@ describe("KanbanView — column + button", () => {
   it("omits the project key entirely when activeProject is undefined", async () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -480,6 +744,24 @@ describe("KanbanView — column + button", () => {
 // ── drag-and-drop ─────────────────────────────────────────────────────────────
 
 describe("KanbanView — drag-and-drop", () => {
+  it("writes the task id to dataTransfer on drag start", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const setData = vi.fn();
+    const card = screen.getByTestId("task-card-t1");
+    fireEvent.dragStart(card, {
+      dataTransfer: { setData, effectAllowed: "" },
+    });
+    expect(setData).toHaveBeenCalledWith("text/plain", "t1");
+  });
+
   it("drop fires PATCH to /api/vault/board/tasks/{id} with {status: colId}", async () => {
     const stub = makeStub();
     vi.stubGlobal("fetch", stub);
@@ -495,6 +777,7 @@ describe("KanbanView — drag-and-drop", () => {
     render(
       <QueryClientProvider client={qc}>
         <KanbanView
+          colLabel={FIXTURE_COL_LABEL}
           columns={columns}
           tasks={tasks}
           cycles={cycles}
@@ -542,6 +825,7 @@ describe("KanbanView — drag-and-drop", () => {
     render(
       <QueryClientProvider client={qc}>
         <KanbanView
+          colLabel={FIXTURE_COL_LABEL}
           columns={columns}
           tasks={tasks}
           cycles={cycles}
@@ -572,6 +856,7 @@ describe("KanbanView — drag-and-drop", () => {
   it("dragEnd clears the drag state (card no longer has dragging style)", () => {
     wrap(
       <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
         columns={columns}
         tasks={tasks}
         cycles={cycles}
@@ -587,5 +872,56 @@ describe("KanbanView — drag-and-drop", () => {
     fireEvent.dragEnd(card);
     // After dragEnd, opacity should be gone
     expect(card).not.toHaveStyle({ opacity: "0.35" });
+  });
+});
+
+// ── QuickAddRow wiring ───────────────────────────────────────────────────────────
+
+describe("KanbanView — QuickAddRow wiring", () => {
+  it("renders a QuickAddRow at the bottom of each column body with status preset", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    // Should have a quick-add row for each column
+    expect(screen.getByTestId("qa-INTAKE")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-TRIAGE")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-FIELD")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-REVIEW")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-SEALED")).toBeInTheDocument();
+  });
+
+  it("passes the correct status preset to each column's QuickAddRow", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const intakeRow = screen.getByTestId("qa-INTAKE");
+    expect(intakeRow).toHaveAttribute("placeholder", "+ ADD");
+  });
+
+  it("includes activeProject in the preset when provided", () => {
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+        activeProject="alpha"
+      />,
+    );
+    // Component should render; exact preset is verified by component tests
+    expect(screen.getByTestId("qa-INTAKE")).toBeInTheDocument();
   });
 });

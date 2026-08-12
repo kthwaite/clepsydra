@@ -5,9 +5,12 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BoardResponse } from "#/api/board";
+import { EMPTY_FILTER } from "#/components/tasking/board-filter";
 import { useBoardStore } from "#/store/board";
 import { filterTasks, TaskingScreen } from "../TaskingScreen";
 import {
@@ -17,6 +20,52 @@ import {
 } from "./fixtures";
 
 const { operations, tasks } = BOARD_FIXTURE;
+
+/** Minimal 3-task fixture for filter-strip composition tests. */
+const FILTER_FIXTURE: BoardResponse = {
+  ...BOARD_FIXTURE,
+  tasks: [
+    {
+      id: "f1",
+      code: "TSK-F1",
+      title: "Alpha task",
+      status: "INTAKE",
+      priority: "P0",
+      project: null,
+      cycle: null,
+      tags: [],
+      checks: [],
+      path: "tasks/f1.md",
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+    {
+      id: "f2",
+      code: "TSK-F2",
+      title: "Beta task",
+      status: "INTAKE",
+      priority: "P1",
+      project: null,
+      cycle: null,
+      tags: [],
+      checks: [],
+      path: "tasks/f2.md",
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+    {
+      id: "f3",
+      code: "TSK-F3",
+      title: "Gamma task",
+      status: "INTAKE",
+      priority: "P2",
+      project: null,
+      cycle: null,
+      tags: [],
+      checks: [],
+      path: "tasks/f3.md",
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+  ],
+};
 
 /** Fresh client per render — retry off so error states surface immediately. */
 function renderScreen() {
@@ -39,6 +88,7 @@ beforeEach(() => {
     editTaskId: null,
     taskModal: null,
     cycleModal: null,
+    filter: EMPTY_FILTER,
   });
 });
 
@@ -112,6 +162,32 @@ describe("TaskingScreen smoke", () => {
     expect(
       await screen.findByText(/ERROR — board unavailable/),
     ).toBeInTheDocument();
+  });
+
+  it("RETRY button refetches and renders board on success", async () => {
+    let fetchAttempt = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => {
+        fetchAttempt++;
+        if (fetchAttempt === 1) {
+          return Promise.reject(new Error("network down"));
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve(BOARD_FIXTURE),
+        } as Response);
+      }),
+    );
+    renderScreen();
+    expect(
+      await screen.findByText(/ERROR — board unavailable/),
+    ).toBeInTheDocument();
+
+    const retryButton = screen.getByRole("button", { name: /retry/i });
+    await userEvent.click(retryButton);
+
+    expect(await screen.findByTestId("kb-col-INTAKE")).toBeInTheDocument();
   });
 
   it("renders the board shell when data loads successfully", async () => {
@@ -409,6 +485,128 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     await userEvent.click(screen.getByRole("button", { name: "tasks/ops-1" }));
     expect(onOpenDossier).toHaveBeenCalledWith("tasks/ops-1");
     expect(onOpenPage).not.toHaveBeenCalled();
+  });
+});
+
+// ── filter strip: text + priority + hold composition ─────────────────────────
+
+describe("TaskingScreen — text/priority/hold filtering", () => {
+  it("typing text filters visible cards and shows the N OF M count", async () => {
+    stubBoardFetch(FILTER_FIXTURE);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.getByText("Gamma task")).toBeInTheDocument();
+    expect(screen.queryByTestId("board-filter-count")).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByTestId("board-filter-input"), "alpha");
+
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+    expect(screen.getByTestId("board-filter-count")).toHaveTextContent(
+      "01 OF 03",
+    );
+  });
+
+  it("clicking a priority toggle composes with the text filter", async () => {
+    stubBoardFetch(FILTER_FIXTURE);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("board-filter-pri-P1"));
+
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+    expect(screen.getByTestId("board-filter-count")).toHaveTextContent(
+      "01 OF 03",
+    );
+  });
+
+  it("clearing the filter restores all cards and hides the count line", async () => {
+    stubBoardFetch(FILTER_FIXTURE);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    const input = screen.getByTestId("board-filter-input");
+    await userEvent.type(input, "alpha");
+    expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
+
+    await userEvent.clear(input);
+
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.getByText("Gamma task")).toBeInTheDocument();
+    expect(screen.queryByTestId("board-filter-count")).not.toBeInTheDocument();
+  });
+
+  it("HOLD toggle keeps only tasks on hold", async () => {
+    const heldFixture: BoardResponse = {
+      ...FILTER_FIXTURE,
+      tasks: FILTER_FIXTURE.tasks.map((t) =>
+        t.id === "f2" ? { ...t, hold: "blocker" } : t,
+      ),
+    };
+    stubBoardFetch(heldFixture);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("board-filter-hold"));
+
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+  });
+});
+
+// ── column labels sourced from the server ─────────────────────────────────────
+
+describe("TaskingScreen — column labels come from the server", () => {
+  it("BACKLOG mode renders the server's FIELD column label, not a hardcoded one", async () => {
+    const relabeled: BoardResponse = {
+      ...BOARD_FIXTURE,
+      columns: BOARD_FIXTURE.columns.map((c) =>
+        c.id === "FIELD" ? { ...c, label: "DEPLOYED" } : c,
+      ),
+    };
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch(relabeled);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    // t1 is FIELD-status in BOARD_FIXTURE — its disposition cell must show
+    // the server-supplied label, not the old hardcoded "IN-FIELD". Scoped to
+    // the row itself: BoardHeader's unrelated "IN-FIELD" stat label is a
+    // separate, hardcoded metric name and out of scope here.
+    const row = screen.getByTestId("bk-row-t1");
+    expect(within(row).getByText("DEPLOYED")).toBeInTheDocument();
+    expect(within(row).queryByText("IN-FIELD")).not.toBeInTheDocument();
+  });
+
+  it("inline status popover on a backlog row shows the server's column label, not the raw id", async () => {
+    const relabeled: BoardResponse = {
+      ...BOARD_FIXTURE,
+      columns: BOARD_FIXTURE.columns.map((c) =>
+        c.id === "FIELD" ? { ...c, label: "DEPLOYED" } : c,
+      ),
+    };
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch(relabeled);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    // t1 is FIELD-status — open its inline status-edit popover chip
+    await userEvent.click(screen.getByTestId("bk-inline-status-t1"));
+
+    // The testid is on the underlying <input>; its visible label text (the
+    // column-label span) is on the wrapping <label>.
+    const fieldOption = screen.getByTestId("inline-status-FIELD");
+    const fieldLabel = fieldOption.closest("label");
+    expect(fieldLabel).toHaveTextContent("DEPLOYED");
+    expect(fieldLabel).not.toHaveTextContent("FIELD");
   });
 });
 

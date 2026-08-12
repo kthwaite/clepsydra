@@ -8,7 +8,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardCycle, BoardTask } from "#/api/board";
@@ -19,6 +19,7 @@ import { TaskingScreen } from "../TaskingScreen";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_NO_SLUG_OP,
+  FIXTURE_COL_LABEL,
   stubBoardFetch,
 } from "./fixtures";
 
@@ -237,11 +238,23 @@ afterEach(() => {
 });
 
 // helper
+
+/** CycleView rows nest InlineEditPopover, which needs a QueryClient. */
+function wrap(ui: React.ReactElement, fetchStub?: ReturnType<typeof vi.fn>) {
+  if (fetchStub) vi.stubGlobal("fetch", fetchStub);
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
 function renderCycleView(
   cycle: BoardCycle | typeof BACKLOG_PSEUDO = ACTIVE_CYCLE,
   items: BoardTask[] = C01_TASKS,
+  fetchStub?: ReturnType<typeof vi.fn>,
 ) {
-  return render(<CycleView cycle={cycle} tasks={items} />);
+  return wrap(
+    <CycleView colLabel={FIXTURE_COL_LABEL} cycle={cycle} tasks={items} />,
+    fetchStub,
+  );
 }
 
 // ── action buttons per cycle state ────────────────────────────────────────────
@@ -348,8 +361,9 @@ describe("CycleView — metrics and burndown", () => {
   });
 
   it("renders the Spark SVG for burndown", () => {
-    render(
+    wrap(
       <CycleView
+        colLabel={FIXTURE_COL_LABEL}
         cycle={ACTIVE_CYCLE}
         tasks={C01_TASKS}
         burndown={[3, 2, 1]}
@@ -489,6 +503,52 @@ describe("CycleView — row click", () => {
   });
 });
 
+// ── inline priority/status editing ────────────────────────────────────────────
+
+describe("CycleView — inline editing", () => {
+  it("priority trigger patches priority without opening the edit panel", async () => {
+    const stub = vi.fn((_url: string, opts?: RequestInit) => {
+      if (opts?.method === "PATCH") {
+        const patch = JSON.parse(opts.body as string);
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ id: "patched", ...patch }),
+        } as Response);
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            columns: [],
+            operations: [],
+            cycles: [],
+            tasks: [],
+          }),
+      } as Response);
+    });
+    renderCycleView(ACTIVE_CYCLE, [T_FIELD], stub);
+
+    const user = userEvent.setup();
+    // T_FIELD is P2 — pick P0 in the popover
+    await user.click(screen.getByTestId(`cv-inline-priority-${T_FIELD.id}`));
+    await user.click(screen.getByTestId("inline-priority-P0"));
+
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter((args) => {
+        const opts = args[1] as RequestInit | undefined;
+        return opts?.method === "PATCH";
+      });
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const opts = patchCalls[0][1] as RequestInit;
+      const body = JSON.parse(opts.body as string) as Record<string, unknown>;
+      expect(body).toEqual({ priority: "P0" });
+    });
+
+    // The edit panel must NOT have opened for this click sequence.
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+});
+
 // ── empty state ───────────────────────────────────────────────────────────────
 
 describe("CycleView — empty state", () => {
@@ -524,7 +584,14 @@ describe("CycleView — empty state", () => {
   });
 
   it("COMMIT TASK includes project when activeProject prop is set", async () => {
-    render(<CycleView cycle={ACTIVE_CYCLE} tasks={[]} activeProject="alpha" />);
+    wrap(
+      <CycleView
+        colLabel={FIXTURE_COL_LABEL}
+        cycle={ACTIVE_CYCLE}
+        tasks={[]}
+        activeProject="alpha"
+      />,
+    );
     await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
     expect(useBoardStore.getState().taskModal).toEqual({
       cycle: "C-01",
@@ -533,7 +600,13 @@ describe("CycleView — empty state", () => {
   });
 
   it("COMMIT TASK omits project when activeProject prop is absent", async () => {
-    render(<CycleView cycle={ACTIVE_CYCLE} tasks={[]} />);
+    wrap(
+      <CycleView
+        colLabel={FIXTURE_COL_LABEL}
+        cycle={ACTIVE_CYCLE}
+        tasks={[]}
+      />,
+    );
     await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
     const modal = useBoardStore.getState().taskModal;
     expect(modal).toEqual({ cycle: "C-01" });

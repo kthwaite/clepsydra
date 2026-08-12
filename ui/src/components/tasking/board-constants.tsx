@@ -1,6 +1,7 @@
 /** Shared constants and micro-chips for the Tasking board. */
 
 import type { BoardOperation } from "#/api/board";
+import type { BoardMode } from "#/store/board";
 
 // ── date formatting ──────────────────────────────────────────────────────────
 
@@ -44,14 +45,6 @@ export const COL_ORDER = [
   "SEALED",
 ] as const;
 
-export const COL_LABEL: Record<string, string> = {
-  INTAKE: "INTAKE",
-  TRIAGE: "TRIAGE",
-  FIELD: "IN-FIELD",
-  REVIEW: "REVIEW",
-  SEALED: "SEALED",
-};
-
 export const PRI_ORDER = ["P0", "P1", "P2", "P3"] as const;
 
 export const PRI_LABEL: Record<string, string> = {
@@ -61,6 +54,29 @@ export const PRI_LABEL: Record<string, string> = {
   P3: "LOW",
 };
 
+/**
+ * Single-sourced priority color map: bar (left rail / on-state fill) and
+ * text (badge foreground / off-state outline) per priority.
+ */
+export const PRI_COLOR: Record<string, { bar: string; text: string }> = {
+  P0: { bar: "var(--hot)", text: "var(--hot)" },
+  P1: { bar: "var(--warn)", text: "var(--warn)" },
+  P2: { bar: "var(--cool)", text: "var(--cool)" },
+  P3: { bar: "var(--ink-4)", text: "var(--ink-mute)" },
+};
+
+/** Looks up a priority's color pair, falling back to a neutral default. */
+export function priColor(pri: string): { bar: string; text: string } {
+  return PRI_COLOR[pri] ?? { bar: "var(--ink-3)", text: "var(--ink-mute)" };
+}
+
+/**
+ * Resolves a board status column id to its display label. Callers build this
+ * from the server's `BoardColumn.label` (see TaskingScreen) so column
+ * vocabulary is single-sourced from the backend instead of hardcoded here.
+ */
+export type ColLabelFn = (id: string) => string;
+
 // ── mode descriptor ──────────────────────────────────────────────────────────
 
 export const MODES = [
@@ -68,20 +84,26 @@ export const MODES = [
   { id: "backlog", label: "BACKLOG", gl: "rows" },
   { id: "cycle", label: "CYCLE", gl: "sprint" },
   { id: "timeline", label: "TIMELINE", gl: "tl" },
-] as const;
+] as const satisfies { id: BoardMode; label: string; gl: string }[];
+
+// ── health color helper ──────────────────────────────────────────────────────
+
+/**
+ * Returns the CSS color variable for a health status.
+ * GREEN → var(--cool), AMBER → var(--warn), RED → var(--hot), else → var(--ink-mute).
+ */
+export function healthColor(health: string): string {
+  if (health === "GREEN") return "var(--cool)";
+  if (health === "AMBER") return "var(--warn)";
+  if (health === "RED") return "var(--hot)";
+  return "var(--ink-mute)";
+}
 
 // ── micro-chip components ────────────────────────────────────────────────────
 
 /** Small coloured priority badge: P0=hot P1=warn P2=cool P3=ink-mute */
 export function PriChip({ pri }: { pri: string }) {
-  const color =
-    pri === "P0"
-      ? "var(--hot)"
-      : pri === "P1"
-        ? "var(--warn)"
-        : pri === "P2"
-          ? "var(--cool)"
-          : "var(--ink-mute)";
+  const { text: color } = priColor(pri);
   return (
     <span
       className="inline-block border px-[4px] text-[9px] font-medium leading-[14px] tracking-[0.08em]"
@@ -125,14 +147,7 @@ export function StatePip({ col }: { col: string }) {
  * Matches .op-dot in styles-board.css.
  */
 export function HealthDot({ health }: { health: string }) {
-  const color =
-    health === "GREEN"
-      ? "var(--cool)"
-      : health === "AMBER"
-        ? "var(--warn)"
-        : health === "RED"
-          ? "var(--hot)"
-          : "var(--ink-mute)";
+  const color = healthColor(health);
   return (
     <span
       className={`inline-block h-[7px] w-[7px] flex-shrink-0${health === "RED" ? " animate-pulse" : ""}`}

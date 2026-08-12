@@ -30,8 +30,12 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { BoardCycle, BoardOperation } from "#/api/board";
 import { useCreateTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
-import { BoardModalFrame } from "./BoardModalFrame";
-import { opKey } from "./board-constants";
+import {
+  BOARD_MODAL_WIDTHS,
+  BoardModalFrame,
+  ModalEscChip,
+} from "./BoardModalFrame";
+import { type ColLabelFn, opKey } from "./board-constants";
 import {
   DispositionRow,
   EdField,
@@ -45,9 +49,15 @@ import {
 interface NewTaskModalProps {
   operations: BoardOperation[];
   cycles: BoardCycle[];
+  /** Resolves a column id to its server-supplied display label. */
+  colLabel: ColLabelFn;
 }
 
-export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
+export function NewTaskModal({
+  operations,
+  cycles,
+  colLabel,
+}: NewTaskModalProps) {
   const taskModal = useBoardStore((s) => s.taskModal);
   const closeTaskModal = useBoardStore((s) => s.closeTaskModal);
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
@@ -61,6 +71,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
   const [priority, setPriority] = useState<string>("P2");
   const [assignee, setAssignee] = useState("");
   const [estimate, setEstimate] = useState("");
+  const [start, setStart] = useState("");
   const [due, setDue] = useState("");
   const [tags, setTags] = useState("");
   const [checklist, setChecklist] = useState("");
@@ -70,6 +81,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
   const isOpen = taskModal !== null;
 
   // Reinitialise on open
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reinitialise only on open
   useEffect(() => {
     if (!isOpen) return;
     setTitle("");
@@ -79,23 +91,45 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
     setPriority("P2");
     setAssignee("");
     setEstimate("");
+    setStart("");
     setDue("");
     setTags("");
     setChecklist("");
     setLink("");
     // Focus title after state flush
     setTimeout(() => titleRef.current?.focus(), 0);
-  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps — intentional: only on open
+  }, [isOpen]);
 
   if (!isOpen) return null;
+
+  // A board:true PROJECT page with no project: frontmatter has no valid
+  // filter/assignment key (filterTasks compares t.project === opFilter, and
+  // a slug-less op's key can never match a task's project) — exclude it so
+  // a task can't be misfiled to it.
+  const assignableOps = operations.filter((op) => Boolean(op.project));
+
+  // Closed cycles are not assignable to new tasks.
+  const selectableCycles = cycles.filter((c) => c.state !== "CLOSED");
 
   // Derived display for the sub-header
   const opLabel = project
     ? (operations.find((op) => opKey(op) === project)?.code ?? project)
     : "UNFILED";
 
+  const dirty =
+    title !== "" ||
+    assignee !== "" ||
+    estimate !== "" ||
+    due !== "" ||
+    start !== "" ||
+    tags !== "" ||
+    checklist !== "" ||
+    link !== "";
+
   const commit = () => {
-    const finalTitle = title.trim() || "UNTITLED TASKING";
+    const finalTitle = title.trim();
+    if (!finalTitle) return;
+
     const tagsArr = tags
       .split(",")
       .map((t) => t.trim())
@@ -114,6 +148,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
         cycle: cycle === "BACKLOG" ? null : cycle || null,
         assignee: assignee.trim() || null,
         estimate: estimate.trim() || null,
+        start: start.trim() || null,
         due: due.trim() || null,
         tags: tagsArr.length ? tagsArr : null,
         link: link.trim() || null,
@@ -138,12 +173,13 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
   return (
     <BoardModalFrame
       ariaLabel="New Tasking"
-      widthClassName="w-[660px]"
+      widthClassName={BOARD_MODAL_WIDTHS.task}
       backdropTestId="new-task-modal-backdrop"
       modalTestId="new-task-modal"
       onClose={closeTaskModal}
       onKeyDown={handleKeyDown}
       constrainHeight
+      isDismissable={!dirty}
     >
       {/* Header */}
       <div className="flex items-center gap-[10px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
@@ -156,14 +192,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
           {opLabel} · COMMIT TO REGISTER
         </span>
-        <button
-          type="button"
-          className="cl-mono ml-auto cursor-pointer border border-[var(--rule)] px-[7px] py-[2px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-          onClick={closeTaskModal}
-          data-testid="new-task-close-btn"
-        >
-          ESC
-        </button>
+        <ModalEscChip onClose={closeTaskModal} testId="new-task-close-btn" />
       </div>
 
       {/* Body */}
@@ -192,7 +221,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
               data-testid="new-task-operation"
             >
               <option value="">UNFILED / NONE</option>
-              {operations.map((op) => (
+              {assignableOps.map((op) => (
                 <option key={op.id} value={opKey(op)}>
                   {op.code} — {op.name}
                 </option>
@@ -207,7 +236,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
               data-testid="new-task-cycle"
             >
               <option value="BACKLOG">BACKLOG / UNSCHEDULED</option>
-              {cycles.map((c) => (
+              {selectableCycles.map((c) => (
                 <option key={c.id} value={c.code}>
                   {c.code} · {c.label} ({c.state})
                 </option>
@@ -222,6 +251,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
             value={status}
             onChange={setStatus}
             testIdPrefix="new-task"
+            colLabel={colLabel}
           />
         </EdField>
 
@@ -234,8 +264,8 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
           />
         </EdField>
 
-        {/* OPERATOR / EST / DUE */}
-        <div className="grid grid-cols-3 gap-[12px]">
+        {/* OPERATOR / EST */}
+        <div className="grid grid-cols-2 gap-[12px]">
           <EdField label="OPERATOR">
             <input
               type="text"
@@ -254,11 +284,23 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
               data-testid="new-task-estimate"
             />
           </EdField>
+        </div>
+
+        {/* START / DUE */}
+        <div className="grid grid-cols-2 gap-[12px]">
+          <EdField label="START" hint="YYYY-MM-DD">
+            <input
+              type="date"
+              className={INPUT_CLS}
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+              data-testid="new-task-start"
+            />
+          </EdField>
           <EdField label="DUE" hint="YYYY-MM-DD">
             <input
-              type="text"
+              type="date"
               className={INPUT_CLS}
-              placeholder="2026-12-31"
               value={due}
               onChange={(e) => setDue(e.target.value)}
               data-testid="new-task-due"
@@ -331,7 +373,7 @@ export function NewTaskModal({ operations, cycles }: NewTaskModalProps) {
             type="button"
             className="cl-btn cl-btn-hot"
             onClick={commit}
-            disabled={create.isPending}
+            disabled={create.isPending || title.trim() === ""}
             data-testid="new-task-commit"
           >
             {create.isPending ? "COMMITTING…" : "COMMIT TASK"}

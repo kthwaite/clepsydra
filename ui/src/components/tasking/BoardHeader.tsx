@@ -3,7 +3,8 @@ import { Spark } from "#/components/ui/spark";
 import { cn } from "#/lib/cn";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { HealthDot, MODES } from "./board-constants";
+import { HealthDot, healthColor, MODES, PRI_ORDER } from "./board-constants";
+import { isFilterActive } from "./board-filter";
 
 // ── mode glyphs ──────────────────────────────────────────────────────────────
 
@@ -132,6 +133,10 @@ interface BoardHeaderProps {
   tasks: BoardTask[];
   /** The active operation object when a single op is selected, else null. */
   activeOp: BoardOperation | null;
+  /** Task count after text/priority/hold filtering (the `tasks` prop's length). */
+  filteredCount: number;
+  /** Task count after op-scoping but before text/priority/hold filtering. */
+  opFilteredCount: number;
   onOpenDossier?: (dossier: string) => void;
   sealHistory?: number[];
   sealHistoryPending?: boolean;
@@ -144,6 +149,8 @@ export function BoardHeader({
   cycles,
   tasks,
   activeOp,
+  filteredCount,
+  opFilteredCount,
   onOpenDossier,
   sealHistory = [],
   sealHistoryPending = false,
@@ -153,18 +160,15 @@ export function BoardHeader({
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const setMode = useBoardStore((s) => s.setMode);
+  const filter = useBoardStore((s) => s.filter);
+  const setFilter = useBoardStore((s) => s.setFilter);
 
   // Stats
   const open = tasks.filter((t) => t.status !== "SEALED").length;
   const inField = tasks.filter((t) => t.status === "FIELD").length;
   const onHold = tasks.filter((t) => Boolean(t.hold)).length;
 
-  const healthColor =
-    activeOp?.health === "AMBER"
-      ? "var(--warn)"
-      : activeOp?.health === "RED"
-        ? "var(--hot)"
-        : "var(--cool)";
+  const opHealthColor = healthColor(activeOp?.health ?? "");
 
   return (
     <header className="flex-none overflow-hidden border-b border-[var(--rule)] bg-[var(--paper-2)]">
@@ -172,7 +176,7 @@ export function BoardHeader({
       <div className="flex items-center gap-[18px] px-[var(--pad)] pb-[10px] pt-[12px]">
         {/* Title block */}
         <div className="flex flex-col gap-[1px]">
-          <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+          <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
             OPS REGISTER / {operations.length} OPERATIONS · {cycles.length}{" "}
             CYCLES
           </span>
@@ -193,7 +197,7 @@ export function BoardHeader({
               role="tab"
               aria-selected={mode === m.id}
               className={cn(
-                "cl-mono inline-flex cursor-pointer items-center gap-[7px] border-r border-[var(--rule)] px-[14px] py-[5px] text-[9px] uppercase tracking-[0.18em] transition-colors last:border-r-0",
+                "cl-mono inline-flex cursor-pointer items-center gap-[7px] border-r border-[var(--rule)] px-[14px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] transition-colors last:border-r-0",
                 mode === m.id
                   ? "bg-[var(--ink)] text-[var(--paper)]"
                   : "text-[var(--ink-mute)] hover:bg-[var(--paper-edge)] hover:text-[var(--ink-2)]",
@@ -210,7 +214,7 @@ export function BoardHeader({
         <div className="ml-auto flex items-center gap-[22px]">
           {/* OPEN */}
           <div className="flex flex-col gap-[1px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               OPEN
             </span>
             <span className="font-sans text-[20px] font-black leading-none tabular-nums text-[var(--ink)]">
@@ -220,7 +224,7 @@ export function BoardHeader({
 
           {/* IN-FIELD */}
           <div className="flex flex-col gap-[1px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               IN-FIELD
             </span>
             <span
@@ -233,7 +237,7 @@ export function BoardHeader({
 
           {/* ON HOLD */}
           <div className="flex flex-col gap-[1px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               ON HOLD
             </span>
             <span
@@ -246,21 +250,30 @@ export function BoardHeader({
 
           {/* SEAL RATE 14d sparkline */}
           <div className="flex flex-col gap-[1px] pb-[2px] text-right">
-            <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
+            <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
               SEAL RATE 14d
             </span>
             {!sealHistoryApplicable ? (
-              <span className="text-[9px] text-[var(--ink-mute)]">
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
                 NOT APPLICABLE
               </span>
             ) : sealHistoryPending ? (
-              <span className="text-[9px] text-[var(--ink-mute)]">LOADING</span>
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                LOADING
+              </span>
             ) : sealHistoryError ? (
-              <span className="text-[9px] text-[var(--hot)]">UNAVAILABLE</span>
-            ) : sealHistory.length === 0 || sealHistory.every((count) => count === 0) ? (
-              <span className="text-[9px] text-[var(--ink-mute)]">NO SEALS</span>
+              <span className="text-[var(--fs-xs)] text-[var(--hot)]">
+                UNAVAILABLE
+              </span>
+            ) : sealHistory.length === 0 ||
+              sealHistory.every((count) => count === 0) ? (
+              <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
+                NO SEALS
+              </span>
             ) : (
-              <div aria-label={`14-day seal history: ${sealHistory.join(", ")}`}>
+              <div
+                aria-label={`14-day seal history: ${sealHistory.join(", ")}`}
+              >
                 <Spark
                   data={sealHistory}
                   width={96}
@@ -273,9 +286,82 @@ export function BoardHeader({
         </div>
       </div>
 
+      {/* Filter strip: text search + priority toggles + hold toggle + count */}
+      <div className="flex items-center gap-[10px] border-t border-[var(--rule-soft)] bg-[var(--paper)] px-[var(--pad)] py-[7px]">
+        <input
+          id="tasking-filter"
+          data-testid="board-filter-input"
+          type="text"
+          placeholder="FILTER…"
+          className="cl-mono w-[220px] border border-[var(--rule)] bg-transparent px-[8px] py-[4px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink)] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)]"
+          value={filter.text}
+          onChange={(e) => setFilter({ ...filter, text: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setFilter({ ...filter, text: "" });
+              e.currentTarget.blur();
+              e.stopPropagation(); // don't let Escape reach the edit panel's window listener
+            }
+          }}
+        />
+
+        <div className="flex items-center gap-[4px]">
+          {PRI_ORDER.map((p) => {
+            const on = filter.pris.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                aria-pressed={on}
+                data-testid={`board-filter-pri-${p}`}
+                className={cn(
+                  "cl-mono border px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] transition-colors",
+                  on
+                    ? "border-[var(--hot)] bg-[var(--hot)] text-[var(--paper)]"
+                    : "border-[var(--rule)] text-[var(--ink-mute)] hover:text-[var(--ink-2)]",
+                )}
+                onClick={() =>
+                  setFilter({
+                    ...filter,
+                    pris: on
+                      ? filter.pris.filter((x) => x !== p)
+                      : [...filter.pris, p],
+                  })
+                }
+              >
+                {p}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            aria-pressed={filter.holdOnly}
+            data-testid="board-filter-hold"
+            className={cn(
+              "cl-mono border px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] transition-colors",
+              filter.holdOnly
+                ? "border-[var(--hot)] bg-[var(--hot)] text-[var(--paper)]"
+                : "border-[var(--rule)] text-[var(--ink-mute)] hover:text-[var(--ink-2)]",
+            )}
+            onClick={() => setFilter({ ...filter, holdOnly: !filter.holdOnly })}
+          >
+            HOLD
+          </button>
+        </div>
+
+        {isFilterActive(filter) && (
+          <span
+            data-testid="board-filter-count"
+            className="cl-mono ml-auto text-[var(--fs-xs)] uppercase tracking-[0.15em] text-[var(--ink-mute)]"
+          >
+            {pad2(filteredCount)} OF {pad2(opFilteredCount)}
+          </span>
+        )}
+      </div>
+
       {/* Op-meta line — only when a real op is selected */}
       {activeOp && (
-        <div className="flex items-center gap-[14px] overflow-hidden whitespace-nowrap border-t border-[var(--rule-soft)] bg-[var(--paper)] px-[var(--pad)] py-[7px] text-[9px] uppercase tracking-[0.12em] text-[var(--ink-mute)]">
+        <div className="flex items-center gap-[14px] overflow-hidden whitespace-nowrap border-t border-[var(--rule-soft)] bg-[var(--paper)] px-[var(--pad)] py-[7px] text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-mute)]">
           <HealthDot health={activeOp.health} />
           <span className="font-medium text-[var(--ink)]">{activeOp.name}</span>
           <span className="text-[var(--ink-faint)]">·</span>
@@ -288,7 +374,10 @@ export function BoardHeader({
           <span className="text-[var(--ink-faint)]">·</span>
           <span>
             HEALTH
-            <b className="ml-[5px] font-medium" style={{ color: healthColor }}>
+            <b
+              className="ml-[5px] font-medium"
+              style={{ color: opHealthColor }}
+            >
               {activeOp.health}
             </b>
           </span>
@@ -317,7 +406,7 @@ export function BoardHeader({
           {activeOp.note && (
             <>
               <span className="text-[var(--ink-faint)]">·</span>
-              <span className="overflow-hidden text-ellipsis text-[9px] normal-case tracking-[0.02em] text-[var(--ink-2)]">
+              <span className="overflow-hidden text-ellipsis text-[var(--fs-xs)] normal-case tracking-[0.02em] text-[var(--ink-2)]">
                 {activeOp.note}
               </span>
             </>

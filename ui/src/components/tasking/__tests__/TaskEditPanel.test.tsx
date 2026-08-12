@@ -24,11 +24,17 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BoardTask } from "#/api/board";
+import type { BoardOperation, BoardTask } from "#/api/board";
 import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
 import { TaskEditPanel } from "../TaskEditPanel";
-import { BOARD_FIXTURE } from "./fixtures";
+import {
+  BOARD_FIXTURE,
+  BOARD_FIXTURE_WITH_CLOSED_CYCLE,
+  FIXTURE_COL_LABEL,
+  NO_SLUG_OP,
+  SEALED_IN_CLOSED_CYCLE_TASK,
+} from "./fixtures";
 
 const { operations, cycles } = BOARD_FIXTURE;
 
@@ -63,6 +69,8 @@ const HELD_TASK: BoardTask = {
 
 interface WrapOpts {
   task?: BoardTask;
+  operations?: BoardOperation[];
+  cycles?: typeof cycles;
   onClose?: () => void;
   onOpenPage?: (path: string) => void;
   onOpenDossier?: (link: string) => void;
@@ -73,6 +81,8 @@ interface WrapOpts {
 
 function wrap({
   task = FULL_TASK,
+  operations: opsOverride = operations,
+  cycles: cyclesOverride = cycles,
   onClose = vi.fn(),
   onOpenPage = vi.fn(),
   onOpenDossier = vi.fn(),
@@ -98,8 +108,9 @@ function wrap({
       <QueryClientProvider client={qc}>
         <TaskEditPanel
           task={task}
-          operations={operations}
-          cycles={cycles}
+          operations={opsOverride}
+          cycles={cyclesOverride}
+          colLabel={FIXTURE_COL_LABEL}
           onClose={onClose}
           onOpenPage={onOpenPage}
           onOpenDossier={onOpenDossier}
@@ -218,6 +229,56 @@ describe("TaskEditPanel — render", () => {
       screen.queryByTestId("edit-panel-hold-reason"),
     ).not.toBeInTheDocument();
   });
+
+  it("DUE input is a date field", () => {
+    wrap();
+    const dueInput = screen.getByTestId<HTMLInputElement>("edit-panel-due");
+    expect(dueInput).toHaveAttribute("type", "date");
+  });
+
+  it("START input is a date field", () => {
+    wrap();
+    const startInput = screen.getByTestId<HTMLInputElement>("edit-panel-start");
+    expect(startInput).toHaveAttribute("type", "date");
+  });
+
+  it("omits slug-less operations from the OPERATION dropdown", () => {
+    wrap({ operations: [...operations, NO_SLUG_OP] });
+    const opSelect = screen.getByTestId("edit-panel-operation");
+    expect(opSelect).toHaveTextContent("OPS-1");
+    expect(opSelect).not.toHaveTextContent("OPS-3");
+  });
+
+  it("omits CLOSED cycles from the CYCLE dropdown when task is not in that cycle", () => {
+    // FULL_TASK is in C-01, not C-00 (CLOSED)
+    wrap({
+      task: FULL_TASK,
+      operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
+      cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
+    });
+    const cycleSelect =
+      screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
+    // C-01 and C-02 should be present
+    expect(cycleSelect).toHaveTextContent("C-01");
+    expect(cycleSelect).toHaveTextContent("C-02");
+    // C-00 (CLOSED) should NOT be present
+    expect(cycleSelect).not.toHaveTextContent("C-00");
+  });
+
+  it("includes CLOSED cycle in dropdown when task is currently assigned to it", () => {
+    // SEALED_IN_CLOSED_CYCLE_TASK is in C-00 (CLOSED), and it must stay representable
+    wrap({
+      task: SEALED_IN_CLOSED_CYCLE_TASK,
+      operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
+      cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
+    });
+    const cycleSelect =
+      screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
+    // C-00 (CLOSED) should be present because the task is in it
+    expect(cycleSelect).toHaveTextContent("C-00");
+    // Verify it's selected
+    expect(cycleSelect.value).toBe("C-00");
+  });
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -290,9 +351,9 @@ describe("TaskEditPanel — immediate patches", () => {
     const stub = makeStub();
     wrap({ fetchStub: stub, seedBoard: true });
     const priority = screen.getByRole("radiogroup", { name: "Priority" });
-    expect(
-      within(priority).getByTestId("edit-panel-priority-P0"),
-    ).toHaveRole("radio");
+    expect(within(priority).getByTestId("edit-panel-priority-P0")).toHaveRole(
+      "radio",
+    );
 
     await userEvent.click(screen.getByTestId("edit-panel-priority-P0"));
 
@@ -395,6 +456,38 @@ describe("TaskEditPanel — debounced patches", () => {
     expect(body.title).toBe("UPDATED TITLE");
   });
 
+  it("start edit fires PATCH {start} after 300ms debounce", async () => {
+    vi.useFakeTimers();
+    const stub = makeStub();
+    wrap({ fetchStub: stub, seedBoard: true });
+
+    const startInput = screen.getByTestId("edit-panel-start");
+
+    act(() => {
+      fireEvent.change(startInput, { target: { value: "2026-08-02" } });
+    });
+
+    // No PATCH yet (debounce hasn't fired)
+    expect(
+      stub.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
+    ).toHaveLength(0);
+
+    // Advance past the 300ms debounce and flush microtasks
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    const patchCalls = stub.mock.calls.filter(
+      ([, opts]) => opts?.method === "PATCH",
+    );
+    expect(patchCalls.length).toBeGreaterThan(0);
+    const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
+      string,
+      unknown
+    >;
+    expect(body).toEqual({ start: "2026-08-02" });
+  });
+
   it("flushes a pending title edit when the panel closes before the debounce fires", async () => {
     vi.useFakeTimers();
     const stub = makeStub();
@@ -434,7 +527,7 @@ describe("TaskEditPanel — debounced patches", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("TaskEditPanel — hold toggle", () => {
-  it("hold toggle ON fires PATCH {hold: 'BLOCKED — STATE REASON'}", async () => {
+  it("hold toggle ON fires PATCH {hold: 'BLOCKED'}", async () => {
     const stub = makeStub();
     // Task starts with hold: null
     wrap({
@@ -454,7 +547,7 @@ describe("TaskEditPanel — hold toggle", () => {
         string,
         unknown
       >;
-      expect(body.hold).toBe("BLOCKED — STATE REASON");
+      expect(body.hold).toBe("BLOCKED");
     });
   });
 
@@ -475,6 +568,63 @@ describe("TaskEditPanel — hold toggle", () => {
       >;
       expect(body.hold).toBeNull();
     });
+  });
+
+  it("holds with BLOCKED and focuses the reason input selected", async () => {
+    const stub = makeStub();
+    const { rerender, qc } = wrap({
+      task: { ...FULL_TASK, hold: null },
+      fetchStub: stub,
+      seedBoard: true,
+    });
+
+    // Click toggle to turn hold on
+    await userEvent.click(screen.getByTestId("edit-panel-hold-toggle"));
+
+    // Verify the PATCH is sent with just "BLOCKED"
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter(
+        ([, opts]) => opts?.method === "PATCH",
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
+        string,
+        unknown
+      >;
+      expect(body.hold).toBe("BLOCKED");
+    });
+
+    // Re-render with task.hold = "BLOCKED" (optimistic board state)
+    const updatedTask = { ...FULL_TASK, hold: "BLOCKED" };
+    rerender(
+      <QueryClientProvider client={qc}>
+        <TaskEditPanel
+          task={updatedTask}
+          operations={operations}
+          cycles={cycles}
+          colLabel={FIXTURE_COL_LABEL}
+          onClose={vi.fn()}
+          onOpenPage={vi.fn()}
+          onOpenDossier={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    const reason = screen.getByTestId(
+      "edit-panel-hold-reason",
+    ) as HTMLInputElement;
+    expect(document.activeElement).toBe(reason);
+    expect(reason.selectionStart).toBe(0);
+    expect(reason.selectionEnd).toBe("BLOCKED".length);
+  });
+
+  it("does NOT focus the reason input when opening panel on an already-held task", () => {
+    wrap({ task: HELD_TASK });
+    const reason = screen.getByTestId(
+      "edit-panel-hold-reason",
+    ) as HTMLInputElement;
+    // Focus should be on the panel itself (tabIndex=-1), not on the reason input
+    expect(document.activeElement).not.toBe(reason);
   });
 });
 
@@ -638,6 +788,49 @@ describe("TaskEditPanel — scrim and escape close", () => {
     wrap({ onClose });
     await userEvent.click(screen.getByTestId("edit-panel"));
     expect(onClose).not.toHaveBeenCalled();
+  });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Focus containment
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("TaskEditPanel — focus containment", () => {
+  it("keeps Tab focus contained within the panel even past its focusable count", async () => {
+    // HELD_TASK renders the hold-reason input too, maximizing focusable count.
+    wrap({ task: HELD_TASK });
+    const panel = screen.getByTestId("edit-panel");
+
+    // Tab far more times than the panel has focusable elements — containment
+    // must wrap focus back inside rather than letting it escape to <body>.
+    for (let i = 0; i < 40; i++) {
+      await userEvent.tab();
+      expect(panel.contains(document.activeElement)).toBe(true);
+    }
+  });
+
+  it("restores focus to the opener element when the panel unmounts", async () => {
+    const opener = document.createElement("button");
+    opener.textContent = "open panel";
+    document.body.appendChild(opener);
+    opener.focus();
+    expect(document.activeElement).toBe(opener);
+
+    const { unmount } = wrap();
+    // Opening the panel must move focus into it, off the opener.
+    expect(document.activeElement).not.toBe(opener);
+
+    await act(async () => {
+      unmount();
+    });
+
+    // FocusScope's restoreFocus schedules the actual .focus() call inside a
+    // requestAnimationFrame (only fires once focus has fallen through to
+    // <body>), so the assertion must poll rather than check synchronously.
+    await waitFor(() => {
+      expect(document.activeElement).toBe(opener);
+    });
+    opener.remove();
   });
 });
 
