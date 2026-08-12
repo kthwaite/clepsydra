@@ -77,6 +77,25 @@ describe("feature documentation inventory", () => {
     ).toEqual([]);
   });
 
+  it("classifies persistent appearance controls as user-facing configuration", () => {
+    const appearanceCommandIds = [
+      "app.settings",
+      "app.themeToggle",
+      "sys.chrome",
+    ];
+
+    expect(
+      FEATURE_INVENTORY.filter((entry) =>
+        appearanceCommandIds.includes(entry.id),
+      ).map((entry) => [entry.id, entry.disposition]),
+    ).toEqual(
+      appearanceCommandIds.map((id) => [
+        id,
+        { kind: "reference", slug: "configuration" },
+      ]),
+    );
+  });
+
   it("uses unique inventory IDs", () => {
     const ids = FEATURE_INVENTORY.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);

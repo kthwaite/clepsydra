@@ -205,11 +205,7 @@ export const FEATURE_INVENTORY = [
     id: "sys.chrome",
     label: "Toggle diegetic chrome",
     surface: "command",
-    disposition: {
-      kind: "internal",
-      rationale:
-        "This presentation-only control removes application chrome for visual inspection and does not change vault behavior.",
-    },
+    disposition: { kind: "reference", slug: "configuration" },
   },
   {
     id: "sys.boot",
