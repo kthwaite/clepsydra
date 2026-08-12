@@ -99,7 +99,7 @@ describe("Gazetteer route filters", () => {
     if (typeof validateSearch !== "function") {
       throw new Error("Expected a callable search validator");
     }
-    expect(validateSearch(completeSearch)).toEqual(completeSearch);
+    expect(validateSearch(completeSearch as any)).toEqual(completeSearch);
   });
 
   it("preserves an explicit unknown Kind and surfaces the rejected query", () => {
@@ -107,7 +107,9 @@ describe("Gazetteer route filters", () => {
     if (typeof validateSearch !== "function") {
       throw new Error("Expected a callable search validator");
     }
-    expect(validateSearch({ ...completeSearch, kind: "RECIPE" })).toEqual({
+    expect(
+      validateSearch({ ...completeSearch, kind: "RECIPE" } as any),
+    ).toEqual({
       ...completeSearch,
       kind: "RECIPE",
     });

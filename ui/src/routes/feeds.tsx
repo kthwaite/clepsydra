@@ -1,4 +1,8 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  type SearchSchemaInput,
+  useNavigate,
+} from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
@@ -15,35 +19,32 @@ type FeedsSearch = FeedRiverFilters & {
 
 export const Route = createFileRoute("/feeds")({
   staticData: { codexView: "feeds" },
-  validateSearch: (search: Record<string, unknown>): FeedsSearch => {
+  validateSearch: (
+    search: Record<string, unknown> & SearchSchemaInput,
+  ): FeedsSearch => {
+    // Cast to Record to allow direct function calls in tests
+    const s = search as Record<string, unknown>;
     const parsedFeed =
-      typeof search.feed === "number"
-        ? search.feed
-        : typeof search.feed === "string"
-          ? Number(search.feed)
+      typeof s.feed === "number"
+        ? s.feed
+        : typeof s.feed === "string"
+          ? Number(s.feed)
           : undefined;
     const parsedEntry =
-      typeof search.entry === "number"
-        ? search.entry
-        : typeof search.entry === "string"
-          ? Number(search.entry)
+      typeof s.entry === "number"
+        ? s.entry
+        : typeof s.entry === "string"
+          ? Number(s.entry)
           : undefined;
     return {
-      view:
-        search.view === "unread" || search.view === "saved"
-          ? search.view
-          : "all",
-      group:
-        typeof search.group === "string" && search.group
-          ? search.group
-          : undefined,
+      view: s.view === "unread" || s.view === "saved" ? s.view : "all",
+      group: typeof s.group === "string" && s.group ? s.group : undefined,
       feed:
         parsedFeed !== undefined && Number.isFinite(parsedFeed)
           ? parsedFeed
           : undefined,
-      tag:
-        typeof search.tag === "string" && search.tag ? search.tag : undefined,
-      manage: search.manage === true || search.manage === "true",
+      tag: typeof s.tag === "string" && s.tag ? s.tag : undefined,
+      manage: s.manage === true || s.manage === "true",
       entry:
         parsedEntry !== undefined &&
         Number.isSafeInteger(parsedEntry) &&

@@ -193,7 +193,7 @@ function CommandPaletteContent() {
       action: () =>
         navigate({
           to: "/gazetteer",
-          search: { tags: [t.tag], sort: "ts", page: 1 },
+          search: { tags: [t.tag] },
         }),
     }));
   }, [tags, navigate]);

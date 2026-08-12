@@ -306,7 +306,7 @@ export function Atrium() {
                 onClick={() =>
                   navigate({
                     to: "/gazetteer",
-                    search: { tags: [t.tag] } as never,
+                    search: { tags: [t.tag] },
                   })
                 }
                 className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(60px,1fr)_32px] items-center gap-2 text-left md:grid-cols-[120px_1fr_36px]"

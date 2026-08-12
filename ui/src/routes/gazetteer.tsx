@@ -1,4 +1,8 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  type SearchSchemaInput,
+  useNavigate,
+} from "@tanstack/react-router";
 import { Gazetteer, type GazetteerFilters } from "#/components/codex/Gazetteer";
 import type { GazetteerSort } from "#/components/codex/gazetteer-filter";
 import { KINDS, type Kind } from "#/lib/kind";
@@ -20,13 +24,17 @@ const SORTS: GazetteerSort[] = ["ts", "id", "title", "words"];
 
 export const Route = createFileRoute("/gazetteer")({
   staticData: { codexView: "gazetteer" },
-  validateSearch: (search: Record<string, unknown>): GazetteerSearch => {
-    const rawTags = Array.isArray(search.tags)
-      ? search.tags
-      : typeof search.tags === "string"
-        ? search.tags.split(",")
-        : typeof search.tag === "string"
-          ? [search.tag]
+  validateSearch: (
+    search: Record<string, unknown> & SearchSchemaInput,
+  ): GazetteerSearch => {
+    // Cast to Record to allow direct function calls in tests
+    const s = search as Record<string, unknown>;
+    const rawTags = Array.isArray(s.tags)
+      ? s.tags
+      : typeof s.tags === "string"
+        ? s.tags.split(",")
+        : typeof s.tag === "string"
+          ? [s.tag]
           : [];
     const tags = [
       ...new Set(
@@ -37,27 +45,22 @@ export const Route = createFileRoute("/gazetteer")({
       ),
     ];
     const rawKind =
-      typeof search.kind === "string" ? search.kind.toUpperCase() : undefined;
+      typeof s.kind === "string" ? s.kind.toUpperCase() : undefined;
     const kind = rawKind;
     const project =
-      typeof search.project === "string" && search.project.trim()
-        ? search.project.trim()
+      typeof s.project === "string" && s.project.trim()
+        ? s.project.trim()
         : undefined;
-    const sort = SORTS.includes(search.sort as GazetteerSort)
-      ? (search.sort as GazetteerSort)
+    const sort = SORTS.includes(s.sort as GazetteerSort)
+      ? (s.sort as GazetteerSort)
       : "ts";
     const page =
-      typeof search.page === "number" &&
-      Number.isFinite(search.page) &&
-      search.page >= 1
-        ? Math.floor(search.page)
+      typeof s.page === "number" && Number.isFinite(s.page) && s.page >= 1
+        ? Math.floor(s.page)
         : 1;
     return {
-      ...search,
-      q:
-        typeof search.q === "string" && search.q.length > 0
-          ? search.q
-          : undefined,
+      ...s,
+      q: typeof s.q === "string" && s.q.length > 0 ? s.q : undefined,
       tags: tags.length > 0 ? tags : undefined,
       kind,
       project,
