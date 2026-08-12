@@ -134,12 +134,15 @@ describe("NoteProtectionDialog", () => {
     expect(screen.getByText(/path.*notes\/private\.md/i)).toBeVisible();
     expect(screen.getByText(/attachments.*not encrypted/i)).toBeVisible();
     expect(screen.getByText(/history.*not encrypted/i)).toBeVisible();
+    const protect = screen.getByRole("button", { name: "Protect note" });
+    expect(protect).toBeDisabled();
     await user.click(
       screen.getByRole("checkbox", {
-        name: /understand what remains visible/i,
+        name: "I understand what remains visible and have exported a recovery identity.",
       }),
     );
-    await user.click(screen.getByRole("button", { name: "Protect note" }));
+    expect(protect).toBeEnabled();
+    await user.click(protect);
 
     await waitFor(() => expect(protectMutateAsyncMock).toHaveBeenCalledOnce());
     expect(events.slice(0, 2)).toEqual(["flush", "plaintext"]);
@@ -220,8 +223,11 @@ describe("NoteProtectionDialog", () => {
     const remove = screen.getByRole("button", { name: "Remove encryption" });
     expect(remove).toBeDisabled();
     await user.click(
-      screen.getByRole("checkbox", { name: /make this note plaintext/i }),
+      screen.getByRole("checkbox", {
+        name: "I understand this will make this note plaintext on disk.",
+      }),
     );
+    expect(remove).toBeEnabled();
     await user.click(remove);
 
     await waitFor(() =>

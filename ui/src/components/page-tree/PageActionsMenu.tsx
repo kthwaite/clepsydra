@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useState } from "react";
 import {
   type MutationPreview,
   type MutationPreviewRequest,
@@ -9,6 +9,7 @@ import { useDeletePage, useMovePage } from "#/api/pages";
 import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDialog";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
+import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 
 type PageAction = "move" | "delete";
@@ -43,7 +44,6 @@ export function PageActionsMenu({
   onMoved: (path: string) => void;
   onDeleted: () => void;
 }) {
-  const rewriteId = useId();
   const previewMutation = usePreviewMutation();
   const movePage = useMovePage();
   const deletePage = useDeletePage();
@@ -199,29 +199,25 @@ export function PageActionsMenu({
           />
         ) : (
           <div>
-            <label
-              htmlFor={rewriteId}
-              className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-            >
-              Inbound links
-            </label>
-            <select
-              id={rewriteId}
-              value={rewrite}
-              onChange={(event) => {
-                setRewrite(event.target.value as MutationRewrite);
+            <Select
+              label="Inbound links"
+              selectedKey={rewrite}
+              onSelectionChange={(key) => {
+                setRewrite(key as MutationRewrite);
                 setError(null);
               }}
-              disabled={previewMutation.isPending}
-              className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
+              isDisabled={previewMutation.isPending}
+              className="w-full"
+              description="The preview will show every backlink rewrite before deletion."
             >
-              <option value="plain_text">Preserve labels as plain text</option>
-              <option value="unlink">Remove link markup</option>
-              <option value="none">Leave unresolved links unchanged</option>
-            </select>
-            <p className="mt-2 text-xs text-muted-foreground">
-              The preview will show every backlink rewrite before deletion.
-            </p>
+              <SelectItem id="plain_text">
+                Preserve labels as plain text
+              </SelectItem>
+              <SelectItem id="unlink">Remove link markup</SelectItem>
+              <SelectItem id="none">
+                Leave unresolved links unchanged
+              </SelectItem>
+            </Select>
             {error ? (
               <p className="mt-2 text-xs text-destructive">{error}</p>
             ) : null}

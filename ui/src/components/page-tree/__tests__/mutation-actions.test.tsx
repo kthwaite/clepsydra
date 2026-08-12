@@ -1,5 +1,5 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FolderActionsMenu } from "#/components/page-tree/FolderActionsMenu";
 import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDialog";
@@ -59,6 +59,20 @@ vi.mock("#/api/folders", () => ({
     isPending: false,
   }),
 }));
+
+async function chooseOption(
+  user: UserEvent,
+  dialog: HTMLElement,
+  fieldName: string,
+  option: string,
+) {
+  await user.click(
+    within(dialog).getByRole("button", {
+      name: new RegExp(fieldName, "i"),
+    }),
+  );
+  await user.click(screen.getByRole("option", { name: option }));
+}
 
 const movePreview = {
   file_ops: [
@@ -180,9 +194,11 @@ describe("PageActionsMenu", () => {
     );
 
     await user.click(screen.getByRole("button", { name: /^delete page$/i }));
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: /inbound links/i }),
-      "unlink",
+    await chooseOption(
+      user,
+      screen.getByRole("dialog"),
+      "Inbound links",
+      "Remove link markup",
     );
     await user.click(screen.getByRole("button", { name: /preview deletion/i }));
 
@@ -264,10 +280,7 @@ describe("FolderActionsMenu", () => {
       params: { path: { path: "notes/new" } },
     });
 
-    await user.selectOptions(
-      within(dialog).getByRole("combobox", { name: /folder to move/i }),
-      "notes",
-    );
+    await chooseOption(user, dialog, "Folder to move", "notes");
     await user.type(
       within(dialog).getByRole("textbox", { name: /folder destination/i }),
       "archive/notes",
@@ -294,8 +307,10 @@ describe("FolderActionsMenu", () => {
     await user.click(screen.getByRole("button", { name: /manage folders/i }));
     const dialog = screen.getByRole("dialog");
 
-    await user.selectOptions(
-      within(dialog).getByRole("combobox", { name: /folder to delete/i }),
+    await chooseOption(
+      user,
+      dialog,
+      "Folder to delete",
       "notes/research",
     );
     await user.click(
@@ -304,16 +319,22 @@ describe("FolderActionsMenu", () => {
     expect(
       screen.getByText(/backend cannot preview folder deletion/i),
     ).toBeVisible();
+    const confirmDeletion = screen.getByRole("button", {
+      name: /confirm folder deletion/i,
+    });
+    expect(confirmDeletion).toBeDisabled();
     const confirm = screen.getByRole("textbox", {
       name: /type notes\/research to confirm/i,
     });
     await user.type(confirm, "notes/research");
-    await user.click(
-      screen.getByRole("checkbox", { name: /delete contents recursively/i }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: /confirm folder deletion/i }),
-    );
+    expect(confirmDeletion).toBeEnabled();
+    const recursive = screen.getByRole("checkbox", {
+      name: /delete contents recursively/i,
+    });
+    expect(recursive).not.toBeChecked();
+    await user.click(recursive);
+    expect(recursive).toBeChecked();
+    await user.click(confirmDeletion);
 
     await waitFor(() =>
       expect(mocks.deleteFolder).toHaveBeenCalledWith({

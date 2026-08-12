@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AnnotationDetail,
@@ -113,6 +113,17 @@ vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => mocks.openPage,
 }));
 
+async function chooseOption(
+  user: UserEvent,
+  name: string,
+  option: string,
+  dialog?: HTMLElement,
+) {
+  const queries = dialog ? within(dialog) : screen;
+  await user.click(queries.getByRole("button", { name: new RegExp(name) }));
+  await user.click(screen.getByRole("option", { name: option }));
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.worksState.data = {
@@ -196,10 +207,8 @@ describe("AcademicLibrary", () => {
       within(dialog).getByRole("textbox", { name: "Title" }),
       work.title,
     );
-    await user.selectOptions(
-      within(dialog).getByRole("combobox", { name: "Work type" }),
-      "paper",
-    );
+    await chooseOption(user, "Work type", "Book", dialog);
+    await chooseOption(user, "Reading status", "Reading", dialog);
     await user.type(
       within(dialog).getByRole("textbox", { name: "Authors" }),
       "Ashish Vaswani, Noam Shazeer",
@@ -215,9 +224,10 @@ describe("AcademicLibrary", () => {
     expect(mocks.createWork).toHaveBeenCalledWith({
       body: expect.objectContaining({
         title: work.title,
-        work_type: "paper",
+        work_type: "book",
         authors: ["Ashish Vaswani", "Noam Shazeer"],
         year: 2017,
+        status: "reading",
       }),
     });
   });
@@ -243,10 +253,7 @@ describe("WorkDetail", () => {
     const title = within(dialog).getByRole("textbox", { name: "Title" });
     await user.clear(title);
     await user.type(title, "Attention Revisited");
-    await user.selectOptions(
-      within(dialog).getByRole("combobox", { name: "Reading status" }),
-      "done",
-    );
+    await chooseOption(user, "Reading status", "Done", dialog);
     await user.click(
       within(dialog).getByRole("button", { name: "Save metadata" }),
     );
@@ -277,10 +284,7 @@ describe("WorkDetail", () => {
     await user.clear(
       within(dialog).getByRole("textbox", { name: "Citation key" }),
     );
-    await user.selectOptions(
-      within(dialog).getByRole("combobox", { name: "Reading status" }),
-      "",
-    );
+    await chooseOption(user, "Reading status", "Unspecified", dialog);
     await user.click(
       within(dialog).getByRole("button", { name: "Save metadata" }),
     );
@@ -312,10 +316,7 @@ describe("WorkDetail", () => {
 
     await user.click(screen.getByRole("button", { name: "Add annotation" }));
     const dialog = screen.getByRole("dialog", { name: "Add annotation" });
-    await user.selectOptions(
-      within(dialog).getByRole("combobox", { name: "Annotation type" }),
-      "note",
-    );
+    await chooseOption(user, "Annotation type", "Note", dialog);
     await user.type(
       within(dialog).getByRole("textbox", { name: "Annotation body" }),
       "Compare the residual stream.",
@@ -372,10 +373,10 @@ describe("ImportDialog", () => {
     async ({ mode, label, input, mutation, expected }) => {
       const user = userEvent.setup();
       render(<ImportDialog isOpen onClose={vi.fn()} />);
-      await user.selectOptions(
-        screen.getByRole("combobox", { name: "Import source" }),
-        mode,
-      );
+      const dialog = screen.getByRole("dialog", {
+        name: "Import academic works",
+      });
+      await chooseOption(user, "Import source", label, dialog);
       fireEvent.change(screen.getByRole("textbox", { name: label }), {
         target: { value: input },
       });
@@ -396,28 +397,40 @@ describe("ImportDialog", () => {
   it("supports safe Zotero dry runs and explicit conflict policy", async () => {
     const user = userEvent.setup();
     render(<ImportDialog isOpen onClose={vi.fn()} />);
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Import source" }),
-      "zotero",
-    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Import academic works",
+    });
+    await chooseOption(user, "Import source", "Zotero", dialog);
     await user.type(
       screen.getByRole("textbox", { name: "Zotero database path" }),
       "/Users/example/Zotero/zotero.sqlite",
     );
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Conflict policy" }),
-      "manual",
+    await chooseOption(
+      user,
+      "Conflict policy",
+      "Report conflicts only",
+      dialog,
     );
     await user.click(
-      screen.getByRole("button", { name: "Preview Zotero import" }),
+      within(dialog).getByRole("checkbox", {
+        name: "Dry run — inspect results without writing pages",
+      }),
+    );
+    await user.click(
+      within(dialog).getByRole("checkbox", {
+        name: "Use and update the Zotero import checkpoint",
+      }),
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Import Zotero" }),
     );
 
     expect(mocks.importZotero).toHaveBeenCalledWith({
       body: {
         database_path: "/Users/example/Zotero/zotero.sqlite",
         conflict_policy: "manual",
-        dry_run: true,
-        auto_checkpoint: true,
+        dry_run: false,
+        auto_checkpoint: false,
       },
     });
     expect(await screen.findByText("skipped")).toBeVisible();
@@ -443,10 +456,10 @@ describe("ImportDialog", () => {
       ],
     });
     render(<ImportDialog isOpen onClose={vi.fn()} />);
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Import source" }),
-      "zotero",
-    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Import academic works",
+    });
+    await chooseOption(user, "Import source", "Zotero", dialog);
     await user.click(
       screen.getByRole("button", { name: "Preview Zotero import" }),
     );
@@ -460,10 +473,10 @@ describe("ImportDialog", () => {
     const user = userEvent.setup();
     mocks.importZotero.mockResolvedValueOnce({ results: [] });
     render(<ImportDialog isOpen onClose={vi.fn()} />);
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Import source" }),
-      "zotero",
-    );
+    const dialog = screen.getByRole("dialog", {
+      name: "Import academic works",
+    });
+    await chooseOption(user, "Import source", "Zotero", dialog);
     await user.click(
       screen.getByRole("button", { name: "Preview Zotero import" }),
     );

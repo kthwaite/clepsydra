@@ -12,7 +12,9 @@ import {
 } from "#/api/index";
 import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDialog";
 import { Button } from "#/components/ui/button";
+import { Checkbox } from "#/components/ui/checkbox";
 import { Dialog } from "#/components/ui/dialog";
+import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 
 function mutationError(error: unknown): string {
@@ -44,28 +46,21 @@ function FolderSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <div>
-      <label
-        htmlFor={id}
-        className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-      >
-        {label}
-      </label>
-      <select
-        id={id}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        className="mt-2 w-full border border-input bg-background px-3 py-2 text-sm"
-      >
-        <option value="">Select a folder</option>
-        {paths.map((path) => (
-          <option key={path} value={path}>
-            {path}
-          </option>
-        ))}
-      </select>
-    </div>
+    <Select
+      id={id}
+      label={label}
+      selectedKey={value}
+      onSelectionChange={(key) => onChange(key as string)}
+      isDisabled={disabled}
+      className="w-full"
+    >
+      <SelectItem id="">Select a folder</SelectItem>
+      {paths.map((path) => (
+        <SelectItem key={path} id={path}>
+          {path}
+        </SelectItem>
+      ))}
+    </Select>
   );
 }
 
@@ -392,21 +387,14 @@ export function FolderActionsMenu({
             isDisabled={deleteFolder.isPending}
             autoFocus
           />
-          <label className="flex items-start gap-2 text-sm text-muted-foreground">
-            <input
-              type="checkbox"
-              checked={recursive}
-              onChange={(event) => setRecursive(event.target.checked)}
-              disabled={deleteFolder.isPending}
-              className="mt-0.5"
-            />
-            <span>
-              Delete contents recursively
-              <span className="block text-xs">
-                Leave unchecked to delete empty folders only.
-              </span>
-            </span>
-          </label>
+          <Checkbox
+            isSelected={recursive}
+            onChange={setRecursive}
+            isDisabled={deleteFolder.isPending}
+            description="Leave unchecked to delete empty folders only."
+          >
+            Delete contents recursively
+          </Checkbox>
           {error ? <p className="text-xs text-destructive">{error}</p> : null}
         </div>
       </Dialog>
