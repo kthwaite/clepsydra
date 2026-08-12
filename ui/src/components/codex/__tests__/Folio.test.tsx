@@ -101,6 +101,7 @@ vi.mock("@tanstack/react-router", () => ({
     useBlockerMock(options);
     return blockerState.current;
   },
+  useLocation: () => ({ pathname: "/workspace" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
 }));
