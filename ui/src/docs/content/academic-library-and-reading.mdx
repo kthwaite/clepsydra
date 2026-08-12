@@ -1,0 +1,133 @@
+export const meta = {
+  slug: "academic-library-and-reading",
+  title: "Academic Library and Reading",
+  description: "Import, deduplicate, organize, read, and annotate academic work pages."
+}
+
+Clepsydra stores each work and annotation as an ordinary Markdown folio. The
+Academic Library at `/academic` is an indexed reading workspace over those
+files: it does not replace the vault or introduce a separate bibliographic
+source of truth.
+
+## Prerequisites
+
+- Start the Clepsydra server with network access for DOI and ISBN lookups.
+- Open **Academic Library** from the command palette or navigate to `/academic`.
+- Configure `academic.papers_folder`, `academic.books_folder`, and
+  `academic.annotations_folder` if the defaults under `library/` are unsuitable.
+- For Zotero import, Clepsydra must be able to read the Zotero SQLite database
+  and any linked or stored PDF paths you expect it to record.
+
+## Workflow
+
+### Add and find works
+
+Choose **Add work** to create a paper, book, thesis, report, or other work. A
+work can include authors, year, reading status (`unread`, `reading`, or `done`),
+citation key, and tags. Books go to the configured books folder; other work
+types go to the papers folder.
+
+The library loads work summaries in batches and searches the currently loaded
+items by title, path, citation key, work type, status, author, tag, and year.
+Choose a work to review metadata and annotations, or **Open work page** to edit
+the underlying Markdown Folio. Use **Edit metadata** for title, authors, year,
+status, rating from 1 to 5, venue, publisher, citation key, and tags.
+
+### Import BibTeX, DOI, ISBN, and Zotero
+
+Choose **Import** and select a source:
+
+- **BibTeX** accepts one or more entries. DOI, ISBN, arXiv value, URL, authors,
+  year, venue or publisher, work type, and the BibTeX citation key are mapped
+  when present. arXiv is metadata extracted from BibTeX or Zotero; there is no
+  shipped standalone arXiv network importer.
+- **DOI** accepts a complete identifier such as `10.1000/example`, checks the
+  local index, and then queries Crossref when no match exists.
+- **ISBN** accepts ISBN-10 or ISBN-13 with optional spaces and hyphens, normalizes
+  and validates it, checks the local index, and queries Open Library when no
+  match exists. The command-palette barcode flow uses this same ISBN importer.
+- **Zotero** reads a database path, optionally limits by collection or changed
+  timestamp, and can use a saved import checkpoint. Preview with **Dry run**
+  before writing pages.
+
+Clepsydra deduplicates work by DOI, ISBN, and citation key; Zotero additionally
+uses its stable item key. A matching BibTeX, DOI, or ISBN import is reported as
+`skipped` and points to the existing page. Citation keys must be unique for
+manual creation and metadata edits. Generated Zotero keys avoid keys already in
+the index and earlier items in the same run.
+
+Zotero offers three conflict policies:
+
+- **Skip existing works** preserves local metadata.
+- **Zotero metadata wins** updates mapped source fields while preserving the
+  page body and local-only frontmatter.
+- **Report conflicts only** returns field-by-field local and Zotero values
+  without applying them.
+
+A dry run reports `would_create`, `skipped`, or `conflict` without creating or
+updating work pages. During a real multi-item import, each result can also be
+`created` or `error`. Items are processed independently; the whole Zotero or
+BibTeX run is not one all-or-none transaction. Review every result. A Zotero
+checkpoint is not advanced when any item reports `error`; checkpoint-write
+failure is returned separately after item processing.
+
+### Read and annotate a work
+
+Select a work in `/academic` to see its reading status, rating, identifiers,
+notes, and annotation list. **Add annotation** creates a separate Markdown page
+linked to the work. Choose `highlight` or `note`, enter the annotation body, and
+optionally record a source asset string, positive page number, quote, and tags.
+Opening an annotation takes you to its Folio.
+
+This is the shipped reading and annotation workspace. It records user-entered
+highlights and locations, but it does not render a PDF, select text inside a
+PDF, import Zotero highlights, or synchronize PDF annotations. Do not treat an
+`assets` path or `urls.pdf` value as an in-app PDF annotation feature.
+
+### Understand Zotero PDF references
+
+For Zotero items, imported-file and linked-file PDFs are recorded as filesystem
+paths in the work's `assets` metadata. Imported or linked URLs can populate the
+work's PDF URL. Clepsydra records those references; it does not copy those PDF
+bytes into the vault attachment folder or into archive content-addressed
+storage.
+
+## Failures and conflicts
+
+- Invalid BibTeX, DOI, ISBN, rating, source page, or missing title/body input is
+  rejected with an error. DOI and ISBN metadata lookup also depends on Crossref
+  or Open Library being reachable and knowing the item.
+- A duplicate citation key returns a conflict. Choose a genuinely unique key;
+  do not rename another work merely to conceal a duplicate identifier.
+- A generated title path can already exist even when identifiers do not match.
+  Creation then fails rather than overwriting the existing Folio.
+- Zotero preview is read-only. For a real import, inspect every item status:
+  earlier items may have committed before a later item reports `error`.
+- `source_wins` intentionally overwrites mapped bibliographic metadata. Use
+  `manual` first when local corrections must be compared rather than replaced.
+- A missing Zotero database, unreadable SQLite file, malformed collection or
+  timestamp filter, or inaccessible metadata service fails the relevant import.
+- Recorded PDF asset paths can become stale if Zotero storage moves. Clepsydra
+  does not repair, upload, or encrypt those external files.
+
+## Privacy
+
+Academic work metadata, citation keys, reading status, ratings, annotations,
+quotes, source paths, and source page numbers are plaintext in ordinary Folios
+and the local index unless the individual Folio is protected. Zotero database
+paths and PDF asset paths can reveal usernames and library layout. DOI, ISBN,
+and feed-style network lookups disclose the requested identifier to the named
+external service.
+
+PDFs referenced by `assets` remain wherever Zotero or the filesystem placed
+them. They are not encrypted attachments, and protected-page encryption does
+not extend to those files. See the attachment guide before copying a sensitive
+PDF into the vault: shipped attachments are plaintext too.
+
+## Related
+
+- [Books and Reading](/docs/books-and-reading) for command-palette ISBN and barcode capture
+- [Pages and Authoring](/docs/pages-and-authoring)
+- [Bases](/docs/bases) for additional saved library views
+- [Attachments and Media](/docs/attachments-and-media)
+- [Capture, Feeds, and Archives](/docs/capture-feeds-and-archives) for CAS distinctions and backups

@@ -23,6 +23,9 @@ const WORKFLOW_GUIDE_SLUGS = [
   "editor-workflows",
   "attachments-and-media",
   "encryption-and-protected-pages",
+  "tasks-agenda-journals-and-board",
+  "academic-library-and-reading",
+  "capture-feeds-and-archives",
 ] as const;
 
 const WORKFLOW_GUIDE_HEADINGS = [

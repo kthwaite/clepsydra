@@ -1,0 +1,156 @@
+export const meta = {
+  slug: "capture-feeds-and-archives",
+  title: "Capture, Feeds, and Archives",
+  description: "Capture web pages, read private feeds, retain archive blobs, and back up their shipped state."
+}
+
+Clepsydra has two separate inbound-web workflows. The browser extension creates
+Markdown archive Folios and stores captured resources in content-addressed
+storage (CAS). The feed reader keeps subscriptions in `feeds.md` and fetched
+entry state in a private local SQLite database. Neither workflow publishes a
+website or exposes a public feed.
+
+## Prerequisites
+
+- Start the Clepsydra server and open `/feeds` for the private reader.
+- Follow the [Browser Extension](/docs/browser-extension) guide to build and
+  connect the capture client. Archiving must be enabled.
+- Review `[archive]` settings, especially `cas_path`, path prefix, and request
+  limits. The default CAS is `~/.clepsydra/cas`, outside the vault.
+- Keep enough storage for vault pages, `.clepsydra/feeds.db`, and CAS blobs.
+
+## Workflow
+
+### Capture a browser page
+
+On a normal `http://` or `https://` page, choose **Capture This Page** in the
+extension or use its keyboard shortcut. The client sends extracted Markdown,
+source and canonical URLs, title, capture time, tags, content hash, snapshot
+hash, and base64 resource blobs to `POST /api/vault/archive`.
+
+The server verifies the Markdown and every blob against its declared SHA-256
+hash, enforces per-blob and total limits, and creates a non-colliding archive
+Folio under the configured prefix and domain. A repeated URL with the same
+content returns **already exists** without adding references. A repeated URL
+with different content returns HTTP 409; the shipped extension only reports
+**Content Changed** and does not update or retry the existing archive.
+
+### Understand archive Folios and CAS blobs
+
+The archive Folio contains editable Markdown plus archive metadata. Its snapshot
+and resource bytes live in the separate CAS, keyed as `sha256:<digest>`. Equal
+bytes are stored once and their reference count is incremented. The server can
+serve a referenced blob from `/api/vault/cas/<hash>`.
+
+Deleting an archive Folio through Clepsydra decrements each distinct snapshot
+and resource reference. A zero-reference blob is retained until a CAS garbage
+collection call removes blobs older than the configured minimum age. Although
+`archive.gc_min_age_days` exists, no shipped UI or CLI command invokes CAS
+collection; plan storage and maintenance accordingly rather than assuming an
+automatic retention purge.
+
+CAS blobs are not editable note attachments. Attachments are user-managed files
+beneath `vault.attachment_folder`, referenced by attachment URLs and deleted
+explicitly through the attachment API. CAS blobs are immutable archived bytes,
+deduplicated by content hash and reference-counted by archive pages. Editing an
+archive Folio's Markdown does not edit or replace either kind of byte.
+
+### Subscribe and read privately
+
+Open `/feeds`, choose **Manage subscriptions**, and enter an RSS/Atom feed URL
+or a site URL from which Clepsydra can discover one. Optional groups organize
+subscriptions. The human-readable manifest is `feeds.md`; malformed lines are
+reported as diagnostics, and reconciliation preserves the last good
+subscription set rather than replacing it with a warning-bearing candidate.
+
+Return to the river and switch among **UNREAD**, **ALL**, and **SAVED**. Filter
+by group, feed, or tag. Entry read and bookmark state, cached content, fetch
+metadata, and counters live in `.clepsydra/feeds.db`. **Refresh feeds** schedules
+fetches; failures are recorded per feed and later attempts use backoff. Retention
+quotas bound cached entries and content, so the reader is not a permanent archive
+of every feed item.
+
+Subscription edits use a manifest revision. A stale edit, move, delete, or OPML
+import is rejected instead of overwriting a newer `feeds.md`; reload and reapply
+the intent. OPML import adds subscriptions and maps folders to groups. **Export
+OPML** downloads the subscription list only. This is reader interoperability,
+not publishing or exporting vault content.
+
+The reader sends outbound HTTP(S) requests to subscribed sites. Its checked
+client rejects non-global destinations, disables proxy use, revalidates each
+redirect, limits redirects, response bytes, and an absolute request deadline,
+and allows only absolute HTTP(S) entry links. These controls reduce SSRF risk;
+they do not make remote content trustworthy or private from the publisher.
+
+### Back up and recover shipped state
+
+Run:
+
+```bash
+clep backup --destination /path/outside/the-vault
+```
+
+The command creates a timestamped uncompressed `.tar`. It walks vault files
+without following symlinks, excludes the rebuildable `.clepsydra/cache.db`,
+and substitutes a consistent snapshot of `.clepsydra/feeds.db` for its live
+SQLite/WAL files. The archive therefore includes ordinary Folios, `feeds.md`,
+plain attachments stored inside the vault, and the feed reader database.
+
+The backup does **not** automatically include the default CAS because
+`~/.clepsydra/cas` is outside the vault. If `archive.cas_path` points outside the
+vault, back up that directory separately and keep it consistent with the vault's
+archive Folios. Likewise, external Zotero PDF asset paths are outside this
+backup. If a custom CAS path is inside the vault, it is walked as ordinary vault
+content, but restore testing is still your responsibility.
+
+There is no shipped restore command. Recovery means stopping writers, safely
+extracting the tar to the intended vault location, restoring any separately
+backed-up CAS and external assets, and starting Clepsydra so the derived index
+can rebuild. Test this procedure on a separate location; a backup file's
+existence alone is not proof of recoverability.
+
+## Failures and conflicts
+
+- Browser capture is refused when archiving is disabled, a hash is wrong, a blob
+  or request is too large, the generated path is invalid, or page publication
+  fails. CAS references touched before a later failure are compensated; any
+  compensation failure is attached to the primary error and must be investigated.
+- HTTP 409 on an existing URL with changed content is non-destructive. The
+  shipped extension reports the conflict without updating or retrying; capture
+  settings do not currently turn it into replacement behavior.
+- Feed discovery or refresh can fail on invalid URLs, non-global destinations,
+  DNS, timeout, redirect, response-limit, HTTP-status, or parse errors. The
+  existing subscription remains and its error is surfaced for retry.
+- Manifest diagnostics preserve the last good subscription set. Fix the exact
+  `feeds.md` line before expecting new subscriptions to reconcile.
+- Stale feed-manifest mutations return a revision conflict. Reload rather than
+  retrying an old revision blindly.
+- Backup aborts if it cannot validate or snapshot feed storage, traverse a vault
+  entry, or finish the archive. A partial file is not committed as the final
+  backup.
+- Restoring only vault Markdown leaves externally stored CAS bytes absent;
+  archive metadata can then point to missing blobs. Restoring only CAS leaves no
+  archive Folios to own its references.
+
+## Privacy
+
+Captured pages, URLs, titles, tags, screenshots, resources, and archive Markdown
+are plaintext. CAS uses content addressing and deduplication, not encryption;
+hashes, MIME types, sizes, and equality can leak information. Browser capture
+can include material from authenticated pages, so inspect what was captured and
+protect both the vault and CAS directory.
+
+Feed subscriptions in `feeds.md`, cached entry content and reading state in
+`.clepsydra/feeds.db`, OPML exports, attachments, and `.tar` backups are also
+plaintext. A private reader means Clepsydra does not publish the river; it does
+not hide subscription requests from publishers or the network. The project does
+not ship public publishing/export from these features, encrypted attachments,
+or encrypted backup archives.
+
+## Related
+
+- [Browser Extension](/docs/browser-extension)
+- [Attachments and Media](/docs/attachments-and-media)
+- [Academic Library and Reading](/docs/academic-library-and-reading)
+- [Configuration](/docs/configuration) for archive and feed limits
+- [CLI](/docs/cli) for command installation and configuration lookup

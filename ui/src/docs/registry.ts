@@ -1,9 +1,11 @@
 import { lazy } from "react";
+import academicLibraryAndReadingSource from "#/docs/content/academic-library-and-reading.mdx?raw";
 import attachmentsAndMediaSource from "#/docs/content/attachments-and-media.mdx?raw";
 import basesSource from "#/docs/content/bases.mdx?raw";
 import blockReferencesAndTransclusionSource from "#/docs/content/block-references-and-transclusion.mdx?raw";
 import booksAndReadingSource from "#/docs/content/books-and-reading.mdx?raw";
 import browserExtensionSource from "#/docs/content/browser-extension.mdx?raw";
+import captureFeedsAndArchivesSource from "#/docs/content/capture-feeds-and-archives.mdx?raw";
 import cliSource from "#/docs/content/cli.mdx?raw";
 import configurationSource from "#/docs/content/configuration.mdx?raw";
 import editorWorkflowsSource from "#/docs/content/editor-workflows.mdx?raw";
@@ -13,6 +15,7 @@ import linksSearchGraphAndRepairSource from "#/docs/content/links-search-graph-a
 import lspSource from "#/docs/content/lsp.mdx?raw";
 import mcpSource from "#/docs/content/mcp.mdx?raw";
 import pagesAndAuthoringSource from "#/docs/content/pages-and-authoring.mdx?raw";
+import tasksAgendaJournalsAndBoardSource from "#/docs/content/tasks-agenda-journals-and-board.mdx?raw";
 import troubleshootingSource from "#/docs/content/troubleshooting.mdx?raw";
 
 export { DEFAULT_DOC_SLUG } from "#/docs/constants";
@@ -48,6 +51,12 @@ const BlockReferencesAndTransclusionGuide = lazy(
   () => import("#/docs/content/block-references-and-transclusion.mdx"),
 );
 const BasesGuide = lazy(() => import("#/docs/content/bases.mdx"));
+const TasksAgendaJournalsAndBoardGuide = lazy(
+  () => import("#/docs/content/tasks-agenda-journals-and-board.mdx"),
+);
+const AcademicLibraryAndReadingGuide = lazy(
+  () => import("#/docs/content/academic-library-and-reading.mdx"),
+);
 const BooksAndReadingGuide = lazy(
   () => import("#/docs/content/books-and-reading.mdx"),
 );
@@ -55,6 +64,9 @@ const LspGuide = lazy(() => import("#/docs/content/lsp.mdx"));
 const McpGuide = lazy(() => import("#/docs/content/mcp.mdx"));
 const BrowserExtensionGuide = lazy(
   () => import("#/docs/content/browser-extension.mdx"),
+);
+const CaptureFeedsAndArchivesGuide = lazy(
+  () => import("#/docs/content/capture-feeds-and-archives.mdx"),
 );
 
 const gettingStartedMeta = {
@@ -141,6 +153,28 @@ const basesMeta = {
     "views",
   ],
 } satisfies DocMeta;
+const tasksAgendaJournalsAndBoardMeta = {
+  slug: "tasks-agenda-journals-and-board",
+  title: "Tasks, Agenda, Journals, and Board",
+  description:
+    "Plan work with Markdown tasks, agenda views, daily journals, and atomic board cycles.",
+  keywords: ["tasks", "agenda", "journals", "board", "cycles", "carryover"],
+} satisfies DocMeta;
+const academicLibraryAndReadingMeta = {
+  slug: "academic-library-and-reading",
+  title: "Academic Library and Reading",
+  description:
+    "Import, deduplicate, organize, read, and annotate academic work pages.",
+  keywords: [
+    "academic",
+    "Zotero",
+    "BibTeX",
+    "DOI",
+    "arXiv",
+    "citations",
+    "annotations",
+  ],
+} satisfies DocMeta;
 const booksAndReadingMeta = {
   slug: "books-and-reading",
   title: "Books and Reading",
@@ -167,6 +201,13 @@ const browserExtensionMeta = {
   description:
     "Build, install, configure, and use the Clepsydra web archive extension.",
   keywords: ["browser", "extension", "web archive", "capture"],
+} satisfies DocMeta;
+const captureFeedsAndArchivesMeta = {
+  slug: "capture-feeds-and-archives",
+  title: "Capture, Feeds, and Archives",
+  description:
+    "Capture web pages, read private feeds, retain archive blobs, and back up their shipped state.",
+  keywords: ["capture", "feeds", "RSS", "Atom", "archive", "CAS", "backup"],
 } satisfies DocMeta;
 
 function page(
@@ -239,6 +280,18 @@ const bases = page(
   BasesGuide,
   basesSource,
 );
+const tasksAgendaJournalsAndBoard = page(
+  "work-reading",
+  tasksAgendaJournalsAndBoardMeta,
+  TasksAgendaJournalsAndBoardGuide,
+  tasksAgendaJournalsAndBoardSource,
+);
+const academicLibraryAndReading = page(
+  "work-reading",
+  academicLibraryAndReadingMeta,
+  AcademicLibraryAndReadingGuide,
+  academicLibraryAndReadingSource,
+);
 const booksAndReading = page(
   "work-reading",
   booksAndReadingMeta,
@@ -252,6 +305,12 @@ const browserExtension = page(
   browserExtensionMeta,
   BrowserExtensionGuide,
   browserExtensionSource,
+);
+const captureFeedsAndArchives = page(
+  "capture-feeds-archives",
+  captureFeedsAndArchivesMeta,
+  CaptureFeedsAndArchivesGuide,
+  captureFeedsAndArchivesSource,
 );
 
 export const DOC_GROUPS = [
@@ -282,12 +341,16 @@ export const DOC_GROUPS = [
   {
     id: "work-reading",
     label: "Work and reading",
-    pages: [booksAndReading],
+    pages: [
+      tasksAgendaJournalsAndBoard,
+      academicLibraryAndReading,
+      booksAndReading,
+    ],
   },
   {
     id: "capture-feeds-archives",
     label: "Capture, feeds, and archives",
-    pages: [browserExtension],
+    pages: [captureFeedsAndArchives, browserExtension],
   },
   {
     id: "ai-integrations",

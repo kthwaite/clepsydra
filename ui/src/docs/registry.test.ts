@@ -20,6 +20,17 @@ const KNOWLEDGE_GUIDE_SLUGS = [
   "bases",
 ] as const;
 
+const WORK_READING_GUIDE_SLUGS = [
+  "tasks-agenda-journals-and-board",
+  "academic-library-and-reading",
+  "books-and-reading",
+] as const;
+
+const CAPTURE_GUIDE_SLUGS = [
+  "capture-feeds-and-archives",
+  "browser-extension",
+] as const;
+
 it("declares the approved user-intent hierarchy", () => {
   expect(
     DOC_GROUPS.map((group) => [
@@ -30,8 +41,8 @@ it("declares the approved user-intent hierarchy", () => {
     ["Start", ["getting-started"]],
     ["Pages and authoring", [...WORKFLOW_GUIDE_SLUGS]],
     ["Links and structured knowledge", [...KNOWLEDGE_GUIDE_SLUGS]],
-    ["Work and reading", ["books-and-reading"]],
-    ["Capture, feeds, and archives", ["browser-extension"]],
+    ["Work and reading", [...WORK_READING_GUIDE_SLUGS]],
+    ["Capture, feeds, and archives", [...CAPTURE_GUIDE_SLUGS]],
     ["AI and integrations", ["lsp", "mcp"]],
     [
       "Operations and reference",
@@ -41,7 +52,7 @@ it("declares the approved user-intent hierarchy", () => {
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(15);
+  expect(DOC_PAGES).toHaveLength(18);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -68,8 +79,8 @@ it("resolves every existing dedicated guide", () => {
     "getting-started",
     ...WORKFLOW_GUIDE_SLUGS,
     ...KNOWLEDGE_GUIDE_SLUGS,
-    "books-and-reading",
-    "browser-extension",
+    ...WORK_READING_GUIDE_SLUGS,
+    ...CAPTURE_GUIDE_SLUGS,
     "lsp",
     "mcp",
     "configuration",
@@ -110,14 +121,26 @@ it("derives previous and next guides across group boundaries", () => {
   });
   expect(getDocNeighbors("bases")).toMatchObject({
     previous: { slug: "block-references-and-transclusion" },
+    next: { slug: "tasks-agenda-journals-and-board" },
+  });
+  expect(getDocNeighbors("tasks-agenda-journals-and-board")).toMatchObject({
+    previous: { slug: "bases" },
+    next: { slug: "academic-library-and-reading" },
+  });
+  expect(getDocNeighbors("academic-library-and-reading")).toMatchObject({
+    previous: { slug: "tasks-agenda-journals-and-board" },
     next: { slug: "books-and-reading" },
   });
   expect(getDocNeighbors("books-and-reading")).toMatchObject({
-    previous: { slug: "bases" },
+    previous: { slug: "academic-library-and-reading" },
+    next: { slug: "capture-feeds-and-archives" },
+  });
+  expect(getDocNeighbors("capture-feeds-and-archives")).toMatchObject({
+    previous: { slug: "books-and-reading" },
     next: { slug: "browser-extension" },
   });
   expect(getDocNeighbors("browser-extension")).toMatchObject({
-    previous: { slug: "books-and-reading" },
+    previous: { slug: "capture-feeds-and-archives" },
     next: { slug: "lsp" },
   });
   expect(getDocNeighbors("mcp")).toMatchObject({

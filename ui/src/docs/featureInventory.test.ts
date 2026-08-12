@@ -35,6 +35,20 @@ const REQUIRED_WORKFLOW_IDS = [
   "workflow.backup",
 ] as const;
 
+const WORKFLOW_GUIDE_ASSIGNMENTS = {
+  "workflow.tasks": "tasks-agenda-journals-and-board",
+  "workflow.agenda": "tasks-agenda-journals-and-board",
+  "workflow.journals": "tasks-agenda-journals-and-board",
+  "workflow.board-cycles": "tasks-agenda-journals-and-board",
+  "workflow.academic-import": "academic-library-and-reading",
+  "workflow.academic-library": "academic-library-and-reading",
+  "workflow.reading": "academic-library-and-reading",
+  "workflow.feeds": "capture-feeds-and-archives",
+  "workflow.browser-capture": "capture-feeds-and-archives",
+  "workflow.archive-cas": "capture-feeds-and-archives",
+  "workflow.backup": "capture-feeds-and-archives",
+} as const;
+
 function routePaths(): string[] {
   const router = createRouter({
     routeTree,
@@ -75,6 +89,18 @@ describe("feature documentation inventory", () => {
         (id) => entriesById.get(id)?.disposition.kind === "internal",
       ),
     ).toEqual([]);
+  });
+
+  it("maps work, reading, capture, feed, archive, and backup workflows to their dedicated guides", () => {
+    const entriesById: ReadonlyMap<string, (typeof FEATURE_INVENTORY)[number]> =
+      new Map(FEATURE_INVENTORY.map((entry) => [entry.id, entry]));
+
+    for (const [id, slug] of Object.entries(WORKFLOW_GUIDE_ASSIGNMENTS)) {
+      expect(entriesById.get(id)?.disposition).toEqual({
+        kind: "guide",
+        slug,
+      });
+    }
   });
 
   it("classifies persistent appearance controls as user-facing configuration", () => {

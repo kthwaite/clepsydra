@@ -176,6 +176,30 @@ describe("searchDocs", () => {
         headingId: "privacy-boundary-for-protected-folios",
       },
     },
+    {
+      query: "all original cycle task files restored",
+      expected: {
+        page: { slug: "tasks-agenda-journals-and-board" },
+        heading: "Plan on the Tasking board",
+        headingId: "plan-on-the-tasking-board",
+      },
+    },
+    {
+      query: "whole Zotero BibTeX run not one",
+      expected: {
+        page: { slug: "academic-library-and-reading" },
+        heading: "Import BibTeX, DOI, ISBN, and Zotero",
+        headingId: "import-bibtex-doi-isbn-and-zotero",
+      },
+    },
+    {
+      query: "timestamped uncompressed tar consistent snapshot",
+      expected: {
+        page: { slug: "capture-feeds-and-archives" },
+        heading: "Back up and recover shipped state",
+        headingId: "back-up-and-recover-shipped-state",
+      },
+    },
   ])("finds distinctive dedicated-guide content for $query", ({ query, expected }) => {
     const result = searchDocs(buildDocsIndex(DOC_PAGES), query)[0];
 
@@ -244,7 +268,10 @@ describe("searchDocs", () => {
   });
 
   it("finds a registry guide by keyword and uses its description excerpt", () => {
-    expect(searchDocs(buildDocsIndex(DOC_PAGES), "database")).toEqual([
+    expect(
+      searchDocs(buildDocsIndex(DOC_PAGES), "database").map((result) => result.page.slug),
+    ).toContain("bases");
+    expect(searchDocs(buildDocsIndex(DOC_PAGES), "database")[0]).toEqual(
       expect.objectContaining({
         page: expect.objectContaining({ slug: "bases" }),
         heading: undefined,
@@ -252,7 +279,7 @@ describe("searchDocs", () => {
         excerpt: "Build saved, non-owning views over typed folio properties.",
         score: 50,
       }),
-    ]);
+    );
   });
 
   it("returns one page-level result when metadata alone satisfies the query", () => {
