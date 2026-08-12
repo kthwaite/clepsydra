@@ -32,6 +32,7 @@ const {
 }));
 
 vi.mock("@tanstack/react-router", () => ({
+  useBlocker: () => ({ status: "idle" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
 }));
@@ -193,6 +194,9 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByRole("radio", { name: "Read" })).toBeChecked();
     expect(screen.getByRole("region", { name: "Ingredients" })).toBeVisible();
     expect(screen.queryByTestId("slate-editor")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
   });
 
   it("switches to structured fields and writes exact canonical Markdown", async () => {
@@ -201,6 +205,9 @@ describe("Folio recipe presentation", () => {
     renderFolio(editor);
 
     await user.click(screen.getByRole("radio", { name: "Edit" }));
+    expect(
+      screen.getByRole("button", { name: "Raw Markdown" }),
+    ).toBeVisible();
     const description = screen.getByRole("textbox", { name: "Description" });
     fireEvent.change(description, { target: { value: "A deeper dish." } });
 

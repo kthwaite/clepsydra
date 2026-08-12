@@ -17,17 +17,26 @@ import type { CustomEditor } from "#/editor/types";
 // early-return branch renders FolioNotFound. Mock the editor + data hooks so
 // the test isolates that branch (FolioBoundary covers the thrown-error path).
 const {
+  blockerState,
   mobileLayoutState,
   mountedSlateEditors,
   navigateMock,
   restorationFrames,
   routerHistory,
+  useBlockerMock,
   useCollapsibleRailMock,
   usePageEditorMock,
   useTagSuggestionsMock,
   useTagsMock,
   useScrollSpyMock,
 } = vi.hoisted(() => ({
+  blockerState: {
+    current: { status: "idle" } as {
+      status: "idle" | "blocked";
+      reset?: () => void;
+      proceed?: () => void;
+    },
+  },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
   navigateMock: vi.fn(),
@@ -52,6 +61,7 @@ const {
       ],
     }),
   ),
+  useBlockerMock: vi.fn(),
   usePageEditorMock: vi.fn(),
   useScrollSpyMock: vi.fn(() => ({
     activeIndex: -1,
@@ -59,6 +69,10 @@ const {
   })),
 }));
 vi.mock("@tanstack/react-router", () => ({
+  useBlocker: (options: unknown) => {
+    useBlockerMock(options);
+    return blockerState.current;
+  },
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
 }));
@@ -158,6 +172,8 @@ import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
 
 beforeEach(() => {
+  blockerState.current = { status: "idle" };
+  useBlockerMock.mockClear();
   clearFolioRestoration("t1");
   mountedSlateEditors.length = 0;
   restorationFrames.length = 0;
@@ -235,8 +251,9 @@ function editableEditor() {
     updatedAt: "2026-08-08T00:00:00Z",
     encrypted: false,
     pageId: "page-alpha",
-    getPlaintext: vi.fn(),
-    getRevision: vi.fn(),
+    getPlaintext: vi.fn(() => "Editable body"),
+    getRevision: vi.fn(() => "revision-1"),
+    setBodyMarkdown: vi.fn(),
   };
 }
 
@@ -392,7 +409,250 @@ describe("Folio invalid-tab recovery", () => {
     ).toBeVisible();
     expect(screen.queryByTestId("slate-editor")).toBeNull();
     expect(document.body.textContent).not.toContain(armor);
+    expect(
+      screen.queryByRole("button", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
+  });
+});
+
+describe("Folio raw Markdown mode", () => {
+  beforeEach(() => {
+    mobileLayoutState.matches = false;
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+  });
+
+  it("offers raw Markdown on a generic editable Folio", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(
+      screen.getByRole("button", { name: "Raw Markdown" }),
+    ).toBeVisible();
+  });
+
+  it("snapshots the current unsaved rich draft instead of stale server Markdown", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    const exactDraft = "Current unsaved draft  \n\n- [ ] still local\n";
+    editor.getPlaintext.mockReturnValue(exactDraft);
+    usePageEditorMock.mockReturnValue(editor);
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+
+    expect(editor.getPlaintext).toHaveBeenCalledOnce();
+    expect(editor.getRevision).toHaveBeenCalledOnce();
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      exactDraft,
+    );
+    expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
+    expect(editor.onSlateChange).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("cancels an unchanged session without normalizing or saving", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(
+      screen.queryByRole("textbox", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Page body" })).toHaveValue(
+      "Editable body",
+    );
+    expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
+    expect(editor.onSlateChange).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("discards an exact changed raw draft on Cancel without mutating the page editor", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    const discarded = "  exact raw text  \r\n\r\nwith spacing\t";
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: discarded },
+    });
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.getByRole("textbox", { name: "Page body" })).toHaveValue(
+      "Editable body",
+    );
+    expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
+    expect(editor.onSlateChange).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("applies the exact raw draft once and returns to the rich editor", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    const exactRaw = "# Exact  \n\n- item\n\n";
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: exactRaw },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+    expect(editor.setBodyMarkdown).toHaveBeenCalledWith(exactRaw);
+    expect(
+      screen.queryByRole("textbox", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Page body" })).toBeVisible();
+    expect(editor.onSlateChange).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("retains exact raw text and reports a conversion diagnostic when Apply throws", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    editor.setBodyMarkdown.mockImplementation(() => {
+      throw new Error("Unexpected construct on line 2");
+    });
+    usePageEditorMock.mockReturnValue(editor);
+    const exactRaw = "# Keep me\n\n<broken  \n";
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: exactRaw },
+    });
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      exactRaw,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /could not be applied.*Unexpected construct on line 2/i,
+    );
+    expect(editor.onSlateChange).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("refuses Apply when the page revision changed after entry", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Local raw draft" },
+    });
+    editor.getRevision.mockReturnValue("revision-2");
+    await user.click(screen.getByRole("button", { name: "Apply" }));
+
+    expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Local raw draft",
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /changed after raw Markdown mode opened/i,
+    );
+  });
+
+  it("blocks only a changed raw draft and resolves Stay or Leave explicitly", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    usePageEditorMock.mockReturnValue(editor);
+    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    let options = useBlockerMock.mock.calls.at(-1)?.[0] as {
+      shouldBlockFn: () => boolean;
+      enableBeforeUnload: boolean;
+      withResolver: boolean;
+    };
+    expect(options.shouldBlockFn()).toBe(false);
+    expect(options.enableBeforeUnload).toBe(false);
+    expect(options.withResolver).toBe(true);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Dirty raw draft" },
+    });
+    options = useBlockerMock.mock.calls.at(-1)?.[0] as typeof options;
+    expect(options.shouldBlockFn()).toBe(true);
+    expect(options.enableBeforeUnload).toBe(true);
+
+    const reset = vi.fn();
+    blockerState.current = { status: "blocked", reset };
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Stay" }));
+    expect(reset).toHaveBeenCalledOnce();
+    blockerState.current = { status: "idle" };
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Dirty raw draft",
+    );
+
+    const proceed = vi.fn();
+    blockerState.current = { status: "blocked", proceed };
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Leave" }));
+
+    expect(proceed).toHaveBeenCalledOnce();
+    expect(
+      screen.queryByRole("textbox", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
+    expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
+    expect(editor.onSlateChange).not.toHaveBeenCalled();
+    expect(editor.saveNow).not.toHaveBeenCalled();
+  });
+
+  it("drops an unchanged stale session when the Folio path changes", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+
+    usePageEditorMock.mockReturnValue(editableEditor());
+    view.rerender(<Folio tabId="t1" path="notes/beta.md" />);
+
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", { name: "Raw Markdown" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("preserves a dirty stale session until blocked navigation resolves", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+      target: { value: "Do not lose this draft  \n" },
+    });
+
+    usePageEditorMock.mockReturnValue(editableEditor());
+    view.rerender(<Folio tabId="t1" path="notes/beta.md" />);
+
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Do not lose this draft  \n",
+    );
+    const options = useBlockerMock.mock.calls.at(-1)?.[0] as {
+      shouldBlockFn: () => boolean;
+    };
+    expect(options.shouldBlockFn()).toBe(true);
   });
 });
 
@@ -463,6 +723,22 @@ describe("Folio mobile presentation", () => {
     expect(screen.getByRole("textbox", { name: "Page body" })).toHaveValue(
       "Unsaved across layouts",
     );
+  });
+
+  it("keeps raw Markdown controls directly usable on mobile", async () => {
+    const user = userEvent.setup();
+    const editor = editableEditor();
+    editor.getPlaintext.mockReturnValue("Mobile raw draft\n");
+    usePageEditorMock.mockReturnValue(editor);
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+
+    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
+      "Mobile raw draft\n",
+    );
+    expect(screen.getByRole("button", { name: "Apply" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
   });
 
   it("passes breakpoint changes as the scroll-spy reattach discriminator", () => {

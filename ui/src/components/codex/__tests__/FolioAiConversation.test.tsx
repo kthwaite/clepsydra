@@ -40,6 +40,7 @@ const {
 }));
 
 vi.mock("@tanstack/react-router", () => ({
+  useBlocker: () => ({ status: "idle" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
 }));
@@ -297,8 +298,9 @@ function pageEditor(overrides: Record<string, unknown> = {}): EditorHarness {
     encrypted: false,
     encryptionState: { status: "plain", body },
     pageId: "conversation-1",
-    getPlaintext: vi.fn(),
+    getPlaintext: vi.fn(() => body),
     getRevision: vi.fn(() => "rev-1"),
+    setBodyMarkdown: vi.fn(),
     savedMarkdown: () => saved,
     ...overrides,
   };
@@ -368,6 +370,9 @@ describe("Folio AI conversation presentation", () => {
       screen.queryByRole("button", { name: "Manage attachments" }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Manage paths" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Raw Markdown" }),
+    ).not.toBeInTheDocument();
     expect(editor.setTitle).not.toHaveBeenCalled();
     expect(editor.setTags).not.toHaveBeenCalled();
     expect(editor.setAliases).not.toHaveBeenCalled();
@@ -386,6 +391,9 @@ describe("Folio AI conversation presentation", () => {
       screen.getByRole("button", { name: "Manage attachments" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Manage paths" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Raw Markdown" }),
+    ).toBeVisible();
   });
 
   it("enables transcript role and action controls only in Edit", async () => {

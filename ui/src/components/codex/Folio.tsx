@@ -1,4 +1,4 @@
-import { useNavigate, useRouter } from "@tanstack/react-router";
+import { useBlocker, useNavigate, useRouter } from "@tanstack/react-router";
 import {
   lazy,
   Suspense,
@@ -33,10 +33,13 @@ import { KindSelect } from "#/components/codex/KindSelect";
 import { LockedFolio } from "#/components/codex/LockedFolio";
 import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import { RawMarkdownEditor } from "#/components/codex/RawMarkdownEditor";
 import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
+import { Button } from "#/components/ui/button";
+import { Dialog } from "#/components/ui/dialog";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
 import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
 import { ConversationPresentationProvider } from "#/editor/conversation/presentation";
@@ -74,6 +77,71 @@ type FolioProps = {
   tabId: string;
   path: string;
 };
+
+type RawMarkdownSession = {
+  path: string;
+  entryRevision: string;
+  snapshot: string;
+  value: string;
+  diagnostic: string | null;
+};
+
+function rawMarkdownApplyDiagnostic(error: unknown) {
+  const detail =
+    error instanceof Error && error.message.trim() ? `: ${error.message}` : "";
+  return `Raw Markdown could not be applied${detail}. Fix the Markdown and try again.`;
+}
+
+function RawMarkdownNavigationGuard({
+  dirty,
+  onLeave,
+}: {
+  dirty: boolean;
+  onLeave: () => void;
+}) {
+  const blocker = useBlocker({
+    shouldBlockFn: () => dirty,
+    enableBeforeUnload: dirty,
+    withResolver: true,
+  });
+
+  return (
+    <Dialog
+      isOpen={blocker.status === "blocked"}
+      onOpenChange={(open) => {
+        if (!open && blocker.status === "blocked") blocker.reset?.();
+      }}
+      title="Unsaved raw Markdown"
+      description="Leaving now will discard the raw Markdown draft."
+      footer={
+        <>
+          <Button
+            variant="secondary"
+            onPress={() => {
+              if (blocker.status === "blocked") blocker.reset?.();
+            }}
+          >
+            Stay
+          </Button>
+          <Button
+            variant="danger"
+            onPress={() => {
+              if (blocker.status !== "blocked") return;
+              onLeave();
+              blocker.proceed?.();
+            }}
+          >
+            Leave
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-muted-foreground">
+        This raw draft exists only in this browser until you Apply it.
+      </p>
+    </Dialog>
+  );
+}
 
 const R_TAB_KEY = "clp.folio.r.tab";
 type RTab = "backlinks" | "links" | "tags";
@@ -188,10 +256,24 @@ export function Folio({ tabId, path }: FolioProps) {
     editorRevision: number;
     document: RecipeDocument;
   } | null>(null);
+  const [rawMarkdownSession, setRawMarkdownSession] =
+    useState<RawMarkdownSession | null>(null);
   useEffect(() => {
     setConversationMode("read");
     setRecipeMode("read");
     setRecipeDraft(null);
+  }, [path]);
+  useEffect(() => {
+    setRawMarkdownSession((current) => {
+      if (
+        !current ||
+        current.path === path ||
+        current.value !== current.snapshot
+      ) {
+        return current;
+      }
+      return null;
+    });
   }, [path]);
   const insertionIdRef = useRef(0);
   const [attachmentInsertion, setAttachmentInsertion] = useState<{
@@ -273,6 +355,52 @@ export function Folio({ tabId, path }: FolioProps) {
   const recipeStructured = recipeParse?.ok === true;
   const recipeReadOnly = recipeStructured && recipeMode === "read";
   const folioReadOnly = conversationReadOnly || recipeReadOnly;
+  const rawMarkdownAvailable =
+    presentation.bodyPresentation === "editor" ||
+    (isAiConversation && conversationMode === "edit") ||
+    (isRecipe && recipeStructured && recipeMode === "edit");
+  const rawMarkdownDirty =
+    rawMarkdownSession !== null &&
+    rawMarkdownSession.value !== rawMarkdownSession.snapshot;
+  const openRawMarkdown = () => {
+    if (!rawMarkdownAvailable) return;
+    const snapshot = editor.getPlaintext();
+    setRawMarkdownSession({
+      path,
+      entryRevision: editor.getRevision(),
+      snapshot,
+      value: snapshot,
+      diagnostic: null,
+    });
+  };
+  const applyRawMarkdown = () => {
+    if (!rawMarkdownSession) return;
+    if (
+      rawMarkdownSession.path !== path ||
+      editor.getRevision() !== rawMarkdownSession.entryRevision
+    ) {
+      setRawMarkdownSession((current) =>
+        current
+          ? {
+              ...current,
+              diagnostic:
+                "This Folio changed after raw Markdown mode opened. Keep or copy this draft, then reopen raw mode before applying.",
+            }
+          : current,
+      );
+      return;
+    }
+    try {
+      editor.setBodyMarkdown(rawMarkdownSession.value);
+      setRawMarkdownSession(null);
+    } catch (error) {
+      setRawMarkdownSession((current) =>
+        current
+          ? { ...current, diagnostic: rawMarkdownApplyDiagnostic(error) }
+          : current,
+      );
+    }
+  };
 
   // ⌘S / Ctrl-S flushes a save from anywhere in the folio (title, tags,
   // rails) — not just the editor body — and suppresses the browser dialog.
@@ -593,50 +721,76 @@ export function Folio({ tabId, path }: FolioProps) {
         </div>
       ) : null}
 
+      {rawMarkdownAvailable && !rawMarkdownSession ? (
+        <div className="mt-3 flex justify-end">
+          <Button variant="secondary" size="sm" onPress={openRawMarkdown}>
+            Raw Markdown
+          </Button>
+        </div>
+      ) : null}
+
       <hr className="cl-rule-dash mt-3" />
 
-      <article
-        className={cn(
-          "codex-prose mt-5 font-sans text-[17px] leading-[1.65]",
-          isAiConversation && `ai-conversation--${conversationMode}`,
-        )}
-      >
-        <WikilinkResolutionProvider path={path}>
-          {recipeStructured && recipeDocument ? (
-            <RecipeFolioBody
-              document={recipeDocument}
-              mode={recipeMode}
-              onModeChange={setRecipeMode}
-              onDocumentChange={(nextDocument) => {
-                setRecipeDraft({
-                  path,
-                  editorRevision: editor.editorRevision,
-                  document: nextDocument,
-                });
-                editor.setBodyMarkdown(serializeRecipeMarkdown(nextDocument));
-              }}
-            />
-          ) : (
-            <ConversationPresentationProvider
-              value={{
-                mode: isAiConversation ? conversationMode : "generic",
-                provider: isAiConversation ? editor.conversationProvider : null,
-              }}
-            >
-              <SlateEditor
-                key={`${path}:${editor.editorRevision}`}
-                initialValue={currentEditorValue}
-                onChange={editor.onSlateChange}
-                onSaveNow={editor.saveNow}
-                insertionRequest={attachmentInsertion}
-                onInsertionHandled={finishAttachmentInsertion}
-                readOnly={conversationReadOnly}
-                editorRef={folioEditorRef}
-              />
-            </ConversationPresentationProvider>
+      {rawMarkdownSession ? (
+        <RawMarkdownEditor
+          value={rawMarkdownSession.value}
+          diagnostic={rawMarkdownSession.diagnostic}
+          onChange={(value) =>
+            setRawMarkdownSession((current) =>
+              current ? { ...current, value, diagnostic: null } : current,
+            )
+          }
+          onApply={applyRawMarkdown}
+          onCancel={() => setRawMarkdownSession(null)}
+        />
+      ) : (
+        <article
+          className={cn(
+            "codex-prose mt-5 font-sans text-[17px] leading-[1.65]",
+            isAiConversation && `ai-conversation--${conversationMode}`,
           )}
-        </WikilinkResolutionProvider>
-      </article>
+        >
+          <WikilinkResolutionProvider path={path}>
+            {recipeStructured && recipeDocument ? (
+              <RecipeFolioBody
+                document={recipeDocument}
+                mode={recipeMode}
+                onModeChange={setRecipeMode}
+                onDocumentChange={(nextDocument) => {
+                  setRecipeDraft({
+                    path,
+                    editorRevision: editor.editorRevision,
+                    document: nextDocument,
+                  });
+                  editor.setBodyMarkdown(
+                    serializeRecipeMarkdown(nextDocument),
+                  );
+                }}
+              />
+            ) : (
+              <ConversationPresentationProvider
+                value={{
+                  mode: isAiConversation ? conversationMode : "generic",
+                  provider: isAiConversation
+                    ? editor.conversationProvider
+                    : null,
+                }}
+              >
+                <SlateEditor
+                  key={`${path}:${editor.editorRevision}`}
+                  initialValue={currentEditorValue}
+                  onChange={editor.onSlateChange}
+                  onSaveNow={editor.saveNow}
+                  insertionRequest={attachmentInsertion}
+                  onInsertionHandled={finishAttachmentInsertion}
+                  readOnly={conversationReadOnly}
+                  editorRef={folioEditorRef}
+                />
+              </ConversationPresentationProvider>
+            )}
+          </WikilinkResolutionProvider>
+        </article>
+      )}
 
       <hr className="cl-rule-dash mt-8" />
       <div className="cl-mono mt-1 flex justify-between text-[9px] uppercase tracking-[0.16em] text-ink-mute">
@@ -977,6 +1131,17 @@ export function Folio({ tabId, path }: FolioProps) {
         />
       </Suspense>
     ) : null;
+  const overlays = (
+    <>
+      {protection}
+      {rawMarkdownSession ? (
+        <RawMarkdownNavigationGuard
+          dirty={rawMarkdownDirty}
+          onLeave={() => setRawMarkdownSession(null)}
+        />
+      ) : null}
+    </>
+  );
 
   if (mobile) {
     return (
@@ -1002,7 +1167,7 @@ export function Folio({ tabId, path }: FolioProps) {
           contents={contents}
           onBack={onMobileBack}
         />
-        {protection}
+        {overlays}
       </>
     );
   }
@@ -1020,7 +1185,7 @@ export function Folio({ tabId, path }: FolioProps) {
       toc={toc}
       activeIndex={activeIndex}
       onJump={scrollTo}
-      protection={protection}
+      protection={overlays}
     />
   );
 }
