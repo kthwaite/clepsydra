@@ -1782,7 +1782,7 @@ export interface components {
         };
         BoardTask: {
             assignee?: string | null;
-            body_excerpt?: string | null;
+            body_excerpt: string | null;
             checks: number[];
             code: string;
             cycle?: string | null;
@@ -2291,14 +2291,14 @@ export interface components {
             blockers: components["schemas"]["PagePropertyBlocker"][];
             compatibility: components["schemas"]["PagePropertyCompatibility"];
             declarations: components["schemas"]["PagePropertyDeclaration"][];
-            definition?: null | components["schemas"]["PropertyDefinition"];
+            definition: null | components["schemas"]["PropertyDefinition"];
             key: string;
             /** @description Backend capability only; Folio lock/read-only state is applied by clients. */
             patchable: boolean;
             /** @description Distinguishes an absent declared property from a present JSON `null`. */
             present: boolean;
             /** @description Current custom frontmatter value. Reserved and absent values are `null`. */
-            value?: unknown;
+            value: unknown;
         };
         /** @description OpenAPI schema for page detail responses. */
         PageDetailResponse: {
