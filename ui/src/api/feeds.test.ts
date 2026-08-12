@@ -23,6 +23,7 @@ import {
   updateCachedEntryPages,
   useDeleteFeed,
   useFeeds,
+  useFeedEntry,
   useImportOpml,
   usePatchFeedEntry,
   useSubscribeFeed,
@@ -53,11 +54,20 @@ type EntryPages = InfiniteData<FeedEntryPage, string | undefined>;
 
 const feedsPath = "/api/vault/feeds";
 const entriesPath = "/api/vault/feeds/entries";
+const entryDetailPath = "/api/vault/feeds/entries/{id}";
 const feedsKey = ["get", feedsPath] as const;
 const requestOrigin = "https://ui.test";
 
 function entriesKey(filters: EntryFilters) {
   return ["get", entriesPath, { params: { query: filters } }] as const;
+}
+
+function entryDetailKey(id: number) {
+  return [
+    "get",
+    entryDetailPath,
+    { params: { path: { id } } },
+  ] as const;
 }
 
 function wrapper(client: QueryClient) {
@@ -131,6 +141,7 @@ function makeFeedList(
       },
     ],
     manifest_revision: manifestRevision,
+    preference_namespace: "fixture-feed-preferences",
   };
 }
 
@@ -192,6 +203,59 @@ describe("useFeeds", () => {
       all: 45,
       saved: 6,
     });
+  });
+});
+
+describe("useFeedEntry", () => {
+  it.each([undefined, 0, -1])(
+    "does not request detail for non-positive id %s",
+    (id) => {
+      const { result } = renderHook(() => useFeedEntry(id), {
+        wrapper: wrapper(freshClient()),
+      });
+
+      expect(result.current.fetchStatus).toBe("idle");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("requests the generated detail operation with the selected path id", async () => {
+    const entry = makeEntry();
+    const client = freshClient();
+    fetchMock.mockResolvedValue(jsonResponse(entry));
+
+    const { result } = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(result.current.data).toEqual(entry);
+    expect(client.getQueryData(entryDetailKey(entry.id))).toEqual(entry);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestedUrl(fetchMock).pathname).toBe(
+      `/api/vault/feeds/entries/${entry.id}`,
+    );
+  });
+
+  it("does not retry a confirmed missing entry", async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: 3, retryDelay: 0 },
+      },
+    });
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { status: 404, error: "entry not found", detail: null, hint: null },
+        404,
+      ),
+    );
+
+    const { result } = renderHook(() => useFeedEntry(404), {
+      wrapper: wrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -392,6 +456,391 @@ describe("feedEntriesInfiniteOptions", () => {
 });
 
 describe("usePatchFeedEntry", () => {
+  it("keeps the cached detail and matching list projection coherent through success", async () => {
+    const entry = makeEntry({ read: false, tags: ["rust"] });
+    const unrelated = makeEntry({ id: 202, guid: "entry-202" });
+    const listKey = entriesKey({ view: "all" });
+    const detailKey = entryDetailKey(entry.id);
+    const unrelatedDetailKey = entryDetailKey(unrelated.id);
+    const client = freshClient();
+    client.setQueryData(listKey, makePages([entry]));
+    client.setQueryData(detailKey, entry);
+    client.setQueryData(unrelatedDetailKey, unrelated);
+    const response = deferred<Response>();
+    fetchMock.mockReturnValue(response.promise);
+    const { result } = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+      tags: [" rust ", "rust", "ai"],
+    });
+
+    await waitFor(() =>
+      expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+        read: true,
+        tags: [" rust ", "rust", "ai"],
+      }),
+    );
+    expect(
+      client.getQueryData<EntryPages>(listKey)?.pages[0].entries[0],
+    ).toMatchObject({ read: true, tags: [" rust ", "rust", "ai"] });
+    expect(client.getQueryData(unrelatedDetailKey)).toBe(unrelated);
+
+    response.resolve(
+      jsonResponse({ ...entry, read: true, tags: ["rust", "ai"] }),
+    );
+    await mutation;
+
+    expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+      read: true,
+      tags: ["rust", "ai"],
+    });
+    expect(
+      client.getQueryData<EntryPages>(listKey)?.pages[0].entries[0],
+    ).toMatchObject({ read: true, tags: ["rust", "ai"] });
+    expect(client.getQueryData(unrelatedDetailKey)).toBe(unrelated);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(unrelatedDetailKey)?.isInvalidated).toBe(false);
+  });
+
+  it("reconciles detail loaded while a patch is in flight", async () => {
+    const entry = makeEntry({ read: false });
+    const client = freshClient();
+    const patchResponse = deferred<Response>();
+    const detailResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(detailResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+
+    const detail = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    detailResponse.resolve(jsonResponse(entry));
+    await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
+    expect(detail.result.current.data?.read).toBe(true);
+
+    patchResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await mutation;
+
+    expect(client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read).toBe(
+      true,
+    );
+    detail.unmount();
+  });
+
+  it("restarts a list mounted during patch so a late stale GET cannot win", async () => {
+    const entry = makeEntry({ read: false });
+    const patched = { ...entry, read: true };
+    const client = freshClient();
+    client.setQueryData(entryDetailKey(entry.id), entry);
+    const patchResponse = deferred<Response>();
+    const staleListResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(staleListResponse.promise)
+      .mockResolvedValueOnce(
+        jsonResponse({ entries: [patched], next_cursor: null }),
+      );
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const listObserver = new InfiniteQueryObserver(
+      client,
+      feedEntriesInfiniteOptions({ view: "all" }),
+    );
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    patchResponse.resolve(jsonResponse(patched));
+    await waitFor(() =>
+      expect(
+        client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
+      ).toBe(true),
+    );
+    staleListResponse.resolve(
+      jsonResponse({ entries: [entry], next_cursor: null }),
+    );
+    await mutation;
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(
+      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
+    ).toBe(true);
+    expect(
+      client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
+    ).toBe(true);
+    unsubscribeList();
+  });
+
+  it("projects a list GET that resolves while its patch remains pending", async () => {
+    const entry = makeEntry({ read: false });
+    const patched = { ...entry, read: true };
+    const client = freshClient();
+    client.setQueryData(entryDetailKey(entry.id), entry);
+    const patchResponse = deferred<Response>();
+    const staleListResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(staleListResponse.promise)
+      .mockResolvedValueOnce(
+        jsonResponse({ entries: [patched], next_cursor: null }),
+      );
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const listObserver = new InfiniteQueryObserver(
+      client,
+      feedEntriesInfiniteOptions({ view: "all" }),
+    );
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    staleListResponse.resolve(
+      jsonResponse({ entries: [entry], next_cursor: null }),
+    );
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    expect(patch.result.current.isPending).toBe(true);
+    expect(
+      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
+    ).toBe(true);
+    expect(
+      client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read,
+    ).toBe(true);
+
+    patchResponse.resolve(jsonResponse(patched));
+    await mutation;
+    unsubscribeList();
+  });
+
+  it("rolls back page one without discarding a page fetched during the patch", async () => {
+    const entry = makeEntry({ read: false });
+    const nextPageEntry = makeEntry({
+      id: 202,
+      guid: "entry-202",
+      title: "Fetched while pending",
+    });
+    const client = freshClient();
+    const options = {
+      ...feedEntriesInfiniteOptions({ view: "all" }),
+      staleTime: Number.POSITIVE_INFINITY,
+    };
+    client.setQueryData(options.queryKey, makePages([entry]));
+    const listObserver = new InfiniteQueryObserver(client, options);
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    const patchResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockResolvedValueOnce(
+        jsonResponse({ entries: [nextPageEntry], next_cursor: null }),
+      );
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current
+      .mutateAsync({ id: entry.id, read: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await listObserver.fetchNextPage();
+    expect(
+      listObserver.getCurrentResult().data?.pages[0].entries[0].read,
+    ).toBe(true);
+    expect(
+      listObserver.getCurrentResult().data?.pages[1].entries[0],
+    ).toEqual(nextPageEntry);
+    unsubscribeList();
+
+    patchResponse.resolve(
+      jsonResponse({ error: "patch failed after fetching page two" }, 500),
+    );
+    await expect(mutation).resolves.toEqual({
+      error: "patch failed after fetching page two",
+    });
+
+    const cached = client.getQueryData<EntryPages>(options.queryKey);
+    expect(cached?.pages[0].entries[0].read).toBe(false);
+    expect(cached?.pages[1].entries[0]).toEqual(nextPageEntry);
+  });
+
+  it("promotes detail to successful idle state when patch wins the pending GET race", async () => {
+    const entry = makeEntry({ read: false });
+    const client = freshClient();
+    const patchResponse = deferred<Response>();
+    const detailResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(patchResponse.promise)
+      .mockReturnValueOnce(detailResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const mutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const detail = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(detail.result.current.fetchStatus).toBe("fetching");
+
+    patchResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await mutation;
+
+    await waitFor(() => {
+      expect(detail.result.current.isSuccess).toBe(true);
+      expect(detail.result.current.fetchStatus).toBe("idle");
+      expect(detail.result.current.data?.read).toBe(true);
+    });
+    detailResponse.resolve(jsonResponse(entry));
+    detail.unmount();
+  });
+
+  it("preserves invocation order for overlapping patches started before detail exists", async () => {
+    const entry = makeEntry({ read: false });
+    const client = freshClient();
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    const detailResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise)
+      .mockReturnValueOnce(detailResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: false,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    const detail = renderHook(() => useFeedEntry(entry.id), {
+      wrapper: wrapper(client),
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    detailResponse.resolve(jsonResponse(entry));
+    await waitFor(() => expect(detail.result.current.isSuccess).toBe(true));
+
+    newerResponse.resolve(jsonResponse({ ...entry, read: false }));
+    await newerMutation;
+    olderResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await olderMutation;
+
+    expect(detail.result.current.fetchStatus).toBe("idle");
+    expect(detail.result.current.data?.read).toBe(false);
+    expect(client.getQueryData<FeedEntry>(entryDetailKey(entry.id))?.read).toBe(
+      false,
+    );
+    detail.unmount();
+  });
+
+  it("defers active list refetch until overlapping optimistic patches settle", async () => {
+    const entry = makeEntry({ read: false, bookmarked: true });
+    const baseline = makePages([entry], ["baseline"]);
+    const finalPages = makePages([
+      { ...entry, read: true, bookmarked: false },
+    ]);
+    const listKey = entriesKey({ view: "all" });
+    const detailKey = entryDetailKey(entry.id);
+    const client = freshClient();
+    client.setQueryData(listKey, baseline);
+    client.setQueryData(detailKey, entry);
+    let finalCommitted = false;
+    let listRefetches = 0;
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: async () => {
+        listRefetches += 1;
+        return finalCommitted ? finalPages : baseline;
+      },
+      staleTime: Number.POSITIVE_INFINITY,
+    });
+    const unsubscribeList = listObserver.subscribe(() => undefined);
+    const olderResponse = deferred<Response>();
+    const newerResponse = deferred<Response>();
+    fetchMock
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockReturnValueOnce(newerResponse.promise);
+    const patch = renderHook(() => usePatchFeedEntry(), {
+      wrapper: wrapper(client),
+    });
+
+    const olderMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      read: true,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    const newerMutation = patch.result.current.mutateAsync({
+      id: entry.id,
+      bookmarked: false,
+    });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+
+    olderResponse.resolve(jsonResponse({ ...entry, read: true }));
+    await olderMutation;
+
+    expect(listRefetches).toBe(0);
+    expect(
+      client.getQueryData<EntryPages>(listKey)?.pages[0].entries[0],
+    ).toMatchObject({ read: true, bookmarked: false });
+    expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+      read: true,
+      bookmarked: false,
+    });
+
+    finalCommitted = true;
+    newerResponse.resolve(
+      jsonResponse({ ...entry, read: true, bookmarked: false }),
+    );
+    await newerMutation;
+    await waitFor(() => expect(listRefetches).toBe(1));
+
+    expect(listObserver.getCurrentResult().data).toEqual(finalPages);
+    expect(client.getQueryData<FeedEntry>(detailKey)).toMatchObject({
+      read: true,
+      bookmarked: false,
+    });
+    unsubscribeList();
+  });
+
   it("optimistically patches every cached filter key and restores each exact pair on failure", async () => {
     const entry = makeEntry({ read: false, bookmarked: true });
     const keys = {
@@ -412,6 +861,8 @@ describe("usePatchFeedEntry", () => {
     for (const name of Object.keys(keys) as Array<keyof typeof keys>) {
       client.setQueryData(keys[name], before[name]);
     }
+    const detailKey = entryDetailKey(entry.id);
+    client.setQueryData(detailKey, entry);
 
     const response = deferred<Response>();
     fetchMock.mockReturnValue(response.promise);
@@ -435,6 +886,7 @@ describe("usePatchFeedEntry", () => {
       client.getQueryData<EntryPages>(keys.tag)?.pages[0].entries[0].read,
     ).toBe(true);
     expect(client.getQueryData(keys.absent)).toBe(before.absent);
+    expect(client.getQueryData<FeedEntry>(detailKey)?.read).toBe(true);
 
     response.resolve(
       jsonResponse({ error: "offline", hint: "try again" }, 500),
@@ -447,6 +899,7 @@ describe("usePatchFeedEntry", () => {
     for (const name of Object.keys(keys) as Array<keyof typeof keys>) {
       expect(client.getQueryData(keys[name])).toBe(before[name]);
     }
+    expect(client.getQueryData(detailKey)).toStrictEqual(entry);
   });
 
   it("invalidates feed summaries and all entry filters so newly matching tag views refetch", async () => {
@@ -834,7 +1287,7 @@ describe("usePatchFeedEntry", () => {
     expect(client.getQueryData(key)).toBe(baseline);
   });
 
-  it("adopts an independently recreated query and restores the exact captured baseline", async () => {
+  it("projects an independently recreated query and restores its exact baseline", async () => {
     const entry = makeEntry({ read: false });
     const baseline = makePages([entry], ["captured-page"]);
     const key = entriesKey({ view: "all" });
@@ -873,7 +1326,9 @@ describe("usePatchFeedEntry", () => {
     expect(replacementQuery).toBeDefined();
     expect(replacementQuery).not.toBe(originalQuery);
     expect(replacementQuery?.queryKey).toEqual(key);
-    expect(client.getQueryData(key)).toBe(independentClone);
+    expect(
+      client.getQueryData<EntryPages>(key)?.pages[0].entries[0].read,
+    ).toBe(true);
     expect(independentClone).toEqual(baseline);
     expect(independentClone).not.toBe(baseline);
 
@@ -887,7 +1342,7 @@ describe("usePatchFeedEntry", () => {
     expect(client.getQueryCache().find({ queryKey: key, exact: true })).toBe(
       replacementQuery,
     );
-    expect(client.getQueryData(key)).toBe(baseline);
+    expect(client.getQueryData(key)).toBe(independentClone);
   });
 });
 

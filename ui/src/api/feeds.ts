@@ -8,7 +8,7 @@ import {
   type UseMutationResult,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { components, operations } from "#/api/schema";
 import { $api, fetchClient } from "./client";
 import { invalidateByPath, queryKeys } from "./keys";
@@ -41,6 +41,7 @@ export type UpdateFeedRequest = components["schemas"]["UpdateFeedRequest"];
 
 const FEEDS_PATH = "/api/vault/feeds" as const;
 const ENTRIES_PATH = "/api/vault/feeds/entries" as const;
+const ENTRY_DETAIL_PATH = "/api/vault/feeds/entries/{id}" as const;
 const FEEDS_QUERY_KEY = ["get", FEEDS_PATH] as const;
 
 type GeneratedEntryFilters = NonNullable<
@@ -54,12 +55,16 @@ type UpdateFeedVariables = Omit<UpdateFeedRequest, "expected_revision"> &
   Pick<Feed, "id">;
 type DeleteFeedVariables = Pick<Feed, "id">;
 type ImportOpmlVariables = Omit<ImportOpmlRequest, "expected_revision">;
+type EntryDetailQuery = Query<unknown, unknown, FeedEntry, QueryKey>;
 type EntryQuery = Query<unknown, unknown, FeedEntryPages, QueryKey>;
 type EntryOptimisticLayer = {
   id: symbol;
   mutation: FeedEntryMutation;
   status: "pending" | "succeeded" | "failed";
   result?: FeedEntryMutation;
+};
+type EntryDetailOptimisticLayer = EntryOptimisticLayer & {
+  serverEntry?: FeedEntry;
 };
 type EntryOptimisticState = {
   query: EntryQuery;
@@ -68,11 +73,30 @@ type EntryOptimisticState = {
   filters: EntryFilters;
   layers: EntryOptimisticLayer[];
 };
+type EntryDetailOptimisticState = {
+  query?: EntryDetailQuery;
+  queryKey: QueryKey;
+  baseline?: FeedEntry;
+  layers: EntryDetailOptimisticLayer[];
+};
 
 const optimisticEntryStates = new WeakMap<
   QueryClient,
   Map<string, EntryOptimisticState>
 >();
+const optimisticEntryDetailStates = new WeakMap<
+  QueryClient,
+  Map<number, EntryDetailOptimisticState>
+>();
+const optimisticEntryMutationLayers = new WeakMap<
+  QueryClient,
+  EntryOptimisticLayer[]
+>();
+const optimisticEntryQuerySubscriptions = new WeakMap<
+  QueryClient,
+  () => void
+>();
+const recreatingOptimisticEntryQueries = new WeakSet<QueryClient>();
 
 function isEntryQueryKey(queryKey: readonly unknown[]) {
   return queryKey[0] === "get" && queryKey[1] === ENTRIES_PATH;
@@ -81,6 +105,14 @@ function isEntryQueryKey(queryKey: readonly unknown[]) {
 function filtersFromEntryQueryKey(queryKey: readonly unknown[]) {
   const init = queryKey[2] as { params?: { query?: EntryFilters } } | undefined;
   return init?.params?.query ?? {};
+}
+
+function entryDetailQueryKey(id: number) {
+  return [
+    "get",
+    ENTRY_DETAIL_PATH,
+    { params: { path: { id } } },
+  ] as const;
 }
 
 function sameStrings(left: readonly string[], right: readonly string[]) {
@@ -158,6 +190,26 @@ function invalidateFeedQueries(queryClient: QueryClient) {
   return invalidateByPath(queryClient, queryKeys.feeds.pathPrefix);
 }
 
+function invalidateEntryMutationQueries(queryClient: QueryClient) {
+  const layers = optimisticEntryMutationLayers.get(queryClient);
+  if (layers?.some((layer) => layer.status === "pending")) {
+    return Promise.resolve();
+  }
+  const unsubscribe = optimisticEntryQuerySubscriptions.get(queryClient);
+  unsubscribe?.();
+  optimisticEntryQuerySubscriptions.delete(queryClient);
+  optimisticEntryMutationLayers.delete(queryClient);
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: FEEDS_QUERY_KEY,
+      exact: true,
+    }),
+    queryClient.invalidateQueries({
+      predicate: (query) => isEntryQueryKey(query.queryKey),
+    }),
+  ]);
+}
+
 function latestManifestRevision(queryClient: QueryClient) {
   const feeds = queryClient.getQueryData<FeedListResponse>(FEEDS_QUERY_KEY);
   if (feeds === undefined) {
@@ -220,50 +272,321 @@ function rebaseEntryQuery(
     return;
   }
 
-  queryClient.setQueryData(state.queryKey, pages);
+  recreatingOptimisticEntryQueries.add(queryClient);
+  try {
+    queryClient.setQueryData(state.queryKey, pages);
+  } finally {
+    recreatingOptimisticEntryQueries.delete(queryClient);
+  }
   const recreatedQuery = queryClient
     .getQueryCache()
     .find({ queryKey: state.queryKey, exact: true }) as EntryQuery | undefined;
   if (recreatedQuery !== undefined) state.query = recreatedQuery;
 }
 
-function settleEntryMutation(
+function beginEntryMutationLayer(
   queryClient: QueryClient,
-  layerId: symbol,
-  queryHashes: string[],
-  result?: FeedEntry,
+  layer: EntryOptimisticLayer,
 ) {
-  const states = optimisticEntryStates.get(queryClient);
-  if (states === undefined) return;
+  let layers = optimisticEntryMutationLayers.get(queryClient);
+  if (layers === undefined) {
+    layers = [];
+    optimisticEntryMutationLayers.set(queryClient, layers);
+  }
+  layers.push(layer);
+  if (!optimisticEntryQuerySubscriptions.has(queryClient)) {
+    const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+      if (
+        recreatingOptimisticEntryQueries.has(queryClient) ||
+        event.type !== "updated" ||
+        event.action.type !== "success" ||
+        !isEntryQueryKey(event.query.queryKey)
+      ) {
+        return;
+      }
+      reconcileUpdatedEntryQuery(
+        queryClient,
+        event.query as EntryQuery,
+        event.action.manual
+          ? undefined
+          : event.query.state.fetchMeta?.fetchMore?.direction,
+      );
+    });
+    optimisticEntryQuerySubscriptions.set(queryClient, unsubscribe);
+  }
+}
 
-  for (const queryHash of queryHashes) {
-    const state = states.get(queryHash);
-    const layer = state?.layers.find((candidate) => candidate.id === layerId);
-    if (state === undefined || layer === undefined) continue;
-
-    if (result === undefined) {
-      layer.status = "failed";
-    } else {
-      layer.status = "succeeded";
-      layer.result = projectedEntryResult(layer.mutation, result);
+function foldSettledEntryQueryLayers(state: EntryOptimisticState) {
+  while (state.layers.length > 0 && state.layers[0].status !== "pending") {
+    const settled = state.layers.shift();
+    if (settled?.status === "succeeded" && settled.result !== undefined) {
+      state.baseline = updateCachedEntryPages(
+        state.baseline,
+        settled.result,
+        state.filters,
+      );
     }
+  }
+}
 
-    while (state.layers.length > 0 && state.layers[0].status !== "pending") {
-      const settled = state.layers.shift();
-      if (settled?.status === "succeeded" && settled.result !== undefined) {
-        state.baseline = updateCachedEntryPages(
-          state.baseline,
-          settled.result,
-          state.filters,
-        );
+function hydrateEntryQueries(queryClient: QueryClient) {
+  const layers = optimisticEntryMutationLayers.get(queryClient);
+  if (layers === undefined || layers.length === 0) return;
+  let states = optimisticEntryStates.get(queryClient);
+  if (states === undefined) {
+    states = new Map();
+    optimisticEntryStates.set(queryClient, states);
+  }
+
+  const queries = queryClient.getQueryCache().findAll({
+    predicate: (query) => isEntryQueryKey(query.queryKey),
+  });
+  for (const cachedQuery of queries) {
+    const query = cachedQuery as EntryQuery;
+    const pages = query.state.data;
+    if (pages === undefined) continue;
+    let state = states.get(query.queryHash);
+    if (state === undefined) {
+      state = {
+        query,
+        queryKey: query.queryKey,
+        baseline: pages,
+        filters: filtersFromEntryQueryKey(query.queryKey),
+        layers: [...layers],
+      };
+      states.set(query.queryHash, state);
+    } else {
+      state.query = query;
+      for (const layer of layers) {
+        if (
+          layer.status === "pending" &&
+          !state.layers.some((candidate) => candidate.id === layer.id)
+        ) {
+          state.layers.push(layer);
+        }
       }
     }
-
+    foldSettledEntryQueryLayers(state);
     rebaseEntryQuery(queryClient, state);
-    if (state.layers.length === 0) states.delete(queryHash);
+    if (state.layers.length === 0) states.delete(query.queryHash);
   }
 
   if (states.size === 0) optimisticEntryStates.delete(queryClient);
+}
+
+function mergeFetchedEntryPage(
+  baseline: FeedEntryPages,
+  incoming: FeedEntryPages,
+) {
+  const pages = incoming.pageParams.map((pageParam, incomingIndex) => {
+    const baselineIndex = baseline.pageParams.findIndex((candidate) =>
+      Object.is(candidate, pageParam),
+    );
+    return baselineIndex === -1
+      ? incoming.pages[incomingIndex]
+      : baseline.pages[baselineIndex];
+  });
+  return { pages, pageParams: incoming.pageParams };
+}
+
+function reconcileUpdatedEntryQuery(
+  queryClient: QueryClient,
+  query: EntryQuery,
+  fetchMoreDirection?: "forward" | "backward",
+) {
+  const layers = optimisticEntryMutationLayers.get(queryClient);
+  const pages = query.state.data;
+  if (layers === undefined || layers.length === 0 || pages === undefined) return;
+
+  let states = optimisticEntryStates.get(queryClient);
+  if (states === undefined) {
+    states = new Map();
+    optimisticEntryStates.set(queryClient, states);
+  }
+  let state = states.get(query.queryHash);
+  if (state === undefined) {
+    state = {
+      query,
+      queryKey: query.queryKey,
+      baseline: pages,
+      filters: filtersFromEntryQueryKey(query.queryKey),
+      layers: [...layers],
+    };
+    states.set(query.queryHash, state);
+  } else {
+    state.query = query;
+    state.baseline =
+      fetchMoreDirection === undefined
+        ? pages
+        : mergeFetchedEntryPage(state.baseline, pages);
+    for (const layer of layers) {
+      if (
+        layer.status === "pending" &&
+        !state.layers.some((candidate) => candidate.id === layer.id)
+      ) {
+        state.layers.push(layer);
+      }
+    }
+  }
+  foldSettledEntryQueryLayers(state);
+  rebaseEntryQuery(queryClient, state);
+  if (state.layers.length === 0) states.delete(query.queryHash);
+  if (states.size === 0) optimisticEntryStates.delete(queryClient);
+}
+
+function settleEntryMutation(
+  queryClient: QueryClient,
+  layerId: symbol,
+  result?: FeedEntry,
+) {
+  const layers = optimisticEntryMutationLayers.get(queryClient);
+  const layer = layers?.find((candidate) => candidate.id === layerId);
+  if (layer === undefined) return;
+  if (result === undefined) {
+    layer.status = "failed";
+  } else {
+    layer.status = "succeeded";
+    layer.result = projectedEntryResult(layer.mutation, result);
+  }
+
+  const states = optimisticEntryStates.get(queryClient);
+  if (states === undefined) return;
+  for (const [queryHash, state] of states) {
+    foldSettledEntryQueryLayers(state);
+    rebaseEntryQuery(queryClient, state);
+    if (state.layers.length === 0) states.delete(queryHash);
+  }
+  if (states.size === 0) optimisticEntryStates.delete(queryClient);
+}
+
+function attachEntryDetailQuery(
+  queryClient: QueryClient,
+  state: EntryDetailOptimisticState,
+) {
+  const query = queryClient
+    .getQueryCache()
+    .find({ queryKey: state.queryKey, exact: true }) as
+    | EntryDetailQuery
+    | undefined;
+  if (query === undefined) {
+    delete state.query;
+    return;
+  }
+  state.query = query;
+  if (state.baseline === undefined && query.state.data !== undefined) {
+    state.baseline = query.state.data;
+  }
+}
+
+function foldSettledEntryDetailLayers(state: EntryDetailOptimisticState) {
+  while (state.layers.length > 0 && state.layers[0].status !== "pending") {
+    const settled = state.layers[0];
+    if (settled.status === "failed") {
+      state.layers.shift();
+      continue;
+    }
+    if (settled.result === undefined || settled.serverEntry === undefined) break;
+    state.baseline =
+      state.baseline === undefined
+        ? settled.serverEntry
+        : patchedEntry(state.baseline, settled.result);
+    state.layers.shift();
+  }
+}
+
+function rebaseEntryDetail(
+  queryClient: QueryClient,
+  state: EntryDetailOptimisticState,
+) {
+  if (state.baseline === undefined) return;
+  let entry = state.baseline;
+  for (const layer of state.layers) {
+    if (layer.status === "failed") continue;
+    entry = patchedEntry(
+      entry,
+      layer.status === "succeeded" && layer.result !== undefined
+        ? layer.result
+        : layer.mutation,
+    );
+  }
+
+  attachEntryDetailQuery(queryClient, state);
+  state.query?.setData(entry);
+}
+
+function releaseEntryDetailState(
+  queryClient: QueryClient,
+  entryId: number,
+  states: Map<number, EntryDetailOptimisticState>,
+  state: EntryDetailOptimisticState,
+) {
+  if (state.layers.length !== 0) return;
+  states.delete(entryId);
+  if (states.size === 0) optimisticEntryDetailStates.delete(queryClient);
+}
+
+function beginEntryDetailMutation(
+  queryClient: QueryClient,
+  layerId: symbol,
+  mutation: FeedEntryMutation,
+) {
+  let states = optimisticEntryDetailStates.get(queryClient);
+  if (states === undefined) {
+    states = new Map();
+    optimisticEntryDetailStates.set(queryClient, states);
+  }
+  let state = states.get(mutation.id);
+  if (state === undefined) {
+    state = {
+      queryKey: entryDetailQueryKey(mutation.id),
+      layers: [],
+    };
+    states.set(mutation.id, state);
+  }
+  attachEntryDetailQuery(queryClient, state);
+  state.layers.push({
+    id: layerId,
+    mutation,
+    status: "pending",
+  });
+}
+
+function hydrateEntryDetailMutationState(
+  queryClient: QueryClient,
+  entryId: number,
+) {
+  const states = optimisticEntryDetailStates.get(queryClient);
+  const state = states?.get(entryId);
+  if (states === undefined || state === undefined) return;
+  attachEntryDetailQuery(queryClient, state);
+  foldSettledEntryDetailLayers(state);
+  rebaseEntryDetail(queryClient, state);
+  releaseEntryDetailState(queryClient, entryId, states, state);
+}
+
+function settleEntryDetailMutation(
+  queryClient: QueryClient,
+  entryId: number,
+  layerId: symbol,
+  result?: FeedEntry,
+) {
+  const states = optimisticEntryDetailStates.get(queryClient);
+  const state = states?.get(entryId);
+  const layer = state?.layers.find((candidate) => candidate.id === layerId);
+  if (states === undefined || state === undefined || layer === undefined) return;
+
+  attachEntryDetailQuery(queryClient, state);
+  if (result === undefined) {
+    layer.status = "failed";
+  } else {
+    layer.status = "succeeded";
+    layer.result = projectedEntryResult(layer.mutation, result);
+    layer.serverEntry = result;
+  }
+
+  foldSettledEntryDetailLayers(state);
+  rebaseEntryDetail(queryClient, state);
+  releaseEntryDetailState(queryClient, entryId, states, state);
 }
 
 function remapMutateOptions<TData, TError, TRawVariables, TVariables, TContext>(
@@ -335,6 +658,32 @@ export function useFeeds() {
   });
 }
 
+export function useFeedEntry(id?: number) {
+  const queryClient = useQueryClient();
+  const enabled = id !== undefined && Number.isSafeInteger(id) && id > 0;
+  const query = $api.useQuery(
+    "get",
+    ENTRY_DETAIL_PATH,
+    { params: { path: { id: enabled ? id : 0 } } },
+    {
+      enabled,
+      throwOnError: false,
+      retry: (failureCount, error) =>
+        !(
+          typeof error === "object" &&
+          error !== null &&
+          "status" in error &&
+          error.status === 404
+        ) && failureCount < 3,
+    },
+  );
+  useEffect(() => {
+    if (!enabled || id === undefined || query.data === undefined) return;
+    hydrateEntryDetailMutationState(queryClient, id);
+  }, [enabled, id, query.data, queryClient]);
+  return query;
+}
+
 export function feedEntriesInfiniteOptions(filters: EntryFilters = {}) {
   const ownedFilters: GeneratedEntryFilters = { ...filters };
   delete ownedFilters.cursor;
@@ -361,72 +710,64 @@ export function feedEntriesInfiniteOptions(filters: EntryFilters = {}) {
 
 export function usePatchFeedEntry() {
   const queryClient = useQueryClient();
-  const mutation = $api.useMutation("patch", "/api/vault/feeds/entries/{id}", {
+  const mutation = $api.useMutation("patch", ENTRY_DETAIL_PATH, {
     onMutate: async (variables) => {
-      await queryClient.cancelQueries({
-        predicate: (query) => isEntryQueryKey(query.queryKey),
-      });
-      const snapshots = queryClient.getQueriesData<FeedEntryPages>({
-        predicate: (query) => isEntryQueryKey(query.queryKey),
-      });
+      const entryId = variables.params.path.id;
       const mutationInput = {
-        id: variables.params.path.id,
+        id: entryId,
         ...variables.body,
       };
       const layerId = Symbol();
-      const queryHashes: string[] = [];
-      let states = optimisticEntryStates.get(queryClient);
-      if (states === undefined) {
-        states = new Map();
-        optimisticEntryStates.set(queryClient, states);
-      }
-
-      for (const [queryKey, pages] of snapshots) {
-        if (pages === undefined) continue;
-        const query = queryClient
-          .getQueryCache()
-          .find({ queryKey, exact: true }) as EntryQuery | undefined;
-        if (query === undefined) continue;
-
-        let state = states.get(query.queryHash);
-        if (state === undefined) {
-          state = {
-            query,
-            queryKey,
-            baseline: pages,
-            filters: filtersFromEntryQueryKey(queryKey),
-            layers: [],
-          };
-          states.set(query.queryHash, state);
-        }
-        state.layers.push({
-          id: layerId,
-          mutation: mutationInput,
-          status: "pending",
-        });
-        queryHashes.push(query.queryHash);
-        rebaseEntryQuery(queryClient, state);
-      }
-
-      if (states.size === 0) optimisticEntryStates.delete(queryClient);
-      return { snapshots, layerId, queryHashes };
+      beginEntryMutationLayer(queryClient, {
+        id: layerId,
+        mutation: mutationInput,
+        status: "pending",
+      });
+      beginEntryDetailMutation(queryClient, layerId, mutationInput);
+      await Promise.all([
+        queryClient.cancelQueries({
+          predicate: (query) => isEntryQueryKey(query.queryKey),
+        }),
+        queryClient.cancelQueries({
+          queryKey: entryDetailQueryKey(entryId),
+          exact: true,
+        }),
+      ]);
+      hydrateEntryQueries(queryClient);
+      hydrateEntryDetailMutationState(queryClient, entryId);
+      return { layerId, entryId };
     },
-    onSuccess: (data, _variables, context) => {
-      if (context !== undefined) {
-        settleEntryMutation(
-          queryClient,
-          context.layerId,
-          context.queryHashes,
-          data,
-        );
-      }
+    onSuccess: async (data, _variables, context) => {
+      if (context === undefined) return;
+      await Promise.all([
+        queryClient.cancelQueries({
+          predicate: (query) => isEntryQueryKey(query.queryKey),
+        }),
+        queryClient.cancelQueries({
+          queryKey: entryDetailQueryKey(context.entryId),
+          exact: true,
+        }),
+      ]);
+      hydrateEntryQueries(queryClient);
+      hydrateEntryDetailMutationState(queryClient, context.entryId);
+      settleEntryMutation(queryClient, context.layerId, data);
+      settleEntryDetailMutation(
+        queryClient,
+        context.entryId,
+        context.layerId,
+        data,
+      );
     },
     onError: (_error, _variables, context) => {
-      if (context !== undefined) {
-        settleEntryMutation(queryClient, context.layerId, context.queryHashes);
-      }
+      if (context === undefined) return;
+      settleEntryMutation(queryClient, context.layerId);
+      settleEntryDetailMutation(
+        queryClient,
+        context.entryId,
+        context.layerId,
+      );
     },
-    onSettled: () => invalidateFeedQueries(queryClient),
+    onSettled: () => invalidateEntryMutationQueries(queryClient),
   });
   const mapVariables = useCallback(
     ({ id, ...body }: FeedEntryMutation) => ({

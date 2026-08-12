@@ -130,6 +130,10 @@ enum Command {
         filters: EntryFilters,
         reply: oneshot::Sender<Result<EntryPage, FeedStoreError>>,
     },
+    GetEntry {
+        id: i64,
+        reply: oneshot::Sender<Result<Entry, FeedStoreError>>,
+    },
     PatchEntry {
         id: i64,
         patch: EntryPatch,
@@ -249,6 +253,10 @@ impl FeedStoreHandle {
     pub async fn list_entries(&self, filters: EntryFilters) -> Result<EntryPage, FeedStoreError> {
         self.request(|reply| Command::ListEntries { filters, reply })
             .await
+    }
+
+    pub async fn get_entry(&self, id: i64) -> Result<Entry, FeedStoreError> {
+        self.request(|reply| Command::GetEntry { id, reply }).await
     }
 
     pub async fn patch_entry(&self, id: i64, patch: EntryPatch) -> Result<Entry, FeedStoreError> {
@@ -397,6 +405,9 @@ fn worker_loop(opened: &mut OpenedConnection, rx: mpsc::Receiver<Command>) {
             }
             Command::ListEntries { filters, reply } => {
                 let _ = reply.send(list_entries(&opened.connection, filters));
+            }
+            Command::GetEntry { id, reply } => {
+                let _ = reply.send(entry_by_id(&opened.connection, id));
             }
             Command::PatchEntry { id, patch, reply } => {
                 let result = patch_entry(&mut opened.connection, id, patch);

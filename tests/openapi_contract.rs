@@ -59,8 +59,8 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 104,
-        "OpenAPI should document all 104 registered /api/vault operations"
+        operation_count, 105,
+        "OpenAPI should document all 105 registered /api/vault operations"
     );
 }
 

@@ -149,6 +149,7 @@ const feedList: FeedList = {
     },
   ],
   manifest_revision: "revision-1",
+  preference_namespace: "fixture-feed-preferences",
 };
 
 const cachedEntry: FeedEntry = {

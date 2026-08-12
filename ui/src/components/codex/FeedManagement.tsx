@@ -1,5 +1,10 @@
-import { useState } from "react";
-import { Button } from "react-aria-components";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Button,
+  Disclosure,
+  DisclosurePanel,
+  Heading,
+} from "react-aria-components";
 import { toast } from "sonner";
 import {
   exportOpml,
@@ -12,8 +17,20 @@ import {
   useUpdateFeed,
 } from "#/api/feeds";
 import { formatRelativeTime } from "#/lib/time";
+import {
+  getFeedDisclosureStorage,
+  normalizeFeedGroupIdentity,
+  readFeedDisclosurePreferences,
+  reconcileFeedDisclosurePreferences,
+  writeFeedDisclosurePreferences,
+  type FeedDisclosurePreferences,
+} from "#/store/feedDisclosure";
 import { Card } from "./Card";
 import { CodexModalShell } from "./CodexModalShell";
+import {
+  canonicalFeedGroups,
+  FeedGroupComboBox,
+} from "./FeedGroupComboBox";
 
 export function FeedManagement() {
   const feedsQuery = useFeeds();
@@ -24,7 +41,114 @@ export function FeedManagement() {
   const importOpml = useImportOpml();
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null);
   const [deletingFeed, setDeletingFeed] = useState<Feed | null>(null);
+  const [activeDisclosure, setActiveDisclosure] = useState<{
+    namespace: string;
+    preferences: FeedDisclosurePreferences;
+    shouldPersist: boolean;
+  } | null>(null);
   const surfaceError = refreshFeeds.error ?? importOpml.error;
+  const successfulManifest =
+    feedsQuery.data &&
+    !feedsQuery.isPending &&
+    !feedsQuery.isLoading &&
+    !feedsQuery.isError
+      ? feedsQuery.data
+      : undefined;
+  const feedGroups = useMemo(
+    () =>
+      canonicalFeedGroups(
+        feedsQuery.data?.groups.map((group) => group.name) ?? [],
+      ),
+    [feedsQuery.data?.groups],
+  );
+
+  useEffect(() => {
+    const manifest = feedsQuery.data;
+    if (!manifest) return;
+
+    const namespace = manifest.preference_namespace;
+    const loaded = readFeedDisclosurePreferences(
+      getFeedDisclosureStorage(),
+      namespace,
+    );
+    setActiveDisclosure((current) => {
+      const isCurrentNamespace = current?.namespace === namespace;
+      const preferences = isCurrentNamespace
+        ? current.preferences
+        : loaded;
+      const reconciled = successfulManifest
+        ? reconcileFeedDisclosurePreferences(
+            preferences,
+            successfulManifest,
+          )
+        : preferences;
+      const shouldPersist =
+        (isCurrentNamespace && current.shouldPersist) ||
+        reconciled !== preferences;
+      if (
+        isCurrentNamespace &&
+        current.preferences === reconciled &&
+        current.shouldPersist === shouldPersist
+      ) {
+        return current;
+      }
+      return { namespace, preferences: reconciled, shouldPersist };
+    });
+  }, [feedsQuery.data, successfulManifest]);
+
+  useEffect(() => {
+    if (!activeDisclosure?.shouldPersist) return;
+
+    writeFeedDisclosurePreferences(
+      getFeedDisclosureStorage(),
+      activeDisclosure.namespace,
+      activeDisclosure.preferences,
+    );
+    setActiveDisclosure((current) => {
+      if (
+        current?.namespace !== activeDisclosure.namespace ||
+        current.preferences !== activeDisclosure.preferences ||
+        !current.shouldPersist
+      ) {
+        return current;
+      }
+      return { ...current, shouldPersist: false };
+    });
+  }, [activeDisclosure]);
+
+  const setDisclosureExpanded = (
+    kind: "groups" | "feeds",
+    identity: string | number,
+    isExpanded: boolean,
+  ) => {
+    const manifest = feedsQuery.data;
+    if (!manifest) return;
+
+    const namespace = manifest.preference_namespace;
+    const loaded = readFeedDisclosurePreferences(
+      getFeedDisclosureStorage(),
+      namespace,
+    );
+    setActiveDisclosure((current) => {
+      const isCurrentNamespace = current?.namespace === namespace;
+      const stored = isCurrentNamespace ? current.preferences : loaded;
+      const preferences = {
+        groups: new Set(stored.groups),
+        feeds: new Set(stored.feeds),
+      };
+      const collapsed = preferences[kind] as Set<string | number>;
+      const changed = isExpanded
+        ? collapsed.delete(identity)
+        : !collapsed.has(identity);
+      if (!isExpanded && changed) collapsed.add(identity);
+      if (!changed && isCurrentNamespace) return current;
+      return {
+        namespace,
+        preferences,
+        shouldPersist: changed,
+      };
+    });
+  };
 
   return (
     <div className="space-y-3.5">
@@ -36,6 +160,7 @@ export function FeedManagement() {
       ) : null}
       <Card label="Subscribe" caption="MANIFEST · feeds.md" pip="cool">
         <SubscribeForm
+          groups={feedGroups}
           error={subscribeFeed.error}
           isPending={subscribeFeed.isPending}
           onSubmit={async (values) => {
@@ -96,35 +221,79 @@ export function FeedManagement() {
 
         {feedsQuery.data?.groups.length ? (
           <ul aria-label="Subscriptions" className="space-y-4">
-            {feedsQuery.data.groups.map((group) => (
-              <li key={group.name}>
-                <div className="mb-1.5 flex items-center gap-3">
-                  <h3 className="cl-mono shrink-0 text-[9px] font-medium uppercase tracking-[0.2em] text-ink-mute">
-                    {group.name || "Ungrouped"}
-                  </h3>
-                  <span
-                    aria-hidden="true"
-                    className="h-px min-w-0 flex-1 bg-rule"
-                  />
-                </div>
-                <ul className="border-t border-rule">
-                  {group.feeds.map((feed) => (
-                    <FeedRow
-                      key={feed.id}
-                      feed={feed}
-                      onEdit={() => {
-                        updateFeed.reset();
-                        setEditingFeed(feed);
-                      }}
-                      onDelete={() => {
-                        deleteFeed.reset();
-                        setDeletingFeed(feed);
-                      }}
-                    />
-                  ))}
-                </ul>
-              </li>
-            ))}
+            {feedsQuery.data.groups.map((group) => {
+              const groupName = group.name || "Ungrouped";
+              const groupIdentity = normalizeFeedGroupIdentity(group.name);
+              const isExpanded =
+                activeDisclosure?.namespace !==
+                  feedsQuery.data?.preference_namespace ||
+                !activeDisclosure.preferences.groups.has(groupIdentity);
+              return (
+                <li key={group.name}>
+                  <Disclosure
+                    isExpanded={isExpanded}
+                    onExpandedChange={(expanded) =>
+                      setDisclosureExpanded(
+                        "groups",
+                        groupIdentity,
+                        expanded,
+                      )
+                    }
+                  >
+                    <Heading
+                      level={3}
+                      className="mb-1.5 text-[9px] font-medium uppercase tracking-[0.2em] text-ink-mute"
+                    >
+                      <Button
+                        slot="trigger"
+                        aria-label={`${groupName} group, ${group.feeds.length} ${group.feeds.length === 1 ? "feed" : "feeds"}`}
+                        className="cl-mono flex w-full items-center gap-3 bg-transparent text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                      >
+                        <span aria-hidden="true">›</span>
+                        <span className="shrink-0">{groupName}</span>
+                        <span className="shrink-0">
+                          {group.feeds.length}{" "}
+                          {group.feeds.length === 1 ? "feed" : "feeds"}
+                        </span>
+                        <span
+                          aria-hidden="true"
+                          className="h-px min-w-0 flex-1 bg-rule"
+                        />
+                      </Button>
+                    </Heading>
+                    <DisclosurePanel>
+                      <ul
+                        aria-label={`${groupName} feeds`}
+                        className="border-t border-rule"
+                      >
+                        {group.feeds.map((feed) => (
+                          <FeedRow
+                            key={feed.id}
+                            feed={feed}
+                            isExpanded={
+                              activeDisclosure?.namespace !==
+                                feedsQuery.data?.preference_namespace ||
+                              !activeDisclosure.preferences.feeds.has(feed.id)
+                            }
+                            onExpandedChange={(expanded) =>
+                              setDisclosureExpanded("feeds", feed.id, expanded)
+                            }
+                            onEdit={() => {
+                              updateFeed.reset();
+                              setEditingFeed(feed);
+                            }}
+                            onDelete={() => {
+                              deleteFeed.reset();
+                              setDeletingFeed(feed);
+                            }}
+                          />
+                        ))}
+                      </ul>
+                    </DisclosurePanel>
+                  </Disclosure>
+                </li>
+              );
+            })}
           </ul>
         ) : null}
 
@@ -137,6 +306,7 @@ export function FeedManagement() {
       {editingFeed ? (
         <EditFeedDialog
           feed={editingFeed}
+          groups={feedGroups}
           error={updateFeed.error}
           isPending={updateFeed.isPending}
           onDismiss={() => setEditingFeed(null)}
@@ -174,10 +344,12 @@ export function FeedManagement() {
 }
 
 function SubscribeForm({
+  groups,
   error,
   isPending,
   onSubmit,
 }: {
+  groups: string[];
   error: unknown;
   isPending: boolean;
   onSubmit: (values: { url: string; group: string | null }) => Promise<void>;
@@ -215,12 +387,12 @@ function SubscribeForm({
       </label>
       <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
         Group
-        <input
-          disabled={isPending}
+        <FeedGroupComboBox
           value={group}
-          onChange={(event) => setGroup(event.target.value)}
-          placeholder="Optional"
-          className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+          groups={groups}
+          ariaLabel="Group"
+          disabled={isPending}
+          onChange={setGroup}
         />
       </label>
       {error ? (
@@ -280,62 +452,98 @@ function ManifestState({
 
 function FeedRow({
   feed,
+  isExpanded,
+  onExpandedChange,
   onEdit,
   onDelete,
 }: {
   feed: Feed;
+  isExpanded: boolean;
+  onExpandedChange: (isExpanded: boolean) => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
   const unhealthy = feed.error_count > 0 || Boolean(feed.last_error);
   const title = feed.title_override || feed.title;
+  const lastFetch = formatRelativeTime(feed.last_fetch_at);
+  const nextFetch = formatRelativeTime(feed.next_fetch_at);
+  const errorSummary = `${feed.error_count} ${
+    feed.error_count === 1 ? "error" : "errors"
+  }`;
+  const summaryLabel = [
+    `${title} feed`,
+    feed.url,
+    unhealthy ? "Degraded feed health" : "Healthy feed",
+    `Last fetch ${lastFetch}`,
+    `Next fetch ${nextFetch}`,
+    errorSummary,
+    feed.tags.length ? `Tags ${feed.tags.join(", ")}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(". ");
+
   return (
-    <li className="grid min-w-0 gap-3 border-b border-rule px-2.5 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start md:px-3.5">
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-start gap-2">
-          <span
-            aria-label={unhealthy ? "Degraded feed health" : "Healthy feed"}
-            className={`mt-1.5 h-[7px] w-[7px] shrink-0 ${unhealthy ? "bg-hot" : "bg-cool"}`}
-          />
-          <div className="min-w-0">
-            <p className="break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
-              {title}
+    <li className="border-b border-rule">
+      <Disclosure
+        isExpanded={isExpanded}
+        onExpandedChange={onExpandedChange}
+      >
+        <Heading level={4} className="m-0">
+          <Button
+            slot="trigger"
+            aria-label={summaryLabel}
+            className="grid w-full min-w-0 gap-3 bg-transparent px-2.5 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent md:px-3.5"
+          >
+            <span className="min-w-0">
+              <span className="flex min-w-0 items-start gap-2">
+                <span
+                  aria-hidden="true"
+                  className={`mt-1.5 h-[7px] w-[7px] shrink-0 ${unhealthy ? "bg-hot" : "bg-cool"}`}
+                />
+                <span className="min-w-0">
+                  <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
+                    {title}
+                  </span>
+                  <span className="cl-mono mt-1 block break-all text-[9px] tracking-[0.08em] text-ink-mute">
+                    {feed.url}
+                  </span>
+                </span>
+              </span>
+              <span className="cl-mono mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-[15px] text-[9px] uppercase tracking-[0.1em] text-ink-mute">
+                <span>Last fetch · {lastFetch}</span>
+                <span>Next fetch · {nextFetch}</span>
+                <span className={unhealthy ? "text-hot" : "text-cool"}>
+                  {errorSummary}
+                </span>
+                {feed.tags.map((tag) => (
+                  <span key={tag}>#{tag}</span>
+                ))}
+              </span>
+            </span>
+          </Button>
+        </Heading>
+        <DisclosurePanel className="px-2.5 pb-3 md:px-3.5">
+          {feed.last_error ? (
+            <p className="mb-2 border-l-2 border-hot pl-2 text-[11px] text-hot">
+              {feed.last_error}
             </p>
-            <p className="cl-mono mt-1 break-all text-[9px] tracking-[0.08em] text-ink-mute">
-              {feed.url}
-            </p>
+          ) : null}
+          <div className="flex flex-wrap gap-2 md:justify-end">
+            <Button
+              className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              onPress={onEdit}
+            >
+              Edit {title}
+            </Button>
+            <Button
+              className="cl-btn border-hot text-hot outline-none focus-visible:ring-2 focus-visible:ring-hot"
+              onPress={onDelete}
+            >
+              Unsubscribe {title}
+            </Button>
           </div>
-        </div>
-        <div className="cl-mono mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-[15px] text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-          <span>Last fetch · {formatRelativeTime(feed.last_fetch_at)}</span>
-          <span>Next fetch · {formatRelativeTime(feed.next_fetch_at)}</span>
-          <span className={unhealthy ? "text-hot" : "text-cool"}>
-            {feed.error_count} {feed.error_count === 1 ? "error" : "errors"}
-          </span>
-          {feed.tags.map((tag) => (
-            <span key={tag}>#{tag}</span>
-          ))}
-        </div>
-        {feed.last_error ? (
-          <p className="mt-2 border-l-2 border-hot pl-2 text-[11px] text-hot">
-            {feed.last_error}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex flex-wrap gap-2 md:justify-end">
-        <Button
-          className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          onPress={onEdit}
-        >
-          Edit {title}
-        </Button>
-        <Button
-          className="cl-btn border-hot text-hot outline-none focus-visible:ring-2 focus-visible:ring-hot"
-          onPress={onDelete}
-        >
-          Unsubscribe {title}
-        </Button>
-      </div>
+        </DisclosurePanel>
+      </Disclosure>
     </li>
   );
 }
@@ -408,11 +616,13 @@ function OpmlActions({
 
 function EditFeedDialog({
   feed,
+  groups,
   isPending,
   error,
   onDismiss,
   onSave,
 }: {
+  groups: string[];
   feed: Feed;
   error: unknown;
   isPending: boolean;
@@ -448,12 +658,16 @@ function EditFeedDialog({
           isDisabled={isPending}
           onChange={setNextTitle}
         />
-        <DialogField
-          label="Group"
-          value={nextGroup}
-          isDisabled={isPending}
-          onChange={setNextGroup}
-        />
+        <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          Group
+          <FeedGroupComboBox
+            value={nextGroup}
+            groups={groups}
+            ariaLabel="Group"
+            disabled={isPending}
+            onChange={setNextGroup}
+          />
+        </label>
         {error ? (
           <MutationAlert
             error={error}

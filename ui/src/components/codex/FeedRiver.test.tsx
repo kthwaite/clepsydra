@@ -61,6 +61,9 @@ const riverMocks = vi.hoisted(() => {
     fetchMock,
     useRealHooks: false,
     entriesQuery,
+    detailQuery: {
+      data: undefined as FeedEntry | undefined,
+    },
     feedsQuery: {
       data: undefined as FeedList | undefined,
       isPending: false,
@@ -105,6 +108,8 @@ vi.mock("#/api/feeds", async (importOriginal) => {
         ? actual.feedEntriesInfiniteOptions(filters)
         : riverMocks.feedEntriesInfiniteOptions(filters),
     useFeeds: () => riverMocks.feedsQuery,
+    useFeedEntry: (id?: number) =>
+      riverMocks.useRealHooks ? actual.useFeedEntry(id) : riverMocks.detailQuery,
     usePatchFeedEntry: () =>
       riverMocks.useRealHooks
         ? actual.usePatchFeedEntry()
@@ -163,6 +168,7 @@ const feeds = {
     },
   ],
   manifest_revision: "revision-1",
+  preference_namespace: "fixture-feed-preferences",
   counts: { unread: 1, all: 1, saved: 0 },
 };
 
@@ -186,14 +192,24 @@ function renderRiver(
     tag?: string;
   } = { view: "unread" },
   compact = false,
+  selectedEntryId?: number,
+  onSelectEntry = vi.fn(),
 ) {
-  return render(<FeedRiver filters={filters} compact={compact} />);
+  return render(
+    <FeedRiver
+      filters={filters}
+      compact={compact}
+      selectedEntryId={selectedEntryId}
+      onSelectEntry={onSelectEntry}
+    />,
+  );
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   riverMocks.fetchMock.mockReset();
   riverMocks.useRealHooks = false;
+  riverMocks.detailQuery.data = undefined;
   riverMocks.patchState.isPending = false;
   riverMocks.patchState.error = null;
   riverMocks.markState.isPending = false;
@@ -229,9 +245,241 @@ afterAll(() => {
 });
 
 describe("FeedRiver", () => {
+  it("selects a full-mode row without mounting inline content and marks unread through the existing patch path", async () => {
+    const user = userEvent.setup();
+    const onSelectEntry = vi.fn();
+    renderRiver({ view: "all" }, false, undefined, onSelectEntry);
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+
+    expect(onSelectEntry).toHaveBeenCalledWith(101);
+    expect(riverMocks.patchEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 101, read: true }),
+    );
+    expect(screen.queryByText("The complete entry body.")).not.toBeInTheDocument();
+  });
+
+  it("marks the selected row current while retaining every loaded row", () => {
+    setEntries([
+      entry(),
+      entry({ id: 102, guid: "entry-102", title: "Earlier dispatch" }),
+    ]);
+    renderRiver({ view: "all" }, false, 102);
+
+    expect(
+      screen.getByRole("article", { name: /earlier dispatch/i }),
+    ).toHaveAttribute("aria-current", "true");
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
+  });
+
+  it("preserves loaded pages and scroll position across selected-id rerenders", () => {
+    setEntries([
+      entry(),
+      entry({ id: 102, guid: "entry-102", title: "Earlier dispatch" }),
+    ]);
+    const page = renderRiver({ view: "all" }, false, 101);
+    const river = screen.getByRole("region", { name: "Feed river" });
+    river.scrollTop = 173;
+
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all" }}
+        selectedEntryId={102}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+
+    expect(river).toBe(screen.getByRole("region", { name: "Feed river" }));
+    expect(river.scrollTop).toBe(173);
+    expect(screen.getByRole("article", { name: /cache semantics/i })).toBeVisible();
+    expect(screen.getByRole("article", { name: /earlier dispatch/i })).toBeVisible();
+  });
+
+  it("pins an unread selected row through optimistic removal and rollback without moving the scroll container", async () => {
+    let rejectPatch!: (reason?: unknown) => void;
+    const patchPromise = new Promise<FeedEntry>((_resolve, reject) => {
+      rejectPatch = reject;
+    });
+    riverMocks.patchEntryAsync.mockReturnValue(patchPromise);
+    const onSelectEntry = vi.fn();
+    const page = renderRiver(
+      { view: "unread" },
+      false,
+      undefined,
+      onSelectEntry,
+    );
+    const river = screen.getByRole("region", { name: "Feed river" });
+    river.scrollTop = 211;
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /cache semantics/i }),
+    );
+    setEntries([]);
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "unread" }}
+        selectedEntryId={101}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    const selected = screen.getByRole("article", { name: /cache semantics/i });
+    expect(selected).toHaveAttribute("aria-current", "true");
+    expect(selected).toHaveTextContent("Unread entry");
+    expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
+    expect(river.scrollTop).toBe(211);
+    await act(async () => rejectPatch(new Error("read patch failed")));
+    setEntries([entry()]);
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "unread" }}
+        selectedEntryId={101}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("Unread entry");
+    expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
+    expect(river.scrollTop).toBe(211);
+  });
+
+  it("reconciles a pinned saved row from authoritative detail success and rollback", () => {
+    const saved = entry({ bookmarked: true });
+    setEntries([saved]);
+    riverMocks.detailQuery.data = saved;
+    const page = renderRiver({ view: "saved" }, false, 101);
+    const river = screen.getByRole("region", { name: "Feed river" });
+
+    setEntries([]);
+    riverMocks.detailQuery.data = entry({ bookmarked: false });
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "saved" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).not.toHaveTextContent("Saved");
+    expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
+
+    riverMocks.detailQuery.data = saved;
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "saved" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("Saved");
+  });
+
+  it("reconciles a pinned tag-filtered row from authoritative detail success and rollback", () => {
+    const tagged = entry({ tags: ["rust", "reading"] });
+    setEntries([tagged]);
+    riverMocks.detailQuery.data = tagged;
+    const page = renderRiver(
+      { view: "all", tag: "rust" },
+      false,
+      101,
+    );
+
+    setEntries([]);
+    riverMocks.detailQuery.data = entry({ tags: ["reading"] });
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all", tag: "rust" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).not.toHaveTextContent("#rust");
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("#reading");
+
+    riverMocks.detailQuery.data = tagged;
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all", tag: "rust" }}
+        selectedEntryId={101}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("#rust");
+
+    setEntries([]);
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all", tag: "rust" }}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("appends a fetched page without replacing the first loaded page", async () => {
+    const user = userEvent.setup();
+    setEntries([entry()], "cursor-page-2");
+    const page = renderRiver({ view: "all" }, false);
+
+    await user.click(screen.getByRole("button", { name: /load more/i }));
+    riverMocks.entriesQuery.data = {
+      pages: [
+        { entries: [entry()], next_cursor: "cursor-page-2" },
+        {
+          entries: [
+            entry({
+              id: 88,
+              guid: "entry-88",
+              title: "Page two dispatch",
+              published_at: "2026-08-08T12:00:00Z",
+            }),
+          ],
+          next_cursor: null,
+        },
+      ],
+      pageParams: [undefined, "cursor-page-2"],
+    };
+    riverMocks.entriesQuery.hasNextPage = false;
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "all" }}
+        onSelectEntry={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("article", { name: /cache semantics/i })).toBeVisible();
+    expect(screen.getByRole("article", { name: /page two dispatch/i })).toBeVisible();
+  });
+
+  it("keeps compact disclosure and its full-reader continuation", async () => {
+    const user = userEvent.setup();
+    renderRiver({ view: "all" }, true);
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+
+    expect(screen.getByText("The complete entry body.")).toBeVisible();
+    expect(
+      screen.getByRole("link", { name: /continue in feeds/i }),
+    ).toHaveAttribute("href", "/feeds?view=all");
+  });
   it("marks an unread entry read when expanded and exposes a safe original link", async () => {
     const user = userEvent.setup();
-    renderRiver();
+    renderRiver({ view: "unread" }, true);
 
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
 
@@ -252,7 +500,7 @@ describe("FeedRiver", () => {
 
   it("hides the visual pip while keeping Read or Unread in the disclosure name and tree", async () => {
     const user = userEvent.setup();
-    renderRiver();
+    renderRiver({ view: "unread" }, true);
 
     const unreadTrigger = screen.getByRole("button", {
       name: /unread entry.*cache semantics/i,
@@ -357,7 +605,7 @@ describe("FeedRiver", () => {
 
   it("toggles an entry bookmark from the expanded controls", async () => {
     const user = userEvent.setup();
-    renderRiver({ view: "all" });
+    renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
 
     await user.click(
@@ -371,7 +619,7 @@ describe("FeedRiver", () => {
 
   it("edits normalized entry tags through named controls", async () => {
     const user = userEvent.setup();
-    renderRiver({ view: "all" });
+    renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     await user.click(screen.getByRole("button", { name: /edit tags/i }));
 
@@ -390,7 +638,7 @@ describe("FeedRiver", () => {
   it("offers an explicit mark-unread action for a read entry", async () => {
     const user = userEvent.setup();
     setEntries([entry({ read: true })]);
-    renderRiver({ view: "all" });
+    renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     riverMocks.patchEntry.mockClear();
 
@@ -403,7 +651,7 @@ describe("FeedRiver", () => {
 
   it("keeps read entries in all, hides them in unread, and restores them when toggled off", async () => {
     const user = userEvent.setup();
-    const page = renderRiver({ view: "all" });
+    const page = renderRiver({ view: "all" }, true);
     const before = riverMocks.entriesQuery.data;
     if (!before) {
       throw new Error("Expected seeded entry pages");
@@ -420,7 +668,7 @@ describe("FeedRiver", () => {
       { view: "all" },
     );
     riverMocks.entriesQuery.data = all;
-    page.rerender(<FeedRiver filters={{ view: "all" }} />);
+    page.rerender(<FeedRiver filters={{ view: "all" }} compact />);
     expect(
       screen.getByRole("article", { name: /cache semantics/i }),
     ).toBeVisible();
@@ -431,13 +679,13 @@ describe("FeedRiver", () => {
       { view: "unread" },
     );
     riverMocks.entriesQuery.data = unread;
-    page.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    page.rerender(<FeedRiver filters={{ view: "unread" }} compact />);
     expect(
       screen.queryByRole("article", { name: /cache semantics/i }),
     ).not.toBeInTheDocument();
 
     riverMocks.entriesQuery.data = all;
-    page.rerender(<FeedRiver filters={{ view: "all" }} />);
+    page.rerender(<FeedRiver filters={{ view: "all" }} compact />);
     expect(
       screen.getByRole("article", { name: /cache semantics/i }),
     ).toBeVisible();
@@ -510,7 +758,7 @@ describe("FeedRiver", () => {
       entry(),
       entry({ id: 102, guid: "entry-102", title: "Second dispatch" }),
     ]);
-    renderRiver({ view: "all" });
+    renderRiver({ view: "all" }, true);
 
     const first = screen.getByRole("article", { name: /cache semantics/i });
     const second = screen.getByRole("article", { name: /second dispatch/i });
@@ -571,7 +819,7 @@ describe("FeedRiver", () => {
     const user = userEvent.setup();
     render(
       <QueryClientProvider client={client}>
-        <FeedRiver filters={{ view: "unread" }} />
+        <FeedRiver filters={{ view: "unread" }} compact />
       </QueryClientProvider>,
     );
 
@@ -660,7 +908,7 @@ describe("FeedRiver", () => {
         url: "https://two.example/post",
       }),
     ]);
-    renderRiver({ view: "all" });
+    renderRiver({ view: "all" }, true);
 
     expect(
       screen.queryByText("The complete entry body."),
@@ -693,7 +941,7 @@ describe("FeedRiver", () => {
   ])("omits the original action for unsafe URL %s", async (url) => {
     const user = userEvent.setup();
     setEntries([entry({ read: true, url })]);
-    renderRiver({ view: "all" });
+    renderRiver({ view: "all" }, true);
 
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
 
@@ -719,11 +967,11 @@ describe("FeedRiver", () => {
 
   it("surfaces mark-on-expand failures without collapsing the entry", async () => {
     const user = userEvent.setup();
-    const view = renderRiver();
+    const view = renderRiver({ view: "unread" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
 
     riverMocks.patchState.error = new Error("Read state could not be saved");
-    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    view.rerender(<FeedRiver filters={{ view: "unread" }} compact />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Read state could not be saved",
@@ -739,19 +987,19 @@ describe("FeedRiver", () => {
     async (actionName, message) => {
       const user = userEvent.setup();
       setEntries([entry({ read: true })]);
-      const view = renderRiver({ view: "all" });
+      const view = renderRiver({ view: "all" }, true);
       await user.click(
         screen.getByRole("button", { name: /cache semantics/i }),
       );
       await user.click(screen.getByRole("button", { name: actionName }));
 
       riverMocks.patchState.isPending = true;
-      view.rerender(<FeedRiver filters={{ view: "all" }} />);
+      view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
       expect(screen.getByRole("button", { name: actionName })).toBeDisabled();
 
       riverMocks.patchState.isPending = false;
       riverMocks.patchState.error = new Error(message);
-      view.rerender(<FeedRiver filters={{ view: "all" }} />);
+      view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
       expect(screen.getByRole("alert")).toHaveTextContent(message);
     },
   );
@@ -767,7 +1015,7 @@ describe("FeedRiver", () => {
     });
     const user = userEvent.setup();
     setEntries([entry({ read: true })]);
-    const view = renderRiver({ view: "all" });
+    const view = renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     await user.click(screen.getByRole("button", { name: /edit tags/i }));
     const tags = screen.getByRole("textbox", {
@@ -778,7 +1026,7 @@ describe("FeedRiver", () => {
     await user.click(screen.getByRole("button", { name: /save tags/i }));
 
     riverMocks.patchState.isPending = true;
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
     expect(
       screen.getByRole("textbox", { name: /tags for cache semantics/i }),
     ).toHaveValue("systems, reading");
@@ -791,7 +1039,7 @@ describe("FeedRiver", () => {
 
     riverMocks.patchState.isPending = false;
     riverMocks.patchState.error = new Error("Tags could not be saved");
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Tags could not be saved",
     );
@@ -808,7 +1056,7 @@ describe("FeedRiver", () => {
       resolvePatch();
       await pendingPatch;
     });
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
     await waitFor(() => {
       expect(
         screen.queryByRole("textbox", { name: /tags for cache semantics/i }),
@@ -823,10 +1071,10 @@ describe("FeedRiver", () => {
     riverMocks.patchEntryAsync.mockResolvedValue(updated);
     const user = userEvent.setup();
     setEntries([entry({ read: true })]);
-    const view = renderRiver({ view: "all" });
+    const view = renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     setEntries([]);
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
 
     await user.click(screen.getByRole("button", { name: /^mark unread$/i }));
 
@@ -850,10 +1098,10 @@ describe("FeedRiver", () => {
     riverMocks.patchEntryAsync.mockResolvedValue(updated);
     const user = userEvent.setup();
     setEntries([entry({ read: true })]);
-    const view = renderRiver({ view: "all" });
+    const view = renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     setEntries([]);
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
 
     await user.click(
       screen.getByRole("button", { name: /bookmark cache semantics/i }),
@@ -875,10 +1123,10 @@ describe("FeedRiver", () => {
     riverMocks.patchEntryAsync.mockResolvedValue(updated);
     const user = userEvent.setup();
     setEntries([entry({ read: true })]);
-    const view = renderRiver({ view: "all" });
+    const view = renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     setEntries([]);
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
     await user.click(screen.getByRole("button", { name: /edit tags/i }));
     const tags = screen.getByRole("textbox", {
       name: /tags for cache semantics/i,
@@ -904,10 +1152,10 @@ describe("FeedRiver", () => {
     riverMocks.patchEntryAsync.mockRejectedValue(failure);
     const user = userEvent.setup();
     setEntries([entry({ read: true, bookmarked: true })]);
-    const view = renderRiver({ view: "all" });
+    const view = renderRiver({ view: "all" }, true);
     await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     setEntries([]);
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
     await user.click(screen.getByRole("button", { name: /edit tags/i }));
     const tags = screen.getByRole("textbox", {
       name: /tags for cache semantics/i,
@@ -917,7 +1165,7 @@ describe("FeedRiver", () => {
 
     await user.click(screen.getByRole("button", { name: /save tags/i }));
     riverMocks.patchState.error = failure;
-    view.rerender(<FeedRiver filters={{ view: "all" }} />);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Tags could not be saved",

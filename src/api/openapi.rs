@@ -195,6 +195,7 @@ impl Modify for FilterSchema {
         crate::api::feeds::refresh_feeds,
         crate::api::feeds::refresh_feed,
         crate::api::feeds::list_entries,
+        crate::api::feeds::get_entry,
         crate::api::feeds::patch_entry,
         crate::api::feeds::mark_entries_read,
         crate::api::feeds::import_opml,

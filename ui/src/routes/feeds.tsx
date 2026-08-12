@@ -1,13 +1,16 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
 import { FeedManagement } from "#/components/codex/FeedManagement";
 import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
+import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
+import { useMobileLayout } from "#/hooks/useMobileLayout";
 
 type FeedsSearch = FeedRiverFilters & {
   manage: boolean;
+  entry?: number;
 };
 
 export const Route = createFileRoute("/feeds")({
@@ -17,6 +20,12 @@ export const Route = createFileRoute("/feeds")({
         ? search.feed
         : typeof search.feed === "string"
           ? Number(search.feed)
+          : undefined;
+    const parsedEntry =
+      typeof search.entry === "number"
+        ? search.entry
+        : typeof search.entry === "string"
+          ? Number(search.entry)
           : undefined;
     return {
       view:
@@ -34,6 +43,12 @@ export const Route = createFileRoute("/feeds")({
       tag:
         typeof search.tag === "string" && search.tag ? search.tag : undefined,
       manage: search.manage === true || search.manage === "true",
+      entry:
+        parsedEntry !== undefined &&
+        Number.isSafeInteger(parsedEntry) &&
+        parsedEntry > 0
+          ? parsedEntry
+          : undefined,
     };
   },
   component: FeedsPage,
@@ -43,6 +58,11 @@ function FeedsPage() {
   const search = Route.useSearch();
   const navigate = useNavigate({ from: "/feeds" });
   const feedsQuery = useFeeds();
+  const isMobile = useMobileLayout();
+  const listRegionRef = useRef<HTMLElement>(null);
+  const readerRegionRef = useRef<HTMLDivElement>(null);
+  const previousEntryId = useRef<number | undefined>(undefined);
+  const mobileListScrollTop = useRef(0);
   const [tagDraft, setTagDraft] = useState(search.tag ?? "");
   useEffect(() => setTagDraft(search.tag ?? ""), [search.tag]);
   const filters: FeedRiverFilters = {
@@ -54,12 +74,53 @@ function FeedsPage() {
   const groups = feedsQuery.data?.groups ?? [];
   const feeds = groups.flatMap((group) => group.feeds);
 
-  const updateSearch = (patch: Partial<FeedsSearch>) => {
-    void navigate({ search: (current) => ({ ...current, ...patch }) });
+  const updateSearch = (patch: Partial<FeedsSearch>, replace = false) => {
+    void navigate({
+      replace,
+      search: (current) => ({ ...current, ...patch }),
+    });
   };
 
+  useEffect(() => {
+    let restoreFrame: number | undefined;
+    const previous = previousEntryId.current;
+    previousEntryId.current = search.entry;
+    if (search.entry !== undefined && previous !== search.entry) {
+      readerRegionRef.current
+        ?.querySelector<HTMLElement>("[data-reader-focus]")
+        ?.focus();
+      return;
+    }
+    if (search.entry === undefined && previous !== undefined) {
+      if (isMobile) {
+        const main = listRegionRef.current?.closest("main");
+        if (main) {
+          const scrollTop = mobileListScrollTop.current;
+          main.scrollTop = scrollTop;
+          restoreFrame = requestAnimationFrame(() => {
+            const currentList = listRegionRef.current;
+            if (
+              previousEntryId.current === undefined &&
+              currentList?.isConnected &&
+              currentList.closest("main") === main
+            ) {
+              main.scrollTop = scrollTop;
+            }
+          });
+        }
+      }
+      const selectedRow = listRegionRef.current?.querySelector<HTMLElement>(
+        `[data-feed-entry-id="${previous}"]`,
+      );
+      (selectedRow ?? listRegionRef.current)?.focus();
+    }
+    return () => {
+      if (restoreFrame !== undefined) cancelAnimationFrame(restoreFrame);
+    };
+  }, [isMobile, search.entry]);
+
   return (
-    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:px-4 md:py-4">
+    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:h-full md:grid-rows-[auto_auto_minmax(0,1fr)] md:contain-paint md:overflow-hidden md:px-4 md:py-4">
       <section className="cl-grid-texture border border-rule bg-paper-2 px-4 py-4 md:px-6 md:py-5">
         <div className="cl-mono flex flex-wrap items-center gap-3 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
           <span aria-hidden="true" className="h-[7px] w-[7px] bg-accent" />
@@ -198,13 +259,38 @@ function FeedsPage() {
             </div>
           </Card>
 
-          <Card
-            label="Feed river"
-            caption={search.view.toUpperCase()}
-            pip="cool"
-          >
-            <FeedRiver filters={filters} />
-          </Card>
+          <div className="grid min-h-0 gap-3.5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+            <section
+              ref={listRegionRef}
+              tabIndex={-1}
+              aria-label="Entry list"
+              hidden={isMobile && search.entry !== undefined}
+              className="min-h-0 overflow-y-auto border border-rule bg-paper-2 p-3.5"
+            >
+              <FeedRiver
+                filters={filters}
+                selectedEntryId={search.entry}
+                onSelectEntry={(entry) => {
+                  if (isMobile) {
+                    mobileListScrollTop.current =
+                      listRegionRef.current?.closest("main")?.scrollTop ?? 0;
+                  }
+                  updateSearch({ entry });
+                }}
+              />
+            </section>
+            <div
+              ref={readerRegionRef}
+              hidden={isMobile && search.entry === undefined}
+              className="min-h-0 md:h-full"
+            >
+              <FeedReaderPane
+                selectedEntryId={search.entry}
+                onBack={() => updateSearch({ entry: undefined })}
+                onMissing={() => updateSearch({ entry: undefined }, true)}
+              />
+            </div>
+          </div>
         </>
       )}
     </div>

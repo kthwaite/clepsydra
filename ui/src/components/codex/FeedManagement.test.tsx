@@ -1,7 +1,9 @@
+import { StrictMode } from "react";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "#/api/schema";
+import { feedDisclosureStorageKey } from "#/store/feedDisclosure";
 
 type FeedList = components["schemas"]["FeedListResponse"];
 type FeedListWithCounts = FeedList & {
@@ -113,8 +115,49 @@ const feedList: FeedListWithCounts = {
     },
   ],
   manifest_revision: "revision-1",
+  preference_namespace: "fixture-feed-preferences",
   counts: { unread: 1, all: 1, saved: 0 },
 };
+
+const disclosureFeedList: FeedListWithCounts = {
+  ...feedList,
+  diagnostics: [],
+  groups: [
+    feedList.groups[0],
+    {
+      name: "Research",
+      feeds: [
+        {
+          id: 8,
+          title: "Two Example",
+          title_override: null,
+          url: "https://two.example/feed.xml",
+          fetch_url: "https://two.example/feed.xml",
+          site_url: "https://two.example",
+          group: "Research",
+          tags: ["design"],
+          last_fetch_at: "2026-08-09T12:15:00Z",
+          next_fetch_at: "2026-08-09T13:15:00Z",
+          error_count: 0,
+          last_error: null,
+        },
+      ],
+    },
+  ],
+  counts: { unread: 1, all: 2, saved: 0 },
+};
+
+function groupDisclosure(name: string) {
+  return screen.getByRole("button", {
+    name: new RegExp(`${name} group`, "i"),
+  });
+}
+
+function feedDisclosure(title: string) {
+  return screen.getByRole("button", {
+    name: new RegExp(`${title} feed`, "i"),
+  });
+}
 
 function renderManagement() {
   return render(<FeedManagement />);
@@ -122,6 +165,7 @@ function renderManagement() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  window.localStorage.clear();
   managementMocks.subscribeState.isPending = false;
   managementMocks.subscribeState.error = null;
   managementMocks.updateState.isPending = false;
@@ -154,6 +198,10 @@ beforeEach(() => {
   );
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("FeedManagement", () => {
   it("supports keyboard-only subscription in predictable focus order", async () => {
     const user = userEvent.setup();
@@ -165,7 +213,7 @@ describe("FeedManagement", () => {
     await user.type(url, "https://one.example/feed");
 
     await user.tab();
-    const group = screen.getByRole("textbox", { name: /^group$/i });
+    const group = screen.getByRole("combobox", { name: /^group$/i });
     expect(group).toHaveFocus();
     await user.type(group, "Tech");
 
@@ -181,6 +229,98 @@ describe("FeedManagement", () => {
     );
   });
 
+
+  it("offers canonical live-manifest groups in both group comboboxes", async () => {
+    managementMocks.feedsQuery.data = {
+      ...feedList,
+      groups: [
+        ...feedList.groups,
+        { name: "Research", feeds: [] },
+        { name: " research ", feeds: [] },
+        { name: "Design", feeds: [] },
+      ],
+    };
+    const user = userEvent.setup();
+    renderManagement();
+
+    const subscribeGroup = screen.getByRole("combobox", {
+      name: /^group$/i,
+    });
+    await user.type(subscribeGroup, "e");
+    expect(
+      (await screen.findAllByRole("option")).map((option) => option.textContent),
+    ).toEqual(["Engineering", "Research", "Design"]);
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: /edit one example/i }));
+    const dialog = screen.getByRole("dialog", { name: /edit one example/i });
+    const editGroup = within(dialog).getByRole("combobox", {
+      name: /^group$/i,
+    });
+    await user.clear(editGroup);
+    await user.type(editGroup, "e");
+    expect(
+      (await screen.findAllByRole("option")).map((option) => option.textContent),
+    ).toEqual(["Engineering", "Research", "Design"]);
+  });
+
+  it("submits a selected case-insensitive manifest match once with canonical spelling", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.type(
+      screen.getByRole("textbox", { name: /feed or site url/i }),
+      "https://canonical.example/feed",
+    );
+    const group = screen.getByRole("combobox", { name: /^group$/i });
+    await user.type(group, "engineering");
+    await user.click(
+      await screen.findByRole("option", { name: "Engineering" }),
+    );
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+
+    expect(managementMocks.subscribeFeed).toHaveBeenCalledTimes(1);
+    expect(managementMocks.subscribeFeed).toHaveBeenCalledWith({
+      url: "https://canonical.example/feed",
+      group: "Engineering",
+    });
+  });
+
+  it("submits a canonical edit selection and a novel edit through the existing mutation", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(screen.getByRole("button", { name: /edit one example/i }));
+    let dialog = screen.getByRole("dialog", { name: /edit one example/i });
+    let group = within(dialog).getByRole("combobox", { name: /^group$/i });
+    await user.clear(group);
+    await user.type(group, "engineering");
+    await user.click(
+      await screen.findByRole("option", { name: "Engineering" }),
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: /save changes/i }),
+    );
+    expect(managementMocks.updateFeed).toHaveBeenLastCalledWith({
+      id: 7,
+      title: null,
+      group: "Engineering",
+    });
+
+    await user.click(screen.getByRole("button", { name: /edit one example/i }));
+    dialog = screen.getByRole("dialog", { name: /edit one example/i });
+    group = within(dialog).getByRole("combobox", { name: /^group$/i });
+    await user.clear(group);
+    await user.type(group, "New Group");
+    await user.click(
+      within(dialog).getByRole("button", { name: /save changes/i }),
+    );
+    expect(managementMocks.updateFeed).toHaveBeenLastCalledWith({
+      id: 7,
+      title: null,
+      group: "New Group",
+    });
+  });
   it("renders a named loading status", () => {
     managementMocks.feedsQuery.data = undefined;
     managementMocks.feedsQuery.isPending = true;
@@ -208,6 +348,7 @@ describe("FeedManagement", () => {
       diagnostics: [],
       groups: [],
       manifest_revision: "empty-revision",
+      preference_namespace: "fixture-feed-preferences",
       counts: { unread: 0, all: 0, saved: 0 },
     } satisfies FeedListWithCounts;
 
@@ -243,7 +384,7 @@ describe("FeedManagement", () => {
     await user.click(screen.getByRole("button", { name: /edit one example/i }));
     const dialog = screen.getByRole("dialog", { name: /edit one example/i });
     const title = within(dialog).getByRole("textbox", { name: /^title$/i });
-    const group = within(dialog).getByRole("textbox", { name: /^group$/i });
+    const group = within(dialog).getByRole("combobox", { name: /^group$/i });
     await user.clear(title);
     await user.type(title, "Renamed Feed");
     await user.clear(group);
@@ -336,7 +477,7 @@ describe("FeedManagement", () => {
       controls.getByRole("button", { name: /unsubscribe one example/i }),
     ).toBeVisible();
   });
-  it("keeps the subscribe draft in its form while pending and after failure", async () => {
+  it("preserves the full subscribe draft through a conflict and retries once", async () => {
     let rejectSubscribe!: (error: Error) => void;
     let mutationOptions:
       | { onError?: (error: Error) => void; onSuccess?: () => void }
@@ -355,9 +496,12 @@ describe("FeedManagement", () => {
     const user = userEvent.setup();
     const view = renderManagement();
     const url = screen.getByRole("textbox", { name: /feed or site url/i });
-    const group = screen.getByRole("textbox", { name: /^group$/i });
+    const group = screen.getByRole("combobox", { name: /^group$/i });
     await user.type(url, "https://pending.example/feed");
-    await user.type(group, "Research");
+    await user.type(group, "engineering");
+    await user.click(
+      await screen.findByRole("option", { name: "Engineering" }),
+    );
     await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
 
     managementMocks.subscribeState.isPending = true;
@@ -365,13 +509,13 @@ describe("FeedManagement", () => {
     expect(
       screen.getByRole("textbox", { name: /feed or site url/i }),
     ).toHaveValue("https://pending.example/feed");
-    expect(screen.getByRole("textbox", { name: /^group$/i })).toHaveValue(
-      "Research",
+    expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue(
+      "Engineering",
     );
     expect(
       screen.getByRole("textbox", { name: /feed or site url/i }),
     ).toBeDisabled();
-    expect(screen.getByRole("textbox", { name: /^group$/i })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: /^group$/i })).toBeDisabled();
     const pendingForm = screen
       .getByRole("textbox", { name: /feed or site url/i })
       .closest("form");
@@ -382,7 +526,7 @@ describe("FeedManagement", () => {
       }),
     ).toBeDisabled();
 
-    const failure = new Error("Subscription could not be saved");
+    const failure = new Error("feeds.md changed; reload and retry");
     managementMocks.subscribeState.isPending = false;
     managementMocks.subscribeState.error = failure;
     mutationOptions?.onError?.(failure);
@@ -393,13 +537,21 @@ describe("FeedManagement", () => {
       .closest("form");
     expect(form).not.toBeNull();
     expect(within(form as HTMLElement).getByRole("alert")).toHaveTextContent(
-      "Subscription could not be saved",
+      "feeds.md changed; reload and retry",
     );
     expect(
       screen.getByRole("textbox", { name: /feed or site url/i }),
     ).toHaveValue("https://pending.example/feed");
-    expect(screen.getByRole("textbox", { name: /^group$/i })).toHaveValue(
-      "Research",
+    expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue(
+      "Engineering",
+    );
+    managementMocks.subscribeFeedAsync.mockImplementation((variables) => {
+      managementMocks.subscribeFeed(variables);
+      return Promise.resolve();
+    });
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    await waitFor(() =>
+      expect(managementMocks.subscribeFeed).toHaveBeenCalledTimes(2),
     );
   });
 
@@ -417,7 +569,7 @@ describe("FeedManagement", () => {
       screen.getByRole("textbox", { name: /feed or site url/i }),
       "https://success.example/feed",
     );
-    await user.type(screen.getByRole("textbox", { name: /^group$/i }), "Tech");
+    await user.type(screen.getByRole("combobox", { name: /^group$/i }), "Tech");
 
     await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
 
@@ -425,11 +577,11 @@ describe("FeedManagement", () => {
       expect(
         screen.getByRole("textbox", { name: /feed or site url/i }),
       ).toHaveValue("");
-      expect(screen.getByRole("textbox", { name: /^group$/i })).toHaveValue("");
+      expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue("");
     });
   });
 
-  it("keeps the edit dialog, pending controls, draft, and local error until success", async () => {
+  it("keeps the full edit draft and local alert through a conflict", async () => {
     let rejectUpdate!: (error: Error) => void;
     let mutationOptions:
       | { onError?: (error: Error) => void; onSuccess?: () => void }
@@ -452,6 +604,9 @@ describe("FeedManagement", () => {
     const title = within(dialog).getByRole("textbox", { name: /^title$/i });
     await user.clear(title);
     await user.type(title, "Pending title");
+    const group = within(dialog).getByRole("combobox", { name: /^group$/i });
+    await user.clear(group);
+    await user.type(group, "Conflict Group");
     await user.click(
       within(dialog).getByRole("button", { name: /save changes/i }),
     );
@@ -466,10 +621,16 @@ describe("FeedManagement", () => {
       within(dialog).getByRole("textbox", { name: /^title$/i }),
     ).toBeDisabled();
     expect(
+      within(dialog).getByRole("combobox", { name: /^group$/i }),
+    ).toHaveValue("Conflict Group");
+    expect(
+      within(dialog).getByRole("combobox", { name: /^group$/i }),
+    ).toBeDisabled();
+    expect(
       within(dialog).getByRole("button", { name: /save changes|saving/i }),
     ).toBeDisabled();
 
-    const failure = new Error("Edit could not be saved");
+    const failure = new Error("feeds.md changed; reload and retry");
     managementMocks.updateState.isPending = false;
     managementMocks.updateState.error = failure;
     mutationOptions?.onError?.(failure);
@@ -477,11 +638,14 @@ describe("FeedManagement", () => {
     view.rerender(<FeedManagement />);
     dialog = screen.getByRole("dialog", { name: /edit one example/i });
     expect(within(dialog).getByRole("alert")).toHaveTextContent(
-      "Edit could not be saved",
+      "feeds.md changed; reload and retry",
     );
     expect(
       within(dialog).getByRole("textbox", { name: /^title$/i }),
     ).toHaveValue("Pending title");
+    expect(
+      within(dialog).getByRole("combobox", { name: /^group$/i }),
+    ).toHaveValue("Conflict Group");
   });
 
   it("keeps unsubscribe confirmation open and local while pending or failed", async () => {
@@ -577,7 +741,7 @@ describe("FeedManagement", () => {
     await user.click(screen.getByRole("button", { name: /edit one example/i }));
     const dialog = screen.getByRole("dialog", { name: /edit one example/i });
     const title = within(dialog).getByRole("textbox", { name: /^title$/i });
-    const group = within(dialog).getByRole("textbox", { name: /^group$/i });
+    const group = within(dialog).getByRole("combobox", { name: /^group$/i });
     expect(title).toHaveValue("");
 
     await user.clear(group);
@@ -624,5 +788,390 @@ describe("FeedManagement", () => {
     );
     expect(managementMocks.importOpml).toHaveBeenLastCalledWith({ opml });
     expect(input).toHaveValue("");
+  });
+
+  it("starts every group and feed expanded when storage is absent", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+
+    renderManagement();
+
+    await waitFor(() => {
+      expect(groupDisclosure("Engineering")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+    expect(groupDisclosure("Research")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("Two Example")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("operates group and feed disclosures by pointer, Enter, and Space", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    renderManagement();
+
+    const group = groupDisclosure("Engineering");
+    await user.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    await user.click(group);
+    expect(group).toHaveAttribute("aria-expanded", "true");
+    group.focus();
+    await user.keyboard("{Enter}");
+    expect(group).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard(" ");
+    expect(group).toHaveAttribute("aria-expanded", "true");
+
+    const feed = feedDisclosure("One Example");
+    await user.click(feed);
+    expect(feed).toHaveAttribute("aria-expanded", "false");
+    await user.click(feed);
+    expect(feed).toHaveAttribute("aria-expanded", "true");
+    feed.focus();
+    await user.keyboard(" ");
+    expect(feed).toHaveAttribute("aria-expanded", "false");
+    await user.keyboard("{Enter}");
+    expect(feed).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("hides a collapsed group without discarding its nested feed preference", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(feedDisclosure("One Example"));
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await user.click(groupDisclosure("Engineering"));
+
+    expect(
+      screen.queryByRole("list", { name: /engineering feeds/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /one example feed/i }),
+    ).not.toBeInTheDocument();
+
+    await user.click(groupDisclosure("Engineering"));
+
+    expect(
+      screen.getByRole("list", { name: /engineering feeds/i }),
+    ).toBeVisible();
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+  });
+
+  it("restores collapsed state on remount only for the same namespace", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    const first = renderManagement();
+
+    await user.click(groupDisclosure("Research"));
+    await user.click(feedDisclosure("One Example"));
+    first.unmount();
+
+    const second = renderManagement();
+    await waitFor(() => {
+      expect(groupDisclosure("Research")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    second.unmount();
+
+    managementMocks.feedsQuery.data = {
+      ...disclosureFeedList,
+      preference_namespace: "another-vault",
+    };
+    renderManagement();
+
+    await waitFor(() => {
+      expect(groupDisclosure("Research")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+  });
+
+  it("prunes obsolete preferences after each successful manifest", async () => {
+    const key = feedDisclosureStorageKey(
+      disclosureFeedList.preference_namespace,
+    );
+    window.localStorage.setItem(
+      key,
+      JSON.stringify({
+        version: 1,
+        groups: ["engineering", "research", "obsolete"],
+        feeds: [7, 8, 99],
+      }),
+    );
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const view = renderManagement();
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(key) ?? "{}")).toEqual({
+        version: 1,
+        groups: ["engineering", "research"],
+        feeds: [7, 8],
+      });
+    });
+
+    managementMocks.feedsQuery.data = {
+      ...disclosureFeedList,
+      groups: disclosureFeedList.groups.slice(0, 1),
+      counts: { unread: 1, all: 1, saved: 0 },
+    };
+    view.rerender(<FeedManagement />);
+
+    await waitFor(() => {
+      expect(JSON.parse(window.localStorage.getItem(key) ?? "{}")).toEqual({
+        version: 1,
+        groups: ["engineering"],
+        feeds: [7],
+      });
+    });
+  });
+
+  it("does not prune stored preferences while the manifest loads or errors", () => {
+    const key = feedDisclosureStorageKey(
+      disclosureFeedList.preference_namespace,
+    );
+    const stored = JSON.stringify({
+      version: 1,
+      groups: ["possibly-live"],
+      feeds: [44],
+    });
+    window.localStorage.setItem(key, stored);
+    managementMocks.feedsQuery.data = undefined;
+    managementMocks.feedsQuery.isPending = true;
+    managementMocks.feedsQuery.isLoading = true;
+    const view = renderManagement();
+
+    expect(window.localStorage.getItem(key)).toBe(stored);
+
+    managementMocks.feedsQuery.isPending = false;
+    managementMocks.feedsQuery.isLoading = false;
+    managementMocks.feedsQuery.isError = true;
+    managementMocks.feedsQuery.error = new Error("manifest unavailable");
+    view.rerender(<FeedManagement />);
+
+    expect(window.localStorage.getItem(key)).toBe(stored);
+  });
+
+  it("keeps summary metadata collapsed and details in the expanded feed panel", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const user = userEvent.setup();
+    renderManagement();
+
+    await user.click(feedDisclosure("One Example"));
+    const item = screen.getByText("One Example").closest("li");
+    expect(item).not.toBeNull();
+    const collapsed = within(item as HTMLElement);
+
+    expect(collapsed.getByText("One Example")).toBeVisible();
+    expect(
+      collapsed.getByText("https://one.example/feed.xml"),
+    ).toBeVisible();
+    expect(collapsed.getByLabelText(/degraded feed health/i)).toBeVisible();
+    expect(collapsed.getByText(/last fetch/i)).toBeVisible();
+    expect(collapsed.getByText(/next fetch/i)).toBeVisible();
+    expect(collapsed.getByText(/2 errors/i)).toBeVisible();
+    expect(collapsed.getByText("#rust")).toBeVisible();
+    expect(collapsed.getByText("#systems")).toBeVisible();
+    expect(
+      collapsed.queryByRole("button", { name: /edit one example/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      collapsed.queryByRole("button", { name: /unsubscribe one example/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      collapsed.queryByText("Timeout contacting origin"),
+    ).not.toBeVisible();
+
+    await user.click(feedDisclosure("One Example"));
+
+    expect(
+      collapsed.getByRole("button", { name: /edit one example/i }),
+    ).toBeVisible();
+    expect(
+      collapsed.getByRole("button", { name: /unsubscribe one example/i }),
+    ).toBeVisible();
+    expect(collapsed.getByText("Timeout contacting origin")).toBeVisible();
+  });
+
+  it("persists one committed transition once under StrictMode", async () => {
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    const user = userEvent.setup();
+    render(
+      <StrictMode>
+        <FeedManagement />
+      </StrictMode>,
+    );
+
+    await waitFor(() => {
+      expect(feedDisclosure("One Example")).toHaveAttribute(
+        "aria-expanded",
+        "true",
+      );
+    });
+    expect(setItem).not.toHaveBeenCalled();
+
+    await user.click(feedDisclosure("One Example"));
+
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await waitFor(() => expect(setItem).toHaveBeenCalledTimes(1));
+    expect(setItem).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["loading", "error"] as const)(
+    "keeps retained-data disclosures interactive during background %s without pruning",
+    async (queryState) => {
+      const key = feedDisclosureStorageKey(
+        disclosureFeedList.preference_namespace,
+      );
+      window.localStorage.setItem(
+        key,
+        JSON.stringify({
+          version: 1,
+          groups: ["research", "obsolete"],
+          feeds: [8, 99],
+        }),
+      );
+      managementMocks.feedsQuery.data = disclosureFeedList;
+      if (queryState === "loading") {
+        managementMocks.feedsQuery.isPending = true;
+        managementMocks.feedsQuery.isLoading = true;
+      } else {
+        managementMocks.feedsQuery.isError = true;
+        managementMocks.feedsQuery.error = new Error("background refresh failed");
+      }
+      const user = userEvent.setup();
+      renderManagement();
+
+      await waitFor(() => {
+        expect(groupDisclosure("Research")).toHaveAttribute(
+          "aria-expanded",
+          "false",
+        );
+      });
+      const engineering = groupDisclosure("Engineering");
+      await user.click(engineering);
+      expect(engineering).toHaveAttribute("aria-expanded", "false");
+      await user.click(engineering);
+      expect(engineering).toHaveAttribute("aria-expanded", "true");
+
+      const feed = feedDisclosure("One Example");
+      feed.focus();
+      await user.keyboard(" ");
+      expect(feed).toHaveAttribute("aria-expanded", "false");
+      expect(JSON.parse(window.localStorage.getItem(key) ?? "{}")).toEqual({
+        version: 1,
+        groups: ["obsolete", "research"],
+        feeds: [7, 8, 99],
+      });
+    },
+  );
+
+  it("restores distinct preferences across a same-mounted A to B to A namespace switch", async () => {
+    const namespaceA = disclosureFeedList.preference_namespace;
+    const namespaceB = "another-vault";
+    window.localStorage.setItem(
+      feedDisclosureStorageKey(namespaceA),
+      JSON.stringify({
+        version: 1,
+        groups: ["engineering"],
+        feeds: [8],
+      }),
+    );
+    window.localStorage.setItem(
+      feedDisclosureStorageKey(namespaceB),
+      JSON.stringify({
+        version: 1,
+        groups: ["research"],
+        feeds: [7],
+      }),
+    );
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    const view = renderManagement();
+
+    await waitFor(() => {
+      expect(groupDisclosure("Engineering")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(groupDisclosure("Research")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("Two Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    managementMocks.feedsQuery.data = {
+      ...disclosureFeedList,
+      preference_namespace: namespaceB,
+    };
+    view.rerender(<FeedManagement />);
+
+    await waitFor(() => {
+      expect(groupDisclosure("Research")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(groupDisclosure("Engineering")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("One Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+
+    managementMocks.feedsQuery.data = disclosureFeedList;
+    view.rerender(<FeedManagement />);
+
+    await waitFor(() => {
+      expect(groupDisclosure("Engineering")).toHaveAttribute(
+        "aria-expanded",
+        "false",
+      );
+    });
+    expect(groupDisclosure("Research")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(feedDisclosure("Two Example")).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    expect(setItem).not.toHaveBeenCalled();
   });
 });
