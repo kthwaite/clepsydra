@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ContentEntry } from "#/api/types";
 
 const routeMocks = vi.hoisted(() => ({
   search: {
@@ -13,11 +14,12 @@ const routeMocks = vi.hoisted(() => ({
     page: 2,
   },
   navigate: vi.fn(),
+  openTab: vi.fn(),
   useContentIndex: vi.fn(
     (
       ..._args: unknown[]
     ): {
-      data?: { items: never[]; total: number };
+      data?: { items: ContentEntry[]; total: number };
       error?: Error;
       isError?: boolean;
       isSuccess?: boolean;
@@ -43,11 +45,14 @@ vi.mock("#/api/pages", () => ({
   useAssignBulk: () => ({ isPending: false, mutate: vi.fn() }),
 }));
 vi.mock("#/hooks/useMobileLayout", () => ({ useMobileLayout: () => false }));
-vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/hooks/useOpenTab", () => ({
+  useOpenTab: () => routeMocks.openTab,
+}));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => ["atlas", "clepsydra"],
 }));
 
+import { appendUniqueTag } from "#/components/codex/gazetteer-filter";
 import { Route } from "#/routes/gazetteer";
 
 const GazetteerPage = Route.options.component as () => ReactNode;
@@ -74,6 +79,18 @@ function resolvedSearch() {
 beforeEach(() => {
   vi.clearAllMocks();
   Object.assign(routeMocks.search, completeSearch);
+});
+
+describe("appendUniqueTag", () => {
+  it("preserves input order and returns the selected array when the exact tag is already present", () => {
+    const selectedTags = ["pkm"];
+
+    expect(appendUniqueTag(selectedTags, "research")).toEqual([
+      "pkm",
+      "research",
+    ]);
+    expect(appendUniqueTag(selectedTags, "pkm")).toBe(selectedTags);
+  });
 });
 
 describe("Gazetteer route filters", () => {
@@ -178,5 +195,86 @@ describe("Gazetteer route filters", () => {
       project: undefined,
       page: 1,
     });
+  });
+
+  it("composes a result tag into route search without opening the row or navigating twice", async () => {
+    const user = userEvent.setup();
+    Object.assign(routeMocks.search, {
+      q: "clep",
+      tags: ["pkm"],
+      kind: "NOTE",
+      project: "clepsydra",
+      sort: "title",
+      page: 4,
+    });
+    routeMocks.useContentIndex.mockReturnValue({
+      data: {
+        items: [
+          {
+            created_at: "2026-08-01T12:00:00Z",
+            description: "Route composition result",
+            inferred: false,
+            kind: "NOTE",
+            links: [],
+            path: "notes/research.md",
+            project: "clepsydra",
+            tags: ["research"],
+            computed_tags: [],
+            title: "Research",
+            updated_at: "2026-08-08T12:00:00Z",
+            word_count: 10,
+          },
+        ],
+        total: 100,
+      },
+      isSuccess: true,
+    });
+    const view = render(<GazetteerPage />);
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Filter by tag research",
+      }),
+    );
+
+    expect(routeMocks.openTab).not.toHaveBeenCalled();
+    expect(routeMocks.navigate).toHaveBeenCalledOnce();
+    expect(routeMocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "/gazetteer",
+        search: expect.any(Function),
+      }),
+    );
+    const update = routeMocks.navigate.mock.calls.at(-1)?.[0].search as (
+      current: typeof completeSearch
+    ) => typeof completeSearch;
+    expect(
+      update({
+        q: "clep",
+        tags: ["pkm"],
+        kind: "NOTE",
+        project: "clepsydra",
+        sort: "title",
+        page: 4,
+      }),
+    ).toMatchObject({
+      q: "clep",
+      tags: ["pkm", "research"],
+      kind: "NOTE",
+      project: "clepsydra",
+      sort: "title",
+      page: 1,
+    });
+
+    Object.assign(routeMocks.search, { tags: ["pkm", "research"], page: 1 });
+    routeMocks.navigate.mockClear();
+    view.rerender(<GazetteerPage />);
+    const activeTag = screen.getByRole("button", {
+      name: "Filter by tag research",
+    });
+    expect(activeTag).toHaveAttribute("aria-pressed", "true");
+    await user.click(activeTag);
+    expect(routeMocks.navigate).not.toHaveBeenCalled();
+    expect(routeMocks.openTab).not.toHaveBeenCalled();
   });
 });

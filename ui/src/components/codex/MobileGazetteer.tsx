@@ -16,6 +16,7 @@ import { Button } from "#/components/ui/button";
 import { TagInput } from "#/components/ui/tag-input";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { TextField } from "#/components/ui/text-field";
+import { cn } from "#/lib/cn";
 import {
   KINDS,
   type Kind,
@@ -24,7 +25,10 @@ import {
   resolveKind,
 } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
-import type { GazetteerSort } from "./gazetteer-filter";
+import {
+  appendUniqueTag,
+  type GazetteerSort,
+} from "./gazetteer-filter";
 
 export interface MobileGazetteerProps {
   query: string;
@@ -90,6 +94,11 @@ export function MobileGazetteer({
   const activeFilterCount =
     selectedTags.length + (query ? 1 : 0) + (kind ? 1 : 0) + (project ? 1 : 0);
 
+  const applyResultTag = (tag: string) => {
+    const nextTags = appendUniqueTag(selectedTags, tag);
+    if (nextTags !== selectedTags) onSelectedTagsChange(nextTags);
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-paper text-ink">
       <header className="flex min-h-11 shrink-0 items-stretch border-b border-rule pl-4">
@@ -153,14 +162,25 @@ export function MobileGazetteer({
 
                     <div className="col-span-2 flex flex-wrap gap-1.5">
                       {row.tags.length > 0 ? (
-                        row.tags.map((tag) => (
-                          <span
-                            key={tag}
-                            className="cl-mono border border-rule-soft px-1.5 py-0.5 text-[9px] text-accent"
-                          >
-                            #{tag}
-                          </span>
-                        ))
+                        row.tags.map((tag) => {
+                          const isSelected = selectedTags.includes(tag);
+                          return (
+                            <AriaButton
+                              key={tag}
+                              aria-label={`Filter by tag ${tag}`}
+                              aria-pressed={isSelected}
+                              onPress={() => applyResultTag(tag)}
+                              className={cn(
+                                "cl-mono border border-rule-soft px-1.5 py-0.5 text-[9px] outline-none transition-colors data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent",
+                                isSelected
+                                  ? "cursor-default border-accent text-ink-mute"
+                                  : "cursor-pointer text-accent data-[hovered]:border-accent data-[hovered]:text-hot",
+                              )}
+                            >
+                              #{tag}
+                            </AriaButton>
+                          );
+                        })
                       ) : (
                         <span className="cl-mono text-[9px] text-ink-mute">
                           No tags
