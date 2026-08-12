@@ -77,6 +77,7 @@ const page: DocPage = {
   slug: "getting-started",
   title: "Getting started",
   description: "Set up Clepsydra and create your first vault.",
+  keywords: ["setup", "vault"],
   groupId: "start",
   source: "",
   Component: FixtureGuide,

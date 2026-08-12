@@ -9,6 +9,7 @@ const gettingStarted = {
   slug: "getting-started",
   title: "Getting Started",
   description: "Set up a local vault.",
+  keywords: ["setup", "vault"],
   groupId: "start-here",
   source: `export const meta = {
   slug: "getting-started",
@@ -32,6 +33,7 @@ const bases = {
   slug: "bases",
   title: "Bases",
   description: "Work with structured records.",
+  keywords: ["records", "fields"],
   groupId: "features",
   source: `import {
   unusedFixtureValue
@@ -68,6 +70,7 @@ function page(
     slug,
     title,
     description,
+    keywords: [slug],
     groupId: "test",
     source,
     Component: NoopDoc,

@@ -44,17 +44,40 @@ function renderSidebar(
 }
 
 describe("DocsSidebar", () => {
-  it("renders the nine-page hierarchy, active marker, and collapsible groups", async () => {
+  it("renders all user-intent groups with accessible collapsible navigation", async () => {
     const user = userEvent.setup();
     renderSidebar({ activeSlug: "getting-started" });
 
     const navigation = await screen.findByRole("navigation", {
       name: "Documentation",
     });
+    const groupButtons = within(navigation)
+      .getAllByRole("button")
+      .filter((button) => button.hasAttribute("aria-expanded"));
+    expect(groupButtons.map((button) => button.textContent?.trim())).toEqual([
+      "Start",
+      "Pages and authoring",
+      "Links and structured knowledge",
+      "Work and reading",
+      "Capture, feeds, and archives",
+      "AI and integrations",
+      "Operations and reference",
+    ]);
+    for (const button of groupButtons) {
+      expect(button).toHaveAttribute("aria-expanded", "true");
+      const panelId = button.getAttribute("aria-controls");
+      expect(panelId).not.toBeNull();
+      expect(button.id).not.toBe("");
+      expect(document.getElementById(panelId ?? "")).toHaveAttribute(
+        "aria-labelledby",
+        button.id,
+      );
+    }
+
+    expect(within(navigation).getAllByRole("link")).toHaveLength(9);
     expect(
       within(navigation).getByRole("link", { name: "Getting Started" }),
     ).toHaveAttribute("aria-current", "page");
-    expect(within(navigation).getAllByRole("link")).toHaveLength(9);
     expect(
       within(navigation).getByRole("link", { name: "Troubleshooting" }),
     ).toHaveAttribute("href", "/docs/troubleshooting");
@@ -64,12 +87,10 @@ describe("DocsSidebar", () => {
     expect(
       within(navigation).getByRole("link", { name: "Books and Reading" }),
     ).toHaveAttribute("href", "/docs/books-and-reading");
-    const startHere = within(navigation).getByRole("button", {
-      name: "Start Here",
-    });
-    expect(startHere).toHaveAttribute("aria-expanded", "true");
-    await user.click(startHere);
-    expect(startHere).toHaveAttribute("aria-expanded", "false");
+
+    const start = groupButtons[0];
+    await user.click(start);
+    expect(start).toHaveAttribute("aria-expanded", "false");
     expect(
       within(navigation).queryByRole("link", { name: "Getting Started" }),
     ).not.toBeInTheDocument();
@@ -84,12 +105,12 @@ describe("DocsSidebar", () => {
     });
     await user.type(searchbox, "typed fields");
 
-    expect(screen.queryByText("Start Here")).not.toBeInTheDocument();
+    expect(screen.queryByText("Start")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Bases/ })).toBeInTheDocument();
     expect(screen.getByText(/typed fields/i)).toBeInTheDocument();
 
     await user.clear(searchbox);
-    expect(screen.getByText("Start Here")).toBeInTheDocument();
+    expect(screen.getByText("Start")).toBeInTheDocument();
   });
 
   it("shows the exact empty result state and clears back to grouped navigation", async () => {
@@ -107,7 +128,7 @@ describe("DocsSidebar", () => {
     await user.click(
       screen.getByRole("button", { name: "Clear documentation search" }),
     );
-    expect(screen.getByText("Start Here")).toBeInTheDocument();
+    expect(screen.getByText("Start")).toBeInTheDocument();
   });
 
   it("preserves ranked result order and heading hashes", async () => {

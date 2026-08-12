@@ -37,50 +37,59 @@ const gettingStartedMeta = {
   slug: "getting-started",
   title: "Getting Started",
   description: "Run Clepsydra with an initialized vault.",
+  keywords: ["install", "setup", "vault", "server"],
 } satisfies DocMeta;
 const configurationMeta = {
   slug: "configuration",
   title: "Configuration",
   description:
     "Configure Clepsydra’s server, vault, TLS, and runtime behavior.",
+  keywords: ["config", "environment", "TLS", "server", "vault"],
 } satisfies DocMeta;
 const troubleshootingMeta = {
   slug: "troubleshooting",
   title: "Troubleshooting",
   description: "Resolve common Clepsydra setup, server, UI, and LSP problems.",
+  keywords: ["diagnostics", "setup", "server", "UI", "LSP"],
 } satisfies DocMeta;
 const cliMeta = {
   slug: "cli",
   title: "CLI",
   description: "Use Clepsydra’s command-line interface.",
+  keywords: ["command line", "commands", "terminal"],
 } satisfies DocMeta;
 const basesMeta = {
   slug: "bases",
   title: "Bases",
   description: "Define typed fields and filtered table views.",
+  keywords: ["database", "properties", "fields", "tables", "views"],
 } satisfies DocMeta;
 const booksAndReadingMeta = {
   slug: "books-and-reading",
   title: "Books and Reading",
   description:
     "Add books from an ISBN or camera barcode and understand imported metadata.",
+  keywords: ["books", "reading", "ISBN", "barcode", "metadata"],
 } satisfies DocMeta;
 const lspMeta = {
   slug: "lsp",
   title: "LSP",
   description: "Use Clepsydra’s language server in Markdown editors.",
+  keywords: ["language server", "editor", "Markdown", "autocomplete"],
 } satisfies DocMeta;
 const mcpMeta = {
   slug: "mcp",
   title: "MCP",
   description:
     "Connect agents to Clepsydra through the Model Context Protocol.",
+  keywords: ["Model Context Protocol", "agents", "AI", "tools"],
 } satisfies DocMeta;
 const browserExtensionMeta = {
   slug: "browser-extension",
   title: "Browser Extension",
   description:
     "Build, install, configure, and use the Clepsydra web archive extension.",
+  keywords: ["browser", "extension", "web archive", "capture"],
 } satisfies DocMeta;
 
 function page(
@@ -99,29 +108,34 @@ const gettingStarted = page(
   gettingStartedSource,
 );
 const configuration = page(
-  "start",
+  "operations-reference",
   configurationMeta,
   ConfigurationGuide,
   configurationSource,
 );
 const troubleshooting = page(
-  "start",
+  "operations-reference",
   troubleshootingMeta,
   TroubleshootingGuide,
   troubleshootingSource,
 );
-const cli = page("reference", cliMeta, CliGuide, cliSource);
-const bases = page("features", basesMeta, BasesGuide, basesSource);
+const cli = page("operations-reference", cliMeta, CliGuide, cliSource);
+const bases = page(
+  "links-structured-knowledge",
+  basesMeta,
+  BasesGuide,
+  basesSource,
+);
 const booksAndReading = page(
-  "features",
+  "work-reading",
   booksAndReadingMeta,
   BooksAndReadingGuide,
   booksAndReadingSource,
 );
-const lsp = page("integrations", lspMeta, LspGuide, lspSource);
-const mcp = page("integrations", mcpMeta, McpGuide, mcpSource);
+const lsp = page("ai-integrations", lspMeta, LspGuide, lspSource);
+const mcp = page("ai-integrations", mcpMeta, McpGuide, mcpSource);
 const browserExtension = page(
-  "integrations",
+  "capture-feeds-archives",
   browserExtensionMeta,
   BrowserExtensionGuide,
   browserExtensionSource,
@@ -130,19 +144,38 @@ const browserExtension = page(
 export const DOC_GROUPS = [
   {
     id: "start",
-    label: "Start Here",
-    pages: [gettingStarted, configuration, troubleshooting],
-  },
-  { id: "reference", label: "Reference", pages: [cli] },
-  {
-    id: "features",
-    label: "Features",
-    pages: [bases, booksAndReading],
+    label: "Start",
+    pages: [gettingStarted],
   },
   {
-    id: "integrations",
-    label: "Integrations",
-    pages: [lsp, mcp, browserExtension],
+    id: "pages-authoring",
+    label: "Pages and authoring",
+    pages: [],
+  },
+  {
+    id: "links-structured-knowledge",
+    label: "Links and structured knowledge",
+    pages: [bases],
+  },
+  {
+    id: "work-reading",
+    label: "Work and reading",
+    pages: [booksAndReading],
+  },
+  {
+    id: "capture-feeds-archives",
+    label: "Capture, feeds, and archives",
+    pages: [browserExtension],
+  },
+  {
+    id: "ai-integrations",
+    label: "AI and integrations",
+    pages: [lsp, mcp],
+  },
+  {
+    id: "operations-reference",
+    label: "Operations and reference",
+    pages: [configuration, troubleshooting, cli],
   },
 ] as const satisfies readonly DocGroup[];
 
