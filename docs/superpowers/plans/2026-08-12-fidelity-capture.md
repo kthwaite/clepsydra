@@ -1994,8 +1994,8 @@ Order matters: SingleFile runs **first** because `loadDeferredImages` scrolls th
 - Produces:
   - `snapshotOptions(input: { maxResourceSizeMb: number }): Record<string, unknown>`
   - `captureSnapshot(input: { maxResourceSizeMb: number }, initOptions: { fetch: unknown; frameFetch: unknown }): Promise<string>`
-  - `CaptureResult` on `#/content/capture` loses nothing and gains nothing — `singlefile_html` now holds a real snapshot.
-  - New message: `{ type: "capture_meta"; captureId: string } & Omit<CaptureResult, "singlefile_html">`, followed by the chunks.
+  - `CaptureResult` is **deleted** and replaced by `CaptureMetadata` (the page facts) plus `CaptureMetaMessage` (the envelope). Step 5's code is authoritative.
+  - New message: `{ type: "capture_meta"; captureId: string; metadata: CaptureMetadata }` — the payload is **nested under `metadata`**, not spread flat, so the worker never has to strip envelope fields off with an unused-binding destructure. **Task 8 must read `message.metadata.*`.** Followed by the chunks.
 
 - [ ] **Step 1: Install the dependency**
 
@@ -2762,7 +2762,33 @@ if (!contentSource.includes("saveOriginalURLs")) {
 			"server cannot join a markdown image to its stored blob",
 	);
 }
+
+// `captureSnapshot` imports single-file-core dynamically (a Vitest TDZ
+// workaround). If a bundler change ever emits that as a separate chunk instead
+// of inlining it, the content script would try to resolve `import("./chunk-*")`
+// against the PAGE's origin in the isolated world and 404 — every capture on
+// every site would fail. The size check above catches the common case (an
+// externalised SingleFile collapses the bundle to ~40 KB), but check directly
+// too, and confirm no sibling chunk was emitted alongside it.
+if (/\bimport\s*\(/.test(contentSource)) {
+	failures.push(
+		"content bundle contains an unresolved dynamic import() — it will " +
+			"resolve against the page origin at injection time and 404",
+	);
+}
+
+const emittedChunks = (await readdir(resolve(distDir, "assets"), { withFileTypes: true }).catch(
+	() => [],
+)).filter((entry) => entry.isFile() && /^chunk-/.test(entry.name));
+if (emittedChunks.length > 0) {
+	failures.push(
+		`bundler emitted ${emittedChunks.length} shared chunk(s) under assets/ ` +
+			"— a content script injected by file cannot load them",
+	);
+}
 ```
+
+Add `readdir` to the `node:fs/promises` import at the top of the file.
 
 Also add `onRemoved: listenerStub("tabs.onRemoved")` to the `chrome.tabs` stub, so the worker's module-scope registration does not throw.
 
