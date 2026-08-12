@@ -87,6 +87,53 @@ describe("useVaultEvents", () => {
     unmount();
   });
 
+  it("refetches an active page-property projection when the Base registry changes", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const projectionKey = [
+      "get",
+      "/api/vault/pages/by-id/{uuid}/properties",
+      { params: { path: { uuid: "page-alpha" } } },
+    ] as const;
+    let revision = 0;
+    const loadProjection = vi.fn(async () => ({
+      revision: `page-rev-${++revision}`,
+    }));
+    const observer = new QueryObserver(client, {
+      queryKey: projectionKey,
+      queryFn: loadProjection,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    await waitFor(() => {
+      expect(observer.getCurrentResult().data).toEqual({
+        revision: "page-rev-1",
+      });
+    });
+
+    const { unmount } = renderHook(() => useVaultEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source?.onmessage?.({
+        data: JSON.stringify({ type: "base_registry_changed" }),
+      } as MessageEvent<string>);
+    });
+
+    await waitFor(() => {
+      expect(observer.getCurrentResult().data).toEqual({
+        revision: "page-rev-2",
+      });
+    });
+    expect(loadProjection).toHaveBeenCalledTimes(2);
+    unsubscribe();
+    unmount();
+  });
+
   it("fails closed for changed block details without letting an old response repopulate them", async () => {
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },

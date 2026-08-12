@@ -9,6 +9,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import type { Descendant } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import "./FolioProperties.mock";
 
 const {
   graph,

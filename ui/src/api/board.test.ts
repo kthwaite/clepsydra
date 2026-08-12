@@ -45,6 +45,7 @@ function makeTask(overrides: Partial<BoardTask> = {}): BoardTask {
     id: "task-1",
     code: "T-1",
     title: "Test task",
+    body_excerpt: null,
     status: "BACKLOG",
     priority: "MEDIUM",
     path: "tasks/T-1.md",

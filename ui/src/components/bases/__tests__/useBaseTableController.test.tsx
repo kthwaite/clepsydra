@@ -187,6 +187,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.commit.mockResolvedValue(undefined);
   mocks.evaluationState.data = evaluation();
   mocks.evaluationState.error = null;
   mocks.evaluationState.isLoading = false;

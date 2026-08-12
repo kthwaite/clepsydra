@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import "./FolioProperties.mock";
 
 const {
   mobileLayoutState,

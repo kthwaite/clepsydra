@@ -28,6 +28,7 @@ import { useAssignPage } from "#/api/pages";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
+import { FolioProperties } from "#/components/codex/FolioProperties";
 import {
   countWordsFromSlate,
   shortFolio,
@@ -412,13 +413,21 @@ export function Folio({ tabId, path }: FolioProps) {
   // Archived bodies are generated from a captured snapshot, and the page's
   // frontmatter hash claims to describe them; the server refuses body writes
   // until the reader explicitly unlocks the page.
-  const bodyProtected = editor.readonly;
+  const bodyProtected = editor.readonly === true;
   const folioReadOnly = conversationReadOnly || recipeReadOnly || bodyProtected;
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
     status: "plain" as const,
     body: editor.bodyMarkdown,
   };
+  const folioProperties = (
+    <FolioProperties
+      pageId={editor.pageId ?? ""}
+      path={path}
+      locked={encrypted && encryptionState.status !== "plain"}
+      readOnly={folioReadOnly}
+    />
+  );
   const rawMarkdownPresentationAvailable =
     presentation.bodyPresentation === "editor" ||
     (isAiConversation && conversationMode === "edit") ||
@@ -740,6 +749,7 @@ export function Folio({ tabId, path }: FolioProps) {
         tags={editableTags}
         derivedTags={computedTags}
         state={encryptionState}
+        properties={folioProperties}
       />
     );
   }
@@ -952,6 +962,7 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   const details = (
+    <>
     <Block label="Document">
       <KV k="ID" v={folioCode} />
       <KV
@@ -1026,6 +1037,8 @@ export function Folio({ tabId, path }: FolioProps) {
         }
       />
     </Block>
+    {folioProperties}
+    </>
   );
 
   const supplementalDetails = (

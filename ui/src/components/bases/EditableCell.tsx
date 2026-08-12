@@ -10,6 +10,10 @@ interface EditableCellCommonProps {
   ariaLabel?: string;
   ariaDescribedBy?: string;
   commitOnBlur?: boolean;
+  /** Focus the display affordance when an external async action closes edit mode. */
+  focusOnDisplay?: boolean;
+  /** Keep a controlled draft mounted while focus moves to sibling recovery actions. */
+  preserveEditingOnBlur?: boolean;
   onCommit: (value: CellValue, hint?: PropertyType) => void;
 }
 
@@ -44,6 +48,8 @@ export function EditableCell({
   onCancel,
   ariaLabel,
   ariaDescribedBy,
+  focusOnDisplay = false,
+  preserveEditingOnBlur = false,
   commitOnBlur = false,
   onCommit,
   onCommitNext,
@@ -56,11 +62,11 @@ export function EditableCell({
   const Editor = CELL_EDITORS[definition.type];
 
   useEffect(() => {
-    if (!editing && restoreFocusRef.current) {
+    if (!editing && (restoreFocusRef.current || focusOnDisplay)) {
       restoreFocusRef.current = false;
       displayButtonRef.current?.focus();
     }
-  }, [editing]);
+  }, [editing, focusOnDisplay]);
 
   if (editing) {
     const editor = (
@@ -91,6 +97,14 @@ export function EditableCell({
 
     return (
       <div
+        onBlurCapture={(event) => {
+          if (preserveEditingOnBlur) event.stopPropagation();
+        }}
+        onKeyDownCapture={(event) => {
+          if (preserveEditingOnBlur && event.key === "Tab") {
+            event.stopPropagation();
+          }
+        }}
         onKeyDown={(event) => {
           if (event.key === "Escape" && event.defaultPrevented) {
             restoreFocusRef.current = true;

@@ -322,6 +322,16 @@ describe("TaskCard — card anatomy", () => {
     expect(screen.queryByTestId("hold-stamp-t1")).not.toBeInTheDocument();
   });
 
+  it("renders only a non-empty body excerpt with a fixed line clamp", () => {
+    renderWithHold();
+
+    const excerpt = screen.getByTestId("task-excerpt-t1");
+    expect(excerpt).toHaveTextContent("A concise projected task body.");
+    expect(excerpt).toHaveClass("line-clamp-3");
+    expect(screen.queryByTestId("task-excerpt-t2")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("task-excerpt-t3")).not.toBeInTheDocument();
+  });
+
   it("shows checklist progress bar with d/total", () => {
     const taskWithChecks: BoardTask = {
       ...tasks[0],

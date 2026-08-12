@@ -22,6 +22,7 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/blocks/search", "get"),
     ("/api/vault/blocks/assign-id", "post"),
     ("/api/vault/blocks/{block_id}", "get"),
+    ("/api/vault/pages/by-id/{uuid}/properties", "get"),
     ("/api/vault/bases/{slug}/views/{view}/evaluate", "post"),
 ];
 
@@ -59,8 +60,94 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 108,
-        "OpenAPI should document all 108 registered /api/vault operations"
+        operation_count, 109,
+        "OpenAPI should document all 109 registered /api/vault operations"
+    );
+}
+
+#[test]
+fn openapi_defines_the_page_base_property_projection_contract() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let operation = &document["paths"]["/api/vault/pages/by-id/{uuid}/properties"]["get"];
+    assert_eq!(operation["operationId"], "get_page_base_properties");
+    assert_eq!(
+        operation["responses"]["200"]["content"]["application/json"]["schema"]["$ref"],
+        "#/components/schemas/PageBasePropertiesResponse"
+    );
+    for status in ["400", "404", "500"] {
+        assert_eq!(
+            operation["responses"][status]["content"]["application/json"]["schema"]["$ref"],
+            "#/components/schemas/ApiError",
+            "missing ApiError response schema for {status}"
+        );
+    }
+
+    let schemas = &document["components"]["schemas"];
+    assert_eq!(
+        schemas["PagePropertyCompatibility"]["enum"],
+        serde_json::json!(["compatible", "conflict"])
+    );
+    assert_eq!(
+        schemas["PagePropertyBlocker"]["enum"],
+        serde_json::json!(["schema_conflict", "reserved_key"])
+    );
+    assert_eq!(
+        schemas["PagePropertyDeclaration"]["properties"]["base"]["$ref"],
+        "#/components/schemas/PageBaseIdentity"
+    );
+    assert_eq!(
+        schemas["PagePropertyDeclaration"]["properties"]["definition"]["$ref"],
+        "#/components/schemas/PropertyDefinition"
+    );
+    let page_base_property = &schemas["PageBaseProperty"];
+    let required = page_base_property["required"]
+        .as_array()
+        .expect("PageBaseProperty.required should be an array");
+    for field in ["value", "definition"] {
+        assert!(
+            required.contains(&serde_json::json!(field)),
+            "PageBaseProperty.{field} is always serialized and must be required"
+        );
+    }
+    let value_schema = &page_base_property["properties"]["value"];
+    assert!(
+        value_schema.get("type").is_none(),
+        "the unconstrained PageBaseProperty.value schema must permit JSON null"
+    );
+    let definition_variants = page_base_property["properties"]["definition"]["oneOf"]
+        .as_array()
+        .expect("PageBaseProperty.definition should be a nullable oneOf");
+    assert!(
+        definition_variants
+            .iter()
+            .any(|variant| variant["type"] == "null"),
+        "PageBaseProperty.definition must permit null"
+    );
+    assert!(
+        definition_variants
+            .iter()
+            .any(|variant| variant["$ref"] == "#/components/schemas/PropertyDefinition"),
+        "PageBaseProperty.definition must reference PropertyDefinition"
+    );
+    assert_eq!(
+        page_base_property["properties"]["compatibility"]["$ref"],
+        "#/components/schemas/PagePropertyCompatibility"
+    );
+    assert_eq!(
+        page_base_property["properties"]["declarations"]["items"]["$ref"],
+        "#/components/schemas/PagePropertyDeclaration"
+    );
+    assert_eq!(
+        page_base_property["properties"]["blockers"]["items"]["$ref"],
+        "#/components/schemas/PagePropertyBlocker"
+    );
+    assert_eq!(
+        schemas["PageBasePropertiesResponse"]["properties"]["matching_bases"]["items"]["$ref"],
+        "#/components/schemas/PageBaseIdentity"
+    );
+    assert_eq!(
+        schemas["PageBasePropertiesResponse"]["properties"]["properties"]["items"]["$ref"],
+        "#/components/schemas/PageBaseProperty"
     );
 }
 

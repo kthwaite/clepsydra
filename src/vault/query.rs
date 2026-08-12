@@ -942,7 +942,7 @@ fn append_excerpt_text(
     false
 }
 
-fn body_excerpt(markdown: &str) -> String {
+pub(crate) fn body_excerpt(markdown: &str) -> String {
     let mut excerpt = String::with_capacity(BODY_EXCERPT_MAX_CHARS);
     let mut scalar_count = 0;
     let mut pending_space = false;

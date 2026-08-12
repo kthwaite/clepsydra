@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { useEncryptionConfig } from "#/api/encryption";
 import { useEncryptionActions } from "#/crypto/EncryptionProvider";
 import type { DecryptedBodyState } from "#/editor/useDecryptedPageBody";
@@ -9,6 +9,7 @@ type LockedFolioProps = {
   tags: string[];
   derivedTags?: string[];
   state: Exclude<DecryptedBodyState, { status: "plain" }>;
+  properties?: ReactNode;
 };
 
 export function LockedFolio({
@@ -17,6 +18,7 @@ export function LockedFolio({
   tags,
   derivedTags = [],
   state,
+  properties,
 }: LockedFolioProps) {
   const config = useEncryptionConfig();
   const actions = useEncryptionActions();
@@ -189,6 +191,7 @@ export function LockedFolio({
             </div>
           )}
         </section>
+        {properties}
       </main>
     </div>
   );

@@ -72,6 +72,7 @@ export const BOARD_FIXTURE: BoardResponse = {
       checks: [],
       path: "tasks/t1.md",
       updated_at: "2026-06-01T00:00:00Z",
+      body_excerpt: "A concise projected task body.",
     },
     {
       id: "t2",
@@ -86,6 +87,7 @@ export const BOARD_FIXTURE: BoardResponse = {
       checks: [],
       path: "tasks/t2.md",
       updated_at: "2026-06-02T00:00:00Z",
+      body_excerpt: "",
     },
     {
       id: "t3",
@@ -99,6 +101,7 @@ export const BOARD_FIXTURE: BoardResponse = {
       checks: [],
       path: "tasks/t3.md",
       updated_at: "2026-06-03T00:00:00Z",
+      body_excerpt: null,
     },
     {
       id: "t4",
@@ -112,6 +115,7 @@ export const BOARD_FIXTURE: BoardResponse = {
       checks: [],
       path: "tasks/t4.md",
       updated_at: "2026-06-04T00:00:00Z",
+      body_excerpt: null,
     },
     {
       id: "t5",
@@ -125,6 +129,7 @@ export const BOARD_FIXTURE: BoardResponse = {
       checks: [],
       path: "tasks/t5.md",
       updated_at: "2026-06-05T00:00:00Z",
+      body_excerpt: null,
     },
   ],
 };
@@ -182,6 +187,7 @@ export const SEALED_IN_CLOSED_CYCLE_TASK: BoardResponse["tasks"][number] = {
   checks: [],
   path: "tasks/t-hist.md",
   updated_at: "2026-05-25T00:00:00Z",
+  body_excerpt: null,
 };
 
 /** BOARD_FIXTURE augmented with a CLOSED cycle + a sealed-in-closed-cycle task */

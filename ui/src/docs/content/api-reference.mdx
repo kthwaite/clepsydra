@@ -144,6 +144,12 @@ Evaluate view. Responses: `200`; `404` Unknown base or view.
 Evaluate embedded view. Responses: `200`; `400`; `404`; `409`; `500`.
 ### `POST /api/vault/bases/preview`
 Preview base. Responses: `200`.
+### `GET /api/vault/pages/by-id/{uuid}/properties`
+Project the page's current revision, encryption state, matching Bases, and
+declared custom properties. Duplicate declarations include complete provenance
+and are either editor-compatible or a data-level schema conflict; reserved
+values are suppressed and nonpatchable. Responses: `200`; `400` Malformed page
+UUID; `404` Unknown page; `500` Page read or Base evaluation failed.
 ### `PATCH /api/vault/pages/by-id/{uuid}/properties`
 Patch properties. Responses: `200`; `400` Reserved key or unrepresentable value; `404` Unknown page; `409` Stale `expected_revision`.
 ### `POST /api/vault/query`

@@ -195,6 +195,38 @@ async fn encrypted_body_projections_are_absent_from_content_blocks_tasks_and_age
 }
 
 #[tokio::test]
+async fn board_task_excerpt_is_null_for_encrypted_body_and_leaks_no_ciphertext() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("tasks")).unwrap();
+            fs::write(
+                root.join("tasks/TSK-0402.md"),
+                format!(
+                    "+++\nid = \"{PROTECTED_ID}\"\ntitle = \"Protected task\"\ntype = \"TASK\"\n\
+                     encryption = {{ format = \"age\", version = 1, key_id = \"{KEY_ID}\" }}\n+++\n\
+                     {ARMOR}"
+                ),
+            )
+            .unwrap();
+        })
+        .build();
+
+    let board = get_json(&fixture, "/api/vault/board").await;
+    let task = board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|task| task["id"] == PROTECTED_ID)
+        .expect("encrypted TASK remains metadata-visible");
+
+    assert!(task.get("body_excerpt").is_some());
+    assert!(task["body_excerpt"].is_null());
+    let serialized = serde_json::to_string(&board).unwrap();
+    assert!(!serialized.contains("BEGIN AGE ENCRYPTED FILE"));
+    assert!(!serialized.contains("YWdlLWVuY3J5cHRpb24"));
+}
+
+#[tokio::test]
 async fn encrypted_block_and_task_mutations_fail_with_a_protected_page_conflict() {
     let fixture = ApiFixture::builder()
         .pre_index_seed(|root| {

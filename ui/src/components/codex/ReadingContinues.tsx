@@ -133,7 +133,7 @@ export function ReadingContinuesPanel() {
       rows={rows}
       onOpen={(row) => openTab("page", row.path, row.title ?? row.path)}
       onAdvance={(row, nextProgress) => {
-        void commit(row, "progress", nextProgress);
+        void commit(row, "progress", nextProgress).catch(() => undefined);
       }}
     />
   );

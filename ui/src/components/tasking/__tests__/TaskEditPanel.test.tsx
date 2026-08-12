@@ -43,6 +43,7 @@ const FULL_TASK: BoardTask = {
   id: "t-full",
   code: "TSK-0042",
   title: "FULL TASK",
+  body_excerpt: null,
   status: "FIELD",
   priority: "P1",
   project: "alpha",

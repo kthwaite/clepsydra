@@ -21,6 +21,7 @@ import {
   useMemo,
   useSyncExternalStore,
 } from "react";
+import "./FolioProperties.mock";
 import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";

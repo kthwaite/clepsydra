@@ -55,7 +55,10 @@ export const queryKeys = {
 
   feeds: { pathPrefix: "/api/vault/feeds" },
 
-  pages: { pathPrefix: "/api/vault/pages" },
+  pages: {
+    pathPrefix: "/api/vault/pages",
+    propertyProjectionPath: "/api/vault/pages/by-id/{uuid}/properties",
+  },
   folders: { pathPrefix: "/api/vault/folders" },
   index: {
     pathPrefix: "/api/vault/index",

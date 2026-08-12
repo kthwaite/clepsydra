@@ -1,8 +1,8 @@
 use axum::Router;
-use utoipa::openapi::{Ref, RefOr};
 use utoipa::openapi::schema::{
     AdditionalProperties, Array, Object, ObjectBuilder, OneOfBuilder, Schema, SchemaType, Type,
 };
+use utoipa::openapi::{Ref, RefOr};
 use utoipa::{Modify, OpenApi};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -196,6 +196,7 @@ impl Modify for SchemaOverrides {
         crate::api::bases::delete_base,
         crate::api::base_members::create_base_member,
         crate::api::query::run_query,
+        crate::api::properties::get_page_base_properties,
         crate::api::properties::patch_properties,
         // Feeds
         crate::api::feeds::list_feeds,
@@ -253,6 +254,12 @@ impl Modify for SchemaOverrides {
             crate::api::base_members::BaseMemberCreateResponse,
             crate::api::base_members::BaseMemberValidationDetail,
             crate::api::query::QueryRequest,
+            crate::api::properties::PageBaseIdentity,
+            crate::api::properties::PagePropertyDeclaration,
+            crate::api::properties::PagePropertyCompatibility,
+            crate::api::properties::PagePropertyBlocker,
+            crate::api::properties::PageBaseProperty,
+            crate::api::properties::PageBasePropertiesResponse,
             crate::api::properties::PropertyPatchRequest,
             crate::api::properties::PropertyPatchResponse,
             // Pages
@@ -534,8 +541,7 @@ mod tests {
             "atomic bulk assignment must not expose per-page failures"
         );
 
-        let responses =
-            &json["paths"]["/api/vault/pages-assign-bulk"]["post"]["responses"];
+        let responses = &json["paths"]["/api/vault/pages-assign-bulk"]["post"]["responses"];
         for status in ["200", "400", "404", "409", "500"] {
             assert!(
                 responses.get(status).is_some(),
@@ -617,6 +623,7 @@ mod tests {
             "expected /api/vault/board/cycles/{{id}} in paths"
         );
         // Board schemas
+        let json = serde_json::to_value(&spec).unwrap();
         let schemas = spec.components.unwrap();
         assert!(
             schemas.schemas.contains_key("BoardTask"),
@@ -653,6 +660,20 @@ mod tests {
         assert!(
             schemas.schemas.contains_key("PatchCycleRequest"),
             "expected PatchCycleRequest in components"
+        );
+
+        let board_task = &json["components"]["schemas"]["BoardTask"];
+        let required = board_task["required"]
+            .as_array()
+            .expect("BoardTask.required should be an array");
+        assert!(
+            required.contains(&serde_json::json!("body_excerpt")),
+            "body_excerpt is always serialized and must be required"
+        );
+        assert_eq!(
+            board_task["properties"]["body_excerpt"]["type"],
+            serde_json::json!(["string", "null"]),
+            "body_excerpt must distinguish protected null from available text"
         );
     }
     #[test]

@@ -6,6 +6,7 @@ const task = (patch: Partial<BoardTask> = {}): BoardTask => ({
   id: "t-1",
   code: "T-001",
   title: "Test",
+  body_excerpt: null,
   status: "FIELD",
   priority: "P2",
   project: null,

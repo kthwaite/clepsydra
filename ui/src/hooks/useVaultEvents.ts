@@ -55,6 +55,10 @@ export function useVaultEvents(): ConnectionStatus {
           if (data.type === "base_registry_changed") {
             invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
             invalidateByPath(queryClient, queryKeys.query.pathPrefix);
+            queryClient.invalidateQueries({
+              predicate: (query) =>
+                query.queryKey[1] === queryKeys.pages.propertyProjectionPath,
+            });
           }
           if (data.type === "feed_changed") {
             invalidateByPath(queryClient, queryKeys.feeds.pathPrefix);

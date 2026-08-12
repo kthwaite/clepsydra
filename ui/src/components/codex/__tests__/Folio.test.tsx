@@ -32,6 +32,8 @@ const {
   attachmentUploadMock,
   mobileLayoutState,
   mountedSlateEditors,
+  folioPropertiesMock,
+  folioPropertiesState,
   navigateMock,
   restorationFrames,
   routerHistory,
@@ -60,6 +62,8 @@ const {
   outlinksState: { data: undefined as OutlinkEntry[] | undefined },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
+  folioPropertiesMock: vi.fn(),
+  folioPropertiesState: { failed: false },
   attachmentRemoveMock: vi.fn(),
   attachmentUploadMock: vi.fn(),
   navigateMock: vi.fn(),
@@ -156,6 +160,24 @@ vi.mock("#/crypto/EncryptionProvider", () => ({
     unlockWithImportedIdentity: vi.fn(),
   }),
 }));
+vi.mock("#/components/codex/FolioProperties", () => ({
+  FolioProperties: (props: {
+    pageId: string;
+    path: string;
+    locked: boolean;
+    readOnly: boolean;
+  }) => {
+    if (folioPropertiesState.failed) {
+      return (
+        <section data-testid="folio-properties">
+          <p role="alert">Property projection unavailable</p>
+        </section>
+      );
+    }
+    folioPropertiesMock(props);
+    return <section data-testid="folio-properties">Projected properties</section>;
+  },
+}));
 vi.mock("#/editor/SlateEditor", () => ({
   SlateEditor: ({
     initialValue,
@@ -231,6 +253,8 @@ beforeEach(() => {
   journalTodayState.isLoading = false;
   outlinksState.data = undefined;
   clearFolioRestoration("t1");
+  folioPropertiesMock.mockClear();
+  folioPropertiesState.failed = false;
   mountedSlateEditors.length = 0;
   restorationFrames.length = 0;
   useTagSuggestionsMock.mockImplementation((query: string) => ({
@@ -466,6 +490,7 @@ describe("Folio invalid-tab recovery", () => {
       initialValue: [{ type: "paragraph", children: [{ text: armor }] }],
       editorRevision: 1,
       encrypted: true,
+      pageId: "page-private",
       encryptionState: { status: "locked" },
     });
 
@@ -476,6 +501,13 @@ describe("Folio invalid-tab recovery", () => {
     ).toBeVisible();
     expect(screen.queryByTestId("slate-editor")).toBeNull();
     expect(document.body.textContent).not.toContain(armor);
+    expect(screen.getByTestId("folio-properties")).toBeVisible();
+    expect(folioPropertiesMock).toHaveBeenLastCalledWith({
+      pageId: "page-private",
+      path: "notes/private.md",
+      locked: true,
+      readOnly: false,
+    });
     expect(
       screen.queryByRole("button", { name: "Raw Markdown" }),
     ).not.toBeInTheDocument();
@@ -970,6 +1002,51 @@ describe("Folio raw Markdown mode", () => {
   });
 });
 
+describe("Folio property placement", () => {
+  it("places projected properties in the desktop metadata rail with page authority", () => {
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(screen.getByTestId("folio-properties").closest("aside")).not.toBeNull();
+    expect(folioPropertiesMock).toHaveBeenLastCalledWith({
+      pageId: "page-alpha",
+      path: "notes/alpha.md",
+      locked: false,
+      readOnly: false,
+    });
+    expect(screen.getByRole("textbox", { name: "Page body" })).toBeVisible();
+  });
+
+
+  it("keeps the normal Folio usable when the property projection fails", () => {
+    mobileLayoutState.matches = false;
+    folioPropertiesState.failed = true;
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Property projection unavailable",
+    );
+    expect(screen.getByRole("textbox", { name: "Page body" })).toBeVisible();
+    expect(screen.getByRole("textbox", { name: "Page title" })).toBeVisible();
+  });
+});
+
 describe("Folio attachment protection plumbing", () => {
   beforeEach(() => {
     mobileLayoutState.matches = false;
@@ -1071,6 +1148,16 @@ describe("Folio mobile presentation", () => {
       screen.getByRole("dialog", { name: "Document details" }),
     ).toBeVisible();
     expect(screen.getByText("notes/alpha.md")).toBeVisible();
+    expect(
+      within(screen.getByRole("dialog", { name: "Document details" }))
+        .getByTestId("folio-properties"),
+    ).toBeVisible();
+    expect(folioPropertiesMock).toHaveBeenLastCalledWith({
+      pageId: "page-alpha",
+      path: "notes/alpha.md",
+      locked: false,
+      readOnly: false,
+    });
 
     await user.click(
       screen.getByRole("button", { name: "Page relationships" }),
