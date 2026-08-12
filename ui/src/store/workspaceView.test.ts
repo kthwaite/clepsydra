@@ -6,8 +6,17 @@ import {
   type WorkspaceState,
 } from "#/store/workspace";
 
-function state(tabs: TabDescriptor[], activeTabId: string | null): WorkspaceState {
-  return { tabs, activeTabId, navigationMode: "smart", openHistory: [], quires: {} };
+function state(
+  tabs: TabDescriptor[],
+  activeTabId: string | null,
+): WorkspaceState {
+  return {
+    tabs,
+    activeTabId,
+    navigationMode: "smart",
+    openHistory: [],
+    quires: {},
+  };
 }
 
 const page = (id: string, path?: string): TabDescriptor => ({
@@ -24,7 +33,9 @@ describe("selectActiveTab", () => {
     expect(selectActiveTab(s)).toBe(s.tabs[1]);
   });
   it("returns undefined when nothing is active", () => {
-    expect(selectActiveTab(state([page("a", "notes/a.md")], null))).toBeUndefined();
+    expect(
+      selectActiveTab(state([page("a", "notes/a.md")], null)),
+    ).toBeUndefined();
   });
 });
 
@@ -33,10 +44,14 @@ describe("selectWorkspaceMode", () => {
     expect(selectWorkspaceMode(state([graph], "g1"))).toBe("constellation");
   });
   it("is folio when a page tab with a path is active", () => {
-    expect(selectWorkspaceMode(state([page("a", "notes/a.md")], "a"))).toBe("folio");
+    expect(selectWorkspaceMode(state([page("a", "notes/a.md")], "a"))).toBe(
+      "folio",
+    );
   });
   it("is launcher when no tab is active", () => {
-    expect(selectWorkspaceMode(state([page("a", "notes/a.md")], null))).toBe("launcher");
+    expect(selectWorkspaceMode(state([page("a", "notes/a.md")], null))).toBe(
+      "launcher",
+    );
   });
   it("is launcher when the active page tab has no path", () => {
     expect(selectWorkspaceMode(state([page("a")], "a"))).toBe("launcher");

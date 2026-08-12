@@ -20,7 +20,7 @@ export interface ViewNavDeps {
   ) => void;
 }
 
-export interface ViewDescriptor {
+interface ViewDescriptor {
   /** Rail entry text and the footer's VIEW label. */
   label: string;
   /** Footer FILE code; null = derive from the active folio's path. */

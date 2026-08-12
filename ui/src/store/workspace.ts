@@ -121,7 +121,7 @@ export interface WorkspaceState {
   quires: Record<string, Quire>;
 }
 
-export type WorkspaceMode = "folio" | "constellation" | "launcher";
+type WorkspaceMode = "folio" | "constellation" | "launcher";
 
 export const selectActiveTab = (s: WorkspaceState): TabDescriptor | undefined =>
   s.tabs.find((t) => t.id === s.activeTabId);
