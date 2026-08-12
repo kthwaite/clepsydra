@@ -20,7 +20,12 @@ import { useMemo } from "react";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { type ColLabelFn, fmtCycleWindow, HealthDot } from "./board-constants";
+import {
+  type ColLabelFn,
+  fmtCycleWindow,
+  HealthDot,
+  priColor,
+} from "./board-constants";
 import { parseDay, pct, taskRange, windowOf } from "./timeline-math";
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -34,18 +39,6 @@ interface ScheduledTask {
 interface TLGroup {
   op: BoardOperation | null; // null = UNFILED pseudo-group
   items: ScheduledTask[];
-}
-
-// ── shared priority color map (tl-pri, tl-bar-pri) ──────────────────────────
-
-const TL_PRI_COLOR: Record<string, string> = {
-  P0: "var(--hot)",
-  P1: "var(--warn)",
-  P2: "var(--cool)",
-};
-
-function tlPriColor(priority: string): string {
-  return TL_PRI_COLOR[priority] ?? "var(--ink-4)";
 }
 
 // ── bar status → border/background classes (tl-bar) ─────────────────────────
@@ -268,7 +261,7 @@ export function TimelineView({
                     <div className="flex min-w-0 items-center gap-[7px] border-r border-[var(--rule)] px-[var(--pad)] py-[6px]">
                       <span
                         className="h-[13px] w-[3px] flex-shrink-0"
-                        style={{ background: tlPriColor(t.priority) }}
+                        style={{ background: priColor(t.priority).bar }}
                       />
                       <span className="cl-mono flex-shrink-0 text-[var(--fs-xs)] text-[var(--ink-2)] [font-variant-numeric:tabular-nums]">
                         {t.code}
@@ -313,7 +306,7 @@ export function TimelineView({
                       >
                         <span
                           className="h-[8px] w-[3px] flex-shrink-0"
-                          style={{ background: tlPriColor(t.priority) }}
+                          style={{ background: priColor(t.priority).bar }}
                         />
                         <span className="cl-mono whitespace-nowrap text-[var(--fs-xs)] tracking-[0.04em] text-[var(--ink-2)]">
                           {t.code} · {colLabel(t.status)}
