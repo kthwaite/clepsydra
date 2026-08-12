@@ -15,6 +15,7 @@ describe("repairs route", () => {
         project: "Atlas",
         pageKind: "PROJECT",
         actionable: "true",
+        offset: "200",
       }),
     ).toEqual({
       target: "clepsydra://page/Missing",
@@ -22,18 +23,25 @@ describe("repairs route", () => {
       project: "Atlas",
       pageKind: "PROJECT",
       actionable: true,
+      offset: 200,
     });
   });
 
   it("writes workspace filter changes back to clean URL search state", () => {
     expect(
       repairFiltersToSearch(
-        { target: "deep-link", kind: ["broken_block_ref"] },
+        {
+          target: "deep-link",
+          kind: ["broken_block_ref"],
+          offset: 200,
+        },
         {
           kind: ["ambiguous_page_link"],
           project: "Atlas",
           pageKind: "NOTE",
           actionable: false,
+          limit: 100,
+          offset: 100,
         },
       ),
     ).toEqual({
@@ -42,7 +50,19 @@ describe("repairs route", () => {
       project: "Atlas",
       pageKind: "NOTE",
       actionable: false,
+      limit: 100,
+      offset: 100,
     });
+  });
+
+  it("drops invalid page kinds and pagination values before querying", () => {
+    expect(
+      parseRepairSearch({
+        pageKind: "NOT_A_KIND",
+        offset: "-10",
+        limit: "5000",
+      }),
+    ).toEqual({});
   });
 
   it("matches /repairs and no longer exposes /link-miss", async () => {

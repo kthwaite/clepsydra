@@ -42,6 +42,8 @@ export function RepairIssueList({
   ) {
     if (event.key === "ArrowRight") {
       event.preventDefault();
+      const focused = issues[index];
+      if (focused) onSelect(focused.fingerprint);
       detailRef.current?.focus();
       return;
     }

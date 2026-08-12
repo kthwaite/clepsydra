@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ReferenceIssueFilters } from "#/api/index";
+import { Button } from "#/components/ui/button";
 import { useReferenceIssues } from "#/api/index";
 import { Dialog } from "#/components/ui/dialog";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
@@ -22,7 +23,12 @@ export function RepairWorkspace({
     controlledFilters ?? {},
   );
   const filters = controlledFilters ?? localFilters;
-  const issuesQuery = useReferenceIssues(filters);
+  const queryFilters: ReferenceIssueFilters = {
+    ...filters,
+    limit: filters.limit ?? 100,
+    offset: filters.offset ?? 0,
+  };
+  const issuesQuery = useReferenceIssues(queryFilters);
   const issues = issuesQuery.data?.items ?? [];
   const [selectedFingerprint, setSelectedFingerprint] = useState<string | null>(
     null,
@@ -32,19 +38,35 @@ export function RepairWorkspace({
   const detailRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
+    if (!issuesQuery.data) return;
     if (
       selectedFingerprint &&
       !issues.some((issue) => issue.fingerprint === selectedFingerprint)
     ) {
       setSelectedFingerprint(null);
     }
-  }, [issues, selectedFingerprint]);
+  }, [issues, issuesQuery.data, selectedFingerprint]);
 
   const selectedIssue = selectedFingerprint
     ? (issues.find((issue) => issue.fingerprint === selectedFingerprint) ?? null)
     : null;
 
   function changeFilters(next: ReferenceIssueFilters) {
+    const reset: ReferenceIssueFilters = {
+      ...next,
+      limit: filters.limit ?? 100,
+      offset: 0,
+    };
+    if (!controlledFilters) setLocalFilters(reset);
+    onFiltersChange?.(reset);
+  }
+
+  function changePage(offset: number) {
+    const next = {
+      ...filters,
+      limit: filters.limit ?? 100,
+      offset,
+    };
     if (!controlledFilters) setLocalFilters(next);
     onFiltersChange?.(next);
   }
@@ -112,15 +134,62 @@ export function RepairWorkspace({
         <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(18rem,0.82fr)_minmax(24rem,1.18fr)]">
           <section
             aria-label="Issue ledger"
-            className="min-h-0 overflow-y-auto border-r-0 border-rule md:border-r"
+            className="flex min-h-0 flex-col border-r-0 border-rule md:border-r"
           >
-            <RepairIssueList
-              issues={issues}
-              selectedFingerprint={selectedFingerprint}
-              onSelect={setSelectedFingerprint}
-              rowRefs={rowRefs}
-              detailRef={detailRef}
-            />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <RepairIssueList
+                issues={issues}
+                selectedFingerprint={selectedFingerprint}
+                onSelect={setSelectedFingerprint}
+                rowRefs={rowRefs}
+                detailRef={detailRef}
+              />
+            </div>
+            <nav
+              aria-label="Issue pages"
+              className="flex items-center justify-between gap-2 border-t border-rule bg-paper-2 px-3 py-2"
+            >
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Previous page"
+                isDisabled={(queryFilters.offset ?? 0) === 0}
+                onPress={() =>
+                  changePage(
+                    Math.max(
+                      0,
+                      (queryFilters.offset ?? 0) - (queryFilters.limit ?? 100),
+                    ),
+                  )
+                }
+              >
+                Previous
+              </Button>
+              <span className="cl-mono text-[10px] tabular-nums text-ink-mute">
+                {(queryFilters.offset ?? 0) + 1}–
+                {Math.min(
+                  (queryFilters.offset ?? 0) + (queryFilters.limit ?? 100),
+                  issuesQuery.data?.total ?? 0,
+                )}{" "}
+                of {issuesQuery.data?.total ?? 0}
+              </span>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Next page"
+                isDisabled={
+                  (queryFilters.offset ?? 0) + (queryFilters.limit ?? 100) >=
+                  (issuesQuery.data?.total ?? 0)
+                }
+                onPress={() =>
+                  changePage(
+                    (queryFilters.offset ?? 0) + (queryFilters.limit ?? 100),
+                  )
+                }
+              >
+                Next
+              </Button>
+            </nav>
           </section>
 
           {!isMobile ? (

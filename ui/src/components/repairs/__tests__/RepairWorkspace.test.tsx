@@ -7,7 +7,10 @@ import { RepairWorkspace } from "../RepairWorkspace";
 
 const mocks = vi.hoisted(() => ({
   issues: [] as ReferenceIssue[],
+  queryFilters: null as Record<string, unknown> | null,
+  total: 1,
   isPending: false,
+  hasData: true,
   queryError: null as Error | null,
   preview: vi.fn(),
   apply: vi.fn(),
@@ -30,15 +33,24 @@ vi.mock("#/api/index", () => {
   }
   return {
     ReferenceRepairApiError,
-    useReferenceIssues: () => ({
-      data: mocks.queryError
-        ? undefined
-        : { items: mocks.issues, limit: 100, offset: 0, total: mocks.issues.length },
-      isPending: mocks.isPending,
-      isError: Boolean(mocks.queryError),
-      error: mocks.queryError,
-      refetch: mocks.refetch,
-    }),
+    useReferenceIssues: (filters: Record<string, unknown>) => {
+      mocks.queryFilters = filters;
+      return {
+        data:
+          mocks.queryError || !mocks.hasData
+            ? undefined
+            : {
+                items: mocks.issues,
+                limit: Number(filters.limit ?? 100),
+                offset: Number(filters.offset ?? 0),
+                total: mocks.total,
+              },
+        isPending: mocks.isPending,
+        isError: Boolean(mocks.queryError),
+        error: mocks.queryError,
+        refetch: mocks.refetch,
+      };
+    },
     usePreviewReferenceRepair: () => ({
       mutateAsync: mocks.preview,
       isPending: false,
@@ -106,6 +118,25 @@ const navigationOnlyIssue: ReferenceIssue = {
   candidates: [],
 };
 
+const createIssue: ReferenceIssue = {
+  ...unresolvedIssue,
+  fingerprint: "create-1",
+  source_revision: "rev-create",
+  target_raw: "Missing Page",
+  actions: ["create", "open_source"],
+  candidates: [],
+};
+
+const orphanIssue: ReferenceIssue = {
+  ...unresolvedIssue,
+  fingerprint: "orphan-1",
+  kind: "orphan_page",
+  target_raw: null,
+  snippet: null,
+  actions: ["open_source"],
+  candidates: [],
+};
+
 function renderWorkspace(
   props: Partial<ComponentProps<typeof RepairWorkspace>> = {},
 ) {
@@ -117,11 +148,29 @@ beforeEach(() => {
   mocks.isPending = false;
   mocks.queryError = null;
   mocks.mobile = false;
+  mocks.hasData = true;
+  mocks.total = mocks.issues.length;
+  mocks.queryFilters = null;
   mocks.preview.mockReset().mockResolvedValue({
     fingerprint: unresolvedIssue.fingerprint,
     before: "[[Unresolved Target]]",
     after: "[[notes/target.md]]",
-    plan: { file_ops: [], text_edits: [] },
+    plan: {
+      file_ops: [
+        {
+          kind: "create_file",
+          path: "notes/source.md",
+          destination: "notes/target.md",
+        },
+      ],
+      text_edits: [
+        {
+          path: "notes/source.md",
+          old_text: "[[Unresolved Target]]",
+          new_text: "[[notes/target.md]]",
+        },
+      ],
+    },
   });
   mocks.apply.mockReset().mockResolvedValue({
     fingerprint: unresolvedIssue.fingerprint,
@@ -147,7 +196,7 @@ describe("RepairWorkspace", () => {
       action: { type: "replace", candidate_page_id: "candidate-1" },
     });
     expect(mocks.apply).not.toHaveBeenCalled();
-    expect(screen.getByText("[[notes/target.md]]")).toBeVisible();
+    expect(screen.getAllByText("[[notes/target.md]]")[0]).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Apply previewed repair" }));
 
@@ -168,7 +217,19 @@ describe("RepairWorkspace", () => {
       expect.objectContaining({ project: "Atlas" }),
     );
 
-    await user.click(screen.getByRole("checkbox", { name: "Actionable only" }));
+    await user.click(screen.getByRole("checkbox", { name: "Unresolved links" }));
+    await user.click(screen.getByRole("checkbox", { name: "Orphans" }));
+    expect(onFiltersChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: ["unresolved_page_link", "orphan_page"],
+        offset: 0,
+      }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: /Repairability/ }),
+    );
+    await user.click(screen.getByRole("option", { name: "Actionable only" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ actionable: true }),
     );
@@ -180,8 +241,8 @@ describe("RepairWorkspace", () => {
     renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /Protected Target/ }));
-    expect(screen.getByText(/repair is unavailable/i)).toBeVisible();
-    expect(screen.getByText(/protected or encrypted/i)).toBeVisible();
+    expect(screen.getByText(/source text is unavailable or redacted/i)).toBeVisible();
+    expect(screen.getByText(/no in-place action is offered/i)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Open source" }));
     expect(mocks.openTab).toHaveBeenCalledWith(
@@ -223,6 +284,132 @@ describe("RepairWorkspace", () => {
     expect(screen.getByRole("region", { name: "Repair detail" })).toHaveFocus();
   });
 
+  it("selects the focused row before ArrowRight enters detail", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    const row = screen.getByRole("button", { name: /Unresolved Target/ });
+    row.focus();
+
+    await user.keyboard("{ArrowRight}");
+
+    expect(screen.getByRole("region", { name: "Repair detail" })).toHaveFocus();
+    expect(screen.getByRole("heading", { name: "Unresolved Target" })).toBeVisible();
+  });
+
+  it("renders every returned file operation and text edit before apply", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+
+    const plan = screen.getByRole("region", { name: "Mutation plan" });
+    expect(plan).toHaveTextContent("create file");
+    expect(plan).toHaveTextContent("notes/source.md");
+    expect(plan).toHaveTextContent("notes/target.md");
+    expect(plan).toHaveTextContent("[[Unresolved Target]]");
+    expect(plan).toHaveTextContent("[[notes/target.md]]");
+  });
+
+  it("invalidates a create preview when its inputs change", async () => {
+    mocks.issues = [createIssue];
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Missing Page/ }));
+    await user.type(screen.getByRole("textbox", { name: "New page folder" }), "notes");
+    await user.click(screen.getByRole("button", { name: "Preview page creation" }));
+    expect(await screen.findByRole("button", { name: "Apply previewed repair" })).toBeVisible();
+
+    await user.type(screen.getByRole("textbox", { name: "New page folder" }), "/new");
+    expect(
+      screen.queryByRole("button", { name: "Apply previewed repair" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("clears the old preview synchronously when a new preview starts", async () => {
+    // Runtime supports ES2024; the app's current TS lib has not declared it yet.
+    const promiseConstructor = Promise as unknown as PromiseConstructor & {
+      withResolvers<T>(): {
+        promise: Promise<T>;
+        resolve: (value: T) => void;
+      };
+    };
+    const { promise: second, resolve: resolveSecond } =
+      promiseConstructor.withResolvers<unknown>();
+    mocks.issues = [
+      {
+        ...unresolvedIssue,
+        candidates: [
+          ...unresolvedIssue.candidates,
+          {
+            page_id: "candidate-2",
+            path: "notes/other.md",
+            title: "Other",
+            rationale: "Nearby title",
+          },
+        ],
+      },
+    ];
+    mocks.preview
+      .mockResolvedValueOnce({
+        fingerprint: "unresolved-1",
+        before: "old",
+        after: "first",
+        plan: { file_ops: [], text_edits: [] },
+      })
+      .mockReturnValueOnce(second);
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+    expect(await screen.findByText("first")).toBeVisible();
+
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/other.md" }),
+    );
+    expect(screen.queryByText("first")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Apply previewed repair" }),
+    ).not.toBeInTheDocument();
+    resolveSecond({
+      fingerprint: "unresolved-1",
+      before: "old",
+      after: "second",
+      plan: { file_ops: [], text_edits: [] },
+    });
+  });
+
+  it("pages the complete result set and resets pagination on filters", async () => {
+    mocks.total = 250;
+    const onFiltersChange = vi.fn();
+    const user = userEvent.setup();
+    renderWorkspace({ onFiltersChange });
+    expect(screen.getByText("1–100 of 250")).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: "Next page" }));
+    expect(onFiltersChange).toHaveBeenCalledWith(
+      expect.objectContaining({ offset: 100, limit: 100 }),
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "Project" }), "Atlas");
+    expect(onFiltersChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ project: "Atlas", offset: 0 }),
+    );
+  });
+
+  it("describes topology issues without claiming their source is encrypted", async () => {
+    mocks.issues = [orphanIssue];
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Source Note/ }));
+
+    expect(screen.getByText(/no incoming references/i)).toBeVisible();
+    expect(screen.queryByText(/protected or encrypted/i)).not.toBeInTheDocument();
+  });
+
   it("restores focus to the selected row after apply", async () => {
     const user = userEvent.setup();
     renderWorkspace();
@@ -240,6 +427,7 @@ describe("RepairWorkspace", () => {
   it("opens issue detail in the shared dialog on mobile", async () => {
     mocks.mobile = true;
     const user = userEvent.setup();
+
     renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
@@ -247,6 +435,25 @@ describe("RepairWorkspace", () => {
     const dialog = screen.getByRole("dialog", { name: "Repair issue" });
     expect(dialog).toBeVisible();
     expect(within(dialog).getByText("notes/source.md")).toBeVisible();
+  });
+  it("keeps selection while a refreshed result is not yet available", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    expect(
+      screen.getByRole("heading", { name: "Unresolved Target" }),
+    ).toBeVisible();
+
+    mocks.hasData = false;
+    mocks.isPending = true;
+    rerender(<RepairWorkspace />);
+    mocks.hasData = true;
+    mocks.isPending = false;
+    rerender(<RepairWorkspace />);
+
+    expect(
+      screen.getByRole("heading", { name: "Unresolved Target" }),
+    ).toBeVisible();
   });
 
   it("explains a deep-linked target without hiding the issue ledger", () => {

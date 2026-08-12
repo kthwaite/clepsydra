@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ReferenceRepairApiError,
   type ReferenceIssue,
@@ -37,8 +37,10 @@ export function RepairIssueDetail({
   const [body, setBody] = useState("");
   const [alert, setAlert] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const previewSequence = useRef(0);
 
   useEffect(() => {
+    previewSequence.current += 1;
     setPreview(null);
     setPreviewRequest(null);
     setFolder("");
@@ -51,6 +53,13 @@ export function RepairIssueDetail({
     (action) => action === "replace" || action === "create",
   );
 
+  function invalidatePreview() {
+    previewSequence.current += 1;
+    setPreview(null);
+    setPreviewRequest(null);
+    setStatus(null);
+  }
+
   async function refreshStaleIssue() {
     setPreview(null);
     setPreviewRequest(null);
@@ -59,14 +68,20 @@ export function RepairIssueDetail({
   }
 
   async function previewRepair(request: ReferenceRepairRequest) {
+    const sequence = previewSequence.current + 1;
+    previewSequence.current = sequence;
+    setPreview(null);
+    setPreviewRequest(null);
     setAlert(null);
     setStatus("Preparing repair preview…");
     try {
       const result = await previewMutation.mutateAsync(request);
+      if (previewSequence.current !== sequence) return;
       setPreview(result);
       setPreviewRequest(request);
       setStatus("Repair preview ready. Review the before and after evidence.");
     } catch (error) {
+      if (previewSequence.current !== sequence) return;
       setStatus(null);
       if (error instanceof ReferenceRepairApiError && error.status === 409) {
         await refreshStaleIssue();
@@ -137,10 +152,20 @@ export function RepairIssueDetail({
           <pre className="mt-2 overflow-x-auto whitespace-pre-wrap border-l-2 border-cool bg-paper-2 px-3 py-2 font-mono text-xs leading-relaxed text-ink-2">
             {issue.snippet}
           </pre>
+        ) : issue.kind === "orphan_page" ? (
+          <p className="mt-2 border-l-2 border-rule px-3 py-2 text-sm text-ink-mute">
+            This page has no incoming references. Open the source to decide
+            whether it should be linked, moved, or removed.
+          </p>
+        ) : issue.kind === "isolated_page" ? (
+          <p className="mt-2 border-l-2 border-rule px-3 py-2 text-sm text-ink-mute">
+            This page has no incoming or outgoing references. Open the source
+            to reconnect it to the vault.
+          </p>
         ) : (
           <p className="mt-2 border-l-2 border-rule px-3 py-2 text-sm text-ink-mute">
-            Source text is protected or encrypted. Repair is unavailable here;
-            open the source to inspect it.
+            Source text is unavailable or redacted. Open the source to inspect
+            the reference.
           </p>
         )}
       </section>
@@ -198,14 +223,20 @@ export function RepairIssueDetail({
               <TextField
                 label="New page folder"
                 value={folder}
-                onChange={setFolder}
+                onChange={(value) => {
+                  setFolder(value);
+                  invalidatePreview();
+                }}
                 placeholder="Vault root"
               />
               <label className="block text-xs font-bold uppercase tracking-widest text-ink-mute">
                 Initial body
                 <textarea
                   value={body}
-                  onChange={(event) => setBody(event.target.value)}
+                  onChange={(event) => {
+                    setBody(event.target.value);
+                    invalidatePreview();
+                  }}
                   rows={4}
                   className="mt-2 block w-full resize-y border border-input bg-paper px-3 py-2 text-sm font-normal normal-case tracking-normal text-ink outline-none focus:border-ring"
                 />
@@ -264,11 +295,66 @@ export function RepairIssueDetail({
               </pre>
             </div>
           </div>
+          <section
+            role="region"
+            aria-label="Mutation plan"
+            className="mt-3 border-t border-rule pt-3"
+          >
+            <h4 className="cl-mono text-[9px] font-bold uppercase tracking-[0.14em] text-ink">
+              Mutation plan
+            </h4>
+            {preview.plan.file_ops.length ? (
+              <ul className="mt-2 divide-y divide-rule border border-rule">
+                {preview.plan.file_ops.map((operation, index) => (
+                  <li
+                    key={`${operation.kind}-${operation.path}-${index}`}
+                    className="grid gap-1 px-3 py-2 text-xs"
+                  >
+                    <span className="cl-mono uppercase text-cool">
+                      {operation.kind.replaceAll("_", " ")}
+                    </span>
+                    <code className="break-all text-ink">{operation.path}</code>
+                    {operation.destination ? (
+                      <code className="break-all text-ink-2">
+                        Destination: {operation.destination}
+                      </code>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-xs text-ink-mute">No file operations.</p>
+            )}
+            {preview.plan.text_edits.length ? (
+              <ul className="mt-2 space-y-2">
+                {preview.plan.text_edits.map((edit, index) => (
+                  <li
+                    key={`${edit.path}-${index}`}
+                    className="border border-rule p-3"
+                  >
+                    <code className="break-all text-xs text-ink">
+                      {edit.path}
+                    </code>
+                    <div className="mt-2 grid gap-2 lg:grid-cols-2">
+                      <pre className="whitespace-pre-wrap bg-paper-2 p-2 font-mono text-xs text-ink-2">
+                        {edit.old_text}
+                      </pre>
+                      <pre className="whitespace-pre-wrap border-l-2 border-cool bg-paper-2 p-2 font-mono text-xs text-ink">
+                        {edit.new_text}
+                      </pre>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="mt-2 text-xs text-ink-mute">No text edits.</p>
+            )}
+          </section>
           <Button
             variant="primary"
             className="mt-3"
             onPress={() => void applyRepair()}
-            isDisabled={applyMutation.isPending}
+            isDisabled={previewMutation.isPending || applyMutation.isPending}
           >
             Apply previewed repair
           </Button>

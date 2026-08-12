@@ -1,27 +1,41 @@
-import { Checkbox } from "react-aria-components";
+import { Checkbox, CheckboxGroup, Label } from "react-aria-components";
 import type { ReferenceIssue, ReferenceIssueFilters } from "#/api/index";
 import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
+import { KINDS, type Kind, kindLabel } from "#/lib/kind";
 
-const KIND_OPTIONS: { id: ReferenceIssue["kind"] | ""; label: string }[] = [
-  { id: "", label: "All issue kinds" },
-  { id: "unresolved_page_link", label: "Unresolved page links" },
-  { id: "ambiguous_page_link", label: "Ambiguous page links" },
-  { id: "broken_block_ref", label: "Broken block references" },
-  { id: "invalid_relation_target", label: "Invalid relation targets" },
-  { id: "orphan_page", label: "Orphan pages" },
-  { id: "isolated_page", label: "Isolated pages" },
+const ISSUE_KINDS: { id: ReferenceIssue["kind"]; label: string }[] = [
+  { id: "unresolved_page_link", label: "Unresolved links" },
+  { id: "ambiguous_page_link", label: "Ambiguous links" },
+  { id: "broken_block_ref", label: "Broken blocks" },
+  { id: "invalid_relation_target", label: "Invalid relations" },
+  { id: "orphan_page", label: "Orphans" },
+  { id: "isolated_page", label: "Isolated" },
 ];
 
-const PAGE_KIND_OPTIONS = [
-  { id: "", label: "All page kinds" },
-  { id: "NOTE", label: "Note" },
-  { id: "PROJECT", label: "Project" },
-  { id: "JOURNAL", label: "Journal" },
-  { id: "TASK", label: "Task" },
-  { id: "AI_CONVERSATION", label: "AI conversation" },
-];
+const ACTIONABILITY_OPTIONS = [
+  { id: "all", label: "All issues" },
+  { id: "actionable", label: "Actionable only" },
+  { id: "navigation", label: "Navigation only" },
+] as const;
+
+function FilterCheckbox({ value, children }: { value: string; children: string }) {
+  return (
+    <Checkbox
+      aria-label={children}
+      value={value}
+      className="group flex min-h-7 items-center gap-1.5 text-[10px] text-ink outline-none"
+    >
+      <span className="flex h-3.5 w-3.5 items-center justify-center border border-rule bg-paper group-data-[selected]:border-accent group-data-[selected]:bg-accent group-data-[focus-visible]:outline group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-offset-2 group-data-[focus-visible]:outline-ring">
+        <span className="hidden text-[9px] font-black text-primary-foreground group-data-[selected]:block">
+          ✓
+        </span>
+      </span>
+      {children}
+    </Checkbox>
+  );
+}
 
 export interface RepairFiltersProps {
   filters: ReferenceIssueFilters;
@@ -39,22 +53,30 @@ export function RepairFilters({ filters, onChange }: RepairFiltersProps) {
   return (
     <section
       aria-label="Repair filters"
-      className="grid gap-3 border-b border-rule bg-paper-2 px-3 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(11rem,1fr)_minmax(9rem,0.8fr)_minmax(9rem,0.8fr)_auto_auto] lg:items-end"
+      className="grid gap-3 border-b border-rule bg-paper-2 px-3 py-3 lg:grid-cols-[minmax(18rem,1.6fr)_minmax(9rem,0.8fr)_minmax(9rem,0.8fr)_minmax(9rem,0.8fr)_auto] lg:items-end"
     >
-      <Select
-        label="Issue kind"
-        selectedKey={filters.kind?.[0] ?? ""}
-        onSelectionChange={(key) =>
+      <CheckboxGroup
+        aria-label="Issue kinds"
+        value={filters.kind ?? []}
+        onChange={(kind) =>
           onChange({
             ...filters,
-            kind: key ? [key as ReferenceIssue["kind"]] : undefined,
+            kind: kind.length ? (kind as ReferenceIssue["kind"][]) : undefined,
           })
         }
-        items={KIND_OPTIONS}
-        className="w-full"
+        className="min-w-0"
       >
-        {(item) => <SelectItem id={item.id}>{item.label}</SelectItem>}
-      </Select>
+        <Label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          Issue kinds
+        </Label>
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+          {ISSUE_KINDS.map((kind) => (
+            <FilterCheckbox key={kind.id} value={kind.id}>
+              {kind.label}
+            </FilterCheckbox>
+          ))}
+        </div>
+      </CheckboxGroup>
 
       <TextField
         label="Project"
@@ -75,30 +97,36 @@ export function RepairFilters({ filters, onChange }: RepairFiltersProps) {
             pageKind: typeof key === "string" && key ? key : undefined,
           })
         }
-        items={PAGE_KIND_OPTIONS}
+        items={[
+          { id: "", label: "All page kinds" },
+          ...KINDS.map((kind: Kind) => ({ id: kind, label: kindLabel(kind) })),
+        ]}
         className="w-full"
       >
         {(item) => <SelectItem id={item.id}>{item.label}</SelectItem>}
       </Select>
 
-      <Checkbox
-        aria-label="Actionable only"
-        isSelected={filters.actionable === true}
-        onChange={(isSelected) =>
+      <Select
+        label="Repairability"
+        selectedKey={
+          filters.actionable === true
+            ? "actionable"
+            : filters.actionable === false
+              ? "navigation"
+              : "all"
+        }
+        onSelectionChange={(key) =>
           onChange({
             ...filters,
-            actionable: isSelected ? true : undefined,
+            actionable:
+              key === "actionable" ? true : key === "navigation" ? false : undefined,
           })
         }
-        className="group flex min-h-8 items-center gap-2 text-xs text-ink outline-none"
+        items={ACTIONABILITY_OPTIONS}
+        className="w-full"
       >
-        <span className="flex h-4 w-4 items-center justify-center border border-rule bg-paper group-data-[selected]:border-accent group-data-[selected]:bg-accent group-data-[focus-visible]:outline group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-offset-2 group-data-[focus-visible]:outline-ring">
-          <span className="hidden text-[10px] font-black text-primary-foreground group-data-[selected]:block">
-            ✓
-          </span>
-        </span>
-        Actionable only
-      </Checkbox>
+        {(item) => <SelectItem id={item.id}>{item.label}</SelectItem>}
+      </Select>
 
       <Button
         size="sm"
