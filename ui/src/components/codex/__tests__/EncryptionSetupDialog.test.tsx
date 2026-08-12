@@ -205,14 +205,17 @@ describe("EncryptionSetupDialog", () => {
     expect(recipientForIdentityMock).toHaveBeenCalledWith(RAW_IDENTITY);
     expect(screen.getByText(RECIPIENT)).toBeVisible();
 
+    const finish = screen.getByRole("button", {
+      name: "Finish encryption setup",
+    });
+    expect(finish).toBeDisabled();
     await user.click(
       screen.getByRole("checkbox", {
-        name: /losing this recovery identity is unrecoverable/i,
+        name: "I understand that losing this recovery identity is unrecoverable.",
       }),
     );
-    await user.click(
-      screen.getByRole("button", { name: "Finish encryption setup" }),
-    );
+    expect(finish).toBeEnabled();
+    await user.click(finish);
 
     const request = setupMutateAsyncMock.mock.calls[0]?.[0];
     expect(request.body).toEqual({
@@ -254,7 +257,7 @@ describe("EncryptionSetupDialog", () => {
     );
     await user.click(
       screen.getByRole("checkbox", {
-        name: /losing this recovery identity is unrecoverable/i,
+        name: "I understand that losing this recovery identity is unrecoverable.",
       }),
     );
     await user.click(
