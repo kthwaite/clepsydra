@@ -911,10 +911,8 @@ fn sql_value_to_json(v: rusqlite::types::Value) -> serde_json::Value {
 }
 
 const BODY_EXCERPT_MAX_CHARS: usize = 240;
-const BODY_PROJECTION_JOIN: &str =
-    " LEFT JOIN page_bodies body_index ON body_index.page_id = p.id";
-const BODY_PROJECTION_SELECT: &str =
-    "CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END";
+const BODY_PROJECTION_JOIN: &str = " LEFT JOIN page_bodies body_index ON body_index.page_id = p.id";
+const BODY_PROJECTION_SELECT: &str = "CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END";
 
 fn append_excerpt_text(
     excerpt: &mut String,
@@ -953,18 +951,12 @@ fn body_excerpt(markdown: &str) -> String {
             Event::Text(text)
             | Event::Code(text)
             | Event::InlineMath(text)
-            | Event::DisplayMath(text) => append_excerpt_text(
-                &mut excerpt,
-                &mut scalar_count,
-                &mut pending_space,
-                &text,
-            ),
-            Event::FootnoteReference(label) => append_excerpt_text(
-                &mut excerpt,
-                &mut scalar_count,
-                &mut pending_space,
-                &label,
-            ),
+            | Event::DisplayMath(text) => {
+                append_excerpt_text(&mut excerpt, &mut scalar_count, &mut pending_space, &text)
+            }
+            Event::FootnoteReference(label) => {
+                append_excerpt_text(&mut excerpt, &mut scalar_count, &mut pending_space, &label)
+            }
             Event::SoftBreak | Event::HardBreak | Event::Rule => {
                 pending_space |= !excerpt.is_empty();
                 false
@@ -2257,10 +2249,7 @@ moment  = { type = "datetime" }
         let QueryOutput::Flat { rows, .. } = output else {
             panic!("expected flat output");
         };
-        let protected = rows
-            .iter()
-            .find(|row| row.path == "protected.md")
-            .unwrap();
+        let protected = rows.iter().find(|row| row.path == "protected.md").unwrap();
         let serialized = serde_json::to_string(protected).unwrap();
         let unprotected = rows
             .iter()

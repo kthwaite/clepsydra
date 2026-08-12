@@ -1221,7 +1221,6 @@ fn validate_filter(
             validate_filter(base, child, &format!("{path}.not"), context, push);
         }
         Filter::Cmp { field, op, value } => {
-
             if matches!(
                 resolve_field(field, &QueryContext::for_base(base)),
                 Err(QueryError::ProjectionOnlyBody)
@@ -1280,9 +1279,7 @@ fn validate_filter(
                     return;
                 }
             }
-            use crate::vault::query::{
-                QueryContext, QueryError, ResolvedField, resolve_field,
-            };
+            use crate::vault::query::{QueryContext, QueryError, ResolvedField, resolve_field};
 
             match resolve_field(field, &QueryContext::for_base(base)) {
                 Ok(ResolvedField::Sys(_)) => {}
@@ -1429,9 +1426,12 @@ columns = ["title", "author", "rating", "finished"]
             duplicate_paths,
             vec!["properties[1].key", "properties[3].key"]
         );
-        assert!(result.diagnostics.iter().all(|diagnostic| {
-            diagnostic.message != "duplicate property key `rating`"
-        }));
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| { diagnostic.message != "duplicate property key `rating`" })
+        );
     }
 
     #[test]

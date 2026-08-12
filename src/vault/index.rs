@@ -789,7 +789,6 @@ impl VaultIndex {
             params![page_id, &page.body],
         )?;
 
-
         // Clear old derived data
         // block_properties must be deleted before blocks due to FK constraint
         tx.execute(
@@ -2159,7 +2158,6 @@ fn upsert_indexed_page(
          ON CONFLICT(page_id) DO UPDATE SET body = excluded.body",
         params![page_id, &pf.body],
     )?;
-
 
     // Clear old derived data for this page
     // block_properties must be deleted before blocks due to FK constraint

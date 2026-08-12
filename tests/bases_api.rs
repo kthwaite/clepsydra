@@ -913,17 +913,12 @@ async fn saved_view_returns_body_excerpt_without_a_page_detail_request() {
         .build()
         .into_server_and_temp();
 
-    let response = server
-        .get("/api/vault/bases/excerpts/views/all")
-        .await;
+    let response = server.get("/api/vault/bases/excerpts/views/all").await;
     response.assert_status_ok();
     let body: serde_json::Value = response.json();
 
     assert_eq!(body["rows"][0]["columns"]["title"], "Excerpt");
-    assert_eq!(
-        body["rows"][0]["columns"]["body"],
-        "A readable label."
-    );
+    assert_eq!(body["rows"][0]["columns"]["body"], "A readable label.");
 }
 
 #[tokio::test]
@@ -1504,11 +1499,7 @@ async fn ordered_property_entries_preserve_reverse_integer_like_keys_across_save
         vec!["2", "ordinary", "1"]
     );
 
-    let reloaded: serde_json::Value = fixture
-        .server
-        .get("/api/vault/bases/ordered")
-        .await
-        .json();
+    let reloaded: serde_json::Value = fixture.server.get("/api/vault/bases/ordered").await.json();
     assert_eq!(reloaded["properties"], properties);
 }
 
@@ -1584,11 +1575,7 @@ async fn duplicate_property_entries_are_rejected_by_create_update_and_preview() 
     );
     assert_no_notification(&mut notifications);
 
-    let reading_path = fixture
-        .state
-        .vault
-        .root()
-        .join("bases/reading.base.toml");
+    let reading_path = fixture.state.vault.root().join("bases/reading.base.toml");
     let reading_before = fs::read_to_string(&reading_path).unwrap();
     let revision = current_base_revision(&fixture, "reading").await;
     let update = fixture
