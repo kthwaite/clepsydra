@@ -1807,7 +1807,7 @@ export class ChunkAssembler {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `bun run test chunked-transfer`
-Expected: 10 passed.
+Expected: 9 passed.
 
 - [ ] **Step 5: Commit**
 
