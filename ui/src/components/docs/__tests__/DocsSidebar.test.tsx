@@ -74,7 +74,9 @@ describe("DocsSidebar", () => {
       );
     }
 
-    expect(within(navigation).getAllByRole("link")).toHaveLength(9);
+    expect(within(navigation).getAllByRole("link")).toHaveLength(
+      DOC_PAGES.length,
+    );
     expect(
       within(navigation).getByRole("link", { name: "Getting Started" }),
     ).toHaveAttribute("aria-current", "page");
@@ -96,6 +98,35 @@ describe("DocsSidebar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("exposes every registry guide in group order and follows native keyboard focus order", async () => {
+    const user = userEvent.setup();
+    renderSidebar({ activeSlug: "getting-started" });
+
+    const navigation = await screen.findByRole("navigation", {
+      name: "Documentation",
+    });
+    expect(
+      within(navigation)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(DOC_PAGES.map((page) => `/docs/${page.slug}`));
+
+    await user.tab();
+    expect(
+      within(navigation).getByRole("searchbox", {
+        name: "Search documentation",
+      }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(
+      within(navigation).getByRole("button", { name: "Start" }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(
+      within(navigation).getByRole("link", { name: "Getting Started" }),
+    ).toHaveFocus();
+  });
+
   it("replaces groups with ranked snippets for a query and restores them when cleared", async () => {
     const user = userEvent.setup();
     renderSidebar({ activeSlug: "getting-started" });
@@ -107,7 +138,7 @@ describe("DocsSidebar", () => {
 
     expect(screen.queryByText("Start")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Bases/ })).toBeInTheDocument();
-    expect(screen.getByText(/typed fields/i)).toBeInTheDocument();
+    expect(screen.getByText(/built-in system fields/i)).toBeInTheDocument();
 
     await user.clear(searchbox);
     expect(screen.getByText("Start")).toBeInTheDocument();
@@ -139,19 +170,22 @@ describe("DocsSidebar", () => {
       await screen.findByRole("searchbox", {
         name: "Search documentation",
       }),
-      "setup",
+      "configure neovim",
     );
 
     const results = screen.getByRole("list", { name: "Search results" });
     const hrefs = within(results)
       .getAllByRole("link")
       .map((link) => link.getAttribute("href"));
-    const expectedHrefs = searchDocs(buildDocsIndex(DOC_PAGES), "setup").map(
+    const expectedHrefs = searchDocs(
+      buildDocsIndex(DOC_PAGES),
+      "configure neovim",
+    ).map(
       (result) =>
         `/docs/${result.page.slug}${result.headingId ? `#${result.headingId}` : ""}`,
     );
     expect(hrefs).toEqual(expectedHrefs);
-    expect(hrefs).toContain("/docs/lsp#setup-neovim-011");
+    expect(hrefs).toContain("/docs/lsp#configure-neovim-011-or-newer");
   });
 
   it("calls onNavigate only after accepted pathname and hash navigation", async () => {
@@ -176,27 +210,27 @@ describe("DocsSidebar", () => {
 
     await user.type(
       screen.getByRole("searchbox", { name: "Search documentation" }),
-      "setup neovim",
+      "configure neovim",
     );
     await user.click(
-      screen.getByRole("link", { name: /LSP.*Setup \(Neovim 0\.11\+\)/ }),
+      screen.getByRole("link", { name: /LSP.*Configure Neovim 0\.11 or newer/ }),
     );
     await waitFor(() => {
       expect(onNavigate).toHaveBeenCalledTimes(1);
     });
     expect(locationsAtNavigate[0]).toEqual({
       pathname: "/docs/lsp",
-      hash: "setup-neovim-011",
+      hash: "configure-neovim-011-or-newer",
     });
 
     await user.type(
       await screen.findByRole("searchbox", {
         name: "Search documentation",
       }),
-      "setup neovim",
+      "configure neovim",
     );
     await user.click(
-      screen.getByRole("link", { name: /LSP.*Setup \(Neovim 0\.11\+\)/ }),
+      screen.getByRole("link", { name: /LSP.*Configure Neovim 0\.11 or newer/ }),
     );
     await waitFor(() => {
       expect(onNavigate).toHaveBeenCalledTimes(2);
@@ -206,13 +240,16 @@ describe("DocsSidebar", () => {
 
   it("marks at most the exact pathname and hash result current", async () => {
     const user = userEvent.setup();
-    renderSidebar({ activeSlug: "lsp" }, "/docs/lsp#setup-neovim-011");
+    renderSidebar(
+      { activeSlug: "lsp" },
+      "/docs/lsp#configure-neovim-011-or-newer",
+    );
 
     await user.type(
       await screen.findByRole("searchbox", {
         name: "Search documentation",
       }),
-      "setup",
+      "configure",
     );
     const results = screen.getByRole("list", { name: "Search results" });
     const currentResults = within(results)
@@ -222,7 +259,7 @@ describe("DocsSidebar", () => {
     expect(currentResults).toHaveLength(1);
     expect(currentResults[0]).toHaveAttribute(
       "href",
-      "/docs/lsp#setup-neovim-011",
+      "/docs/lsp#configure-neovim-011-or-newer",
     );
   });
 });

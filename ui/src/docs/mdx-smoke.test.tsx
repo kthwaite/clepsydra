@@ -74,6 +74,33 @@ it.each(DOC_PAGES)(
   },
 );
 
+it("resolves every internal documentation link to a registered guide and heading", () => {
+  const pagesBySlug = new Map(DOC_PAGES.map((page) => [page.slug, page]));
+  const docsLink = /\]\(\/docs\/([^)\s#]+)(?:#([^)\s]+))?\)/g;
+
+  for (const sourcePage of DOC_PAGES) {
+    for (const match of sourcePage.source.matchAll(docsLink)) {
+      const [, targetSlug, targetHeadingId] = match;
+      const targetPage = pagesBySlug.get(targetSlug ?? "");
+      expect(
+        targetPage,
+        `${sourcePage.slug} links to unregistered guide ${targetSlug}`,
+      ).toBeDefined();
+
+      if (targetPage && targetHeadingId) {
+        const rendered = render(<targetPage.Component />);
+        expect(
+          rendered.container.querySelector(
+            `#${CSS.escape(targetHeadingId)}`,
+          ),
+          `${sourcePage.slug} links to missing heading ${targetSlug}#${targetHeadingId}`,
+        ).not.toBeNull();
+        rendered.unmount();
+      }
+    }
+  }
+});
+
 it.each(WORKFLOW_GUIDE_SLUGS)(
   "$slug follows the workflow guide structure",
   (slug) => {

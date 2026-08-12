@@ -214,6 +214,45 @@ describe("searchDocs", () => {
     expect(result).toMatchObject(expected);
   });
 
+  it.each([
+    ["stale repair", "links-search-graph-and-repair"],
+    ["protected attachment", "attachments-and-media"],
+    ["board carryover", "tasks-agenda-journals-and-board"],
+    ["zotero conflict", "academic-library-and-reading"],
+    ["block transclusion", "block-references-and-transclusion"],
+    ["MCP server", "mcp"],
+    ["CAS archive", "capture-feeds-and-archives"],
+  ])("ranks the canonical guide first for %s", (query, expectedSlug) => {
+    expect(searchDocs(buildDocsIndex(DOC_PAGES), query)[0]?.page.slug).toBe(
+      expectedSlug,
+    );
+  });
+
+  it("deduplicates a page while retaining its best heading deep link", () => {
+    const repeated = page(
+      "repeated-sections",
+      "Repeated sections",
+      "Unrelated",
+      [
+        "## First match",
+        "",
+        "Needle appears here.",
+        "",
+        "## Second match",
+        "",
+        "Needle appears here too.",
+      ].join("\n"),
+    );
+
+    expect(searchDocs(buildDocsIndex([repeated]), "needle")).toEqual([
+      expect.objectContaining({
+        page: repeated,
+        heading: "First match",
+        headingId: "first-match",
+      }),
+    ]);
+  });
+
   it("requires every normalized query token in the same section", () => {
     const index = buildDocsIndex([gettingStarted, bases]);
 

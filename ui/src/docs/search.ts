@@ -340,22 +340,25 @@ export function searchDocs(
     })
     .filter((candidate): candidate is RankedSection => candidate !== undefined);
 
-  const specificClassesByPage = new Map<DocPage, Set<number>>();
+  const bestByPage = new Map<DocPage, RankedSection>();
   for (const candidate of ranked) {
-    if (candidate.section.heading === undefined) {
-      continue;
+    const current = bestByPage.get(candidate.section.page);
+    if (
+      current === undefined ||
+      candidate.score > current.score ||
+      (candidate.score === current.score &&
+        current.section.heading === undefined &&
+        candidate.section.heading !== undefined) ||
+      (candidate.score === current.score &&
+        (current.section.heading === undefined) ===
+          (candidate.section.heading === undefined) &&
+        candidate.section.order < current.section.order)
+    ) {
+      bestByPage.set(candidate.section.page, candidate);
     }
-    const classes = specificClassesByPage.get(candidate.section.page) ?? new Set<number>();
-    classes.add(candidate.scoreClass);
-    specificClassesByPage.set(candidate.section.page, classes);
   }
 
-  return ranked
-    .filter(
-      (candidate) =>
-        candidate.section.heading !== undefined ||
-        !specificClassesByPage.get(candidate.section.page)?.has(candidate.scoreClass),
-    )
+  return [...bestByPage.values()]
     .sort((left, right) => right.score - left.score || left.section.order - right.section.order)
     .map(({ section, score, excerptText }) => ({
       page: section.page,
