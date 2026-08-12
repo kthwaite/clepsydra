@@ -1542,6 +1542,99 @@ async fn base_property_wire_rejects_the_removed_map_representation() {
 }
 
 #[tokio::test]
+async fn duplicate_property_entries_are_rejected_by_create_update_and_preview() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let duplicate_properties = serde_json::json!([
+        { "key": "status", "definition": { "type": "text" } },
+        { "key": "status", "definition": { "type": "number" } },
+        { "key": "rating", "definition": { "type": "number" } },
+        { "key": "status", "definition": { "type": "bool" } }
+    ]);
+
+    let create = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "duplicates",
+            "definition": {
+                "name": "Duplicates",
+                "properties": duplicate_properties.clone()
+            }
+        }))
+        .await;
+    create.assert_status(StatusCode::BAD_REQUEST);
+    let create_error: serde_json::Value = create.json();
+    assert_eq!(
+        create_error["detail"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|diagnostic| diagnostic["path"].as_str())
+            .collect::<Vec<_>>(),
+        vec!["properties[1].key", "properties[3].key"]
+    );
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/duplicates.base.toml")
+            .exists()
+    );
+    assert_no_notification(&mut notifications);
+
+    let reading_path = fixture
+        .state
+        .vault
+        .root()
+        .join("bases/reading.base.toml");
+    let reading_before = fs::read_to_string(&reading_path).unwrap();
+    let revision = current_base_revision(&fixture, "reading").await;
+    let update = fixture
+        .server
+        .put("/api/vault/bases/reading")
+        .json(&serde_json::json!({
+            "expected_revision": revision,
+            "definition": {
+                "name": "Reading",
+                "properties": duplicate_properties.clone()
+            },
+            "view_origins": []
+        }))
+        .await;
+    update.assert_status(StatusCode::BAD_REQUEST);
+    assert_eq!(fs::read_to_string(&reading_path).unwrap(), reading_before);
+    assert_no_notification(&mut notifications);
+
+    let preview = fixture
+        .server
+        .post("/api/vault/bases/preview")
+        .json(&serde_json::json!({
+            "definition": {
+                "name": "Preview",
+                "properties": duplicate_properties
+            }
+        }))
+        .await;
+    preview.assert_status_ok();
+    let preview_body: serde_json::Value = preview.json();
+    assert!(preview_body["output"].is_null());
+    assert!(preview_body["evaluation_error"].is_null());
+    assert_eq!(
+        preview_body["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|diagnostic| diagnostic["path"].as_str())
+            .collect::<Vec<_>>(),
+        vec!["properties[1].key", "properties[3].key"]
+    );
+    assert_eq!(fs::read_to_string(reading_path).unwrap(), reading_before);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test]
 async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
     let fixture = ApiFixture::builder().pre_index_seed(seed).build();
     let root = fixture.state.vault.root();

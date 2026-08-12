@@ -6,7 +6,11 @@
 //! the registry — a broken base is listed with its diagnostics and excluded
 //! from evaluation.
 
-use std::{borrow::Cow, collections::HashMap, path::Path};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -994,7 +998,15 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         );
     }
 
-    for (key, _) in &base.file.properties {
+    let mut property_keys = HashSet::new();
+    for (property_index, (key, _)) in base.file.properties.iter().enumerate() {
+        if !property_keys.insert(key.as_str()) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("properties[{property_index}].key")),
+                format!("duplicate property key `{key}`"),
+            );
+        }
         if key == BODY_COLUMN {
             push(
                 BaseDiagnosticSeverity::Error,
@@ -1388,6 +1400,38 @@ columns = ["title", "author", "rating", "finished"]
                 .collect::<Vec<_>>(),
             vec!["status", "rating"]
         );
+    }
+
+    #[test]
+    fn duplicate_property_keys_are_blocking_at_every_later_declaration() {
+        let property = PropertyDefinition {
+            property_type: PropertyType::Text,
+            options: Vec::new(),
+            many: None,
+        };
+        let mut file = base_file_with_views(["All"]);
+        file.properties = vec![
+            ("status".to_string(), property.clone()),
+            ("status".to_string(), property.clone()),
+            ("rating".to_string(), property.clone()),
+            ("status".to_string(), property),
+        ];
+
+        let result = validate_definition("reading", file);
+        let duplicate_paths = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message == "duplicate property key `status`")
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            duplicate_paths,
+            vec!["properties[1].key", "properties[3].key"]
+        );
+        assert!(result.diagnostics.iter().all(|diagnostic| {
+            diagnostic.message != "duplicate property key `rating`"
+        }));
     }
 
     #[test]

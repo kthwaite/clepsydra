@@ -93,7 +93,7 @@ OpenAPI regeneration:
 
 Verification:
 
-- `cargo test --test bases_api` — 57 passed.
+- `cargo test --test bases_api` — 58 passed.
 - `cargo test openapi` — 16 passed.
 - `bun run test src/components/bases/__tests__/definition-model.test.ts src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx src/components/bases/__tests__/PropertiesEditor.test.tsx src/components/bases/__tests__/ViewsEditor.test.tsx` — 4 files, 108 tests passed.
 - `bun run test src/components/bases/__tests__/BaseTable.test.tsx src/components/bases/__tests__/BaseTableView.test.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/bases/__tests__/member-draft.test.ts src/components/bases/__tests__/embed-semantic-validation.test.ts src/components/bases/__tests__/BaseEmbedInspector.test.tsx src/editor/elements/BaseEmbedElement.test.tsx` — 7 files, 177 tests passed.
@@ -110,3 +110,28 @@ Verification:
 
 - Focused Vitest runs emit existing Vite native-config warnings about `__dirname` and an extensionless `mdx-plugin` import. These are unrelated browser-smoke warnings and were not changed per scope.
 - Real-browser smoke and repository-wide gates remain deliberately unrun for this correction wave.
+
+## Residual correction: duplicate ordered property keys
+
+The ordered-array transport made duplicate property keys structurally expressible. Before this correction, authoritative validation accepted them and TOML map persistence collapsed them with last-declaration-wins behavior, diverging from ordered domain/UI lookup semantics.
+
+### RED
+
+- `cargo test duplicate_property_keys_are_blocking_at_every_later_declaration`
+  - Failed with no diagnostics; expected `properties[1].key` and `properties[3].key`.
+- `cargo test --test bases_api duplicate_property_entries_are_rejected_by_create_update_and_preview`
+  - Failed because create returned HTTP 200 and persisted a collapsed property map instead of returning HTTP 400.
+
+### GREEN
+
+- Authoritative Base validation now tracks exact property keys in declaration order.
+- Every declaration after the first occurrence emits a blocking `duplicate property key \`<key>\`` diagnostic at `properties[i].key`.
+- No map compatibility or alternate wire representation was added.
+- Focused API coverage proves create rejection without a new file, update rejection without changing the stored Base, preview rejection without output, and no registry notification for any rejected mutation.
+
+Verification:
+
+- `cargo test duplicate_property_keys_are_blocking_at_every_later_declaration` — 1 passed.
+- `cargo test --test bases_api duplicate_property_entries_are_rejected_by_create_update_and_preview` — 1 passed.
+- `cargo test vault::base::tests::` — 30 passed.
+- `cargo test --test bases_api` — 58 passed.
