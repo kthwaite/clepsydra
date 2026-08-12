@@ -448,6 +448,106 @@ describe("TaskCard — inline editing", () => {
     // The edit panel must NOT have opened for this click sequence.
     expect(useBoardStore.getState().editTaskId).toBeNull();
   });
+
+  it("Enter key on priority chip does not open the edit panel", async () => {
+    const stub = makeStub();
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+      stub,
+    );
+
+    const priorityChip = screen.getByTestId("kb-inline-priority-t1");
+    priorityChip.focus();
+    fireEvent.keyDown(priorityChip, { key: "Enter" });
+
+    // The edit panel must NOT have opened
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
+});
+
+// ── keyboard activation ──────────────────────────────────────────────────────────
+
+describe("TaskCard — keyboard activation", () => {
+  it("card has role=button and tabIndex=0", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t1");
+    expect(card).toHaveAttribute("role", "button");
+    expect(card).toHaveAttribute("tabindex", "0");
+  });
+
+  it("Enter key on card opens the edit panel", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t1");
+    card.focus();
+    fireEvent.keyDown(card, { key: "Enter" });
+    expect(useBoardStore.getState().editTaskId).toBe("t1");
+  });
+
+  it("Space key on card opens the edit panel", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const card = screen.getByTestId("task-card-t2");
+    card.focus();
+    fireEvent.keyDown(card, { key: " " });
+    expect(useBoardStore.getState().editTaskId).toBe("t2");
+  });
+
+  it("dossier link is a button that opens dossier without opening edit panel", async () => {
+    const onOpenDossier = vi.fn();
+    const taskWithLink: BoardTask = {
+      ...tasks[0],
+      id: "t-link",
+      code: "TSK-0020",
+      status: "INTAKE",
+      link: "tasks/alpha",
+    };
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={[taskWithLink]}
+        cycles={cycles}
+        showOp={false}
+        onOpenDossier={onOpenDossier}
+      />,
+    );
+
+    const linkButton = screen.getByText("tasks/alpha");
+    expect(linkButton.tagName).toBe("BUTTON");
+
+    const user = userEvent.setup();
+    await user.click(linkButton);
+
+    // onOpenDossier should be called
+    expect(onOpenDossier).toHaveBeenCalledWith("tasks/alpha");
+
+    // Edit panel must NOT have opened
+    expect(useBoardStore.getState().editTaskId).toBeNull();
+  });
 });
 
 // ── + button opens taskModal with status preset ───────────────────────────────

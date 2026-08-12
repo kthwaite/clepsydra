@@ -64,6 +64,8 @@ export function TaskCard({
       className="group relative cursor-grab border border-[var(--rule)] bg-[var(--bg)] p-[9px_11px_9px_14px] transition-[border-color,background,transform] duration-[80ms,120ms,80ms] hover:border-[var(--hot)] hover:bg-[var(--bg-3)] active:cursor-grabbing"
       style={isDragging ? { opacity: 0.35, borderStyle: "dashed" } : undefined}
       draggable
+      role="button"
+      tabIndex={0}
       onDragStart={(e) => {
         // Firefox refuses to initiate an HTML5 drag without setData.
         if (e.dataTransfer) {
@@ -74,6 +76,12 @@ export function TaskCard({
       }}
       onDragEnd={onDragEnd}
       onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
       data-testid={`task-card-${t.id}`}
     >
       {/* Left priority bar */}
@@ -169,7 +177,8 @@ export function TaskCard({
           <span className="font-variant-numeric">{t.estimate}</span>
         )}
         {t.link && (
-          <span
+          <button
+            type="button"
             className="cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
             onClick={(e) => {
               e.stopPropagation();
@@ -177,7 +186,7 @@ export function TaskCard({
             }}
           >
             {t.link}
-          </span>
+          </button>
         )}
         <span
           className="ml-auto font-variant-numeric"

@@ -6,7 +6,9 @@
 
 ### 1. TaskCard keyboard activation
 
-`TaskCard` renders as a `<div>` with `onClick`. It needs `role="button"`, `tabIndex={0}`, and a `keyDown` handler for Enter/Space to open the edit panel. Currently only mouse-accessible.
+**Status: DONE** (commit: task-20; 2026-08-12)
+
+`TaskCard` now renders with `role="button"`, `tabIndex={0}`, and a `keyDown` handler for Enter/Space to open the edit panel. The dossier footer link is now a real `<button>` element. Regression test ensures RAC Buttons (priority badge, state pip) don't bubble keyboard activation to the card.
 
 ### 2. Keyboard DnD for TaskCard
 
