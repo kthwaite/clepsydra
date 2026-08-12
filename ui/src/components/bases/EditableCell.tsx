@@ -96,7 +96,8 @@ export function EditableCell({
     );
 
     return (
-      <div
+      <fieldset
+        className="m-0 min-w-0 border-0 p-0"
         onBlurCapture={(event) => {
           if (preserveEditingOnBlur) event.stopPropagation();
         }}
@@ -112,7 +113,7 @@ export function EditableCell({
         }}
       >
         {editor}
-      </div>
+      </fieldset>
     );
   }
 
