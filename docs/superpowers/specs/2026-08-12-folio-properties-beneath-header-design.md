@@ -41,6 +41,12 @@ Use one `FolioProperties` implementation across every layout.
 
 The component must not gain a sidebar or document variant. A single responsive row layout prevents presentation paths from diverging.
 
+### Base `body` column
+
+`body` is a projection-only Base system column, not a declared custom property. It does not appear in `PageBasePropertiesResponse.properties` and must not be duplicated as a compact property row.
+
+When a matching Base view includes `body`, the rich note body remains the full-width editor immediately after the dedicated Properties section and intervening note controls. The Folio does not interleave the body with custom properties or reorder fields to match a particular Base view. This is deterministic when several Bases or views match and preserves the body’s rich-text editing surface.
+
 ## Component Changes
 
 ### `Folio`
@@ -82,6 +88,7 @@ Property failures remain isolated: the Folio header and body continue to render 
 - A successful projection with no matching Base renders no Properties section.
 - Loading and load failure remain visible and retryable.
 - Existing typed editing, saving, conflict recovery, draft retention, focus, and accessibility tests continue to pass.
+- A Base view containing `body` still renders one full-width note body editor after Properties and never renders a duplicate `body` property row.
 
 ### Behavioral smoke test
 
