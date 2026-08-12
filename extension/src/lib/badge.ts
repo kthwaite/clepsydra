@@ -34,7 +34,7 @@ const APPEARANCES: Record<CapturePhase, BadgeAppearance> = {
 	processing: {
 		text: "…",
 		color: "#7c3aed",
-		title: "Clepsydra: collecting images…",
+		title: "Clepsydra: building the snapshot…",
 		clearAfterMs: null,
 	},
 	uploading: {

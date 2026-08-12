@@ -5,23 +5,18 @@ export interface ArchiveManifest {
 	title: string;
 	description?: string;
 	captured_at: string;
+	/** sha256 of `markdown_body` as sent; the server's transport check. */
 	content_hash: string;
-	snapshot_hash: string;
+	/** The SingleFile capture, resources still inlined. The server deconstructs it. */
+	snapshot_html: string;
 	markdown_body: string;
 	tags: string[];
-	blobs: BlobUpload[];
 	/** Provenance parsed from the page by Readability; all optional. */
 	byline?: string;
 	site_name?: string;
 	published_time?: string;
 	lang?: string;
 	excerpt?: string;
-}
-
-export interface BlobUpload {
-	hash: string;
-	content_type: string;
-	data: string; // base64
 }
 
 export interface ArchiveResponse {
@@ -53,8 +48,10 @@ export interface ExtensionSettings {
 	notify_on_duplicate: boolean;
 	/**
 	 * Mirrors the server's `archive.max_blob_size_mb` / `max_request_size_mb`
-	 * (src/vault/config.rs). Checked client-side so one oversized image is
-	 * skipped rather than failing the whole capture with a 400.
+	 * (src/vault/config.rs). The per-resource limit is handed to SingleFile so it
+	 * declines an oversized resource at capture time; exceeding the total fails
+	 * the whole capture, because a snapshot missing arbitrary resources is not a
+	 * snapshot.
 	 */
 	max_blob_size_mb: number;
 	max_request_size_mb: number;
@@ -65,6 +62,6 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
 	default_tags: [],
 	notify_on_success: true,
 	notify_on_duplicate: true,
-	max_blob_size_mb: 50,
-	max_request_size_mb: 100,
+	max_blob_size_mb: 100,
+	max_request_size_mb: 250,
 };
