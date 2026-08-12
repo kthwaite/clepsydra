@@ -68,6 +68,32 @@ it.each(WORKFLOW_GUIDE_SLUGS)(
   },
 );
 
+it("documents mutation preview snapshots and recursive folder deletion", () => {
+  const source = DOC_PAGES.find(
+    (page) => page.slug === "pages-and-authoring",
+  )?.source;
+
+  expect(source).toContain("preview is a snapshot");
+  expect(source).toMatch(/replans\s+against the current vault/);
+  expect(source).toMatch(
+    /Recursive folder\s+deletion does not check or rewrite inbound links/,
+  );
+});
+
+it("documents the protected-page API trust and size boundaries", () => {
+  const source = DOC_PAGES.find(
+    (page) => page.slug === "encryption-and-protected-pages",
+  )?.source;
+
+  expect(source).toContain("shipped frontend safeguards");
+  expect(source).toMatch(
+    /cannot attest that the browser was unlocked, that the user\s+acknowledged/,
+  );
+  expect(source).toContain("complete canonical age v1 armored body");
+  expect(source).toContain("2 MiB");
+  expect(source).toMatch(/encryption\s+overhead/);
+});
+
 it("links Getting Started to both dedicated guides", () => {
   render(<Guide />);
 

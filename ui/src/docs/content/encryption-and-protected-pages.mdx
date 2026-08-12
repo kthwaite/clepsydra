@@ -56,11 +56,14 @@ add multiple recipients.
 3. Review the visible metadata boundary, confirm that recovery material was
    exported, and choose **Protect note**.
 
-Clepsydra first flushes pending edits. The browser encrypts the current Markdown
-and submits a dedicated protection transition with the page UUID and expected
-revision. The server validates age armor, stores the encryption descriptor in
+These save, unlock, recovery-export acknowledgment, and protection-confirmation
+checks are shipped frontend safeguards. The frontend first flushes pending
+edits, encrypts the current Markdown, and submits
+`POST /api/vault/pages/by-id/<uuid>/protect` with the expected revision. The
+server validates the encryption descriptor, page state and revision, and the
+complete canonical age v1 armored body; it then stores the descriptor in
 frontmatter, replaces the body with ciphertext, and removes body-derived index
-projections. A stale revision fails instead of replacing newer content.
+projections.
 
 ### Unlock and edit a protected Folio
 
@@ -75,6 +78,11 @@ browser before the update request is sent; title, tags, and aliases remain
 ordinary frontmatter updates. `Command+S` on macOS or `Ctrl+S` elsewhere still
 flushes immediately.
 
+The complete canonical age v1 armored body—not the plaintext before
+encryption—must be at most 2 MiB. Encryption overhead reduces the usable
+plaintext size below 2 MiB. An oversized initial protection or later protected
+save is rejected; shorten the body and save again.
+
 Choose **lock** in an unlocked protected editor to lock all protected editors.
 Clepsydra first asks every open protected editor to save. If any save fails,
 locking is refused so unsaved plaintext is not silently discarded. A successful
@@ -84,10 +92,12 @@ frontend has no automatic inactivity lock or `config.toml` idle-lock setting.
 
 ### Remove protection or change the password
 
-Choose **encrypted · remove**, acknowledge that the transition writes the body
-back to disk as plaintext, and choose **Remove encryption**. Clepsydra flushes,
-uses the current revision, and performs a dedicated unprotect transition; this
-is not a temporary view.
+Choose **encrypted · remove**, review the warning, and choose **Remove
+encryption**. In the shipped frontend, acknowledgment and a successful flush
+are required first. The frontend submits
+`POST /api/vault/pages/by-id/<uuid>/unprotect` with the current revision and
+caller-supplied plaintext body. A successful transition writes that body back
+to disk as plaintext; this is not a temporary view.
 
 For password-based setup, return to **Settings → Advanced → Encrypted notes**
 and choose **Change password**. Supply the current password and a new password
@@ -96,18 +106,31 @@ existing Folio ciphertext and cannot recover a lost identity.
 
 ## Failures and conflicts
 
-- Setup rejects mismatched or short passwords, malformed identities, a recipient
-  mismatch, and an already initialized keyring. Setup is not partially replaced
-  on conflict.
+- Setup rejects mismatched or short passwords in the frontend, malformed
+  identities or recipients, and an already initialized keyring. After setup,
+  the frontend also refuses a response whose recipient differs from the one it
+  prepared. This response consistency check is not proof that a recipient is
+  owned by the caller.
 - A wrong password, wrong identity, tampered body, or ciphertext for another key
   leaves the Folio locked. The UI reports a safe authentication error rather
   than exposing cryptographic detail.
-- Protect and unprotect require an initialized, unlocked key and an explicit
-  acknowledgment. If the pre-transition save fails, no protection change is
-  made.
+- The shipped frontend requires an initialized, unlocked key, explicit
+  acknowledgment, and a successful pre-transition save before protect or
+  unprotect. These are not server attestations. The protect API validates the
+  descriptor, complete canonical age v1 armor, current page state, and revision.
+  The unprotect API validates the current protected state and revision, then
+  writes the caller-supplied plaintext.
 - Protection, unprotection, and protected saves are revision checked. On a stale
   revision, reload the winning page and reapply the intended edit; Clepsydra
   does not merge age envelopes.
+- The server cannot attest that the browser was unlocked, that the user
+  acknowledged the disclosure, that ciphertext uses the configured recipient,
+  that the caller owns its recipient, or that unprotect plaintext is an
+  authentic decryption. A custom client can bypass frontend confirmations while
+  still satisfying the API's structural and revision checks.
+- A complete armored protected body over 2 MiB is rejected. Because encryption
+  overhead counts toward that limit, usable plaintext is smaller; oversized
+  protected autosaves remain unsaved and report failure.
 - Protected bodies do not participate in server-side full-text body search,
   snippets, outlinks, backlinks, unresolved links, blocks, word counts, similar
   content, body-aware tasks/journal mutations, or LSP body features. These

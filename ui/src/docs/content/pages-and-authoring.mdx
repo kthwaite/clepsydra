@@ -82,6 +82,13 @@ The destination must be inside the vault and must not already exist. The active
 tab follows a successful move. Saving is flushed before Clepsydra prepares the
 preview.
 
+The preview is a snapshot of the file operations and link edits calculated when
+you requested it. Confirmation resubmits the displayed source, destination, and
+rewrite policy; it does not submit that calculated plan. The server replans
+against the current vault before applying the mutation, so the actual affected
+set can differ from the snapshot or the operation can conflict. Re-preview
+immediately before confirming, especially after any other vault activity.
+
 ### Create, move, or delete folders
 
 Open **Manage folders** in the same **Manage paths** panel.
@@ -93,7 +100,9 @@ Open **Manage folders** in the same **Manage paths** panel.
   **Move folder**.
 - **Delete** has no server preview. Select the folder, type its exact path to
   confirm, and leave **Delete contents recursively** unchecked for an empty
-  folder. Checking it deletes the folder's contents too.
+  folder. Checking it deletes the folder's contents too. Recursive folder
+  deletion does not check or rewrite inbound links to pages it removes, so
+  surviving Folios can retain unresolved references.
 
 ### Delete a page and handle backlinks
 
@@ -104,12 +113,12 @@ Choose **Delete page**, then select how inbound links should be handled:
 - **Leave unresolved links unchanged**.
 
 Choose **Preview deletion** and inspect every backlink rewrite before
-**Confirm delete**. The page editor then performs a forced delete of the frozen
-preview. “Forced” means the normal API safeguard that refuses to delete a page
-with backlinks is deliberately bypassed after review; it does not make a stale
-or invalid plan succeed. Deletion removes the page and applies the selected
-rewrite atomically. Leaving links unchanged deliberately creates unresolved
-references.
+**Confirm delete**. Confirmation submits the same page path and rewrite policy
+with `force=true`, and the server calculates a new deletion plan from current
+state. “Forced” means the normal API safeguard that refuses to delete a page
+with backlinks is deliberately bypassed after review. Deletion removes the page
+and applies the server's current rewrite plan atomically. Leaving links
+unchanged deliberately creates unresolved references.
 
 ## Failures and conflicts
 
@@ -122,12 +131,15 @@ references.
   than replacing it.
 - Preview first flushes the current Folio. If saving fails, no preview or path
   mutation starts.
-- Files can change after a preview. A stale move, folder move, or deletion fails
-  instead of applying an obsolete plan; reopen the panel and preview again.
+- Files can change after a preview. Confirmation replans instead of applying the
+  displayed snapshot byte-for-byte, so affected operations may differ or the
+  mutation may conflict. Re-preview immediately; after any failure, return to
+  the panel and preview again.
 - A direct delete without `force=true` returns a conflict when backlinks exist
   and reports the referring pages. Review those pages before forcing deletion.
 - Folder deletion cannot be previewed. Non-recursive deletion fails for a
-  non-empty folder; recursive deletion is intentionally destructive.
+  non-empty folder. Recursive deletion is intentionally destructive, performs
+  no inbound-link safety check, and performs no link rewriting.
 
 ## Privacy
 
