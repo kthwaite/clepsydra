@@ -1,0 +1,146 @@
+export const meta = {
+  slug: "pages-and-authoring",
+  title: "Pages and Authoring",
+  description: "Create, organize, move, and delete folios."
+}
+
+A Folio is an ordinary Markdown page in the vault. Clepsydra gives each page a
+stable frontmatter identity while letting its vault-relative path change as you
+organize it.
+
+## Prerequisites
+
+- Run Clepsydra against an initialized vault and open the web application.
+- Open the command console with `Command+K` on macOS or `Ctrl+K` elsewhere.
+- Use an editable Folio when you need the organization controls. A page opened
+  through `/pages/<vault-relative-path>` is restored as a tab in `/workspace`.
+
+## Workflow
+
+### Create a Folio
+
+1. Run **Inscribe new folio** (`app.inscribe`) from the command console, or use
+   `Command+N` on macOS and `Ctrl+N` elsewhere.
+2. Choose a **Kind**, optionally choose a **Project**, enter the required
+   **Title**, and add any tags.
+3. Check the `REF` path preview, then choose **commit to archive**.
+
+New Folio filenames have the canonical shape
+`<yyyymmdd>.<title-slug>.<short-id>.md`. The selected Kind chooses the top-level
+folder and Project adds a subfolder, so a NOTE in project `atlas` can be created
+as `notes/atlas/20260812.field-notes.A1b2C3d4.md`. The title slug is capped and
+is not the page's identity.
+
+Every page has a UUID in TOML frontmatter as `id`. That ID remains the page's
+identity when its path changes. Changing the displayed title updates
+frontmatter; it does not automatically rename the existing file. New
+frontmatter can also contain `title`, `type`, `project`, `tags`, `aliases`,
+`created_at`, and `updated_at`.
+
+Creation writes the page at the projected path, then declares the selected Kind
+and Project. If that declaration fails, the created page still opens rather
+than being hidden by the intake dialog.
+
+### Use Kind and Project projection
+
+The Document details rail shows **Kind**, **Project**, and **Path**. Assigning a
+Kind writes the `type` frontmatter field; the unrelated frontmatter key `kind`
+is an ordinary property. Assigning a Project writes `project`. Either assignment
+can move the same file so the folder follows its declared metadata.
+
+| Kind | Canonical folder |
+| --- | --- |
+| `NOTE` | `notes` |
+| `PROJECT` | `projects` |
+| `JOURNAL` | `journals` |
+| `TODO` | `todos` |
+| `QUOTE` | `quotes` |
+| `BOOK` | `books` |
+| `CAPTURE` | `captures` |
+| `CODE` | `code` |
+| `PERSON` | `people` |
+| `TASK` | `tasks` |
+| `CYCLE` | `cycles` |
+| `AI_CONVERSATION` | `conversations` |
+
+Without a declared `type`, Clepsydra infers Kind from the top-level folder and
+otherwise falls back to NOTE. Missing metadata is conservative: no declared
+Kind keeps the current top-level folder, and no declared Project keeps the
+current subfolder. Explicitly clearing Project removes its subfolder. A
+successful projected move keeps the filename and updates links as one planned
+mutation.
+
+### Move or rename a page
+
+1. In an editable Folio, open **Manage paths** under **Organization**.
+2. Choose **Move or rename page**.
+3. Enter the complete vault-relative destination, including `.md`.
+4. Choose **Preview move**, review the server-generated file operations and
+   link edits, then choose **Move page**.
+
+The destination must be inside the vault and must not already exist. The active
+tab follows a successful move. Saving is flushed before Clepsydra prepares the
+preview.
+
+### Create, move, or delete folders
+
+Open **Manage folders** in the same **Manage paths** panel.
+
+- **Create** accepts a vault-relative folder such as `notes/research` and does
+  not require a preview.
+- **Move or rename** requires a source folder and destination. Choose
+  **Preview folder move**, review every planned file and text edit, then choose
+  **Move folder**.
+- **Delete** has no server preview. Select the folder, type its exact path to
+  confirm, and leave **Delete contents recursively** unchecked for an empty
+  folder. Checking it deletes the folder's contents too.
+
+### Delete a page and handle backlinks
+
+Choose **Delete page**, then select how inbound links should be handled:
+
+- **Preserve labels as plain text**;
+- **Remove link markup**;
+- **Leave unresolved links unchanged**.
+
+Choose **Preview deletion** and inspect every backlink rewrite before
+**Confirm delete**. The page editor then performs a forced delete of the frozen
+preview. “Forced” means the normal API safeguard that refuses to delete a page
+with backlinks is deliberately bypassed after review; it does not make a stale
+or invalid plan succeed. Deletion removes the page and applies the selected
+rewrite atomically. Leaving links unchanged deliberately creates unresolved
+references.
+
+## Failures and conflicts
+
+- Intake refuses a blank title. Invalid paths, unknown Kinds, invalid Project
+  slugs, and existing destinations are rejected.
+- A page-create collision returns a conflict and does not overwrite the
+  existing file. A Kind/Project declaration can fail after intake creation;
+  the new page remains at its created path.
+- Moving a missing source fails. Moving to an existing destination fails rather
+  than replacing it.
+- Preview first flushes the current Folio. If saving fails, no preview or path
+  mutation starts.
+- Files can change after a preview. A stale move, folder move, or deletion fails
+  instead of applying an obsolete plan; reopen the panel and preview again.
+- A direct delete without `force=true` returns a conflict when backlinks exist
+  and reports the referring pages. Review those pages before forcing deletion.
+- Folder deletion cannot be previewed. Non-recursive deletion fails for a
+  non-empty folder; recursive deletion is intentionally destructive.
+
+## Privacy
+
+Filenames, folder names, vault-relative paths, and TOML frontmatter are
+plaintext. They can reveal titles, projects, Kinds, tags, aliases, timestamps,
+and page identity even when the Markdown body is protected. Use neutral names
+and metadata when those details are sensitive; protecting a body does not hide
+its location or organization.
+
+## Related
+
+- [Editor Workflows](/docs/editor-workflows)
+- [Attachments and Media](/docs/attachments-and-media)
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Bases](/docs/bases)
+- [MCP](/docs/mcp) for previewed agent moves, folder operations, and deletes

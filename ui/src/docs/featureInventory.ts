@@ -115,7 +115,7 @@ export const FEATURE_INVENTORY = [
     id: "/pages/$",
     label: "Folio page",
     surface: "route",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "pages-and-authoring" },
   },
   {
     id: "nav.atrium",
@@ -181,7 +181,7 @@ export const FEATURE_INVENTORY = [
     id: "app.inscribe",
     label: "Inscribe new folio",
     surface: "command",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "pages-and-authoring" },
   },
   {
     id: "app.settings",
@@ -221,13 +221,13 @@ export const FEATURE_INVENTORY = [
     id: "workflow.pages-editor",
     label: "Pages and editor",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "editor-workflows" },
   },
   {
     id: "workflow.folders-moves-deletes",
     label: "Folders, moves, and deletes",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "pages-and-authoring" },
   },
   {
     id: "workflow.search",
@@ -251,7 +251,7 @@ export const FEATURE_INVENTORY = [
     id: "workflow.block-references-transclusion",
     label: "Block references and transclusion",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "editor-workflows" },
   },
   {
     id: "workflow.bases",
@@ -323,13 +323,13 @@ export const FEATURE_INVENTORY = [
     id: "workflow.attachments",
     label: "Attachments",
     surface: "workflow",
-    disposition: { kind: "reference", slug: "configuration" },
+    disposition: { kind: "guide", slug: "attachments-and-media" },
   },
   {
     id: "workflow.encryption",
     label: "Protected folios and encryption",
     surface: "workflow",
-    disposition: { kind: "reference", slug: "configuration" },
+    disposition: { kind: "guide", slug: "encryption-and-protected-pages" },
   },
   {
     id: "workflow.codex",

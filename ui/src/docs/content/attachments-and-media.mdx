@@ -1,0 +1,133 @@
+export const meta = {
+  slug: "attachments-and-media",
+  title: "Attachments and Media",
+  description: "Upload, insert, audit, and delete vault attachments."
+}
+
+Attachments are vault-wide files stored beneath the configured attachment
+folder, `_attachments` by default. Folios contain Markdown references to those
+files; deleting or moving a reference does not move the attachment bytes.
+
+## Prerequisites
+
+- Open an editable Folio in `/workspace` and expand **Manage attachments** under
+  **Attachments**.
+- A protected Folio must be unlocked before its attachment manager can inspect
+  the decrypted Markdown or insert a reference.
+- The server must be able to write the vault's `vault.attachment_folder`.
+  Attachment URLs use `/api/vault/attachments/<attachment-path>`.
+
+## Workflow
+
+### List and open attachments
+
+**Manage attachments** loads the complete attachment inventory, including files
+in attachment subfolders. Entries are sorted by path and show the filename and
+byte size. Choose the filename to open the served file in a new browser tab.
+The server reports a MIME type inferred from the attachment path and otherwise
+uses `application/octet-stream`.
+
+### Upload a file
+
+1. Choose **Upload** and select one file.
+2. On a normal Folio, Clepsydra stores the file but does not insert a reference
+   automatically. Find the new inventory entry and choose **Insert** when you
+   want the reference in the current body.
+3. On a protected Folio, review the per-upload plaintext disclosure. Cancelling
+   stores no file and inserts no reference. Acknowledging uploads the file and,
+   after success, inserts its Markdown reference into the Folio.
+
+Uploads use the selected filename as the attachment path. The server creates
+missing attachment subfolders, installs the upload without replacing an
+existing file, and requires the multipart field
+`plaintext_acknowledged=true` for every upload.
+
+### Insert or copy a reference
+
+Choose **Insert** on an existing entry to insert at the current Folio selection.
+On a protected Folio, each insertion of an already stored attachment opens a
+separate plaintext disclosure; an acknowledgment from an earlier upload or
+insertion is never reused.
+
+Clepsydra generates an image reference for `avif`, `bmp`, `gif`, `jpg`, `jpeg`,
+`png`, `svg`, and `webp` paths:
+
+```markdown
+![diagram.png](/api/vault/attachments/diagram.png)
+```
+
+Other files use an ordinary Markdown link:
+
+```markdown
+[notes.pdf](/api/vault/attachments/notes.pdf)
+```
+
+**Copy Markdown for _filename_** copies the same generated reference without
+editing the Folio.
+
+### Delete an attachment
+
+Choose the trash control, then **Confirm delete _filename_**. Deletion removes
+the stored file only. It does not scan or rewrite Folios, so every existing
+Markdown or HTML reference to that path remains in place and may become broken.
+Cancel before confirmation to leave the file untouched.
+
+### Audit stale references on protected Folios
+
+While **Manage attachments** is open for an unlocked protected Folio, the
+browser compares recognized attachment links and images in the decrypted
+Markdown with the successfully loaded inventory. **Plaintext attachment
+references** lists recognized paths that no longer match a stored file.
+
+This is a client-only, best-effort audit. It recognizes Markdown links and
+images that target Clepsydra attachment URLs. It ignores raw HTML, code,
+malformed or unresolved links, and non-attachment destinations. If inventory
+loading fails, no stale-reference warning is shown. No warning is therefore not
+proof that every reference is valid. The browser sends neither decrypted body
+text nor its extracted reference inventory to the server for this audit.
+
+## Failures and conflicts
+
+- Uploading to an existing attachment path returns HTTP 409 and does not replace
+  the stored file. Rename the local file or choose a different path.
+- An invalid vault-relative path, malformed multipart request, missing file,
+  missing/false acknowledgment, duplicate field, or unknown field is rejected
+  without installing the upload.
+- A failed upload displays **Could not upload _filename_** and inserts no
+  reference. Retry after correcting the server, path, or network problem.
+- If the inventory fails to load, the manager reports the error and suppresses
+  the protected-page stale-reference audit rather than presenting incomplete
+  results as clean.
+- Fetching or deleting a missing attachment returns 404. Deleting succeeds only
+  for a file, not a directory.
+- Deletion does not check backlinks or references. Restore the file or repair
+  every stale reference yourself.
+
+For protected Folios, the plaintext acknowledgment has a narrow boundary. It
+covers each new upload and each frontend insertion of an already stored
+reference. Existing references remain available to the best-effort audit while
+the protected Folio is unlocked; they are not retroactively acknowledged or
+removed. The server enforces the upload field, but reference confirmation is a
+Clepsydra-frontend safeguard. A custom client can insert a reference without
+that confirmation and can construct valid encrypted ciphertext whose plaintext
+the server cannot inspect. The acknowledgment is disclosure, not encryption,
+authorization, or proof that ciphertext contains no attachment references.
+
+## Privacy
+
+Attachment bytes are always plaintext. Filenames, attachment paths, reported
+MIME types, and sizes are also plaintext and can disclose the subject or
+content. In a protected Folio, only the Markdown reference becomes part of the
+encrypted body; the referenced file remains plaintext beneath the attachment
+folder and is served by its plaintext URL.
+
+Use non-revealing filenames, remove sensitive metadata from files before
+uploading, and protect access to the vault and HTTP session. Body encryption is
+not a substitute for encrypting the attachment itself.
+
+## Related
+
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Editor Workflows](/docs/editor-workflows)
+- [Pages and Authoring](/docs/pages-and-authoring)
+- [Configuration](/docs/configuration) for `vault.attachment_folder`

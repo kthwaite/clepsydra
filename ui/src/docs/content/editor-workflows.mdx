@@ -1,0 +1,142 @@
+export const meta = {
+  slug: "editor-workflows",
+  title: "Editor Workflows",
+  description: "Edit folios with autosave, slash commands, embeds, and block references."
+}
+
+Folio is a structured editor backed by portable Markdown. It saves body and
+frontmatter changes through the same revision guard and preserves unsupported
+Markdown when a metadata-only edit does not need to rewrite the body.
+
+## Prerequisites
+
+- Open an existing Folio in `/workspace`, or create one with **Inscribe new
+  folio** (`app.inscribe`).
+- A protected Folio must be unlocked before the body editor is mounted.
+- Use an editable Folio. AI conversation Folios open in Read mode; choose
+  **Edit** before changing their structured transcript.
+
+## Workflow
+
+### Autosave and save now
+
+Body edits, title changes, tags, and aliases become **Unsaved changes** and are
+autosaved after 1.5 seconds without another edit. Moving only the cursor does
+not schedule a save. Edits made while a request is in flight remain dirty and
+are sent in the next serialized save rather than being marked saved early.
+
+Use **Save folio** with `Command+S` on macOS or `Ctrl+S` elsewhere to flush
+immediately. Leaving the title, tags, or aliases field also flushes. Clepsydra
+attempts to flush a pending save when the browser document becomes hidden, when
+the Folio unmounts, and before page or folder organization actions.
+
+The header reports **Saved**, **Saving...**, **Unsaved changes**, or
+**Save failed**. A save sends the revision that was loaded with the Folio; it
+never silently overwrites a newer revision.
+
+### Use slash commands
+
+At the start of an otherwise empty paragraph, type `/`. Continue typing to
+filter the menu, then choose a command with the pointer, `Enter`, or `Tab`.
+`Escape` closes the menu and removes the typed slash query.
+
+| Command | Result |
+| --- | --- |
+| **Time Heading** | Current local time as a section heading |
+| **Base embed** | A live saved Base view |
+| **Heading 1** through **Heading 6** | Markdown heading levels 1–6 |
+| **Bullet list** | Unordered list |
+| **Numbered list** | Ordered list |
+| **Task list** | Checklist item |
+| **Blockquote** | Quoted block |
+| **Code block** | Fenced code block |
+| **Divider** | Horizontal rule |
+
+A slash command is offered only when the paragraph consists of the leading
+slash and its query and the cursor is at the end. Slash text inside existing
+prose is ordinary text.
+
+### Paste Markdown
+
+Pasting plain text into Folio parses that text as Markdown and inserts the
+resulting blocks. Internal Folio copy/paste keeps Slate's own structured
+fragment instead of reparsing it. Inside a code block, pasted plain text is
+inserted literally with line endings normalized; Markdown marks are not
+interpreted there. File clipboard data follows the browser/editor default and
+is not an attachment upload—use **Manage attachments** for files.
+
+### Embed a Base
+
+Choose **Base embed** from the slash menu. The **Configure Base embed**
+inspector opens for the new block. Select a Base and saved view, optionally add
+an embed filter, ordered sort, and row limit, then choose **Save**. Cancelling a
+new unconfigured embed removes it; cancelling an edit leaves the existing
+configured block unchanged.
+
+The Folio stores a fenced `base` block containing the Base/view reference and
+its document-local overrides. The rendered table stays a live, non-owning view:
+member edits write member pages, while Base/view/filter/sort/limit changes write
+only this Folio block. Missing Base or view references remain repairable in the
+inspector rather than being discarded.
+
+### Give a block an ID and reference it
+
+A persisted block ID is a terminal marker such as `^abc123DEF0`. IDs are 10–12
+ASCII letters or digits and can identify paragraphs, list items, headings, code
+blocks, and blockquotes. You may author the marker in Markdown yourself.
+
+To insert a reference in Folio:
+
+1. Type `((` and at least two search characters.
+2. Choose a matching block. Results show the source Folio and its ID, or
+   **no id**.
+3. If the source has no ID, Clepsydra assigns one to that source block first.
+4. Folio stores the reference as `((<block-id>))`.
+
+### Understand single-block transclusion
+
+A block reference renders exactly the one resolved block returned by
+`/api/vault/blocks/<block-id>`. Its normalized content is read-only, inert text:
+Markdown and HTML syntax are not rendered, and a nested `((other-id))` remains
+literal instead of expanding recursively. This prevents one reference from
+turning into an unbounded document tree.
+
+Choose **Source** beside the transclusion to open its source Folio and focus the
+referenced block. A missing or empty block shows **Referenced block
+unavailable**. A transient request failure adds **Retry**; a definitive 404 does
+not retry automatically.
+
+## Failures and conflicts
+
+- A normal save failure leaves the Folio in **Save failed**. Correct the server
+  or network problem and save again.
+- If the page changed after it was loaded, the server returns a revision
+  conflict. Autosave stops and the header shows **Page changed on disk**.
+  **Reload from disk** asks for confirmation because it discards the current
+  unsaved edits. Folio does not merge the two versions; preserve any text you
+  need elsewhere, reload, and reapply it.
+- A page that was created elsewhere while a missing-page draft was open is not
+  overwritten when it already has content; reload the winning page instead.
+- An invalid or missing Base/view remains visible as a repair state. Invalid
+  repair input stays local until it becomes valid.
+- Block search starts at two characters. ID assignment can fail if the source
+  changed or is protected. Protected bodies do not expose blocks to server-side
+  search or block-ID mutation.
+- A stale or deleted block displays the unavailable state. Retrying cannot
+  restore a block that no longer exists.
+
+## Privacy
+
+A normal Folio body is plaintext on disk and is sent to the Clepsydra server for
+saving and indexing. A protected body is decrypted and rendered only after the
+browser session unlocks, but its plaintext then exists in browser memory and in
+the live editor. Block search and transclusion use server-indexed block content;
+protected bodies intentionally supply no such block content.
+
+## Related
+
+- [Pages and Authoring](/docs/pages-and-authoring)
+- [Bases](/docs/bases) for the complete embed format and table behavior
+- [Attachments and Media](/docs/attachments-and-media)
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [LSP](/docs/lsp) for editing Markdown outside the web Folio

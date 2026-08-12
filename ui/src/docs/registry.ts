@@ -1,12 +1,16 @@
 import { lazy } from "react";
+import attachmentsAndMediaSource from "#/docs/content/attachments-and-media.mdx?raw";
 import basesSource from "#/docs/content/bases.mdx?raw";
 import booksAndReadingSource from "#/docs/content/books-and-reading.mdx?raw";
 import browserExtensionSource from "#/docs/content/browser-extension.mdx?raw";
 import cliSource from "#/docs/content/cli.mdx?raw";
 import configurationSource from "#/docs/content/configuration.mdx?raw";
+import editorWorkflowsSource from "#/docs/content/editor-workflows.mdx?raw";
+import encryptionAndProtectedPagesSource from "#/docs/content/encryption-and-protected-pages.mdx?raw";
 import gettingStartedSource from "#/docs/content/getting-started.mdx?raw";
 import lspSource from "#/docs/content/lsp.mdx?raw";
 import mcpSource from "#/docs/content/mcp.mdx?raw";
+import pagesAndAuthoringSource from "#/docs/content/pages-and-authoring.mdx?raw";
 import troubleshootingSource from "#/docs/content/troubleshooting.mdx?raw";
 
 export { DEFAULT_DOC_SLUG } from "#/docs/constants";
@@ -15,6 +19,18 @@ import type { DocGroup, DocMeta, DocPage } from "#/docs/types";
 
 const GettingStartedGuide = lazy(
   () => import("#/docs/content/getting-started.mdx"),
+);
+const PagesAndAuthoringGuide = lazy(
+  () => import("#/docs/content/pages-and-authoring.mdx"),
+);
+const EditorWorkflowsGuide = lazy(
+  () => import("#/docs/content/editor-workflows.mdx"),
+);
+const AttachmentsAndMediaGuide = lazy(
+  () => import("#/docs/content/attachments-and-media.mdx"),
+);
+const EncryptionAndProtectedPagesGuide = lazy(
+  () => import("#/docs/content/encryption-and-protected-pages.mdx"),
 );
 const ConfigurationGuide = lazy(
   () => import("#/docs/content/configuration.mdx"),
@@ -38,6 +54,31 @@ const gettingStartedMeta = {
   title: "Getting Started",
   description: "Run Clepsydra with an initialized vault.",
   keywords: ["install", "setup", "vault", "server"],
+} satisfies DocMeta;
+const pagesAndAuthoringMeta = {
+  slug: "pages-and-authoring",
+  title: "Pages and Authoring",
+  description: "Create, organize, move, and delete folios.",
+  keywords: ["pages", "folios", "folders", "frontmatter", "moves"],
+} satisfies DocMeta;
+const editorWorkflowsMeta = {
+  slug: "editor-workflows",
+  title: "Editor Workflows",
+  description:
+    "Edit folios with autosave, slash commands, embeds, and block references.",
+  keywords: ["editor", "autosave", "Markdown", "slash commands", "blocks"],
+} satisfies DocMeta;
+const attachmentsAndMediaMeta = {
+  slug: "attachments-and-media",
+  title: "Attachments and Media",
+  description: "Upload, insert, audit, and delete vault attachments.",
+  keywords: ["attachments", "media", "uploads", "images", "files"],
+} satisfies DocMeta;
+const encryptionAndProtectedPagesMeta = {
+  slug: "encryption-and-protected-pages",
+  title: "Encryption and Protected Pages",
+  description: "Set up encryption and protect, unlock, edit, and recover folios.",
+  keywords: ["encryption", "protected pages", "age", "privacy", "recovery"],
 } satisfies DocMeta;
 const configurationMeta = {
   slug: "configuration",
@@ -107,6 +148,30 @@ const gettingStarted = page(
   GettingStartedGuide,
   gettingStartedSource,
 );
+const pagesAndAuthoring = page(
+  "pages-authoring",
+  pagesAndAuthoringMeta,
+  PagesAndAuthoringGuide,
+  pagesAndAuthoringSource,
+);
+const editorWorkflows = page(
+  "pages-authoring",
+  editorWorkflowsMeta,
+  EditorWorkflowsGuide,
+  editorWorkflowsSource,
+);
+const attachmentsAndMedia = page(
+  "pages-authoring",
+  attachmentsAndMediaMeta,
+  AttachmentsAndMediaGuide,
+  attachmentsAndMediaSource,
+);
+const encryptionAndProtectedPages = page(
+  "pages-authoring",
+  encryptionAndProtectedPagesMeta,
+  EncryptionAndProtectedPagesGuide,
+  encryptionAndProtectedPagesSource,
+);
 const configuration = page(
   "operations-reference",
   configurationMeta,
@@ -150,7 +215,12 @@ export const DOC_GROUPS = [
   {
     id: "pages-authoring",
     label: "Pages and authoring",
-    pages: [],
+    pages: [
+      pagesAndAuthoring,
+      editorWorkflows,
+      attachmentsAndMedia,
+      encryptionAndProtectedPages,
+    ],
   },
   {
     id: "links-structured-knowledge",

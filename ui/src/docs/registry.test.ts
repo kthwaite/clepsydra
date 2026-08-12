@@ -7,6 +7,13 @@ import {
   getDocPage,
 } from "#/docs/registry";
 
+const WORKFLOW_GUIDE_SLUGS = [
+  "pages-and-authoring",
+  "editor-workflows",
+  "attachments-and-media",
+  "encryption-and-protected-pages",
+] as const;
+
 it("declares the approved user-intent hierarchy", () => {
   expect(
     DOC_GROUPS.map((group) => [
@@ -15,7 +22,7 @@ it("declares the approved user-intent hierarchy", () => {
     ]),
   ).toEqual([
     ["Start", ["getting-started"]],
-    ["Pages and authoring", []],
+    ["Pages and authoring", [...WORKFLOW_GUIDE_SLUGS]],
     ["Links and structured knowledge", ["bases"]],
     ["Work and reading", ["books-and-reading"]],
     ["Capture, feeds, and archives", ["browser-extension"]],
@@ -28,7 +35,7 @@ it("declares the approved user-intent hierarchy", () => {
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(9);
+  expect(DOC_PAGES).toHaveLength(13);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -53,6 +60,7 @@ it("registers each existing guide exactly once with discovery metadata", () => {
 it("resolves every existing dedicated guide", () => {
   expect(DOC_PAGES.map((page) => page.slug)).toEqual([
     "getting-started",
+    ...WORKFLOW_GUIDE_SLUGS,
     "bases",
     "books-and-reading",
     "browser-extension",
@@ -69,11 +77,19 @@ it("resolves every existing dedicated guide", () => {
 
 it("derives previous and next guides across group boundaries", () => {
   expect(getDocNeighbors("getting-started")).toMatchObject({
-    next: { slug: "bases" },
+    next: { slug: "pages-and-authoring" },
   });
   expect(getDocNeighbors("getting-started").previous).toBeUndefined();
-  expect(getDocNeighbors("bases")).toMatchObject({
+  expect(getDocNeighbors("pages-and-authoring")).toMatchObject({
     previous: { slug: "getting-started" },
+    next: { slug: "editor-workflows" },
+  });
+  expect(getDocNeighbors("encryption-and-protected-pages")).toMatchObject({
+    previous: { slug: "attachments-and-media" },
+    next: { slug: "bases" },
+  });
+  expect(getDocNeighbors("bases")).toMatchObject({
+    previous: { slug: "encryption-and-protected-pages" },
     next: { slug: "books-and-reading" },
   });
   expect(getDocNeighbors("books-and-reading")).toMatchObject({

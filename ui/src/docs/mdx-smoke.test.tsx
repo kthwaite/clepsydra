@@ -15,6 +15,21 @@ import Troubleshooting, {
 } from "#/docs/content/troubleshooting.mdx";
 import { DOC_PAGES } from "#/docs/registry";
 
+const WORKFLOW_GUIDE_SLUGS = [
+  "pages-and-authoring",
+  "editor-workflows",
+  "attachments-and-media",
+  "encryption-and-protected-pages",
+] as const;
+
+const WORKFLOW_GUIDE_HEADINGS = [
+  "Prerequisites",
+  "Workflow",
+  "Failures and conflicts",
+  "Privacy",
+  "Related",
+] as const;
+
 it("compiles MDX, preserves typed metadata, and exposes raw source", () => {
   render(<Guide />);
   expect(
@@ -38,6 +53,18 @@ it.each(DOC_PAGES)(
   async ({ Component }) => {
     const { container } = render(<Component />);
     await waitFor(() => expect(container).not.toBeEmptyDOMElement());
+  },
+);
+
+it.each(WORKFLOW_GUIDE_SLUGS)(
+  "$slug follows the workflow guide structure",
+  (slug) => {
+    const source = DOC_PAGES.find((page) => page.slug === slug)?.source;
+
+    expect(source, `${slug} must be registered`).toBeDefined();
+    for (const heading of WORKFLOW_GUIDE_HEADINGS) {
+      expect(source).toMatch(new RegExp(`^## ${heading}$`, "m"));
+    }
   },
 );
 
