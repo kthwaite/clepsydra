@@ -936,6 +936,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/index/issues/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reference_repair_apply"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/index/issues/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reference_repair_preview"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/index/outlinks/{path}": {
         parameters: {
             query?: never;
@@ -2047,6 +2079,8 @@ export interface components {
             local_value?: string | null;
             source_value?: string | null;
         };
+        /** @enum {string} */
+        FileOpKind: "rename" | "delete" | "create_dir";
         /** @description Recursive filter AST: all, any, not, or a field comparison */
         Filter: {
             all: components["schemas"]["Filter"][];
@@ -2209,6 +2243,18 @@ export interface components {
             destination: string;
         };
         /**
+         * @description A transport-independent description of the index change emitted after a
+         *     successful filesystem and index mutation.
+         */
+        MutationNotification: {
+            removed: string[];
+            upserted: string[];
+        };
+        MutationPlan: {
+            file_ops: components["schemas"]["PlannedFileOp"][];
+            text_edits: components["schemas"]["PlannedTextEdit"][];
+        };
+        /**
          * @description Comparison operators for filter predicates.
          * @enum {string}
          */
@@ -2318,6 +2364,16 @@ export interface components {
             tags?: string[] | null;
             /** @description Leave absent to keep current title. */
             title?: string | null;
+        };
+        PlannedFileOp: {
+            destination?: string | null;
+            kind: components["schemas"]["FileOpKind"];
+            path: string;
+        };
+        PlannedTextEdit: {
+            new_text: string;
+            old_text: string;
+            path: string;
         };
         PreviewMutationRequest: {
             destination?: string;
@@ -2468,6 +2524,31 @@ export interface components {
             offset: number;
             /** Format: int64 */
             total: number;
+        };
+        ReferenceRepairActionDto: {
+            body?: string | null;
+            folder: string;
+            /** @enum {string} */
+            type: "create";
+        } | {
+            candidate_page_id: string;
+            /** @enum {string} */
+            type: "replace";
+        };
+        ReferenceRepairApplyResponse: {
+            fingerprint: string;
+            notification: components["schemas"]["MutationNotification"];
+        };
+        ReferenceRepairPreviewResponse: {
+            after: string;
+            before: string;
+            fingerprint: string;
+            plan: components["schemas"]["MutationPlan"];
+        };
+        ReferenceRepairRequest: {
+            action: components["schemas"]["ReferenceRepairActionDto"];
+            fingerprint: string;
+            source_revision: string;
         };
         RefreshFeedsResponse: {
             scheduled: number;
@@ -5734,6 +5815,108 @@ export interface operations {
                 };
             };
             /** @description Reference issue inventory unavailable */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reference_repair_apply: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceRepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Committed reference repair */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceRepairApplyResponse"];
+                };
+            };
+            /** @description Action is unavailable or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Issue, source revision, or path state is stale */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Reference repair could not be committed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reference_repair_preview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReferenceRepairRequest"];
+            };
+        };
+        responses: {
+            /** @description Reference repair preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReferenceRepairPreviewResponse"];
+                };
+            };
+            /** @description Action is unavailable or invalid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Issue or source revision is stale */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Reference repair could not be prepared */
             500: {
                 headers: {
                     [name: string]: unknown;

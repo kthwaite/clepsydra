@@ -3,6 +3,7 @@ use std::path::PathBuf;
 
 use rusqlite::params;
 use serde::Serialize;
+use utoipa::ToSchema;
 
 use super::Vault;
 use super::batch_mutation::{
@@ -164,14 +165,14 @@ pub enum RewriteMode {
 // MutationPlan
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct PlannedFileOp {
     pub kind: FileOpKind,
     pub path: String,
     pub destination: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum FileOpKind {
     Rename,
@@ -179,7 +180,7 @@ pub enum FileOpKind {
     CreateDir,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct PlannedTextEdit {
     pub path: String,
     pub old_text: String,
@@ -193,21 +194,27 @@ pub struct StagedWrite {
     pub content: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ToSchema)]
 pub struct MutationPlan {
     pub file_ops: Vec<PlannedFileOp>,
     pub text_edits: Vec<PlannedTextEdit>,
     #[serde(skip)]
+    #[schema(ignore)]
     pub index_events: Vec<ChangeEvent>,
     #[serde(skip)]
+    #[schema(ignore)]
     pub staged_writes: Vec<StagedWrite>,
     #[serde(skip)]
+    #[schema(ignore)]
     pub moved_pages: Vec<(VaultPath, VaultPath)>,
     #[serde(skip)]
+    #[schema(ignore)]
     primary_intents: Vec<BatchPathIntent>,
     #[serde(skip)]
+    #[schema(ignore)]
     create_directories: Vec<VaultPath>,
     #[serde(skip)]
+    #[schema(ignore)]
     remove_directories: Vec<VaultPath>,
 }
 

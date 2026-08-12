@@ -18,8 +18,8 @@ use super::pages::page_detail;
 use super::pagination::{PaginatedResponse, PaginationParams};
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
-use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
-use crate::vault::mutation_coordinator::CreatePageCommand;
+use crate::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
 use crate::vault::kind::Kind;
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
@@ -28,6 +28,11 @@ use crate::vault::reference_issues::{
     ReferenceIssueAction as VaultReferenceIssueAction,
     ReferenceIssueFilter as VaultReferenceIssueFilter,
     ReferenceIssueKind as VaultReferenceIssueKind,
+};
+use crate::vault::reference_repair::{
+    ReferenceRepairAction as VaultReferenceRepairAction,
+    ReferenceRepairError as VaultReferenceRepairError,
+    ReferenceRepairRequest as VaultReferenceRepairRequest, prepare_reference_repair,
 };
 
 // ---------------------------------------------------------------------------
@@ -236,6 +241,52 @@ pub struct ReferenceIssuesResponse {
     pub total: u64,
     pub limit: u32,
     pub offset: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ReferenceRepairActionDto {
+    Create { folder: String, body: Option<String> },
+    Replace { candidate_page_id: String },
+}
+
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct ReferenceRepairRequest {
+    pub fingerprint: String,
+    pub source_revision: String,
+    pub action: ReferenceRepairActionDto,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReferenceRepairPreviewResponse {
+    pub fingerprint: String,
+    pub before: String,
+    pub after: String,
+    pub plan: MutationPlan,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ReferenceRepairApplyResponse {
+    pub fingerprint: String,
+    pub notification: MutationNotification,
+}
+
+impl From<ReferenceRepairRequest> for VaultReferenceRepairRequest {
+    fn from(value: ReferenceRepairRequest) -> Self {
+        let action = match value.action {
+            ReferenceRepairActionDto::Create { folder, body } => {
+                VaultReferenceRepairAction::Create { folder, body }
+            }
+            ReferenceRepairActionDto::Replace { candidate_page_id } => {
+                VaultReferenceRepairAction::Replace { candidate_page_id }
+            }
+        };
+        Self {
+            fingerprint: value.fingerprint,
+            source_revision: value.source_revision,
+            action,
+        }
+    }
 }
 
 #[derive(Debug, IntoParams)]
@@ -450,6 +501,18 @@ impl From<VaultReferenceIssue> for ReferenceIssueDto {
     }
 }
 
+fn reference_repair_error(error: VaultReferenceRepairError) -> ApiError {
+    match error {
+        VaultReferenceRepairError::Invalid(message) => ApiError::bad_request(message),
+        VaultReferenceRepairError::Stale => {
+            ApiError::conflict("reference issue changed since it was selected")
+        }
+        VaultReferenceRepairError::Index(_) | VaultReferenceRepairError::Io(_) => {
+            ApiError::internal("reference repair could not be prepared")
+        }
+    }
+}
+
 fn default_rewrite_mode() -> String {
     "plain_text".to_string()
 }
@@ -465,6 +528,8 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/outlinks/{*path}", get(outlinks))
         .route("/unresolved", get(unresolved))
         .route("/issues", get(reference_issues))
+        .route("/issues/preview", post(reference_repair_preview))
+        .route("/issues/apply", post(reference_repair_apply))
         .route("/ambiguous", get(ambiguous))
         .route("/warnings", get(warnings))
         .route("/tags", get(tags))
@@ -512,6 +577,84 @@ pub async fn reference_issues(
         total: page.total,
         limit,
         offset,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/index/issues/preview",
+    context_path = "/api/vault",
+    tag = "Index",
+    request_body = ReferenceRepairRequest,
+    responses(
+        (status = 200, description = "Reference repair preview", body = ReferenceRepairPreviewResponse),
+        (status = 400, description = "Action is unavailable or invalid", body = ApiError),
+        (status = 409, description = "Issue or source revision is stale", body = ApiError),
+        (status = 500, description = "Reference repair could not be prepared", body = ApiError)
+    )
+)]
+pub async fn reference_repair_preview(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ReferenceRepairRequest>,
+) -> Result<Json<ReferenceRepairPreviewResponse>, ApiError> {
+    let prepared = state
+        .index
+        .with_index(move |index, vault| {
+            prepare_reference_repair(vault, index, request.into())
+        })
+        .await
+        .map_err(|_| ApiError::internal("reference repair could not be prepared"))?
+        .map_err(reference_repair_error)?;
+
+    Ok(Json(ReferenceRepairPreviewResponse {
+        fingerprint: prepared.fingerprint,
+        before: prepared.before,
+        after: prepared.after,
+        plan: prepared.plan,
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/index/issues/apply",
+    context_path = "/api/vault",
+    tag = "Index",
+    request_body = ReferenceRepairRequest,
+    responses(
+        (status = 200, description = "Committed reference repair", body = ReferenceRepairApplyResponse),
+        (status = 400, description = "Action is unavailable or invalid", body = ApiError),
+        (status = 409, description = "Issue, source revision, or path state is stale", body = ApiError),
+        (status = 500, description = "Reference repair could not be committed", body = ApiError)
+    )
+)]
+pub async fn reference_repair_apply(
+    State(state): State<Arc<AppState>>,
+    Json(request): Json<ReferenceRepairRequest>,
+) -> Result<Json<ReferenceRepairApplyResponse>, ApiError> {
+    let prepared = state
+        .index
+        .with_index(move |index, vault| {
+            prepare_reference_repair(vault, index, request.into())
+        })
+        .await
+        .map_err(|_| ApiError::internal("reference repair could not be prepared"))?
+        .map_err(reference_repair_error)?;
+    let fingerprint = prepared.fingerprint;
+    let notification = state
+        .mutation_coordinator
+        .execute_batch(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.hooks),
+            prepared.command,
+            super::mutation_notifier(state.as_ref()),
+        )
+        .await
+        .map_err(super::mutation_error)?;
+
+    Ok(Json(ReferenceRepairApplyResponse {
+        fingerprint,
+        notification,
     }))
 }
 

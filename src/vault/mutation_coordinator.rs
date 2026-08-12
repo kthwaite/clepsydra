@@ -5,8 +5,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Weak};
 
+use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
+use utoipa::ToSchema;
 
 use super::Vault;
 use super::atomic_file::{
@@ -50,7 +52,7 @@ pub struct MutationCoordinator {
 
 /// A transport-independent description of the index change emitted after a
 /// successful filesystem and index mutation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ToSchema)]
 pub struct MutationNotification {
     pub upserted: Vec<String>,
     pub removed: Vec<String>,

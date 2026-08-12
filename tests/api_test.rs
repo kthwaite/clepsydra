@@ -2454,6 +2454,356 @@ fn reference_issues_openapi_registers_route_parameters_and_schemas() {
     );
 }
 
+fn reference_repair_server() -> (TestServer, TempDir) {
+    setup_server_with_files(&[
+        (
+            "notes/source.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nSee [[Twin|the chosen twin]] and [[Missing Page]].\n",
+        ),
+        (
+            "notes/twin-a.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000611\ntitle: Twin\n---\nFirst.\n",
+        ),
+        (
+            "notes/twin-b.md",
+            "---\nid: 019fd000-0000-7000-8000-000000000612\ntitle: Twin\n---\nSecond.\n",
+        ),
+    ])
+}
+
+async fn reference_repair_issue(
+    server: &TestServer,
+    kind: &str,
+    target: &str,
+) -> serde_json::Value {
+    let response = server
+        .get(&format!("/api/vault/index/issues?kind={kind}&limit=200"))
+        .await;
+    response.assert_status_ok();
+    response
+        .json::<serde_json::Value>()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|issue| issue["target_raw"] == target)
+        .unwrap()
+        .clone()
+}
+
+fn reference_repair_replace_request(
+    issue: &serde_json::Value,
+    candidate_page_id: &str,
+) -> serde_json::Value {
+    serde_json::json!({
+        "fingerprint": issue["fingerprint"],
+        "source_revision": issue["source_revision"],
+        "action": {
+            "type": "replace",
+            "candidate_page_id": candidate_page_id,
+        },
+    })
+}
+
+fn reference_repair_create_request(issue: &serde_json::Value) -> serde_json::Value {
+    serde_json::json!({
+        "fingerprint": issue["fingerprint"],
+        "source_revision": issue["source_revision"],
+        "action": {
+            "type": "create",
+            "folder": "notes",
+            "body": "Created through reference repair.\n",
+        },
+    })
+}
+
+#[tokio::test]
+async fn reference_repair_preview_and_apply_report_the_same_text_edit() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    let preview = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await;
+    preview.assert_status_ok();
+    let preview: serde_json::Value = preview.json();
+    assert_eq!(preview["fingerprint"], issue["fingerprint"]);
+    assert_eq!(preview["before"], "[[Twin|the chosen twin]]");
+    assert_eq!(
+        preview["after"],
+        format!("[[{candidate_id}|the chosen twin]]")
+    );
+    assert_eq!(preview["plan"]["text_edits"][0]["old_text"], preview["before"]);
+    assert_eq!(preview["plan"]["text_edits"][0]["new_text"], preview["after"]);
+
+    let apply = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    apply.assert_status_ok();
+    let apply: serde_json::Value = apply.json();
+    assert_eq!(apply["fingerprint"], issue["fingerprint"]);
+    assert_eq!(
+        apply["notification"]["upserted"],
+        serde_json::json!(["notes/source.md"])
+    );
+    assert_eq!(apply["notification"]["removed"], serde_json::json!([]));
+
+    let source = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+    assert!(source.contains(&preview["after"].as_str().unwrap()));
+}
+
+#[tokio::test]
+async fn reference_repair_apply_rejects_source_changed_after_preview() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    let changed_source = "---\nid: 019fd000-0000-7000-8000-000000000610\ntitle: Repair Source\n---\nChanged after preview.\n";
+    fs::write(&source_path, changed_source).unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status(StatusCode::CONFLICT);
+    assert_eq!(fs::read_to_string(source_path).unwrap(), changed_source);
+}
+
+#[tokio::test]
+async fn reference_repair_create_resolves_original_no_match_after_indexing() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+
+    let preview = server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await;
+    preview.assert_status_ok();
+    let preview: serde_json::Value = preview.json();
+    assert_eq!(preview["before"], "[[Missing Page]]");
+    assert_eq!(preview["after"], "[[Missing Page]]");
+    assert_eq!(preview["plan"]["text_edits"], serde_json::json!([]));
+
+    let apply = server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await;
+    apply.assert_status_ok();
+    let apply: serde_json::Value = apply.json();
+    assert_eq!(
+        apply["notification"]["upserted"],
+        serde_json::json!(["notes/Missing Page.md", "notes/source.md"])
+    );
+    assert!(tmp.path().join("vault/notes/Missing Page.md").is_file());
+
+    let issues: serde_json::Value = server
+        .get("/api/vault/index/issues?kind=unresolved_page_link&limit=200")
+        .await
+        .json();
+    assert!(
+        issues["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|current| current["fingerprint"] != issue["fingerprint"])
+    );
+}
+
+#[tokio::test]
+async fn reference_repair_ambiguous_replacement_is_an_explicit_target() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
+    let candidate_id = issue["candidates"][1]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
+    assert!(source.contains(&format!("[[{candidate_id}|the chosen twin]]")));
+    let issues: serde_json::Value = server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link&limit=200")
+        .await
+        .json();
+    assert_eq!(issues["total"], 0);
+}
+
+#[tokio::test]
+async fn reference_repair_encrypted_source_has_no_preview_or_apply_action() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("notes")).unwrap();
+            fs::write(
+                root.join("notes/private.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000613\ntitle: Private\n---\nSecret [[Twin]].\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("notes/twin-a.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000614\ntitle: Twin\n---\nFirst.\n",
+            )
+            .unwrap();
+            fs::write(
+                root.join("notes/twin-b.md"),
+                "---\nid: 019fd000-0000-7000-8000-000000000615\ntitle: Twin\n---\nSecond.\n",
+            )
+            .unwrap();
+        })
+        .post_index_mutation(|state| {
+            let connection =
+                rusqlite::Connection::open(state.vault.root().join(".clepsydra/cache.db")).unwrap();
+            connection
+                .execute(
+                    "UPDATE pages SET encrypted = 1 WHERE id = ?1",
+                    ["019fd000-0000-7000-8000-000000000613"],
+                )
+                .unwrap();
+        })
+        .build();
+    let response: serde_json::Value = fixture
+        .server
+        .get("/api/vault/index/issues?kind=ambiguous_page_link")
+        .await
+        .json();
+    let issue = &response["items"][0];
+    assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
+    let request =
+        reference_repair_replace_request(issue, "019fd000-0000-7000-8000-000000000614");
+
+    for endpoint in ["preview", "apply"] {
+        let response = fixture
+            .server
+            .post(&format!("/api/vault/index/issues/{endpoint}"))
+            .json(&request)
+            .await;
+        response.assert_status_bad_request();
+        let body = response.text();
+        assert!(!body.contains("Secret"));
+        assert!(!body.contains("Twin"));
+    }
+}
+
+#[tokio::test]
+async fn reference_repair_create_is_atomic_when_destination_becomes_occupied() {
+    let (server, tmp) = reference_repair_server();
+    let issue = reference_repair_issue(&server, "unresolved_page_link", "Missing Page").await;
+    let request = reference_repair_create_request(&issue);
+    server
+        .post("/api/vault/index/issues/preview")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let source_path = tmp.path().join("vault/notes/source.md");
+    let source_before = fs::read_to_string(&source_path).unwrap();
+    let destination = tmp.path().join("vault/notes/Missing Page.md");
+    fs::write(&destination, "occupied outside the index\n").unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status(StatusCode::CONFLICT);
+    assert_eq!(fs::read_to_string(source_path).unwrap(), source_before);
+    assert_eq!(
+        fs::read_to_string(destination).unwrap(),
+        "occupied outside the index\n"
+    );
+}
+
+#[tokio::test]
+async fn reference_repair_property_reference_uses_format_preserving_patch() {
+    let source = "+++\nid = \"019fd000-0000-7000-8000-000000000616\"\ntitle = \"Property Source\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n# preserve this comment\nlink = [\"[[Twin|chosen]]\", \"Other\"]\nstatus = \"draft\" # and this one\n+++\nBody stays byte-for-byte.\n";
+    let twin_a = "+++\nid = \"019fd000-0000-7000-8000-000000000617\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nFirst.\n";
+    let twin_b = "+++\nid = \"019fd000-0000-7000-8000-000000000618\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nSecond.\n";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/property-source.md", source),
+        ("notes/property-twin-a.md", twin_a),
+        ("notes/property-twin-b.md", twin_b),
+    ]);
+    let issue =
+        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let request = reference_repair_replace_request(&issue, candidate_id);
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&request)
+        .await
+        .assert_status_ok();
+
+    let content =
+        fs::read_to_string(tmp.path().join("vault/notes/property-source.md")).unwrap();
+    assert!(content.contains("# preserve this comment"));
+    assert!(content.contains("status = \"draft\" # and this one"));
+    assert!(content.contains("Body stays byte-for-byte."));
+    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(!content.contains("[[Twin|chosen]]"));
+}
+
+#[tokio::test]
+async fn reference_repair_property_reference_can_patch_linkable_system_arrays() {
+    let source = "+++\nid = \"019fd000-0000-7000-8000-000000000619\"\ntitle = \"Tagged Source\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\ntags = [\"[[Twin|chosen]]\", \"other\"]\n+++\nBody.\n";
+    let twin_a = "+++\nid = \"019fd000-0000-7000-8000-000000000620\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nFirst.\n";
+    let twin_b = "+++\nid = \"019fd000-0000-7000-8000-000000000621\"\ntitle = \"Twin\"\ncreated_at = 2026-08-12T10:00:00Z\nupdated_at = 2026-08-12T10:00:00Z\n+++\nSecond.\n";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/tagged-source.md", source),
+        ("notes/tagged-twin-a.md", twin_a),
+        ("notes/tagged-twin-b.md", twin_b),
+    ]);
+    let issue =
+        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+
+    server
+        .post("/api/vault/index/issues/apply")
+        .json(&reference_repair_replace_request(&issue, candidate_id))
+        .await
+        .assert_status_ok();
+
+    let content =
+        fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
+    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(content.contains("\"other\""));
+}
+
+#[test]
+fn reference_repair_openapi_registers_typed_contracts() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    for endpoint in ["preview", "apply"] {
+        assert!(
+            openapi["paths"][format!("/api/vault/index/issues/{endpoint}")]
+                .get("post")
+                .is_some()
+        );
+    }
+    for schema in [
+        "ReferenceRepairActionDto",
+        "ReferenceRepairApplyResponse",
+        "ReferenceRepairPreviewResponse",
+        "ReferenceRepairRequest",
+    ] {
+        assert!(
+            openapi["components"]["schemas"].get(schema).is_some(),
+            "missing OpenAPI schema {schema}"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Preview mutation (dry-run)
 // ---------------------------------------------------------------------------
