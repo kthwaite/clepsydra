@@ -148,79 +148,133 @@ describe("FolioProperties", () => {
     ).toBeVisible();
   });
 
-  it("groups compatible declarations into one editor with complete provenance", () => {
-    const text = definition("text");
-    projectionState.data = projection([
-      property("status", "text", {
-        value: "reading",
-        declarations: [
-          {
-            base: { slug: "reading", name: "Reading" },
-            definition: text,
-          },
-          {
-            base: { slug: "library", name: "Library" },
-            definition: text,
-          },
-        ],
-      }),
-    ]);
+  it("groups uniquely declared properties by authoritative Base order", () => {
+    projectionState.data = projection(
+      [
+        property("author", "text", {
+          value: "Ursula Le Guin",
+          declarations: [
+            {
+              base: { slug: "library", name: "Library" },
+              definition: definition("text"),
+            },
+          ],
+        }),
+        property("status", "select", {
+          value: "reading",
+          definition: definition("select", { options: ["reading"] }),
+          declarations: [
+            {
+              base: { slug: "reading", name: "Reading" },
+              definition: definition("select", { options: ["reading"] }),
+            },
+          ],
+        }),
+        property("rating", "number", {
+          value: 5,
+          declarations: [
+            {
+              base: { slug: "library", name: "Library" },
+              definition: definition("number"),
+            },
+          ],
+        }),
+      ],
+      [
+        { slug: "reading", name: "Reading" },
+        { slug: "library", name: "Library" },
+      ],
+    );
 
     renderPanel();
 
+    const reading = screen.getByRole("region", { name: "Reading" });
+    const library = screen.getByRole("region", { name: "Library" });
     expect(
-      screen.getAllByRole("button", { name: "Edit status property" }),
-    ).toHaveLength(1);
-    const item = screen.getByRole("heading", { name: "status" }).closest("li");
-    expect(item).not.toBeNull();
+      reading.compareDocumentPosition(library) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+    expect(within(reading).getByText("status")).toBeVisible();
+    const libraryPropertyList = within(library).getAllByRole("list")[0];
+    expect(libraryPropertyList).toBeDefined();
     expect(
-      within(item as HTMLElement).getByText("Reading (reading) · text"),
+      Array.from(libraryPropertyList?.children ?? []).map(
+        (row) => row.textContent,
+      ),
+    ).toEqual([
+      expect.stringContaining("author"),
+      expect.stringContaining("rating"),
+    ]);
+    expect(
+      within(reading).getByRole("heading", { name: "Reading" }),
     ).toBeVisible();
     expect(
-      within(item as HTMLElement).getByText("Library (library) · text"),
+      within(library).getByRole("heading", { name: "Library" }),
     ).toBeVisible();
   });
 
-  it("shows conflicting and reserved values with provenance but no editors", () => {
-    projectionState.data = projection([
-      property("rating", "number", {
-        value: { raw: 4 },
-        compatibility: "conflict",
-        definition: null,
-        patchable: false,
-        blockers: ["schema_conflict"],
-        declarations: [
-          {
-            base: { slug: "books", name: "Books" },
-            definition: definition("number"),
-          },
-          {
-            base: { slug: "reviews", name: "Reviews" },
-            definition: definition("text"),
-          },
-        ],
-      }),
-      property("conversation", "text", {
-        present: false,
-        value: null,
-        patchable: false,
-        blockers: ["reserved_key"],
-      }),
-    ]);
+  it("renders shared properties once with adjacent compatible and conflict types", () => {
+    const text = definition("text");
+    projectionState.data = projection(
+      [
+        property("status", "text", {
+          value: "reading",
+          declarations: [
+            {
+              base: { slug: "reading", name: "Reading" },
+              definition: text,
+            },
+            {
+              base: { slug: "library", name: "Library" },
+              definition: text,
+            },
+          ],
+        }),
+        property("rating", "number", {
+          value: { raw: 4 },
+          compatibility: "conflict",
+          definition: null,
+          patchable: false,
+          blockers: ["schema_conflict"],
+          declarations: [
+            {
+              base: { slug: "library", name: "Library" },
+              definition: definition("number"),
+            },
+            {
+              base: { slug: "reviews", name: "Reviews" },
+              definition: definition("text"),
+            },
+            {
+              base: { slug: "reading", name: "Reading" },
+              definition: definition("number"),
+            },
+          ],
+        }),
+      ],
+      [
+        { slug: "reading", name: "Reading" },
+        { slug: "library", name: "Library" },
+        { slug: "reviews", name: "Reviews" },
+      ],
+    );
 
     renderPanel();
 
-    expect(screen.getByText('{"raw":4}')).toBeVisible();
-    expect(screen.getByText("Schema conflict")).toBeVisible();
-    expect(screen.getByText("Books (books) · number")).toBeVisible();
-    expect(screen.getByText("Reviews (reviews) · text")).toBeVisible();
-    expect(screen.getByText("Not exposed")).toBeVisible();
-    expect(screen.getByText("Reserved property")).toBeVisible();
+    const shared = screen.getByRole("region", { name: "Shared" });
     expect(
-      screen.queryByRole("button", {
-        name: /Edit (rating|conversation) property/,
+      within(shared).getAllByRole("button", {
+        name: "Edit status property",
       }),
-    ).toBeNull();
+    ).toHaveLength(1);
+    expect(
+      within(shared).getByText("text", { selector: "span" }),
+    ).toBeVisible();
+    expect(
+      within(shared).getByText("number / text", { selector: "span" }),
+    ).toBeVisible();
+    expect(within(shared).getByText("Schema conflict")).toBeVisible();
+    expect(screen.getAllByText("status", { selector: "h4" })).toHaveLength(1);
   });
 
   it("never exposes or edits body content from a malformed body declaration", () => {
@@ -236,6 +290,11 @@ describe("FolioProperties", () => {
     renderPanel();
 
     expect(screen.getByRole("heading", { name: "body" })).toBeVisible();
+    const bodyRow = screen.getByRole("heading", { name: "body" }).closest("li");
+    expect(bodyRow).not.toBeNull();
+    expect(
+      within(bodyRow as HTMLElement).getByText("text", { selector: "span" }),
+    ).toBeVisible();
     expect(screen.getByText("Not exposed")).toBeVisible();
     expect(screen.getByText("Reserved property")).toBeVisible();
     expect(
@@ -318,6 +377,12 @@ describe("FolioProperties", () => {
         property("status", "text", {
           present: false,
           value: "stale transport value must not become the draft",
+          declarations: [
+            {
+              base: { slug: "reading", name: "Reading" },
+              definition: definition("text"),
+            },
+          ],
         }),
       ],
       [{ slug: "reading", name: "Reading" }],
@@ -359,8 +424,21 @@ describe("FolioProperties", () => {
     });
     expect(projectionState.refetch).toHaveBeenCalledOnce();
     expect(screen.queryByRole("heading", { name: "status" })).toBeNull();
-    expect(screen.getByRole("heading", { name: "archived" })).toBeVisible();
-    expect(screen.getByText("Archive (archive) · bool")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Reading" })).toBeNull();
+    const archive = screen.getByRole("region", { name: "Archive" });
+    expect(
+      within(archive).getAllByRole("heading", { name: "archived" }),
+    ).toHaveLength(1);
+    expect(
+      within(archive).getByText("bool", { selector: "span" }),
+    ).toBeVisible();
+    const archivedValue = within(archive).getByText("false");
+    const provenanceId = archivedValue.getAttribute("aria-describedby");
+    expect(provenanceId).toBeTruthy();
+    const provenance = document.getElementById(provenanceId as string);
+    expect(provenance).toHaveClass("sr-only");
+    expect(provenance).toHaveTextContent("Archive (archive) · bool");
+    expect(provenance).not.toBeVisible();
   });
 
   it("returns focus to the edited property after a successful refetch", async () => {
@@ -549,7 +627,21 @@ describe("FolioProperties", () => {
 
     const view = renderPanel({ locked: true });
     expect(screen.getByText("reading")).toBeVisible();
-    expect(screen.getByText("Library (library) · select")).toBeVisible();
+    const statusRow = screen
+      .getByRole("heading", { name: "status" })
+      .closest("li");
+    expect(statusRow).not.toBeNull();
+    expect(
+      within(statusRow as HTMLElement).getByText("select", {
+        selector: "span",
+      }),
+    ).toBeVisible();
+    const provenance = within(statusRow as HTMLElement).getByLabelText(
+      "status declarations",
+    );
+    expect(provenance).toHaveClass("sr-only");
+    expect(provenance).toHaveTextContent("Library (library) · select");
+    expect(provenance).not.toBeVisible();
     expect(screen.getByText("Page is locked")).toBeVisible();
     expect(
       screen.queryByRole("button", { name: "Edit status property" }),
@@ -590,9 +682,28 @@ describe("FolioProperties", () => {
 
   it("names editors, connects provenance descriptions, and restores focus after keyboard cancel", async () => {
     const user = userEvent.setup();
-    projectionState.data = projection([
-      property("status", "text", { value: "reading" }),
-    ]);
+    const text = definition("text");
+    projectionState.data = projection(
+      [
+        property("status", "text", {
+          value: "reading",
+          declarations: [
+            {
+              base: { slug: "reading", name: "Reading" },
+              definition: text,
+            },
+            {
+              base: { slug: "library", name: "Library" },
+              definition: text,
+            },
+          ],
+        }),
+      ],
+      [
+        { slug: "reading", name: "Reading" },
+        { slug: "library", name: "Library" },
+      ],
+    );
 
     renderPanel();
     await user.tab();
@@ -600,9 +711,11 @@ describe("FolioProperties", () => {
     expect(edit).toHaveFocus();
     const descriptionId = edit.getAttribute("aria-describedby");
     expect(descriptionId).toBeTruthy();
-    expect(document.getElementById(descriptionId as string)).toHaveTextContent(
-      "Library (library) · text",
-    );
+    const provenance = document.getElementById(descriptionId as string);
+    expect(provenance).toHaveClass("sr-only");
+    expect(provenance).toHaveTextContent("Reading (reading) · text");
+    expect(provenance).toHaveTextContent("Library (library) · text");
+    expect(provenance).not.toBeVisible();
 
     await user.keyboard("{Enter}");
     const input = screen.getByRole("textbox", { name: "status property" });
