@@ -10,13 +10,16 @@ function detail(): BaseDetailResponse {
   return {
     slug: "reading",
     name: "Reading Log",
-    properties: {
-      kind: { type: "number" },
-      rating: { type: "number" },
-      shelf: { type: "select", options: ["Now", "Later"] },
-      topics: { type: "multi_select" },
-      related: { type: "relation" },
-    },
+    properties: [
+      { key: "kind", definition: { type: "number" } },
+      { key: "rating", definition: { type: "number" } },
+      {
+        key: "shelf",
+        definition: { type: "select", options: ["Now", "Later"] },
+      },
+      { key: "topics", definition: { type: "multi_select" } },
+      { key: "related", definition: { type: "relation" } },
+    ],
     views: [
       {
         name: "All Entries",

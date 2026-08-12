@@ -169,13 +169,11 @@ export function BaseEmbedInspector({
   );
   const detailMatchesSelection = detail.data?.slug === selectedSlug;
   const properties: DraftProperty[] = detailMatchesSelection
-    ? Object.entries(detail.data?.properties ?? {}).map(
-        ([key, definition]) => ({
-          id: key,
-          key,
-          definition,
-        }),
-      )
+    ? (detail.data?.properties ?? []).map(({ key, definition }) => ({
+        id: key,
+        key,
+        definition,
+      }))
     : [];
   const registryRefreshing = registry.isPending || registry.isFetching;
   const detailRefreshing =

@@ -24,7 +24,7 @@ function baseDetail(overrides: Partial<BaseFile> = {}): BaseDetailFixture {
     member_creation: [],
     name: "Books",
     description: "Reading tracker",
-    properties: {},
+    properties: [],
     views: [],
     ...overrides,
   };
@@ -55,10 +55,16 @@ describe("base definition model", () => {
           },
         ],
       },
-      properties: {
-        status: { type: "select", options: ["queued", "reading"] },
-        rating: { type: "number" },
-      },
+      properties: [
+        {
+          key: "status",
+          definition: {
+            type: "select",
+            options: ["queued", "reading"],
+          },
+        },
+        { key: "rating", definition: { type: "number" } },
+      ],
       views: [
         {
           name: "Reading",
@@ -91,9 +97,27 @@ describe("base definition model", () => {
     );
     expect(new Set(draft.views.map((view) => view.id)).size).toBe(2);
     expect(toWire(draft)).toEqual(stripResponseFields(detail));
-    expect(Object.keys(toWire(draft).properties ?? {})).toEqual([
+    expect(toWire(draft).properties?.map((property) => property.key)).toEqual([
       "status",
       "rating",
+    ]);
+  });
+
+  it("round-trips reverse integer-like keys in exact mixed declaration order", () => {
+    const detail = baseDetail({
+      properties: [
+        { key: "2", definition: { type: "number" } },
+        { key: "ordinary", definition: { type: "text" } },
+        { key: "1", definition: { type: "bool" } },
+      ],
+    });
+
+    const wire = toWire(fromWire(detail));
+
+    expect(wire.properties).toEqual([
+      { key: "2", definition: { type: "number" } },
+      { key: "ordinary", definition: { type: "text" } },
+      { key: "1", definition: { type: "bool" } },
     ]);
   });
 

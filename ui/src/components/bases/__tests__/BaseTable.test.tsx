@@ -42,12 +42,21 @@ const definition: BaseDetailResponse = {
   slug: "reading",
   revision: "base-rev-1",
   name: "Reading Log",
-  properties: {
-    status: { type: "select", options: ["queued", "reading"] },
-    rating: { type: "number" },
-    optional_rating: { type: "number" },
-    optional_status: { type: "select", options: ["one", "two"] },
-  },
+  properties: [
+    {
+      key: "status",
+      definition: {
+        type: "select",
+        options: ["queued", "reading"],
+      },
+    },
+    { key: "rating", definition: { type: "number" } },
+    { key: "optional_rating", definition: { type: "number" } },
+    {
+      key: "optional_status",
+      definition: { type: "select", options: ["one", "two"] },
+    },
+  ],
   views: [
     {
       name: "Continues",

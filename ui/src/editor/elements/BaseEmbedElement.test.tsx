@@ -153,7 +153,7 @@ function controllerModel(
       revision: "r1",
       name: "Reading Log",
       description: "",
-      properties: { rating: { type: "number" } },
+      properties: [{ key: "rating", definition: { type: "number" } }],
       views: [
         { name: "All", layout: "table", columns: ["title", "rating"] },
         { name: "Unread", layout: "table", columns: ["title"] },

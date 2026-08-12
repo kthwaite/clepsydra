@@ -114,6 +114,7 @@ const SYSTEM_COLUMNS: Record<string, boolean> = {
   title: true,
   kind: true,
   project: true,
+  body: false,
   tags: false,
   aliases: false,
   created_at: true,
@@ -122,7 +123,33 @@ const SYSTEM_COLUMNS: Record<string, boolean> = {
   word_count: true,
 };
 
-const EMPTY_PROPERTIES: NonNullable<BaseDetailResponse["properties"]> = {};
+interface BodyExcerptCellProps {
+  value: CellValue;
+  pageLabel: string;
+  path: string;
+  onOpenPage: (path: string) => void;
+}
+
+function BodyExcerptCell({
+  value,
+  pageLabel,
+  path,
+  onOpenPage,
+}: BodyExcerptCellProps) {
+  if (typeof value !== "string" || value.trim() === "") return null;
+
+  return (
+    <button
+      type="button"
+      aria-label={`Open body excerpt for ${pageLabel} in Folio`}
+      className="cl-mono block w-full min-w-0 cursor-pointer truncate px-1 py-0.5 text-left text-[12px] text-ink-2 underline-offset-2 hover:text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      onClick={() => onOpenPage(path)}
+    >
+      {value}
+    </button>
+  );
+}
+
 
 function aggregateLabel(
   definition: BaseDetailResponse,
@@ -181,7 +208,16 @@ export const BaseTableView = forwardRef<
   );
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
-  const properties = definition.properties ?? EMPTY_PROPERTIES;
+  const properties = useMemo(
+    () =>
+      new Map(
+        (definition.properties ?? []).map(({ key, definition }) => [
+          key,
+          definition,
+        ]),
+      ),
+    [definition.properties],
+  );
   const evaluationIdentity = useMemo(
     () =>
       JSON.stringify({
@@ -214,7 +250,7 @@ export const BaseTableView = forwardRef<
   >(undefined);
   const editableColumns = columns.filter(
     (column) =>
-      SYSTEM_COLUMNS[column] === undefined && properties[column] !== undefined,
+      SYSTEM_COLUMNS[column] === undefined && properties.has(column),
   );
   const nextEditableColumn = (column: string): string | undefined => {
     const index = editableColumns.indexOf(column);
@@ -536,8 +572,10 @@ export const BaseTableView = forwardRef<
         {columns.map((column) => {
           const allowsSorting =
             !readOnly &&
-            (SYSTEM_COLUMNS[column] === true ||
-              (properties[column] != null && canSort(properties[column].type)));
+            (SYSTEM_COLUMNS[column] !== undefined
+              ? SYSTEM_COLUMNS[column]
+              : properties.get(column) != null &&
+                canSort(properties.get(column)!.type));
           return (
             <Column
               key={column}
@@ -604,15 +642,24 @@ export const BaseTableView = forwardRef<
                       {row.title ?? row.path}
                     </button>
                   )
+                ) : column === "body" ? (
+                  <BodyExcerptCell
+                    value={
+                      (row.columns as Record<string, CellValue>).body ?? null
+                    }
+                    pageLabel={row.title ?? row.path}
+                    path={row.path}
+                    onOpenPage={onOpenPage}
+                  />
                 ) : !readOnly &&
                   !memberDraftOpen &&
                   SYSTEM_COLUMNS[column] === undefined &&
-                  properties[column] ? (
+                  properties.has(column) ? (
                   <EditableCell
                     value={
                       (row.columns as Record<string, CellValue>)[column] ?? null
                     }
-                    definition={properties[column]}
+                    definition={properties.get(column)!}
                     isEditing={
                       activeCell?.rowId === String(row.id) &&
                       activeCell.column === column &&

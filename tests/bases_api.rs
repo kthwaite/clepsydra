@@ -218,6 +218,25 @@ fn seed(root: &Path) {
     .unwrap();
 }
 
+fn seed_body_projection(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/excerpts.base.toml"),
+        r#"name = "Excerpts"
+
+[[views]]
+name = "All"
+columns = ["title", "body"]
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("excerpt.md"),
+        "+++\nid = \"0190f8a0-0000-7000-8000-0000000000b2\"\ntitle = \"Excerpt\"\ntype = \"NOTE\"\n+++\nA **readable** [label](https://example.com).\n",
+    )
+    .unwrap();
+}
+
 fn seed_grouped_limit_base(root: &Path) {
     fs::create_dir_all(root.join("bases")).unwrap();
     fs::write(
@@ -395,15 +414,18 @@ fn preview_definition() -> serde_json::Value {
         "filter": {
             "all": [{ "field": "kind", "op": "eq", "value": "BOOK" }]
         },
-        "properties": {
-            "author": { "type": "text" },
-            "status": {
-                "type": "select",
-                "options": ["queued", "reading", "finished"]
+        "properties": [
+            { "key": "author", "definition": { "type": "text" } },
+            {
+                "key": "status",
+                "definition": {
+                    "type": "select",
+                    "options": ["queued", "reading", "finished"]
+                }
             },
-            "rating": { "type": "number" },
-            "started": { "type": "date" }
-        },
+            { "key": "rating", "definition": { "type": "number" } },
+            { "key": "started", "definition": { "type": "date" } }
+        ],
         "views": [{
             "name": "Continues",
             "layout": "table",
@@ -670,7 +692,16 @@ async fn get_base_returns_definition_capability_and_unknown_is_404() {
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     assert_eq!(body["slug"], "reading");
-    assert_eq!(body["properties"]["status"]["type"], "select");
+    assert_eq!(
+        body["properties"][1],
+        serde_json::json!({
+            "key": "status",
+            "definition": {
+                "type": "select",
+                "options": ["queued", "reading", "finished"]
+            }
+        })
+    );
     assert_eq!(body["views"][0]["name"], "Continues");
     assert_eq!(
         body["revision"],
@@ -873,6 +904,21 @@ async fn view_evaluation_honors_view_filter_and_sort() {
         .get("/api/vault/bases/reading/views/nope")
         .await
         .assert_status_not_found();
+}
+
+#[tokio::test]
+async fn saved_view_returns_body_excerpt_without_a_page_detail_request() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_body_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server.get("/api/vault/bases/excerpts/views/all").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["rows"][0]["columns"]["title"], "Excerpt");
+    assert_eq!(body["rows"][0]["columns"]["body"], "A readable label.");
 }
 
 #[tokio::test]
@@ -1336,9 +1382,9 @@ async fn every_accepted_named_view_is_ascii_case_insensitively_addressable() {
             "slug": "addressable",
             "definition": {
                 "name": "Addressable",
-                "properties": {
-                    "rating": { "type": "number" }
-                },
+                "properties": [
+                    { "key": "rating", "definition": { "type": "number" } }
+                ],
                 "views": [
                     { "name": "All", "layout": "table" },
                     {
@@ -1417,6 +1463,165 @@ fn assert_no_notification(notifications: &mut tokio::sync::broadcast::Receiver<S
 }
 
 #[tokio::test]
+async fn ordered_property_entries_preserve_reverse_integer_like_keys_across_save_reload() {
+    let fixture = ApiFixture::builder().build();
+    let properties = serde_json::json!([
+        { "key": "2", "definition": { "type": "number" } },
+        { "key": "ordinary", "definition": { "type": "text" } },
+        { "key": "1", "definition": { "type": "bool" } }
+    ]);
+
+    let create = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "ordered",
+            "definition": {
+                "name": "Ordered",
+                "properties": properties,
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+    create.assert_status_ok();
+    let created: serde_json::Value = create.json();
+    assert_eq!(created["properties"], properties);
+
+    let stored = base_document::load(fixture.state.vault.root(), "ordered").unwrap();
+    assert_eq!(
+        stored
+            .definition
+            .file
+            .properties
+            .iter()
+            .map(|(key, _)| key.as_str())
+            .collect::<Vec<_>>(),
+        vec!["2", "ordinary", "1"]
+    );
+
+    let reloaded: serde_json::Value = fixture.server.get("/api/vault/bases/ordered").await.json();
+    assert_eq!(reloaded["properties"], properties);
+}
+
+#[tokio::test]
+async fn base_property_wire_rejects_the_removed_map_representation() {
+    let fixture = ApiFixture::builder().build();
+    let response = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "legacy-map",
+            "definition": {
+                "name": "Legacy map",
+                "properties": {
+                    "status": { "type": "text" }
+                },
+                "views": [{ "name": "All", "layout": "table" }]
+            }
+        }))
+        .await;
+
+    response.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/legacy-map.base.toml")
+            .exists()
+    );
+}
+
+#[tokio::test]
+async fn duplicate_property_entries_are_rejected_by_create_update_and_preview() {
+    let fixture = ApiFixture::builder().pre_index_seed(seed).build();
+    let mut notifications = fixture.state.change_tx.subscribe();
+    let duplicate_properties = serde_json::json!([
+        { "key": "status", "definition": { "type": "text" } },
+        { "key": "status", "definition": { "type": "number" } },
+        { "key": "rating", "definition": { "type": "number" } },
+        { "key": "status", "definition": { "type": "bool" } }
+    ]);
+
+    let create = fixture
+        .server
+        .post("/api/vault/bases")
+        .json(&serde_json::json!({
+            "slug": "duplicates",
+            "definition": {
+                "name": "Duplicates",
+                "properties": duplicate_properties.clone()
+            }
+        }))
+        .await;
+    create.assert_status(StatusCode::BAD_REQUEST);
+    let create_error: serde_json::Value = create.json();
+    assert_eq!(
+        create_error["detail"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|diagnostic| diagnostic["path"].as_str())
+            .collect::<Vec<_>>(),
+        vec!["properties[1].key", "properties[3].key"]
+    );
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("bases/duplicates.base.toml")
+            .exists()
+    );
+    assert_no_notification(&mut notifications);
+
+    let reading_path = fixture.state.vault.root().join("bases/reading.base.toml");
+    let reading_before = fs::read_to_string(&reading_path).unwrap();
+    let revision = current_base_revision(&fixture, "reading").await;
+    let update = fixture
+        .server
+        .put("/api/vault/bases/reading")
+        .json(&serde_json::json!({
+            "expected_revision": revision,
+            "definition": {
+                "name": "Reading",
+                "properties": duplicate_properties.clone()
+            },
+            "view_origins": []
+        }))
+        .await;
+    update.assert_status(StatusCode::BAD_REQUEST);
+    assert_eq!(fs::read_to_string(&reading_path).unwrap(), reading_before);
+    assert_no_notification(&mut notifications);
+
+    let preview = fixture
+        .server
+        .post("/api/vault/bases/preview")
+        .json(&serde_json::json!({
+            "definition": {
+                "name": "Preview",
+                "properties": duplicate_properties
+            }
+        }))
+        .await;
+    preview.assert_status_ok();
+    let preview_body: serde_json::Value = preview.json();
+    assert!(preview_body["output"].is_null());
+    assert!(preview_body["evaluation_error"].is_null());
+    assert_eq!(
+        preview_body["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|diagnostic| diagnostic["path"].as_str())
+            .collect::<Vec<_>>(),
+        vec!["properties[1].key", "properties[3].key"]
+    );
+    assert_eq!(fs::read_to_string(reading_path).unwrap(), reading_before);
+    assert_no_notification(&mut notifications);
+}
+
+#[tokio::test]
 async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
     let fixture = ApiFixture::builder().pre_index_seed(seed).build();
     let root = fixture.state.vault.root();
@@ -1431,9 +1636,12 @@ async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
             "slug": "books",
             "definition": {
                 "name": "Books",
-                "properties": {
-                    "status": { "type": "select", "options": [] }
-                },
+                "properties": [
+                    {
+                        "key": "status",
+                        "definition": { "type": "select", "options": [] }
+                    }
+                ],
                 "views": [{ "name": "All", "layout": "table" }]
             }
         }))
@@ -1455,9 +1663,12 @@ async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
             "expected_revision": "stale",
             "definition": {
                 "name": "Books Updated",
-                "properties": {
-                    "status": { "type": "select", "options": [] }
-                },
+                "properties": [
+                    {
+                        "key": "status",
+                        "definition": { "type": "select", "options": [] }
+                    }
+                ],
                 "views": [{ "name": "All", "layout": "table" }]
             },
             "view_origins": [{ "kind": "existing", "name": "All" }]
@@ -1479,9 +1690,12 @@ async fn create_update_and_delete_are_revision_guarded_and_non_owning() {
             "expected_revision": created_revision,
             "definition": {
                 "name": "Books Updated",
-                "properties": {
-                    "status": { "type": "select", "options": [] }
-                },
+                "properties": [
+                    {
+                        "key": "status",
+                        "definition": { "type": "select", "options": [] }
+                    }
+                ],
                 "views": [{ "name": "All", "layout": "table" }]
             },
             "view_origins": [{ "kind": "existing", "name": "All" }]
@@ -1658,6 +1872,61 @@ async fn blocking_diagnostics_are_bad_request_detail_without_notification() {
 }
 
 #[tokio::test]
+async fn update_blocks_body_aliases_and_keeps_the_canonical_view_evaluable() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_body_projection)
+        .build();
+    let revision = current_base_revision(&fixture, "excerpts").await;
+
+    for (columns, expected_duplicates) in [
+        (serde_json::json!(["sys.body"]), 0),
+        (serde_json::json!(["prop.body"]), 0),
+        (serde_json::json!(["body", "sys.body"]), 1),
+    ] {
+        let response = fixture
+            .server
+            .put("/api/vault/bases/excerpts")
+            .json(&serde_json::json!({
+                "expected_revision": revision,
+                "definition": {
+                    "name": "Excerpts",
+                    "views": [{
+                        "name": "All",
+                        "layout": "table",
+                        "columns": columns
+                    }]
+                },
+                "view_origins": [{ "kind": "existing", "name": "All" }]
+            }))
+            .await;
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let error: serde_json::Value = response.json();
+        let diagnostics = error["detail"]["diagnostics"].as_array().unwrap();
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic["severity"] == "error"
+                && diagnostic["message"]
+                    .as_str()
+                    .is_some_and(|message| message.starts_with("noncanonical body column"))
+        }));
+        assert_eq!(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic["message"] == "duplicate `body` column in view `All`"
+                })
+                .count(),
+            expected_duplicates
+        );
+    }
+
+    fixture
+        .server
+        .get("/api/vault/bases/excerpts/views/All")
+        .await
+        .assert_status_ok();
+}
+
+#[tokio::test]
 async fn non_text_contains_definition_is_rejected_with_stable_diagnostics() {
     let fixture = ApiFixture::builder().pre_index_seed(seed).build();
     let mut notifications = fixture.state.change_tx.subscribe();
@@ -1676,10 +1945,10 @@ async fn non_text_contains_definition_is_rejected_with_stable_diagnostics() {
                         { "field": "done", "op": "contains", "value": true }
                     ]
                 },
-                "properties": {
-                    "rating": { "type": "number" },
-                    "done": { "type": "bool" }
-                },
+                "properties": [
+                    { "key": "rating", "definition": { "type": "number" } },
+                    { "key": "done", "definition": { "type": "bool" } }
+                ],
                 "views": [{ "name": "All", "layout": "table" }]
             }
         }))

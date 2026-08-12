@@ -6,7 +6,11 @@
 //! the registry — a broken base is listed with its diagnostics and excluded
 //! from evaluation.
 
-use std::{borrow::Cow, collections::HashMap, path::Path};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -28,6 +32,15 @@ pub const SYSTEM_FIELDS: &[&str] = &[
     "journal_date",
     "word_count",
 ];
+
+/// View-only system column projected from the indexed Markdown body.
+pub const BODY_COLUMN: &str = "body";
+
+pub(crate) fn is_body_field_reference(field: &str) -> bool {
+    field == BODY_COLUMN
+        || field.strip_prefix("sys.") == Some(BODY_COLUMN)
+        || field.strip_prefix("prop.") == Some(BODY_COLUMN)
+}
 
 /// Closed set of declarable property types (v1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -204,7 +217,7 @@ fn default_layout() -> String {
 }
 
 /// The parsed model of a `.base.toml` file.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BaseFile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -213,7 +226,6 @@ pub struct BaseFile {
     pub filter: Option<Filter>,
     /// Declared properties in file order (serialized as a key → definition map).
     #[serde(default, with = "property_map")]
-    #[schema(value_type = std::collections::HashMap<String, PropertyDefinition>)]
     pub properties: Vec<(String, PropertyDefinition)>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub views: Vec<ViewDefinition>,
@@ -280,7 +292,7 @@ mod property_map {
 }
 
 /// A parsed, validated base.
-#[derive(Debug, Clone, Serialize, ToSchema)]
+#[derive(Debug, Clone, Serialize)]
 pub struct BaseDefinition {
     /// Filename stem; the API identity.
     pub slug: String,
@@ -986,6 +998,24 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         );
     }
 
+    let mut property_keys = HashSet::new();
+    for (property_index, (key, _)) in base.file.properties.iter().enumerate() {
+        if !property_keys.insert(key.as_str()) {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("properties[{property_index}].key")),
+                format!("duplicate property key `{key}`"),
+            );
+        }
+        if key == BODY_COLUMN {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("properties.{key}")),
+                format!("property name `{BODY_COLUMN}` is reserved"),
+            );
+        }
+    }
+
     // Filter fields referencing undeclared properties are a warning (the
     // vault may legitimately carry keys the base doesn't declare); op/type
     // mismatches are hard facts.
@@ -1021,6 +1051,27 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                 ),
             );
         }
+        let mut body_seen = false;
+        for (column_index, column) in view.columns.iter().enumerate() {
+            if !is_body_field_reference(column) {
+                continue;
+            }
+            let path = Some(format!("views[{view_index}].columns[{column_index}]"));
+            if column != BODY_COLUMN {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    path.clone(),
+                    format!("noncanonical body column `{column}`; use `{BODY_COLUMN}`"),
+                );
+            }
+            if std::mem::replace(&mut body_seen, true) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    path,
+                    format!("duplicate `{BODY_COLUMN}` column in view `{}`", view.name),
+                );
+            }
+        }
         if let Some(filter) = &view.filter {
             validate_filter(
                 base,
@@ -1040,6 +1091,25 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             );
         }
         if let Some(group_by) = &view.group_by
+            && matches!(
+                crate::vault::query::resolve_field(
+                    group_by,
+                    &crate::vault::query::QueryContext::for_base(base)
+                ),
+                Err(crate::vault::query::QueryError::ProjectionOnlyBody)
+            )
+        {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("views[{view_index}].group_by")),
+                format!(
+                    "view `{}` group: {}",
+                    view.name,
+                    crate::vault::query::QueryError::ProjectionOnlyBody
+                ),
+            );
+        }
+        if let Some(group_by) = &view.group_by
             && let Some(def) = base.property(group_by)
             && matches!(
                 def.property_type,
@@ -1056,6 +1126,27 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             );
         }
         for (aggregate_index, aggregate) in view.aggregates.iter().enumerate() {
+            if aggregate.field.as_deref().is_some_and(|field| {
+                matches!(
+                    crate::vault::query::resolve_field(
+                        field,
+                        &crate::vault::query::QueryContext::for_base(base)
+                    ),
+                    Err(crate::vault::query::QueryError::ProjectionOnlyBody)
+                )
+            }) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!(
+                        "views[{view_index}].aggregates[{aggregate_index}].field"
+                    )),
+                    format!(
+                        "view `{}` aggregate: {}",
+                        view.name,
+                        crate::vault::query::QueryError::ProjectionOnlyBody
+                    ),
+                );
+            }
             if !matches!(aggregate.function, AggregateFn::Count) && aggregate.field.is_none() {
                 push(
                     BaseDiagnosticSeverity::Warning,
@@ -1130,6 +1221,17 @@ fn validate_filter(
             validate_filter(base, child, &format!("{path}.not"), context, push);
         }
         Filter::Cmp { field, op, value } => {
+            if matches!(
+                resolve_field(field, &QueryContext::for_base(base)),
+                Err(QueryError::ProjectionOnlyBody)
+            ) {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(format!("{path}.field")),
+                    format!("{context}: {}", QueryError::ProjectionOnlyBody),
+                );
+                return;
+            }
             if *op == Op::Contains {
                 use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 
@@ -1177,7 +1279,7 @@ fn validate_filter(
                     return;
                 }
             }
-            use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+            use crate::vault::query::{QueryContext, QueryError, ResolvedField, resolve_field};
 
             match resolve_field(field, &QueryContext::for_base(base)) {
                 Ok(ResolvedField::Sys(_)) => {}
@@ -1294,6 +1396,41 @@ columns = ["title", "author", "rating", "finished"]
                 .map(|(key, _)| key.as_str())
                 .collect::<Vec<_>>(),
             vec!["status", "rating"]
+        );
+    }
+
+    #[test]
+    fn duplicate_property_keys_are_blocking_at_every_later_declaration() {
+        let property = PropertyDefinition {
+            property_type: PropertyType::Text,
+            options: Vec::new(),
+            many: None,
+        };
+        let mut file = base_file_with_views(["All"]);
+        file.properties = vec![
+            ("status".to_string(), property.clone()),
+            ("status".to_string(), property.clone()),
+            ("rating".to_string(), property.clone()),
+            ("status".to_string(), property),
+        ];
+
+        let result = validate_definition("reading", file);
+        let duplicate_paths = result
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message == "duplicate property key `status`")
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            duplicate_paths,
+            vec!["properties[1].key", "properties[3].key"]
+        );
+        assert!(
+            result
+                .diagnostics
+                .iter()
+                .all(|diagnostic| { diagnostic.message != "duplicate property key `rating`" })
         );
     }
 
@@ -1781,6 +1918,144 @@ rating = { type = "number" }
         assert_eq!(
             errors[1].message,
             "filter: op `contains` is not valid for non-text field `prop.rating`"
+        );
+    }
+    #[test]
+    fn body_is_reserved_against_property_declarations() {
+        let content = r#"
+name = "X"
+
+[properties]
+body = { type = "text" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(base.is_some());
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("properties.body")
+                && diagnostic.message == "property name `body` is reserved"
+        }));
+    }
+
+    #[test]
+    fn body_column_may_appear_once_in_each_view() {
+        let content = r#"
+name = "X"
+
+[[views]]
+name = "First"
+columns = ["title", "body"]
+
+[[views]]
+name = "Second"
+columns = ["body", "updated_at"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(
+            diagnostics.is_empty(),
+            "one body column per view is valid: {diagnostics:?}"
+        );
+    }
+
+    #[test]
+    fn duplicate_body_columns_in_one_view_are_a_diagnostic() {
+        let content = r#"
+name = "X"
+
+[[views]]
+name = "All"
+columns = ["body", "title", "body"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("views[0].columns[2]")
+                && diagnostic.message == "duplicate `body` column in view `All`"
+        }));
+    }
+
+    #[test]
+    fn noncanonical_body_column_aliases_are_blocking_diagnostics() {
+        for alias in ["sys.body", "prop.body"] {
+            let content = format!(
+                r#"
+name = "X"
+
+[[views]]
+name = "All"
+columns = ["{alias}"]
+"#
+            );
+            let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), &content);
+
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Error
+                    && diagnostic.path.as_deref() == Some("views[0].columns[0]")
+                    && diagnostic.message
+                        == format!("noncanonical body column `{alias}`; use `body`")
+            }));
+        }
+    }
+
+    #[test]
+    fn body_aliases_participate_in_duplicate_detection() {
+        let content = r#"
+name = "X"
+
+[[views]]
+name = "All"
+columns = ["body", "sys.body", "prop.body"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let duplicate_paths = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.message == "duplicate `body` column in view `All`")
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            duplicate_paths,
+            vec!["views[0].columns[1]", "views[0].columns[2]"]
+        );
+    }
+
+    #[test]
+    fn body_is_rejected_as_a_saved_view_query_capability() {
+        let content = r#"
+name = "X"
+
+[filter]
+field = "body"
+op = "contains"
+value = "secret"
+
+[[views]]
+name = "All"
+filter = { field = "body", op = "contains", value = "secret" }
+sort = [{ field = "body" }]
+group_by = "body"
+aggregates = [{ fn = "count", field = "body" }]
+columns = ["body"]
+"#;
+        let (_, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        let paths = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            paths,
+            vec![
+                "filter.field",
+                "views[0].filter.field",
+                "views[0].sort[0].field",
+                "views[0].group_by",
+                "views[0].aggregates[0].field",
+            ]
         );
     }
 }

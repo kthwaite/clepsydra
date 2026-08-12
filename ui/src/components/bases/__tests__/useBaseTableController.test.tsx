@@ -34,7 +34,12 @@ const definition: BaseDetailResponse = {
   slug: "reading",
   revision: "detail-revision-must-not-own-embedded-creation",
   name: "Reading Log",
-  properties: { status: { type: "select", options: ["reading", "finished"] } },
+  properties: [
+    {
+      key: "status",
+      definition: { type: "select", options: ["reading", "finished"] },
+    },
+  ],
   views: [
     { name: "Continues", layout: "table", columns: ["title", "status"] },
     { name: "Shelf", layout: "table", columns: ["title"] },

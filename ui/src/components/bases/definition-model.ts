@@ -148,13 +148,11 @@ export function fromWire(detail: BaseFile): BaseDraft {
     name: detail.name,
     description: detail.description ?? undefined,
     filter: cloneFilter(detail.filter),
-    properties: Object.entries(detail.properties ?? {}).map(
-      ([key, definition]) => ({
-        id: crypto.randomUUID(),
-        key,
-        definition: clonePropertyDefinition(definition),
-      }),
-    ),
+    properties: (detail.properties ?? []).map(({ key, definition }) => ({
+      id: crypto.randomUUID(),
+      key,
+      definition: clonePropertyDefinition(definition),
+    })),
     views: (detail.views ?? []).map((view) => ({
       id: crypto.randomUUID(),
       name: view.name,
@@ -176,12 +174,10 @@ export function toWire(draft: BaseDraft): BaseFile {
     name: draft.name,
     description: draft.description,
     filter: cloneFilter(draft.filter),
-    properties: Object.fromEntries(
-      draft.properties.map(({ key, definition }) => [
-        key,
-        clonePropertyDefinition(definition),
-      ]),
-    ),
+    properties: draft.properties.map(({ key, definition }) => ({
+      key,
+      definition: clonePropertyDefinition(definition),
+    })),
     views: draft.views.map((view) => ({
       name: view.name,
       layout: view.layout,

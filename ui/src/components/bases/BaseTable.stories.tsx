@@ -7,15 +7,18 @@ const definition: BaseDetailResponse = {
   revision: "storybook-revision",
   name: "Reading Log",
   description: "Books in flight and their wake.",
-  properties: {
-    author: { type: "text" },
-    status: {
-      type: "select",
-      options: ["queued", "reading", "finished", "abandoned"],
+  properties: [
+    { key: "author", definition: { type: "text" } },
+    {
+      key: "status",
+      definition: {
+        type: "select",
+        options: ["queued", "reading", "finished", "abandoned"],
+      },
     },
-    rating: { type: "number" },
-    started: { type: "date" },
-  },
+    { key: "rating", definition: { type: "number" } },
+    { key: "started", definition: { type: "date" } },
+  ],
   views: [
     {
       name: "Continues",

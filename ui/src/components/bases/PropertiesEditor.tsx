@@ -29,7 +29,7 @@ export const SYSTEM_PROPERTY_FIELDS = [
 ] as const;
 
 const RESERVED_PROPERTY_FIELDS: Record<
-  (typeof SYSTEM_PROPERTY_FIELDS)[number],
+  (typeof SYSTEM_PROPERTY_FIELDS)[number] | "body",
   true
 > = {
   id: true,
@@ -44,6 +44,7 @@ const RESERVED_PROPERTY_FIELDS: Record<
   encryption: true,
   journal_date: true,
   word_count: true,
+  body: true,
 };
 
 const TYPE_LABELS: Record<PropertyType, string> = {
@@ -110,6 +111,18 @@ export function PropertiesEditor({
   const [pendingRemoval, setPendingRemoval] = useState<DraftProperty>();
   const [pendingRename, setPendingRename] = useState<PendingRename>();
   const newKeyInput = useRef<HTMLInputElement>(null);
+  const [moveAnnouncement, setMoveAnnouncement] = useState("");
+  const [focusPropertyId, setFocusPropertyId] = useState<string>();
+  const draggedPropertyId = useRef<string | undefined>(undefined);
+  const reorderHandles = useRef(new Map<string, HTMLButtonElement>());
+
+  useEffect(() => {
+    if (!focusPropertyId) return;
+    const handle = reorderHandles.current.get(focusPropertyId);
+    if (!handle) return;
+    handle.focus();
+    setFocusPropertyId(undefined);
+  }, [focusPropertyId, properties]);
 
   useEffect(() => {
     const nextDiagnostics: BaseDiagnostic[] = [];
@@ -211,6 +224,28 @@ export function PropertiesEditor({
     );
   }
 
+  function moveProperty(from: number, to: number) {
+    if (from < 0 || to < 0 || from >= properties.length || to >= properties.length)
+      return;
+    const moved = properties[from];
+    if (!moved || from === to) return;
+    setFocusPropertyId(moved.id);
+    setMoveAnnouncement(
+      `Moved ${moved.key} to position ${to + 1} of ${properties.length}.`,
+    );
+    onChange(moveItem(properties, from, to));
+  }
+
+  function dropProperty(targetId: string) {
+    const draggedId = draggedPropertyId.current;
+    draggedPropertyId.current = undefined;
+    if (!draggedId) return;
+    moveProperty(
+      properties.findIndex(({ id }) => id === draggedId),
+      properties.findIndex(({ id }) => id === targetId),
+    );
+  }
+
   return (
     <section aria-labelledby="properties-editor-heading">
       <h2
@@ -297,43 +332,82 @@ export function PropertiesEditor({
           </p>
         </div>
       ) : (
-        <ol
-          className="mt-4 grid gap-3"
-          aria-label="Ordered property declarations"
-        >
-          {properties.map((property, index) => (
-            <PropertyDefinitionEditor
-              key={property.id}
-              property={property}
-              index={index}
-              count={properties.length}
-              persisted={persistedPropertyIds.has(property.id)}
-              renaming={activeRenameId === property.id}
-              renameError={
-                renameDiagnostic?.propertyId === property.id
-                  ? renameDiagnostic.message
-                  : undefined
-              }
-              onChange={replaceProperty}
-              onMove={(from, to) => onChange(moveItem(properties, from, to))}
-              onRemove={removeProperty}
-              onRename={requestRename}
-              onStartRename={() => {
-                setActiveRenameId(property.id);
-                setRenameDiagnostic(undefined);
-              }}
-              onCancelRename={() => {
-                setActiveRenameId((current) =>
-                  current === property.id ? undefined : current,
-                );
-                setRenameDiagnostic((current) =>
-                  current?.propertyId === property.id ? undefined : current,
-                );
-              }}
-              registerFocus={registerFocus}
-            />
-          ))}
-        </ol>
+        <>
+          <table
+            className="mt-4 w-full table-fixed border-collapse"
+            aria-label="Ordered property declarations"
+          >
+            <thead>
+              <tr className="border-b border-border text-left font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+                <th scope="col" className="w-10 px-1 py-2 sm:px-2">
+                  <span className="sr-only">Order</span>
+                </th>
+                <th scope="col" className="px-2 py-2 sm:px-3">
+                  Key
+                </th>
+                <th scope="col" className="px-2 py-2 sm:px-3">
+                  Type and configuration
+                </th>
+                <th scope="col" className="w-28 px-1 py-2 text-right sm:w-48 sm:px-2">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {properties.map((property, index) => (
+                <PropertyDefinitionEditor
+                  key={property.id}
+                  property={property}
+                  index={index}
+                  count={properties.length}
+                  persisted={persistedPropertyIds.has(property.id)}
+                  renaming={activeRenameId === property.id}
+                  renameError={
+                    renameDiagnostic?.propertyId === property.id
+                      ? renameDiagnostic.message
+                      : undefined
+                  }
+                  onChange={replaceProperty}
+                  onMove={moveProperty}
+                  onDragStart={(propertyId) => {
+                    draggedPropertyId.current = propertyId;
+                  }}
+                  onDragEnd={() => {
+                    draggedPropertyId.current = undefined;
+                  }}
+                  onDrop={dropProperty}
+                  onHandleRef={(propertyId, element) => {
+                    if (element) reorderHandles.current.set(propertyId, element);
+                    else reorderHandles.current.delete(propertyId);
+                  }}
+                  onRemove={removeProperty}
+                  onRename={requestRename}
+                  onStartRename={() => {
+                    setActiveRenameId(property.id);
+                    setRenameDiagnostic(undefined);
+                  }}
+                  onCancelRename={() => {
+                    setActiveRenameId((current) =>
+                      current === property.id ? undefined : current,
+                    );
+                    setRenameDiagnostic((current) =>
+                      current?.propertyId === property.id ? undefined : current,
+                    );
+                  }}
+                  registerFocus={registerFocus}
+                />
+              ))}
+            </tbody>
+          </table>
+          <p
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            className="sr-only"
+          >
+            {moveAnnouncement}
+          </p>
+        </>
       )}
 
       <aside

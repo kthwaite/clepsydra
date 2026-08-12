@@ -10,11 +10,13 @@
 
 use std::collections::HashMap;
 
+use pulldown_cmark::{Event, Options, Parser, TagEnd};
 use rusqlite::Connection;
 use thiserror::Error;
 
 use super::base::{
-    Aggregate, AggregateFn, BaseDefinition, Filter, Op, PropertyType, SortDir, SortKey,
+    Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, Filter, Op, PropertyType, SortDir,
+    SortKey, is_body_field_reference,
 };
 use super::canonical::CanonicalName;
 use super::link::normalize_links_to_target;
@@ -152,6 +154,10 @@ impl<'a> QueryContext<'a> {
 pub enum QueryError {
     #[error("unknown system field `{0}`")]
     UnknownSystemField(String),
+    #[error(
+        "`body` is projection-only and cannot be used as a filter, sort key, group, or aggregate"
+    )]
+    ProjectionOnlyBody,
     #[error("op `{op:?}` is not valid for field `{field}`")]
     InvalidOp { field: String, op: Op },
     #[error("invalid value for field `{field}`: {reason}")]
@@ -169,6 +175,9 @@ pub enum QueryError {
 /// Resolve a field reference. Bare names bind system-first; `sys.<name>` /
 /// `prop.<name>` disambiguate.
 pub fn resolve_field(field: &str, ctx: &QueryContext) -> Result<ResolvedField, QueryError> {
+    if is_body_field_reference(field) {
+        return Err(QueryError::ProjectionOnlyBody);
+    }
     if let Some(name) = field.strip_prefix("sys.") {
         return SysField::from_name(name)
             .map(ResolvedField::Sys)
@@ -692,6 +701,16 @@ pub fn evaluate(
     spec: &QuerySpec,
     ctx: &QueryContext,
 ) -> Result<QueryOutput, QueryError> {
+    for aggregate in &spec.aggregates {
+        if let Some(field) = aggregate.field.as_deref()
+            && matches!(
+                resolve_field(field, ctx),
+                Err(QueryError::ProjectionOnlyBody)
+            )
+        {
+            return Err(QueryError::ProjectionOnlyBody);
+        }
+    }
     match &spec.group_by {
         Some(group_key) => evaluate_grouped(conn, spec, ctx, group_key),
         None => evaluate_flat(conn, spec, ctx),
@@ -755,6 +774,9 @@ fn evaluate_grouped(
     let mut agg_joins = String::new();
     let mut agg_params: Vec<SqlValue> = Vec::new();
     for (i, agg) in spec.aggregates.iter().enumerate() {
+        if let Some(field) = agg.field.as_deref() {
+            resolve_field(field, ctx)?;
+        }
         match (agg.function, &agg.field) {
             (AggregateFn::Count, _) => agg_exprs.push("COUNT(*)".to_string()),
             (function, Some(field)) => {
@@ -888,6 +910,102 @@ fn sql_value_to_json(v: rusqlite::types::Value) -> serde_json::Value {
     }
 }
 
+const BODY_EXCERPT_MAX_CHARS: usize = 240;
+const BODY_PROJECTION_JOIN: &str = " LEFT JOIN page_bodies body_index ON body_index.page_id = p.id";
+const BODY_PROJECTION_SELECT: &str = "CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END";
+
+fn append_excerpt_text(
+    excerpt: &mut String,
+    scalar_count: &mut usize,
+    pending_space: &mut bool,
+    text: &str,
+) -> bool {
+    for ch in text.chars() {
+        if ch.is_whitespace() {
+            *pending_space |= !excerpt.is_empty();
+            continue;
+        }
+        if *pending_space {
+            excerpt.push(' ');
+            *scalar_count += 1;
+            *pending_space = false;
+            if *scalar_count > BODY_EXCERPT_MAX_CHARS {
+                return true;
+            }
+        }
+        excerpt.push(ch);
+        *scalar_count += 1;
+        if *scalar_count > BODY_EXCERPT_MAX_CHARS {
+            return true;
+        }
+    }
+    false
+}
+
+fn body_excerpt(markdown: &str) -> String {
+    let mut excerpt = String::with_capacity(BODY_EXCERPT_MAX_CHARS);
+    let mut scalar_count = 0;
+    let mut pending_space = false;
+    for event in Parser::new_ext(markdown, Options::all()) {
+        let full = match event {
+            Event::Text(text)
+            | Event::Code(text)
+            | Event::InlineMath(text)
+            | Event::DisplayMath(text) => {
+                append_excerpt_text(&mut excerpt, &mut scalar_count, &mut pending_space, &text)
+            }
+            Event::FootnoteReference(label) => {
+                append_excerpt_text(&mut excerpt, &mut scalar_count, &mut pending_space, &label)
+            }
+            Event::SoftBreak | Event::HardBreak | Event::Rule => {
+                pending_space |= !excerpt.is_empty();
+                false
+            }
+            Event::End(
+                TagEnd::Paragraph
+                | TagEnd::Heading(_)
+                | TagEnd::BlockQuote(_)
+                | TagEnd::CodeBlock
+                | TagEnd::HtmlBlock
+                | TagEnd::List(_)
+                | TagEnd::Item
+                | TagEnd::FootnoteDefinition
+                | TagEnd::DefinitionList
+                | TagEnd::DefinitionListTitle
+                | TagEnd::DefinitionListDefinition
+                | TagEnd::Table
+                | TagEnd::TableHead
+                | TagEnd::TableRow
+                | TagEnd::TableCell,
+            ) => {
+                pending_space |= !excerpt.is_empty();
+                false
+            }
+            // Raw HTML syntax is omitted. Inline element contents still arrive
+            // as Text events; opaque HTML blocks are intentionally omitted.
+            Event::Html(_) | Event::InlineHtml(_) => false,
+            _ => false,
+        };
+        if full {
+            break;
+        }
+    }
+    if scalar_count > BODY_EXCERPT_MAX_CHARS {
+        let truncate_at = excerpt
+            .char_indices()
+            .nth(BODY_EXCERPT_MAX_CHARS - 1)
+            .map_or(excerpt.len(), |(byte_index, _)| byte_index);
+        excerpt.truncate(truncate_at);
+        excerpt.push('…');
+    }
+    excerpt
+}
+
+enum AppendedColumn {
+    Json(String),
+    Body,
+}
+
 /// Fetch result rows: filter + optional group restriction + sort + paging,
 /// with requested columns materialized from `ord = 0` projections.
 fn fetch_rows(
@@ -899,28 +1017,39 @@ fn fetch_rows(
     limit: Option<u32>,
     offset: u32,
 ) -> Result<Vec<QueryRow>, QueryError> {
-    // Column joins for requested property columns. Tags come from their
-    // effective index projection; aliases still come from meta_json.
+    // Requested property columns and the body projection use equality-indexed
+    // joins in this set-based query. No page files or detail endpoints are read.
     let mut select_cols =
         "p.id, p.path, p.title, p.kind, p.project, p.created_at, p.updated_at, p.encrypted, p.journal_date, p.word_count"
             .to_string();
     let mut column_joins = String::new();
     let mut column_params: Vec<SqlValue> = Vec::new();
-    // Requested column name → position among the appended (json) columns.
-    let mut json_columns: Vec<String> = Vec::new();
+    // Position and decoding mode for each appended select column.
+    let mut appended_columns: Vec<AppendedColumn> = Vec::new();
     let mut system_columns: Vec<(String, SysField)> = Vec::new();
+    let mut body_joined = false;
     for (i, name) in spec.columns.iter().enumerate() {
+        if name == BODY_COLUMN {
+            if !body_joined {
+                column_joins.push_str(BODY_PROJECTION_JOIN);
+                body_joined = true;
+            }
+            select_cols.push_str(", ");
+            select_cols.push_str(BODY_PROJECTION_SELECT);
+            appended_columns.push(AppendedColumn::Body);
+            continue;
+        }
         match resolve_field(name, ctx)? {
             ResolvedField::Sys(SysField::Tags) => {
                 select_cols.push_str(
                     ", (SELECT json_group_array(tag) FROM
                        (SELECT tag FROM tags WHERE page_id = p.id ORDER BY computed, rowid))",
                 );
-                json_columns.push(name.clone());
+                appended_columns.push(AppendedColumn::Json(name.clone()));
             }
             ResolvedField::Sys(SysField::Aliases) => {
                 select_cols.push_str(", json_extract(p.meta_json, '$.aliases')");
-                json_columns.push(name.clone());
+                appended_columns.push(AppendedColumn::Json(name.clone()));
             }
             ResolvedField::Sys(sys) => system_columns.push((name.clone(), sys)),
             ResolvedField::Prop { key, .. } => {
@@ -930,7 +1059,7 @@ fn fetch_rows(
                 ));
                 column_params.push(SqlValue::Text(key));
                 select_cols.push_str(&format!(", {alias}.value_json"));
-                json_columns.push(name.clone());
+                appended_columns.push(AppendedColumn::Json(name.clone()));
             }
         }
     }
@@ -1013,12 +1142,22 @@ fn fetch_rows(
                 columns.insert(requested_name.clone(), value.clone());
             }
         }
-        for (i, name) in json_columns.iter().enumerate() {
+        for (i, column) in appended_columns.iter().enumerate() {
             let raw: Option<String> = row.get(n_fixed + i)?;
-            let value = raw
-                .and_then(|s| serde_json::from_str(&s).ok())
-                .unwrap_or(serde_json::Value::Null);
-            columns.insert(name.clone(), value);
+            match column {
+                AppendedColumn::Json(name) => {
+                    let value = raw
+                        .and_then(|s| serde_json::from_str(&s).ok())
+                        .unwrap_or(serde_json::Value::Null);
+                    columns.insert(name.clone(), value);
+                }
+                AppendedColumn::Body => {
+                    let value = raw
+                        .map(|markdown| serde_json::Value::String(body_excerpt(&markdown)))
+                        .unwrap_or(serde_json::Value::Null);
+                    columns.insert(BODY_COLUMN.to_string(), value);
+                }
+            }
         }
         Ok(QueryRow {
             id: row.get(0)?,
@@ -1948,5 +2087,234 @@ moment  = { type = "datetime" }
             unprotected_rows[0].columns["sys.encryption"],
             serde_json::Value::Bool(false)
         );
+    }
+
+    #[test]
+    fn body_excerpt_obeys_exact_scalar_boundary() {
+        let chars_239 = "a".repeat(239);
+        let chars_240 = "b".repeat(240);
+        let chars_241 = "c".repeat(241);
+
+        assert_eq!(body_excerpt(&chars_239), chars_239);
+        assert_eq!(body_excerpt(&chars_240), chars_240);
+        assert_eq!(body_excerpt(&chars_241), format!("{}…", "c".repeat(239)));
+    }
+
+    #[test]
+    fn body_excerpt_truncates_multibyte_unicode_by_scalar() {
+        let excerpt = body_excerpt(&"界".repeat(241));
+
+        assert_eq!(excerpt, format!("{}…", "界".repeat(239)));
+        assert_eq!(excerpt.chars().count(), 240);
+    }
+
+    #[test]
+    fn body_excerpt_marks_truncation_at_a_normalized_word_boundary() {
+        let markdown = format!("{}\n\nnext", "a".repeat(239));
+
+        assert_eq!(body_excerpt(&markdown), format!("{}…", "a".repeat(239)));
+    }
+
+    #[test]
+    fn body_projection_plan_uses_a_page_id_index_lookup() {
+        let tmp = tempfile::tempdir().unwrap();
+        let index = VaultIndex::open(&tmp.path().join("index.db")).unwrap();
+        let table_count: i64 = index
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master
+                 WHERE type = 'table' AND name = 'page_bodies'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            table_count, 1,
+            "body projection requires an equality-indexed source"
+        );
+
+        let query = format!(
+            "EXPLAIN QUERY PLAN
+             SELECT {BODY_PROJECTION_SELECT}
+             FROM pages p{BODY_PROJECTION_JOIN}
+             ORDER BY p.path
+             LIMIT 25"
+        );
+        let mut statement = index.connection().prepare(&query).unwrap();
+        let details = statement
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(
+            details.iter().any(|detail| {
+                detail.contains("SEARCH body_index")
+                    && detail.contains("page_id=?")
+                    && detail.contains("LEFT-JOIN")
+            }),
+            "expected a keyed body lookup, got {details:?}"
+        );
+        assert!(
+            details
+                .iter()
+                .all(|detail| !detail.contains("SCAN body_index")),
+            "body projection must not scan the body source: {details:?}"
+        );
+    }
+    #[test]
+    fn body_column_projects_bounded_normalized_plain_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::write(tmp.path().join("bases/reading.base.toml"), READING_BASE).unwrap();
+        let markdown_body = format!(
+            "# Heading\n\nA [link label](https://example.com) with `code`.\n\n{}\n",
+            "界".repeat(300)
+        );
+        std::fs::write(
+            tmp.path().join("excerpt.md"),
+            format!(
+                "+++\nid = \"0190f8a0-0000-7000-8000-0000000000b0\"\ntitle = \"Excerpt\"\ntype = \"BOOK\"\n+++\n{markdown_body}"
+            ),
+        )
+        .unwrap();
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("reading").unwrap();
+        let output = evaluate(
+            index.connection(),
+            &QuerySpec {
+                columns: vec!["body".into()],
+                ..Default::default()
+            },
+            &QueryContext::for_base(base),
+        )
+        .unwrap();
+        let QueryOutput::Flat { rows, .. } = output else {
+            panic!("expected flat output");
+        };
+        let excerpt = rows[0].columns["body"].as_str().unwrap();
+
+        assert!(excerpt.starts_with("Heading A link label with code. 界"));
+        assert_eq!(excerpt.chars().count(), 240);
+        assert!(excerpt.ends_with('…'));
+        assert!(!excerpt.contains("https://example.com"));
+        assert!(!excerpt.contains('\n'));
+        assert!(!excerpt.contains('`'));
+    }
+
+    #[test]
+    fn body_excerpt_separates_tight_lists_tables_and_definition_lists() {
+        assert_eq!(body_excerpt("- alpha\n- beta\n"), "alpha beta");
+        assert_eq!(
+            body_excerpt("| first | second |\n| --- | --- |\n| third | fourth |\n"),
+            "first second third fourth"
+        );
+        assert_eq!(
+            body_excerpt("Term\n: Definition\n\nOther\n: Meaning\n"),
+            "Term Definition Other Meaning"
+        );
+    }
+
+    #[test]
+    fn body_excerpt_preserves_math_but_omits_raw_html_events() {
+        assert_eq!(
+            body_excerpt("before $x + y$ and $$z$$ after"),
+            "before x + y and z after"
+        );
+        assert_eq!(
+            body_excerpt("before <span>inside</span> after"),
+            "before inside after"
+        );
+        assert_eq!(
+            body_excerpt("<div>\nraw block content\n</div>\n\nkept"),
+            "kept"
+        );
+    }
+
+    #[test]
+    fn protected_body_column_is_null_and_never_serializes_armored_content() {
+        let (_tmp, index, base) = encryption_fixture();
+        let output = evaluate(
+            index.connection(),
+            &QuerySpec {
+                columns: vec!["body".into()],
+                ..Default::default()
+            },
+            &QueryContext::for_base(&base),
+        )
+        .unwrap();
+        let QueryOutput::Flat { rows, .. } = output else {
+            panic!("expected flat output");
+        };
+        let protected = rows.iter().find(|row| row.path == "protected.md").unwrap();
+        let serialized = serde_json::to_string(protected).unwrap();
+        let unprotected = rows
+            .iter()
+            .find(|row| row.path == "unprotected.md")
+            .unwrap();
+
+        assert_eq!(unprotected.columns["body"], serde_json::json!("body"));
+
+        assert_eq!(protected.columns["body"], serde_json::Value::Null);
+        assert!(!serialized.contains("BEGIN AGE ENCRYPTED FILE"));
+        assert!(!serialized.contains("YWdlLWVuY3J5cHRpb24"));
+    }
+
+    #[test]
+    fn body_is_projection_only_not_a_general_query_field() {
+        let (_tmp, index, base) = fixture();
+        let context = QueryContext::for_base(&base);
+        for field in ["body", "sys.body", "prop.body"] {
+            assert!(matches!(
+                resolve_field(field, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let filter = Filter::Cmp {
+                field: field.into(),
+                op: Op::Contains,
+                value: serde_json::json!("body"),
+            };
+            assert!(matches!(
+                compile_filter(&filter, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let sort = QuerySpec {
+                sort: vec![SortKey {
+                    field: field.into(),
+                    dir: SortDir::Asc,
+                }],
+                ..Default::default()
+            };
+            assert!(matches!(
+                evaluate(index.connection(), &sort, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let group = QuerySpec {
+                group_by: Some(field.into()),
+                ..Default::default()
+            };
+            assert!(matches!(
+                evaluate(index.connection(), &group, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+
+            let aggregate = QuerySpec {
+                aggregates: vec![Aggregate {
+                    function: AggregateFn::Count,
+                    field: Some(field.into()),
+                }],
+                ..Default::default()
+            };
+            assert!(matches!(
+                evaluate(index.connection(), &aggregate, &context),
+                Err(QueryError::ProjectionOnlyBody)
+            ));
+        }
     }
 }

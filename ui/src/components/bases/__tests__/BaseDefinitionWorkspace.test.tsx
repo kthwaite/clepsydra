@@ -35,12 +35,12 @@ vi.mock("#/api/bases", () => ({
   useUpdateBase: () => ({ mutateAsync: updateMock, isPending: false }),
 }));
 
-const detail: BaseDetailResponse = {
+const detail = {
   slug: "reading-log",
   name: "Reading Log",
   description: "Books in progress",
   filter: undefined,
-  properties: {},
+  properties: [],
   views: [
     {
       name: "All",
@@ -53,7 +53,7 @@ const detail: BaseDetailResponse = {
   diagnostics: [],
   member_creation: [],
   revision: "revision-1",
-};
+} satisfies BaseDetailResponse;
 
 function mutationResponse(
   overrides: Partial<BaseMutationResponse> = {},
@@ -125,6 +125,21 @@ describe("BaseDefinitionWorkspace", () => {
       screen.getByRole("button", { name: "Copy base file path" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+
+  it("keeps body out of the property declaration flow", async () => {
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.type(screen.getByLabelText("New property key"), "body");
+    await user.click(screen.getByRole("button", { name: "Add property" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /body.*reserved system field/i,
+    );
+    expect(
+      screen.queryByRole("rowheader", { name: "body" }),
+    ).not.toBeInTheDocument();
   });
 
   it("marks edits dirty and saves with the captured original revision", async () => {
@@ -261,13 +276,16 @@ describe("BaseDefinitionWorkspace", () => {
 
   it("keeps persisted property identity after edits made during a save", async () => {
     const pending = deferred<BaseMutationResponse>();
-    const properties = { status: { type: "text" as const } };
+    const properties = [
+      { key: "status", definition: { type: "text" as const } },
+    ];
     baseState.data = { ...detail, properties };
     updateMock.mockReturnValue(pending.promise);
     renderWorkspace();
     const user = await renameBase("Submitted name");
     await user.click(screen.getByRole("button", { name: "Save" }));
     await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Edit status" }));
     await user.selectOptions(screen.getByLabelText("Type for status"), "url");
     await act(async () => {
       pending.resolve(
@@ -291,6 +309,115 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Discard" }));
     expect(screen.getByLabelText("Name")).toHaveValue("Reading Log");
     expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+
+  it("saves reordered columns through the complete definition draft", async () => {
+    baseState.data = {
+      ...detail,
+      views: [
+        {
+          ...detail.views[0],
+          columns: ["title", "path"],
+        },
+      ],
+    };
+    updateMock.mockResolvedValue(
+      mutationResponse({
+        views: [
+          {
+            ...detail.views[0],
+            columns: ["path", "title"],
+          },
+        ],
+        revision: "revision-2",
+      }),
+    );
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Move path up" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateMock).toHaveBeenCalledWith({
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-1",
+        definition: expect.objectContaining({
+          views: [
+            expect.objectContaining({
+              columns: ["path", "title"],
+            }),
+          ],
+        }),
+        view_origins: [{ kind: "existing", name: "All" }],
+      },
+    });
+    expect(await screen.findByText("Saved")).toBeInTheDocument();
+  });
+
+  it("discards reordered columns back to the loaded definition", async () => {
+    baseState.data = {
+      ...detail,
+      views: [
+        {
+          ...detail.views[0],
+          columns: ["title", "path"],
+        },
+      ],
+    };
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Move path up" }));
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(
+      screen
+        .getByRole("table", { name: "Visible column order" })
+        .querySelectorAll("th[scope='row']"),
+    ).toHaveLength(2);
+    expect(
+      Array.from(
+        screen
+          .getByRole("table", { name: "Visible column order" })
+          .querySelectorAll("th[scope='row']"),
+      ).map((cell) => cell.textContent),
+    ).toEqual(["title", "path"]);
+    expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+
+  it("retains reordered columns when Save meets a revision conflict", async () => {
+    baseState.data = {
+      ...detail,
+      views: [
+        {
+          ...detail.views[0],
+          columns: ["title", "path"],
+        },
+      ],
+    };
+    updateMock.mockRejectedValue({
+      status: 409,
+      error: "base definition changed since expected_revision",
+      detail: { revision: "server-new" },
+    });
+    renderWorkspace();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.click(screen.getByRole("button", { name: "Move path up" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      /changed outside clepsydra/i,
+    );
+    expect(
+      Array.from(
+        screen
+          .getByRole("table", { name: "Visible column order" })
+          .querySelectorAll("th[scope='row']"),
+      ).map((cell) => cell.textContent),
+    ).toEqual(["path", "title"]);
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
 
   it("does not overwrite a dirty draft when the query refetches", async () => {
@@ -604,7 +731,7 @@ describe("BaseDefinitionWorkspace", () => {
   it("blocks a stale sort after a scalar property becomes a relation and focuses its field", async () => {
     baseState.data = {
       ...detail,
-      properties: { status: { type: "text" } },
+      properties: [{ key: "status", definition: { type: "text" } }],
       views: [
         {
           name: "All",
@@ -618,6 +745,7 @@ describe("BaseDefinitionWorkspace", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Properties" }));
+    await user.click(screen.getByRole("button", { name: "Edit status" }));
     await user.selectOptions(
       screen.getByLabelText("Type for status"),
       "relation",
@@ -686,25 +814,25 @@ describe("BaseDefinitionWorkspace", () => {
       "kind",
     );
     await user.type(screen.getByLabelText("Value for condition 1"), "book");
-    await waitFor(() => expect(previewMock).toHaveBeenCalled());
-
-    expect(previewMock).toHaveBeenLastCalledWith({
-      body: {
-        definition: expect.objectContaining({
-          views: [
-            expect.objectContaining({
-              name: "Everything",
-              filter: {
-                all: [{ field: "kind", op: "eq", value: "book" }],
-              },
-            }),
-          ],
-        }),
-        view: "Everything",
-        limit: 100,
-        offset: 0,
-      },
-    });
+    await waitFor(() =>
+      expect(previewMock).toHaveBeenLastCalledWith({
+        body: {
+          definition: expect.objectContaining({
+            views: [
+              expect.objectContaining({
+                name: "Everything",
+                filter: {
+                  all: [{ field: "kind", op: "eq", value: "book" }],
+                },
+              }),
+            ],
+          }),
+          view: "Everything",
+          limit: 100,
+          offset: 0,
+        },
+      }),
+    );
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(updateMock).toHaveBeenCalledWith({
       params: { path: { slug: "reading-log" } },

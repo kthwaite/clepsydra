@@ -36,11 +36,14 @@ const definition: BaseDetailResponse = {
   slug: "reading",
   revision: "revision-1",
   name: "Reading Log",
-  properties: {
-    author: { type: "text" },
-    rating: { type: "number" },
-    status: { type: "select", options: ["queued", "reading"] },
-  },
+  properties: [
+    { key: "author", definition: { type: "text" } },
+    { key: "rating", definition: { type: "number" } },
+    {
+      key: "status",
+      definition: { type: "select", options: ["queued", "reading"] },
+    },
+  ],
   views: [
     { name: "Continues", layout: "table", columns: ["title", "author"] },
     {
@@ -542,6 +545,150 @@ describe("BaseTableView", () => {
     expect(props.onCommitCell).not.toHaveBeenCalled();
   });
 
+  it("opens a flat body excerpt in Folio without editing, sorting, or fetching", async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const props = renderView({
+      definition: {
+        ...definition,
+        properties: [
+          ...(definition.properties ?? []),
+          { key: "body", definition: { type: "text" } },
+        ],
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "body", "author"],
+          },
+        ],
+      },
+      output: {
+        shape: "flat",
+        total: 1,
+        rows: [
+          {
+            ...row,
+            columns: {
+              body: "Projected body excerpt",
+              author: "Gene Wolfe",
+            },
+          },
+        ],
+      },
+    });
+
+    try {
+      const body = await screen.findByRole("button", {
+        name: "Open body excerpt for The Book of the New Sun in Folio",
+      });
+      expect(body).toHaveTextContent("Projected body excerpt");
+      expect(body).toHaveClass("w-full", "min-w-0", "truncate");
+      expect(
+        screen.getByRole("columnheader", { name: "body" }),
+      ).not.toHaveClass("cursor-pointer");
+
+      await user.click(body);
+      await user.click(screen.getByRole("columnheader", { name: "body" }));
+
+      expect(props.onOpenPage).toHaveBeenCalledWith("book.md");
+      expect(props.onCommitCell).not.toHaveBeenCalled();
+      expect(props.onSortChange).not.toHaveBeenCalled();
+      expect(fetchSpy).not.toHaveBeenCalled();
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  });
+
+  it("opens a grouped body excerpt through the same Folio control", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      definition: {
+        ...definition,
+        views: [
+          {
+            name: "Shelf",
+            layout: "table",
+            group_by: "status",
+            columns: ["title", "body"],
+          },
+        ],
+      },
+      activeView: "Shelf",
+      output: {
+        shape: "grouped",
+        groups: [
+          {
+            key: "reading",
+            total: 1,
+            aggregates: [],
+            rows: [
+              {
+                ...row,
+                columns: { body: "A grouped body excerpt" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    const body = await screen.findByRole("button", {
+      name: "Open body excerpt for The Book of the New Sun in Folio",
+    });
+    expect(body).toHaveTextContent("A grouped body excerpt");
+
+    await user.click(body);
+
+    expect(props.onOpenPage).toHaveBeenCalledWith("book.md");
+    expect(props.onCommitCell).not.toHaveBeenCalled();
+  });
+
+  it("renders protected null and empty body values without content or editors", () => {
+    renderView({
+      definition: {
+        ...definition,
+        properties: [
+          ...(definition.properties ?? []),
+          { key: "body", definition: { type: "text" } },
+        ],
+        views: [
+          {
+            name: "Continues",
+            layout: "table",
+            columns: ["title", "body"],
+          },
+        ],
+      },
+      output: {
+        shape: "flat",
+        total: 2,
+        rows: [
+          {
+            ...row,
+            id: "protected",
+            path: "protected.md",
+            title: "Protected",
+            columns: { body: null },
+          },
+          {
+            ...row,
+            id: "empty",
+            path: "empty.md",
+            title: "Empty",
+            columns: { body: "" },
+          },
+        ],
+      },
+    });
+
+    expect(
+      screen.queryByRole("button", { name: /Open body excerpt/ }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Edit body")).not.toBeInTheDocument();
+    expect(screen.queryByText("—")).not.toBeInTheDocument();
+  });
+
   it("displays only the first sort key and replaces all keys on header sort", async () => {
     const user = userEvent.setup();
     const props = renderView({
@@ -569,11 +716,11 @@ describe("BaseTableView", () => {
     const props = renderView({
       definition: {
         ...definition,
-        properties: {
-          ...definition.properties,
-          topics: { type: "multi_select" },
-          related: { type: "relation" },
-        },
+        properties: [
+          ...(definition.properties ?? []),
+          { key: "topics", definition: { type: "multi_select" } },
+          { key: "related", definition: { type: "relation" } },
+        ],
         views: [
           {
             name: "Continues",
