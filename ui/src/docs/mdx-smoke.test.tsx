@@ -226,6 +226,68 @@ function registeredGuideSource(slug: string): string {
   return DOC_PAGES.find((page) => page.slug === slug)?.source ?? "";
 }
 
+it("documents task date, stale-span, and current Today projection boundaries", () => {
+  const source = registeredGuideSource(
+    "tasks-agenda-journals-and-board",
+  );
+
+  expect(source).toContain("not validated as dates by the server");
+  expect(source).toContain("compares their indexed strings lexicographically");
+  expect(source).toContain("rewrite a different nearby checkbox");
+  expect(source).toContain("both **Overdue** and **Due Today**");
+});
+
+it("documents exact academic deduplication and Zotero status matrices", () => {
+  const source = registeredGuideSource("academic-library-and-reading");
+
+  for (const status of [
+    "`would_create`",
+    "`would_skip`",
+    "`would_update`",
+    "`conflict`",
+    "`skipped`",
+    "`created`",
+    "`updated`",
+    "`error`",
+  ]) {
+    expect(source).toContain(status);
+  }
+  expect(source).toContain("DOI and ISBN deduplication compares exact indexed strings");
+  expect(source).toMatch(/BibTeX and\s+Zotero preserve source spelling/);
+});
+
+it("documents extension permissions and complete capture scope", () => {
+  const source = registeredGuideSource("capture-feeds-and-archives");
+
+  expect(source).toMatch(
+    /`activeTab`, `storage`, `notifications`, and\s+`scripting`/,
+  );
+  expect(source).toContain("`http://*/*` and `https://*/*`");
+  expect(source).toContain("current page DOM");
+  expect(source).toMatch(/cross-origin image\s+resources/);
+  expect(source).toMatch(/configured\s+Clepsydra server/);
+});
+
+it("documents feed scheduling, retention budgets, and Saved growth", () => {
+  const source = registeredGuideSource("capture-feeds-and-archives");
+
+  expect(source).toContain("60-second due sweep");
+  expect(source).toContain("30-minute base interval");
+  expect(source).toContain("capped at 24 hours");
+  expect(source).toContain("5,000 entries or 128 MiB per feed");
+  expect(source).toMatch(/50,000\s+entries or 1 GiB globally/);
+  expect(source).toContain("Saved entries are exempt");
+});
+
+it("documents warning-only archive deletion hooks and CAS recovery limits", () => {
+  const source = registeredGuideSource("capture-feeds-and-archives");
+
+  expect(source).toMatch(/warning after the Folio\s+deletion has succeeded/);
+  expect(source).toMatch(/leaked reference\s+counts/);
+  expect(source).toContain("archive-import or reference-replay");
+  expect(source).toContain("complete CAS directory, including `cas.db`");
+});
+
 function runtimeRoutePaths(): string[] {
   const router = createRouter({
     routeTree,

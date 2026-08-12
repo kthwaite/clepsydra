@@ -50,11 +50,14 @@ Choose **Import** and select a source:
   timestamp, and can use a saved import checkpoint. Preview with **Dry run**
   before writing pages.
 
-Clepsydra deduplicates work by DOI, ISBN, and citation key; Zotero additionally
-uses its stable item key. A matching BibTeX, DOI, or ISBN import is reported as
-`skipped` and points to the existing page. Citation keys must be unique for
-manual creation and metadata edits. Generated Zotero keys avoid keys already in
-the index and earlier items in the same run.
+DOI and ISBN deduplication compares exact indexed strings. The dedicated ISBN
+importer normalizes ISBN-10/13 and removes accepted separators, but BibTeX and
+Zotero preserve source spelling, including DOI case and ISBN separators.
+Equivalent identifiers can therefore miss the identifier match; a matching
+citation key may still find the existing work. Standardize source identifiers
+before importing when reliable deduplication matters. Zotero also checks its
+stable item key, and generated Zotero citation keys avoid keys already in the
+index and earlier items in the same run.
 
 Zotero offers three conflict policies:
 
@@ -64,12 +67,17 @@ Zotero offers three conflict policies:
 - **Report conflicts only** returns field-by-field local and Zotero values
   without applying them.
 
-A dry run reports `would_create`, `skipped`, or `conflict` without creating or
-updating work pages. During a real multi-item import, each result can also be
-`created` or `error`. Items are processed independently; the whole Zotero or
-BibTeX run is not one all-or-none transaction. Review every result. A Zotero
-checkpoint is not advanced when any item reports `error`; checkpoint-write
-failure is returned separately after item processing.
+For a Zotero dry run, the item status matrix is: a new item is `would_create`;
+an existing item under **Skip** is `would_skip`; an existing item under
+**Zotero metadata wins** is `would_update`; and **Report conflicts only**
+returns `conflict` when fields differ or `skipped` when they do not. A real run
+uses `created`, `skipped`, `updated`, or `conflict` for those corresponding
+outcomes, and `error` when processing that item fails.
+
+Items are processed independently; the whole Zotero or BibTeX run is not one
+all-or-none transaction. Review every result. A Zotero checkpoint is not
+advanced when any item reports `error`; checkpoint-write failure is returned
+separately after item processing.
 
 ### Read and annotate a work
 

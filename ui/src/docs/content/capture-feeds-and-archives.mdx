@@ -28,6 +28,15 @@ extension or use its keyboard shortcut. The client sends extracted Markdown,
 source and canonical URLs, title, capture time, tags, content hash, snapshot
 hash, and base64 resource blobs to `POST /api/vault/archive`.
 
+The Chromium manifest requests `activeTab`, `storage`, `notifications`, and
+`scripting`, plus host access for `http://*/*` and `https://*/*`. The Firefox
+manifest puts the same HTTP(S) host patterns directly in `permissions` alongside
+`activeTab`, `storage`, and `notifications`. This scope lets the injected script
+read the current page DOM, lets the background worker fetch cross-origin image
+resources with browser credentials, and lets it contact the configured
+Clepsydra server. Review the captured payload rather than assuming the
+permissions constrain extraction to public text or same-origin resources.
+
 The server verifies the Markdown and every blob against its declared SHA-256
 hash, enforces per-blob and total limits, and creates a non-colliding archive
 Folio under the configured prefix and domain. A repeated URL with the same
@@ -42,12 +51,16 @@ and resource bytes live in the separate CAS, keyed as `sha256:<digest>`. Equal
 bytes are stored once and their reference count is incremented. The server can
 serve a referenced blob from `/api/vault/cas/<hash>`.
 
-Deleting an archive Folio through Clepsydra decrements each distinct snapshot
-and resource reference. A zero-reference blob is retained until a CAS garbage
-collection call removes blobs older than the configured minimum age. Although
-`archive.gc_min_age_days` exists, no shipped UI or CLI command invokes CAS
-collection; plan storage and maintenance accordingly rather than assuming an
-automatic retention purge.
+Deleting an archive Folio through Clepsydra removes the Folio and then runs a
+post-delete hook that attempts to decrement each distinct snapshot and resource
+reference. If that hook fails, the server logs a warning after the Folio
+deletion has succeeded; the delete is not rolled back, so leaked reference
+counts can retain otherwise unreachable blobs.
+
+A zero-reference blob remains until a CAS garbage-collection call removes blobs
+older than the configured minimum age. Although `archive.gc_min_age_days`
+exists, no shipped UI or CLI command invokes CAS collection; plan storage and
+maintenance accordingly rather than assuming an automatic retention purge.
 
 CAS blobs are not editable note attachments. Attachments are user-managed files
 beneath `vault.attachment_folder`, referenced by attachment URLs and deleted
@@ -65,10 +78,18 @@ subscription set rather than replacing it with a warning-bearing candidate.
 
 Return to the river and switch among **UNREAD**, **ALL**, and **SAVED**. Filter
 by group, feed, or tag. Entry read and bookmark state, cached content, fetch
-metadata, and counters live in `.clepsydra/feeds.db`. **Refresh feeds** schedules
-fetches; failures are recorded per feed and later attempts use backoff. Retention
-quotas bound cached entries and content, so the reader is not a permanent archive
-of every feed item.
+metadata, and counters live in `.clepsydra/feeds.db`. The scheduler runs an
+automatic 60-second due sweep and also wakes when **Refresh feeds** marks
+subscriptions due. A success or `304` uses the configured fetch interval, whose
+default is a 30-minute base interval. Repeated failures use exponential backoff
+from that base, capped at 24 hours.
+
+Age retention defaults to 30 days for read entries and 90 days for unread
+entries. Quotas retain at most 5,000 entries or 128 MiB per feed and 50,000
+entries or 1 GiB globally. Both age pruning and those budgets apply only to
+unbookmarked entries. Bookmarked Saved entries are exempt, so Saved storage can
+grow beyond the retention budgets; the reader is not a permanent archive unless
+you deliberately preserve and back up that growing state.
 
 Subscription edits use a manifest revision. A stale edit, move, delete, or OPML
 import is rejected instead of overwriting a newer `feeds.md`; reload and reapply
@@ -98,16 +119,20 @@ plain attachments stored inside the vault, and the feed reader database.
 
 The backup does **not** automatically include the default CAS because
 `~/.clepsydra/cas` is outside the vault. If `archive.cas_path` points outside the
-vault, back up that directory separately and keep it consistent with the vault's
-archive Folios. Likewise, external Zotero PDF asset paths are outside this
-backup. If a custom CAS path is inside the vault, it is walked as ordinary vault
-content, but restore testing is still your responsibility.
+vault, back up the complete CAS directory, including `cas.db` and the blob tree,
+separately and keep that copy consistent with the vault's archive Folios.
+Likewise, external Zotero PDF asset paths are outside this backup. If a custom
+CAS path is inside the vault, it is walked as ordinary vault content, but that
+walk is not a transactional snapshot across archive Folios and CAS.
 
-There is no shipped restore command. Recovery means stopping writers, safely
-extracting the tar to the intended vault location, restoring any separately
-backed-up CAS and external assets, and starting Clepsydra so the derived index
-can rebuild. Test this procedure on a separate location; a backup file's
-existence alone is not proof of recoverability.
+There is no shipped restore command, archive-import or reference-replay
+operation, or CAS refcount rebuild. Recovery means stopping writers, safely
+extracting the tar to the intended vault location, restoring a matching complete
+CAS directory, including `cas.db`, and restoring any external assets. Start
+Clepsydra so the derived page index can rebuild, but do not expect that rebuild
+to reconstruct CAS bytes or reference counts from archive Folios. Test this
+procedure on a separate location; a backup file's existence alone is not proof
+of recoverability.
 
 ## Failures and conflicts
 
@@ -128,9 +153,10 @@ existence alone is not proof of recoverability.
 - Backup aborts if it cannot validate or snapshot feed storage, traverse a vault
   entry, or finish the archive. A partial file is not committed as the final
   backup.
-- Restoring only vault Markdown leaves externally stored CAS bytes absent;
-  archive metadata can then point to missing blobs. Restoring only CAS leaves no
-  archive Folios to own its references.
+- Restoring only vault Markdown leaves externally stored CAS bytes and its
+  refcount database absent; archive metadata can then point to missing blobs.
+  Restoring only or mismatching CAS leaves no reliable association with the
+  restored archive Folios, and startup indexing does not repair that boundary.
 
 ## Privacy
 

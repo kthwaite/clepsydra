@@ -15,8 +15,10 @@ and mutations over those files, not a second task store.
 - Use checkbox list items such as `- [ ] Draft proposal`. Inline properties use
   the Markdown form `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
   `[priority:: P1]`.
-- Dates in task properties and board fields must use `YYYY-MM-DD`. The shipped
-  task and board forms do not parse phrases such as “tomorrow” or “next Friday.”
+- Enter task `due` and `scheduled` values and board-cycle start and end strings
+  as exact `YYYY-MM-DD`. They are not validated as dates by the server. For
+  agenda tasks, the API compares their indexed strings lexicographically, so
+  another spelling can be misplaced instead of rejected.
 
 ## Workflow
 
@@ -27,9 +29,11 @@ Task queries can filter by status, due or scheduled bounds, priority, tag, sourc
 page, and whether a due date is absent. Changing a task status rewrites that
 checkbox in the source page and then reindexes it.
 
-The status mutation addresses a checkbox by source path and indexed byte offset.
-If the page changed enough for that target to become stale, reload the page or
-view before retrying rather than assuming a different checkbox was updated.
+The status mutation addresses a checkbox by source path and indexed byte offset;
+it does not verify the task's identity at that offset. If an external edit shifts
+offsets before reindexing, the endpoint can rewrite a different nearby checkbox.
+Wait for reindexing, then reload the page, board, or agenda before changing
+status.
 Tasks inside protected pages are visible only according to the protected-page
 index boundary and cannot be changed through the task-status endpoint.
 
@@ -37,10 +41,12 @@ index boundary and cannot be changed through the task-status endpoint.
 
 Open `/agenda`:
 
-- **Today** shows overdue tasks separately, then work due or scheduled today and
-  incomplete tasks in today's journal.
-- **Upcoming** groups due dates from today through seven days ahead. It is a due
-  date view; a merely scheduled future task is not included there.
+- **Today** obtains overdue tasks separately, but `/agenda/today` also includes
+  overdue work in its task list. The current UI can therefore show an overdue
+  task in both **Overdue** and **Due Today**; the latter also includes work due
+  or scheduled today and incomplete tasks in today's journal.
+- **Upcoming** groups due strings from today through seven days ahead. It is a
+  due-property view; a merely scheduled future task is not included there.
 - **Inbox** shows `todo` tasks without a `due` property. A scheduled-but-undated
   task therefore still belongs to this query.
 
@@ -92,8 +98,12 @@ not unrelated edits from other clients before or after it.
 
 ## Failures and conflicts
 
-- Invalid task statuses, priorities, cycle codes, dates, and stale source spans
-  are rejected. Reload the board or agenda and retry with current data.
+- Invalid task statuses, priorities, and relevant cycle codes are rejected, but
+  malformed date strings can instead sort incorrectly. Correct the source value,
+  wait for reindexing, and reload the board or agenda.
+- A task status update does not reject every stale span: a shifted offset can
+  select another checkbox near that byte position. Reindex and reload before
+  retrying after external edits.
 - A task status change returns a conflict for a protected page. Unlock and edit
   the source Folio instead; the endpoint does not decrypt it.
 - Board creation can reject a generated destination collision. Existing task
