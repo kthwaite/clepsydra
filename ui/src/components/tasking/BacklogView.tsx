@@ -29,6 +29,7 @@ import {
 } from "./board-constants";
 import { checklistProgress } from "./board-stats";
 import { InlineEditPopover } from "./InlineEditPopover";
+import { QuickAddRow } from "./QuickAddRow";
 
 /** Shared grid tracks for the header row and task rows (.bk-row). */
 const BK_COLS = "94px minmax(0,1fr) 90px 122px 58px 70px 58px 72px";
@@ -80,14 +81,23 @@ export function BacklogView({ tasks }: BacklogViewProps) {
 
   return (
     <div className="h-full overflow-auto text-[var(--fs-s)]">
+      {/* ── QuickAddRow ──────────────────────────────────────────────────── */}
+      <div
+        className="sticky top-0 z-[4] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad,12px)] py-[5px]"
+        style={{ minHeight: "var(--row-h, 32px)" }}
+      >
+        <QuickAddRow preset={{}} testId="qa-backlog" />
+      </div>
+
       {/* ── Header row ──────────────────────────────────────────────────── */}
       <div
-        className="cl-mono sticky top-0 z-[3] grid w-full border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad,12px)] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]"
+        className="cl-mono sticky z-[3] grid w-full border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad,12px)] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]"
         style={{
           gridTemplateColumns: BK_COLS,
           gap: "12px",
           minHeight: "var(--row-h, 32px)",
           alignItems: "center",
+          top: "var(--row-h, 32px)",
         }}
       >
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
@@ -130,7 +140,7 @@ export function BacklogView({ tasks }: BacklogViewProps) {
             data-testid={`bk-grp-hd-${g.pri}`}
             className="sticky z-[4] flex items-center gap-[12px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad,12px)] py-[7px]"
             style={{
-              top: "var(--row-h, 32px)",
+              top: "calc(2 * var(--row-h, 32px))",
               borderTopStyle: idx === 0 ? "none" : "solid",
               borderTopWidth: idx === 0 ? 0 : "1px",
               borderTopColor: "var(--rule)",

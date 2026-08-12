@@ -16,6 +16,7 @@ import { usePatchTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import { PRI_ORDER } from "./board-constants";
+import { QuickAddRow } from "./QuickAddRow";
 import { TaskCard } from "./TaskCard";
 
 // ── sealed-cycle filter (Decision 8) ─────────────────────────────────────────
@@ -215,6 +216,14 @@ export function KanbanView({
                   />
                 ))
               )}
+              <QuickAddRow
+                preset={
+                  activeProject
+                    ? { status: col.id, project: activeProject }
+                    : { status: col.id }
+                }
+                testId={`qa-${col.id}`}
+              />
             </div>
           </div>
         );

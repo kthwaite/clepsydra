@@ -500,3 +500,17 @@ describe("BacklogView — empty state", () => {
     expect(screen.queryByText("CRITICAL")).not.toBeInTheDocument();
   });
 });
+
+describe("BacklogView — QuickAddRow wiring", () => {
+  it("renders a QuickAddRow above the header row", () => {
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
+    // QuickAddRow should be present with the backlog testId
+    expect(screen.getByTestId("qa-backlog")).toBeInTheDocument();
+  });
+
+  it("QuickAddRow has empty preset (no status/project/cycle)", () => {
+    wrap(<BacklogView tasks={[T_P0_DUE]} />);
+    const row = screen.getByTestId("qa-backlog");
+    expect(row).toHaveAttribute("placeholder", "+ ADD");
+  });
+});

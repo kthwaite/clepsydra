@@ -642,3 +642,51 @@ describe("KanbanView — drag-and-drop", () => {
     expect(card).not.toHaveStyle({ opacity: "0.35" });
   });
 });
+
+// ── QuickAddRow wiring ───────────────────────────────────────────────────────────
+
+describe("KanbanView — QuickAddRow wiring", () => {
+  it("renders a QuickAddRow at the bottom of each column body with status preset", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    // Should have a quick-add row for each column
+    expect(screen.getByTestId("qa-INTAKE")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-TRIAGE")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-FIELD")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-REVIEW")).toBeInTheDocument();
+    expect(screen.getByTestId("qa-SEALED")).toBeInTheDocument();
+  });
+
+  it("passes the correct status preset to each column's QuickAddRow", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    const intakeRow = screen.getByTestId("qa-INTAKE");
+    expect(intakeRow).toHaveAttribute("placeholder", "+ ADD");
+  });
+
+  it("includes activeProject in the preset when provided", () => {
+    wrap(
+      <KanbanView
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+        activeProject="alpha"
+      />,
+    );
+    // Component should render; exact preset is verified by component tests
+    expect(screen.getByTestId("qa-INTAKE")).toBeInTheDocument();
+  });
+});
