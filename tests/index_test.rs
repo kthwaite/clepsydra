@@ -441,14 +441,15 @@ Content here.
 }
 
 #[test]
-fn uuid_shaped_targets_resolve_exactly_before_canonical_aliases() {
+fn noncanonical_uuid_targets_resolve_exactly_before_canonical_aliases() {
     const TARGET_ID: &str = "019fd000-0000-7000-8000-000000000721";
+    const TARGET_REFERENCE: &str = "019fd000000070008000000000000721";
     let source = format!(
-        "---\nid: 019fd000-0000-7000-8000-000000000720\ntitle: Source\n---\nSee [[{TARGET_ID}|selected]].\n"
+        "---\nid: 019fd000-0000-7000-8000-000000000720\ntitle: Source\n---\nSee [[{TARGET_REFERENCE}|selected]].\n"
     );
     let target = format!("---\nid: {TARGET_ID}\ntitle: Selected Target\n---\nSelected.\n");
     let decoy = format!(
-        "---\nid: 019fd000-0000-7000-8000-000000000722\ntitle: Alias Decoy\naliases:\n  - {TARGET_ID}\n---\nDecoy.\n"
+        "---\nid: 019fd000-0000-7000-8000-000000000722\ntitle: Alias Decoy\naliases:\n  - {TARGET_REFERENCE}\n---\nDecoy.\n"
     );
     let (_tmp, vault) = setup_vault(&[
         ("source.md", &source),
@@ -473,6 +474,40 @@ fn uuid_shaped_targets_resolve_exactly_before_canonical_aliases() {
         .unwrap();
     assert_eq!(target_id.as_deref(), Some(TARGET_ID));
     assert_eq!(target_path.as_deref(), Some("target.md"));
+}
+
+#[test]
+fn uuid_shaped_targets_fall_back_to_unique_canonical_names_without_an_exact_id() {
+    const UUID_TITLE: &str = "019fd000-0000-7000-8000-000000000723";
+    let source = format!(
+        "---\nid: 019fd000-0000-7000-8000-000000000724\ntitle: Source\n---\nSee [[{UUID_TITLE}]].\n"
+    );
+    let canonical_target = format!(
+        "---\nid: 019fd000-0000-7000-8000-000000000725\ntitle: {UUID_TITLE}\n---\nCanonical target.\n"
+    );
+    let (_tmp, vault) =
+        setup_vault(&[("source.md", &source), ("canonical.md", &canonical_target)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let (target_id, target_path): (Option<String>, Option<String>) = index
+        .connection()
+        .query_row(
+            "SELECT target_id, target_path
+             FROM links
+             WHERE source_id = '019fd000-0000-7000-8000-000000000724'
+               AND span_start >= 0",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        target_id.as_deref(),
+        Some("019fd000-0000-7000-8000-000000000725")
+    );
+    assert_eq!(target_path.as_deref(), Some("canonical.md"));
 }
 
 #[test]

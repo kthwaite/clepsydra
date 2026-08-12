@@ -1637,15 +1637,17 @@ fn unique_link_target(
     conn: &Connection,
     target_canonical: &str,
 ) -> Result<Option<(String, String)>, IndexError> {
-    if Uuid::parse_str(target_canonical).is_ok() {
-        return conn
+    if let Ok(target_id) = Uuid::parse_str(target_canonical) {
+        let exact = conn
             .query_row(
                 "SELECT id, path FROM pages WHERE id = ?1",
-                params![target_canonical],
+                params![target_id.hyphenated().to_string()],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()
-            .map_err(IndexError::Sqlite);
+            .optional()?;
+        if exact.is_some() {
+            return Ok(exact);
+        }
     }
 
     let mut stmt = conn.prepare(

@@ -36,6 +36,8 @@ export function RepairWorkspace({
   const isMobile = useMobileLayout();
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const detailRef = useRef<HTMLElement>(null);
+  const emptyResultsRef = useRef<HTMLDivElement>(null);
+  const appliedFingerprintRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!issuesQuery.data) return;
@@ -46,6 +48,20 @@ export function RepairWorkspace({
       setSelectedFingerprint(null);
     }
   }, [issues, issuesQuery.data, selectedFingerprint]);
+
+  useEffect(() => {
+    const fingerprint = appliedFingerprintRef.current;
+    if (!fingerprint || !issuesQuery.data) return;
+    if (issues.some((issue) => issue.fingerprint === fingerprint)) return;
+    appliedFingerprintRef.current = null;
+    requestAnimationFrame(() => {
+      const firstIssue = issues[0];
+      const target = firstIssue
+        ? rowRefs.current.get(firstIssue.fingerprint)
+        : emptyResultsRef.current;
+      target?.focus();
+    });
+  }, [issues, issuesQuery.data]);
 
   useEffect(() => {
     if (!issuesQuery.data) return;
@@ -111,6 +127,11 @@ export function RepairWorkspace({
     });
   }
 
+  function closeMobileAfterApply() {
+    appliedFingerprintRef.current = selectedFingerprint;
+    closeMobileDetail();
+  }
+
   return (
     <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-paper text-ink">
       <header className="border-b border-rule bg-paper-2 px-3 py-4 md:px-5">
@@ -155,7 +176,13 @@ export function RepairWorkspace({
           Reference issues could not load. {issuesQuery.error?.message}
         </div>
       ) : issues.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center p-8 text-center">
+        <div
+          ref={emptyResultsRef}
+          role="status"
+          aria-label="Reference repair results"
+          tabIndex={-1}
+          className="flex flex-1 items-center justify-center p-8 text-center outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+        >
           <div>
             <p className="text-sm font-semibold">No reference issues match.</p>
             <p className="mt-1 text-xs text-ink-mute">
@@ -287,7 +314,7 @@ export function RepairWorkspace({
             <RepairIssueDetail
               issue={selectedIssue}
               onRefresh={() => issuesQuery.refetch()}
-              onApplied={closeMobileDetail}
+              onApplied={closeMobileAfterApply}
             />
           ) : null}
         </Dialog>

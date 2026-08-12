@@ -502,6 +502,34 @@ describe("RepairWorkspace", () => {
     );
     await waitFor(() => expect(row).toHaveFocus());
   });
+
+  it("moves focus to the results status when an applied mobile issue leaves the ledger", async () => {
+    mocks.mobile = true;
+    const user = userEvent.setup();
+    const { rerender } = renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Apply previewed repair" }),
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("dialog", { name: "Repair issue" }),
+      ).not.toBeInTheDocument(),
+    );
+
+    mocks.issues = [];
+    mocks.total = 0;
+    rerender(<RepairWorkspace />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("status", { name: "Reference repair results" }),
+      ).toHaveFocus(),
+    );
+  });
   it("keeps selection while a refreshed result is not yet available", async () => {
     const user = userEvent.setup();
     const { rerender } = renderWorkspace();
