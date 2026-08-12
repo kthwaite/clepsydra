@@ -649,7 +649,7 @@ fn absolutise(raw: &str, base_url: &str) -> Option<String> {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --lib archive_snapshot`
-Expected: 20 passed.
+Expected: 21 passed.
 
 - [ ] **Step 5: Verify the gates**
 
@@ -1948,7 +1948,7 @@ export function snapshotRejection(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `bun run test capture-hygiene`
-Expected: 11 passed.
+Expected: 10 passed (5 plain cases plus the 5-marker `it.each`).
 
 - [ ] **Step 5: Commit**
 
