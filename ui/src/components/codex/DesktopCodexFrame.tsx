@@ -138,16 +138,6 @@ export function DesktopCodexFrame({
 
         {/* HEADER META — minimal status that survives diegetic-off */}
         <div className="cl-mono flex shrink-0 items-stretch text-[10px]">
-          <span className="hidden items-center gap-1.5 border-l border-rule-soft px-3 sm:flex">
-            <span
-              className="inline-block h-[6px] w-[6px]"
-              style={{ background: syncColor }}
-              aria-hidden
-            />
-            <span className="text-ink-mute uppercase tracking-[0.16em]">
-              {pages} notes
-            </span>
-          </span>
           <button
             type="button"
             onClick={openSearch}
@@ -157,19 +147,6 @@ export function DesktopCodexFrame({
             <span className="hidden md:inline uppercase tracking-[0.16em]">
               query
             </span>
-          </button>
-          <button
-            type="button"
-            onClick={() => openSettings("appearance")}
-            className={cn(
-              "cl-mono flex cursor-pointer items-center gap-1.5 border-l border-rule-soft px-3 uppercase tracking-[0.18em]",
-              settingsOpen
-                ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
-                : "text-ink-mute hover:text-ink",
-            )}
-          >
-            <span className="text-[9px] text-ink-mute">08</span>
-            <span className="text-[10px]">STATUS</span>
           </button>
           <button
             type="button"
