@@ -1,24 +1,18 @@
 # Archived Page Viewer Design
 
-**Status:** Blocked — awaiting the capture spec
+**Status:** Approved design — implement after the capture spec
 **Date:** 2026-08-12
 
-> **Sequencing changed after approval.** The vault holds one captured page and
-> no further captures will be made until this work is complete, so no corpus of
-> raw-`outerHTML` snapshots will accumulate. The dual-path design below — content-type
-> dispatch, the 415 seam, the unconditional low-fidelity notice — exists only to
-> carry legacy snapshots that will now never exist.
+> **Revised after the capture spec.** `2026-08-12-fidelity-capture-design.md`
+> settles the artifact: one SingleFile snapshot per page, deconstructed into the
+> CAS. Two consequences, applied below:
 >
-> The capture spec is therefore promoted ahead of this one, and this document
-> must be revised against its outcome before implementation. The revision hinges
-> on one decision: if capture produces WACZ, the viewer needs server-side record
-> unpacking; if it produces a single inlined self-contained HTML document, the
-> viewer stays a sandboxed iframe over one blob and most of what follows survives
-> unchanged.
->
-> Sections that survive either way: the route and its placement, the sandbox
-> headers and the four security invariants, the refusal to fetch from the live
-> web, the typed-`archive`-metadata fix, and the banner.
+> - The dual-path content-type dispatch, the `application/wacz` 415 seam and the
+>   unconditional low-fidelity notice are **removed**. There is one artifact, and
+>   no corpus of raw-`outerHTML` snapshots will accumulate.
+> - The CSP invariant becomes "no **external** origin" rather than "no network
+>   scheme". Snapshot resources live at `/api/vault/cas/<hash>`, so the frame
+>   needs an explicit allowance for the vault's own host.
 
 ## Summary
 
@@ -26,20 +20,19 @@ Clepsydra will gain a dedicated route for viewing the captured snapshot of an ar
 
 The snapshot is served by a new endpoint that exists solely to be framed. It sets a `Content-Security-Policy: sandbox` so the archived markup runs in an opaque origin with no script execution and no reach into vault storage or the API. `/api/vault/cas/{hash}` is unchanged and continues to force download for active content types.
 
-The viewer is designed against an artifact contract rather than a specific capture technology. Today every snapshot is `text/html`; when WACZ capture lands, the same route dispatches on content type and the rest of the viewer is unaffected.
+The snapshot is a SingleFile capture whose resources have been deconstructed into the content store and rewritten to `cas:` references, as specified in `2026-08-12-fidelity-capture-design.md`. The frame therefore loads its resources from the vault's own host and from nowhere else.
 
 ## Goals
 
 - Read an archived page's captured snapshot inside Clepsydra, with its origin URL and capture time visible.
 - Serve archived markup inertly: no script execution, no access to the vault origin.
 - Render only what was captured, never fetching from the live web.
-- Keep the fidelity decision reversible — the viewer must not depend on how the snapshot was produced.
-- Make the current low-fidelity state legible rather than disguised.
+- Keep the viewer independent of how the snapshot was produced, beyond the artifact contract it consumes.
 - Fix the untyped `[archive]` frontmatter so the banner reads typed fields.
 
 ## Non-goals
 
-- WACZ unpacking, or any capture-side work. The route returns 415 for artifacts it cannot yet frame; filling that in belongs to the capture spec.
+- Capture-side work of any kind. That is `2026-08-12-fidelity-capture-design.md`, which this spec depends on and must follow.
 - Capture history, timelines, or multiple snapshots per URL. The data model holds one archive per URL and re-capturing changed content returns 409; that is unchanged here.
 - Annotating, highlighting, or editing the framed page.
 - Replaying dynamic behaviour (XHR, dynamic imports). That needs URL-rewriting replay, which this design deliberately declines.
@@ -67,23 +60,32 @@ The route is reached from the archived page's folio. It is not a folio tab mode:
 
 `GET /api/vault/archive/view/{hash}`
 
-The only endpoint that serves archived markup inline. It looks the blob up in the CAS and dispatches on its stored content type:
+The only endpoint that serves archived markup inline. It looks the blob up in the CAS and serves it with the sandbox headers below.
 
-- `text/html`, `application/xhtml+xml` — served inline with the sandbox headers below.
-- anything else, including `application/wacz` — `415 Unsupported Media Type`, with a message naming the type. This is the seam where the capture spec plugs in.
-- unknown hash — `404`.
+Snapshots are always `text/html` — the capture pipeline produces exactly one artifact type. Any other stored content type is a corruption, not a format to support, and returns `415` naming the type. An unknown hash returns `404`.
 
 ### Response headers
 
 ```
-Content-Security-Policy: sandbox; default-src 'none'; img-src data:; media-src data:; style-src 'unsafe-inline' data:; font-src data:
+Content-Security-Policy: sandbox; default-src 'none'; img-src <vault-origin> data:; media-src <vault-origin> data:; style-src 'unsafe-inline' <vault-origin> data:; font-src <vault-origin> data:
 X-Content-Type-Options: nosniff
-Content-Type: <stored content type>
+Content-Type: text/html
 ```
+
+`<vault-origin>` is the server's own scheme and host, written explicitly. `'self'`
+cannot be used: CSP `sandbox` gives the frame an opaque origin, against which
+`'self'` matches nothing. The origin is derived from configuration, not from the
+request's `Host` header, so a spoofed header cannot widen the policy.
 
 `sandbox` with no tokens gives an opaque origin and blocks script execution outright. `style-src 'unsafe-inline'` admits the page's own `<style>` blocks, which is not a meaningful vector once scripts cannot run.
 
-**No directive permits `http:` or `https:`.** This is a correctness property, not only a safety one. Wayback serves what it captured; if the frame could fetch live assets, an old archive would silently render with today's images and would misrepresent what it recorded. Refusing live fetches also keeps the low-fidelity state visible instead of papered over.
+**No directive permits an external origin.** The frame reaches the vault's own host for deconstructed resources and nothing else. This is a correctness property, not only a safety one: Wayback serves what it captured, and a frame that could fetch live assets would render an old archive with today's images, misrepresenting what it recorded.
+
+### Interaction with the CAS attachment rule
+
+Deconstructed snapshots reference their resources at `/api/vault/cas/{hash}`, which forces `Content-Disposition: attachment` for active content types. Images, CSS and fonts are unaffected. **SVG is:** `image/svg+xml` is on the active list, because an SVG navigated to directly can execute script.
+
+An SVG loaded through `<img>` cannot execute script, so the attachment header is not protecting anything in that position — but browsers vary in whether they honour `Content-Disposition` on subresources, so a snapshot's SVG assets may fail to render. The implementation must verify this against a real capture containing SVG, and if it breaks, the fix is to distinguish navigation from subresource loading (e.g. `Sec-Fetch-Dest`) rather than to drop the attachment rule.
 
 ## Server: typed archive metadata
 
@@ -98,7 +100,7 @@ A parallel snapshot-metadata endpoint was considered and rejected: it would dupl
 Stated so tests can pin each one:
 
 1. The view response carries `Content-Security-Policy: sandbox`.
-2. No CSP directive in that response permits a network scheme.
+2. No CSP directive in that response permits any origin other than the vault's own.
 3. The `<iframe>` also carries a bare `sandbox` attribute with **no tokens** — defence in depth, independent of the header. No tokens is the maximally restrictive form: markup and CSS still render, while scripts, forms, popups and same-origin access are all denied. In particular it must not gain `allow-scripts` or `allow-same-origin`; granting both together would let the framed page remove its own sandbox.
 4. `/api/vault/cas/{hash}` still returns `Content-Disposition: attachment` for active content types.
 
@@ -108,13 +110,11 @@ Invariant 4 is the existing G1 regression guard. This design adds an inline path
 
 | Condition | Rendering |
 |---|---|
-| Page has `archive.snapshot_hash`, blob is HTML | Banner plus framed snapshot, with a notice that external resources were not captured |
+| Page has `archive.snapshot_hash`, blob present | Banner plus framed snapshot |
 | Page has no `archive` metadata | Explanatory empty state and a link back to the page — reachable by typing the URL for any ordinary note |
 | `snapshot_hash` present, blob absent from CAS | "Snapshot is no longer in the content store", naming the hash — the garbage-collected case |
-| Blob type cannot be framed | The 415 message, naming the type |
+| Stored blob is not `text/html` | The 415 message, naming the type — a corruption, not an expected state |
 | Page not found | Existing 404 handling |
-
-The low-fidelity notice is **unconditional** for now. There is exactly one kind of snapshot today, so a `fidelity` frontmatter field would have a single possible value. When WACZ capture lands and there are genuinely two, the capture spec adds the field and the banner branches on it.
 
 ## Banner content
 
@@ -149,8 +149,9 @@ Origin URL (linked to the live page), capture time, page title, and a link back 
 
 **Rust**
 - View route sets `sandbox` CSP and serves HTML inline.
-- No CSP directive permits `http:` or `https:`.
-- Non-framable content type returns 415 naming the type.
+- No CSP directive permits an origin other than the vault's own.
+- The allowed origin comes from configuration, not the request `Host` header.
+- An unexpected stored content type returns 415 naming the type.
 - Unknown hash returns 404.
 - `/api/vault/cas/{hash}` still returns `attachment` for active types (regression).
 
@@ -162,10 +163,8 @@ Origin URL (linked to the live page), capture time, page title, and a link back 
 
 ## Risks
 
-**The frame will look bare.** Today's snapshot is raw `document.documentElement.outerHTML` with nothing inlined, so the sandbox blocks its stylesheets and images and the result is close to unstyled text. This is the honest rendering of what was captured, and the notice says so — but it means the viewer's value is limited until the capture work lands. Accepted deliberately: the alternative is a frame that lies.
+**Ordering.** This spec is worthless before the capture spec ships: framing a raw-`outerHTML` snapshot yields unstyled text with its resources blocked. Implement capture first.
 
-**415 is a visible dead end** if a WACZ arrives before the capture spec is implemented. Acceptable because no WACZ can exist until that spec ships.
+**The allowed origin is a widening of the sandbox.** Permitting the vault's own host for subresources is what makes deconstructed snapshots render, but it means the frame can issue requests to our server. Those requests are limited to fetch directives — no script, no form, no navigation — and `/api/vault/cas/{hash}` is a read-only blob endpoint. Worth restating whenever the CSP is touched, because loosening it further is how this becomes a hole.
 
-## Follow-up
-
-The capture spec (fidelity: WACZ or inlined self-contained HTML) is the sequel and the thing that makes this viewer worth using. It fills in the 415 branch, adds the `fidelity` field, and carries the licence questions this design avoided — `single-file-core` and Browsertrix are both AGPL, and the JavaScript WACZ tooling terms need checking.
+**Dependency.** `2026-08-12-fidelity-capture-design.md` — the artifact this frames, the `cas:` rewriting that requires the origin allowance, and the AGPL note about `single-file-core`.
