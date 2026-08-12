@@ -38,6 +38,8 @@ export function FeedRiver({
   const patchEntry = usePatchFeedEntry();
   const markEntriesRead = useMarkFeedEntriesRead();
   const [expandedEntry, setExpandedEntry] = useState<FeedEntry | null>(null);
+  const [selectedEntrySnapshot, setSelectedEntrySnapshot] =
+    useState<FeedEntry | null>(null);
   const [expandedEntryFilters, setExpandedEntryFilters] =
     useState<FeedRiverFilters | null>(null);
   const [tagEditorId, setTagEditorId] = useState<number | null>(null);
@@ -101,6 +103,37 @@ export function FeedRiver({
       ),
     [entriesQuery.data],
   );
+  const loadedSelectedEntry = entries.find(
+    (entry) => entry.id === selectedEntryId,
+  );
+  useEffect(() => {
+    if (selectedEntryId === undefined) {
+      setSelectedEntrySnapshot(null);
+      return;
+    }
+    if (loadedSelectedEntry) setSelectedEntrySnapshot(loadedSelectedEntry);
+  }, [loadedSelectedEntry, selectedEntryId]);
+  const activeSelectedEntry =
+    selectedEntryId !== undefined
+      ? selectedEntrySnapshot?.id === selectedEntryId
+        ? selectedEntrySnapshot
+        : loadedSelectedEntry
+      : undefined;
+  const selectedEntries = useMemo(() => {
+    if (!activeSelectedEntry) return entries;
+    const mergedEntries = entries.slice();
+    const selectedIndex = mergedEntries.findIndex(
+      (entry) => entry.id === activeSelectedEntry.id,
+    );
+    if (selectedIndex === -1) mergedEntries.push(activeSelectedEntry);
+    else mergedEntries[selectedIndex] = activeSelectedEntry;
+    return mergedEntries.sort((left, right) => {
+      const timeDifference =
+        Date.parse(right.published_at ?? right.fetched_at) -
+        Date.parse(left.published_at ?? left.fetched_at);
+      return timeDifference || right.id - left.id;
+    });
+  }, [activeSelectedEntry, entries]);
   const visibleEntries = useMemo(() => {
     if (!activeExpandedEntry) return entries;
 
@@ -126,7 +159,7 @@ export function FeedRiver({
     }
     return names;
   }, [feedsQuery.data]);
-  const riverEntries = compact ? visibleEntries : entries;
+  const riverEntries = compact ? visibleEntries : selectedEntries;
   const days = useMemo(() => groupByDay(riverEntries), [riverEntries]);
 
   if (entriesQuery.isPending || entriesQuery.isLoading) {
@@ -325,11 +358,19 @@ export function FeedRiver({
                     feedName={feedNames.get(entry.feed_id)}
                     isSelected={selectedEntryId === entry.id}
                     onSelect={() => {
+                      setSelectedEntrySnapshot(entry);
                       onSelectEntry?.(entry.id);
                       if (!entry.read) {
                         patchEntry.reset();
                         void patchEntry
                           .mutateAsync({ id: entry.id, read: true })
+                          .then((updated) => {
+                            if (updated?.id === entry.id) {
+                              setSelectedEntrySnapshot((current) =>
+                                current?.id === entry.id ? updated : current,
+                              );
+                            }
+                          })
                           .catch(() => {
                             // The shared optimistic mutation restores the unread row on failure.
                           });
@@ -383,6 +424,7 @@ function EntrySelectionRow({
     >
       <h3 id={titleId} className="m-0">
         <Button
+          data-feed-entry-id={entry.id}
           className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 text-left outline-none hover:bg-paper-edge focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
           onPress={onSelect}
         >

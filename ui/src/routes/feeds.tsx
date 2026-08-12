@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
@@ -59,6 +59,9 @@ function FeedsPage() {
   const navigate = useNavigate({ from: "/feeds" });
   const feedsQuery = useFeeds();
   const isMobile = useMobileLayout();
+  const listRegionRef = useRef<HTMLElement>(null);
+  const readerRegionRef = useRef<HTMLDivElement>(null);
+  const previousEntryId = useRef<number | undefined>(undefined);
   const [tagDraft, setTagDraft] = useState(search.tag ?? "");
   useEffect(() => setTagDraft(search.tag ?? ""), [search.tag]);
   const filters: FeedRiverFilters = {
@@ -69,10 +72,6 @@ function FeedsPage() {
   };
   const groups = feedsQuery.data?.groups ?? [];
   const feeds = groups.flatMap((group) => group.feeds);
-  const selectedFeed =
-    search.feed === undefined
-      ? undefined
-      : feeds.find((feed) => feed.id === search.feed);
 
   const updateSearch = (patch: Partial<FeedsSearch>, replace = false) => {
     void navigate({
@@ -81,8 +80,25 @@ function FeedsPage() {
     });
   };
 
+  useEffect(() => {
+    const previous = previousEntryId.current;
+    previousEntryId.current = search.entry;
+    if (search.entry !== undefined && previous !== search.entry) {
+      readerRegionRef.current
+        ?.querySelector<HTMLElement>("[data-reader-focus]")
+        ?.focus();
+      return;
+    }
+    if (search.entry === undefined && previous !== undefined) {
+      const selectedRow = listRegionRef.current?.querySelector<HTMLElement>(
+        `[data-feed-entry-id="${previous}"]`,
+      );
+      (selectedRow ?? listRegionRef.current)?.focus();
+    }
+  }, [search.entry]);
+
   return (
-    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:h-dvh md:grid-rows-[auto_auto_minmax(0,1fr)] md:overflow-hidden md:px-4 md:py-4">
+    <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:h-full md:grid-rows-[auto_auto_minmax(0,1fr)] md:overflow-hidden md:px-4 md:py-4">
       <section className="cl-grid-texture border border-rule bg-paper-2 px-4 py-4 md:px-6 md:py-5">
         <div className="cl-mono flex flex-wrap items-center gap-3 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
           <span aria-hidden="true" className="h-[7px] w-[7px] bg-accent" />
@@ -223,6 +239,8 @@ function FeedsPage() {
 
           <div className="grid min-h-0 gap-3.5 md:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
             <section
+              ref={listRegionRef}
+              tabIndex={-1}
               aria-label="Entry list"
               hidden={isMobile && search.entry !== undefined}
               className="min-h-0 overflow-y-auto border border-rule bg-paper-2 p-3.5"
@@ -233,10 +251,13 @@ function FeedsPage() {
                 onSelectEntry={(entry) => updateSearch({ entry })}
               />
             </section>
-            <div hidden={isMobile && search.entry === undefined} className="min-h-0">
+            <div
+              ref={readerRegionRef}
+              hidden={isMobile && search.entry === undefined}
+              className="min-h-0"
+            >
               <FeedReaderPane
                 selectedEntryId={search.entry}
-                feedName={selectedFeed?.title_override ?? selectedFeed?.title}
                 onBack={() => updateSearch({ entry: undefined })}
                 onMissing={() => updateSearch({ entry: undefined }, true)}
               />

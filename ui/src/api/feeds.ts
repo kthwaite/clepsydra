@@ -665,7 +665,17 @@ export function useFeedEntry(id?: number) {
     "get",
     ENTRY_DETAIL_PATH,
     { params: { path: { id: enabled ? id : 0 } } },
-    { enabled, throwOnError: false },
+    {
+      enabled,
+      throwOnError: false,
+      retry: (failureCount, error) =>
+        !(
+          typeof error === "object" &&
+          error !== null &&
+          "status" in error &&
+          error.status === 404
+        ) && failureCount < 3,
+    },
   );
   useEffect(() => {
     if (!enabled || id === undefined || query.data === undefined) return;

@@ -15,6 +15,7 @@ const routeMocks = vi.hoisted(() => ({
     manage: false,
     entry: undefined as number | undefined,
   },
+  riverHasSelected: true,
   navigate: vi.fn(),
   mobile: false,
   useFeedEntry: vi.fn(),
@@ -56,10 +57,19 @@ vi.mock("@tanstack/react-router", () => ({
     useSearch: () => routeMocks.search,
   }),
   useNavigate: () => routeMocks.navigate,
+  useLocation: () => ({ pathname: "/feeds" }),
 }));
 
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => routeMocks.mobile,
+}));
+
+vi.mock("#/components/codex/DesktopCodexFrame", () => ({
+  DesktopCodexFrame: () => <header aria-label="Desktop Codex chrome" />,
+}));
+
+vi.mock("#/components/codex/MobileCodexFrame", () => ({
+  MobileCodexFrame: () => <header aria-label="Mobile Codex chrome" />,
 }));
 
 vi.mock("#/api/feeds", () => ({
@@ -117,9 +127,16 @@ vi.mock("#/components/codex/FeedRiver", () => ({
       aria-label="Feed river fixture"
       data-selected-entry={selectedEntryId}
     >
-      <button type="button" onClick={() => onSelectEntry?.(501)}>
-        Select direct entry
-      </button>
+      {routeMocks.riverHasSelected ? (
+        <button
+          type="button"
+          data-feed-entry-id="501"
+          aria-current={selectedEntryId === 501 ? "true" : undefined}
+          onClick={() => onSelectEntry?.(501)}
+        >
+          Select direct entry
+        </button>
+      ) : null}
       <span>Loaded list entry</span>
     </section>
   ),
@@ -130,6 +147,7 @@ vi.mock("#/components/codex/FeedManagement", () => ({
 }));
 
 import { Route } from "#/routes/feeds";
+import { CodexFrame } from "#/components/codex/CodexFrame";
 
 const FeedsPage = Route.options.component as () => ReactNode;
 
@@ -147,6 +165,7 @@ beforeEach(() => {
   routeMocks.detailQuery.isPending = false;
   routeMocks.detailQuery.isLoading = false;
   routeMocks.detailQuery.isError = false;
+  routeMocks.riverHasSelected = true;
   routeMocks.detailQuery.error = null;
   routeMocks.patchState.isPending = false;
   routeMocks.patchState.error = null;
@@ -293,6 +312,84 @@ describe("feeds route controls", () => {
     );
     expect(screen.queryByRole("region", { name: "Entry list" })).toBeNull();
     expect(riverFixture.closest("[hidden]")).not.toBeNull();
+  });
+
+  it("hands focus from a selected mobile row to the reader and back to that row", async () => {
+    routeMocks.mobile = true;
+    const page = render(<FeedsPage />);
+    const row = screen.getByRole("button", { name: /select direct entry/i });
+
+    await userEvent.setup().click(row);
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+    page.rerender(<FeedsPage />);
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Back to entries" }),
+    );
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: "Back to entries" }),
+    );
+    routeMocks.search.entry = undefined;
+    page.rerender(<FeedsPage />);
+
+    expect(document.activeElement).toBe(row);
+  });
+
+  it("hands browser-history focus to the list region when the selected row is unavailable", () => {
+    routeMocks.mobile = true;
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+    const page = render(<FeedsPage />);
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Back to entries" }),
+    );
+
+    routeMocks.riverHasSelected = false;
+    routeMocks.search.entry = undefined;
+    page.rerender(<FeedsPage />);
+
+    expect(document.activeElement).toBe(
+      screen.getByRole("region", { name: "Entry list" }),
+    );
+  });
+
+  it.each([undefined, 99])(
+    "resolves source from entry feed id when the feed filter is %s",
+    (feed) => {
+      routeMocks.search.feed = feed;
+      routeMocks.search.entry = 501;
+      routeMocks.detailQuery.data = directEntry;
+
+      render(<FeedsPage />);
+
+      expect(
+        screen.getByRole("article", { name: "Direct archive entry" }),
+      ).toHaveTextContent("Source Ledger");
+    },
+  );
+
+  it("fills the real CodexFrame parent instead of creating a nested viewport", () => {
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+    render(
+      <CodexFrame forceView="feeds">
+        <FeedsPage />
+      </CodexFrame>,
+    );
+
+    const main = screen.getByRole("main");
+    const routePage = main.querySelector(".mx-auto");
+    expect(routePage).toHaveClass("md:h-full");
+    expect(routePage).not.toHaveClass("md:h-dvh");
+    expect(screen.getByRole("region", { name: "Entry list" })).toHaveClass(
+      "overflow-y-auto",
+    );
+    expect(screen.getByRole("region", { name: "Feed reader" })).toHaveClass(
+      "overflow-y-auto",
+    );
   });
 
   it("renders a direct URL detail outside loaded list pages without iframe or source fetch", () => {

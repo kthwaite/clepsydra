@@ -236,6 +236,27 @@ describe("useFeedEntry", () => {
       `/api/vault/feeds/entries/${entry.id}`,
     );
   });
+
+  it("does not retry a confirmed missing entry", async () => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: 3, retryDelay: 0 },
+      },
+    });
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { status: 404, error: "entry not found", detail: null, hint: null },
+        404,
+      ),
+    );
+
+    const { result } = renderHook(() => useFeedEntry(404), {
+      wrapper: wrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("updateCachedEntryPages", () => {

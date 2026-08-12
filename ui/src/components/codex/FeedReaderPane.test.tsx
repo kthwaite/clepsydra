@@ -15,6 +15,22 @@ const paneMocks = vi.hoisted(() => ({
     refetch: vi.fn(),
   },
   useFeedEntry: vi.fn(),
+  feedsQuery: {
+    data: {
+      groups: [
+        {
+          name: "Engineering",
+          feeds: [
+            {
+              id: 7,
+              title: "Manifest Source",
+              title_override: "Manifest Ledger",
+            },
+          ],
+        },
+      ],
+    },
+  },
   patchEntryAsync: vi.fn(),
   patchState: {
     isPending: false,
@@ -28,6 +44,7 @@ vi.mock("#/api/feeds", () => ({
     paneMocks.useFeedEntry(id);
     return paneMocks.query;
   },
+  useFeeds: () => paneMocks.feedsQuery,
   usePatchFeedEntry: () => ({
     mutateAsync: paneMocks.patchEntryAsync,
     ...paneMocks.patchState,
@@ -54,7 +71,7 @@ const storedEntry: FeedEntry = {
 function renderPane(
   selectedEntryId: number | null = 101,
   overrides: Partial<{
-    feedName: string;
+    feedName: string | null;
     onBack: () => void;
     onMissing: () => void;
   }> = {},
@@ -62,7 +79,11 @@ function renderPane(
   return render(
     <FeedReaderPane
       selectedEntryId={selectedEntryId ?? undefined}
-      feedName={overrides.feedName ?? "Source Ledger"}
+      feedName={
+        overrides.feedName === null
+          ? undefined
+          : overrides.feedName ?? "Source Ledger"
+      }
       onBack={overrides.onBack ?? vi.fn()}
       onMissing={overrides.onMissing ?? vi.fn()}
     />,
@@ -143,7 +164,7 @@ describe("FeedReaderPane", () => {
 
     const article = screen.getByRole("article", { name: "Stored dispatch" });
     expect(article).toHaveTextContent(/sanitized stored body/i);
-    expect(within(article).getByText("Source Ledger")).toBeVisible();
+    expect(within(article).getByText("Manifest Ledger")).toBeVisible();
     expect(within(article).getByText("Ada Reader")).toBeVisible();
     expect(within(article).getByText("#systems")).toBeVisible();
     expect(within(article).getByText("#reading")).toBeVisible();
@@ -154,6 +175,31 @@ describe("FeedReaderPane", () => {
       "2026-08-09T12:00:00Z",
     );
     expect(article.querySelector("iframe")).not.toBeInTheDocument();
+  });
+
+  it("resolves the source label from the loaded entry feed id when no name is supplied", () => {
+    renderPane(101, { feedName: null });
+
+    expect(screen.getByText("Manifest Ledger")).toBeVisible();
+  });
+
+  it("does not mount active markup from a malformed stored-content DTO", () => {
+    paneMocks.query.data = {
+      ...storedEntry,
+      content_html:
+        '<p onclick="window.evil()">Kept text<script>window.evil()</script><iframe src="https://source.example/posts/stored"></iframe><img src="safe.png" onerror="window.evil()"></p>',
+    };
+    const page = renderPane();
+    const article = screen.getByRole("article", { name: "Stored dispatch" });
+
+    expect(article).toHaveTextContent("Kept text");
+    expect(article.querySelector("script")).not.toBeInTheDocument();
+    expect(article.querySelector("iframe")).not.toBeInTheDocument();
+    expect(article.querySelector("[onclick]")).not.toBeInTheDocument();
+    expect(article.querySelector("[onerror]")).not.toBeInTheDocument();
+    expect(
+      page.container.querySelector(".feed-entry-content")?.innerHTML,
+    ).not.toContain("https://source.example/posts/stored");
   });
 
   it("keeps metadata and offers only a safe HTTP(S) fallback when body is absent", () => {

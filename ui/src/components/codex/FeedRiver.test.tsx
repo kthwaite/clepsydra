@@ -291,6 +291,55 @@ describe("FeedRiver", () => {
     expect(screen.getByRole("article", { name: /earlier dispatch/i })).toBeVisible();
   });
 
+  it("pins an unread selected row through optimistic removal and rollback without moving the scroll container", async () => {
+    const deferredPatch = Promise.withResolvers<FeedEntry>();
+    riverMocks.patchEntryAsync.mockReturnValue(deferredPatch.promise);
+    const onSelectEntry = vi.fn();
+    const page = renderRiver(
+      { view: "unread" },
+      false,
+      undefined,
+      onSelectEntry,
+    );
+    const river = screen.getByRole("region", { name: "Feed river" });
+    river.scrollTop = 211;
+
+    await userEvent.setup().click(
+      screen.getByRole("button", { name: /cache semantics/i }),
+    );
+    setEntries([]);
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "unread" }}
+        selectedEntryId={101}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    const selected = screen.getByRole("article", { name: /cache semantics/i });
+    expect(selected).toHaveAttribute("aria-current", "true");
+    expect(selected).toHaveTextContent("Unread entry");
+    expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
+    expect(river.scrollTop).toBe(211);
+    await act(async () =>
+      deferredPatch.reject(new Error("read patch failed")),
+    );
+    setEntries([entry()]);
+    page.rerender(
+      <FeedRiver
+        filters={{ view: "unread" }}
+        selectedEntryId={101}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toHaveTextContent("Unread entry");
+    expect(screen.getByRole("region", { name: "Feed river" })).toBe(river);
+    expect(river.scrollTop).toBe(211);
+  });
+
   it("appends a fetched page without replacing the first loaded page", async () => {
     const user = userEvent.setup();
     setEntries([entry()], "cursor-page-2");

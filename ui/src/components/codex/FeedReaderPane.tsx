@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import {
   type FeedEntry,
   useFeedEntry,
+  useFeeds,
   usePatchFeedEntry,
 } from "#/api/feeds";
 import { formatFeedTime } from "#/lib/time";
@@ -19,6 +20,7 @@ export function FeedReaderPane({
   onMissing: (id: number) => void;
 }) {
   const entryQuery = useFeedEntry(selectedEntryId);
+  const feedsQuery = useFeeds();
   const patchEntry = usePatchFeedEntry();
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
@@ -26,7 +28,19 @@ export function FeedReaderPane({
   const reportedMissingId = useRef<number | undefined>(undefined);
   const entry =
     entryQuery.data?.id === selectedEntryId ? entryQuery.data : undefined;
-  const missing = isNotFound(entryQuery.error);
+  const missing =
+    typeof entryQuery.error === "object" &&
+    entryQuery.error !== null &&
+    "status" in entryQuery.error &&
+    entryQuery.error.status === 404;
+  const manifestFeedName = useMemo(() => {
+    if (!entry) return undefined;
+    for (const group of feedsQuery.data?.groups ?? []) {
+      const feed = group.feeds.find((candidate) => candidate.id === entry.feed_id);
+      if (feed) return feed.title_override || feed.title;
+    }
+    return undefined;
+  }, [entry, feedsQuery.data]);
 
   useEffect(() => {
     setIsEditingTags(false);
@@ -72,6 +86,7 @@ export function FeedReaderPane({
       <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-rule bg-paper px-3 py-2">
         <Button
           aria-label="Back to entries"
+          data-reader-focus
           className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
           onPress={onBack}
         >
@@ -122,7 +137,7 @@ export function FeedReaderPane({
       ) : entry ? (
         <ReaderArticle
           entry={entry}
-          feedName={feedName}
+          feedName={manifestFeedName ?? feedName}
           isEditingTags={isEditingTags}
           tagDraft={tagDraft}
           isPatchPending={patchEntry.isPending}
@@ -180,6 +195,10 @@ function ReaderArticle({
   const titleId = `feed-reader-title-${entry.id}`;
   const originalUrl = safeFeedEntryUrl(entry.url);
   const timestamp = entry.published_at ?? entry.fetched_at;
+  const contentHtml = useMemo(
+    () => sanitizeStoredFeedHtml(entry.content_html),
+    [entry.content_html],
+  );
 
   return (
     <article aria-labelledby={titleId} className="min-w-0 px-4 py-5 md:px-6 md:py-6">
@@ -203,10 +222,10 @@ function ReaderArticle({
       </header>
 
       <div className="py-5">
-        {entry.content_html ? (
+        {contentHtml ? (
           <div
             className="feed-entry-content"
-            dangerouslySetInnerHTML={{ __html: entry.content_html }}
+            dangerouslySetInnerHTML={{ __html: contentHtml }}
           />
         ) : (
           <p className="cl-marg">
@@ -316,13 +335,23 @@ export function normalizeFeedEntryTags(value: string) {
   ];
 }
 
-function isNotFound(error: unknown) {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "status" in error &&
-    error.status === 404
-  );
+function sanitizeStoredFeedHtml(value: string | null | undefined) {
+  if (!value || typeof document === "undefined") return value ?? "";
+  const template = document.createElement("template");
+  template.innerHTML = value;
+  for (const element of template.content.querySelectorAll(
+    "script, iframe, object, embed",
+  )) {
+    element.remove();
+  }
+  for (const element of template.content.querySelectorAll("*")) {
+    for (const attribute of element.getAttributeNames()) {
+      if (attribute.toLowerCase().startsWith("on")) {
+        element.removeAttribute(attribute);
+      }
+    }
+  }
+  return template.innerHTML;
 }
 
 function errorMessage(error: unknown, fallback = "Try again.") {
