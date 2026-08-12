@@ -4,6 +4,7 @@ import {
   useRewrapIdentity,
   useSetupEncryption,
 } from "#/api/encryption";
+import { Checkbox } from "#/components/ui/checkbox";
 import {
   createVaultIdentity,
   recipientForIdentity,
@@ -354,18 +355,14 @@ export function EncryptionSetupDialog({
                   Download recovery identity
                 </button>
               ) : null}
-              <label className="flex items-start gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={acknowledged}
-                  onChange={(event) => setAcknowledged(event.target.checked)}
-                />
-                <span>
-                  {method === "password"
-                    ? "I understand that losing both my password and recovery identity is unrecoverable."
-                    : "I understand that losing this recovery identity is unrecoverable."}
-                </span>
-              </label>
+              <Checkbox
+                isSelected={acknowledged}
+                onChange={setAcknowledged}
+              >
+                {method === "password"
+                  ? "I understand that losing both my password and recovery identity is unrecoverable."
+                  : "I understand that losing this recovery identity is unrecoverable."}
+              </Checkbox>
             </div>
           ) : null}
 

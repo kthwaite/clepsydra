@@ -4,6 +4,7 @@ import {
   useProtectPage,
   useUnprotectPage,
 } from "#/api/encryption";
+import { Checkbox } from "#/components/ui/checkbox";
 import { encryptMarkdown } from "#/crypto/age";
 import {
   useEncryptionActions,
@@ -133,19 +134,15 @@ export function NoteProtectionDialog({
           <p>Attachments are not encrypted.</p>
           <p>Git and filesystem history are not encrypted.</p>
         </div>
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={acknowledged}
-            disabled={busy}
-            onChange={(event) => setAcknowledged(event.target.checked)}
-          />
-          <span>
-            {protecting
-              ? "I understand what remains visible and have exported a recovery identity."
-              : "I understand this will make this note plaintext on disk."}
-          </span>
-        </label>
+        <Checkbox
+          isSelected={acknowledged}
+          onChange={setAcknowledged}
+          isDisabled={busy}
+        >
+          {protecting
+            ? "I understand what remains visible and have exported a recovery identity."
+            : "I understand this will make this note plaintext on disk."}
+        </Checkbox>
         {error ? (
           <p role="alert" aria-live="assertive" className="text-sm text-hot">
             ⁂ {error}

@@ -172,9 +172,10 @@ describe("EncryptionSetupDialog", () => {
 
     await user.click(
       screen.getByRole("checkbox", {
-        name: /losing both my password and recovery identity/i,
+        name: "I understand that losing both my password and recovery identity is unrecoverable.",
       }),
     );
+    expect(finish).toBeEnabled();
     await user.click(finish);
 
     await waitFor(() => expect(setupMutateAsyncMock).toHaveBeenCalledOnce());
