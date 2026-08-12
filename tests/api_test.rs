@@ -2546,6 +2546,7 @@ async fn reference_repair_preview_and_apply_report_the_same_text_edit() {
     let (server, tmp) = reference_repair_server();
     let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
     let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let candidate_path = issue["candidates"][0]["path"].as_str().unwrap();
     let request = reference_repair_replace_request(&issue, candidate_id);
 
     let preview = server
@@ -2558,7 +2559,7 @@ async fn reference_repair_preview_and_apply_report_the_same_text_edit() {
     assert_eq!(preview["before"], "[[Twin|the chosen twin]]");
     assert_eq!(
         preview["after"],
-        format!("[[{candidate_id}|the chosen twin]]")
+        format!("[[{candidate_path}|the chosen twin]]")
     );
     assert_eq!(preview["plan"]["text_edits"][0]["old_text"], preview["before"]);
     assert_eq!(preview["plan"]["text_edits"][0]["new_text"], preview["after"]);
@@ -2869,6 +2870,7 @@ async fn reference_repair_ambiguous_replacement_is_an_explicit_target() {
     let (server, tmp) = reference_repair_server();
     let issue = reference_repair_issue(&server, "ambiguous_page_link", "Twin").await;
     let candidate_id = issue["candidates"][1]["page_id"].as_str().unwrap();
+    let candidate_path = issue["candidates"][1]["path"].as_str().unwrap();
     let request = reference_repair_replace_request(&issue, candidate_id);
 
     server
@@ -2878,7 +2880,7 @@ async fn reference_repair_ambiguous_replacement_is_an_explicit_target() {
         .assert_status_ok();
 
     let source = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
-    assert!(source.contains(&format!("[[{candidate_id}|the chosen twin]]")));
+    assert!(source.contains(&format!("[[{candidate_path}|the chosen twin]]")));
     let issues: serde_json::Value = server
         .get("/api/vault/index/issues?kind=ambiguous_page_link&limit=200")
         .await
@@ -2982,6 +2984,7 @@ async fn reference_repair_property_reference_uses_format_preserving_patch() {
     let issue =
         reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
     let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let candidate_path = issue["candidates"][0]["path"].as_str().unwrap();
     let request = reference_repair_replace_request(&issue, candidate_id);
 
     server
@@ -2995,7 +2998,7 @@ async fn reference_repair_property_reference_uses_format_preserving_patch() {
     assert!(content.contains("# preserve this comment"));
     assert!(content.contains("status = \"draft\" # and this one"));
     assert!(content.contains("Body stays byte-for-byte."));
-    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(content.contains(&format!("[[{candidate_path}|chosen]]")));
     assert!(!content.contains("[[Twin|chosen]]"));
 }
 
@@ -3012,6 +3015,7 @@ async fn reference_repair_property_reference_can_patch_linkable_system_arrays() 
     let issue =
         reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
     let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
+    let candidate_path = issue["candidates"][0]["path"].as_str().unwrap();
 
     server
         .post("/api/vault/index/issues/apply")
@@ -3021,7 +3025,7 @@ async fn reference_repair_property_reference_can_patch_linkable_system_arrays() 
 
     let content =
         fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
-    assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
+    assert!(content.contains(&format!("[[{candidate_path}|chosen]]")));
     assert!(content.contains("\"other\""));
 }
 

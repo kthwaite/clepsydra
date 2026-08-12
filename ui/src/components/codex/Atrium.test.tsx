@@ -25,6 +25,9 @@ vi.mock("#/api/index", () => ({
   useTags: () => ({ data: [] }),
   useStats: () => ({ data: undefined }),
   useContentIndex: () => ({ data: { items: [] } }),
+  useReferenceIssues: () => ({
+    data: { items: [], total: 0, limit: 1, offset: 0 },
+  }),
 }));
 
 vi.mock("#/api/journal", () => ({
