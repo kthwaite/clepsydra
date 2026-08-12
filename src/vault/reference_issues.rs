@@ -626,17 +626,18 @@ mod tests {
     use crate::vault::index::VaultIndex;
     use crate::vault::kind::Kind;
 
-    fn insert_page(
-        index: &VaultIndex,
-        id: &str,
-        path: &str,
-        title: &str,
-        revision: &str,
+    struct PageFixture<'a> {
+        id: &'a str,
+        path: &'a str,
+        title: &'a str,
+        revision: &'a str,
         kind: Kind,
-        project: Option<&str>,
+        project: Option<&'a str>,
         encrypted: bool,
-        body: &str,
-    ) {
+        body: &'a str,
+    }
+
+    fn insert_page(index: &VaultIndex, page: PageFixture<'_>) {
         index
             .connection()
             .execute(
@@ -645,14 +646,14 @@ mod tests {
                     kind, kind_inferred, project, encrypted
                  ) VALUES (?1, ?2, ?3, ?4, '{}', ?5, ?6, 0, ?7, ?8)",
                 params![
-                    id,
-                    path,
-                    title,
-                    title.to_ascii_lowercase(),
-                    revision,
-                    kind.as_str(),
-                    project,
-                    encrypted,
+                    page.id,
+                    page.path,
+                    page.title,
+                    page.title.to_ascii_lowercase(),
+                    page.revision,
+                    page.kind.as_str(),
+                    page.project,
+                    page.encrypted,
                 ],
             )
             .unwrap();
@@ -661,7 +662,7 @@ mod tests {
             .execute(
                 "INSERT INTO pages_fts (page_id, path, title, body)
                  VALUES (?1, ?2, ?3, ?4)",
-                params![id, path, title, body],
+                params![page.id, page.path, page.title, page.body],
             )
             .unwrap();
     }
@@ -729,17 +730,7 @@ mod tests {
 
 
     fn connect_source_to_anchor(index: &VaultIndex, source_id: &str, source_span: i64) {
-        insert_page(
-            index,
-            "anchor",
-            "projects/anchor.md",
-            "Anchor",
-            "anchor-rev",
-            Kind::Project,
-            None,
-            false,
-            "anchor",
-        );
+        insert_page(index, PageFixture { id: "anchor", path: "projects/anchor.md", title: "Anchor", revision: "anchor-rev", kind: Kind::Project, project: None, encrypted: false, body: "anchor" });
         insert_link(
             index,
             source_id,
@@ -770,17 +761,7 @@ mod tests {
 
     fn fixture_with_wiki_block_and_relation_misses() -> VaultIndex {
         let index = VaultIndex::open_in_memory().unwrap();
-        insert_page(
-            &index,
-            "source",
-            "notes/source.md",
-            "Source",
-            "rev-1",
-            Kind::Note,
-            Some("alpha"),
-            false,
-            "prefix ((dead)) and [[missing]]",
-        );
+        insert_page(&index, PageFixture { id: "source", path: "notes/source.md", title: "Source", revision: "rev-1", kind: Kind::Note, project: Some("alpha"), encrypted: false, body: "prefix ((dead)) and [[missing]]" });
         connect_source_to_anchor(&index, "source", 100);
         insert_link(
             &index,
@@ -848,39 +829,9 @@ mod tests {
     #[test]
     fn classifies_ambiguous_wiki_links_and_ranks_canonical_candidates_by_path() {
         let index = VaultIndex::open_in_memory().unwrap();
-        insert_page(
-            &index,
-            "source",
-            "notes/source.md",
-            "Source",
-            "rev-ambiguous",
-            Kind::Note,
-            None,
-            false,
-            "prefix [[Twin]] suffix",
-        );
-        insert_page(
-            &index,
-            "candidate-z",
-            "projects/z-twin.md",
-            "Z Twin",
-            "rev-z",
-            Kind::Project,
-            None,
-            false,
-            "z",
-        );
-        insert_page(
-            &index,
-            "candidate-a",
-            "notes/a-twin.md",
-            "A Twin",
-            "rev-a",
-            Kind::Note,
-            None,
-            false,
-            "a",
-        );
+        insert_page(&index, PageFixture { id: "source", path: "notes/source.md", title: "Source", revision: "rev-ambiguous", kind: Kind::Note, project: None, encrypted: false, body: "prefix [[Twin]] suffix" });
+        insert_page(&index, PageFixture { id: "candidate-z", path: "projects/z-twin.md", title: "Z Twin", revision: "rev-z", kind: Kind::Project, project: None, encrypted: false, body: "z" });
+        insert_page(&index, PageFixture { id: "candidate-a", path: "notes/a-twin.md", title: "A Twin", revision: "rev-a", kind: Kind::Note, project: None, encrypted: false, body: "a" });
         insert_canonical_name(&index, "candidate-z", "twin");
         insert_canonical_name(&index, "candidate-a", "twin");
         insert_link(
@@ -947,39 +898,9 @@ mod tests {
     #[test]
     fn distinguishes_orphan_from_isolated_pages_using_resolved_edges() {
         let index = VaultIndex::open_in_memory().unwrap();
-        insert_page(
-            &index,
-            "outbound-only",
-            "notes/outbound-only.md",
-            "Outbound Only",
-            "rev-out",
-            Kind::Note,
-            None,
-            false,
-            "[[Inbound Only]]",
-        );
-        insert_page(
-            &index,
-            "inbound-only",
-            "notes/inbound-only.md",
-            "Inbound Only",
-            "rev-in",
-            Kind::Note,
-            None,
-            false,
-            "inbound",
-        );
-        insert_page(
-            &index,
-            "neither",
-            "notes/neither.md",
-            "Neither",
-            "rev-neither",
-            Kind::Note,
-            None,
-            false,
-            "neither",
-        );
+        insert_page(&index, PageFixture { id: "outbound-only", path: "notes/outbound-only.md", title: "Outbound Only", revision: "rev-out", kind: Kind::Note, project: None, encrypted: false, body: "[[Inbound Only]]" });
+        insert_page(&index, PageFixture { id: "inbound-only", path: "notes/inbound-only.md", title: "Inbound Only", revision: "rev-in", kind: Kind::Note, project: None, encrypted: false, body: "inbound" });
+        insert_page(&index, PageFixture { id: "neither", path: "notes/neither.md", title: "Neither", revision: "rev-neither", kind: Kind::Note, project: None, encrypted: false, body: "neither" });
         insert_link(
             &index,
             "outbound-only",
@@ -1032,9 +953,8 @@ mod tests {
             })
             .unwrap();
         let issue = &page.items[0];
-        let base = blake3::hash(
-            b"v1\0broken_block_ref\0source\0rev-1\07\015\0((dead))",
-        )
+        let base =
+            blake3::hash(b"v1\0broken_block_ref\0source\0rev-1\0\x37\0\x31\x35\0((dead))")
         .to_hex()
         .to_string();
         let expected = evidence_fingerprint(&base, &[]);
@@ -1070,28 +990,8 @@ mod tests {
     #[test]
     fn encrypted_body_issues_redact_all_public_body_evidence() {
         let index = VaultIndex::open_in_memory().unwrap();
-        insert_page(
-            &index,
-            "encrypted",
-            "notes/encrypted.md",
-            "Encrypted",
-            "secret-rev",
-            Kind::Note,
-            None,
-            true,
-            "prefix [[secret]] ((dead-secret))",
-        );
-        insert_page(
-            &index,
-            "candidate",
-            "notes/candidate.md",
-            "Candidate",
-            "candidate-rev",
-            Kind::Note,
-            None,
-            false,
-            "candidate",
-        );
+        insert_page(&index, PageFixture { id: "encrypted", path: "notes/encrypted.md", title: "Encrypted", revision: "secret-rev", kind: Kind::Note, project: None, encrypted: true, body: "prefix [[secret]] ((dead-secret))" });
+        insert_page(&index, PageFixture { id: "candidate", path: "notes/candidate.md", title: "Candidate", revision: "candidate-rev", kind: Kind::Note, project: None, encrypted: false, body: "candidate" });
         insert_canonical_name(&index, "candidate", "secret");
         insert_block(&index, "candidate", "dead-secret", 1);
         insert_link(
@@ -1147,7 +1047,7 @@ mod tests {
             .find(|issue| issue.kind == ReferenceIssueKind::UnresolvedPageLink)
             .unwrap();
         let base = blake3::hash(
-            b"v1\0unresolved_page_link\0encrypted\0secret-rev\07\017\0[[secret]]",
+            b"v1\0unresolved_page_link\0encrypted\0secret-rev\0\x37\0\x31\x37\0[[secret]]",
         )
         .to_hex()
         .to_string();
@@ -1157,28 +1057,8 @@ mod tests {
     #[test]
     fn encrypted_property_relations_remain_clear_metadata() {
         let index = VaultIndex::open_in_memory().unwrap();
-        insert_page(
-            &index,
-            "encrypted",
-            "notes/encrypted.md",
-            "Encrypted",
-            "secret-rev",
-            Kind::Note,
-            None,
-            true,
-            "ciphertext",
-        );
-        insert_page(
-            &index,
-            "candidate",
-            "projects/known.md",
-            "Known",
-            "candidate-rev",
-            Kind::Project,
-            None,
-            false,
-            "known",
-        );
+        insert_page(&index, PageFixture { id: "encrypted", path: "notes/encrypted.md", title: "Encrypted", revision: "secret-rev", kind: Kind::Note, project: None, encrypted: true, body: "ciphertext" });
+        insert_page(&index, PageFixture { id: "candidate", path: "projects/known.md", title: "Known", revision: "candidate-rev", kind: Kind::Project, project: None, encrypted: false, body: "known" });
         insert_canonical_name(&index, "candidate", "known");
         insert_link(
             &index,
@@ -1220,28 +1100,8 @@ mod tests {
     #[test]
     fn encrypted_page_without_indexed_outlinks_is_orphan_not_isolated() {
         let index = VaultIndex::open_in_memory().unwrap();
-        insert_page(
-            &index,
-            "encrypted",
-            "notes/encrypted.md",
-            "Encrypted",
-            "secret-rev",
-            Kind::Note,
-            None,
-            true,
-            "ciphertext",
-        );
-        insert_page(
-            &index,
-            "plaintext",
-            "notes/plaintext.md",
-            "Plaintext",
-            "plain-rev",
-            Kind::Note,
-            None,
-            false,
-            "plaintext",
-        );
+        insert_page(&index, PageFixture { id: "encrypted", path: "notes/encrypted.md", title: "Encrypted", revision: "secret-rev", kind: Kind::Note, project: None, encrypted: true, body: "ciphertext" });
+        insert_page(&index, PageFixture { id: "plaintext", path: "notes/plaintext.md", title: "Plaintext", revision: "plain-rev", kind: Kind::Note, project: None, encrypted: false, body: "plaintext" });
 
         let page = index
             .reference_issues(ReferenceIssueFilter {
@@ -1268,28 +1128,8 @@ mod tests {
     #[test]
     fn duplicate_block_rows_on_one_page_are_not_actionable() {
         let index = VaultIndex::open_in_memory().unwrap();
-        insert_page(
-            &index,
-            "source",
-            "notes/source.md",
-            "Source",
-            "source-rev",
-            Kind::Note,
-            None,
-            false,
-            "prefix ((duplicate))",
-        );
-        insert_page(
-            &index,
-            "candidate",
-            "notes/candidate.md",
-            "Candidate",
-            "candidate-rev",
-            Kind::Note,
-            None,
-            false,
-            "duplicate blocks",
-        );
+        insert_page(&index, PageFixture { id: "source", path: "notes/source.md", title: "Source", revision: "source-rev", kind: Kind::Note, project: None, encrypted: false, body: "prefix ((duplicate))" });
+        insert_page(&index, PageFixture { id: "candidate", path: "notes/candidate.md", title: "Candidate", revision: "candidate-rev", kind: Kind::Note, project: None, encrypted: false, body: "duplicate blocks" });
         insert_block(&index, "candidate", "duplicate", 1);
         insert_block(&index, "candidate", "duplicate", 20);
         insert_link(

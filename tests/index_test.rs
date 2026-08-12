@@ -441,6 +441,41 @@ Content here.
 }
 
 #[test]
+fn uuid_shaped_targets_resolve_exactly_before_canonical_aliases() {
+    const TARGET_ID: &str = "019fd000-0000-7000-8000-000000000721";
+    let source = format!(
+        "---\nid: 019fd000-0000-7000-8000-000000000720\ntitle: Source\n---\nSee [[{TARGET_ID}|selected]].\n"
+    );
+    let target = format!("---\nid: {TARGET_ID}\ntitle: Selected Target\n---\nSelected.\n");
+    let decoy = format!(
+        "---\nid: 019fd000-0000-7000-8000-000000000722\ntitle: Alias Decoy\naliases:\n  - {TARGET_ID}\n---\nDecoy.\n"
+    );
+    let (_tmp, vault) = setup_vault(&[
+        ("source.md", &source),
+        ("target.md", &target),
+        ("decoy.md", &decoy),
+    ]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let (target_id, target_path): (Option<String>, Option<String>) = index
+        .connection()
+        .query_row(
+            "SELECT target_id, target_path
+             FROM links
+             WHERE source_id = '019fd000-0000-7000-8000-000000000720'
+               AND span_start >= 0",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(target_id.as_deref(), Some(TARGET_ID));
+    assert_eq!(target_path.as_deref(), Some("target.md"));
+}
+
+#[test]
 fn ambiguous_links_stay_unresolved() {
     // Two pages with title "Design"
     let page_a = r#"---

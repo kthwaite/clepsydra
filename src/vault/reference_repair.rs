@@ -213,7 +213,7 @@ fn prepare_replace(
         }
         target.to_string()
     } else {
-        candidate.path.clone()
+        candidate.page_id.clone()
     };
 
     let (before, after, content) = if issue.kind == ReferenceIssueKind::InvalidRelationTarget {
