@@ -330,17 +330,18 @@ function registeredGuideSource(slug: string): string {
   return DOC_PAGES.find((page) => page.slug === slug)?.source ?? "";
 }
 
-it("documents exact SHEAF pin and quire ordering", () => {
+it("documents SHEAF close and ordering behavior", () => {
   const source = registeredGuideSource("codex-and-conversation-capture");
 
   expect(source).toContain(
-    "Ungrouped pinned tabs render before every remaining segment",
+    "**CLOSE QUIRE** closes every member and dissolves the empty quire",
+  );
+  expect(source).toContain(
+    "The SHEAF follows workspace order, while each quire keeps its member order",
   );
   expect(source).toMatch(
-    /quire keeps its\s+place[\s\S]*pinned members render before its\s+unpinned members/,
+    /Recent Folios\s+are ordered by activation, newest first/,
   );
-  expect(source).toContain("Pinned quire members survive **CLOSE QUIRE**");
-  expect(source).toContain("not pulled globally ahead of their quire");
 });
 
 it("documents executable Helix LSP setup without dropping current servers", () => {

@@ -7,15 +7,14 @@ import {
   nearestVisibleTabId,
   nextQuireColor,
   normalizeQuires,
-  orderSheafTabs,
   QUIRE_COLORS,
   type Quire,
   quireColorVar,
   sheafSegments,
 } from "./quires";
 
-function tab(id: string, quireId?: string, pinned?: boolean): TabDescriptor {
-  return { id, type: "page", path: `${id}.md`, label: id, quireId, pinned };
+function tab(id: string, quireId?: string): TabDescriptor {
+  return { id, type: "page", path: `${id}.md`, label: id, quireId };
 }
 
 function quire(id: string, collapsed = false): Quire {
@@ -142,52 +141,28 @@ describe("normalizeQuires", () => {
   });
 });
 
-describe("orderSheafTabs", () => {
-  it("floats pinned-ungrouped tabs to the front, keeps segments in order", () => {
-    const quires = { q1: quire("q1") };
-    const tabs = [
-      tab("a", "q1"),
-      tab("b", "q1"),
-      tab("x"),
-      tab("p", undefined, true),
-    ];
-    expect(orderSheafTabs(tabs, quires).map((t) => t.id)).toEqual([
-      "p",
-      "a",
-      "b",
-      "x",
-    ]);
-  });
-
-  it("sorts pinned members first within their quire, not globally", () => {
-    const quires = { q1: quire("q1") };
-    const tabs = [
-      tab("x"),
-      tab("a", "q1"),
-      tab("b", "q1", true),
-      tab("c", "q1"),
-    ];
-    expect(orderSheafTabs(tabs, quires).map((t) => t.id)).toEqual([
-      "x",
-      "b",
-      "a",
-      "c",
-    ]);
-  });
-});
-
 describe("sheafSegments", () => {
-  it("groups ordered tabs into tab and quire segments", () => {
+  it("preserves normalized tab order within and outside quires", () => {
     const quires = { q1: quire("q1") };
-    const ordered = [tab("x"), tab("a", "q1"), tab("b", "q1"), tab("y")];
-    const segs = sheafSegments(ordered, quires);
-    expect(segs).toHaveLength(3);
-    expect(segs[0]).toMatchObject({ kind: "tab", tab: { id: "x" } });
-    expect(segs[1]).toMatchObject({ kind: "quire", quire: { id: "q1" } });
-    expect(
-      segs[1].kind === "quire" && segs[1].members.map((m) => m.id),
-    ).toEqual(["a", "b"]);
-    expect(segs[2]).toMatchObject({ kind: "tab", tab: { id: "y" } });
+    const normalized = normalizeQuires(
+      [
+        tab("x"),
+        tab("a", "q1"),
+        tab("y"),
+        tab("b", "q1"),
+        tab("z"),
+      ],
+      quires,
+    );
+
+    const order = sheafSegments(normalized.tabs, normalized.quires).flatMap(
+      (segment) =>
+        segment.kind === "tab"
+          ? [segment.tab.id]
+          : segment.members.map((member) => member.id),
+    );
+
+    expect(order).toEqual(["x", "a", "b", "y", "z"]);
   });
 
   it("treats tabs with unknown quireIds as ungrouped", () => {

@@ -27,7 +27,11 @@ import {
 import { formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
 import { useGazetteerStore } from "#/store/gazetteer";
-import { filterAndSortRows, type GazetteerSort } from "./gazetteer-filter";
+import {
+  appendUniqueTag,
+  filterAndSortRows,
+  type GazetteerSort,
+} from "./gazetteer-filter";
 
 /** Pure: returns a NEW Set with `value` toggled (added if absent, removed if present). */
 export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
@@ -134,6 +138,11 @@ export function Gazetteer({ initialTag, filters }: Props) {
     if (contentQuery.isSuccess && currentPage !== page) setPage(currentPage);
   }, [contentQuery.isSuccess, currentPage, page, setPage]);
   const selected = [...selectedPaths];
+
+  const applyResultTag = (tag: string) => {
+    const nextTags = appendUniqueTag(selectedTags, tag);
+    if (nextTags !== selectedTags) setSelectedTags(nextTags);
+  };
 
   const toggleRow = (path: string) => {
     setSelectedPaths((cur) => toggleInSet(cur, path));
@@ -469,10 +478,36 @@ export function Gazetteer({ initialTag, filters }: Props) {
                       </span>
                     )}
                   </td>
-                  <td className="cl-mono px-3 py-1.5 text-[9px] text-accent">
-                    <span className="block overflow-hidden text-ellipsis whitespace-nowrap">
-                      {(n.tags ?? []).map((t) => `#${t}`).join(" ") || "—"}
-                    </span>
+                  <td className="cl-mono max-w-[200px] overflow-hidden px-3 py-1.5 text-[9px] text-accent">
+                    {(n.tags ?? []).length > 0 ? (
+                      <div className="flex gap-1 overflow-hidden whitespace-nowrap">
+                        {(n.tags ?? []).map((tag) => {
+                          const isSelected = selectedTags.includes(tag);
+                          return (
+                            <button
+                              key={tag}
+                              type="button"
+                              aria-label={`Filter by tag ${tag}`}
+                              aria-pressed={isSelected}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                applyResultTag(tag);
+                              }}
+                              className={cn(
+                                "cl-mono shrink-0 text-[9px] outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-accent",
+                                isSelected
+                                  ? "cursor-default text-ink-mute"
+                                  : "cursor-pointer text-accent hover:text-hot",
+                              )}
+                            >
+                              #{tag}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      "—"
+                    )}
                   </td>
                   <td className="cl-mono px-3 py-1.5 text-right text-[10px] tabular-nums text-ink-mute">
                     {n.word_count ?? "—"}

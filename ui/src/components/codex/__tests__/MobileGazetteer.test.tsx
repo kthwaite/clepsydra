@@ -92,11 +92,53 @@ describe("MobileGazetteer", () => {
     expect(alpha).toHaveTextContent("#active");
     expect(alpha).toHaveTextContent("321 words");
     expect(alpha).toHaveTextContent("Edited");
-    expect(within(alpha).getAllByRole("button")).toHaveLength(1);
+    expect(within(alpha).getAllByRole("button")).toHaveLength(3);
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Open Alpha" }));
     expect(onOpen).toHaveBeenCalledWith("notes/alpha.md", "Alpha");
+  });
+
+  it("appends a result tag through the controlled callback and makes it keyboard reachable", async () => {
+    const user = userEvent.setup();
+    const onSelectedTagsChange = vi.fn();
+    renderGazetteer({
+      selectedTags: ["pkm"],
+      onSelectedTagsChange,
+    });
+
+    const resultTag = screen.getByRole("button", {
+      name: "Filter by tag research",
+    });
+    expect(resultTag).toHaveAttribute("aria-pressed", "false");
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Filters · 1" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Open Alpha" })).toHaveFocus();
+    await user.tab();
+    expect(resultTag).toHaveFocus();
+
+    await user.keyboard("{Enter}");
+    expect(onSelectedTagsChange).toHaveBeenCalledOnce();
+    expect(onSelectedTagsChange).toHaveBeenCalledWith(["pkm", "research"]);
+  });
+
+  it("exposes active result tags as pressed and keeps their activation inert", async () => {
+    const user = userEvent.setup();
+    const onSelectedTagsChange = vi.fn();
+    renderGazetteer({
+      selectedTags: ["research"],
+      onSelectedTagsChange,
+    });
+
+    const activeTag = screen.getByRole("button", {
+      name: "Filter by tag research",
+    });
+    expect(activeTag).toHaveAttribute("aria-pressed", "true");
+
+    await user.click(activeTag);
+    expect(onSelectedTagsChange).not.toHaveBeenCalled();
   });
 
   it("opens a named dismissible filter sheet and emits controlled changes", async () => {

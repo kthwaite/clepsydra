@@ -65,7 +65,8 @@ export function pushOpenHistory(
   return [{ path, openedAt: now }, ...without].slice(0, OPEN_HISTORY_CAP);
 }
 
-/** Persist migrations: v1→v2 adds openHistory, v2→v3 adds quires. */
+/** Persist migrations: v1→v2 adds openHistory, v2→v3 adds quires,
+ * v3→v4 removes tab pins. */
 export function migrateWorkspace(
   persisted: unknown,
   version: number,
@@ -77,6 +78,21 @@ export function migrateWorkspace(
   if (version < 3 || typeof s.quires !== "object" || s.quires === null) {
     s = { ...s, quires: {} };
   }
+  if (version < 4 && Array.isArray(s.tabs)) {
+    s = {
+      ...s,
+      tabs: s.tabs.map((tab) => ({
+        id: tab.id,
+        type: tab.type,
+        path: tab.path,
+        label: tab.label,
+        lastActiveAt: tab.lastActiveAt,
+        quireId: tab.quireId,
+        focusBlockId: tab.focusBlockId,
+        focusRequestId: tab.focusRequestId,
+      })),
+    };
+  }
   // Invariant pass over rehydrated state (dangling quireIds, gaps in runs,
   // quires persisted by older/buggy builds).
   return { ...s, ...normalizeQuires(s.tabs ?? [], s.quires ?? {}) };
@@ -87,8 +103,6 @@ export interface TabDescriptor {
   type: TabType;
   path?: string;
   label: string;
-  /** Pinned tabs sort first in SHEAF and are visually marked. */
-  pinned?: boolean;
   /** Epoch ms of last activation — orders the RECENT accordion section. */
   lastActiveAt?: number;
   /** Membership in a quire (tab group). Members are kept contiguous. */
@@ -122,7 +136,6 @@ interface WorkspaceActions {
   clearActiveTab: () => void;
   clearTabFocus: (tabId: string) => void;
   takeTabFocus: (tabId: string, requestId: string) => string | undefined;
-  togglePin: (tabId: string) => void;
   moveTab: (fromIndex: number, toIndex: number) => void;
   updateTabLabel: (tabId: string, label: string) => void;
   updateTabPath: (tabId: string, path: string, label?: string) => void;
@@ -351,9 +364,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         }
         set((state) =>
           normalized(
-            state.tabs
-              .filter((t) => t.id === tabId || t.pinned)
-              .map((t) => (t.id === tabId ? t : withoutTabFocus(t))),
+            state.tabs.filter((tab) => tab.id === tabId),
             state.quires,
             { activeTabId: tabId },
           ),
@@ -427,14 +438,6 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           ),
         });
         return tab.focusBlockId;
-      },
-
-      togglePin(tabId) {
-        set((state) => ({
-          tabs: state.tabs.map((t) =>
-            t.id === tabId ? { ...t, pinned: !t.pinned } : t,
-          ),
-        }));
       },
 
       moveTab(fromIndex, toIndex) {
@@ -615,26 +618,22 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         );
         if (
           workspaceTransitionDepth === 0 &&
-          active?.quireId === quireId &&
-          !active.pinned
+          active?.quireId === quireId
         ) {
           runWorkspaceTransition(() => get().closeQuireTabs(quireId));
           return;
         }
         set((state) => {
-          const firstIdx = state.tabs.findIndex((t) => t.quireId === quireId);
-          const nextTabs = state.tabs.filter(
-            (t) => t.quireId !== quireId || t.pinned,
+          const firstIdx = state.tabs.findIndex(
+            (tab) => tab.quireId === quireId,
           );
+          const nextTabs = state.tabs.filter((tab) => tab.quireId !== quireId);
           let activeTabId = state.activeTabId;
-          if (activeTabId && !nextTabs.some((t) => t.id === activeTabId)) {
+          if (activeTabId && !nextTabs.some((tab) => tab.id === activeTabId)) {
             const at = Math.min(
               Math.max(firstIdx, 0),
               Math.max(nextTabs.length - 1, 0),
             );
-            // Old quires map on purpose: if the quire was collapsed and a pinned
-            // member survives, it stays collapsed (and hidden) — the label chip
-            // still renders, so the survivor remains discoverable.
             activeTabId = nearestVisibleTabId(nextTabs, state.quires, at);
           }
           return normalized(nextTabs, state.quires, { activeTabId });
@@ -655,7 +654,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
     }),
     {
       name: "clepsydra.workspace",
-      version: 3,
+      version: 4,
       migrate: (persisted, version): Partial<WorkspaceState> =>
         migrateWorkspace(persisted, version),
       partialize: (state) => ({

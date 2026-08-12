@@ -1,3 +1,17 @@
+import type { OutlinkEntry } from "#/api/types";
+
+export type ResolvedFolioOutlink = OutlinkEntry & { target_path: string };
+
+export function visibleFolioOutlinks(
+  outlinks: readonly OutlinkEntry[] | undefined,
+): ResolvedFolioOutlink[] {
+  return (outlinks ?? []).filter(
+    (link): link is ResolvedFolioOutlink =>
+      (link.kind === "wiki" || link.kind === "block_ref") &&
+      typeof link.target_path === "string",
+  );
+}
+
 /** FNV-1a 32-bit hash of a string, rendered as a 7-char base-36 code. */
 function hashFolio(s: string): string {
   let h = 0x811c9dc5;

@@ -17,7 +17,7 @@ import {
 } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
-import type { TagCount } from "#/api/types";
+import type { OutlinkEntry, TagCount } from "#/api/types";
 import type { CustomEditor } from "#/editor/types";
 
 // The recovery panel is the PRIMARY (declarative) invalid-tab path: usePage
@@ -27,6 +27,7 @@ import type { CustomEditor } from "#/editor/types";
 const {
   blockerState,
   journalTodayState,
+  outlinksState,
   attachmentRemoveMock,
   attachmentUploadMock,
   mobileLayoutState,
@@ -56,6 +57,7 @@ const {
     },
     isLoading: false,
   },
+  outlinksState: { data: undefined as OutlinkEntry[] | undefined },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
   attachmentRemoveMock: vi.fn(),
@@ -99,6 +101,7 @@ vi.mock("@tanstack/react-router", () => ({
     useBlockerMock(options);
     return blockerState.current;
   },
+  useLocation: () => ({ pathname: "/workspace" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
 }));
@@ -116,7 +119,7 @@ vi.mock("#/components/codex/useScrollSpy", () => ({
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
-  useOutlinks: () => ({ data: undefined }),
+  useOutlinks: () => outlinksState,
   useSimilar: () => ({ data: undefined }),
   useTagSuggestions: useTagSuggestionsMock,
   useTags: useTagsMock,
@@ -224,6 +227,7 @@ beforeEach(() => {
   useBlockerMock.mockClear();
   journalTodayState.data = null;
   journalTodayState.isLoading = false;
+  outlinksState.data = undefined;
   clearFolioRestoration("t1");
   mountedSlateEditors.length = 0;
   restorationFrames.length = 0;
@@ -474,6 +478,98 @@ describe("Folio invalid-tab recovery", () => {
       screen.queryByRole("button", { name: "Raw Markdown" }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/END OF FILE/)).toBeNull();
+  });
+
+  it("orders recent open Folios by activation without tab pin controls", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "t1",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+          lastActiveAt: 1,
+        },
+        {
+          id: "t2",
+          type: "page",
+          path: "notes/beta.md",
+          label: "Beta",
+          lastActiveAt: 2,
+        },
+      ],
+      activeTabId: "t1",
+      quires: {},
+      openHistory: [],
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const recent = screen.getByText("Recent").parentElement!;
+    expect(
+      within(recent).queryByRole("button", { name: /pin tab/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(recent).getAllByRole("button", { name: "Close tab" }),
+    ).toHaveLength(2);
+
+    const beta = within(recent).getByRole("button", { name: "Beta" });
+    const alpha = within(recent).getByRole("button", { name: "Alpha" });
+    expect(
+      beta.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).not.toBe(0);
+
+    await user.click(beta);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t2");
+  });
+
+});
+
+describe("Folio outbound links", () => {
+  beforeEach(() => {
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+  });
+
+  it("excludes metadata edges from the Links count, badge, and list", async () => {
+    const user = userEvent.setup();
+    outlinksState.data = [
+      ...Array.from({ length: 5 }, (_, index) => ({
+        kind: "property_ref",
+        source_field: "tags",
+        target_id: `tag-${index}`,
+        target_path: `notes/tag-${index}.md`,
+        target_raw: `tag-${index}`,
+      })),
+      {
+        kind: "wiki",
+        source_field: null,
+        target_id: "page-1",
+        target_path: "notes/real.md",
+        target_raw: "Real",
+      },
+    ];
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const vitals = screen.getByText("Vitals").parentElement;
+    expect(vitals).not.toBeNull();
+    expect(within(vitals!).getByText("Links").closest("div")).toHaveTextContent(
+      "1",
+    );
+    const linksTab = screen.getByRole("button", { name: /^Links/ });
+    expect(linksTab).toHaveTextContent("1");
+    await user.click(linksTab);
+    expect(screen.getByText("Real")).toBeVisible();
+    expect(screen.queryByText("tag-0")).toBeNull();
   });
 });
 

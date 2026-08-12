@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
-import { Pin, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useStats } from "#/api/index";
@@ -12,7 +12,6 @@ import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import {
-  orderSheafTabs,
   type Quire,
   quireColorVar,
   sheafSegments,
@@ -41,10 +40,7 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   const toggleQuireCollapse = useWorkspaceStore((s) => s.toggleQuireCollapse);
   const { data: stats } = useStats();
 
-  const pageTabs = orderSheafTabs(
-    tabs.filter((t) => t.type === "page"),
-    quires,
-  );
+  const pageTabs = tabs.filter((tab) => tab.type === "page");
   const segments = sheafSegments(pageTabs, quires);
 
   const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(
@@ -226,16 +222,11 @@ function FolioTab({
   onContextMenu,
 }: FolioTabProps) {
   const closeTab = useWorkspaceStore((s) => s.closeTab);
-  const togglePin = useWorkspaceStore((s) => s.togglePin);
 
   const kind = resolveKindFromPath(t.path ?? "");
   const onClose = (e: ReactMouseEvent) => {
     e.stopPropagation();
     closeTab(t.id);
-  };
-  const onPin = (e: ReactMouseEvent) => {
-    e.stopPropagation();
-    togglePin(t.id);
   };
 
   // Quire membership rules the top edge; the active accent keeps the bottom.
@@ -268,36 +259,17 @@ function FolioTab({
         {t.label || t.path || "(untitled)"}
       </span>
       <span
-        onClick={onPin}
+        onClick={onClose}
         onKeyDown={(e) => {
-          if (e.key === "Enter") onPin(e as unknown as ReactMouseEvent);
+          if (e.key === "Enter") onClose(e as unknown as ReactMouseEvent);
         }}
         role="button"
         tabIndex={0}
-        aria-label={t.pinned ? "unpin folio" : "pin folio"}
-        className={cn(
-          "flex-shrink-0 cursor-pointer px-[2px] leading-none transition-opacity",
-          t.pinned
-            ? "text-warn opacity-100"
-            : "text-ink-mute opacity-0 group-hover:opacity-60 hover:!opacity-100",
-        )}
+        aria-label="close folio"
+        className="flex-shrink-0 cursor-pointer px-[2px] leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
       >
-        <Pin size={11} fill={t.pinned ? "currentColor" : "none"} />
+        <X size={11} />
       </span>
-      {!t.pinned && (
-        <span
-          onClick={onClose}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") onClose(e as unknown as ReactMouseEvent);
-          }}
-          role="button"
-          tabIndex={0}
-          aria-label="close folio"
-          className="flex-shrink-0 cursor-pointer px-[2px] leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
-        >
-          <X size={11} />
-        </span>
-      )}
     </button>
   );
 }
