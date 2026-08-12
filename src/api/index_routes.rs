@@ -644,7 +644,7 @@ pub async fn reference_repair_apply(
     let notification = state
         .mutation_coordinator
         .execute_batch_excluded(
-            &exclusion,
+            exclusion,
             &state.vault,
             &state.index,
             Arc::clone(&state.hooks),

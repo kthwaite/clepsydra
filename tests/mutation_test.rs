@@ -1412,6 +1412,96 @@ async fn cancelled_create_finishes_indexing_after_filesystem_publication() {
     .expect("cancelled request left the published file unindexed");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancelled_excluded_batch_retains_global_exclusion_through_reconciliation() {
+    let original = "original";
+    let replacement = "replacement";
+    let (tmp, index_vault) = setup_vault(&[("source.md", original)]);
+    let db_path = index_vault.root().join(".clepsydra/exclusion-cancel.db");
+    let mut vault_index = VaultIndex::open(&db_path).unwrap();
+    vault_index.build(&index_vault).unwrap();
+    let index = IndexHandle::spawn(vault_index, index_vault);
+    let mutation_vault = Vault::open(&tmp.path().join("vault")).unwrap();
+    let coordinator = Arc::new(MutationCoordinator::new());
+    let source_path = VaultPath::new("source.md").unwrap();
+    let expected_source = fs::read(mutation_vault.resolve(&source_path)).unwrap();
+
+    let (index_entered_tx, index_entered_rx) = std::sync::mpsc::channel();
+    let (index_release_tx, index_release_rx) = std::sync::mpsc::channel();
+    let blocking_index = index.clone();
+    let index_blocker = tokio::spawn(async move {
+        blocking_index
+            .with_index(move |_, _| {
+                index_entered_tx.send(()).unwrap();
+                index_release_rx.recv().unwrap();
+            })
+            .await
+    });
+    index_entered_rx.recv().unwrap();
+
+    let exclusion = coordinator.exclude_mutations().await;
+    let mutation_coordinator = Arc::clone(&coordinator);
+    let mutation_index = index.clone();
+    let mutation_source = source_path.clone();
+    let observed_vault = mutation_vault.clone();
+    let mutation = tokio::spawn(async move {
+        mutation_coordinator
+            .execute_batch_excluded(
+                exclusion,
+                &mutation_vault,
+                &mutation_index,
+                Arc::new(Vec::new()),
+                BatchMutationCommand {
+                    intents: vec![BatchPathIntent::Write {
+                        path: mutation_source.clone(),
+                        expected: ExpectedPathState::Bytes(expected_source),
+                        content: replacement.as_bytes().to_vec(),
+                    }],
+                    create_directories: Vec::new(),
+                    remove_directories: Vec::new(),
+                    index_events: vec![ChangeEvent::Upsert(mutation_source)],
+                    moved_pages: Vec::new(),
+                },
+                Arc::new(|_| {}),
+            )
+            .await
+    });
+
+    tokio::time::timeout(std::time::Duration::from_secs(1), async {
+        while fs::read_to_string(observed_vault.resolve(&source_path)).unwrap() != replacement {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("excluded batch did not publish");
+    mutation.abort();
+    assert!(mutation.await.unwrap_err().is_cancelled());
+
+    let waiting_coordinator = Arc::clone(&coordinator);
+    let mut waiter = tokio::spawn(async move {
+        waiting_coordinator
+            .lock_paths(&[VaultPath::new("unrelated.md").unwrap()])
+            .await
+    });
+    let exclusion_released_early =
+        tokio::time::timeout(std::time::Duration::from_millis(50), &mut waiter)
+            .await
+            .is_ok();
+
+    index_release_tx.send(()).unwrap();
+    index_blocker.await.unwrap().unwrap();
+    if !exclusion_released_early {
+        let _guard = tokio::time::timeout(std::time::Duration::from_secs(1), waiter)
+            .await
+            .expect("global exclusion was not released after reconciliation")
+            .unwrap();
+    }
+    assert!(
+        !exclusion_released_early,
+        "cancellation dropped global exclusion while shielded reconciliation continued"
+    );
+}
+
 #[test]
 fn mutation_coordinator_atomic_replace_cleans_partial_temp_after_write_failure() {
     use std::io::{self, Write};

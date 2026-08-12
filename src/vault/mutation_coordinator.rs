@@ -601,6 +601,7 @@ impl MutationCoordinator {
 
         MutationGuard {
             _gate_guard: None,
+            _exclusion_guard: None,
             _guards: guards,
             _locks: locks.into_iter().map(|request| request.lock).collect(),
         }
@@ -608,6 +609,7 @@ impl MutationCoordinator {
 
     pub async fn exclude_mutations(&self) -> MutationExclusionGuard {
         MutationExclusionGuard {
+            gate: Arc::clone(&self.mutation_gate),
             _guard: Arc::clone(&self.mutation_gate).write_owned().await,
         }
     }
@@ -671,19 +673,25 @@ impl MutationCoordinator {
 
     pub async fn execute_batch_excluded(
         &self,
-        _exclusion: &MutationExclusionGuard,
+        exclusion: MutationExclusionGuard,
         vault: &Vault,
         index: &IndexHandle,
         hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
         command: BatchMutationCommand,
         notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
     ) -> Result<MutationNotification, MutationError> {
+        if !Arc::ptr_eq(&self.mutation_gate, &exclusion.gate) {
+            return Err(MutationError::InvalidInput(
+                "mutation exclusion belongs to another coordinator".to_string(),
+            ));
+        }
         let affected_paths = command.affected_paths();
         #[cfg(test)]
         if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
             hook(&affected_paths);
         }
-        let guard = self.lock_paths_excluded(&affected_paths).await;
+        let mut guard = self.lock_paths_excluded(&affected_paths).await;
+        guard._exclusion_guard = Some(exclusion);
         self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
             .await
     }
@@ -1432,10 +1440,13 @@ enum MutationLockGuard {
 
 
 pub struct MutationExclusionGuard {
+    gate: Arc<RwLock<()>>,
     _guard: OwnedRwLockWriteGuard<()>,
 }
+
 pub struct MutationGuard {
     _gate_guard: Option<OwnedRwLockReadGuard<()>>,
+    _exclusion_guard: Option<MutationExclusionGuard>,
     _guards: Vec<MutationLockGuard>,
     _locks: Vec<Arc<RwLock<()>>>,
 }
