@@ -4,6 +4,18 @@ import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ReferenceRepairApiError, type ReferenceIssue } from "#/api/index";
 import { RepairWorkspace } from "../RepairWorkspace";
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T | PromiseLike<T>) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: Deferred<T>["resolve"];
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
 
 const mocks = vi.hoisted(() => ({
   issues: [] as ReferenceIssue[],
@@ -15,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   preview: vi.fn(),
   apply: vi.fn(),
   refetch: vi.fn(),
+  refetchGate: null as Deferred<unknown> | null,
   openTab: vi.fn(),
   mobile: false,
 }));
@@ -48,7 +61,8 @@ vi.mock("#/api/index", () => {
         isPending: mocks.isPending,
         isError: Boolean(mocks.queryError),
         error: mocks.queryError,
-        refetch: mocks.refetch,
+        refetch: () =>
+          mocks.refetchGate ? mocks.refetchGate.promise : mocks.refetch(),
       };
     },
     usePreviewReferenceRepair: () => ({
@@ -151,6 +165,7 @@ beforeEach(() => {
   mocks.hasData = true;
   mocks.total = mocks.issues.length;
   mocks.queryFilters = null;
+  mocks.refetchGate = null;
   mocks.preview.mockReset().mockResolvedValue({
     fingerprint: unresolvedIssue.fingerprint,
     before: "[[Unresolved Target]]",
@@ -198,7 +213,9 @@ describe("RepairWorkspace", () => {
     expect(mocks.apply).not.toHaveBeenCalled();
     expect(screen.getAllByText("[[notes/target.md]]")[0]).toBeVisible();
 
-    await user.click(screen.getByRole("button", { name: "Apply previewed repair" }));
+    await user.click(
+      screen.getByRole("button", { name: "Apply previewed repair" }),
+    );
 
     expect(mocks.apply).toHaveBeenCalledTimes(1);
     expect(
@@ -217,7 +234,9 @@ describe("RepairWorkspace", () => {
       expect.objectContaining({ project: "Atlas" }),
     );
 
-    await user.click(screen.getByRole("checkbox", { name: "Unresolved links" }));
+    await user.click(
+      screen.getByRole("checkbox", { name: "Unresolved links" }),
+    );
     await user.click(screen.getByRole("checkbox", { name: "Orphans" }));
     expect(onFiltersChange).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -226,9 +245,7 @@ describe("RepairWorkspace", () => {
       }),
     );
 
-    await user.click(
-      screen.getByRole("button", { name: /Repairability/ }),
-    );
+    await user.click(screen.getByRole("button", { name: /Repairability/ }));
     await user.click(screen.getByRole("option", { name: "Actionable only" }));
     expect(onFiltersChange).toHaveBeenLastCalledWith(
       expect.objectContaining({ actionable: true }),
@@ -241,7 +258,9 @@ describe("RepairWorkspace", () => {
     renderWorkspace();
 
     await user.click(screen.getByRole("button", { name: /Protected Target/ }));
-    expect(screen.getByText(/source text is unavailable or redacted/i)).toBeVisible();
+    expect(
+      screen.getByText(/source text is unavailable or redacted/i),
+    ).toBeVisible();
     expect(screen.getByText(/no in-place action is offered/i)).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "Open source" }));
@@ -253,9 +272,12 @@ describe("RepairWorkspace", () => {
   });
 
   it("refreshes and announces a stale 409 preview", async () => {
-    
     mocks.preview.mockRejectedValueOnce(
-      new ReferenceRepairApiError({ error: "stale reference" } as never, 409, ""),
+      new ReferenceRepairApiError(
+        { error: "stale reference" } as never,
+        409,
+        "",
+      ),
     );
     const user = userEvent.setup();
     renderWorkspace();
@@ -293,7 +315,9 @@ describe("RepairWorkspace", () => {
     await user.keyboard("{ArrowRight}");
 
     expect(screen.getByRole("region", { name: "Repair detail" })).toHaveFocus();
-    expect(screen.getByRole("heading", { name: "Unresolved Target" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Unresolved Target" }),
+    ).toBeVisible();
   });
 
   it("renders every returned file operation and text edit before apply", async () => {
@@ -317,11 +341,21 @@ describe("RepairWorkspace", () => {
     const user = userEvent.setup();
     renderWorkspace();
     await user.click(screen.getByRole("button", { name: /Missing Page/ }));
-    await user.type(screen.getByRole("textbox", { name: "New page folder" }), "notes");
-    await user.click(screen.getByRole("button", { name: "Preview page creation" }));
-    expect(await screen.findByRole("button", { name: "Apply previewed repair" })).toBeVisible();
+    await user.type(
+      screen.getByRole("textbox", { name: "New page folder" }),
+      "notes",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Preview page creation" }),
+    );
+    expect(
+      await screen.findByRole("button", { name: "Apply previewed repair" }),
+    ).toBeVisible();
 
-    await user.type(screen.getByRole("textbox", { name: "New page folder" }), "/new");
+    await user.type(
+      screen.getByRole("textbox", { name: "New page folder" }),
+      "/new",
+    );
     expect(
       screen.queryByRole("button", { name: "Apply previewed repair" }),
     ).not.toBeInTheDocument();
@@ -429,7 +463,9 @@ describe("RepairWorkspace", () => {
     await user.click(
       screen.getByRole("button", { name: "Replace with notes/target.md" }),
     );
-    await user.click(screen.getByRole("button", { name: "Apply previewed repair" }));
+    await user.click(
+      screen.getByRole("button", { name: "Apply previewed repair" }),
+    );
 
     mocks.issues = [];
     mocks.total = 200;
@@ -454,10 +490,12 @@ describe("RepairWorkspace", () => {
     await user.click(screen.getByRole("button", { name: /Source Note/ }));
 
     expect(screen.getByText(/no incoming references/i)).toBeVisible();
-    expect(screen.queryByText(/protected or encrypted/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/protected or encrypted/i),
+    ).not.toBeInTheDocument();
   });
 
-  it("restores focus to the selected row after apply", async () => {
+  it("does not focus the selected desktop row before authoritative refresh", async () => {
     const user = userEvent.setup();
     renderWorkspace();
     const row = screen.getByRole("button", { name: /Unresolved Target/ });
@@ -466,9 +504,81 @@ describe("RepairWorkspace", () => {
     await user.click(
       screen.getByRole("button", { name: "Replace with notes/target.md" }),
     );
-    await user.click(screen.getByRole("button", { name: "Apply previewed repair" }));
+    await user.click(
+      screen.getByRole("button", { name: "Apply previewed repair" }),
+    );
 
-    await waitFor(() => expect(row).toHaveFocus());
+    expect(row).not.toHaveFocus();
+  });
+
+  it("waits for authoritative desktop removal before focusing the first remaining row", async () => {
+    const user = userEvent.setup();
+    mocks.issues = [unresolvedIssue, ambiguousIssue];
+    mocks.total = 2;
+    mocks.refetchGate = deferred<unknown>();
+    const { rerender } = renderWorkspace();
+    const appliedRow = screen.getByRole("button", {
+      name: /Unresolved Target/,
+    });
+
+    await user.click(appliedRow);
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Apply previewed repair" }),
+    );
+
+    expect(appliedRow).not.toHaveFocus();
+    mocks.issues = [ambiguousIssue];
+    mocks.total = 1;
+    mocks.refetchGate.resolve(undefined);
+    await mocks.refetchGate.promise;
+    mocks.refetchGate = null;
+    rerender(<RepairWorkspace />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: /Second Target/ }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("does not steal focus when another issue is selected during a pending apply", async () => {
+    const user = userEvent.setup();
+    const applyGate = deferred<unknown>();
+    mocks.apply.mockReturnValue(applyGate.promise);
+    mocks.refetchGate = deferred<unknown>();
+    mocks.issues = [unresolvedIssue, ambiguousIssue];
+    mocks.total = 2;
+    const { rerender } = renderWorkspace();
+    await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
+    await user.click(
+      screen.getByRole("button", { name: "Replace with notes/target.md" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Apply previewed repair" }),
+    );
+
+    const otherRow = screen.getByRole("button", { name: /Second Target/ });
+    await user.click(otherRow);
+    applyGate.resolve({
+      fingerprint: unresolvedIssue.fingerprint,
+      notification: { message: "Repair applied" },
+    });
+    mocks.issues = [ambiguousIssue];
+    mocks.total = 1;
+    mocks.refetchGate.resolve(undefined);
+    await mocks.refetchGate.promise;
+    mocks.refetchGate = null;
+    rerender(<RepairWorkspace />);
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("heading", { name: "Second Target" }),
+      ).toBeVisible(),
+    );
+    expect(screen.getByRole("button", { name: /Second Target/ })).toHaveFocus();
   });
 
   it("opens issue detail in the shared dialog on mobile", async () => {
@@ -493,7 +603,9 @@ describe("RepairWorkspace", () => {
     await user.click(
       screen.getByRole("button", { name: "Replace with notes/target.md" }),
     );
-    await user.click(screen.getByRole("button", { name: "Apply previewed repair" }));
+    await user.click(
+      screen.getByRole("button", { name: "Apply previewed repair" }),
+    );
 
     await waitFor(() =>
       expect(
@@ -506,6 +618,7 @@ describe("RepairWorkspace", () => {
   it("moves focus to the results status when an applied mobile issue leaves the ledger", async () => {
     mocks.mobile = true;
     const user = userEvent.setup();
+    mocks.refetchGate = deferred<unknown>();
     const { rerender } = renderWorkspace();
     await user.click(screen.getByRole("button", { name: /Unresolved Target/ }));
     await user.click(
@@ -522,6 +635,9 @@ describe("RepairWorkspace", () => {
 
     mocks.issues = [];
     mocks.total = 0;
+    mocks.refetchGate.resolve(undefined);
+    await mocks.refetchGate.promise;
+    mocks.refetchGate = null;
     rerender(<RepairWorkspace />);
 
     await waitFor(() =>
@@ -556,13 +672,17 @@ describe("RepairWorkspace", () => {
     expect(screen.getByRole("status")).toHaveTextContent(
       "clepsydra://page/Unresolved Target",
     );
-    expect(screen.getByRole("list", { name: "Reference issues" })).toBeVisible();
+    expect(
+      screen.getByRole("list", { name: "Reference issues" }),
+    ).toBeVisible();
   });
 
   it("renders explicit loading, error, and empty states", () => {
     mocks.isPending = true;
     const { rerender } = renderWorkspace();
-    expect(screen.getByRole("status")).toHaveTextContent(/loading reference issues/i);
+    expect(screen.getByRole("status")).toHaveTextContent(
+      /loading reference issues/i,
+    );
 
     mocks.isPending = false;
     mocks.queryError = new Error("offline");

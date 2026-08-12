@@ -37,7 +37,12 @@ export function RepairWorkspace({
   const rowRefs = useRef(new Map<string, HTMLButtonElement>());
   const detailRef = useRef<HTMLElement>(null);
   const emptyResultsRef = useRef<HTMLDivElement>(null);
-  const appliedFingerprintRef = useRef<string | null>(null);
+  const pendingAppliedFocusRef = useRef<{
+    fingerprint: string;
+    dataAtApply: typeof issuesQuery.data;
+    refreshSettled: boolean;
+    expectedSelection: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!issuesQuery.data) return;
@@ -50,18 +55,26 @@ export function RepairWorkspace({
   }, [issues, issuesQuery.data, selectedFingerprint]);
 
   useEffect(() => {
-    const fingerprint = appliedFingerprintRef.current;
-    if (!fingerprint || !issuesQuery.data) return;
-    if (issues.some((issue) => issue.fingerprint === fingerprint)) return;
-    appliedFingerprintRef.current = null;
+    const pending = pendingAppliedFocusRef.current;
+    if (!pending || !issuesQuery.data) return;
+    if (!pending.refreshSettled || issuesQuery.data === pending.dataAtApply)
+      return;
+    if (selectedFingerprint !== pending.expectedSelection) {
+      pendingAppliedFocusRef.current = null;
+      return;
+    }
+    pendingAppliedFocusRef.current = null;
     requestAnimationFrame(() => {
+      const appliedRow = rowRefs.current.get(pending.fingerprint);
       const firstIssue = issues[0];
-      const target = firstIssue
-        ? rowRefs.current.get(firstIssue.fingerprint)
-        : emptyResultsRef.current;
+      const target =
+        (appliedRow?.isConnected ? appliedRow : null) ??
+        (firstIssue
+          ? rowRefs.current.get(firstIssue.fingerprint)
+          : emptyResultsRef.current);
       target?.focus();
     });
-  }, [issues, issuesQuery.data]);
+  }, [issues, issuesQuery.data, selectedFingerprint]);
 
   useEffect(() => {
     if (!issuesQuery.data) return;
@@ -86,7 +99,8 @@ export function RepairWorkspace({
   ]);
 
   const selectedIssue = selectedFingerprint
-    ? (issues.find((issue) => issue.fingerprint === selectedFingerprint) ?? null)
+    ? (issues.find((issue) => issue.fingerprint === selectedFingerprint) ??
+      null)
     : null;
 
   function changeFilters(next: ReferenceIssueFilters) {
@@ -109,13 +123,23 @@ export function RepairWorkspace({
     onFiltersChange?.(next);
   }
 
-  function restoreRowFocus(fingerprint = selectedFingerprint) {
+  function coordinateAppliedFocus(
+    fingerprint = selectedFingerprint,
+    expectedSelection = selectedFingerprint,
+  ) {
     if (!fingerprint) return;
-    requestAnimationFrame(() => {
-      rowRefs.current.get(fingerprint)?.focus();
+    pendingAppliedFocusRef.current = {
+      fingerprint,
+      dataAtApply: issuesQuery.data,
+      refreshSettled: false,
+      expectedSelection,
+    };
+    void issuesQuery.refetch().finally(() => {
+      const pending = pendingAppliedFocusRef.current;
+      if (pending?.fingerprint !== fingerprint) return;
+      pending.refreshSettled = true;
     });
   }
-
   function closeMobileDetail() {
     const fingerprint = selectedFingerprint;
     setSelectedFingerprint(null);
@@ -128,8 +152,8 @@ export function RepairWorkspace({
   }
 
   function closeMobileAfterApply() {
-    appliedFingerprintRef.current = selectedFingerprint;
-    closeMobileDetail();
+    coordinateAppliedFocus(selectedFingerprint, null);
+    setSelectedFingerprint(null);
   }
 
   return (
@@ -281,7 +305,7 @@ export function RepairWorkspace({
                 <RepairIssueDetail
                   issue={selectedIssue}
                   onRefresh={() => issuesQuery.refetch()}
-                  onApplied={restoreRowFocus}
+                  onApplied={coordinateAppliedFocus}
                 />
               ) : (
                 <div className="flex h-full min-h-48 items-center justify-center text-center">

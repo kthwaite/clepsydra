@@ -213,6 +213,7 @@ export function useReferenceIssues(
       if (!data) throw new Error("Reference issue response was empty.");
       return data;
     },
+    throwOnError: false,
   });
 }
 
