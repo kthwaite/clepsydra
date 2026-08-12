@@ -43,7 +43,7 @@ The component must not gain a sidebar or document variant. A single responsive r
 
 ### Base `body` column
 
-`body` is a projection-only Base system column, not a declared custom property. It does not appear in `PageBasePropertiesResponse.properties` and must not be duplicated as a compact property row.
+`body` is a projection-only Base system column, not a valid declared custom property. Selecting `body` in a Base view does not add it to `PageBasePropertiesResponse.properties` and must not create a second body editor. A malformed Base that attempts to declare a custom property named `body` may still surface the existing reserved-property diagnostic; that diagnostic never exposes or edits body content.
 
 When a matching Base view includes `body`, the rich note body remains the full-width editor immediately after the dedicated Properties section and intervening note controls. The Folio does not interleave the body with custom properties or reorder fields to match a particular Base view. This is deterministic when several Bases or views match and preserves the body’s rich-text editing surface.
 
@@ -88,7 +88,7 @@ Property failures remain isolated: the Folio header and body continue to render 
 - A successful projection with no matching Base renders no Properties section.
 - Loading and load failure remain visible and retryable.
 - Existing typed editing, saving, conflict recovery, draft retention, focus, and accessibility tests continue to pass.
-- A Base view containing `body` still renders one full-width note body editor after Properties and never renders a duplicate `body` property row.
+- A Base view containing `body` still renders exactly one full-width note body editor after Properties. A malformed custom `body` declaration may render only its reserved-property diagnostic, never a second body value or editor.
 
 ### Behavioral smoke test
 
