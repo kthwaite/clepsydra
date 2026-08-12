@@ -141,7 +141,7 @@ function BodyExcerptCell({
     <button
       type="button"
       aria-label={`Open body excerpt for ${pageLabel} in Folio`}
-      className="cl-mono block w-full min-w-0 cursor-pointer truncate px-1 py-0.5 text-left text-[12px] text-ink-2 underline-offset-2 hover:text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="cl-mono block w-full min-w-0 cursor-pointer truncate px-1 py-0.5 text-left text-[12px] text-ink-2 underline-offset-2 hover:text-accent hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring text-wrap"
       onClick={() => onOpenPage(path)}
     >
       {value}
