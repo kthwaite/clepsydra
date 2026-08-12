@@ -8,6 +8,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { BoardResponse } from "#/api/board";
+import { EMPTY_FILTER } from "#/components/tasking/board-filter";
 import { useBoardStore } from "#/store/board";
 import { filterTasks, TaskingScreen } from "../TaskingScreen";
 import {
@@ -17,6 +19,52 @@ import {
 } from "./fixtures";
 
 const { operations, tasks } = BOARD_FIXTURE;
+
+/** Minimal 3-task fixture for filter-strip composition tests. */
+const FILTER_FIXTURE: BoardResponse = {
+  ...BOARD_FIXTURE,
+  tasks: [
+    {
+      id: "f1",
+      code: "TSK-F1",
+      title: "Alpha task",
+      status: "INTAKE",
+      priority: "P0",
+      project: null,
+      cycle: null,
+      tags: [],
+      checks: [],
+      path: "tasks/f1.md",
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+    {
+      id: "f2",
+      code: "TSK-F2",
+      title: "Beta task",
+      status: "INTAKE",
+      priority: "P1",
+      project: null,
+      cycle: null,
+      tags: [],
+      checks: [],
+      path: "tasks/f2.md",
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+    {
+      id: "f3",
+      code: "TSK-F3",
+      title: "Gamma task",
+      status: "INTAKE",
+      priority: "P2",
+      project: null,
+      cycle: null,
+      tags: [],
+      checks: [],
+      path: "tasks/f3.md",
+      updated_at: "2026-06-01T00:00:00Z",
+    },
+  ],
+};
 
 /** Fresh client per render — retry off so error states surface immediately. */
 function renderScreen() {
@@ -39,6 +87,7 @@ beforeEach(() => {
     editTaskId: null,
     taskModal: null,
     cycleModal: null,
+    filter: EMPTY_FILTER,
   });
 });
 
@@ -436,6 +485,80 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     await userEvent.click(screen.getByRole("button", { name: "tasks/ops-1" }));
     expect(onOpenDossier).toHaveBeenCalledWith("tasks/ops-1");
     expect(onOpenPage).not.toHaveBeenCalled();
+  });
+});
+
+// ── filter strip: text + priority + hold composition ─────────────────────────
+
+describe("TaskingScreen — text/priority/hold filtering", () => {
+  it("typing text filters visible cards and shows the N OF M count", async () => {
+    stubBoardFetch(FILTER_FIXTURE);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.getByText("Gamma task")).toBeInTheDocument();
+    expect(screen.queryByTestId("board-filter-count")).not.toBeInTheDocument();
+
+    await userEvent.type(screen.getByTestId("board-filter-input"), "alpha");
+
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+    expect(screen.getByTestId("board-filter-count")).toHaveTextContent(
+      "01 OF 03",
+    );
+  });
+
+  it("clicking a priority toggle composes with the text filter", async () => {
+    stubBoardFetch(FILTER_FIXTURE);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("board-filter-pri-P1"));
+
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+    expect(screen.getByTestId("board-filter-count")).toHaveTextContent(
+      "01 OF 03",
+    );
+  });
+
+  it("clearing the filter restores all cards and hides the count line", async () => {
+    stubBoardFetch(FILTER_FIXTURE);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    const input = screen.getByTestId("board-filter-input");
+    await userEvent.type(input, "alpha");
+    expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
+
+    await userEvent.clear(input);
+
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.getByText("Gamma task")).toBeInTheDocument();
+    expect(screen.queryByTestId("board-filter-count")).not.toBeInTheDocument();
+  });
+
+  it("HOLD toggle keeps only tasks on hold", async () => {
+    const heldFixture: BoardResponse = {
+      ...FILTER_FIXTURE,
+      tasks: FILTER_FIXTURE.tasks.map((t) =>
+        t.id === "f2" ? { ...t, hold: "blocker" } : t,
+      ),
+    };
+    stubBoardFetch(heldFixture);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("board-filter-hold"));
+
+    expect(screen.getByText("Beta task")).toBeInTheDocument();
+    expect(screen.queryByText("Alpha task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
   });
 });
 

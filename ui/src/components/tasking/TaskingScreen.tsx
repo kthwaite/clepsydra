@@ -6,6 +6,7 @@ import { useBoardStore } from "#/store/board";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import { opKey } from "./board-constants";
+import { applyBoardFilter } from "./board-filter";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
 import { NewCycleModal } from "./NewCycleModal";
@@ -62,6 +63,7 @@ export function TaskingScreen({
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const opFilter = useBoardStore((s) => s.opFilter);
+  const filter = useBoardStore((s) => s.filter);
   const cycleSel = useBoardStore((s) => s.cycleSel);
   const railOpen = useBoardStore((s) => s.railOpen);
   const editTaskId = useBoardStore((s) => s.editTaskId);
@@ -80,36 +82,46 @@ export function TaskingScreen({
     }
   }, [data, opFilter, setOpFilter]);
 
-  const { operations, cycles, tasks, activeOp, visibleTasks, editTask } =
-    useMemo(() => {
-      if (!data) {
-        return {
-          operations: [],
-          cycles: [],
-          tasks: [],
-          activeOp: null,
-          visibleTasks: [],
-          editTask: null,
-        };
-      }
-
-      const filtered = filterTasks(data.tasks, data.operations, opFilter);
-      const active =
-        opFilter !== "ALL" && opFilter !== "UNFILED"
-          ? (data.operations.find((op) => opKey(op) === opFilter) ?? null)
-          : null;
-
+  const {
+    operations,
+    cycles,
+    tasks,
+    activeOp,
+    visibleTasks,
+    opFilteredCount,
+    editTask,
+  } = useMemo(() => {
+    if (!data) {
       return {
-        operations: data.operations,
-        cycles: data.cycles,
-        tasks: data.tasks,
-        activeOp: active,
-        visibleTasks: filtered,
-        editTask: editTaskId
-          ? (data.tasks.find((t) => t.id === editTaskId) ?? null)
-          : null,
+        operations: [],
+        cycles: [],
+        tasks: [],
+        activeOp: null,
+        visibleTasks: [],
+        opFilteredCount: 0,
+        editTask: null,
       };
-    }, [data, opFilter, editTaskId]);
+    }
+
+    const opFiltered = filterTasks(data.tasks, data.operations, opFilter);
+    const filtered = applyBoardFilter(opFiltered, filter);
+    const active =
+      opFilter !== "ALL" && opFilter !== "UNFILED"
+        ? (data.operations.find((op) => opKey(op) === opFilter) ?? null)
+        : null;
+
+    return {
+      operations: data.operations,
+      cycles: data.cycles,
+      tasks: data.tasks,
+      activeOp: active,
+      visibleTasks: filtered,
+      opFilteredCount: opFiltered.length,
+      editTask: editTaskId
+        ? (data.tasks.find((t) => t.id === editTaskId) ?? null)
+        : null,
+    };
+  }, [data, opFilter, filter, editTaskId]);
 
   const telemetryProject = activeOp?.project ?? undefined;
   const telemetryUnfiled = opFilter === "UNFILED";
@@ -189,6 +201,8 @@ export function TaskingScreen({
             cycles={cycles}
             tasks={visibleTasks}
             activeOp={activeOp}
+            filteredCount={visibleTasks.length}
+            opFilteredCount={opFilteredCount}
             onOpenDossier={onOpenDossier}
             sealHistory={
               telemetryApplicable

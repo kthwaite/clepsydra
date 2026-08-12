@@ -3,7 +3,8 @@ import { Spark } from "#/components/ui/spark";
 import { cn } from "#/lib/cn";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
-import { HealthDot, MODES, healthColor } from "./board-constants";
+import { HealthDot, healthColor, MODES, PRI_ORDER } from "./board-constants";
+import { isFilterActive } from "./board-filter";
 
 // ── mode glyphs ──────────────────────────────────────────────────────────────
 
@@ -132,6 +133,10 @@ interface BoardHeaderProps {
   tasks: BoardTask[];
   /** The active operation object when a single op is selected, else null. */
   activeOp: BoardOperation | null;
+  /** Task count after text/priority/hold filtering (the `tasks` prop's length). */
+  filteredCount: number;
+  /** Task count after op-scoping but before text/priority/hold filtering. */
+  opFilteredCount: number;
   onOpenDossier?: (dossier: string) => void;
   sealHistory?: number[];
   sealHistoryPending?: boolean;
@@ -144,6 +149,8 @@ export function BoardHeader({
   cycles,
   tasks,
   activeOp,
+  filteredCount,
+  opFilteredCount,
   onOpenDossier,
   sealHistory = [],
   sealHistoryPending = false,
@@ -153,6 +160,8 @@ export function BoardHeader({
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const setMode = useBoardStore((s) => s.setMode);
+  const filter = useBoardStore((s) => s.filter);
+  const setFilter = useBoardStore((s) => s.setFilter);
 
   // Stats
   const open = tasks.filter((t) => t.status !== "SEALED").length;
@@ -266,6 +275,79 @@ export function BoardHeader({
             )}
           </div>
         </div>
+      </div>
+
+      {/* Filter strip: text search + priority toggles + hold toggle + count */}
+      <div className="flex items-center gap-[10px] border-t border-[var(--rule-soft)] bg-[var(--paper)] px-[var(--pad)] py-[7px]">
+        <input
+          id="tasking-filter"
+          data-testid="board-filter-input"
+          type="text"
+          placeholder="FILTER…"
+          className="cl-mono w-[220px] border border-[var(--rule)] bg-transparent px-[8px] py-[4px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink)] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)]"
+          value={filter.text}
+          onChange={(e) => setFilter({ ...filter, text: e.target.value })}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              setFilter({ ...filter, text: "" });
+              e.currentTarget.blur();
+              e.stopPropagation(); // don't let Escape reach the edit panel's window listener
+            }
+          }}
+        />
+
+        <div className="flex items-center gap-[4px]">
+          {PRI_ORDER.map((p) => {
+            const on = filter.pris.includes(p);
+            return (
+              <button
+                key={p}
+                type="button"
+                aria-pressed={on}
+                data-testid={`board-filter-pri-${p}`}
+                className={cn(
+                  "cl-mono border px-[7px] py-[3px] text-[9px] uppercase tracking-[0.1em] transition-colors",
+                  on
+                    ? "border-[var(--hot)] bg-[var(--hot)] text-[var(--paper)]"
+                    : "border-[var(--rule)] text-[var(--ink-mute)] hover:text-[var(--ink-2)]",
+                )}
+                onClick={() =>
+                  setFilter({
+                    ...filter,
+                    pris: on
+                      ? filter.pris.filter((x) => x !== p)
+                      : [...filter.pris, p],
+                  })
+                }
+              >
+                {p}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            aria-pressed={filter.holdOnly}
+            data-testid="board-filter-hold"
+            className={cn(
+              "cl-mono border px-[7px] py-[3px] text-[9px] uppercase tracking-[0.1em] transition-colors",
+              filter.holdOnly
+                ? "border-[var(--hot)] bg-[var(--hot)] text-[var(--paper)]"
+                : "border-[var(--rule)] text-[var(--ink-mute)] hover:text-[var(--ink-2)]",
+            )}
+            onClick={() => setFilter({ ...filter, holdOnly: !filter.holdOnly })}
+          >
+            HOLD
+          </button>
+        </div>
+
+        {isFilterActive(filter) && (
+          <span
+            data-testid="board-filter-count"
+            className="cl-mono ml-auto text-[9px] uppercase tracking-[0.15em] text-[var(--ink-mute)]"
+          >
+            {pad2(filteredCount)} OF {pad2(opFilteredCount)}
+          </span>
+        )}
       </div>
 
       {/* Op-meta line — only when a real op is selected */}
