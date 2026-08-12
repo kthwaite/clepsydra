@@ -107,16 +107,22 @@ beforeEach(() => {
 });
 
 describe("FolioProperties", () => {
-  it("distinguishes a page with no matching Bases", () => {
+  it("hides the section after an authoritative no-match projection", () => {
     projectionState.data = projection([], []);
+
+    const view = renderPanel();
+
+    expect(view.container).toBeEmptyDOMElement();
+    expect(screen.queryByRole("heading", { name: "Properties" })).toBeNull();
+  });
+
+  it("shows loading before the authoritative projection is available", () => {
+    projectionState.isLoading = true;
 
     renderPanel();
 
     expect(screen.getByRole("heading", { name: "Properties" })).toBeVisible();
-    expect(screen.getByText("No matching Bases")).toBeVisible();
-    expect(
-      screen.getByText("This page does not currently match any Base."),
-    ).toBeVisible();
+    expect(screen.getByText("Loading properties…")).toBeVisible();
   });
 
   it("distinguishes matching Bases that declare no properties", () => {
@@ -198,6 +204,27 @@ describe("FolioProperties", () => {
     expect(screen.getByText("Not exposed")).toBeVisible();
     expect(screen.getByText("Reserved property")).toBeVisible();
     expect(screen.queryByRole("button", { name: /Edit (rating|conversation) property/ })).toBeNull();
+  });
+
+  it("never exposes or edits body content from a malformed body declaration", () => {
+    projectionState.data = projection([
+      property("body", "text", {
+        present: false,
+        value: null,
+        patchable: false,
+        blockers: ["reserved_key"],
+      }),
+    ]);
+
+    renderPanel();
+
+    expect(screen.getByRole("heading", { name: "body" })).toBeVisible();
+    expect(screen.getByText("Not exposed")).toBeVisible();
+    expect(screen.getByText("Reserved property")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "Edit body property" }),
+    ).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "body property" })).toBeNull();
   });
 
   it("routes every supported property type through the shared editor family", async () => {

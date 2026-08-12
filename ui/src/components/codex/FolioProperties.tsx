@@ -164,10 +164,14 @@ export function FolioProperties({
       )
     : null;
 
+  if (!projection.isError && projection.data?.matching_bases.length === 0) {
+    return null;
+  }
+
   return (
     <section
       aria-labelledby={`${id}-heading`}
-      className="border-b border-rule px-3 py-3"
+      className="mt-3 border-y border-rule py-3"
     >
       <div className="mb-2 flex items-center justify-between gap-2">
         <h2
@@ -202,17 +206,6 @@ export function FolioProperties({
         <p className="cl-marg m-0">Loading properties…</p>
       ) : null}
 
-      {projection.data?.matching_bases.length === 0 ? (
-        <div>
-          <p className="cl-mono m-0 text-[10px] font-semibold text-ink-2">
-            No matching Bases
-          </p>
-          <p className="cl-marg mt-1 mb-0">
-            This page does not currently match any Base.
-          </p>
-        </div>
-      ) : null}
-
       {projection.data &&
       projection.data.matching_bases.length > 0 &&
       projection.data.properties.length === 0 ? (
@@ -228,7 +221,7 @@ export function FolioProperties({
       ) : null}
 
       {projection.data && projection.data.properties.length > 0 ? (
-        <ul className="m-0 space-y-3 p-0">
+        <ul className="m-0 space-y-2 p-0">
           {projection.data.properties.map((property, index) => {
             const provenanceId = `${id}-provenance-${index}`;
             const errorId = `${id}-error-${index}`;
@@ -255,12 +248,15 @@ export function FolioProperties({
             }
 
             return (
-              <li key={property.key} className="list-none">
-                <div className="mb-1 flex items-start justify-between gap-2">
+              <li
+                key={property.key}
+                className="grid list-none gap-x-4 gap-y-1 py-1 sm:grid-cols-[minmax(8rem,12rem)_minmax(0,1fr)]"
+              >
+                <div className="min-w-0">
                   <h3 className="cl-mono m-0 break-all text-[10px] font-semibold text-ink-2">
                     {property.key}
                   </h3>
-                  <div className="flex flex-wrap justify-end gap-1">
+                  <div className="mt-1 flex flex-wrap gap-1">
                     {readOnlyReason ? (
                       <span className="cl-mono text-[8px] uppercase tracking-[0.08em] text-ink-mute">
                         {readOnlyReason}
@@ -277,104 +273,106 @@ export function FolioProperties({
                   </div>
                 </div>
 
-                {canEdit && property.definition ? (
-                  <EditableCell
-                    value={propertyCellValue(property)}
-                    definition={property.definition}
-                    isEditing={editingKey === property.key}
-                    focusOnDisplay={focusReturnKey === property.key}
-                    preserveEditingOnBlur={propertyFailure !== null}
-                    ariaLabel={`${property.key} property`}
-                    ariaDescribedBy={describedBy}
-                    onEdit={() => {
-                      setEditingKey(property.key);
-                      setFocusReturnKey(null);
-                      setFailedSave(null);
-                    }}
-                    onCancel={() => discardDraft(property.key)}
-                    onCommit={(value, hint) => {
-                      void saveProperty(property, value, hint);
-                    }}
-                    onCommitNext={(value, hint) => {
-                      void saveProperty(property, value, hint);
-                    }}
-                  />
-                ) : (
-                  <p
-                    aria-describedby={provenanceId}
-                    className="cl-mono m-0 break-words text-[11px] text-ink-2"
-                  >
-                    {displayPropertyValue(property)}
-                  </p>
-                )}
-
-                <ul
-                  id={provenanceId}
-                  aria-label={`${property.key} declarations`}
-                  className="mt-1 m-0 space-y-0.5 p-0"
-                >
-                  {property.declarations.map((declaration, declarationIndex) => (
-                    <li
-                      key={`${declaration.base.slug}-${declarationIndex}`}
-                      className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
+                <div className="min-w-0">
+                  {canEdit && property.definition ? (
+                    <EditableCell
+                      value={propertyCellValue(property)}
+                      definition={property.definition}
+                      isEditing={editingKey === property.key}
+                      focusOnDisplay={focusReturnKey === property.key}
+                      preserveEditingOnBlur={propertyFailure !== null}
+                      ariaLabel={`${property.key} property`}
+                      ariaDescribedBy={describedBy}
+                      onEdit={() => {
+                        setEditingKey(property.key);
+                        setFocusReturnKey(null);
+                        setFailedSave(null);
+                      }}
+                      onCancel={() => discardDraft(property.key)}
+                      onCommit={(value, hint) => {
+                        void saveProperty(property, value, hint);
+                      }}
+                      onCommitNext={(value, hint) => {
+                        void saveProperty(property, value, hint);
+                      }}
+                    />
+                  ) : (
+                    <p
+                      aria-describedby={provenanceId}
+                      className="cl-mono m-0 break-words text-[11px] text-ink-2"
                     >
-                      {declaration.base.name} ({declaration.base.slug}) ·{" "}
-                      {describeDefinition(declaration.definition)}
-                    </li>
-                  ))}
-                </ul>
-
-                {savingKey === property.key ? (
-                  <p
-                    role="status"
-                    className="cl-mono mt-1 mb-0 text-[8px] uppercase tracking-[0.08em] text-ink-mute"
-                  >
-                    Saving {property.key}…
-                  </p>
-                ) : null}
-
-                {propertyFailure ? (
-                  <div id={errorId} className="mt-1">
-                    <p role="alert" className="cl-marg m-0 text-[11px] text-hot">
-                      {propertyFailure.message}
+                      {displayPropertyValue(property)}
                     </p>
-                    <div className="mt-1 flex flex-wrap gap-1.5">
-                      {propertyFailure.conflict ? (
-                        <button
-                          type="button"
-                          className={ACTION_CLASS}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={retryProjection}
-                        >
-                          Reload current properties
-                        </button>
-                      ) : (
-                        <button
-                          type="button"
-                          className={ACTION_CLASS}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => {
-                            void saveProperty(
-                              property,
-                              propertyFailure.value,
-                              propertyFailure.hint,
-                            );
-                          }}
-                        >
-                          Retry saving {property.key}
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className={ACTION_CLASS}
-                        onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => discardDraft(property.key)}
+                  )}
+
+                  <ul
+                    id={provenanceId}
+                    aria-label={`${property.key} declarations`}
+                    className="mt-1 m-0 space-y-0.5 p-0"
+                  >
+                    {property.declarations.map((declaration, declarationIndex) => (
+                      <li
+                        key={`${declaration.base.slug}-${declarationIndex}`}
+                        className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
                       >
-                        Discard {property.key} draft
-                      </button>
+                        {declaration.base.name} ({declaration.base.slug}) ·{" "}
+                        {describeDefinition(declaration.definition)}
+                      </li>
+                    ))}
+                  </ul>
+
+                  {savingKey === property.key ? (
+                    <p
+                      role="status"
+                      className="cl-mono mt-1 mb-0 text-[8px] uppercase tracking-[0.08em] text-ink-mute"
+                    >
+                      Saving {property.key}…
+                    </p>
+                  ) : null}
+
+                  {propertyFailure ? (
+                    <div id={errorId} className="mt-1">
+                      <p role="alert" className="cl-marg m-0 text-[11px] text-hot">
+                        {propertyFailure.message}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1.5">
+                        {propertyFailure.conflict ? (
+                          <button
+                            type="button"
+                            className={ACTION_CLASS}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={retryProjection}
+                          >
+                            Reload current properties
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            className={ACTION_CLASS}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => {
+                              void saveProperty(
+                                property,
+                                propertyFailure.value,
+                                propertyFailure.hint,
+                              );
+                            }}
+                          >
+                            Retry saving {property.key}
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className={ACTION_CLASS}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => discardDraft(property.key)}
+                        >
+                          Discard {property.key} draft
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ) : null}
+                  ) : null}
+                </div>
               </li>
             );
           })}
