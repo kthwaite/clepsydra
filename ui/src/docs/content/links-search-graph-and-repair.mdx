@@ -6,6 +6,20 @@ export const meta = {
 
 Clepsydra derives a knowledge index from ordinary Markdown folios. Wikilinks and configured relation properties feed outlinks, backlinks, graph edges, and reference diagnostics; full-text search uses a separate title-and-body index. These projections never replace the files in the vault.
 
+## Prerequisites
+
+Start the server with an initialized, indexed vault. Create at least two folios
+before exercising links or the graph; reference repair requires an unresolved,
+ambiguous, broken, orphaned, isolated, or invalid-relation projection to exist.
+
+## Workflow
+
+Author and resolve wikilinks in Folio, inspect outlinks and backlinks, search
+the indexed corpus, and use Constellation for topology. When the index reports
+a reference issue, open Reference Repairs, inspect one occurrence, preview one
+candidate action, and apply only that preview. The sections below define each
+step and its evidence.
+
 ## Write and resolve wikilinks
 
 Write `[[Target]]` for a wikilink or `[[Target|display text]]` to show an alias without changing the target. In Folio, type `[[` to search indexed pages by title, canonical name, or path. Select a result to insert it. A muted, dashed link is dangling: the current page's indexed outlinks do not contain a unique target for it.
@@ -79,11 +93,28 @@ Protected body issues disclose no target text, span, source field, snippet, or c
 
 A relation declared by a Base is still a frontmatter value in a Markdown folio. A missing or ambiguous relation target becomes `invalid_relation_target`; use its candidate preview to patch that property occurrence. Schema warnings such as `many = false` are advisory and are not repair actions. See [Bases](/docs/bases) for relation value shapes, inline editing, and the saved-view model.
 
+## Failures and conflicts
+
+Unresolved and ambiguous names remain unresolved rather than choosing a page
+silently. Create-from-link leaves the source token unchanged when creation
+fails. Repair previews are occurrence-scoped and revision-bound: a stale
+fingerprint, source revision, target, or path produces `409`, clears the
+preview, and requires a fresh review. There is no bulk or optimistic apply.
+
 ## Rebuild and recovery boundaries
 
 Reference issues, backlinks, outlinks, FTS results, and graph data are index projections. If a file was changed outside Clepsydra, allow the watcher notification to refresh the index. Use the existing index rebuild controls only when diagnostics show that the projection itself is stale; rebuilding does not rewrite Markdown links or choose ambiguous targets.
 
 Repair is intentionally occurrence-scoped. It does not provide global search-and-replace, automatically delete orphaned pages, or reconnect isolated pages. Open navigation-only issues and make the domain decision in their source folios.
+
+## Privacy
+
+Titles, paths, aliases, tags, linkable frontmatter properties, relation field
+names, and their index projections are plaintext. Protected folios can be
+found by title, but their body does not contribute FTS text, blocks, outlink
+evidence, snippets, or graph topology. A protected issue therefore exposes no
+body target or candidate evidence; frontmatter-derived relation projections
+remain available because frontmatter is not encrypted.
 
 ## Related
 

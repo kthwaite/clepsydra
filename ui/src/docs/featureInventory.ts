@@ -218,6 +218,24 @@ export const FEATURE_INVENTORY = [
     },
   },
   {
+    id: "quire.new",
+    label: "Create a Quire from the active folio",
+    surface: "command",
+    disposition: { kind: "guide", slug: "codex-and-conversation-capture" },
+  },
+  {
+    id: "quire.add",
+    label: "Add the active folio to a Quire",
+    surface: "command",
+    disposition: { kind: "guide", slug: "codex-and-conversation-capture" },
+  },
+  {
+    id: "quire.remove",
+    label: "Remove the active folio from its Quire",
+    surface: "command",
+    disposition: { kind: "guide", slug: "codex-and-conversation-capture" },
+  },
+  {
     id: "workflow.pages-editor",
     label: "Pages and editor",
     surface: "workflow",

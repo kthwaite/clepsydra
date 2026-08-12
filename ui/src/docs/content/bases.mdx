@@ -6,6 +6,22 @@ export const meta = {
 
 A Base is a saved, non-owning view over pages in a vault. Its `.base.toml` definition owns a membership predicate, advisory property schemas, and one or more saved table views; it never owns the matching rows. The pages remain ordinary Markdown files and may match any number of Bases: a Base does not move, copy, or own them.
 
+## Prerequisites
+
+Start Clepsydra with an initialized vault and at least one Markdown folio whose
+TOML frontmatter contains fields worth filtering or displaying. Use `/bases`
+for guided authoring. Manual definitions must be direct children of
+`<vault>/bases/`, end in `.base.toml`, and contain valid TOML with a `name`.
+
+## Workflow
+
+Create a Base, define its membership predicate and advisory property schemas,
+configure one or more saved table views, preview the draft, then save against
+the revision you loaded. Open `/bases/<slug>` to query the saved view, edit
+frontmatter properties or relation values inline, add a matching member, or
+embed the non-owning view in a Folio. The following sections specify the
+definition format and each authoring path.
+
 ## Create and configure a base
 
 Open `/bases` from the **Bases** header item or run **Open Bases** in the command palette. The index lists saved bases and files that need repair. Choose **Create base**, or run **Create Base** in the command palette, to open guided creation. Enter a name and slug, optionally define the first membership rule, and create the base. Clepsydra opens `/bases/<slug>/edit` with an `All` table view and `title` column ready to configure.
@@ -269,7 +285,7 @@ Relation values participate in the same canonical-name resolution as page wikili
 
 See [relation repair](/docs/links-search-graph-and-repair#relation-repair) for the six issue classes, exact preview, stale-conflict, and one-at-a-time apply semantics.
 
-## Validation, troubleshooting, and v1 limits
+## Failures and conflicts
 
 Base files are parsed independently so one broken file does not poison the registry:
 
@@ -281,3 +297,26 @@ Base files are parsed independently so one broken file does not poison the regis
 If a base does not appear, check that it is directly under `<vault>/bases/`, ends in `.base.toml`, contains `name`, and has valid TOML. If `/bases/<slug>` says the base has no views, add at least one `[[views]]` entry. If date or number comparisons behave unexpectedly, verify the page uses native TOML values rather than quoted strings and that the property has the corresponding declaration.
 
 V1 supports table layout only. Unsaved preview requests are capped at 100 rows; saved grouped views cap displayed rows in each group at 50 while retaining the true group total. These limits do not change the non-owning model: pages can match any number of bases, and removing a base never removes pages or page properties.
+
+## Privacy
+
+`.base.toml` definitions are plaintext. Page frontmatter properties and
+relation values are plaintext, and index projections of that metadata are
+plaintext. Base membership, filtering, grouping, aggregation, LSP completion,
+and relation diagnostics can therefore reveal those values to any client or
+process that can read the vault or its running server.
+
+Protected folio bodies do not contribute body-derived word counts, FTS body
+text, block rows, or body-link topology to the index; previously indexed
+body-derived data is removed when a folio becomes protected. Its frontmatter
+remains available to Bases, including title, kind, project, declared
+properties, and relations, because protected-page encryption covers the body
+rather than frontmatter. Do not place secrets in Base definitions or
+frontmatter and assume body protection hides them.
+
+## Related
+
+- [Links, Search, Graph, and Repair](/docs/links-search-graph-and-repair) for relation repair
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+- [Pages and Authoring](/docs/pages-and-authoring) for frontmatter and canonical moves
+- [LSP](/docs/lsp) for property completions and diagnostics

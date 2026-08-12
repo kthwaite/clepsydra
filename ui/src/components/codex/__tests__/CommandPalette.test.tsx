@@ -4,14 +4,40 @@ import { Profiler } from "react";
 import { flushSync } from "react-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { navigateMock, openTabMock, useSearchMock, useTagsMock } = vi.hoisted(
-  () => ({
-    navigateMock: vi.fn(),
-    openTabMock: vi.fn(),
-    useSearchMock: vi.fn(() => ({ data: [] })),
-    useTagsMock: vi.fn(() => ({ data: [] })),
-  }),
-);
+const {
+  navigateMock,
+  openTabMock,
+  useSearchMock,
+  useTagsMock,
+  workspaceStateMock,
+} = vi.hoisted(() => ({
+  navigateMock: vi.fn(),
+  openTabMock: vi.fn(),
+  useSearchMock: vi.fn(() => ({ data: [] })),
+  useTagsMock: vi.fn(() => ({ data: [] })),
+  workspaceStateMock: {
+    tabs: [] as Array<{
+      id: string;
+      type: string;
+      path: string;
+      label: string;
+      quireId?: string;
+    }>,
+    quires: {} as Record<
+      string,
+      {
+        id: string;
+        name: string;
+        color: string;
+        collapsed: boolean;
+      }
+    >,
+    activeTabId: null as string | null,
+    createQuire: vi.fn(),
+    addTabToQuire: vi.fn(),
+    removeTabFromQuire: vi.fn(),
+  },
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
@@ -33,10 +59,13 @@ vi.mock("#/components/ThemeProvider", () => ({
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
-vi.mock("#/store/workspace", () => ({
-  useWorkspaceStore: (selector: (state: unknown) => unknown) =>
-    selector({ tabs: [], quires: {}, activeTabId: null }),
-}));
+vi.mock("#/store/workspace", () => {
+  const useWorkspaceStore = Object.assign(
+    (selector: (state: unknown) => unknown) => selector(workspaceStateMock),
+    { getState: () => workspaceStateMock },
+  );
+  return { useWorkspaceStore };
+});
 
 import { CommandPalette } from "#/components/codex/CommandPalette";
 import { STATIC_COMMANDS } from "#/components/codex/commandRegistry";
@@ -46,6 +75,9 @@ import { useUiStore } from "#/store/ui";
 describe("CommandPalette keyboard navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    workspaceStateMock.tabs = [];
+    workspaceStateMock.quires = {};
+    workspaceStateMock.activeTabId = null;
     useUiStore.setState({ isSearchOpen: true });
   });
 
@@ -201,5 +233,53 @@ describe("CommandPalette keyboard navigation", () => {
       fireEvent.change(query, { target: { value: command.title } });
       expect(screen.getByText(command.title)).toBeInTheDocument();
     }
+  });
+
+  it("preserves stable and dynamic Quire command IDs, labels, filtering, and actions", async () => {
+    const user = userEvent.setup();
+    workspaceStateMock.tabs = [
+      {
+        id: "tab-1",
+        type: "page",
+        path: "notes/alpha.md",
+        label: "Alpha",
+        quireId: "quire-1",
+      },
+    ];
+    workspaceStateMock.quires = {
+      "quire-1": {
+        id: "quire-1",
+        name: "Current",
+        color: "sepia",
+        collapsed: false,
+      },
+      "quire-2": {
+        id: "quire-2",
+        name: "Research",
+        color: "verdigris",
+        collapsed: false,
+      },
+    };
+    workspaceStateMock.activeTabId = "tab-1";
+    render(<CommandPalette />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Command query" }),
+      "Quire:",
+    );
+
+    expect(screen.getByText("quire.new")).toBeInTheDocument();
+    expect(screen.getByText("quire.add.quire-2")).toBeInTheDocument();
+    expect(screen.queryByText("quire.add.quire-1")).not.toBeInTheDocument();
+    expect(screen.getByText("quire.remove")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", {
+        name: /quire\.add\.quire-2.*Quire: add active folio to Research/i,
+      }),
+    );
+    expect(workspaceStateMock.addTabToQuire).toHaveBeenCalledWith(
+      "tab-1",
+      "quire-2",
+    );
   });
 });

@@ -1,13 +1,55 @@
 export const meta = {
   slug: "configuration",
   title: "Configuration",
-  description: "Configure Clepsydra’s server, vault, feeds, TLS, and runtime behavior."
+  description: "Configure server and vault behavior plus Status, theme, and chrome preferences."
 }
 
 Clepsydra uses two config layers:
 
 1. **Application config** (`config.toml`) — server bind settings, frontend serving mode, TLS, vault root, and feed scheduling/limits
 2. **Vault config** (`<vault>/.clepsydra/config.toml`) — vault behavior, academic/archive settings
+
+## Status and preferences
+
+Choose **STATUS** in the desktop header (the mobile control is labelled
+**Status**) or run **Open Status / preferences** in the command console. Both
+open the Settings dialog directly on **Appearance**. The folio sidebar’s
+**Settings** control opens the same dialog.
+
+- **General** shows current corpus and index counts.
+- **Navigation** selects Smart, New Tab, or Replace behavior for opening pages.
+- **Appearance** controls mode, accent, density, and diegetic chrome.
+- **Location** saves coordinates and an optional label to
+  `.clepsydra/location.toml` for Atrium’s sunrise, sunset, and day arc.
+- **Editor** currently displays informational placeholders; it has no shipped
+  preference controls.
+- **Advanced** owns encrypted-note setup/password changes and index-health
+  actions. These are operational controls, not visual preferences.
+
+### Theme toggle
+
+Use the header button labelled **[DARK]** or **[PAPER]**, run **Toggle dark
+mode**, or choose Dark/Paper under **Status → Appearance**. The direct toggle
+switches between the resolved dark and paper palettes. Appearance also offers
+the shipped accent palettes and compact/default/spacious density.
+
+Theme, accent, and density are browser-local preferences stored in
+`localStorage` (`clepsydra.theme`, `clepsydra.accent`, and
+`clepsydra.density`). They persist for that browser origin; they do not modify
+`config.toml`, vault files, or other clients.
+
+### Diegetic chrome
+
+Use **Status → Appearance → Diegetic chrome** or run **Toggle diegetic
+chrome**. Turning it off suppresses the ornamental footer annotations such as
+the VESSEL/write indicator and index-collation text; primary navigation, page
+content, query, Status, and the theme toggle remain available. The setting is
+on by default and persists for the browser origin under
+`clepsydra.diegetic`; it does not change vault data.
+
+The privacy boundary for these preferences is distinct from protected folios:
+browser-local appearance values are not synchronized or encrypted by
+Clepsydra, while `.clepsydra/location.toml` is a plaintext vault-internal file.
 
 ---
 

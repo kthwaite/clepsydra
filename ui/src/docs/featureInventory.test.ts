@@ -1,6 +1,9 @@
 import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { describe, expect, it } from "vitest";
-import { STATIC_COMMANDS } from "#/components/codex/commandRegistry";
+import {
+  QUIRE_COMMAND_FAMILIES,
+  STATIC_COMMANDS,
+} from "#/components/codex/commandRegistry";
 import { FEATURE_INVENTORY } from "#/docs/featureInventory";
 import { DOC_GROUPS, DOC_PAGES } from "#/docs/registry";
 import { routeTree } from "#/routeTree.gen";
@@ -76,12 +79,17 @@ describe("feature documentation inventory", () => {
     ).toEqual(routePaths().sort());
   });
 
-  it("gives every static command exactly one documentation disposition", () => {
+  it("gives every command family exactly one documentation disposition", () => {
     expect(
       FEATURE_INVENTORY.filter((entry) => entry.surface === "command")
         .map((entry) => entry.id)
         .sort(),
-    ).toEqual(STATIC_COMMANDS.map((command) => command.id).sort());
+    ).toEqual(
+      [
+        ...STATIC_COMMANDS.map((command) => command.id),
+        ...QUIRE_COMMAND_FAMILIES.map((family) => family.id),
+      ].sort(),
+    );
   });
 
   it("includes every current major named workflow without marking it internal", () => {
@@ -178,6 +186,66 @@ describe("feature documentation inventory", () => {
       ]),
     );
   });
+
+  it.each([
+    ["/", "getting-started", "## Atrium: your starting dashboard", "dashboard"],
+    [
+      "nav.atrium",
+      "getting-started",
+      "## Atrium: your starting dashboard",
+      "Atrium",
+    ],
+    [
+      "/gazetteer",
+      "getting-started",
+      "## Gazetteer: find and organize the corpus",
+      "index",
+    ],
+    [
+      "nav.gazetteer",
+      "getting-started",
+      "## Gazetteer: find and organize the corpus",
+      "Gazetteer",
+    ],
+    [
+      "app.shortcutHelp",
+      "getting-started",
+      "## Keyboard shortcut help",
+      "keyboard shortcuts",
+    ],
+    [
+      "app.settings",
+      "configuration",
+      "## Status and preferences",
+      "preferences",
+    ],
+    [
+      "app.themeToggle",
+      "configuration",
+      "### Theme toggle",
+      "theme",
+    ],
+    [
+      "sys.chrome",
+      "configuration",
+      "### Diegetic chrome",
+      "diegetic chrome",
+    ],
+  ] as const)(
+    "%s is owned by useful content and discovery metadata in %s",
+    (id, slug, heading, discoveryTerm) => {
+      const entry = FEATURE_INVENTORY.find((candidate) => candidate.id === id);
+      expect(entry?.disposition).toEqual(
+        expect.objectContaining({ slug }),
+      );
+
+      const page = DOC_PAGES.find((candidate) => candidate.slug === slug);
+      expect(page?.source).toContain(heading);
+      expect(
+        `${page?.description ?? ""} ${page?.keywords.join(" ") ?? ""}`,
+      ).toMatch(new RegExp(discoveryTerm, "i"));
+    },
+  );
 
   it("uses unique inventory IDs", () => {
     const ids = FEATURE_INVENTORY.map((entry) => entry.id);

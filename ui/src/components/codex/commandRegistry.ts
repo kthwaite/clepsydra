@@ -25,6 +25,118 @@ export interface StaticCommandDescriptor {
   readonly action: StaticCommandAction;
 }
 
+export type QuireCommandFamilyDescriptor =
+  | {
+      readonly id: "quire.new";
+      readonly title: string;
+      readonly action: "create-quire";
+    }
+  | {
+      readonly id: "quire.add";
+      readonly title: string;
+      readonly action: "add-to-quire";
+    }
+  | {
+      readonly id: "quire.remove";
+      readonly title: string;
+      readonly action: "remove-from-quire";
+    };
+
+export type QuireCommandAction = QuireCommandFamilyDescriptor["action"];
+
+export type RuntimeQuireCommandDescriptor =
+  | {
+      readonly familyId: "quire.new";
+      readonly id: "quire.new";
+      readonly title: string;
+      readonly action: "create-quire";
+    }
+  | {
+      readonly familyId: "quire.add";
+      readonly id: `quire.add.${string}`;
+      readonly title: string;
+      readonly action: "add-to-quire";
+      readonly quireId: string;
+    }
+  | {
+      readonly familyId: "quire.remove";
+      readonly id: "quire.remove";
+      readonly title: string;
+      readonly action: "remove-from-quire";
+    };
+
+export interface QuireCommandContext {
+  readonly activeQuireId?: string;
+  readonly quires: readonly {
+    readonly id: string;
+    readonly name: string;
+  }[];
+}
+
+export const QUIRE_COMMAND_FAMILIES: readonly QuireCommandFamilyDescriptor[] = [
+  {
+    id: "quire.new",
+    title: "Quire: new from active folio",
+    action: "create-quire",
+  },
+  {
+    id: "quire.add",
+    title: "Quire: add active folio to",
+    action: "add-to-quire",
+  },
+  {
+    id: "quire.remove",
+    title: "Quire: remove active folio from quire",
+    action: "remove-from-quire",
+  },
+];
+
+export function runtimeQuireCommands({
+  activeQuireId,
+  quires,
+}: QuireCommandContext): RuntimeQuireCommandDescriptor[] {
+  const commands: RuntimeQuireCommandDescriptor[] = [];
+
+  for (const family of QUIRE_COMMAND_FAMILIES) {
+    switch (family.action) {
+      case "create-quire":
+        commands.push({
+          familyId: family.id,
+          id: family.id,
+          title: family.title,
+          action: family.action,
+        });
+        break;
+      case "add-to-quire":
+        for (const quire of quires) {
+          if (quire.id === activeQuireId) continue;
+          commands.push({
+            familyId: family.id,
+            id: `${family.id}.${quire.id}`,
+            title: `${family.title} ${quire.name}`,
+            action: family.action,
+            quireId: quire.id,
+          });
+        }
+        break;
+      case "remove-from-quire":
+        if (activeQuireId) {
+          commands.push({
+            familyId: family.id,
+            id: family.id,
+            title: family.title,
+            action: family.action,
+          });
+        }
+        break;
+      default:
+        family satisfies never;
+    }
+  }
+
+  return commands;
+}
+
 export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
   {
     id: "nav.atrium",

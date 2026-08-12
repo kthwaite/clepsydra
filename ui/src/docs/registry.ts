@@ -80,8 +80,19 @@ const CaptureFeedsAndArchivesGuide = lazy(
 const gettingStartedMeta = {
   slug: "getting-started",
   title: "Getting Started",
-  description: "Run Clepsydra with an initialized vault.",
-  keywords: ["install", "setup", "vault", "server"],
+  description:
+    "Start Clepsydra, use Atrium and Gazetteer, and find keyboard shortcuts.",
+  keywords: [
+    "install",
+    "setup",
+    "vault",
+    "server",
+    "Atrium",
+    "dashboard",
+    "Gazetteer",
+    "index",
+    "keyboard shortcuts",
+  ],
 } satisfies DocMeta;
 const pagesAndAuthoringMeta = {
   slug: "pages-and-authoring",
@@ -112,8 +123,20 @@ const configurationMeta = {
   slug: "configuration",
   title: "Configuration",
   description:
-    "Configure Clepsydra’s server, vault, TLS, and runtime behavior.",
-  keywords: ["config", "environment", "TLS", "server", "vault"],
+    "Configure server and vault behavior plus Status, theme, and chrome preferences.",
+  keywords: [
+    "config",
+    "environment",
+    "TLS",
+    "server",
+    "vault",
+    "Status",
+    "preferences",
+    "theme",
+    "dark mode",
+    "paper mode",
+    "diegetic chrome",
+  ],
 } satisfies DocMeta;
 const troubleshootingMeta = {
   slug: "troubleshooting",

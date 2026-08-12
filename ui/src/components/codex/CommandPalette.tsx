@@ -9,6 +9,7 @@ import {
 import { useSearch, useTags } from "#/api/index";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import {
+  runtimeQuireCommands,
   STATIC_COMMANDS,
   type StaticCommandAction,
 } from "#/components/codex/commandRegistry";
@@ -189,34 +190,31 @@ function CommandPaletteContent() {
   const quireCommands = useMemo<Command[]>(() => {
     const active = workspaceTabs.find((t) => t.id === activeTabId);
     if (!active || active.type !== "page") return [];
-    const store = () => useWorkspaceStore.getState();
-    const cmds: Command[] = [
-      {
-        kind: "cmd",
-        id: "quire.new",
-        title: "Quire: new from active folio",
-        action: () =>
-          store().createQuire(active.id, deriveQuireName(active.label)),
+
+    return runtimeQuireCommands({
+      activeQuireId: active.quireId,
+      quires: Object.values(quireMap),
+    }).map((command) => ({
+      kind: "cmd",
+      id: command.id,
+      title: command.title,
+      action: () => {
+        const store = useWorkspaceStore.getState();
+        switch (command.action) {
+          case "create-quire":
+            store.createQuire(active.id, deriveQuireName(active.label));
+            return;
+          case "add-to-quire":
+            store.addTabToQuire(active.id, command.quireId);
+            return;
+          case "remove-from-quire":
+            store.removeTabFromQuire(active.id);
+            return;
+          default:
+            command satisfies never;
+        }
       },
-    ];
-    for (const q of Object.values(quireMap)) {
-      if (q.id === active.quireId) continue;
-      cmds.push({
-        kind: "cmd",
-        id: `quire.add.${q.id}`,
-        title: `Quire: add active folio to ${q.name}`,
-        action: () => store().addTabToQuire(active.id, q.id),
-      });
-    }
-    if (active.quireId) {
-      cmds.push({
-        kind: "cmd",
-        id: "quire.remove",
-        title: "Quire: remove active folio from quire",
-        action: () => store().removeTabFromQuire(active.id),
-      });
-    }
-    return cmds;
+    }));
   }, [workspaceTabs, quireMap, activeTabId]);
 
   const filtered = useMemo<Command[]>(() => {

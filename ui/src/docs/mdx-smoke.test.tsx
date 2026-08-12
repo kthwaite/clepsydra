@@ -19,16 +19,13 @@ import Troubleshooting, {
 import { FEATURE_INVENTORY } from "#/docs/featureInventory";
 import { DOC_PAGES } from "#/docs/registry";
 
-const WORKFLOW_GUIDE_SLUGS = [
-  "pages-and-authoring",
-  "editor-workflows",
-  "attachments-and-media",
-  "encryption-and-protected-pages",
-  "tasks-agenda-journals-and-board",
-  "academic-library-and-reading",
-  "capture-feeds-and-archives",
-  "codex-and-conversation-capture",
-] as const;
+const STRUCTURED_GUIDE_SLUGS = [
+  ...new Set(
+    FEATURE_INVENTORY.flatMap((entry) =>
+      entry.disposition.kind === "guide" ? [entry.disposition.slug] : [],
+    ),
+  ),
+];
 
 const WORKFLOW_GUIDE_HEADINGS = [
   "Prerequisites",
@@ -123,8 +120,8 @@ it("resolves every rendered internal documentation link to a registered guide an
   }
 });
 
-it.each(WORKFLOW_GUIDE_SLUGS)(
-  "$slug follows the workflow guide structure",
+it.each(STRUCTURED_GUIDE_SLUGS)(
+  "$slug follows the shared guide structure",
   (slug) => {
     const source = DOC_PAGES.find((page) => page.slug === slug)?.source;
 
@@ -148,6 +145,21 @@ it.each(INTEGRATION_GUIDE_SLUGS)(
     expect(source).toContain("(/docs/troubleshooting)");
   },
 );
+
+it("documents the plaintext Base definition, property, projection, and protected-body boundaries", () => {
+  const source = DOC_PAGES.find((page) => page.slug === "bases")?.source;
+
+  expect(source).toContain("`.base.toml` definitions are plaintext");
+  expect(source).toMatch(
+    /frontmatter properties and\s+relation values are plaintext/i,
+  );
+  expect(source).toMatch(
+    /index projections of that metadata are\s+plaintext/i,
+  );
+  expect(source).toMatch(
+    /protected folio bodies do not contribute body-derived[\s\S]*frontmatter\s+remains available/i,
+  );
+});
 
 it("documents mutation preview snapshots and recursive folder deletion", () => {
   const source = DOC_PAGES.find(

@@ -1,7 +1,7 @@
 export const meta = {
   slug: "getting-started",
   title: "Getting Started",
-  description: "Run Clepsydra with an initialized vault."
+  description: "Start Clepsydra, use Atrium and Gazetteer, and find keyboard shortcuts."
 }
 
 This guide gets Clepsydra running locally with an initialized vault.
@@ -15,6 +15,13 @@ By default, Clepsydra now runs as a **single binary** that serves both:
 - Rust toolchain (stable)
 - Bun (for `ui/` and `extension/`)
 - Optional for local HTTPS: [`mkcert`](https://github.com/FiloSottile/mkcert)
+
+## Workflow
+
+Initialize a vault, point the application config at it, build the embedded UI,
+and start `clep serve` (or `cargo run -- serve`). Open `/` for Atrium, create a
+first folio, then use Gazetteer and the command console to move between the
+corpus-wide and page-focused workflows described below.
 
 ## 1) Initialize a vault
 
@@ -228,6 +235,44 @@ curl -X POST http://localhost:3000/api/vault/pages/notes/first.md \
 
 (If TLS is enabled, use `https://localhost:3000/...`.)
 
+## Atrium: your starting dashboard
+
+Open `/` or run **Open Atrium** in the command console. Atrium is the day-start
+dashboard: **Open today’s journal** opens or creates the current journal,
+**Capture** opens folio inscription, and **Search** opens the command console.
+The rest of the dashboard projects current vault state, including inventory
+counts and reference-issue access, recent created/edited/opened folios,
+activity, frequently used tags, reading and feed panels, and the location-aware
+sky panel. These are views over the current server and index; Atrium does not
+replace the source Markdown files.
+
+If the sky panel has no coordinates, use its location control or open
+**Status → Location**. Clepsydra stores that choice in
+`.clepsydra/location.toml`.
+
+## Gazetteer: find and organize the corpus
+
+Open `/gazetteer` or run **Open Gazetteer (index)**. Gazetteer lists the current
+content index. Its text filter is a case-insensitive substring match over
+title, path, description, and tags. Selecting several tag chips uses AND
+semantics, and the sort controls order by update time, path ID, title, or word
+count.
+
+On desktop, select visible rows to assign a kind or project in bulk. A
+successful assignment can move files because kind and project determine their
+canonical paths; rows that failed remain selected so they can be retried. The
+mobile view keeps search, tags, sorting, pagination, and page opening, but does
+not expose the desktop bulk-assignment bar.
+
+## Keyboard shortcut help
+
+Press <kbd>Command</kbd>+<kbd>/</kbd> on macOS or
+<kbd>Ctrl</kbd>+<kbd>/</kbd> elsewhere, or run **Keyboard shortcuts** in the
+command console. The modal is generated from the current shortcut registry and
+groups every active binding by workflow. Notes such as “outside the editor”
+identify scope. Press <kbd>Escape</kbd> or dismiss the modal to return to the
+current surface.
+
 ## Wikilinks
 
 Type `[[` to search for a page, then press Enter or Tab to insert the selected
@@ -368,3 +413,27 @@ To archive web pages into Clepsydra, follow the complete
 
 For common configuration, server, UI, vault initialization, and LSP problems,
 see the [Troubleshooting guide](/docs/troubleshooting).
+
+## Failures and conflicts
+
+If the UI, server, vault, TLS, or LSP does not start as described, follow
+[Troubleshooting](/docs/troubleshooting). Gazetteer bulk assignments use
+the server’s typed move operation: successful and unchanged paths are cleared
+from the selection, while failed paths remain available for correction rather
+than being presented as successful.
+
+## Privacy
+
+Atrium and Gazetteer display server and index projections from the selected
+vault. Titles, paths, tags, frontmatter, activity timestamps, and configured
+location are not protected by body encryption. Protected folio bodies remain
+unavailable to body-derived search and projections, but their plaintext
+metadata can still appear. See [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
+before treating a dashboard or index as private.
+
+## Related
+
+- [Pages and Authoring](/docs/pages-and-authoring)
+- [Links, Search, Graph, and Repair](/docs/links-search-graph-and-repair)
+- [Configuration](/docs/configuration)
+- [Troubleshooting](/docs/troubleshooting)

@@ -6,6 +6,19 @@ export const meta = {
 
 A block reference stores a stable block ID in Markdown and renders the referenced source block in place. The source remains authoritative: a reference neither copies the block into the current Folio nor makes the rendered text editable.
 
+## Prerequisites
+
+Start Clepsydra with an indexed vault and open an editable, unprotected source
+Folio. The picker needs at least two search characters and can only discover
+indexed blocks; protected body content is intentionally unavailable.
+
+## Workflow
+
+Give the authoritative source block a valid stable ID, insert its
+`((blockId))` reference in another Folio, and save normally. The rendered
+reference is a read-only, single-block view with a **Source** control. Edit the
+source—not the transclusion—and let vault notifications refresh consumers.
+
 ## Block IDs and reference syntax
 
 A source block carries a terminal caret marker. Clepsydra accepts 10–12 ASCII letters or digits; generated IDs contain 11 base-62 characters.
@@ -55,7 +68,9 @@ A missing ID, a block removed from the index, an empty normalized result, and a 
 
 The unavailable state intentionally preserves the `((blockId))` token in the document. Repair or restore the source; do not replace the reference merely to hide the state. For index-level evidence and candidate repair, open [Reference Repairs](/repairs) and review the `broken_block_ref` issue one occurrence at a time.
 
-## Privacy boundary for protected folios
+## Privacy
+
+### Privacy boundary for protected folios
 
 Protected folio bodies are not indexed as blocks. Block search therefore cannot reveal their plaintext, and the block-ID assignment endpoint rejects protected pages. If a formerly plaintext source becomes protected, change handling clears retained block-detail data for that page before refetch can repopulate it.
 
@@ -69,7 +84,7 @@ The Folio editor stores a block reference as an inline, read-only token. It can 
 
 Raw HTML, code spans, links, and fenced code are opaque while read-only Markdown scans for `((blockId))` tokens. A token inside one of those nodes remains literal. This avoids turning code examples or existing links into live block lookups.
 
-## Failures and repair
+## Failures and conflicts
 
 | Symptom | Meaning | Next action |
 | --- | --- | --- |

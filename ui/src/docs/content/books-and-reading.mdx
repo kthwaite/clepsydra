@@ -11,6 +11,21 @@ Clepsydra server to be online. For the shipped `/academic` workspace, BibTeX,
 DOI, Zotero, citation-key conflicts, reading status, and annotations, see
 [Academic Library and Reading](/docs/academic-library-and-reading).
 
+## Prerequisites
+
+Start the Clepsydra server with an initialized vault and network access to
+Open Library. Camera scanning additionally needs a secure browser context
+(HTTPS or loopback), camera permission, and a device capable of reading the
+book’s EAN-13 barcode.
+
+## Workflow
+
+Open the command console, run the book-import command, type or scan a valid
+ISBN, review the normalized value, and submit it. Clepsydra validates and
+canonicalizes the identifier, reuses an existing matching book Folio, or
+fetches Open Library metadata and creates the Folio in the configured books
+folder. Continue richer status, notes, and annotation work in Academic Library.
+
 ## Add a book by ISBN
 
 1. Open the command palette with `Command+K` on macOS or `Ctrl+K` elsewhere.
@@ -84,7 +99,7 @@ The Academic Library does not render or annotate PDFs. See
 [Academic Library and Reading](/docs/academic-library-and-reading) for the
 complete shipped boundary.
 
-## Troubleshooting
+## Failures and conflicts
 
 ### The camera does not start
 
@@ -109,6 +124,16 @@ ISBN-13 only; a different product barcode is not a book ISBN.
 The ISBN can be valid while the corresponding edition is absent from Open
 Library. Confirm the edition's ISBN and try again later. You can still create a
 normal folio and enter its metadata manually.
+
+## Privacy
+
+This importer has no protected-body mode. The ISBN is sent to the local
+Clepsydra server, which requests edition and author metadata from
+`openlibrary.org`; Open Library therefore receives the canonical ISBN and the
+normal network metadata of those HTTPS requests. The resulting book title,
+authors, ISBN, status, and other imported fields are plaintext frontmatter and
+remain indexable. Camera permission is a browser permission; denying it leaves
+manual ISBN entry available.
 
 ## Related
 
