@@ -3202,7 +3202,7 @@ Expected: 5 new tests pass, whole suite green, typecheck and lint clean.
 - [ ] **Step 6: Verify the bundle**
 
 Run: `bun run build`
-Expected: `dist/content/frames.js` exists and is roughly 30–80 KB — it carries only the frame-tree processor, not the whole of SingleFile. If it is ~800 KB, the import pulled in the full library; report that rather than working around it.
+Expected: `dist/content/frames.js` exists and is well under 100 KB — it carries only the frame-tree processor, not the whole of SingleFile. Measured on this branch: **23.9 KB, 9 modules**, against `capture.js`'s 840 KB and 52 modules. If it is ~800 KB, the import pulled in the full library; report that rather than working around it.
 
 - [ ] **Step 7: Commit**
 
