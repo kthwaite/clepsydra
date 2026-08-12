@@ -540,11 +540,9 @@ describe("CodexFrame responsive shell", () => {
 
     expect(openSearchMock).toHaveBeenCalledOnce();
     expect(openInscribeMock).toHaveBeenCalledOnce();
+    // Navigation to /workspace is now useOpenTab's responsibility (mocked
+    // above as workspaceState.openTab); see useOpenTab.test.tsx.
     expect(workspaceState.openTab).toHaveBeenCalledWith("graph");
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/workspace" });
-    expect(workspaceState.openTab.mock.invocationCallOrder[0]).toBeLessThan(
-      navigateMock.mock.invocationCallOrder[0],
-    );
   });
 
   it("marks Bases active on mobile and navigates to its index", async () => {

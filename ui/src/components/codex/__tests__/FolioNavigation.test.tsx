@@ -860,7 +860,11 @@ describe("mobile Folio Back", () => {
       expect(router.state.status).toBe("idle");
     });
     expect(navigateSpy).toHaveBeenCalledOnce();
-    expect(navigateSpy).toHaveBeenCalledWith({ to: "/workspace" });
+    // Mobile Constellation now opens via useOpenTab, which also stamps
+    // folioOriginTabId via a state callback (see useOpenTab.test.tsx).
+    expect(navigateSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ to: "/workspace" }),
+    );
   });
 
   it("keeps mobile deletion and router navigation in one raw-draft confirmation", async () => {

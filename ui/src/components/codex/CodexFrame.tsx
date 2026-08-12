@@ -8,12 +8,11 @@ import { cn } from "#/lib/cn";
 
 export type CodexFrameProps = {
   children: ReactNode;
-  /** override automatic view detection; usually unnecessary */
+  /** Test-only: pin the view so router/store state isn't the variable under test. */
   forceView?: CodexView;
 };
 
 export type CodexFrameChromeProps = Omit<CodexFrameProps, "children"> & {
-  pathname: string;
   bottomSlot: Element | null;
 };
 
@@ -30,17 +29,9 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
       )}
     >
       {mobile ? (
-        <MobileCodexFrame
-          bottomSlot={bottomSlot}
-          forceView={forceView}
-          pathname={pathname}
-        />
+        <MobileCodexFrame bottomSlot={bottomSlot} forceView={forceView} />
       ) : (
-        <DesktopCodexFrame
-          bottomSlot={bottomSlot}
-          forceView={forceView}
-          pathname={pathname}
-        />
+        <DesktopCodexFrame bottomSlot={bottomSlot} forceView={forceView} />
       )}
       <main
         className={cn(
