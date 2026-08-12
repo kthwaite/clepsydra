@@ -1,0 +1,93 @@
+export const meta = {
+  slug: "links-search-graph-and-repair",
+  title: "Links, Search, Graph, and Repair",
+  description: "Resolve links, search indexed folios, navigate the graph, and repair reference issues."
+}
+
+Clepsydra derives a knowledge index from ordinary Markdown folios. Wikilinks and configured relation properties feed outlinks, backlinks, graph edges, and reference diagnostics; full-text search uses a separate title-and-body index. These projections never replace the files in the vault.
+
+## Write and resolve wikilinks
+
+Write `[[Target]]` for a wikilink or `[[Target|display text]]` to show an alias without changing the target. In Folio, type `[[` to search indexed pages by title, canonical name, or path. Select a result to insert it. A muted, dashed link is dangling: the current page's indexed outlinks do not contain a unique target for it.
+
+Link lookup normalizes a target with Unicode NFC normalization, Unicode-aware lowercase, collapsed whitespace, trimming, and an optional `.md` suffix removed. Each folio contributes canonical names from its frontmatter title, filename, vault-relative path without `.md`, and every frontmatter alias—titles, filenames, paths, and aliases all participate in the same lookup. A path such as `[[projects/atlas]]` is therefore the normal way to distinguish pages that share `Atlas` as a title or filename.
+
+Resolution is deliberately unique-only:
+
+- **Resolved:** exactly one indexed page owns the canonical name. The outlink records its page ID and path.
+- **Unresolved:** no page owns the canonical name. The target remains in the Markdown and can later resolve when a matching folio appears.
+- **Ambiguous:** two or more pages own the canonical name. Clepsydra leaves the link unresolved rather than silently choosing the first match.
+
+The index's unresolved-link diagnostics expose candidates for ambiguous targets. Their ranking follows `vault.disambiguation_strategy`: `shortest_path` is the default, `closest_directory` prefers the longest directory prefix shared with the source, and `most_recent` prefers the latest `updated_at`. Ranking is guidance only; it does not turn an ambiguous link into a resolved one. See [LSP setup and troubleshooting](/docs/lsp) for editor diagnostics and completion outside the web Folio editor.
+
+### Create from a dangling link
+
+In an editable Folio, <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-click a dangling wikilink to resolve or create it. Clepsydra first refreshes the source page's outlinks, then checks full-text results for an exact case-insensitive title. If neither finds a page, it creates a new `NOTE` with the link target as its title and opens it. Concurrent requests for the same normalized title share one in-flight creation request. If creation fails, the original wikilink remains dangling.
+
+Read-only rendered Markdown does not create a page when a dangling link is clicked.
+
+## Outlinks and backlinks
+
+An **outlink** starts in the current folio. Its index entry retains the raw target, link kind, optional frontmatter source field, and nullable resolved page ID and path. Wikilinks, ordinary Markdown links that point to folios, block references, and configured linkable frontmatter properties can all contribute link entries; their recorded kinds remain distinct.
+
+A **backlink** points into the current folio. The Folio backlinks panel names the source and shows nearby body text. For a relation or other linkable frontmatter property, the context names the source field instead of exposing a body snippet. Open a backlink to inspect the source before editing it.
+
+The index is authoritative for these panels. A recent file change can briefly leave an editor token ahead of its refreshed outlink projection; Clepsydra refetches once before treating a link as missing during create-from-link navigation.
+
+## Full-text search
+
+The command palette searches the vault when its query is non-empty. The backing FTS index searches title and body with Porter stemming and Unicode tokenization, orders matches by FTS rank, and returns the folio path, title, and a marked body snippet. The stored path identifies a result but is not itself an FTS search column.
+
+Protected folios contribute their title but no body plaintext or ciphertext to FTS. A title query can therefore find a protected folio, while a phrase that exists only in its decrypted body cannot. Search results open the matching folio in the workspace; search does not modify files.
+
+Full-text search and wikilink completion have different scopes. FTS searches title and body. The `[[` suggestion menu filters the page catalogue by title, canonical name, and path. Block search is described in [Block References and Transclusion](/docs/block-references-and-transclusion).
+
+## Navigate the Constellation graph
+
+Open `/graph` or run **Open Constellation (graph)**. The route opens a Constellation tab and then replaces the browser location with the workspace route.
+
+The graph contains one node for every indexed folio and one edge for every resolved link whose `target_id` is present. Unresolved and ambiguous links have no graph edge. Link kinds are retained on edges; the graph does not infer an edge from text similarity. An isolated page has neither inbound nor outbound resolved edges. An orphan has no inbound resolved edge but may still link outward.
+
+Use the Constellation controls to anchor on a folio, choose one- or two-hop depth, hide journal pages, and include or exclude unconnected nodes. Selecting a node opens its folio. These controls filter the displayed projection; they do not change links or page files.
+
+## Repair reference issues
+
+Open `/repairs` or run **Open Reference Repairs**. Reference Repairs projects six current issue classes from the index:
+
+| Issue kind | Meaning | Shipped in-place action |
+| --- | --- | --- |
+| `unresolved_page_link` | A page wikilink has no unique target. | Create the missing page; replace is also offered when candidates exist. |
+| `ambiguous_page_link` | More than one page owns the target's canonical name. | Replace with one candidate. |
+| `broken_block_ref` | A `((block-id))` reference does not resolve uniquely. | Replace when a unique candidate block exists; otherwise open the source. |
+| `invalid_relation_target` | A Base relation property contains a target that does not resolve uniquely. | Replace when one or more candidates exist; otherwise open the source. |
+| `orphan_page` | The page has no inbound resolved links. | Navigation only. |
+| `isolated_page` | The page has no inbound or outbound resolved links. | Navigation only. |
+
+Filters can narrow by issue class, project, page kind, and whether an automatic action is available. The workspace displays one issue at a time. It offers no bulk apply: repair decisions need the source evidence and the selected target for that specific occurrence.
+
+### Preview, apply, and stale conflicts
+
+A repair is always previewed before it can be applied. Choose one candidate or configure one page creation, then review the exact before and after evidence plus every planned file operation and text edit. **Apply previewed repair** sends the same fingerprint, source revision, and action that produced that preview. The server prepares the action again against the current vault and commits it through the coordinated batch mutation path.
+
+A `409` means the fingerprint, source revision, target evidence, or path state is stale. Clepsydra clears the preview and refreshes the list instead of overwriting newer content. Review the refreshed issue and prepare a new preview.
+
+Applying does not optimistically erase the selected issue. The row remains in the list while the authoritative index invalidation and refetch complete; only refreshed data can remove it or change the selection. Failures likewise leave it available for review. There is no bulk apply and no client-side assumption that a successful HTTP response has already removed the indexed issue.
+
+Protected body issues disclose no target text, span, source field, snippet, or candidate evidence. They offer **Open source** only. Relation issues use the frontmatter field name as their evidence and remain repairable because the index already stores that structured property projection.
+
+### Relation repair
+
+A relation declared by a Base is still a frontmatter value in a Markdown folio. A missing or ambiguous relation target becomes `invalid_relation_target`; use its candidate preview to patch that property occurrence. Schema warnings such as `many = false` are advisory and are not repair actions. See [Bases](/docs/bases) for relation value shapes, inline editing, and the saved-view model.
+
+## Rebuild and recovery boundaries
+
+Reference issues, backlinks, outlinks, FTS results, and graph data are index projections. If a file was changed outside Clepsydra, allow the watcher notification to refresh the index. Use the existing index rebuild controls only when diagnostics show that the projection itself is stale; rebuilding does not rewrite Markdown links or choose ambiguous targets.
+
+Repair is intentionally occurrence-scoped. It does not provide global search-and-replace, automatically delete orphaned pages, or reconnect isolated pages. Open navigation-only issues and make the domain decision in their source folios.
+
+## Related
+
+- [Block References and Transclusion](/docs/block-references-and-transclusion)
+- [Bases](/docs/bases)
+- [LSP](/docs/lsp)
+- [Reference Repairs workspace](/repairs)

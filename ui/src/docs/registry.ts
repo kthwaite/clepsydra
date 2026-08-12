@@ -1,6 +1,7 @@
 import { lazy } from "react";
 import attachmentsAndMediaSource from "#/docs/content/attachments-and-media.mdx?raw";
 import basesSource from "#/docs/content/bases.mdx?raw";
+import blockReferencesAndTransclusionSource from "#/docs/content/block-references-and-transclusion.mdx?raw";
 import booksAndReadingSource from "#/docs/content/books-and-reading.mdx?raw";
 import browserExtensionSource from "#/docs/content/browser-extension.mdx?raw";
 import cliSource from "#/docs/content/cli.mdx?raw";
@@ -8,6 +9,7 @@ import configurationSource from "#/docs/content/configuration.mdx?raw";
 import editorWorkflowsSource from "#/docs/content/editor-workflows.mdx?raw";
 import encryptionAndProtectedPagesSource from "#/docs/content/encryption-and-protected-pages.mdx?raw";
 import gettingStartedSource from "#/docs/content/getting-started.mdx?raw";
+import linksSearchGraphAndRepairSource from "#/docs/content/links-search-graph-and-repair.mdx?raw";
 import lspSource from "#/docs/content/lsp.mdx?raw";
 import mcpSource from "#/docs/content/mcp.mdx?raw";
 import pagesAndAuthoringSource from "#/docs/content/pages-and-authoring.mdx?raw";
@@ -39,6 +41,12 @@ const TroubleshootingGuide = lazy(
   () => import("#/docs/content/troubleshooting.mdx"),
 );
 const CliGuide = lazy(() => import("#/docs/content/cli.mdx"));
+const LinksSearchGraphAndRepairGuide = lazy(
+  () => import("#/docs/content/links-search-graph-and-repair.mdx"),
+);
+const BlockReferencesAndTransclusionGuide = lazy(
+  () => import("#/docs/content/block-references-and-transclusion.mdx"),
+);
 const BasesGuide = lazy(() => import("#/docs/content/bases.mdx"));
 const BooksAndReadingGuide = lazy(
   () => import("#/docs/content/books-and-reading.mdx"),
@@ -99,11 +107,39 @@ const cliMeta = {
   description: "Use Clepsydra’s command-line interface.",
   keywords: ["command line", "commands", "terminal"],
 } satisfies DocMeta;
+const linksSearchGraphAndRepairMeta = {
+  slug: "links-search-graph-and-repair",
+  title: "Links, Search, Graph, and Repair",
+  description:
+    "Resolve links, search folios, navigate the graph, and repair references.",
+  keywords: [
+    "wikilinks",
+    "backlinks",
+    "outlinks",
+    "search",
+    "graph",
+    "repairs",
+  ],
+} satisfies DocMeta;
+const blockReferencesAndTransclusionMeta = {
+  slug: "block-references-and-transclusion",
+  title: "Block References and Transclusion",
+  description:
+    "Assign stable block IDs and transclude one non-recursive source block.",
+  keywords: ["block references", "block IDs", "transclusion", "embeds"],
+} satisfies DocMeta;
 const basesMeta = {
   slug: "bases",
   title: "Bases",
-  description: "Define typed fields and filtered table views.",
-  keywords: ["database", "properties", "fields", "tables", "views"],
+  description: "Build saved, non-owning views over typed folio properties.",
+  keywords: [
+    "database",
+    "properties",
+    "relations",
+    "filters",
+    "tables",
+    "views",
+  ],
 } satisfies DocMeta;
 const booksAndReadingMeta = {
   slug: "books-and-reading",
@@ -185,6 +221,18 @@ const troubleshooting = page(
   troubleshootingSource,
 );
 const cli = page("operations-reference", cliMeta, CliGuide, cliSource);
+const linksSearchGraphAndRepair = page(
+  "links-structured-knowledge",
+  linksSearchGraphAndRepairMeta,
+  LinksSearchGraphAndRepairGuide,
+  linksSearchGraphAndRepairSource,
+);
+const blockReferencesAndTransclusion = page(
+  "links-structured-knowledge",
+  blockReferencesAndTransclusionMeta,
+  BlockReferencesAndTransclusionGuide,
+  blockReferencesAndTransclusionSource,
+);
 const bases = page(
   "links-structured-knowledge",
   basesMeta,
@@ -225,7 +273,11 @@ export const DOC_GROUPS = [
   {
     id: "links-structured-knowledge",
     label: "Links and structured knowledge",
-    pages: [bases],
+    pages: [
+      linksSearchGraphAndRepair,
+      blockReferencesAndTransclusion,
+      bases,
+    ],
   },
   {
     id: "work-reading",

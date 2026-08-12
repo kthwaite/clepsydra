@@ -59,13 +59,13 @@ export const FEATURE_INVENTORY = [
     id: "/graph",
     label: "Constellation graph",
     surface: "route",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
     id: "/repairs",
     label: "Reference repairs",
     surface: "route",
-    disposition: { kind: "reference", slug: "troubleshooting" },
+    disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
     id: "/tasking",
@@ -139,7 +139,7 @@ export const FEATURE_INVENTORY = [
     id: "nav.constellation",
     label: "Open Constellation",
     surface: "command",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
     id: "nav.gazetteer",
@@ -163,7 +163,7 @@ export const FEATURE_INVENTORY = [
     id: "nav.repairs",
     label: "Open reference repairs",
     surface: "command",
-    disposition: { kind: "reference", slug: "troubleshooting" },
+    disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
     id: "bases.create",
@@ -233,25 +233,25 @@ export const FEATURE_INVENTORY = [
     id: "workflow.search",
     label: "Search",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
     id: "workflow.wikilinks-backlinks",
     label: "Wikilinks and backlinks",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
     id: "workflow.graph",
     label: "Graph navigation",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "getting-started" },
+    disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
     id: "workflow.block-references-transclusion",
     label: "Block references and transclusion",
     surface: "workflow",
-    disposition: { kind: "guide", slug: "editor-workflows" },
+    disposition: { kind: "guide", slug: "block-references-and-transclusion" },
   },
   {
     id: "workflow.bases",
@@ -371,7 +371,7 @@ export const FEATURE_INVENTORY = [
     id: "workflow.diagnostics",
     label: "Diagnostics and reference repair",
     surface: "workflow",
-    disposition: { kind: "reference", slug: "troubleshooting" },
+    disposition: { kind: "reference", slug: "links-search-graph-and-repair" },
   },
   {
     id: "workflow.backup",

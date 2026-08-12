@@ -1,6 +1,9 @@
+import { createMemoryHistory, createRouter } from "@tanstack/react-router";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import { expect, it } from "vitest";
 import { docsMdxComponents } from "#/components/docs/DocsMdxComponents";
+import { STATIC_COMMANDS } from "#/components/codex/commandRegistry";
+import { routeTree } from "#/routeTree.gen";
 import BooksAndReading, {
   meta as booksAndReadingMeta,
 } from "#/docs/content/books-and-reading.mdx";
@@ -214,4 +217,134 @@ it("renders repository-only guide references as non-clickable source paths", () 
   expect(
     screen.queryByRole("link", { name: "encrypted-notes.md" }),
   ).not.toBeInTheDocument();
+});
+
+function registeredGuideSource(slug: string): string {
+  return DOC_PAGES.find((page) => page.slug === slug)?.source ?? "";
+}
+
+function runtimeRoutePaths(): string[] {
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  return Object.values(router.routesById)
+    .filter((route) => route.id !== "__root__")
+    .map((route) => route.fullPath);
+}
+
+it("cross-links the knowledge guides and repair workspace", () => {
+  const linksGuide = registeredGuideSource(
+    "links-search-graph-and-repair",
+  );
+  const basesGuide = registeredGuideSource("bases");
+
+  expect(linksGuide).toContain(
+    "](/docs/block-references-and-transclusion)",
+  );
+  expect(linksGuide).toContain("](/repairs)");
+  expect(linksGuide).toContain("](/docs/bases)");
+  expect(linksGuide).toContain("](/docs/lsp)");
+  expect(basesGuide).toContain(
+    "](/docs/links-search-graph-and-repair#relation-repair)",
+  );
+});
+
+it("documents the shipped link, search, graph, and repair contracts", () => {
+  const source = registeredGuideSource("links-search-graph-and-repair");
+
+  for (const issueKind of [
+    "unresolved_page_link",
+    "ambiguous_page_link",
+    "broken_block_ref",
+    "invalid_relation_target",
+    "orphan_page",
+    "isolated_page",
+  ]) {
+    expect(source).toContain(`\`${issueKind}\``);
+  }
+  expect(source).toContain("titles, filenames, paths, and aliases");
+  expect(source).toContain("title and body");
+  expect(source).toContain("resolved links");
+  expect(source).toContain("one issue at a time");
+  expect(source).toContain("no bulk apply");
+  expect(source).toContain("remains in the list");
+  expect(source).toContain("409");
+});
+
+it("documents single-block non-recursive transclusion and its privacy boundary", () => {
+  const source = registeredGuideSource(
+    "block-references-and-transclusion",
+  );
+
+  expect(source).toContain("one read-only block");
+  expect(source).toContain("Nested reference tokens remain inert");
+  expect(source).toContain("Referenced block unavailable");
+  expect(source).toContain("protected and missing targets are indistinguishable");
+  expect(source).toContain("assigns the ID to the source block");
+});
+
+it("documents Bases as non-owning saved views with safe property mutation", () => {
+  const source = registeredGuideSource("bases");
+
+  expect(source).toContain("saved, non-owning view");
+  expect(source).toContain("does not move, copy, or own");
+  expect(source).toContain("preserving untouched keys and comments");
+  expect(source).toContain("stale edit is rejected");
+  expect(source).toContain("many = false");
+  expect(source).toContain("warning");
+  expect(source).toContain("A Base embed is a live, non-owning view");
+});
+
+it("keeps every documented knowledge route and command grounded in runtime registries", () => {
+  const routes = new Set(runtimeRoutePaths());
+  const commands = new Map(
+    STATIC_COMMANDS.map((command) => [command.id, command.title]),
+  );
+  const routeClaims = [
+    {
+      slug: "links-search-graph-and-repair",
+      sourceText: "`/graph`",
+      path: "/graph",
+    },
+    {
+      slug: "links-search-graph-and-repair",
+      sourceText: "`/repairs`",
+      path: "/repairs",
+    },
+    { slug: "bases", sourceText: "`/bases`", path: "/bases/" },
+    {
+      slug: "bases",
+      sourceText: "`/bases/<slug>`",
+      path: "/bases/$slug",
+    },
+    {
+      slug: "bases",
+      sourceText: "`/bases/<slug>/edit`",
+      path: "/bases/$slug/edit",
+    },
+  ] as const;
+  const commandClaims = [
+    {
+      slug: "links-search-graph-and-repair",
+      id: "nav.constellation",
+      title: "Open Constellation (graph)",
+    },
+    {
+      slug: "links-search-graph-and-repair",
+      id: "nav.repairs",
+      title: "Open Reference Repairs",
+    },
+    { slug: "bases", id: "nav.bases", title: "Open Bases" },
+    { slug: "bases", id: "bases.create", title: "Create Base" },
+  ] as const;
+
+  for (const claim of routeClaims) {
+    expect(registeredGuideSource(claim.slug)).toContain(claim.sourceText);
+    expect(routes).toContain(claim.path);
+  }
+  for (const claim of commandClaims) {
+    expect(registeredGuideSource(claim.slug)).toContain(claim.title);
+    expect(commands.get(claim.id)).toBe(claim.title);
+  }
 });

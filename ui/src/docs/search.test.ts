@@ -160,6 +160,22 @@ describe("searchDocs", () => {
         headingId: "content-changed-conflict",
       },
     },
+    {
+      query: "no bulk apply",
+      expected: {
+        page: { slug: "links-search-graph-and-repair" },
+        heading: "Preview, apply, and stale conflicts",
+        headingId: "preview-apply-and-stale-conflicts",
+      },
+    },
+    {
+      query: "protected and missing targets indistinguishable",
+      expected: {
+        page: { slug: "block-references-and-transclusion" },
+        heading: "Privacy boundary for protected folios",
+        headingId: "privacy-boundary-for-protected-folios",
+      },
+    },
   ])("finds distinctive dedicated-guide content for $query", ({ query, expected }) => {
     const result = searchDocs(buildDocsIndex(DOC_PAGES), query)[0];
 
@@ -233,7 +249,7 @@ describe("searchDocs", () => {
         page: expect.objectContaining({ slug: "bases" }),
         heading: undefined,
         headingId: undefined,
-        excerpt: "Define typed fields and filtered table views.",
+        excerpt: "Build saved, non-owning views over typed folio properties.",
         score: 50,
       }),
     ]);

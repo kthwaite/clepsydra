@@ -14,6 +14,12 @@ const WORKFLOW_GUIDE_SLUGS = [
   "encryption-and-protected-pages",
 ] as const;
 
+const KNOWLEDGE_GUIDE_SLUGS = [
+  "links-search-graph-and-repair",
+  "block-references-and-transclusion",
+  "bases",
+] as const;
+
 it("declares the approved user-intent hierarchy", () => {
   expect(
     DOC_GROUPS.map((group) => [
@@ -23,7 +29,7 @@ it("declares the approved user-intent hierarchy", () => {
   ).toEqual([
     ["Start", ["getting-started"]],
     ["Pages and authoring", [...WORKFLOW_GUIDE_SLUGS]],
-    ["Links and structured knowledge", ["bases"]],
+    ["Links and structured knowledge", [...KNOWLEDGE_GUIDE_SLUGS]],
     ["Work and reading", ["books-and-reading"]],
     ["Capture, feeds, and archives", ["browser-extension"]],
     ["AI and integrations", ["lsp", "mcp"]],
@@ -35,7 +41,7 @@ it("declares the approved user-intent hierarchy", () => {
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(13);
+  expect(DOC_PAGES).toHaveLength(15);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -61,7 +67,7 @@ it("resolves every existing dedicated guide", () => {
   expect(DOC_PAGES.map((page) => page.slug)).toEqual([
     "getting-started",
     ...WORKFLOW_GUIDE_SLUGS,
-    "bases",
+    ...KNOWLEDGE_GUIDE_SLUGS,
     "books-and-reading",
     "browser-extension",
     "lsp",
@@ -70,6 +76,12 @@ it("resolves every existing dedicated guide", () => {
     "troubleshooting",
     "cli",
   ]);
+  expect(getDocPage("links-search-graph-and-repair")?.title).toBe(
+    "Links, Search, Graph, and Repair",
+  );
+  expect(getDocPage("block-references-and-transclusion")?.title).toBe(
+    "Block References and Transclusion",
+  );
   expect(getDocPage("troubleshooting")?.title).toBe("Troubleshooting");
   expect(getDocPage("browser-extension")?.title).toBe("Browser Extension");
   expect(getDocPage("books-and-reading")?.title).toBe("Books and Reading");
@@ -86,10 +98,18 @@ it("derives previous and next guides across group boundaries", () => {
   });
   expect(getDocNeighbors("encryption-and-protected-pages")).toMatchObject({
     previous: { slug: "attachments-and-media" },
+    next: { slug: "links-search-graph-and-repair" },
+  });
+  expect(getDocNeighbors("links-search-graph-and-repair")).toMatchObject({
+    previous: { slug: "encryption-and-protected-pages" },
+    next: { slug: "block-references-and-transclusion" },
+  });
+  expect(getDocNeighbors("block-references-and-transclusion")).toMatchObject({
+    previous: { slug: "links-search-graph-and-repair" },
     next: { slug: "bases" },
   });
   expect(getDocNeighbors("bases")).toMatchObject({
-    previous: { slug: "encryption-and-protected-pages" },
+    previous: { slug: "block-references-and-transclusion" },
     next: { slug: "books-and-reading" },
   });
   expect(getDocNeighbors("books-and-reading")).toMatchObject({

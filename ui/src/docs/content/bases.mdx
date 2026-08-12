@@ -1,10 +1,10 @@
 export const meta = {
   slug: "bases",
   title: "Bases",
-  description: "Define typed fields and filtered table views."
+  description: "Build saved, non-owning views over typed folio properties."
 }
 
-A base is a saved, non-owning view over pages in a vault. It declares which pages belong to the base, gives their frontmatter properties advisory types, and defines table views over the matching pages. The pages remain ordinary Markdown files: a base does not move, copy, or own them.
+A Base is a saved, non-owning view over pages in a vault. Its `.base.toml` definition owns a membership predicate, advisory property schemas, and one or more saved table views; it never owns the matching rows. The pages remain ordinary Markdown files and may match any number of Bases: a Base does not move, copy, or own them.
 
 ## Create and configure a base
 
@@ -80,11 +80,9 @@ A base requires `name`. `description`, `filter`, `properties`, and `views` are o
 
 ## Page properties and advisory schemas
 
-The `[properties]` table describes page frontmatter keys; it does not create storage separate from the pages. Values retain their native TOML types when indexed. A declaration controls typed filtering, grouping, editing, completions, and warnings.
+The `[properties]` table describes keys stored in page frontmatter; it does not create separate records or storage. Values retain their native TOML types when indexed. A declaration controls typed filtering, grouping, inline editors, LSP completions, and diagnostics for every matching page that carries the key.
 
-Schemas are advisory. A page whose value disagrees with a declaration still indexes, and the declaration does not rewrite or reject it. Clepsydra reports a warning instead. Likewise, `options` constrain diagnostics and completions rather than blocking an unfamiliar value, and `many = false` on a relation warns about multiple targets rather than enforcing a write constraint.
-
-An empty `options` list means an open vocabulary. The LSP can offer values already observed in the vault and does not warn about new ones.
+Schemas are advisory. A page whose value disagrees with a declaration still indexes, and the declaration does not rewrite or reject it. Clepsydra reports a warning instead. Likewise, a non-empty `options` list constrains diagnostics and completions rather than blocking an unfamiliar value, and `many = false` on a relation warns about multiple targets rather than enforcing a write constraint. An empty `options` list means an open vocabulary: the LSP can offer values already observed in the vault and does not warn about new ones.
 
 ## Property types
 
@@ -205,7 +203,9 @@ columns = ["title", "author", "rating", "started"]
 
 Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
 
-System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions. For a page that already uses TOML `+++` frontmatter, a successful edit surgically patches the frontmatter and updates `updated_at`, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision.
+System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions.
+
+Each commit fetches the page's current revision, sends only the changed property key with its type hint, and updates `updated_at`. For TOML `+++` frontmatter, the server splices that edit into the existing bytes, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision; the table refetches the winning state and reports the failed key.
 
 ### Add members inline
 
@@ -262,6 +262,12 @@ With `clep lsp` attached, completion inside a page's `+++` frontmatter offers pr
 For matching bases, the LSP warns about incompatible native TOML types, values outside a non-empty select vocabulary, multiple relation values when `many = false`, and unresolved relation targets. These are warnings, never indexing errors. Legacy `---` frontmatter does not receive property-schema diagnostics. The LSP completes and checks page frontmatter; it does not provide an editor for `.base.toml` files.
 
 See [LSP setup and troubleshooting](/docs/lsp) for client configuration and the complete language-server capability list.
+
+### Relation repair
+
+Relation values participate in the same canonical-name resolution as page wikilinks. A missing or ambiguous target produces an LSP warning and an `invalid_relation_target` entry in Reference Repairs. When one or more replacement candidates are available, the repair workspace can preview and patch the property occurrence with the selected page; otherwise it offers source navigation only. It does not enforce `many = false`, because cardinality remains an advisory schema warning.
+
+See [relation repair](/docs/links-search-graph-and-repair#relation-repair) for the six issue classes, exact preview, stale-conflict, and one-at-a-time apply semantics.
 
 ## Validation, troubleshooting, and v1 limits
 
