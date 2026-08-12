@@ -23,7 +23,7 @@ export function InlineEditPopover({
   children: React.ReactNode;
   testIdPrefix: string;
   /** Only consulted when field === "status"; forwarded to DispositionRow. */
-  colLabel?: ColLabelFn;
+  colLabel: ColLabelFn;
 }) {
   const [open, setOpen] = useState(false);
   const patch = usePatchTask();

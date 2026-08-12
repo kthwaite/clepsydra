@@ -134,8 +134,8 @@ export function DispositionRow({
   value: string;
   onChange: (colId: string) => void;
   testIdPrefix: string;
-  /** Resolves a column id to its display label; falls back to the id itself. */
-  colLabel?: ColLabelFn;
+  /** Resolves a column id to its display label. */
+  colLabel: ColLabelFn;
 }) {
   return (
     <RadioGroup
@@ -151,7 +151,7 @@ export function DispositionRow({
           className={`${RADIO_CLS_BASE} ${value === colId ? RADIO_CLS_ON : RADIO_CLS_OFF_HOVER}`}
           data-testid={`${testIdPrefix}-status-${colId}`}
         >
-          {colLabel?.(colId) ?? colId}
+          {colLabel(colId)}
         </TaskRadio>
       ))}
     </RadioGroup>

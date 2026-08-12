@@ -407,6 +407,7 @@ export function CycleView({
                         task={t}
                         field="priority"
                         testIdPrefix="cv"
+                        colLabel={colLabel}
                       >
                         <PriChip pri={t.priority} />
                       </InlineEditPopover>

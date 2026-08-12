@@ -19,6 +19,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoardTask } from "#/api/board";
 import { InlineEditPopover } from "../InlineEditPopover";
+import { FIXTURE_COL_LABEL } from "./fixtures";
 
 const TASK: BoardTask = {
   id: "t-inline",
@@ -82,7 +83,12 @@ describe("InlineEditPopover — status", () => {
 
     wrap(
       <div onClick={onCardClick}>
-        <InlineEditPopover task={TASK} field="status" testIdPrefix="kb">
+        <InlineEditPopover
+          task={TASK}
+          field="status"
+          testIdPrefix="kb"
+          colLabel={FIXTURE_COL_LABEL}
+        >
           <span>pip</span>
         </InlineEditPopover>
       </div>,
@@ -109,7 +115,12 @@ describe("InlineEditPopover — status", () => {
     const user = userEvent.setup();
 
     wrap(
-      <InlineEditPopover task={TASK} field="status" testIdPrefix="kb">
+      <InlineEditPopover
+        task={TASK}
+        field="status"
+        testIdPrefix="kb"
+        colLabel={FIXTURE_COL_LABEL}
+      >
         <span>pip</span>
       </InlineEditPopover>,
     );
@@ -118,7 +129,9 @@ describe("InlineEditPopover — status", () => {
     await user.click(screen.getByTestId("inline-status-FIELD"));
 
     await waitFor(() => {
-      expect(screen.queryByTestId("inline-status-FIELD")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("inline-status-FIELD"),
+      ).not.toBeInTheDocument();
     });
   });
 
@@ -128,7 +141,12 @@ describe("InlineEditPopover — status", () => {
     const user = userEvent.setup();
 
     wrap(
-      <InlineEditPopover task={TASK} field="status" testIdPrefix="kb">
+      <InlineEditPopover
+        task={TASK}
+        field="status"
+        testIdPrefix="kb"
+        colLabel={FIXTURE_COL_LABEL}
+      >
         <span>pip</span>
       </InlineEditPopover>,
     );
@@ -139,7 +157,9 @@ describe("InlineEditPopover — status", () => {
     await user.keyboard("{Escape}");
 
     await waitFor(() => {
-      expect(screen.queryByTestId("inline-status-FIELD")).not.toBeInTheDocument();
+      expect(
+        screen.queryByTestId("inline-status-FIELD"),
+      ).not.toBeInTheDocument();
     });
     expect(patchCallsFrom(stub)).toHaveLength(0);
   });
@@ -158,7 +178,12 @@ describe("InlineEditPopover — priority", () => {
 
     wrap(
       <div onClick={onCardClick}>
-        <InlineEditPopover task={TASK} field="priority" testIdPrefix="bk">
+        <InlineEditPopover
+          task={TASK}
+          field="priority"
+          testIdPrefix="bk"
+          colLabel={FIXTURE_COL_LABEL}
+        >
           <span>P2</span>
         </InlineEditPopover>
       </div>,
@@ -187,7 +212,12 @@ describe("InlineEditPopover — priority", () => {
 describe("InlineEditPopover — global shortcut passthrough", () => {
   it("does not swallow a keydown RAC's press handling doesn't itself act on", () => {
     wrap(
-      <InlineEditPopover task={TASK} field="status" testIdPrefix="kb">
+      <InlineEditPopover
+        task={TASK}
+        field="status"
+        testIdPrefix="kb"
+        colLabel={FIXTURE_COL_LABEL}
+      >
         <span>pip</span>
       </InlineEditPopover>,
     );
