@@ -82,7 +82,9 @@ describe("Select", () => {
     expect(trigger).toHaveTextContent("Unread");
   });
 
-  it("supports dynamic items and field messaging", () => {
+  it("renders and selects dynamic items with field messaging", async () => {
+    const user = userEvent.setup();
+    const onSelectionChange = vi.fn();
     const items = [
       { id: "a", name: "Alpha" },
       { id: "b", name: "Beta" },
@@ -94,6 +96,7 @@ describe("Select", () => {
         description="Pick one"
         isInvalid
         errorMessage="Required"
+        onSelectionChange={onSelectionChange}
       >
         {(item) => <SelectItem id={item.id}>{item.name}</SelectItem>}
       </Select>,
@@ -101,6 +104,14 @@ describe("Select", () => {
 
     const trigger = screen.getByRole("button", { name: /Letter/ });
     expect(trigger).toHaveAccessibleDescription("Pick one Required");
+
+    await user.click(trigger);
+    expect(screen.getByRole("option", { name: "Alpha" })).toBeInTheDocument();
+    const beta = screen.getByRole("option", { name: "Beta" });
+    await user.click(beta);
+
+    expect(onSelectionChange).toHaveBeenCalledWith("b");
+    expect(trigger).toHaveTextContent("Beta");
   });
 
   it("does not open when disabled", async () => {
