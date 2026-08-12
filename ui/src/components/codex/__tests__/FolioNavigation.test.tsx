@@ -661,6 +661,39 @@ describe("mobile Folio Back", () => {
     expect(editorCapture.current?.selection).toBeNull();
   });
 
+  it("preserves block focus by using the source editor for Recipes with block IDs", async () => {
+    pageEditorState.kind = "RECIPE";
+    pageEditorState.body =
+      "Focused source block ^abc123DEF0\n\nINGREDIENTS\n• salt\n\nSTEPS\n1. Serve.\n\nNOTES\n";
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    renderNavigation("/workspace");
+    await screen.findByText("Focused source block");
+
+    act(() => {
+      useWorkspaceStore
+        .getState()
+        .openTab("page", "notes/alpha.md", "Alpha", {
+          blockId: "abc123DEF0",
+        });
+    });
+
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalledOnce());
+    expect(editorCapture.current?.selection).toEqual({
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 0 },
+    });
+  });
+
   it("consumes a focus request when the source block is missing", async () => {
     useWorkspaceStore.setState({
       tabs: [

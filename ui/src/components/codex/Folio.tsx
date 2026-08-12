@@ -12,6 +12,7 @@ import {
 import {
   Editor,
   Element as SlateElement,
+  type Descendant,
   type Range,
   Transforms,
 } from "slate";
@@ -180,6 +181,15 @@ function RawMarkdownNavigationGuard({
 const R_TAB_KEY = "clp.folio.r.tab";
 type RTab = "backlinks" | "links" | "tags";
 const EMPTY_EDITOR_VALUE: [] = [];
+
+function containsBlockId(nodes: Descendant[]): boolean {
+  return nodes.some(
+    (node) =>
+      SlateElement.isElement(node) &&
+      (("blockId" in node && typeof node.blockId === "string") ||
+        containsBlockId(node.children)),
+  );
+}
 
 const NoteProtectionDialog = lazy(() =>
   import("#/components/codex/NoteProtectionDialog").then((module) => ({
@@ -396,7 +406,12 @@ export function Folio({ tabId, path }: FolioProps) {
   const recipeDocument =
     activeRecipeParse?.ok === true ? activeRecipeParse.value : null;
   const recipeStructured = activeRecipeParse?.ok === true;
-  const recipeReadOnly = recipeStructured && recipeMode === "read";
+  const recipeHasBlockIds =
+    isRecipe &&
+    containsBlockId(editor.editorValue ?? editor.initialValue);
+  const recipePresentationStructured = recipeStructured && !recipeHasBlockIds;
+  const recipeReadOnly =
+    recipePresentationStructured && recipeMode === "read";
   const folioReadOnly = conversationReadOnly || recipeReadOnly;
   const encrypted = editor.encrypted === true;
   const encryptionState = editor.encryptionState ?? {
@@ -406,7 +421,9 @@ export function Folio({ tabId, path }: FolioProps) {
   const rawMarkdownPresentationAvailable =
     presentation.bodyPresentation === "editor" ||
     (isAiConversation && conversationMode === "edit") ||
-    (isRecipe && recipeStructured && recipeMode === "edit");
+    (isRecipe &&
+      recipeStructured &&
+      (recipeHasBlockIds || recipeMode === "edit"));
   const rawMarkdownAvailable =
     rawMarkdownPresentationAvailable &&
     !editor.isLoading &&
@@ -882,7 +899,7 @@ export function Folio({ tabId, path }: FolioProps) {
           )}
         >
           <WikilinkResolutionProvider path={path}>
-            {recipeStructured && recipeDocument ? (
+            {recipePresentationStructured && recipeDocument ? (
               <RecipeFolioBody
                 document={recipeDocument}
                 mode={recipeMode}
