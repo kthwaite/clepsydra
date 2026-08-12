@@ -6,22 +6,6 @@ import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 
 const mocks = vi.hoisted(() => ({
   closeSettings: vi.fn(),
-  legacyUnresolvedState: {
-    data: [
-      {
-        source_id: "source-1",
-        source_path: "notes/source.md",
-        target_raw: "Ghost",
-        target_canonical: "ghost",
-        kind: "wikilink",
-        span_start: 12,
-        reason: "no_match",
-        candidates: [],
-      },
-    ],
-    error: null,
-    isPending: false,
-  },
   navigate: vi.fn(),
   rebuildIndex: vi.fn(),
   setActiveSettingsSection: vi.fn(),
@@ -43,7 +27,6 @@ vi.mock("#/api/index", () => ({
     isPending: false,
   }),
   useStats: () => ({ data: undefined }),
-  useUnresolvedLinks: () => mocks.legacyUnresolvedState,
 }));
 
 vi.mock("#/api/encryption", () => ({
@@ -70,18 +53,6 @@ vi.mock("#/store/ui", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.legacyUnresolvedState.data = [
-    {
-      source_id: "source-1",
-      source_path: "notes/source.md",
-      target_raw: "Ghost",
-      target_canonical: "ghost",
-      kind: "wikilink",
-      span_start: 12,
-      reason: "no_match",
-      candidates: [],
-    },
-  ];
   mocks.warningsState.data = ["Failed to parse broken.md"];
   mocks.warningsState.error = null;
   mocks.warningsState.isPending = false;
