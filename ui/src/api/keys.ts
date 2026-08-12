@@ -1,4 +1,5 @@
 import type { QueryClient } from "@tanstack/react-query";
+import type { operations } from "./schema";
 
 export type BaseEvaluationQueryKey = readonly [
   "post",
@@ -59,7 +60,21 @@ export const queryKeys = {
 
   pages: { pathPrefix: "/api/vault/pages" },
   folders: { pathPrefix: "/api/vault/folders" },
-  index: { pathPrefix: "/api/vault/index" },
+  index: {
+    pathPrefix: "/api/vault/index",
+    issuesPath: "/api/vault/index/issues",
+    graphPath: "/api/vault/index/graph",
+    issues: (
+      query: NonNullable<
+        operations["reference_issues"]["parameters"]["query"]
+      >,
+    ) =>
+      [
+        "get",
+        "/api/vault/index/issues",
+        { params: { query } },
+      ] as const,
+  },
   bases: {
     pathPrefix: "/api/vault/bases",
     evaluation: (identity: string): BaseEvaluationQueryKey => [
