@@ -43,7 +43,7 @@ export function WikilinkCombobox({
     [pages, lowerQuery],
   );
   const trimmedQuery = query.trim();
-  const exactIdentityExists = filteredPages.some((page) =>
+  const exactIdentityExists = pages.some((page) =>
     pageHasExactWikilinkIdentity(page, trimmedQuery),
   );
   const suggestions: WikilinkSuggestion[] = [

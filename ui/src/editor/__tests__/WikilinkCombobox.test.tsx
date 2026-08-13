@@ -97,6 +97,31 @@ describe("WikilinkCombobox", () => {
     },
   );
 
+  it("suppresses Create for an exact alias omitted by substring filtering", () => {
+    renderCombobox({
+      pages: [{ ...pages[0], aliases: ["Blueprint"] }],
+      query: "blueprint",
+    });
+
+    expect(screen.queryByText("Design Notes")).toBeNull();
+    expect(screen.queryByText(/Create/)).toBeNull();
+  });
+
+  it.each([
+    ["NFC", "Cafe\u0301 Notes", { title: "Café Notes" }],
+    ["collapsed whitespace", "Design   Notes", {}],
+  ])(
+    "suppresses Create when exact %s identity is omitted by raw filtering",
+    (_normalization, query, pageOverrides) => {
+      renderCombobox({
+        pages: [{ ...pages[0], ...pageOverrides }],
+        query,
+      });
+
+      expect(screen.queryByText(/Create/)).toBeNull();
+    },
+  );
+
   it("reaches the trailing Create row with the keyboard", () => {
     const onCreate = vi.fn();
     renderCombobox({ pages, query: "design", onCreate });
@@ -132,6 +157,21 @@ describe("WikilinkCombobox", () => {
       "Topic 7notes/topic-7.md",
       "Create “topic”",
     ]);
+  });
+
+  it("suppresses Create when the exact page is beyond the eight-row cap", () => {
+    const manyPages = Array.from({ length: 9 }, (_, index): PageSummary => ({
+      ...pages[0],
+      id: `p${index}`,
+      title: index === 8 ? "Topic" : `Topic ${index}`,
+      canonical_name: `topic-${index}`,
+      path: `notes/topic-${index}.md`,
+    }));
+
+    renderCombobox({ pages: manyPages, query: "topic" });
+
+    expect(screen.getAllByRole("option")).toHaveLength(8);
+    expect(screen.queryByText(/Create/)).toBeNull();
   });
 
   it("dispatches page suggestions to onSelect only", async () => {
