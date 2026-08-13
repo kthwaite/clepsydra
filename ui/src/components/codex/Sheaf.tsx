@@ -417,14 +417,14 @@ function FolioTab({
       : undefined;
 
   return (
-    <SheafContextMenu target={{ kind: "tab", tabId: t.id }}>
-      <div
-        ref={ref}
-        className={cn(
-          "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
-          active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
-        )}
-      >
+    <div
+      ref={ref}
+      className={cn(
+        "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
+        active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
+      )}
+    >
+      <SheafContextMenu target={{ kind: "tab", tabId: t.id }}>
         <button
           ref={dragHandleRef}
           type="button"
@@ -448,16 +448,16 @@ function FolioTab({
             {t.label || t.path || "(untitled)"}
           </span>
         </button>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="close folio"
-          className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
-          style={closeButtonStyle}
-        >
-          <X size={11} />
-        </button>
-      </div>
-    </SheafContextMenu>
+      </SheafContextMenu>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label="close folio"
+        className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+        style={closeButtonStyle}
+      >
+        <X size={11} />
+      </button>
+    </div>
   );
 }

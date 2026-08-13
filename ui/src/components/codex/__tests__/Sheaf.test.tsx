@@ -486,16 +486,21 @@ describe("Sheaf context menu integration", () => {
     });
   });
 
-  it("preserves drag-and-drop registrations on the native menu targets", () => {
+  it("keeps the outer DnD container out of keyboard order and the activation button as drag handle", () => {
     seed(false);
     render(<Sheaf activeTabId="t3" />);
 
     const tabButton = screen.getByRole("button", { name: "Alpha" });
+    const tabContainer = tabButton.parentElement;
+    if (!(tabContainer instanceof HTMLDivElement)) {
+      throw new Error("Alpha tab container was not rendered");
+    }
     const tabDraggable = draggableFor(tabButton);
     const tabDropTarget = dropTargetFor(tabButton);
+    expect(tabContainer).not.toHaveAttribute("tabindex");
     expect(tabDraggable.dragHandle).toBe(tabButton);
-    expect(tabDraggable.element).toBe(tabButton.parentElement);
-    expect(tabDropTarget.element).toBe(tabDraggable.element);
+    expect(tabDraggable.element).toBe(tabContainer);
+    expect(tabDropTarget.element).toBe(tabContainer);
 
     const quireButton = screen.getByRole("button", { name: /quire thesis/i });
     const quireDropTarget = dropTargetFor(quireButton);
