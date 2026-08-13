@@ -1,4 +1,4 @@
-import { type MouseEvent, useRef } from "react";
+import { type KeyboardEvent, type MouseEvent, useRef, useState } from "react";
 import { Path } from "slate";
 import {
   ReactEditor,
@@ -7,6 +7,7 @@ import {
   useSlateStatic,
 } from "slate-react";
 import { CLink } from "#/components/codex/CLink";
+import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
 import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
@@ -24,7 +25,9 @@ export function WikilinkElement({ attributes, children, element }: Props) {
   const { lookup } = useWikilinkResolution();
   const { resolveOrCreate } = useResolveOrCreateWikilinkTarget();
   const openTab = useOpenTab();
-  // Guards the navigation flow against double-fire while in flight.
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  // Synchronously guards the navigation flow against double-fire while in flight.
   const inFlightRef = useRef(false);
 
   const path = ReactEditor.findPath(editor, element);
@@ -36,23 +39,33 @@ export function WikilinkElement({ attributes, children, element }: Props) {
       ? element.alias
       : element.target;
 
-  const openTarget = async (target: string) => {
-    if (inFlightRef.current) return;
+  const closeTransientPreview = () => {
+    const { hoverId, close } = usePreviewStore.getState();
+    if (hoverId) close(hoverId);
+  };
+
+  const openTarget = async (target: string): Promise<boolean> => {
+    if (inFlightRef.current) return false;
 
     const current = lookup(target);
     if (current) {
       openTab("page", current);
-      return;
+      return true;
     }
 
     inFlightRef.current = true;
+    setCreating(true);
+    setCreateError(null);
     try {
       const resolvedTarget = await resolveOrCreate(target);
       openTab("page", resolvedTarget.path);
+      return true;
     } catch {
-      // Best effort: leave the link dangling.
+      setCreateError("Creation failed — try again");
+      return false;
     } finally {
       inFlightRef.current = false;
+      setCreating(false);
     }
   };
 
@@ -99,38 +112,74 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     : "cl-mono align-baseline text-[0.95em] text-ink hover:text-accent";
   const bracketClassName = dangling ? "text-ink-mute" : "text-accent";
 
-  const handleClick = (event: MouseEvent) => {
+  const handleActivation = (event: MouseEvent | KeyboardEvent) => {
     event.preventDefault();
     event.stopPropagation();
+    const modifierActivation = event.metaKey || event.ctrlKey;
     if (readOnly) {
-      if (resolved) openTab("page", resolved);
+      if (resolved) {
+        if (modifierActivation) closeTransientPreview();
+        openTab("page", resolved);
+      }
       return;
     }
-    if (event.metaKey || event.ctrlKey) {
+    if (modifierActivation) {
+      closeTransientPreview();
       void openTarget(element.target);
       return;
     }
-    const { hoverId, close } = usePreviewStore.getState();
-    if (hoverId) close(hoverId);
+    closeTransientPreview();
     controller.begin(path, "end", "after");
   };
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Enter") handleActivation(event);
+  };
+
+  const linkContent = (
+    <>
+      <span aria-hidden className={bracketClassName}>
+        ⟦
+      </span>
+      <span className="px-[2px] not-italic">{displayText}</span>
+      <span aria-hidden className={bracketClassName}>
+        ⟧
+      </span>
+    </>
+  );
 
   return (
     <span {...attributes}>
       <span contentEditable={false}>
-        <CLink
-          path={resolved ?? undefined}
-          onClick={handleClick}
-          className={linkClassName}
-        >
-          <span aria-hidden className={bracketClassName}>
-            ⟦
-          </span>
-          <span className="px-[2px] not-italic">{displayText}</span>
-          <span aria-hidden className={bracketClassName}>
-            ⟧
-          </span>
-        </CLink>
+        {resolved ? (
+          <CLink
+            path={resolved}
+            onClick={handleActivation}
+            className={linkClassName}
+          >
+            {linkContent}
+          </CLink>
+        ) : (
+          <MissingWikilinkPopover
+            target={element.target}
+            readOnly={readOnly}
+            creating={creating}
+            error={createError}
+            onCreate={() => openTarget(element.target)}
+          >
+            <a
+              {...{
+                role: "link" as const,
+                onClick: handleActivation,
+                onKeyDown: handleKeyDown,
+              }}
+              tabIndex={0}
+              className={`cl-link relative cursor-pointer ${linkClassName}`}
+            >
+              {linkContent}
+            </a>
+          </MissingWikilinkPopover>
+        )}
       </span>
       {children}
     </span>

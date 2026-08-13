@@ -48,6 +48,7 @@ pub struct PageSummary {
     pub project: Option<String>,
     pub tags: Vec<String>,
     pub computed_tags: Vec<String>,
+    pub aliases: Vec<String>,
     pub encrypted: bool,
 }
 
@@ -375,7 +376,7 @@ pub(crate) fn page_detail(page: Page) -> PageDetail {
 /// listing query rely on this shared mapper, so their SELECT statements MUST
 /// use the same column order:
 /// `id, path, title, canonical_name, kind, kind_inferred, project, encrypted,
-/// <effective tags subquery>, <computed tags subquery>`.
+/// <effective tags subquery>, <computed tags subquery>, aliases_json`.
 /// Tag subqueries are `group_concat` values joined by the unit separator
 /// (`char(31)`) so commas in tag text don't fragment the split.
 pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PageSummary> {
@@ -394,6 +395,14 @@ pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
             .any(|computed| tag.trim().eq_ignore_ascii_case(computed.trim()))
     });
     tags.extend(computed_tags.iter().cloned());
+    let aliases_json: String = row.get(10)?;
+    let aliases: Vec<String> = serde_json::from_str(&aliases_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            10,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })?;
 
     Ok(PageSummary {
         id: row.get(0)?,
@@ -406,6 +415,7 @@ pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
         encrypted: row.get::<_, i64>(7)? != 0,
         tags,
         computed_tags,
+        aliases,
     })
 }
 
@@ -485,7 +495,13 @@ pub async fn list_pages(
                                     FROM tags t WHERE t.page_id = p.id), ''),
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t
-                                   WHERE t.page_id = p.id AND t.computed = 1), '')
+                                   WHERE t.page_id = p.id AND t.computed = 1), ''),
+                        CASE
+                            WHEN json_type(p.meta_json, '$.aliases') IS NULL THEN '[]'
+                            WHEN json_type(p.meta_json, '$.aliases') = 'array'
+                                THEN json_extract(p.meta_json, '$.aliases')
+                            ELSE '{}'
+                        END
                    FROM pages p",
             );
             page_sql.push_str(&where_sql);

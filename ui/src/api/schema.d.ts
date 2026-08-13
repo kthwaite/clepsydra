@@ -2358,6 +2358,7 @@ export interface components {
             definition: components["schemas"]["PropertyDefinition"];
         };
         PageSummary: {
+            aliases: string[];
             canonical_name: string;
             computed_tags: string[];
             encrypted: boolean;

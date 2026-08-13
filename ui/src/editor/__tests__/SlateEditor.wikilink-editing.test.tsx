@@ -51,6 +51,7 @@ vi.mock("#/api/pages", async (importOriginal) => {
             id: "page-1",
             title: "My Page",
             canonical_name: "my-page",
+            aliases: [],
             path: "notes/my-page.md",
           },
         ],
@@ -367,5 +368,46 @@ describe("SlateEditor wikilink editing integration", () => {
     ).toHaveFocus();
     expect(screen.queryByText(/notes\/my-page\.md/)).toBeNull();
     expect(usePreviewStore.getState().windows).toEqual([]);
+  });
+
+  it("closes a real CLink hover preview during modifier activation before leave timers run", async () => {
+    lookupMock.mockReturnValue("notes/my-page.md");
+    renderEditor(
+      [
+        makeParagraph([
+          { text: "Before " },
+          makeWikilink({ target: "My Page" }),
+          { text: " after" },
+        ]),
+      ],
+      { showPreviewLayer: true },
+    );
+    const link = await screen.findByRole("link", { name: "My Page" });
+    vi.useFakeTimers();
+
+    try {
+      fireEvent.mouseEnter(link);
+      act(() => vi.advanceTimersByTime(220));
+
+      expect(usePreviewStore.getState().hoverId).not.toBeNull();
+      expect(usePreviewStore.getState().windows).toEqual([
+        expect.objectContaining({
+          path: "notes/my-page.md",
+          pinned: false,
+          minimized: false,
+        }),
+      ]);
+
+      fireEvent.mouseLeave(link);
+      fireEvent.click(link, { metaKey: true });
+
+      expect(usePreviewStore.getState().hoverId).toBeNull();
+      expect(usePreviewStore.getState().windows).toEqual([]);
+
+      act(() => vi.advanceTimersByTime(200));
+      expect(usePreviewStore.getState().windows).toEqual([]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

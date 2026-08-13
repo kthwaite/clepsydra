@@ -271,7 +271,13 @@ fn filesystem_authoritative_page_summaries(
                                     FROM tags t WHERE t.page_id = p.id), ''),
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t
-                                   WHERE t.page_id = p.id AND t.computed = 1), '')
+                                   WHERE t.page_id = p.id AND t.computed = 1), ''),
+                        CASE
+                            WHEN json_type(p.meta_json, '$.aliases') IS NULL THEN '[]'
+                            WHEN json_type(p.meta_json, '$.aliases') = 'array'
+                                THEN json_extract(p.meta_json, '$.aliases')
+                            ELSE '{}'
+                        END
                    FROM pages p WHERE p.path = ?1",
                 params![vault_path.as_str()],
                 page_summary_from_row,
@@ -300,6 +306,7 @@ fn build_page_summary_fallback(name: &str, vp: &VaultPath) -> PageSummary {
         project: None,
         tags: vec![computed_tag.clone()],
         computed_tags: vec![computed_tag],
+        aliases: Vec::new(),
         encrypted: false,
     }
 }
@@ -387,6 +394,7 @@ mod tests {
         assert!(summary.project.is_none());
         assert_eq!(summary.tags, vec!["note"]);
         assert_eq!(summary.computed_tags, vec!["note"]);
+        assert!(summary.aliases.is_empty());
     }
 
     #[test]
@@ -412,6 +420,7 @@ mod tests {
                 project: None,
                 tags: Vec::new(),
                 computed_tags: Vec::new(),
+                aliases: Vec::new(),
                 encrypted: false,
             },
             PageSummary {
@@ -424,6 +433,7 @@ mod tests {
                 project: None,
                 tags: Vec::new(),
                 computed_tags: Vec::new(),
+                aliases: Vec::new(),
                 encrypted: false,
             },
         ];
