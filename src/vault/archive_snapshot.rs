@@ -123,8 +123,9 @@ fn html_tag_end(html: &str, start: usize) -> Option<usize> {
     None
 }
 
-/// Return whether a tag is closing and its ASCII-insensitive element name.
-fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
+/// Return whether a tag is closing, its ASCII-insensitive element name, and
+/// the byte where attribute recovery begins.
+fn html_tag_name(tag: &str) -> Option<(bool, &str, usize)> {
     let bytes = tag.as_bytes();
     let mut cursor = 0;
     while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
@@ -142,7 +143,7 @@ fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
     while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
         cursor += 1;
     }
-    (cursor > start).then_some((closing, &tag[start..cursor]))
+    (cursor > start).then_some((closing, &tag[start..cursor], cursor))
 }
 
 #[derive(Clone, Copy)]
@@ -284,30 +285,24 @@ struct HtmlAttribute<'a> {
 
 /// Structurally scan a start tag's attributes, retaining their source ranges.
 ///
-/// Attribute values may be single-quoted, double-quoted, or unquoted. A
-/// missing closing quote consumes the remainder of the tag, matching the
-/// browser tokenizer and preventing a malformed value from exposing later
-/// bytes as a second attribute.
-fn html_attributes(tag: &str) -> Vec<HtmlAttribute<'_>> {
+/// Attribute values may be single-quoted, double-quoted, or unquoted. The
+/// solidus is a browser parse error outside the self-closing position, not a
+/// terminator: `<a/href=...>` still produces an `a` element with an `href`.
+fn html_attributes<'a>(tag: &'a str, mut cursor: usize) -> Vec<HtmlAttribute<'a>> {
     let bytes = tag.as_bytes();
-    let mut cursor = 0;
-    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-        cursor += 1;
-    }
-    if bytes.get(cursor) == Some(&b'/') {
-        return Vec::new();
-    }
-    while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
-        cursor += 1;
-    }
-
     let mut attributes = Vec::new();
     while cursor < bytes.len() {
         let leading_start = cursor;
         while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
             cursor += 1;
         }
-        if cursor == bytes.len() || bytes[cursor] == b'/' {
+        while bytes.get(cursor) == Some(&b'/') {
+            cursor += 1;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+        }
+        if cursor == bytes.len() {
             break;
         }
 
@@ -406,10 +401,15 @@ pub fn neutralize_navigation(html: &str) -> std::borrow::Cow<'_, str> {
     while let Some(open_offset) = html[cursor..].find('<') {
         let open = cursor + open_offset;
         if html[open..].starts_with("<!--") {
-            let Some(comment_end) = html[open + 4..].find("-->") else {
+            let after_open = open + 4;
+            if html.as_bytes().get(after_open) == Some(&b'>') {
+                cursor = after_open + 1;
+                continue;
+            }
+            let Some(comment_end) = html[after_open..].find("-->") else {
                 break;
             };
-            cursor = open + 4 + comment_end + 3;
+            cursor = after_open + comment_end + 3;
             continue;
         }
 
@@ -422,10 +422,10 @@ pub fn neutralize_navigation(html: &str) -> std::borrow::Cow<'_, str> {
         }
 
         let tag = &html[open + 1..close];
-        let Some((false, name)) = html_tag_name(tag) else {
+        let Some((false, name, attributes_start)) = html_tag_name(tag) else {
             continue;
         };
-        let attributes = html_attributes(tag);
+        let attributes = html_attributes(tag, attributes_start);
         if is_meta_refresh(name, &attributes) {
             removals.push(open..close + 1);
         } else {
@@ -491,7 +491,7 @@ pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> 
         }
 
         let tag = &html[open + 1..close];
-        if let Some((false, name)) = html_tag_name(tag)
+        if let Some((false, name, _)) = html_tag_name(tag)
             && let Some(inert) = inert_html_content(name)
         {
             cursor = match inert {
@@ -1424,6 +1424,39 @@ mod tests {
             neutralize_navigation(html),
             std::borrow::Cow::Borrowed(value) if value == html
         ));
+    }
+
+    #[test]
+    fn neutralization_recovers_attributes_after_malformed_solidus() {
+        let html = concat!(
+            r#"<meta/http-equiv=refresh content="0;url=https://meta.example">"#,
+            r#"<a/href=https://anchor.example data-label=kept>Visible</a>"#,
+            r#"<img/src=cas:sha256:image alt=kept>"#
+        );
+
+        assert_eq!(
+            neutralize_navigation(html),
+            concat!(
+                r#""#,
+                r#"<a data-label=kept>Visible</a>"#,
+                r#"<img/src=cas:sha256:image alt=kept>"#
+            )
+        );
+    }
+
+    #[test]
+    fn neutralization_resumes_after_browser_closed_empty_comment() {
+        let html = concat!(
+            "<!-->",
+            r#"<a href=https://anchor.example>Visible</a>"#,
+            r#"<meta http-equiv=refresh content="0;url=https://meta.example">"#,
+            r#"<img src=cas:sha256:image>"#
+        );
+
+        assert_eq!(
+            neutralize_navigation(html),
+            concat!("<!-->", "<a>Visible</a>", r#"<img src=cas:sha256:image>"#)
+        );
     }
 
     // -------------------------------------------------------------------
