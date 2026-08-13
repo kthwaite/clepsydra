@@ -51,7 +51,10 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
       >
         <div
           key={pathname}
-          className={cn("view-anim", mobile ? "min-h-full" : "h-full")}
+          className={cn(
+            "view-anim",
+            fullPage || !mobile ? "h-full" : "min-h-full",
+          )}
         >
           {children}
         </div>

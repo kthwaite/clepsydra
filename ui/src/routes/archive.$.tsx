@@ -85,7 +85,10 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
     };
   }, [path, snapshotHash, retryKey]);
 
-  if (pageQuery.isError) {
+  if (
+    pageQuery.isError &&
+    (isNotFound(pageQuery.error) || !pageQuery.data)
+  ) {
     if (isNotFound(pageQuery.error)) throw notFound();
     throw pageQuery.error;
   }
@@ -106,7 +109,7 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
 
   if (!archive || !snapshotHash) {
     return (
-      <main className="flex h-full items-center justify-center bg-paper p-4 text-ink">
+      <div className="flex h-full items-center justify-center bg-paper p-4 text-ink">
         <section
           aria-labelledby="no-archive-title"
           className="w-full max-w-xl border-y border-rule py-6"
@@ -132,7 +135,7 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
             ← Back to vault page
           </Link>
         </section>
-      </main>
+      </div>
     );
   }
 
@@ -142,7 +145,7 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
       : { hash: snapshotHash, path, status: "pending" };
 
   return (
-    <main className="flex h-full min-h-0 flex-col bg-paper text-ink">
+    <div className="flex h-full min-h-0 flex-col bg-paper text-ink">
       <ArchiveBanner title={title} path={path} archive={archive} />
       {currentProbe.status === "ready" ? (
         <iframe
@@ -156,7 +159,7 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
           Locating captured snapshot…
         </SnapshotStatus>
       ) : currentProbe.status === "missing" ? (
-        <SnapshotStatus eyebrow="Content store / missing">
+        <SnapshotStatus status="status" eyebrow="Content store / missing">
           <p>Snapshot is no longer in the content store.</p>
           <code className="mt-3 block break-all text-[11px] text-hot">
             {snapshotHash}
@@ -181,7 +184,7 @@ export function ArchiveSnapshotRoute({ path }: { path: string }) {
           </button>
         </SnapshotStatus>
       )}
-    </main>
+    </div>
   );
 }
 

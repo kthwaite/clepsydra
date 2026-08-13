@@ -34,6 +34,15 @@ function ProvenanceField({
   );
 }
 
+function isSafeLiveUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
 /** Provenance chrome for a captured page. The ruled strips deliberately echo
  * Clepsydra's dossier headers without presenting the snapshot as a workspace
  * folio or dashboard card. */
@@ -61,15 +70,24 @@ export function ArchiveBanner({ title, path, archive }: ArchiveBannerProps) {
           <h1 className="font-sans text-xl font-black leading-tight tracking-tight text-ink md:text-2xl">
             {title}
           </h1>
-          <a
-            href={archive.url}
-            target="_blank"
-            rel="noreferrer"
-            className="cl-mono mt-2 block truncate text-[10px] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
-            aria-label={`Open live page: ${archive.url}`}
-          >
-            {archive.url} ↗
-          </a>
+          {isSafeLiveUrl(archive.url) ? (
+            <a
+              href={archive.url}
+              target="_blank"
+              rel="noreferrer"
+              className="cl-mono mt-2 block truncate text-[10px] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+              aria-label={`Open live page: ${archive.url}`}
+            >
+              {archive.url} ↗
+            </a>
+          ) : (
+            <p className="cl-mono mt-2 text-[10px] text-hot">
+              <span className="mr-2 uppercase tracking-[0.12em]">
+                Invalid archive URL metadata
+              </span>
+              <span className="break-all">{archive.url}</span>
+            </p>
+          )}
         </div>
 
         <div className="cl-mono grid min-w-0 gap-x-4 gap-y-2 border-l border-rule pl-4 sm:grid-cols-2">

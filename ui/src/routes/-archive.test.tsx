@@ -147,9 +147,8 @@ describe("archived snapshot route", () => {
 
     render(<ArchiveSnapshotRoute path="archive/example/page.md" />);
 
-    expect(
-      await screen.findByText(/snapshot is no longer in the content store/i),
-    ).toBeInTheDocument();
+    const missing = await screen.findByRole("status");
+    expect(missing).toHaveTextContent(/snapshot is no longer in the content store/i);
     expect(screen.getByText("sha/with space")).toBeInTheDocument();
     expect(screen.queryByTitle(/archived snapshot/i)).not.toBeInTheDocument();
   });
@@ -222,6 +221,53 @@ describe("archived snapshot route", () => {
       "ROUTE_NOT_FOUND",
     );
     expect(mocks.notFound).toHaveBeenCalled();
+  });
+
+  it("keeps usable cached page data through a non-404 background refetch error", async () => {
+    mocks.pageQuery.isError = true;
+    mocks.pageQuery.error = new Error("background refetch failed");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 200 })),
+    );
+
+    render(<ArchiveSnapshotRoute path="archive/example/page.md" />);
+
+    expect(
+      await screen.findByTitle("Archived snapshot: A captured page"),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps a cached page-query 404 grounded in the router not-found convention", () => {
+    mocks.pageQuery.isError = true;
+    mocks.pageQuery.error = { status: 404, error: "page not found" };
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    expect(() =>
+      render(<ArchiveSnapshotRoute path="archive/example/page.md" />),
+    ).toThrow("ROUTE_NOT_FOUND");
+    expect(mocks.notFound).toHaveBeenCalled();
+  });
+
+  it("leaves the CodexFrame as the only main landmark", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(null, { status: 200 })),
+    );
+
+    const archived = render(
+      <ArchiveSnapshotRoute path="archive/example/page.md" />,
+    );
+    await screen.findByTitle("Archived snapshot: A captured page");
+    expect(archived.container.querySelectorAll("main")).toHaveLength(0);
+
+    mocks.pageQuery.data = {
+      canonical_name: "Ordinary note",
+      path: "notes/ordinary.md",
+      meta: { title: "Ordinary note" },
+    };
+    archived.rerender(<ArchiveSnapshotRoute path="notes/ordinary.md" />);
+    expect(archived.container.querySelectorAll("main")).toHaveLength(0);
   });
 
   it("keeps a changed hash pending until its own preflight resolves", async () => {

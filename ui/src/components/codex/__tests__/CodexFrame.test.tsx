@@ -492,6 +492,20 @@ describe("CodexFrame responsive shell", () => {
     expect(document.querySelector("main")).toHaveClass("h-full");
   });
 
+  it("gives the mobile archive route a definite full height without codex chrome", () => {
+    mobileLayoutState.matches = true;
+    locationState.pathname = "/archive/archive/example/page.md";
+    renderFrame();
+
+    const content = screen.getByText("Frame content");
+    expect(content.parentElement).toHaveClass("h-full");
+    expect(
+      screen.queryByRole("navigation", { name: "Mobile roots" }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector("footer")).not.toBeInTheDocument();
+    expect(document.querySelectorAll("main")).toHaveLength(1);
+  });
+
   it("shows the six roots and global actions in the mobile chrome", () => {
     mobileLayoutState.matches = true;
     renderFrame();

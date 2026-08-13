@@ -50,6 +50,43 @@ describe("ArchiveBanner", () => {
     );
   });
 
+  it.each([
+    ["https://example.com/articles/time", "https://example.com/articles/time"],
+    ["http://example.com/articles/time", "http://example.com/articles/time"],
+  ])("links an absolute HTTP(S) live URL: %s", (url, expectedHref) => {
+    render(
+      <ArchiveBanner
+        title="The Shape of Time"
+        path="archive/example/the-shape-of-time.md"
+        archive={{ ...archive, url }}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /open live page/i })).toHaveAttribute(
+      "href",
+      expectedHref,
+    );
+  });
+
+  it.each([
+    "javascript:alert(document.domain)",
+    "data:text/html,<h1>unsafe</h1>",
+    "//example.com/protocol-relative",
+    "not a URL",
+  ])("renders an invalid legacy archive URL as non-clickable corruption text: %s", (url) => {
+    render(
+      <ArchiveBanner
+        title="The Shape of Time"
+        path="archive/example/the-shape-of-time.md"
+        archive={{ ...archive, url }}
+      />,
+    );
+
+    expect(screen.queryByRole("link", { name: /open live page/i })).not.toBeInTheDocument();
+    expect(screen.getByText(url)).toBeInTheDocument();
+    expect(screen.getByText(/invalid archive url metadata/i)).toBeInTheDocument();
+  });
+
   it("shows optional provenance only when retained", () => {
     const { rerender } = render(
       <ArchiveBanner
