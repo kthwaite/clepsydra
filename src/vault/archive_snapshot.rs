@@ -148,6 +148,28 @@ fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
     (cursor > start).then_some((closing, &tag[start..cursor]))
 }
 
+#[derive(Clone, Copy)]
+enum InertHtmlContent {
+    UntilEndTag,
+    ThroughEof,
+}
+
+/// Classify elements whose text must not be scanned as nested markup.
+fn inert_html_content(name: &str) -> Option<InertHtmlContent> {
+    if [
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes",
+    ]
+    .iter()
+    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    {
+        Some(InertHtmlContent::UntilEndTag)
+    } else if name.eq_ignore_ascii_case("plaintext") {
+        Some(InertHtmlContent::ThroughEof)
+    } else {
+        None
+    }
+}
+
 /// Skip an HTML raw-text element through its matching closing tag.
 fn raw_text_end(html: &str, start: usize, name: &str) -> Option<usize> {
     let bytes = html.as_bytes();
@@ -284,9 +306,14 @@ pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> 
 
         let tag = &html[open + 1..close];
         if let Some((false, name)) = html_tag_name(tag)
-            && (name.eq_ignore_ascii_case("script") || name.eq_ignore_ascii_case("style"))
+            && let Some(inert) = inert_html_content(name)
         {
-            cursor = raw_text_end(html, cursor, name).unwrap_or(html.len());
+            cursor = match inert {
+                InertHtmlContent::UntilEndTag => {
+                    raw_text_end(html, cursor, name).unwrap_or(html.len())
+                }
+                InertHtmlContent::ThroughEof => html.len(),
+            };
         }
 
         let (Some(original), Some(hash)) = resource_attributes(tag) else {
@@ -810,6 +837,42 @@ mod tests {
         let html = concat!(
             r#"<script>const image = '<img data-sf-original-src="https://cdn.example/script>a.png" src="cas:sha256:script">';</script>"#,
             r#"<style>/* <img data-sf-original-src="https://cdn.example/style>b.png" src="cas:sha256:style"> */</style>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_textarea_and_title_text() {
+        let html = concat!(
+            r#"<TEXTAREA><img data-sf-original-src="https://cdn.example/textarea>a.png" src="cas:sha256:textarea"></textarea>"#,
+            r#"<title><img data-sf-original-src="https://cdn.example/title>b.png" src="cas:sha256:title"></TITLE>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_xmp_and_iframe_text() {
+        let html = concat!(
+            r#"<xmp><img data-sf-original-src="https://cdn.example/xmp>a.png" src="cas:sha256:xmp"></xmp>"#,
+            r#"<IFRAME><img data-sf-original-src="https://cdn.example/iframe>b.png" src="cas:sha256:iframe"></iframe>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn plaintext_consumes_resource_like_markup_through_eof() {
+        let html = concat!(
+            "<plaintext>",
+            r#"<img data-sf-original-src="https://cdn.example/plaintext>a.png" src="cas:sha256:plaintext">"#
         );
 
         let map = original_url_map(html, BASE);
