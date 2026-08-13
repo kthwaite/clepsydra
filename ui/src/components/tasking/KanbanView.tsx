@@ -4,13 +4,21 @@
  * - Cards bucketed by task.status, sorted by PRI_ORDER within each column.
  * - Decision 8 (sealed filter): SEALED column excludes tasks whose cycle
  *   refers to a cycle with state "CLOSED" — see `visibleInKanban`.
- * - DnD via native HTML5 drag-and-drop; optimistic patch via usePatchTask.
+ * - DnD via Pragmatic drag-and-drop; optimistic patch via usePatchTask.
  * - Column header + button → openTaskModal({ status }) preset.
  * - Card click → setEditTaskId(task.id).
  * - Dossier link click → onOpenDossier prop (stopPropagation internally).
  */
 
-import { useState } from "react";
+import { dropTargetForElements } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
@@ -46,6 +54,89 @@ export function visibleInKanban(
   });
 }
 
+type TaskCardDragData = {
+  kind: "task-card";
+  taskId: string;
+  status: string;
+};
+
+function getTaskCardDragData(
+  data: Record<string | symbol, unknown>,
+): TaskCardDragData | null {
+  if (
+    data.kind !== "task-card" ||
+    typeof data.taskId !== "string" ||
+    typeof data.status !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    kind: "task-card",
+    taskId: data.taskId,
+    status: data.status,
+  };
+}
+
+interface KanbanDropColumnProps {
+  status: string;
+  onMoveTask: (taskId: string, status: string) => void;
+  taskStatusById: ReadonlyMap<string, string>;
+  children: ReactNode;
+}
+
+function KanbanDropColumn({
+  status,
+  onMoveTask,
+  taskStatusById,
+  children,
+}: KanbanDropColumnProps) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [isDropTarget, setIsDropTarget] = useState(false);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    return dropTargetForElements({
+      element,
+      getData: () => ({ kind: "task-card-column", status }),
+      canDrop: ({ source }) => {
+        const data = getTaskCardDragData(source.data);
+        return data !== null && taskStatusById.has(data.taskId);
+      },
+      onDragEnter: () => setIsDropTarget(true),
+      onDragLeave: () => setIsDropTarget(false),
+      onDrop: ({ source }) => {
+        setIsDropTarget(false);
+        const data = getTaskCardDragData(source.data);
+        if (!data) return;
+        const currentStatus = taskStatusById.get(data.taskId);
+        if (currentStatus === undefined || currentStatus === status) return;
+        onMoveTask(data.taskId, status);
+      },
+    });
+  }, [onMoveTask, status, taskStatusById]);
+
+  return (
+    <div
+      ref={ref}
+      className="flex min-h-0 flex-[1_0_282px] flex-col border-r border-[var(--rule)] last:border-r-0"
+      style={
+        isDropTarget
+          ? {
+              background:
+                "color-mix(in oklab, var(--accent) 7%, transparent)",
+            }
+          : undefined
+      }
+      data-testid={`kb-col-${status}`}
+    >
+      {children}
+    </div>
+  );
+}
+
 // ── KanbanView ────────────────────────────────────────────────────────────────
 
 export interface KanbanViewProps {
@@ -77,12 +168,18 @@ export function KanbanView({
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const openTaskModal = useBoardStore((s) => s.openTaskModal);
 
-  const patchTask = usePatchTask();
+  const { mutate: patchTask } = usePatchTask();
+  const moveTask = useCallback(
+    (taskId: string, status: string) =>
+      patchTask({ id: taskId, patch: { status } }),
+    [patchTask],
+  );
 
-  const [dragId, setDragId] = useState<string | null>(null);
-  const [dropCol, setDropCol] = useState<string | null>(null);
-
-  const visible = visibleInKanban(tasks, cycles);
+  const visible = useMemo(() => visibleInKanban(tasks, cycles), [tasks, cycles]);
+  const taskStatusById = useMemo(
+    () => new Map(visible.map((task) => [task.id, task.status])),
+    [visible],
+  );
 
   return (
     <div className="flex h-full min-h-0 overflow-x-auto overflow-y-hidden">
@@ -98,40 +195,13 @@ export function KanbanView({
         const over = col.wip > 0 && items.length > col.wip;
         const fill =
           col.wip > 0 ? Math.min(100, (items.length / col.wip) * 100) : 0;
-        const isDropTarget = dropCol === col.id;
 
         return (
-          <div
+          <KanbanDropColumn
             key={col.id}
-            className="flex min-h-0 flex-[1_0_282px] flex-col border-r border-[var(--rule)] last:border-r-0"
-            style={
-              isDropTarget
-                ? {
-                    background:
-                      "color-mix(in oklab, var(--accent) 7%, transparent)",
-                  }
-                : undefined
-            }
-            onDragOver={(e) => {
-              e.preventDefault();
-              if (dropCol !== col.id) setDropCol(col.id);
-            }}
-            onDragLeave={(e) => {
-              // Only clear when leaving the column div itself, not a child
-              if (e.currentTarget === e.target) setDropCol(null);
-            }}
-            onDrop={() => {
-              if (dragId) {
-                // Same-column drop is a no-op — skip the mutation entirely
-                const dragged = visible.find((t) => t.id === dragId);
-                if (dragged && dragged.status !== col.id) {
-                  patchTask.mutate({ id: dragId, patch: { status: col.id } });
-                }
-              }
-              setDragId(null);
-              setDropCol(null);
-            }}
-            data-testid={`kb-col-${col.id}`}
+            status={col.id}
+            onMoveTask={moveTask}
+            taskStatusById={taskStatusById}
           >
             {/* Column header */}
             <div className="sticky top-0 z-[2] flex items-center gap-[8px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[8px]">
@@ -209,12 +279,6 @@ export function KanbanView({
                     key={t.id}
                     task={t}
                     showOp={showOp}
-                    isDragging={dragId === t.id}
-                    onDragStart={() => setDragId(t.id)}
-                    onDragEnd={() => {
-                      setDragId(null);
-                      setDropCol(null);
-                    }}
                     onClick={() => setEditTaskId(t.id)}
                     onOpenDossier={onOpenDossier}
                     colLabel={colLabel}
@@ -230,7 +294,7 @@ export function KanbanView({
                 testId={`qa-${col.id}`}
               />
             </div>
-          </div>
+          </KanbanDropColumn>
         );
       })}
     </div>
