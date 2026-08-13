@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  captureFolioHistoryLocation,
+  clearFolioHistoryState,
+  readFolioHistoryRestorationRequest,
+  readFolioHistoryLocation,
+  readFolioRestoration,
+  registerFolioHistoryCapture,
+  requestFolioHistoryRestoration,
+  saveFolioRestoration,
+} from "./folioRestoration";
+import {
   migrateWorkspace,
   type OpenHistoryEntry,
   pushOpenHistory,
+  registerWorkspaceTransitionGuard,
   useWorkspaceStore,
 } from "./workspace";
 
@@ -66,6 +77,51 @@ describe("useWorkspaceStore openTab wiring", () => {
     expect(useWorkspaceStore.getState().openHistory.map((e) => e.path)).toEqual(
       ["x.md"],
     );
+  });
+
+  it("activateTabFromHistory applies activation without re-entering the guard", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+          focusBlockId: "block-alpha",
+          focusRequestId: "focus-alpha",
+        },
+        {
+          id: "beta",
+          type: "page",
+          path: "notes/beta.md",
+          label: "Beta",
+        },
+      ],
+      activeTabId: "alpha",
+      openHistory: [],
+      quires: {},
+    });
+    let guardCalls = 0;
+    const unregister = registerWorkspaceTransitionGuard(() => {
+      guardCalls += 1;
+      return true;
+    });
+
+    try {
+      useWorkspaceStore.getState().activateTabFromHistory("beta");
+    } finally {
+      unregister();
+    }
+
+    const state = useWorkspaceStore.getState();
+    expect(guardCalls).toBe(0);
+    expect(state.activeTabId).toBe("beta");
+    expect(state.tabs.find((tab) => tab.id === "alpha")).not.toHaveProperty(
+      "focusBlockId",
+    );
+    expect(state.openHistory.map((entry) => entry.path)).toEqual([
+      "notes/beta.md",
+    ]);
   });
 });
 
@@ -638,6 +694,159 @@ describe("moveTab drop semantics", () => {
     const { tabs } = useWorkspaceStore.getState();
     expect(tabs.map((tab) => tab.id)).toEqual(["0", "1", "2"]);
     expect(tabs.find((tab) => tab.id === "1")?.quireId).toBeUndefined();
+  });
+});
+
+describe("workspace Folio history lifecycle", () => {
+  function request(tabId: string, path = `${tabId}.md`) {
+    requestFolioHistoryRestoration({
+      tabId,
+      path,
+      locationId: `visit-${tabId}`,
+    });
+  }
+  function seedRecord(tabId: string, path = `${tabId}.md`) {
+    const record = {
+      tabId,
+      path,
+      revision: `revision-${tabId}`,
+      scrollTop: 10,
+      anchor: null,
+      focus: null,
+    };
+    saveFolioRestoration(record);
+    const unregister = registerFolioHistoryCapture(tabId, path, () => record);
+    captureFolioHistoryLocation(`visit-${tabId}`, tabId, path);
+    unregister();
+  }
+
+  it("clears a pending history request when its tab closes before restoration", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha"), pageTab("beta")],
+      activeTabId: "alpha",
+    });
+    request("alpha");
+
+    useWorkspaceStore.getState().closeTab("alpha");
+
+    expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
+  });
+
+  it("clears pending, latest, and visit state when a tab path changes", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha"), pageTab("other")],
+      activeTabId: "other",
+    });
+    request("alpha");
+    seedRecord("alpha");
+    seedRecord("other");
+
+    useWorkspaceStore
+      .getState()
+      .updateTabPath("alpha", "renamed.md", "Renamed");
+
+    expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
+    expect(readFolioRestoration("alpha", "alpha.md")).toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-alpha", "alpha", "alpha.md"),
+    ).toBeNull();
+    expect(readFolioRestoration("other", "other.md")).not.toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-other", "other", "other.md"),
+    ).not.toBeNull();
+  });
+
+  it("clears old history identity when replace mode reuses a tab ID", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("slot")],
+      activeTabId: "slot",
+      navigationMode: "replace",
+    });
+    request("slot");
+
+    useWorkspaceStore.getState().openTab("page", "replacement.md", "New");
+
+    expect(readFolioHistoryRestorationRequest("slot", "slot.md")).toBeNull();
+  });
+
+  it("clears removed tabs during closeOtherTabs while preserving the kept tab", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha"), pageTab("beta")],
+      activeTabId: "alpha",
+    });
+    const unregister = registerFolioHistoryCapture(
+      "alpha",
+      "alpha.md",
+      () => null,
+    );
+    request("beta");
+
+    useWorkspaceStore.getState().closeOtherTabs("alpha");
+
+    expect(readFolioHistoryRestorationRequest("beta", "beta.md")).toBeNull();
+    unregister();
+  });
+
+  it("clears every removed quire tab while preserving unrelated history", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        { ...pageTab("alpha"), quireId: "q1" },
+        { ...pageTab("beta"), quireId: "q1" },
+        pageTab("other"),
+      ],
+      activeTabId: "other",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+    for (const tabId of ["alpha", "beta", "other"]) {
+      request(tabId);
+      seedRecord(tabId);
+    }
+
+    useWorkspaceStore.getState().closeQuireTabs("q1");
+
+    for (const tabId of ["alpha", "beta"]) {
+      expect(
+        readFolioHistoryRestorationRequest(tabId, `${tabId}.md`),
+      ).toBeNull();
+      expect(readFolioRestoration(tabId, `${tabId}.md`)).toBeNull();
+      expect(
+        readFolioHistoryLocation(`visit-${tabId}`, tabId, `${tabId}.md`),
+      ).toBeNull();
+    }
+    expect(
+      readFolioHistoryRestorationRequest("other", "other.md"),
+    ).not.toBeNull();
+    expect(readFolioRestoration("other", "other.md")).not.toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-other", "other", "other.md"),
+    ).not.toBeNull();
+  });
+
+  it("clears all Folio history during workspace teardown", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha")],
+      activeTabId: "alpha",
+    });
+    request("alpha");
+
+    useWorkspaceStore.getState().clearWorkspace();
+
+    expect(useWorkspaceStore.getState().tabs).toEqual([]);
+    expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
   });
 });
 

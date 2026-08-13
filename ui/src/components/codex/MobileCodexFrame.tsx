@@ -9,6 +9,10 @@ import {
 } from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import {
+  useActivateTabWithFolioHistory,
+  useLeaveFolioWorkspace,
+} from "#/hooks/useFolioHistoryNavigation";
 import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
 
@@ -25,6 +29,8 @@ export function MobileCodexFrame({
   const resolved = useCodexView();
   const view = forceView ?? resolved;
   const openTab = useOpenTab();
+  const activateTab = useActivateTabWithFolioHistory();
+  const leaveWorkspace = useLeaveFolioWorkspace();
 
   return (
     <>
@@ -87,7 +93,14 @@ export function MobileCodexFrame({
                   <button
                     key={root}
                     type="button"
-                    onClick={() => goToView(root, { navigate, openTab })}
+                    onClick={() =>
+                      goToView(root, {
+                        navigate,
+                        openTab,
+                        activateTab,
+                        leaveWorkspace,
+                      })
+                    }
                     aria-label={mobile.name}
                     aria-current={active ? "page" : undefined}
                     className={cn(

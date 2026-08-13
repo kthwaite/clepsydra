@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useSyncExternalStore,
   useState,
 } from "react";
 import {
@@ -62,6 +63,11 @@ import type { CustomEditor } from "#/editor/types";
 import { usePageEditor } from "#/editor/usePageEditor";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
+import {
+  registerFolioHistoryTraversalGuard,
+  useActivateTabWithFolioHistory,
+  useLeaveFolioWorkspace,
+} from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
 import { todayJournalPath } from "#/lib/journal";
@@ -77,9 +83,15 @@ import {
 } from "#/recipe/recipeCodec";
 import {
   clearFolioRestoration,
+  consumeFolioHistoryRestorationRequest,
+  type FolioRestoration,
+  readFolioHistoryRestorationRequest,
+  readFolioHistoryRestorationRequestId,
   readFolioRestoration,
+  registerFolioHistoryCapture,
   saveFolioRestoration,
   snapshotTextPoint,
+  subscribeFolioHistoryRestorationRequests,
   validateTextPointSnapshot,
 } from "#/store/folioRestoration";
 import {
@@ -128,13 +140,22 @@ function RawMarkdownNavigationGuard({
 
   useEffect(() => {
     if (!dirty) return;
-    return registerWorkspaceTransitionGuard((proceed) => {
+    const guard = (proceed: () => void) => {
+      if (leaveApprovedRef.current) return false;
       const pending = { proceed };
       pendingTransitionRef.current = pending;
       setPendingTransition(pending);
       leaveApprovedRef.current = false;
       return true;
-    });
+    };
+    const unregisterWorkspaceGuard =
+      registerWorkspaceTransitionGuard(guard);
+    const unregisterHistoryGuard =
+      registerFolioHistoryTraversalGuard(guard);
+    return () => {
+      unregisterWorkspaceGuard();
+      unregisterHistoryGuard();
+    };
   }, [dirty]);
 
   const stay = () => {
@@ -221,6 +242,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const mobile = useMobileLayout();
   const navigate = useNavigate();
   const router = useRouter();
+  const leaveFolioWorkspace = useLeaveFolioWorkspace();
   const isTodayDraftPath = path === todayJournalPath();
   const { data: journalToday, isLoading: isJournalTodayLoading } =
     useJournalToday(isTodayDraftPath);
@@ -256,24 +278,19 @@ export function Folio({ tabId, path }: FolioProps) {
     (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
   );
   const takeTabFocus = useWorkspaceStore((state) => state.takeTabFocus);
+  const pendingHistoryLocationId = useSyncExternalStore(
+    subscribeFolioHistoryRestorationRequests,
+    () => readFolioHistoryRestorationRequestId(tabId, path),
+  );
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
-      runWorkspaceTransition(() => {
+      leaveFolioWorkspace(() => {
         void navigate({ to: "/" });
       });
       return;
     }
 
-    runWorkspaceTransition(() => {
-      const originTabId = router.history.location.state.folioOriginTabId;
-      if (originTabId) {
-        const workspace = useWorkspaceStore.getState();
-        if (workspace.tabs.some((tab) => tab.id === originTabId)) {
-          workspace.activateTab(originTabId);
-        }
-      }
-      router.history.back();
-    });
+    router.history.back();
   };
   useEffect(() => {
     if (isTodayDraftPath && journalToday?.path && journalToday.path !== path) {
@@ -309,6 +326,44 @@ export function Folio({ tabId, path }: FolioProps) {
     available: boolean;
     getRevision: () => string;
   } | null>(null);
+  const consumedHistoryLocationIdRef = useRef<string | null>(null);
+
+  const buildRestorationSnapshot = useCallback((): FolioRestoration | null => {
+    const state = restorationStateRef.current;
+    const slateEditor =
+      folioEditorRef.current ?? lastMountedFolioEditorRef.current;
+    const scrollContainer = bodyRef.current;
+    if (
+      !state ||
+      state.tabId !== tabId ||
+      state.path !== path ||
+      !state.available ||
+      !slateEditor ||
+      !scrollContainer
+    ) {
+      return null;
+    }
+
+    const selection = slateEditor.selection;
+    return {
+      tabId,
+      path,
+      revision: state.getRevision(),
+      scrollTop: scrollContainer.scrollTop,
+      anchor: selection
+        ? snapshotTextPoint(slateEditor, selection.anchor)
+        : null,
+      focus: selection
+        ? snapshotTextPoint(slateEditor, selection.focus)
+        : null,
+    };
+  }, [path, tabId]);
+
+  useLayoutEffect(
+    () =>
+      registerFolioHistoryCapture(tabId, path, buildRestorationSnapshot),
+    [buildRestorationSnapshot, path, tabId],
+  );
 
   // An in-place SlateEditor remount (external content adopt, conflict reload,
   // unlock) destroys the caret. Snapshot selection and focus as the old
@@ -659,6 +714,40 @@ export function Folio({ tabId, path }: FolioProps) {
         return;
       }
 
+      const restoration = buildRestorationSnapshot();
+      if (!restoration) {
+        clearFolioRestoration(tabId);
+        return;
+      }
+      saveFolioRestoration(restoration);
+    },
+    [buildRestorationSnapshot, path, tabId],
+  );
+
+  useLayoutEffect(() => {
+    if (
+      pendingHistoryLocationId === null &&
+      consumedHistoryLocationIdRef.current !== null
+    ) {
+      consumedHistoryLocationIdRef.current = null;
+      return;
+    }
+    const historyRequest = readFolioHistoryRestorationRequest(tabId, path);
+    if (!restorationAvailable) {
+      if (!editor.isLoading && editor.pageNotFound && historyRequest) {
+        consumeFolioHistoryRestorationRequest(
+          historyRequest.request.locationId,
+        );
+      }
+      return;
+    }
+
+    const restoration = historyRequest
+      ? historyRequest.restoration
+      : readFolioRestoration(tabId, path);
+    if (!historyRequest && !restoration) return;
+
+    const frame = requestAnimationFrame(() => {
       const state = restorationStateRef.current;
       if (
         !state ||
@@ -666,77 +755,81 @@ export function Folio({ tabId, path }: FolioProps) {
         state.path !== path ||
         !state.available
       ) {
-        clearFolioRestoration(tabId);
+        if (
+          historyRequest &&
+          state &&
+          (state.tabId !== tabId || state.path !== path)
+        ) {
+          consumeFolioHistoryRestorationRequest(
+            historyRequest.request.locationId,
+          );
+        }
         return;
       }
 
-      const slateEditor =
-        folioEditorRef.current ?? lastMountedFolioEditorRef.current;
-      if (!slateEditor) {
-        clearFolioRestoration(tabId);
-        return;
-      }
-      const selection = slateEditor.selection;
-      saveFolioRestoration({
-        tabId,
-        path,
-        revision: state.getRevision(),
-        scrollTop: bodyRef.current?.scrollTop ?? 0,
-        anchor: selection
-          ? snapshotTextPoint(slateEditor, selection.anchor)
-          : null,
-        focus: selection
-          ? snapshotTextPoint(slateEditor, selection.focus)
-          : null,
-      });
-    },
-    [path, tabId],
-  );
-
-  useLayoutEffect(() => {
-    if (!restorationAvailable) return;
-    const restoration = readFolioRestoration(tabId, path);
-    if (!restoration) return;
-
-    const frame = requestAnimationFrame(() => {
       const slateEditor = folioEditorRef.current;
       const scrollContainer = bodyRef.current;
       if (!slateEditor || !scrollContainer) return;
 
-      const requireTextMatch = restoration.revision !== editor.getRevision();
-      let selection: Range | null = null;
-      if (restoration.anchor && restoration.focus) {
-        const anchor = validateTextPointSnapshot(
-          slateEditor,
-          restoration.anchor,
-          requireTextMatch,
-        );
-        const focus = validateTextPointSnapshot(
-          slateEditor,
-          restoration.focus,
-          requireTextMatch,
-        );
-        if (anchor && focus) selection = { anchor, focus };
-      }
-      if (requireTextMatch && !selection) return;
-
-      scrollContainer.scrollTop = restoration.scrollTop;
-      if (selection) Transforms.select(slateEditor, selection);
-      if (restoration.hadFocus) {
-        // The user was typing in the swapped-out instance; hand the caret
-        // back. When the saved points no longer fit the adopted content,
-        // fall back to the end of the document rather than dropping focus.
-        if (!selection) {
-          Transforms.select(slateEditor, Editor.end(slateEditor, []));
+      if (restoration) {
+        const requireTextMatch =
+          restoration.revision !== editor.getRevision();
+        let selection: Range | null = null;
+        if (restoration.anchor && restoration.focus) {
+          const anchor = validateTextPointSnapshot(
+            slateEditor,
+            restoration.anchor,
+            requireTextMatch,
+          );
+          const focus = validateTextPointSnapshot(
+            slateEditor,
+            restoration.focus,
+            requireTextMatch,
+          );
+          if (anchor && focus) selection = { anchor, focus };
         }
-        ReactEditor.focus(slateEditor);
+
+        scrollContainer.scrollTop = restoration.scrollTop;
+        if (selection) Transforms.select(slateEditor, selection);
+        if (restoration.hadFocus) {
+          // The user was typing in the swapped-out instance; hand the caret
+          // back. When the saved points no longer fit the adopted content,
+          // fall back to the end of the document rather than dropping focus.
+          if (!selection) {
+            Transforms.select(slateEditor, Editor.end(slateEditor, []));
+          }
+          ReactEditor.focus(slateEditor);
+        }
+      }
+
+      if (historyRequest) {
+        consumedHistoryLocationIdRef.current =
+          historyRequest.request.locationId;
+        consumeFolioHistoryRestorationRequest(
+          historyRequest.request.locationId,
+        );
       }
     });
 
-    return () => cancelAnimationFrame(frame);
+    return () => {
+      cancelAnimationFrame(frame);
+      const state = restorationStateRef.current;
+      if (
+        historyRequest &&
+        state &&
+        (state.tabId !== tabId || state.path !== path)
+      ) {
+        consumeFolioHistoryRestorationRequest(
+          historyRequest.request.locationId,
+        );
+      }
+    };
   }, [
     editor.editorRevision,
     editor.getRevision,
+    editor.isLoading,
+    pendingHistoryLocationId,
+    editor.pageNotFound,
     path,
     restorationAvailable,
     tabId,
@@ -1838,8 +1931,8 @@ function resolveKindAndColor(path: string) {
 
 function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
   const tabs = useWorkspaceStore((s) => s.tabs);
-  const activateTab = useWorkspaceStore((s) => s.activateTab);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const activateTab = useActivateTabWithFolioHistory();
   const [open, setOpen] = useState(true);
 
   const recent = tabs

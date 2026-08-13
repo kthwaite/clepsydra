@@ -1,6 +1,12 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, StrictMode, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearFolioHistoryState,
+  readFolioHistoryRestorationRequest,
+  requestFolioHistoryRestoration,
+} from "#/store/folioRestoration";
+import { useWorkspaceStore } from "#/store/workspace";
 import { createVaultIdentity, wrapIdentity } from "../age";
 import {
   type EncryptionActions,
@@ -258,10 +264,66 @@ describe("EncryptionProvider", () => {
     expect(activeWindowListeners("pointerdown")).toBe(1);
     expect(activeWindowListeners("keydown")).toBe(1);
     expect(activeDocumentListeners("visibilitychange")).toBe(1);
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
 
     view.unmount();
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
     expect(activeWindowListeners("pointerdown")).toBe(0);
     expect(activeWindowListeners("keydown")).toBe(0);
     expect(activeDocumentListeners("visibilitychange")).toBe(0);
+  });
+
+  it("clears workspace and Folio visit state after explicit successful lock", async () => {
+    clearFolioHistoryState();
+    const wrapped = await wrapIdentity(fixtureIdentity, "correct-password-value");
+    configHook.value = {
+      ...configHook.value,
+      data: {
+        ...configHook.value.data,
+        wrapped_identity: wrapped,
+      },
+    };
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    requestFolioHistoryRestoration({
+      tabId: "alpha",
+      path: "notes/alpha.md",
+      locationId: "visit-alpha",
+    });
+    render(
+      <EncryptionProvider>
+        <ActionsProbe />
+      </EncryptionProvider>,
+    );
+    await waitFor(() => expect(latestActions).not.toBeNull());
+    await act(async () => {
+      await latestActions?.unlockWithPassword("correct-password-value");
+      await latestActions?.lock();
+    });
+
+    expect(useWorkspaceStore.getState().tabs).toEqual([]);
+    expect(
+      readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
+    ).toBeNull();
   });
 });

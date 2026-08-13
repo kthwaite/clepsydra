@@ -4,6 +4,7 @@ import { useIndexWarnings, useRebuildIndex } from "#/api/index";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
+import { useLeaveFolioWorkspace } from "#/hooks/useFolioHistoryNavigation";
 import { useUiStore } from "#/store/ui";
 
 function errorMessage(error: unknown, fallback: string): string {
@@ -70,6 +71,7 @@ function DiagnosticSection({
 export function IndexHealthPanel() {
   const navigate = useNavigate();
   const closeSettings = useUiStore((state) => state.closeSettings);
+  const leaveWorkspace = useLeaveFolioWorkspace();
   const warnings = useIndexWarnings();
   const rebuildIndex = useRebuildIndex();
   const [rebuildOpen, setRebuildOpen] = useState(false);
@@ -80,8 +82,10 @@ export function IndexHealthPanel() {
   const warningItems = warnings.data ?? [];
 
   function openRepairs() {
-    closeSettings();
-    void navigate({ to: "/repairs" });
+    leaveWorkspace(() => {
+      closeSettings();
+      void navigate({ to: "/repairs" });
+    });
   }
 
   function openRebuild() {

@@ -4,6 +4,11 @@ import { routeViewFromMatches } from "#/components/codex/useCodexView";
 import { goToView } from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import {
+  type ActivateTabWithFolioHistory,
+  useActivateTabWithFolioHistory,
+  useLeaveFolioWorkspace,
+} from "#/hooks/useFolioHistoryNavigation";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import {
   type Chord,
@@ -45,10 +50,9 @@ const DIALOG_EXEMPT_IDS: ReadonlySet<GlobalShortcutId> = new Set([
   "palette.toggle",
 ]);
 
-function cycleTab(dir: 1 | -1) {
-  const { tabs, quires, activeTabId, activateTab } =
-    useWorkspaceStore.getState();
-  const pageTabs = tabs.filter((t) => t.type === "page");
+function cycleTab(dir: 1 | -1, activateTab: ActivateTabWithFolioHistory) {
+  const { tabs, quires, activeTabId } = useWorkspaceStore.getState();
+  const pageTabs = tabs.filter((tab) => tab.type === "page");
   const target = cycleTargetId(pageTabs, quires, activeTabId, dir === -1);
   if (target) activateTab(target);
 }
@@ -69,6 +73,8 @@ export function useGlobalShortcuts() {
   const openShortcutHelp = useUiStore((s) => s.openShortcutHelp);
   const { toggle: toggleTheme } = useTheme();
   const openTab = useOpenTab();
+  const activateTab = useActivateTabWithFolioHistory();
+  const leaveWorkspace = useLeaveFolioWorkspace();
   const openTodayJournal = useOpenTodayJournal();
 
   // Exhaustive over GlobalShortcutId: adding a `scope: "global"` registry
@@ -80,16 +86,42 @@ export function useGlobalShortcuts() {
       routeViewFromMatches(router.state.matches) === "tasking";
     return {
       "palette.toggle": { run: toggleSearch },
-      "nav.atrium": { run: () => goToView("atrium", { navigate, openTab }) },
+      "nav.atrium": {
+        run: () =>
+          goToView("atrium", {
+            navigate,
+            openTab,
+            activateTab,
+            leaveWorkspace,
+          }),
+      },
       "journal.today": { run: openTodayJournal },
       "nav.constellation": {
-        run: () => goToView("constellation", { navigate, openTab }),
+        run: () =>
+          goToView("constellation", {
+            navigate,
+            openTab,
+            activateTab,
+            leaveWorkspace,
+          }),
       },
       "nav.gazetteer": {
-        run: () => goToView("gazetteer", { navigate, openTab }),
+        run: () =>
+          goToView("gazetteer", {
+            navigate,
+            openTab,
+            activateTab,
+            leaveWorkspace,
+          }),
       },
       "nav.tasking": {
-        run: () => goToView("tasking", { navigate, openTab }),
+        run: () =>
+          goToView("tasking", {
+            navigate,
+            openTab,
+            activateTab,
+            leaveWorkspace,
+          }),
       },
       "app.inscribe": { run: openInscribe },
       "journal.capture": { run: openCaptureAside },
@@ -103,8 +135,14 @@ export function useGlobalShortcuts() {
           if (activeTabId) closeTab(activeTabId);
         },
       },
-      "tabs.next": { when: inWorkspace, run: () => cycleTab(1) },
-      "tabs.prev": { when: inWorkspace, run: () => cycleTab(-1) },
+      "tabs.next": {
+        when: inWorkspace,
+        run: () => cycleTab(1, activateTab),
+      },
+      "tabs.prev": {
+        when: inWorkspace,
+        run: () => cycleTab(-1, activateTab),
+      },
       // Tasking bindings read/write the board store via getState(), so they
       // need no reactive dependency in this memo.
       "tasking.newTask": {
@@ -149,6 +187,8 @@ export function useGlobalShortcuts() {
     openShortcutHelp,
     toggleTheme,
     openTab,
+    activateTab,
+    leaveWorkspace,
     openTodayJournal,
   ]);
 

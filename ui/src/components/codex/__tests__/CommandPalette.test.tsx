@@ -84,6 +84,10 @@ vi.mock("#/components/ThemeProvider", () => ({
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
+vi.mock("#/hooks/useFolioHistoryNavigation", () => ({
+  useActivateTabWithFolioHistory: () => vi.fn(),
+  useLeaveFolioWorkspace: () => (proceed: () => void) => proceed(),
+}));
 vi.mock("#/store/workspace", () => {
   const useWorkspaceStore = Object.assign(
     (selector: (state: unknown) => unknown) => selector(workspaceStateMock),

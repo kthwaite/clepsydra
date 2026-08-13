@@ -15,6 +15,10 @@ import {
 import { useTheme } from "#/components/ThemeProvider";
 import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import {
+  useActivateTabWithFolioHistory,
+  useLeaveFolioWorkspace,
+} from "#/hooks/useFolioHistoryNavigation";
 import { useUptime } from "#/hooks/useUptime";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
@@ -52,6 +56,8 @@ export function DesktopCodexFrame({
   const activeTabId = useWorkspaceStore((s) => s.activeTabId);
   const activePath = useWorkspaceStore((s) => selectActiveTab(s)?.path);
   const openTab = useOpenTab();
+  const activateTab = useActivateTabWithFolioHistory();
+  const leaveWorkspace = useLeaveFolioWorkspace();
   const { data: stats, isError: statsError } = useStats();
   const syncStatus = useVaultEvents();
 
@@ -78,7 +84,14 @@ export function DesktopCodexFrame({
       <header className="order-0 flex h-8 min-w-0 flex-shrink-0 items-stretch border-b border-rule text-[11px]">
         <button
           type="button"
-          onClick={() => navigate({ to: "/" })}
+          onClick={() =>
+            goToView("atrium", {
+              navigate,
+              openTab,
+              activateTab,
+              leaveWorkspace,
+            })
+          }
           className="flex flex-shrink-0 cursor-pointer items-center border-r border-rule px-3 font-sans text-[15px] font-black uppercase tracking-[0.08em] text-ink"
           aria-label="CLEPSYDRA — return to Atrium"
         >
@@ -96,7 +109,14 @@ export function DesktopCodexFrame({
                 key={key}
                 type="button"
                 aria-current={active ? "page" : undefined}
-                onClick={() => goToView(key, { navigate, openTab })}
+                onClick={() =>
+                  goToView(key, {
+                    navigate,
+                    openTab,
+                    activateTab,
+                    leaveWorkspace,
+                  })
+                }
                 className={cn(
                   "cl-mono flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
                   active

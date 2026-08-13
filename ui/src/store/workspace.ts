@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { clearFolioRestoration } from "#/store/folioRestoration";
+import {
+  clearFolioHistoryForTab,
+  clearFolioHistoryState,
+  clearFolioRestoration,
+} from "#/store/folioRestoration";
 import {
   nearestVisibleTabId,
   nextQuireColor,
@@ -146,8 +150,12 @@ interface WorkspaceActions {
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
   activateTab: (tabId: string) => void;
+  /** Apply a router-approved history destination without re-entering guards. */
+  activateTabFromHistory: (tabId: string) => void;
   /** Drop focus without closing any tab — surfaces the empty-state launcher. */
   clearActiveTab: () => void;
+  /** Clear all workspace and visit state when the workspace/vault is torn down. */
+  clearWorkspace: () => void;
   clearTabFocus: (tabId: string) => void;
   takeTabFocus: (tabId: string, requestId: string) => string | undefined;
   moveTab: (
@@ -180,6 +188,29 @@ function withoutTabFocus(tab: TabDescriptor): TabDescriptor {
   }
   const { focusBlockId: _, focusRequestId: __, ...rest } = tab;
   return rest;
+}
+
+function activatedTabState(
+  state: WorkspaceState,
+  tabId: string,
+): Partial<WorkspaceState> {
+  const tab = state.tabs.find((candidate) => candidate.id === tabId);
+  const quire = tab?.quireId ? state.quires[tab.quireId] : undefined;
+  return {
+    activeTabId: tabId,
+    tabs: state.tabs.map((candidate) =>
+      candidate.id === tabId
+        ? { ...candidate, lastActiveAt: Date.now() }
+        : withoutTabFocus(candidate),
+    ),
+    quires: quire?.collapsed
+      ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
+      : state.quires,
+    openHistory:
+      tab?.type === "page" && tab.path
+        ? pushOpenHistory(state.openHistory, tab.path, Date.now())
+        : state.openHistory,
+  };
 }
 
 /** Re-establish quire invariants after a mutation; merge any extra changes. */
@@ -290,6 +321,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             (activeTab.type !== type || activeTab.path !== path)
           ) {
             clearFolioRestoration(activeTab.id);
+            clearFolioHistoryForTab(activeTab.id);
           }
           // Replace the active tab's content; the slot keeps its quire.
           set(
@@ -343,6 +375,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         }
 
         clearFolioRestoration(tabId);
+        clearFolioHistoryForTab(tabId);
 
         const nextTabs = state.tabs.filter((t) => t.id !== tabId);
         let nextActive = state.activeTabId;
@@ -370,6 +403,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           runWorkspaceTransition(() => get().closeOtherTabs(tabId));
           return;
         }
+        for (const tab of get().tabs) {
+          if (tab.id !== tabId) clearFolioHistoryForTab(tab.id);
+        }
         set((state) =>
           normalized(
             state.tabs.filter((tab) => tab.id === tabId),
@@ -384,26 +420,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           runWorkspaceTransition(() => get().activateTab(tabId));
           return;
         }
-        set((state) => {
-          const tab = state.tabs.find((t) => t.id === tabId);
-          // Activation must never land on a hidden tab — expand its quire.
-          const quire = tab?.quireId ? state.quires[tab.quireId] : undefined;
-          return {
-            activeTabId: tabId,
-            tabs: state.tabs.map((t) =>
-              t.id === tabId
-                ? { ...t, lastActiveAt: Date.now() }
-                : withoutTabFocus(t),
-            ),
-            quires: quire?.collapsed
-              ? { ...state.quires, [quire.id]: { ...quire, collapsed: false } }
-              : state.quires,
-            openHistory:
-              tab?.type === "page" && tab.path
-                ? pushOpenHistory(state.openHistory, tab.path, Date.now())
-                : state.openHistory,
-          };
-        });
+        set((state) => activatedTabState(state, tabId));
+      },
+
+      activateTabFromHistory(tabId) {
+        set((state) => activatedTabState(state, tabId));
       },
 
       clearActiveTab() {
@@ -415,6 +436,16 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           activeTabId: null,
           tabs: state.tabs.map(withoutTabFocus),
         }));
+      },
+
+      clearWorkspace() {
+        clearFolioHistoryState();
+        set({
+          tabs: [],
+          activeTabId: null,
+          openHistory: [],
+          quires: {},
+        });
       },
 
       clearTabFocus(tabId) {
@@ -528,6 +559,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         }
         if (currentTab && currentTab.path !== path) {
           clearFolioRestoration(tabId);
+          clearFolioHistoryForTab(tabId);
         }
         set((state) => {
           const tab = state.tabs.find((t) => t.id === tabId);
@@ -676,6 +708,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         if (workspaceTransitionDepth === 0 && active?.quireId === quireId) {
           runWorkspaceTransition(() => get().closeQuireTabs(quireId));
           return;
+        }
+        for (const tab of current.tabs) {
+          if (tab.quireId !== quireId) continue;
+          clearFolioRestoration(tab.id);
+          clearFolioHistoryForTab(tab.id);
         }
         set((state) => {
           const firstIdx = state.tabs.findIndex(

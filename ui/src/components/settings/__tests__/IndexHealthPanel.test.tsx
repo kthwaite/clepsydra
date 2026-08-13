@@ -20,6 +20,9 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
 }));
 
+vi.mock("#/hooks/useFolioHistoryNavigation", () => ({
+  useLeaveFolioWorkspace: () => (proceed: () => void) => proceed(),
+}));
 vi.mock("#/api/index", () => ({
   useIndexWarnings: () => mocks.warningsState,
   useRebuildIndex: () => ({

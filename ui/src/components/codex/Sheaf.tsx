@@ -8,22 +8,18 @@ import {
   attachClosestEdge,
   extractClosestEdge,
 } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
-import { useNavigate } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { SheafContextMenu } from "#/components/codex/SheafContextMenu";
 import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
+import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
 import { type Quire, quireColorVar, sheafSegments } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
-import {
-  runWorkspaceTransition,
-  type TabDescriptor,
-  useWorkspaceStore,
-} from "#/store/workspace";
+import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type SheafProps = {
   activeTabId: string | null;
@@ -50,11 +46,10 @@ function getSheafTabId(data: Record<string, unknown>): string | null {
 }
 
 export function Sheaf({ activeTabId, className }: SheafProps) {
-  const navigate = useNavigate();
   const openInscribe = useUiStore((state) => state.openInscribe);
   const tabs = useWorkspaceStore((s) => s.tabs);
   const quires = useWorkspaceStore((s) => s.quires);
-  const activateTab = useWorkspaceStore((s) => s.activateTab);
+  const activateTab = useActivateTabWithFolioHistory();
   const toggleQuireCollapse = useWorkspaceStore((s) => s.toggleQuireCollapse);
   const moveTab = useWorkspaceStore((s) => s.moveTab);
 
@@ -118,12 +113,9 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   };
 
   const onActivate = (id: string) => {
-    runWorkspaceTransition(() => {
-      clearOpenTimer();
-      setHovered(null);
-      activateTab(id);
-      void navigate({ to: "/workspace" });
-    });
+    clearOpenTimer();
+    setHovered(null);
+    activateTab(id);
   };
 
   const hoveredPath = hovered

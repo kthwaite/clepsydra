@@ -44,6 +44,13 @@ vi.mock("@tanstack/react-router", () => ({
   useBlocker: () => ({ status: "idle" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
+  useRouterState: ({
+    select,
+  }: {
+    select: (s: {
+      matches: Array<{ staticData?: { codexView?: string } }>;
+    }) => unknown;
+  }) => select({ matches: [{ staticData: { codexView: "workspace" } }] }),
 }));
 vi.mock("#/editor/usePageEditor", () => ({ usePageEditor: usePageEditorMock }));
 vi.mock("#/hooks/useMobileLayout", () => ({
