@@ -447,7 +447,7 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
                     break;
                 }
                 byte if byte.is_ascii_whitespace() => between_attributes = true,
-                b'/' => {}
+                b'/' => between_attributes = true,
                 _ if between_attributes => {
                     attributes += 1;
                     if attributes > MAX_ATTRIBUTES_PER_TAG {
@@ -1715,6 +1715,16 @@ mod tests {
         );
         let attribute_error = neutralize_navigation(&many_attributes).unwrap_err();
         assert!(attribute_error.contains("attribute limit"), "{attribute_error}");
+
+        let solidus_attributes = format!(
+            "<a{} href=https://live.example>visible</a>",
+            "/a".repeat(MAX_ATTRIBUTES_PER_TAG + 1)
+        );
+        let solidus_error = neutralize_navigation(&solidus_attributes).unwrap_err();
+        assert!(
+            solidus_error.contains("attribute limit"),
+            "{solidus_error}"
+        );
     }
 
     // -------------------------------------------------------------------
