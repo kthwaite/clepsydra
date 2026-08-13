@@ -12,10 +12,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import {
-  type MenuTarget,
-  SheafContextMenu,
-} from "#/components/codex/SheafContextMenu";
+import { SheafContextMenu } from "#/components/codex/SheafContextMenu";
 import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
 import { cn } from "#/lib/cn";
@@ -67,7 +64,6 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   const [hovered, setHovered] = useState<{ id: string; rect: DOMRect } | null>(
     null,
   );
-  const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
   const [dropFeedback, setDropFeedback] = useState<SheafDropFeedback>(null);
   const sheafRef = useRef<HTMLDivElement>(null);
@@ -79,12 +75,6 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
       openTimer.current = null;
     }
   }, []);
-
-  const openMenu = (next: MenuTarget) => {
-    clearOpenTimer();
-    setHovered(null);
-    setMenu(next);
-  };
 
   useEffect(() => clearOpenTimer, [clearOpenTimer]);
 
@@ -201,10 +191,6 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
             onActivate={onActivate}
             onEnter={onTabEnter}
             onLeave={onTabLeave}
-            onContextMenu={(e, tabId) => {
-              e.preventDefault();
-              openMenu({ kind: "tab", tabId, x: e.clientX, y: e.clientY });
-            }}
           />
         ) : (
           <Fragment key={seg.quire.id}>
@@ -217,15 +203,6 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
               }
               setDropFeedback={setDropFeedback}
               onToggle={() => toggleQuireCollapse(seg.quire.id)}
-              onContextMenu={(e) => {
-                e.preventDefault();
-                openMenu({
-                  kind: "quire",
-                  quireId: seg.quire.id,
-                  x: e.clientX,
-                  y: e.clientY,
-                });
-              }}
             />
             {!seg.quire.collapsed &&
               seg.members.map((t) => (
@@ -247,15 +224,6 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
                   onActivate={onActivate}
                   onEnter={onTabEnter}
                   onLeave={onTabLeave}
-                  onContextMenu={(e, tabId) => {
-                    e.preventDefault();
-                    openMenu({
-                      kind: "tab",
-                      tabId,
-                      x: e.clientX,
-                      y: e.clientY,
-                    });
-                  }}
                 />
               ))}
           </Fragment>
@@ -279,7 +247,6 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
           New
         </button>
       </span>
-      {menu && <SheafContextMenu target={menu} onClose={() => setMenu(null)} />}
     </div>
   );
 }
@@ -290,7 +257,6 @@ type QuireHeaderProps = {
   highlighted: boolean;
   setDropFeedback: (feedback: SheafDropFeedback) => void;
   onToggle: () => void;
-  onContextMenu: (e: ReactMouseEvent) => void;
 };
 
 function QuireHeader({
@@ -299,7 +265,6 @@ function QuireHeader({
   highlighted,
   setDropFeedback,
   onToggle,
-  onContextMenu,
 }: QuireHeaderProps) {
   const ref = useRef<HTMLButtonElement>(null);
   const moveTab = useWorkspaceStore((s) => s.moveTab);
@@ -324,27 +289,28 @@ function QuireHeader({
   }, [moveTab, quire.id, setDropFeedback]);
 
   return (
-    <button
-      ref={ref}
-      type="button"
-      onClick={onToggle}
-      onContextMenu={onContextMenu}
-      aria-label={`quire ${quire.name}, ${memberCount} folios${
-        quire.collapsed ? ", collapsed" : ""
-      }`}
-      className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.18em]"
-      style={{
-        color: quireColorVar(quire.color),
-        boxShadow: `inset 0 2px 0 0 ${quireColorVar(quire.color)}`,
-        outline: highlighted ? "1px solid var(--accent)" : undefined,
-        outlineOffset: highlighted ? "-1px" : undefined,
-      }}
-    >
-      {quire.name}
-      {quire.collapsed && (
-        <span className="text-ink-mute">·{memberCount}</span>
-      )}
-    </button>
+    <SheafContextMenu target={{ kind: "quire", quireId: quire.id }}>
+      <button
+        ref={ref}
+        type="button"
+        onClick={onToggle}
+        aria-label={`quire ${quire.name}, ${memberCount} folios${
+          quire.collapsed ? ", collapsed" : ""
+        }`}
+        className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.18em]"
+        style={{
+          color: quireColorVar(quire.color),
+          boxShadow: `inset 0 2px 0 0 ${quireColorVar(quire.color)}`,
+          outline: highlighted ? "1px solid var(--accent)" : undefined,
+          outlineOffset: highlighted ? "-1px" : undefined,
+        }}
+      >
+        {quire.name}
+        {quire.collapsed && (
+          <span className="text-ink-mute">·{memberCount}</span>
+        )}
+      </button>
+    </SheafContextMenu>
   );
 }
 
@@ -360,7 +326,6 @@ type FolioTabProps = {
   onDndEnd: () => void;
   onEnter: (id: string, path: string | undefined, el: HTMLElement) => void;
   onLeave: () => void;
-  onContextMenu: (e: ReactMouseEvent, tabId: string) => void;
 };
 
 function FolioTab({
@@ -375,7 +340,6 @@ function FolioTab({
   onActivate,
   onEnter,
   onLeave,
-  onContextMenu,
 }: FolioTabProps) {
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const dragHandleRef = useRef<HTMLButtonElement>(null);
@@ -453,46 +417,47 @@ function FolioTab({
       : undefined;
 
   return (
-    <div
-      ref={ref}
-      className={cn(
-        "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
-        active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
-      )}
-    >
-      <button
-        ref={dragHandleRef}
-        type="button"
-        onClick={() => onActivate(t.id)}
-        onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
-        onMouseLeave={onLeave}
-        onContextMenu={(e) => onContextMenu(e, t.id)}
-        title={t.path ? undefined : t.label}
-        aria-label={t.label || t.path || "untitled folio"}
+    <SheafContextMenu target={{ kind: "tab", tabId: t.id }}>
+      <div
+        ref={ref}
         className={cn(
-          "flex min-w-0 cursor-pointer items-center gap-2 py-1 pl-3",
-          dragged && "opacity-50",
+          "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
+          active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
         )}
-        style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
       >
-        <span
-          className="inline-block h-[6px] w-[6px] flex-shrink-0"
-          style={{ background: kindColorVar(kind) }}
-          aria-hidden
-        />
-        <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px] select-none">
-          {t.label || t.path || "(untitled)"}
-        </span>
-      </button>
-      <button
-        type="button"
-        onClick={onClose}
-        aria-label="close folio"
-        className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
-        style={closeButtonStyle}
-      >
-        <X size={11} />
-      </button>
-    </div>
+        <button
+          ref={dragHandleRef}
+          type="button"
+          onClick={() => onActivate(t.id)}
+          onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
+          onMouseLeave={onLeave}
+          title={t.path ? undefined : t.label}
+          aria-label={t.label || t.path || "untitled folio"}
+          className={cn(
+            "flex min-w-0 cursor-pointer items-center gap-2 py-1 pl-3",
+            dragged && "opacity-50",
+          )}
+          style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
+        >
+          <span
+            className="inline-block h-[6px] w-[6px] flex-shrink-0"
+            style={{ background: kindColorVar(kind) }}
+            aria-hidden
+          />
+          <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px] select-none">
+            {t.label || t.path || "(untitled)"}
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="close folio"
+          className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+          style={closeButtonStyle}
+        >
+          <X size={11} />
+        </button>
+      </div>
+    </SheafContextMenu>
   );
 }

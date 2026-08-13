@@ -8,7 +8,14 @@ import type {
   monitorForElements as monitorForElementsAdapter,
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import type { attachClosestEdge as attachClosestEdgeAdapter } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useUiStore } from "#/store/ui";
@@ -423,6 +430,77 @@ describe("Sheaf creation action", () => {
     expect(useUiStore.getState().isInscribeOpen).toBe(true);
     expect(useWorkspaceStore.getState().tabs).toHaveLength(3);
     expect(screen.getAllByRole("button", { name: "New page" })).toHaveLength(1);
+  });
+});
+
+describe("Sheaf context menu integration", () => {
+  it("opens tab actions from the live tab target", async () => {
+    seed(false);
+    const user = userEvent.setup();
+    render(<Sheaf activeTabId="t3" />);
+
+    await user.pointer({
+      target: screen.getByRole("button", { name: "Gamma" }),
+      keys: "[MouseRight]",
+    });
+
+    const menu = await screen.findByRole("menu", { name: "Gamma" });
+    expect(
+      await within(menu).findByRole("menuitem", { name: "CLOSE" }),
+    ).toBeVisible();
+  });
+
+  it("replaces an open tab menu with quire actions in one gesture", async () => {
+    seed(false);
+    const user = userEvent.setup();
+    render(<Sheaf activeTabId="t3" />);
+    const quireButton = screen.getByRole("button", { name: /quire thesis/i });
+
+    await user.pointer({
+      target: screen.getByRole("button", { name: "Gamma" }),
+      keys: "[MouseRight]",
+    });
+    expect(
+      await screen.findByRole("menuitem", { name: "CLOSE" }),
+    ).toBeVisible();
+
+    await user.pointer({
+      target: quireButton,
+      keys: "[MouseRight]",
+    });
+
+    const quireMenu = await screen.findByRole("menu", {
+      name: /quire thesis/i,
+    });
+    expect(
+      await within(quireMenu).findByRole("menuitem", { name: "RENAME…" }),
+    ).toBeVisible();
+    expect(
+      within(quireMenu).getByRole("menuitem", { name: "COLLAPSE" }),
+    ).toBeVisible();
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("menu", { name: "Gamma" }),
+      ).not.toBeInTheDocument();
+      expect(screen.getAllByRole("menu")).toHaveLength(1);
+    });
+  });
+
+  it("preserves drag-and-drop registrations on the native menu targets", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+
+    const tabButton = screen.getByRole("button", { name: "Alpha" });
+    const tabDraggable = draggableFor(tabButton);
+    const tabDropTarget = dropTargetFor(tabButton);
+    expect(tabDraggable.dragHandle).toBe(tabButton);
+    expect(tabDraggable.element).toBe(tabButton.parentElement);
+    expect(tabDropTarget.element).toBe(tabDraggable.element);
+
+    const quireButton = screen.getByRole("button", { name: /quire thesis/i });
+    const quireDropTarget = dropTargetFor(quireButton);
+    expect(quireButton).toBeVisible();
+    expect(quireDropTarget.element).toBe(quireButton);
   });
 });
 
