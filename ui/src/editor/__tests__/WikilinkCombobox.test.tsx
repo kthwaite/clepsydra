@@ -26,6 +26,7 @@ const pages: PageSummary[] = [
     id: "p1",
     title: "Design Notes",
     canonical_name: "design-notes",
+    aliases: [],
     path: "notes/design-notes.md",
     kind: "NOTE",
     inferred: true,

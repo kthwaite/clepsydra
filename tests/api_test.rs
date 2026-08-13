@@ -1463,7 +1463,7 @@ async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
             fs::write(
                 root.join("topic/indexed.md"),
                 format!(
-                    "---\nid: {INDEXED_ID}\ntitle: Indexed title\ntags:\n  - indexed\nproject: alpha\n---\nIndexed body.\n"
+                    "---\nid: {INDEXED_ID}\ntitle: Indexed title\naliases:\n  - Design\n  - Blueprint\ntags:\n  - indexed\nproject: alpha\n---\nIndexed body.\n"
                 ),
             )
             .unwrap();
@@ -1507,11 +1507,16 @@ async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
     assert_eq!(indexed["project"], "alpha");
     assert_eq!(indexed["tags"], serde_json::json!(["indexed", "note"]));
     assert_eq!(indexed["computed_tags"], serde_json::json!(["note"]));
+    assert_eq!(
+        indexed["aliases"],
+        serde_json::json!(["Design", "Blueprint"])
+    );
 
     let filesystem_only = pages
         .iter()
         .find(|page| page["path"] == "topic/filesystem-only.md")
         .unwrap();
+    assert_eq!(filesystem_only["aliases"], serde_json::json!([]));
     assert_eq!(
         filesystem_only,
         &serde_json::json!({
@@ -1523,7 +1528,8 @@ async fn folder_authority_uses_filesystem_membership_and_index_enrichment() {
             "inferred": true,
             "encrypted": false,
             "tags": ["note"],
-            "computed_tags": ["note"]
+            "computed_tags": ["note"],
+            "aliases": []
         }),
         "filesystem-only pages should use the deterministic fallback summary"
     );
