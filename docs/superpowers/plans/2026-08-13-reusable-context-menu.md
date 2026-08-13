@@ -95,7 +95,7 @@ Use a small stateful `SelectionFixture` in the test file so assertions observe s
 Run:
 
 ```bash
-bun --cwd ui test src/components/ui/__tests__/menu.test.tsx
+bun run --cwd ui test src/components/ui/__tests__/menu.test.tsx
 ```
 
 Expected: FAIL because `#/components/ui/menu` does not exist.
@@ -138,7 +138,7 @@ Implement `MenuSeparator` with RAC `Separator` and `my-1 border-t border-rule-so
 Run:
 
 ```bash
-bun --cwd ui test src/components/ui/__tests__/menu.test.tsx
+bun run --cwd ui test src/components/ui/__tests__/menu.test.tsx
 ```
 
 Expected: all menu primitive tests PASS.
@@ -223,7 +223,7 @@ Add exact tests that:
 Run:
 
 ```bash
-bun --cwd ui test src/components/codex/__tests__/SheafContextMenu.test.tsx
+bun run --cwd ui test src/components/codex/__tests__/SheafContextMenu.test.tsx
 ```
 
 Expected: FAIL because the component still requires coordinates/onClose and has flat rows and inline inputs.
@@ -277,7 +277,7 @@ Render the shared `Dialog` with `size="sm"`, a `TextField autoFocus`, Cancel but
 Run:
 
 ```bash
-bun --cwd ui test src/components/codex/__tests__/SheafContextMenu.test.tsx
+bun run --cwd ui test src/components/codex/__tests__/SheafContextMenu.test.tsx
 ```
 
 Expected: all SHEAF domain-menu tests PASS.
@@ -323,7 +323,7 @@ Add a drag/drop preservation assertion using the file's existing pragmatic-DnD m
 Run:
 
 ```bash
-bun --cwd ui test src/components/codex/__tests__/Sheaf.test.tsx
+bun run --cwd ui test src/components/codex/__tests__/Sheaf.test.tsx
 ```
 
 Expected: the new tests FAIL because `Sheaf` still owns one detached coordinate-driven menu.
@@ -363,7 +363,7 @@ Do not move `ref`, `dragHandleRef`, mouse-enter/leave handlers, click handlers, 
 Run:
 
 ```bash
-bun --cwd ui test src/components/codex/__tests__/Sheaf.test.tsx src/components/codex/__tests__/SheafContextMenu.test.tsx src/components/ui/__tests__/menu.test.tsx
+bun run --cwd ui test src/components/codex/__tests__/Sheaf.test.tsx src/components/codex/__tests__/SheafContextMenu.test.tsx src/components/ui/__tests__/menu.test.tsx
 ```
 
 Expected: all tests PASS.
@@ -373,7 +373,7 @@ Expected: all tests PASS.
 Read the context-menu paragraph in `ui/src/docs/content/codex-and-conversation-capture.mdx`. If it only lists available actions, leave it unchanged. If it states that rename/create occurs inline, replace that exact statement with dialog-based wording and run:
 
 ```bash
-bun --cwd ui test src/docs/mdx-smoke.test.tsx
+bun run --cwd ui test src/docs/mdx-smoke.test.tsx
 ```
 
 Expected: PASS when a docs edit is needed; otherwise record that no docs change was required.
@@ -442,7 +442,7 @@ Run each command separately:
 ```bash
 bun --cwd ui typecheck
 bun --cwd ui lint
-bun --cwd ui test
+bun run --cwd ui test
 ```
 
 Expected: all commands exit 0; report the exact test-file and test counts from Vitest.
