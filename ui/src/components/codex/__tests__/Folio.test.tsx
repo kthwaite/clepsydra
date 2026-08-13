@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo } from "react";
 import {
   createEditor,
   type Descendant,
@@ -15,6 +15,7 @@ import {
   Element,
   Text,
 } from "slate";
+import { ReactEditor } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as AttachmentsApi from "#/api/attachments";
 import type { OutlinkEntry, TagCount } from "#/api/types";
@@ -192,10 +193,12 @@ vi.mock("#/editor/SlateEditor", () => ({
     initialValue,
     onChange,
     editorRef,
+    onUnmountSnapshot,
   }: {
     initialValue: Descendant[];
     onChange: (value: Descendant[]) => void;
     editorRef?: { current: CustomEditor | null };
+    onUnmountSnapshot?: (editor: CustomEditor) => void;
   }) => {
     const editor = useMemo(() => {
       const instance = createEditor() as CustomEditor;
@@ -210,6 +213,15 @@ vi.mock("#/editor/SlateEditor", () => ({
         if (editorRef?.current === editor) editorRef.current = null;
       };
     }, [editor, editorRef]);
+
+    // Mirrors the real SlateEditor's unmount-snapshot contract, including its
+    // layout-phase timing (before the replacement's layout effects run).
+    useLayoutEffect(
+      () => () => {
+        onUnmountSnapshot?.(editor);
+      },
+      [editor, onUnmountSnapshot],
+    );
 
     const first = initialValue[0];
     const firstChild =
@@ -246,6 +258,7 @@ vi.mock("#/lib/useProjects", () => ({
 
 import { TabContent } from "#/components/TabContent";
 import { todayJournalPath } from "#/lib/journal";
+import { queryClient } from "#/lib/queryClient";
 import {
   clearFolioRestoration,
   type FolioRestoration,
@@ -300,6 +313,7 @@ function errorEditor() {
   return {
     isLoading: false,
     error: new Error("404"),
+    pageNotFound: true,
     tags: [],
     computedTags: [],
     title: undefined,
@@ -411,10 +425,48 @@ describe("Folio invalid-tab recovery", () => {
     });
   });
 
-  it("renders the recovery panel when the page query errors", () => {
+  it("renders the recovery panel when the page query 404s", () => {
     render(<Folio tabId="t1" path="notes/gone.md" />);
     expect(screen.getByText("Folio not found.")).toBeInTheDocument();
     expect(screen.getByText("notes/gone.md")).toBeInTheDocument();
+  });
+
+  it("renders the error panel, not a not-found claim, for non-404 query errors", () => {
+    usePageEditorMock.mockReturnValue({
+      ...errorEditor(),
+      error: { status: 500, error: "index unavailable" },
+      pageNotFound: false,
+    });
+
+    render(<Folio tabId="t1" path="notes/gone.md" />);
+
+    expect(screen.getByText("Folio hit an error.")).toBeInTheDocument();
+    expect(screen.getByText("index unavailable")).toBeInTheDocument();
+    expect(screen.queryByText("Folio not found.")).not.toBeInTheDocument();
+  });
+
+  it("retry on the error panel resets errored queries so they can refetch", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue({
+      ...errorEditor(),
+      error: { status: 500, error: "index unavailable" },
+      pageNotFound: false,
+    });
+    await queryClient.prefetchQuery({
+      queryKey: ["folio-test-errored"],
+      queryFn: () => Promise.reject(new Error("nope")),
+      retry: false,
+    });
+    expect(queryClient.getQueryState(["folio-test-errored"])?.status).toBe(
+      "error",
+    );
+
+    render(<Folio tabId="t1" path="notes/gone.md" />);
+    await user.click(screen.getByRole("button", { name: /retry/i }));
+
+    expect(queryClient.getQueryState(["folio-test-errored"])?.status).not.toBe(
+      "error",
+    );
   });
 
   it("closes the offending tab from the recovery panel", async () => {
@@ -1498,6 +1550,67 @@ describe("Folio in-session restoration", () => {
     useWorkspaceStore.getState().closeTab("t1");
 
     expect(readFolioRestoration("t1", "notes/alpha.md")).toBeNull();
+  });
+
+  it("restores selection and focus across an in-place editor remount", () => {
+    const departing = editableEditor();
+    departing.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(departing);
+    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const first = activeSlateEditor();
+    const savedSelection = {
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 7 },
+    };
+    first.selection = savedSelection;
+    const isFocusedSpy = vi
+      .spyOn(ReactEditor, "isFocused")
+      .mockReturnValue(true);
+    const focusSpy = vi
+      .spyOn(ReactEditor, "focus")
+      .mockImplementation(() => {});
+
+    usePageEditorMock.mockReturnValue({ ...departing, editorRevision: 2 });
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    const second = activeSlateEditor();
+    expect(second).not.toBe(first);
+
+    flushRestorationFrame();
+
+    expect(second.selection).toEqual(savedSelection);
+    expect(focusSpy).toHaveBeenCalledWith(second);
+    isFocusedSpy.mockRestore();
+    focusSpy.mockRestore();
+  });
+
+  it("keeps selection but does not take focus when the swapped-out editor was blurred", () => {
+    const departing = editableEditor();
+    departing.getRevision.mockReturnValue("revision-1");
+    usePageEditorMock.mockReturnValue(departing);
+    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const first = activeSlateEditor();
+    const savedSelection = {
+      anchor: { path: [0, 0], offset: 2 },
+      focus: { path: [0, 0], offset: 7 },
+    };
+    first.selection = savedSelection;
+    const isFocusedSpy = vi
+      .spyOn(ReactEditor, "isFocused")
+      .mockReturnValue(false);
+    const focusSpy = vi
+      .spyOn(ReactEditor, "focus")
+      .mockImplementation(() => {});
+
+    usePageEditorMock.mockReturnValue({ ...departing, editorRevision: 2 });
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    const second = activeSlateEditor();
+
+    flushRestorationFrame();
+
+    expect(second.selection).toEqual(savedSelection);
+    expect(focusSpy).not.toHaveBeenCalled();
+    isFocusedSpy.mockRestore();
+    focusSpy.mockRestore();
   });
 
   it("restores selection without taking focus from an explicit control", () => {

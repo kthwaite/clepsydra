@@ -77,7 +77,11 @@ const {
 });
 
 vi.stubGlobal("matchMedia", matchMediaController.query);
-vi.mock("@tanstack/react-query", () => ({ useIsMutating: () => 0 }));
+vi.mock("@tanstack/react-query", () => ({
+  useIsMutating: () => 0,
+  // FolioError constructs the app QueryClient singleton at module load.
+  QueryClient: class {},
+}));
 vi.mock("@tanstack/react-router", () => ({
   useLocation: () => ({ pathname: "/workspace" }),
   useNavigate: () => navigateMock,

@@ -449,7 +449,7 @@ describe("mobile Folio Back", () => {
     ).toBeUndefined();
   });
 
-  it("consumes a retained-data terminal error request as missing", async () => {
+  it("consumes a focus request while a retained-data terminal error shows the error panel", async () => {
     useWorkspaceStore.setState({
       tabs: [
         {
@@ -479,7 +479,7 @@ describe("mobile Folio Back", () => {
         revision: "revision-b",
       }),
     );
-    await screen.findByText("Folio not found.");
+    await screen.findByText("Folio hit an error.");
     act(() => {
       useWorkspaceStore.getState().openTab("page", "notes/alpha.md", "Alpha", {
         blockId: "abc123DEF0",

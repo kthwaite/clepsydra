@@ -2,6 +2,7 @@ import {
   type RefObject,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -139,6 +140,10 @@ export interface SlateEditorProps {
   onInsertionHandled?: (id: number) => void;
   readOnly?: boolean;
   editorRef?: RefObject<CustomEditor | null>;
+  /** Called with the live editor instance as this component unmounts, while
+   *  its selection and focus bookkeeping are still intact. Lets the owner
+   *  snapshot caret state across an in-place (key-swap) remount. */
+  onUnmountSnapshot?: (editor: CustomEditor) => void;
 }
 
 interface ComboboxTrigger {
@@ -158,6 +163,7 @@ export function SlateEditor({
   onInsertionHandled,
   readOnly = false,
   editorRef,
+  onUnmountSnapshot,
 }: SlateEditorProps) {
   const editor = useMemo(
     () =>
@@ -182,6 +188,18 @@ export function SlateEditor({
       if (editorRef?.current === editor) editorRef.current = null;
     };
   }, [editor, editorRef]);
+
+  // Latest-callback ref so the unmount snapshot fires exactly once, at real
+  // unmount. A layout effect keeps it in the mutation phase, before the
+  // replacement instance's layout effects (and any restore keyed on them).
+  const onUnmountSnapshotRef = useRef(onUnmountSnapshot);
+  onUnmountSnapshotRef.current = onUnmountSnapshot;
+  useLayoutEffect(
+    () => () => {
+      onUnmountSnapshotRef.current?.(editor);
+    },
+    [editor],
+  );
   const wikilinkEditing = useWikilinkEditingController(editor);
   const mathEditing = useMathEditingController(editor);
   const baseEmbedEditing = useBaseEmbedEditingController(editor);

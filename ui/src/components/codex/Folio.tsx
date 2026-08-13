@@ -27,6 +27,11 @@ import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
+import {
+  FolioError,
+  resetErroredQueries,
+  toError,
+} from "#/components/codex/FolioError";
 import { FolioNotFound } from "#/components/codex/FolioNotFound";
 import { FolioProperties } from "#/components/codex/FolioProperties";
 import {
@@ -297,12 +302,53 @@ export function Folio({ tabId, path }: FolioProps) {
   );
   const folioEditorRef = useRef<CustomEditor | null>(null);
   const lastMountedFolioEditorRef = useRef<CustomEditor | null>(null);
+  const rawMarkdownSessionRef = useRef<RawMarkdownSession | null>(null);
   const restorationStateRef = useRef<{
     tabId: string;
     path: string;
     available: boolean;
     getRevision: () => string;
   } | null>(null);
+
+  // An in-place SlateEditor remount (external content adopt, conflict reload,
+  // unlock) destroys the caret. Snapshot selection and focus as the old
+  // instance unmounts so the editorRevision-keyed restore effect below can
+  // hand them back. bodyRef being empty means the whole folio is unmounting —
+  // the folio-level unmount save owns that case (and never records focus, so
+  // returning to a tab cannot steal it).
+  const handleEditorSwapSnapshot = useCallback(
+    (slateEditor: CustomEditor) => {
+      const scrollContainer = bodyRef.current;
+      if (!scrollContainer) return;
+      // Entering raw Markdown mode also unmounts the editor; the raw session
+      // owns caret state until it exits, so no snapshot belongs there.
+      if (rawMarkdownSessionRef.current) return;
+      const state = restorationStateRef.current;
+      if (
+        !state ||
+        state.tabId !== tabId ||
+        state.path !== path ||
+        !state.available
+      ) {
+        return;
+      }
+      const selection = slateEditor.selection;
+      saveFolioRestoration({
+        tabId,
+        path,
+        revision: state.getRevision(),
+        scrollTop: scrollContainer.scrollTop,
+        anchor: selection
+          ? snapshotTextPoint(slateEditor, selection.anchor)
+          : null,
+        focus: selection
+          ? snapshotTextPoint(slateEditor, selection.focus)
+          : null,
+        hadFocus: ReactEditor.isFocused(slateEditor),
+      });
+    },
+    [path, tabId],
+  );
   const [recipeMode, setRecipeMode] = useState<"read" | "edit">("read");
   const [recipeProjection, setRecipeProjection] = useState<{
     path: string;
@@ -311,6 +357,7 @@ export function Folio({ tabId, path }: FolioProps) {
   } | null>(null);
   const [rawMarkdownSession, setRawMarkdownSession] =
     useState<RawMarkdownSession | null>(null);
+  rawMarkdownSessionRef.current = rawMarkdownSession;
   useEffect(() => {
     setConversationMode("read");
     setRecipeMode("read");
@@ -675,6 +722,15 @@ export function Folio({ tabId, path }: FolioProps) {
 
       scrollContainer.scrollTop = restoration.scrollTop;
       if (selection) Transforms.select(slateEditor, selection);
+      if (restoration.hadFocus) {
+        // The user was typing in the swapped-out instance; hand the caret
+        // back. When the saved points no longer fit the adopted content,
+        // fall back to the end of the document rather than dropping focus.
+        if (!selection) {
+          Transforms.select(slateEditor, Editor.end(slateEditor, []));
+        }
+        ReactEditor.focus(slateEditor);
+      }
     });
 
     return () => cancelAnimationFrame(frame);
@@ -739,7 +795,19 @@ export function Folio({ tabId, path }: FolioProps) {
     return <div className="cl-marg p-6">… fetching folio {path} …</div>;
   }
   if (!rawMarkdownSession && editor.error && !editor.isDraft) {
-    return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
+    // Only a settled 404 means the file is actually gone; any other query
+    // error is a load failure the user can retry without losing the tab.
+    if (editor.pageNotFound) {
+      return <FolioNotFound path={path} onClose={() => closeTab(tabId)} />;
+    }
+    return (
+      <FolioError
+        path={path}
+        error={toError(editor.error)}
+        onRetry={resetErroredQueries}
+        onClose={() => closeTab(tabId)}
+      />
+    );
   }
   if (!rawMarkdownSession && encrypted && encryptionState.status !== "plain") {
     return (
@@ -945,6 +1013,7 @@ export function Folio({ tabId, path }: FolioProps) {
                   onInsertionHandled={finishAttachmentInsertion}
                   readOnly={conversationReadOnly || bodyProtected}
                   editorRef={folioEditorRef}
+                  onUnmountSnapshot={handleEditorSwapSnapshot}
                 />
               </ConversationPresentationProvider>
             )}

@@ -76,6 +76,9 @@ export interface PageEditorOptions {
 interface PageEditorState {
   isLoading: boolean;
   error: unknown;
+  /** True when the page query settled on a 404 — the one case where an error
+   *  genuinely means the file is missing, rather than a transient failure. */
+  pageNotFound: boolean;
   isDraft: boolean;
   initialValue: Descendant[];
   /** Latest live Slate AST, including edits that have not saved yet. */
@@ -738,6 +741,7 @@ export function usePageEditor(
   return {
     isLoading,
     error: pageNotFound && canDraft ? null : error,
+    pageNotFound,
     isDraft,
     initialValue,
     editorValue:

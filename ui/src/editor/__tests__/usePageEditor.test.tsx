@@ -686,3 +686,44 @@ describe("usePageEditor draft mode", () => {
     expect(ensure).not.toHaveBeenCalled();
   });
 });
+
+describe("usePageEditor error exposure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+  });
+
+  it("reports pageNotFound for a 404 page query error", () => {
+    usePageMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: { status: 404, error: "page not found" },
+      refetch: refetchPageMock,
+    });
+
+    const { result } = renderHook(() => usePageEditor("notes/gone.md"));
+
+    expect(result.current.pageNotFound).toBe(true);
+    expect(result.current.error).toEqual({
+      status: 404,
+      error: "page not found",
+    });
+  });
+
+  it("does not report pageNotFound for other page query errors", () => {
+    usePageMock.mockReturnValue({
+      data: undefined,
+      isLoading: false,
+      error: { status: 500, error: "index unavailable" },
+      refetch: refetchPageMock,
+    });
+
+    const { result } = renderHook(() => usePageEditor("notes/present.md"));
+
+    expect(result.current.pageNotFound).toBe(false);
+    expect(result.current.error).toEqual({
+      status: 500,
+      error: "index unavailable",
+    });
+  });
+});

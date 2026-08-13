@@ -13,6 +13,10 @@ export type FolioRestoration = {
   scrollTop: number;
   anchor: TextPointSnapshot | null;
   focus: TextPointSnapshot | null;
+  /** The editor held keyboard focus when the snapshot was taken. Set by the
+   *  in-place remount snapshot so restoration can hand the caret back; absent
+   *  on tab-switch saves, where restoration must never steal focus. */
+  hadFocus?: boolean;
 };
 
 const MAX_RECORDS = 16;
