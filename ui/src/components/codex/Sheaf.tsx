@@ -1,7 +1,17 @@
+import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
+import {
+  draggable,
+  dropTargetForElements,
+  monitorForElements,
+} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import {
+  attachClosestEdge,
+  extractClosestEdge,
+} from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import { useNavigate } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { useStats } from "#/api/index";
 import {
   type MenuTarget,
@@ -27,6 +37,17 @@ type SheafProps = {
 // Cold-open delay; once a card is showing, scrubbing to another tab is instant.
 const HOVER_DELAY = 220;
 
+type SheafTabDragData = {
+  kind: "sheaf-tab";
+  tabId: string;
+};
+
+function getSheafTabId(data: Record<string, unknown>): string | null {
+  return data.kind === "sheaf-tab" && typeof data.tabId === "string"
+    ? data.tabId
+    : null;
+}
+
 export function Sheaf({ activeTabId, className }: SheafProps) {
   const navigate = useNavigate();
   const openInscribe = useUiStore((state) => state.openInscribe);
@@ -34,6 +55,7 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   const quires = useWorkspaceStore((s) => s.quires);
   const activateTab = useWorkspaceStore((s) => s.activateTab);
   const toggleQuireCollapse = useWorkspaceStore((s) => s.toggleQuireCollapse);
+  const moveTab = useWorkspaceStore((s) => s.moveTab);
   const { data: stats } = useStats();
 
   const pageTabs = tabs.filter((tab) => tab.type === "page");
@@ -43,14 +65,16 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
     null,
   );
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+  const sheafRef = useRef<HTMLDivElement>(null);
   const openTimer = useRef<number | null>(null);
 
-  const clearOpenTimer = () => {
+  const clearOpenTimer = useCallback(() => {
     if (openTimer.current !== null) {
       window.clearTimeout(openTimer.current);
       openTimer.current = null;
     }
-  };
+  }, []);
 
   const openMenu = (next: MenuTarget) => {
     clearOpenTimer();
@@ -58,13 +82,29 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
     setMenu(next);
   };
 
-  useEffect(() => clearOpenTimer, []);
+  useEffect(() => clearOpenTimer, [clearOpenTimer]);
+
+  const onTabDndStart = useCallback(
+    (tabId: string) => {
+      clearOpenTimer();
+      setHovered(null);
+      setDraggedTabId(tabId);
+    },
+    [clearOpenTimer],
+  );
+
+  const onTabDndEnd = useCallback(() => {
+    clearOpenTimer();
+    setHovered(null);
+    setDraggedTabId(null);
+  }, [clearOpenTimer]);
 
   const onTabEnter = (
     id: string,
     path: string | undefined,
     el: HTMLElement,
   ) => {
+    if (draggedTabId !== null) return;
     if (!shouldPreviewTab(path, id, activeTabId)) return;
     clearOpenTimer();
     const show = () => setHovered({ id, rect: el.getBoundingClientRect() });
@@ -94,8 +134,38 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
     ? (pageTabs.find((t) => t.id === hovered.id)?.path ?? null)
     : null;
 
+  useEffect(
+    () =>
+      monitorForElements({
+        canMonitor: ({ source }) => getSheafTabId(source.data) !== null,
+        onDragStart: ({ source }) => {
+          const sourceTabId = getSheafTabId(source.data);
+          if (sourceTabId) onTabDndStart(sourceTabId);
+        },
+        onDrop: onTabDndEnd,
+      }),
+    [onTabDndEnd, onTabDndStart],
+  );
+
+  useEffect(() => {
+    const element = sheafRef.current;
+    if (!element) return;
+
+    return dropTargetForElements({
+      element,
+      getData: () => ({ kind: "sheaf-background" }),
+      canDrop: ({ source }) => getSheafTabId(source.data) !== null,
+      onDrop: ({ source, self, location }) => {
+        if (location.current.dropTargets[0]?.element !== self.element) return;
+        const sourceTabId = getSheafTabId(source.data);
+        if (sourceTabId) moveTab(sourceTabId, { position: "end" });
+      },
+    });
+  }, [moveTab]);
+
   return (
     <div
+      ref={sheafRef}
       className={cn(
         "cl-mono cl-noscroll flex flex-shrink-0 items-stretch overflow-x-auto border-b border-rule bg-paper-2",
         className,
@@ -112,6 +182,9 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
             key={seg.tab.id}
             tab={seg.tab}
             active={seg.tab.id === activeTabId}
+            dragged={seg.tab.id === draggedTabId}
+            onDndStart={onTabDndStart}
+            onDndEnd={onTabDndEnd}
             onActivate={onActivate}
             onEnter={onTabEnter}
             onLeave={onTabLeave}
@@ -122,9 +195,10 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
           />
         ) : (
           <Fragment key={seg.quire.id}>
-            <button
-              type="button"
-              onClick={() => toggleQuireCollapse(seg.quire.id)}
+            <QuireHeader
+              quire={seg.quire}
+              memberCount={seg.members.length}
+              onToggle={() => toggleQuireCollapse(seg.quire.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
                 openMenu({
@@ -134,20 +208,7 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
                   y: e.clientY,
                 });
               }}
-              aria-label={`quire ${seg.quire.name}, ${seg.members.length} folios${
-                seg.quire.collapsed ? ", collapsed" : ""
-              }`}
-              className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.18em]"
-              style={{
-                color: quireColorVar(seg.quire.color),
-                boxShadow: `inset 0 2px 0 0 ${quireColorVar(seg.quire.color)}`,
-              }}
-            >
-              {seg.quire.name}
-              {seg.quire.collapsed && (
-                <span className="text-ink-mute">·{seg.members.length}</span>
-              )}
-            </button>
+            />
             {!seg.quire.collapsed &&
               seg.members.map((t) => (
                 <FolioTab
@@ -155,6 +216,9 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
                   tab={t}
                   quire={seg.quire}
                   active={t.id === activeTabId}
+                  dragged={t.id === draggedTabId}
+                  onDndStart={onTabDndStart}
+                  onDndEnd={onTabDndEnd}
                   onActivate={onActivate}
                   onEnter={onTabEnter}
                   onLeave={onTabLeave}
@@ -198,11 +262,68 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   );
 }
 
+type QuireHeaderProps = {
+  quire: Quire;
+  memberCount: number;
+  onToggle: () => void;
+  onContextMenu: (e: ReactMouseEvent) => void;
+};
+
+function QuireHeader({
+  quire,
+  memberCount,
+  onToggle,
+  onContextMenu,
+}: QuireHeaderProps) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const moveTab = useWorkspaceStore((s) => s.moveTab);
+
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+
+    return dropTargetForElements({
+      element,
+      getData: () => ({ kind: "sheaf-quire", quireId: quire.id }),
+      canDrop: ({ source }) => getSheafTabId(source.data) !== null,
+      onDrop: ({ source }) => {
+        const sourceTabId = getSheafTabId(source.data);
+        if (sourceTabId) moveTab(sourceTabId, { quireId: quire.id });
+      },
+    });
+  }, [moveTab, quire.id]);
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      onClick={onToggle}
+      onContextMenu={onContextMenu}
+      aria-label={`quire ${quire.name}, ${memberCount} folios${
+        quire.collapsed ? ", collapsed" : ""
+      }`}
+      className="flex flex-shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-2.5 py-1 text-[9px] uppercase tracking-[0.18em]"
+      style={{
+        color: quireColorVar(quire.color),
+        boxShadow: `inset 0 2px 0 0 ${quireColorVar(quire.color)}`,
+      }}
+    >
+      {quire.name}
+      {quire.collapsed && (
+        <span className="text-ink-mute">·{memberCount}</span>
+      )}
+    </button>
+  );
+}
+
 type FolioTabProps = {
   tab: TabDescriptor;
   quire?: Quire;
   active: boolean;
+  dragged: boolean;
+  onDndStart: (tabId: string) => void;
   onActivate: (id: string) => void;
+  onDndEnd: () => void;
   onEnter: (id: string, path: string | undefined, el: HTMLElement) => void;
   onLeave: () => void;
   onContextMenu: (e: ReactMouseEvent, tabId: string) => void;
@@ -212,12 +333,18 @@ function FolioTab({
   tab: t,
   quire,
   active,
+  dragged,
+  onDndStart,
+  onDndEnd,
   onActivate,
   onEnter,
   onLeave,
   onContextMenu,
 }: FolioTabProps) {
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const dragHandleRef = useRef<HTMLButtonElement>(null);
+  const moveTab = useWorkspaceStore((s) => s.moveTab);
+  const ref = useRef<HTMLDivElement>(null);
 
   const kind = resolveKindFromPath(t.path ?? "");
   const onClose = (e: ReactMouseEvent) => {
@@ -225,47 +352,87 @@ function FolioTab({
     closeTab(t.id);
   };
 
-  // Quire membership rules the top edge; the active accent keeps the bottom.
+  useEffect(() => {
+    const element = ref.current;
+    const dragHandle = dragHandleRef.current;
+    if (!element || !dragHandle) return;
+
+    return combine(
+      draggable({
+        element,
+        dragHandle,
+        getInitialData: (): SheafTabDragData => ({
+          kind: "sheaf-tab",
+          tabId: t.id,
+        }),
+        onDragStart: () => onDndStart(t.id),
+        onDrop: onDndEnd,
+      }),
+      dropTargetForElements({
+        element,
+        canDrop: ({ source }) => getSheafTabId(source.data) !== null,
+        getData: ({ input }) =>
+          attachClosestEdge(
+            { kind: "sheaf-tab-target", tabId: t.id },
+            { element, input, allowedEdges: ["left", "right"] },
+          ),
+        onDrop: ({ source, self }) => {
+          const sourceTabId = getSheafTabId(source.data);
+          const edge = extractClosestEdge(self.data);
+          if (!sourceTabId || (edge !== "left" && edge !== "right")) return;
+          moveTab(sourceTabId, {
+            tabId: t.id,
+            position: edge === "left" ? "before" : "after",
+          });
+        },
+      }),
+    );
+  }, [moveTab, onDndEnd, onDndStart, t.id]);
   const rules = [
     quire ? `inset 0 2px 0 0 ${quireColorVar(quire.color)}` : null,
     active ? "inset 0 -2px 0 0 var(--accent)" : null,
   ].filter(Boolean);
 
   return (
-    <button
-      type="button"
-      onClick={() => onActivate(t.id)}
+    <div
+      ref={ref}
       onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
       onMouseLeave={onLeave}
       onContextMenu={(e) => onContextMenu(e, t.id)}
-      title={t.path ? undefined : t.label}
-      aria-label={t.label || t.path || "untitled folio"}
       className={cn(
-        "group flex max-w-[240px] flex-shrink-0 cursor-pointer items-center gap-2 whitespace-nowrap border-r border-rule-soft py-1 pl-3 pr-2",
+        "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
         active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
       )}
-      style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
     >
-      <span
-        className="inline-block h-[6px] w-[6px] flex-shrink-0"
-        style={{ background: kindColorVar(kind) }}
-        aria-hidden
-      />
-      <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px] select-none">
-        {t.label || t.path || "(untitled)"}
-      </span>
-      <span
+      <button
+        ref={dragHandleRef}
+        type="button"
+        onClick={() => onActivate(t.id)}
+        title={t.path ? undefined : t.label}
+        aria-label={t.label || t.path || "untitled folio"}
+        className={cn(
+          "flex min-w-0 cursor-pointer items-center gap-2 py-1 pl-3",
+          dragged && "opacity-50",
+        )}
+        style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
+      >
+        <span
+          className="inline-block h-[6px] w-[6px] flex-shrink-0"
+          style={{ background: kindColorVar(kind) }}
+          aria-hidden
+        />
+        <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px] select-none">
+          {t.label || t.path || "(untitled)"}
+        </span>
+      </button>
+      <button
+        type="button"
         onClick={onClose}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") onClose(e as unknown as ReactMouseEvent);
-        }}
-        role="button"
-        tabIndex={0}
         aria-label="close folio"
-        className="flex-shrink-0 cursor-pointer px-[2px] leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+        className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
       >
         <X size={11} />
-      </span>
-    </button>
+      </button>
+    </div>
   );
 }
