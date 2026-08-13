@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
+  useSyncExternalStore,
   useState,
 } from "react";
 import {
@@ -81,10 +82,12 @@ import {
   consumeFolioHistoryRestorationRequest,
   type FolioRestoration,
   readFolioHistoryRestorationRequest,
+  readFolioHistoryRestorationRequestId,
   readFolioRestoration,
   registerFolioHistoryCapture,
   saveFolioRestoration,
   snapshotTextPoint,
+  subscribeFolioHistoryRestorationRequests,
   validateTextPointSnapshot,
 } from "#/store/folioRestoration";
 import {
@@ -262,6 +265,10 @@ export function Folio({ tabId, path }: FolioProps) {
     (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
   );
   const takeTabFocus = useWorkspaceStore((state) => state.takeTabFocus);
+  const pendingHistoryLocationId = useSyncExternalStore(
+    subscribeFolioHistoryRestorationRequests,
+    () => readFolioHistoryRestorationRequestId(tabId, path),
+  );
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       leaveFolioWorkspace(() => {
@@ -803,6 +810,7 @@ export function Folio({ tabId, path }: FolioProps) {
     editor.editorRevision,
     editor.getRevision,
     editor.isLoading,
+    pendingHistoryLocationId,
     editor.pageNotFound,
     path,
     restorationAvailable,

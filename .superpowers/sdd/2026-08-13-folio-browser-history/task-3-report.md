@@ -18,11 +18,10 @@ Command:
 bun run test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/FolioNavigation.test.tsx
 ```
 
-Observed after implementation: exit 0; 2 test files passed; 65 tests passed.
+Observed after implementation: exit 0; 2 test files passed; 66 tests passed.
 
 ## Typecheck evidence
 
-Command:
 
 ```text
 bun run typecheck
@@ -30,6 +29,34 @@ bun run typecheck
 
 Observed: exit 0; `tsc --noEmit --project tsconfig.app.json` completed without diagnostics.
 
+
+## Review round 1 evidence
+
+RED command:
+
+```text
+bun run test -- src/store/folioRestoration.test.ts src/components/codex/__tests__/Folio.test.tsx -t "pending-request subscribers|superseding same-tab request"
+```
+
+Observed before the reactive request fix: exit 1; the store test failed because `subscribeFolioHistoryRestorationRequests` did not exist, and the Folio test restored the first request's `44` scroll position instead of the superseding request's `58`.
+
+GREEN command:
+
+```text
+bun run test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/FolioNavigation.test.tsx src/store/folioRestoration.test.ts
+```
+
+Observed after the fix: exit 0; 3 test files passed; 86 tests passed.
+
+Typecheck command:
+
+```text
+bun run typecheck
+```
+
+Observed after the fix: exit 0; `tsc --noEmit --project tsconfig.app.json` completed without diagnostics.
+
+Review fix: the restoration registry now exposes a `useSyncExternalStore`-compatible pending-request subscription and matching location-ID snapshot. It notifies only on actual request-state changes. Folio subscribes to that identity, so same-tab/path supersession cancels the old RAF and schedules the exact newer snapshot without depending on unrelated editor or route changes.
 ## Implementation summary
 
 - Added one synchronous `FolioRestoration` builder and registered it as the mounted Folio history capture; the latest-per-tab unmount save now uses the same builder.
@@ -40,6 +67,7 @@ Observed: exit 0; `tsc --noEmit --project tsconfig.app.json` completed without d
 ## Self-review
 
 - Capture validation is single-sourced and synchronous; no new store or hook API was introduced.
+- Same-tab history activations participate in the restoration effect lifecycle, so a newly requested location is observed even when tab, path, and editor content are unchanged.
 - History precedence cannot fall through to latest-per-tab state when a matching request exists, including a missing record.
 - Exact-ID consumption preserves a superseding request; unavailable transient states do not consume it.
 - Read-only conversation presentation still mounts the source editor and completes restoration.
@@ -52,6 +80,8 @@ Observed: exit 0; `tsc --noEmit --project tsconfig.app.json` completed without d
 - `ui/src/components/codex/__tests__/Folio.test.tsx`
 - `ui/src/components/codex/__tests__/FolioNavigation.test.tsx`
 - `.superpowers/sdd/2026-08-13-folio-browser-history/task-3-report.md`
+- `ui/src/store/folioRestoration.ts`
+- `ui/src/store/folioRestoration.test.ts`
 
 ## Commit
 

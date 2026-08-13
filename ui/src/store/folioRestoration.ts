@@ -42,6 +42,28 @@ let activeCapture: {
   capture: () => FolioRestoration | null;
 } | null = null;
 let pendingHistoryRestoration: FolioHistoryRestoreRequest | null = null;
+const pendingHistoryRestorationListeners = new Set<() => void>();
+
+function notifyPendingHistoryRestorationChanged(): void {
+  for (const listener of pendingHistoryRestorationListeners) listener();
+}
+
+export function subscribeFolioHistoryRestorationRequests(
+  listener: () => void,
+): () => void {
+  pendingHistoryRestorationListeners.add(listener);
+  return () => pendingHistoryRestorationListeners.delete(listener);
+}
+
+export function readFolioHistoryRestorationRequestId(
+  tabId: string,
+  path: string,
+): string | null {
+  const request = pendingHistoryRestoration;
+  return request?.tabId === tabId && request.path === path
+    ? request.locationId
+    : null;
+}
 
 function clonePoint(point: TextPointSnapshot | null): TextPointSnapshot | null {
   return point
@@ -154,7 +176,15 @@ export function readFolioHistoryLocation(
 export function requestFolioHistoryRestoration(
   request: FolioHistoryRestoreRequest,
 ): void {
+  if (
+    pendingHistoryRestoration?.tabId === request.tabId &&
+    pendingHistoryRestoration.path === request.path &&
+    pendingHistoryRestoration.locationId === request.locationId
+  ) {
+    return;
+  }
   pendingHistoryRestoration = { ...request };
+  notifyPendingHistoryRestorationChanged();
 }
 
 export function readFolioHistoryRestorationRequest(
@@ -177,6 +207,7 @@ export function consumeFolioHistoryRestorationRequest(
 ): void {
   if (pendingHistoryRestoration?.locationId === locationId) {
     pendingHistoryRestoration = null;
+    notifyPendingHistoryRestorationChanged();
   }
 }
 
@@ -187,13 +218,17 @@ export function clearFolioHistoryForTab(tabId: string): void {
   if (activeCapture?.tabId === tabId) activeCapture = null;
   if (pendingHistoryRestoration?.tabId === tabId) {
     pendingHistoryRestoration = null;
+    notifyPendingHistoryRestorationChanged();
   }
 }
 
 export function clearFolioHistoryState(): void {
   historyRecords.clear();
   activeCapture = null;
-  pendingHistoryRestoration = null;
+  if (pendingHistoryRestoration) {
+    pendingHistoryRestoration = null;
+    notifyPendingHistoryRestorationChanged();
+  }
 }
 
 export function snapshotTextPoint(

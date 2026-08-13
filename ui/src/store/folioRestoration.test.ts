@@ -12,6 +12,7 @@ import {
   registerFolioHistoryCapture,
   requestFolioHistoryRestoration,
   saveFolioRestoration,
+  subscribeFolioHistoryRestorationRequests,
   consumeFolioHistoryRestorationRequest,
 } from "#/store/folioRestoration";
 
@@ -446,6 +447,42 @@ describe("Folio history restoration registry", () => {
     expect(
       readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
     ).toBeNull();
+  });
+
+  it("notifies pending-request subscribers only when pending state changes", () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeFolioHistoryRestorationRequests(listener);
+    const alpha = {
+      tabId: "alpha",
+      path: "notes/alpha.md",
+      locationId: "history-alpha",
+    };
+
+    requestFolioHistoryRestoration(alpha);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    consumeFolioHistoryRestorationRequest("stale-history");
+    clearFolioHistoryForTab("beta");
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    requestFolioHistoryRestoration(alpha);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    consumeFolioHistoryRestorationRequest("history-alpha");
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    requestFolioHistoryRestoration(alpha);
+    clearFolioHistoryForTab("alpha");
+    expect(listener).toHaveBeenCalledTimes(4);
+
+    requestFolioHistoryRestoration(alpha);
+    clearFolioHistoryState();
+    clearFolioHistoryState();
+    expect(listener).toHaveBeenCalledTimes(6);
+
+    unsubscribe();
+    requestFolioHistoryRestoration(alpha);
+    expect(listener).toHaveBeenCalledTimes(6);
   });
 
   it("clears records, capture, and pending restoration for one tab only", () => {

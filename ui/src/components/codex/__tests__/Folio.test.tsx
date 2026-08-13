@@ -1662,8 +1662,7 @@ describe("Folio in-session restoration", () => {
     ).toBeNull();
   });
 
-  it("does not let an older restore effect consume a superseding request", () => {
-    saveFolioRestoration(restorationRecord({ scrollTop: 5 }));
+  it("applies and consumes a superseding same-tab request", () => {
     queueHistoryRestoration(
       "history-first",
       "notes/alpha.md",
@@ -1673,19 +1672,56 @@ describe("Folio in-session restoration", () => {
     render(<Folio tabId="t1" path="notes/alpha.md" />);
     const restoredScroller = folioScrollContainer();
 
-    requestFolioHistoryRestoration({
-      tabId: "t1",
-      path: "notes/alpha.md",
-      locationId: "history-second",
+    act(() => {
+      queueHistoryRestoration(
+        "history-second",
+        "notes/alpha.md",
+        restorationRecord({
+          scrollTop: 58,
+          anchor: { path: [0, 0], offset: 1, text: "Editable body" },
+          focus: { path: [0, 0], offset: 4, text: "Editable body" },
+        }),
+      );
     });
     flushRestorationFrame();
 
-    expect(restoredScroller.scrollTop).toBe(44);
-    // Defect caught: completion of the first effect used to erase the newer exact-ID request.
+    // Defect caught: the first scheduled restore used to strand its newer replacement.
+    expect(restoredScroller.scrollTop).toBe(58);
+    expect(activeSlateEditor().selection).toEqual({
+      anchor: { path: [0, 0], offset: 1 },
+      focus: { path: [0, 0], offset: 4 },
+    });
     expect(
-      readFolioHistoryRestorationRequest("t1", "notes/alpha.md")?.request
-        .locationId,
-    ).toBe("history-second");
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
+    ).toBeNull();
+  });
+
+  it("restores a same-tab history request that arrives after mount", () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
+    restorationFrames.length = 0;
+    queueHistoryRestoration(
+      "history-same-tab",
+      "notes/alpha.md",
+      restorationRecord({
+        scrollTop: 62,
+        anchor: null,
+        focus: null,
+      }),
+    );
+
+    act(() => {
+      useWorkspaceStore.getState().activateTabFromHistory("t1");
+    });
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredScroller = folioScrollContainer();
+    flushRestorationFrame();
+
+    // Defect caught: an already-mounted same-tab visit had no changed restore dependency.
+    expect(restoredScroller.scrollTop).toBe(62);
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
+    ).toBeNull();
   });
 
   it("discards a matching history request after a settled not-found", () => {
