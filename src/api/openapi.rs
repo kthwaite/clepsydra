@@ -599,6 +599,21 @@ mod tests {
                 "ArchiveMetaResponse.{field} should be a string"
             );
         }
+        for field in [
+            "canonical_url",
+            "description",
+            "byline",
+            "site_name",
+            "published_time",
+            "lang",
+            "excerpt",
+        ] {
+            assert_eq!(
+                properties[field]["type"],
+                serde_json::json!(["string", "null"]),
+                "ArchiveMetaResponse.{field} should be an optional nullable string"
+            );
+        }
         assert_eq!(
             properties["resource_count"]["type"], "integer",
             "ArchiveMetaResponse.resource_count should remain numeric"
