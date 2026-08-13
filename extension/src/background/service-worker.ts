@@ -16,11 +16,7 @@ import {
 	type CompletedTransfer,
 	PendingTransferCoordinator,
 } from "#/lib/pending-transfer";
-import {
-	RELAY_FETCH,
-	type RelayFetchRequest,
-	performRelayFetch,
-} from "#/lib/relay-fetch";
+import { RELAY_PORT_NAME, handleRelayFetchPort } from "#/lib/relay-fetch";
 import { convertArchiveHtml } from "#/lib/turndown-rules";
 import type {
 	ArchiveConflictDetail,
@@ -261,9 +257,14 @@ type WorkerMessage =
 	| CaptureMetaMessage
 	| CaptureChunk
 	| CaptureAbort
-	| RelayFetchRequest
 	| { type: "capture_error"; error: string }
 	| { type: "capture_status"; tabId: number };
+
+chrome.runtime.onConnect.addListener((port) => {
+	if (port.name === RELAY_PORT_NAME) {
+		handleRelayFetchPort(port);
+	}
+});
 
 chrome.runtime.onMessage.addListener(
 	(
@@ -275,11 +276,6 @@ chrome.runtime.onMessage.addListener(
 			// Answered synchronously, so no need to hold the channel open.
 			sendResponse({ phase: phases.get(message.tabId) ?? null });
 			return undefined;
-		}
-
-		if (message.type === RELAY_FETCH) {
-			void performRelayFetch(message.url, message.headers).then(sendResponse);
-			return true; // keep the channel open for the async reply
 		}
 
 		const tabId = sender.tab?.id;

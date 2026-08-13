@@ -64,7 +64,7 @@ async function maxResourceSizeMb(): Promise<number> {
 }
 
 async function capture(): Promise<void> {
-	const relayFetch = createRelayFetch(send);
+	const relayFetch = createRelayFetch();
 	const snapshotHtml = await captureSnapshot(
 		{ maxResourceSizeMb: await maxResourceSizeMb() },
 		{ fetch: relayFetch, frameFetch: relayFetch },
