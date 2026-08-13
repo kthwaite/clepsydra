@@ -2,6 +2,7 @@
 //! the CAS.
 use std::sync::Arc;
 
+use axum::body::Body;
 use axum::Json;
 use axum::Router;
 use axum::extract::{Extension, Path, State};
@@ -10,13 +11,13 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use url::Host;
+use url::{Host, Url};
 
 use super::AppState;
 use super::error::ApiError;
 use crate::ServerSettings;
 use crate::vault::archive_snapshot::{self, SnapshotResource};
-use crate::vault::cas::ContentStore;
+use crate::vault::cas::{BlobMetadata, ContentStore};
 use crate::vault::index_policy::IndexMutation;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator, MutationGuard};
@@ -290,7 +291,7 @@ pub fn router_with_body_limit(
             post(ingest_archive).layer(axum::extract::DefaultBodyLimit::max(max_bytes)),
         )
         .route("/status", get(archive_status))
-        .route("/view/{hash}", get(view_snapshot))
+        .route("/view/{hash}", get(view_snapshot).head(head_snapshot))
         .layer(Extension(view_config))
 }
 
@@ -332,6 +333,29 @@ fn framable_content_type(content_type: &str) -> bool {
         .eq_ignore_ascii_case("text/html")
 }
 
+fn validate_http_url(field: &str, raw: &str) -> Result<(), ApiError> {
+    let has_http_prefix = raw
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || raw
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"));
+    let parsed = Url::parse(raw).ok();
+    let valid = has_http_prefix
+        && !raw.chars().any(char::is_whitespace)
+        && parsed.as_ref().is_some_and(|url| {
+            matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(format!(
+            "{field} must be an absolute HTTP(S) URL"
+        )))
+    }
+}
+
+
 fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -349,12 +373,120 @@ fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
     headers
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SnapshotMethod {
+    Get,
+    Head,
+}
+
+enum LoadedSnapshot {
+    Body {
+        data: Vec<u8>,
+        content_type: String,
+    },
+    Metadata(BlobMetadata),
+}
+
+trait SnapshotStore {
+    fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>>;
+    fn retrieve(&self, hash: &str)
+    -> Result<(Vec<u8>, String), Box<dyn std::error::Error>>;
+}
+
+impl SnapshotStore for ContentStore {
+    fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
+        ContentStore::inspect(self, hash)
+    }
+
+    fn retrieve(
+        &self,
+        hash: &str,
+    ) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
+        ContentStore::retrieve(self, hash)
+    }
+}
+
+fn load_snapshot(
+    store: &impl SnapshotStore,
+    hash: &str,
+    method: SnapshotMethod,
+) -> Result<LoadedSnapshot, ApiError> {
+    match method {
+        SnapshotMethod::Get => store
+            .retrieve(hash)
+            .map(|(data, content_type)| LoadedSnapshot::Body { data, content_type }),
+        SnapshotMethod::Head => store.inspect(hash).map(LoadedSnapshot::Metadata),
+    }
+    .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))
+}
+
+fn without_body(response: Response) -> Response {
+    let (parts, _) = response.into_parts();
+    Response::from_parts(parts, Body::empty())
+}
+
+fn unsupported_snapshot_response(content_type: &str) -> Response {
+    let error = ApiError {
+        status: StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16(),
+        error: format!("snapshot is not text/html: {content_type}"),
+        detail: None,
+        hint: None,
+    };
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-clepsydra-archive-content-type",
+        HeaderValue::from_str(content_type)
+            .unwrap_or_else(|_| HeaderValue::from_static(OCTET_STREAM)),
+    );
+    (StatusCode::UNSUPPORTED_MEDIA_TYPE, headers, Json(error)).into_response()
+}
+
+fn snapshot_response_with(
+    snapshot: LoadedSnapshot,
+    config: &ArchiveViewConfig,
+    transform_body: impl FnOnce(Vec<u8>) -> Vec<u8>,
+) -> Response {
+    match snapshot {
+        LoadedSnapshot::Metadata(metadata) => {
+            if !framable_content_type(&metadata.content_type) {
+                return without_body(unsupported_snapshot_response(&metadata.content_type));
+            }
+            (StatusCode::OK, sandbox_headers(config), Body::empty()).into_response()
+        }
+        LoadedSnapshot::Body { data, content_type } => {
+            if !framable_content_type(&content_type) {
+                return unsupported_snapshot_response(&content_type);
+            }
+            (
+                StatusCode::OK,
+                sandbox_headers(config),
+                transform_body(data),
+            )
+                .into_response()
+        }
+    }
+}
+
+fn prepare_snapshot_body(data: Vec<u8>) -> Vec<u8> {
+    let data = rewrite_cas_urls(data);
+    match std::str::from_utf8(&data) {
+        Ok(html) => match archive_snapshot::neutralize_navigation(html) {
+            std::borrow::Cow::Borrowed(_) => data,
+            std::borrow::Cow::Owned(neutralized) => neutralized.into_bytes(),
+        },
+        Err(_) => archive_snapshot::neutralize_navigation(&String::from_utf8_lossy(&data))
+            .into_owned()
+            .into_bytes(),
+    }
+}
+
+
 const STORED_CAS_URL_PREFIX: &[u8] = b"cas:sha256:";
 const SERVED_CAS_URL_PREFIX: &[u8] = b"/api/vault/cas/";
 const SHA256_HEX_LEN: usize = 64;
 
 fn cas_url_boundary(byte: u8) -> bool {
-    byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b')' | b'>')
+    byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b')' | b'>' | b'#')
 }
 
 fn cas_url_start_boundary(data: &[u8], start: usize) -> bool {
@@ -648,33 +780,30 @@ pub async fn view_snapshot(
     Extension(config): Extension<ArchiveViewConfig>,
     Path(hash): Path<String>,
 ) -> Result<Response, ApiError> {
-    let (data, content_type) = {
+    let snapshot = {
         let cas = state.cas.lock();
-        cas.retrieve(&hash)
-            .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))?
+        load_snapshot(&*cas, &hash, SnapshotMethod::Get)?
     };
-    if !framable_content_type(&content_type) {
-        let error = ApiError {
-            status: StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16(),
-            error: format!("snapshot is not text/html: {content_type}"),
-            detail: None,
-            hint: None,
-        };
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-clepsydra-archive-content-type",
-            HeaderValue::from_str(&content_type)
-                .unwrap_or_else(|_| HeaderValue::from_static(OCTET_STREAM)),
-        );
-        return Ok((StatusCode::UNSUPPORTED_MEDIA_TYPE, headers, Json(error)).into_response());
-    }
+    Ok(snapshot_response_with(
+        snapshot,
+        &config,
+        prepare_snapshot_body,
+    ))
+}
 
-    Ok((
-        StatusCode::OK,
-        sandbox_headers(&config),
-        rewrite_cas_urls(data),
-    )
-        .into_response())
+pub async fn head_snapshot(
+    State(state): State<Arc<AppState>>,
+    Extension(config): Extension<ArchiveViewConfig>,
+    Path(hash): Path<String>,
+) -> Response {
+    let snapshot = {
+        let cas = state.cas.lock();
+        load_snapshot(&*cas, &hash, SnapshotMethod::Head)
+    };
+    without_body(match snapshot {
+        Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body),
+        Err(error) => error.into_response(),
+    })
 }
 
 #[utoipa::path(
@@ -775,6 +904,11 @@ pub async fn ingest_archive(
         return Err(ApiError::forbidden(
             "archiving is disabled in server configuration".to_string(),
         ));
+    }
+
+    validate_http_url("url", &req.url)?;
+    if let Some(canonical_url) = req.canonical_url.as_deref() {
+        validate_http_url("canonical_url", canonical_url)?;
     }
 
     // Verify content_hash matches markdown_body (don't trust client-provided hash)
@@ -1033,6 +1167,60 @@ mod tests {
                 "CSP did not use {expected_origin:?} in every resource directive: {policy}"
             );
         }
+    }
+
+    #[test]
+    fn head_snapshot_uses_metadata_without_retrieving_or_rewriting_bytes() {
+        use std::cell::Cell;
+
+        struct ProbeStore {
+            inspections: Cell<usize>,
+            retrievals: Cell<usize>,
+        }
+
+        impl SnapshotStore for ProbeStore {
+            fn inspect(
+                &self,
+                _hash: &str,
+            ) -> Result<crate::vault::cas::BlobMetadata, Box<dyn std::error::Error>> {
+                self.inspections.set(self.inspections.get() + 1);
+                Ok(crate::vault::cas::BlobMetadata {
+                    content_type: "text/html".to_string(),
+                    size: 1024,
+                })
+            }
+
+            fn retrieve(
+                &self,
+                _hash: &str,
+            ) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
+                self.retrievals.set(self.retrievals.get() + 1);
+                Ok((
+                    b"<a href=https://live.example>live</a>".to_vec(),
+                    "text/html".to_string(),
+                ))
+            }
+        }
+
+        let store = ProbeStore {
+            inspections: Cell::new(0),
+            retrievals: Cell::new(0),
+        };
+        let snapshot = load_snapshot(&store, "sha256:test", SnapshotMethod::Head).unwrap();
+        assert_eq!(store.inspections.get(), 1);
+        assert_eq!(store.retrievals.get(), 0);
+
+        let rewrites = Cell::new(0);
+        let response = snapshot_response_with(
+            snapshot,
+            &ArchiveViewConfig::default(),
+            |data| {
+                rewrites.set(rewrites.get() + 1);
+                data
+            },
+        );
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(rewrites.get(), 0);
     }
 
     // ---------------------------------------------------------------------------

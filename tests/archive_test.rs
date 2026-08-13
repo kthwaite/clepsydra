@@ -221,6 +221,99 @@ async fn rollback_on_index_failure_preserves_primary_and_compensates_every_blob(
 // Archive ingest tests
 // ---------------------------------------------------------------------------
 
+fn archive_url_payload(url: &str, canonical_url: Option<&str>) -> serde_json::Value {
+    let body = "# URL policy\n\nCaptured content.";
+    serde_json::json!({
+        "url": url,
+        "canonical_url": canonical_url,
+        "domain": "example.com",
+        "title": "URL Policy",
+        "captured_at": "2026-08-13T12:00:00Z",
+        "content_hash": content_hash(body),
+        "snapshot_html": "<html><body><p>captured</p></body></html>",
+        "markdown_body": body,
+        "tags": ["archive"],
+    })
+}
+
+#[tokio::test]
+async fn archive_ingest_accepts_absolute_http_urls() {
+    let (server, _tmp, _state) = setup_server();
+    let payload = archive_url_payload(
+        "http://example.com/from-http",
+        Some("https://example.com/canonical"),
+    );
+
+    server
+        .post("/api/vault/archive")
+        .json(&payload)
+        .await
+        .assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn archive_ingest_rejects_non_http_source_urls() {
+    let (server, _tmp, _state) = setup_server();
+
+    for url in [
+        "javascript:alert(1)",
+        "data:text/html,pwned",
+        "file:///etc/passwd",
+        "clepsydra://archive/one",
+        "//example.com/protocol-relative",
+        "https://",
+        "not a url",
+    ] {
+        let response = server
+            .post("/api/vault/archive")
+            .json(&archive_url_payload(url, None))
+            .await;
+
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = response.json();
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("url")
+                    && error.contains("absolute HTTP(S)")),
+            "unexpected validation error for {url:?}: {body}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn archive_ingest_rejects_non_http_canonical_urls() {
+    let (server, _tmp, _state) = setup_server();
+
+    for canonical_url in [
+        "javascript:alert(1)",
+        "data:text/html,pwned",
+        "file:///etc/passwd",
+        "clepsydra://archive/one",
+        "//example.com/protocol-relative",
+        "http://",
+        "not a url",
+    ] {
+        let response = server
+            .post("/api/vault/archive")
+            .json(&archive_url_payload(
+                "https://example.com/source",
+                Some(canonical_url),
+            ))
+            .await;
+
+        response.assert_status(StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = response.json();
+        assert!(
+            body["error"]
+                .as_str()
+                .is_some_and(|error| error.contains("canonical_url")
+                    && error.contains("absolute HTTP(S)")),
+            "unexpected validation error for {canonical_url:?}: {body}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn archive_ingest_creates_page_and_stores_blobs() {
     let (server, _tmp, state) = setup_server();
@@ -599,10 +692,31 @@ async fn archive_view_serves_html_with_configuration_bound_sandbox() {
          https://vault.example:7443 data:; font-src https://vault.example:7443 data:"
     );
     let expected_html = format!(
-        r#"<html><body><img src="/api/vault/cas/{resource_hash}"><p>cas:{resource_hash}.</p><img src="cas:{resource_hash}/../pages/private"><img src="cas:{resource_hash};/../../pages/private"><img src="cas:{resource_hash},/../../pages/private"><a href="cas:../pages/private">bad</a></body></html>"#
+        r#"<html><body><img src="/api/vault/cas/{resource_hash}"><p>cas:{resource_hash}.</p><img src="cas:{resource_hash}/../pages/private"><img src="cas:{resource_hash};/../../pages/private"><img src="cas:{resource_hash},/../../pages/private"><a>bad</a></body></html>"#
     );
     assert_eq!(response.as_bytes().as_ref(), expected_html.as_bytes());
 
+
+    let head_response = server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{hash}"),
+        )
+        .await;
+    head_response.assert_status(StatusCode::OK);
+    assert_eq!(
+        head_response.headers().get("content-type"),
+        response.headers().get("content-type")
+    );
+    assert_eq!(
+        head_response.headers().get("content-security-policy"),
+        response.headers().get("content-security-policy")
+    );
+    assert_eq!(
+        head_response.headers().get("x-content-type-options"),
+        response.headers().get("x-content-type-options")
+    );
+    assert!(head_response.as_bytes().is_empty());
     let cas_response = server.get(&format!("/api/vault/cas/{hash}")).await;
     cas_response.assert_status(StatusCode::OK);
     assert_eq!(
@@ -613,6 +727,155 @@ async fn archive_view_serves_html_with_configuration_bound_sandbox() {
         Some("attachment"),
         "the general CAS route must keep active content downloadable"
     );
+}
+
+#[tokio::test]
+async fn archive_view_structurally_neutralizes_navigation_without_losing_resources() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let resource_hash = format!("sha256:{}", "b".repeat(64));
+    let html = format!(
+        r#"<!doctype html>
+<html><head>
+<BASE HREF=https://base.example/root/ TARGET=_self>
+<META content='0; URL=&#x68;ttps://refresh.example/path' HTTP-EQUIV=ReFrEsH>
+<meta http-equiv=refresh content=0;url=//refresh-relative.example/path>
+<meta http-equiv="content-type" content="text/html">
+<link rel=stylesheet href="cas:{resource_hash}">
+<style>@font-face {{ src: url(cas:{resource_hash}); }} .label::after {{ content: "<a href>"; }}</style>
+</head><body>
+<a HREF="https://absolute.example/path" data-label="html"><span>Visible &amp; styled</span></a>
+<area href=//protocol-relative.example/path alt="Map label">
+<a href=/relative/path data-label=malformed><b>Unclosed visible anchor
+<a href data-label=boolean>Boolean attribute visible</a>
+<form ACTION='/submit' method=post><button FoRmAcTiOn="data:text/html,pwned">Submit</button><input formaction=javascript:alert(1)></form>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <a href="https://svg.example/path" xlink:href="//svg-relative.example/path"><text>SVG visible</text></a>
+  <image href="cas:{resource_hash}">
+  <use xlink:href="cas:{resource_hash}#icon">
+</svg>
+<math xmlns="http://www.w3.org/1998/Math/MathML"><a href="https://math.example/path" xlink:href="/math"><mtext>Math visible</mtext></a></math>
+<svg:a xlink:href="https://namespaced.example/path">Namespaced visible</svg:a>
+<img src="cas:{resource_hash}" alt="Captured image">
+</body></html>"#
+    );
+    let hash = store_blob(&state, html.as_bytes(), "text/html");
+
+    let response = server
+        .get(&format!("/api/vault/archive/view/{hash}"))
+        .await;
+
+    response.assert_status(StatusCode::OK);
+    let body = response.text();
+    for forbidden in [
+        "base.example",
+        "refresh.example",
+        "refresh-relative.example",
+        "absolute.example",
+        "protocol-relative.example",
+        "/relative/path",
+        "/submit",
+        "data:text/html,pwned",
+        "javascript:alert(1)",
+        "svg.example",
+        "svg-relative.example",
+        "math.example",
+        "xlink:href=\"/math\"",
+        "namespaced.example",
+    ] {
+        assert!(
+            !body.contains(forbidden),
+            "navigation vector {forbidden:?} survived in {body}"
+        );
+    }
+    for visible in [
+        "Visible &amp; styled",
+        "Unclosed visible anchor",
+        "Boolean attribute visible",
+        "Submit",
+        "SVG visible",
+        "Math visible",
+        "Namespaced visible",
+        "Captured image",
+    ] {
+        assert!(
+            body.contains(visible),
+            "visible snapshot content {visible:?} was lost: {body}"
+        );
+    }
+    assert!(body.contains(r#"<meta http-equiv="content-type" content="text/html">"#));
+    assert!(body.contains("<a data-label=boolean>Boolean attribute visible</a>"));
+    assert!(body.contains(&format!(
+        r#"<link rel=stylesheet href="/api/vault/cas/{resource_hash}">"#
+    )));
+    assert!(body.contains(&format!(
+        r#"@font-face {{ src: url(/api/vault/cas/{resource_hash}); }}"#
+    )));
+    assert!(body.contains(&format!(
+        r#"<image href="/api/vault/cas/{resource_hash}">"#
+    )));
+    assert!(body.contains(&format!(
+        r#"<use xlink:href="/api/vault/cas/{resource_hash}#icon">"#
+    )));
+    assert!(body.contains(&format!(
+        r#"<img src="/api/vault/cas/{resource_hash}" alt="Captured image">"#
+    )));
+}
+
+#[tokio::test]
+async fn archive_view_head_returns_metadata_headers_without_a_body() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let hash = store_blob(
+        &state,
+        b"<html><body><a href=https://live.example>Visible</a></body></html>",
+        "text/html; charset=utf-8",
+    );
+
+    let response = server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{hash}"),
+        )
+        .await;
+
+    response.assert_status(StatusCode::OK);
+    assert!(response.as_bytes().is_empty(), "HEAD returned snapshot bytes");
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .map(|value| value.to_str().unwrap()),
+        Some("text/html")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-content-type-options")
+            .map(|value| value.to_str().unwrap()),
+        Some("nosniff")
+    );
+    assert!(
+        response
+            .headers()
+            .get("content-security-policy")
+            .is_some(),
+        "HEAD omitted the snapshot sandbox policy"
+    );
+}
+
+#[tokio::test]
+async fn archive_view_head_missing_hash_is_404_without_a_body() {
+    let (server, _tmp, _state) = setup_archive_view_server();
+    let missing = format!("sha256:{}", "0".repeat(64));
+
+    let response = server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{missing}"),
+        )
+        .await;
+
+    response.assert_status(StatusCode::NOT_FOUND);
+    assert!(response.as_bytes().is_empty(), "HEAD returned an error body");
 }
 
 #[tokio::test]
@@ -630,6 +893,24 @@ async fn archive_view_missing_hash_names_the_hash() {
         body["error"].as_str().unwrap().contains(&missing),
         "error did not name missing hash: {body}"
     );
+}
+
+#[tokio::test]
+async fn archive_view_head_treats_a_missing_backing_file_as_not_found() {
+    let (server, temp_dir, state) = setup_archive_view_server();
+    let hash = store_blob(&state, b"<html>gone</html>", "text/html");
+    let hex = hash.strip_prefix("sha256:").unwrap();
+    std::fs::remove_file(temp_dir.path().join("cas").join(&hex[..2]).join(hex)).unwrap();
+
+    let response = server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{hash}"),
+        )
+        .await;
+
+    response.assert_status(StatusCode::NOT_FOUND);
+    assert!(response.as_bytes().is_empty());
 }
 
 #[tokio::test]

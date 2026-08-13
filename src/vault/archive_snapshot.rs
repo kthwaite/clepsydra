@@ -275,6 +275,193 @@ fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
     (original, hash)
 }
 
+#[derive(Debug)]
+struct HtmlAttribute<'a> {
+    name: &'a str,
+    value: Option<&'a str>,
+    span: Range<usize>,
+}
+
+/// Structurally scan a start tag's attributes, retaining their source ranges.
+///
+/// Attribute values may be single-quoted, double-quoted, or unquoted. A
+/// missing closing quote consumes the remainder of the tag, matching the
+/// browser tokenizer and preventing a malformed value from exposing later
+/// bytes as a second attribute.
+fn html_attributes(tag: &str) -> Vec<HtmlAttribute<'_>> {
+    let bytes = tag.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if bytes.get(cursor) == Some(&b'/') {
+        return Vec::new();
+    }
+    while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
+        cursor += 1;
+    }
+
+    let mut attributes = Vec::new();
+    while cursor < bytes.len() {
+        let leading_start = cursor;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if cursor == bytes.len() || bytes[cursor] == b'/' {
+            break;
+        }
+
+        let name_start = cursor;
+        while cursor < bytes.len()
+            && !bytes[cursor].is_ascii_whitespace()
+            && !matches!(bytes[cursor], b'=' | b'/')
+        {
+            cursor += 1;
+        }
+        if cursor == name_start {
+            cursor += 1;
+            continue;
+        }
+        let name_end = cursor;
+        let name = &tag[name_start..name_end];
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+
+        let mut value = None;
+        if bytes.get(cursor) == Some(&b'=') {
+            cursor += 1;
+            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            if let Some(&quote @ (b'\'' | b'"')) = bytes.get(cursor) {
+                cursor += 1;
+                let value_start = cursor;
+                while cursor < bytes.len() && bytes[cursor] != quote {
+                    cursor += 1;
+                }
+                value = Some(&tag[value_start..cursor]);
+                if cursor < bytes.len() {
+                    cursor += 1;
+                }
+            } else {
+                let value_start = cursor;
+                while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
+                    cursor += 1;
+                }
+                value = Some(&tag[value_start..cursor]);
+            }
+        } else {
+            cursor = name_end;
+        }
+        attributes.push(HtmlAttribute {
+            name,
+            value,
+            span: leading_start..cursor,
+        });
+    }
+    attributes
+}
+
+fn element_local_name(name: &str) -> &str {
+    name.rsplit_once(':').map_or(name, |(_, local)| local)
+}
+
+fn is_navigation_attribute(element: &str, attribute: &str) -> bool {
+    let element = element_local_name(element);
+    let is_href = attribute.eq_ignore_ascii_case("href")
+        || attribute.eq_ignore_ascii_case("xlink:href");
+
+    (is_href
+        && (element.eq_ignore_ascii_case("a") || element.eq_ignore_ascii_case("area")))
+        || (element.eq_ignore_ascii_case("base")
+            && (attribute.eq_ignore_ascii_case("href")
+                || attribute.eq_ignore_ascii_case("target")))
+        || (element.eq_ignore_ascii_case("form") && attribute.eq_ignore_ascii_case("action"))
+        || attribute.eq_ignore_ascii_case("formaction")
+}
+
+fn is_meta_refresh(element: &str, attributes: &[HtmlAttribute<'_>]) -> bool {
+    element_local_name(element).eq_ignore_ascii_case("meta")
+        && attributes.iter().any(|attribute| {
+            attribute.name.eq_ignore_ascii_case("http-equiv")
+                && attribute.value.is_some_and(|value| {
+                    decode_html_entities(value)
+                        .trim()
+                        .eq_ignore_ascii_case("refresh")
+                })
+        })
+}
+
+/// Remove document-navigation vectors while retaining captured presentation.
+///
+/// This runs at the view boundary, so legacy snapshots receive the same
+/// protection as newly ingested captures. It edits only structural tag ranges:
+/// link text, styles, resource-bearing `src`, HTML stylesheet `href`, and
+/// SVG/MathML resource references remain byte-for-byte intact.
+pub fn neutralize_navigation(html: &str) -> std::borrow::Cow<'_, str> {
+    let mut removals = Vec::<Range<usize>>::new();
+    let mut cursor = 0;
+
+    while let Some(open_offset) = html[cursor..].find('<') {
+        let open = cursor + open_offset;
+        if html[open..].starts_with("<!--") {
+            let Some(comment_end) = html[open + 4..].find("-->") else {
+                break;
+            };
+            cursor = open + 4 + comment_end + 3;
+            continue;
+        }
+
+        let Some(close) = html_tag_end(html, open + 1) else {
+            break;
+        };
+        cursor = close + 1;
+        if matches!(html.as_bytes().get(open + 1), Some(b'!' | b'?')) {
+            continue;
+        }
+
+        let tag = &html[open + 1..close];
+        let Some((false, name)) = html_tag_name(tag) else {
+            continue;
+        };
+        let attributes = html_attributes(tag);
+        if is_meta_refresh(name, &attributes) {
+            removals.push(open..close + 1);
+        } else {
+            removals.extend(
+                attributes
+                    .iter()
+                    .filter(|attribute| is_navigation_attribute(name, attribute.name))
+                    .map(|attribute| {
+                        open + 1 + attribute.span.start..open + 1 + attribute.span.end
+                    }),
+            );
+        }
+
+        if let Some(inert) = inert_html_content(name) {
+            cursor = match inert {
+                InertHtmlContent::UntilEndTag => {
+                    raw_text_end(html, cursor, name).unwrap_or(html.len())
+                }
+                InertHtmlContent::ThroughEof => html.len(),
+            };
+        }
+    }
+    if removals.is_empty() {
+        return std::borrow::Cow::Borrowed(html);
+    }
+    let removed_bytes = removals.iter().map(|range| range.len()).sum::<usize>();
+    let mut neutralized = String::with_capacity(html.len().saturating_sub(removed_bytes));
+    let mut copied_through = 0;
+    for range in removals {
+        neutralized.push_str(&html[copied_through..range.start]);
+        copied_through = range.end;
+    }
+    neutralized.push_str(&html[copied_through..]);
+    std::borrow::Cow::Owned(neutralized)
+}
+
 /// Absolute original URL → the hash of the blob that replaced it.
 ///
 /// Call this on the **deconstructed** snapshot: it pairs the
@@ -1207,6 +1394,36 @@ mod tests {
         let out = rewrite_markdown_images(markdown, &map, "http://localhost:34989/article");
 
         assert_eq!(out, "![large relay bitmap](cas:sha256:relay)");
+    }
+
+    #[test]
+    fn neutralization_does_not_parse_navigation_text_inside_raw_content() {
+        let html = concat!(
+            r#"<style>.example::after { content: "<a href=https://live.example>"; }</style>"#,
+            r#"<textarea><form action=https://live.example></textarea>"#,
+            r#"<!-- <meta http-equiv=refresh content="0; url=https://live.example"> -->"#,
+            r#"<a href=https://remove.example>Visible</a>"#
+        );
+
+        assert_eq!(
+            neutralize_navigation(html),
+            concat!(
+                r#"<style>.example::after { content: "<a href=https://live.example>"; }</style>"#,
+                r#"<textarea><form action=https://live.example></textarea>"#,
+                r#"<!-- <meta http-equiv=refresh content="0; url=https://live.example"> -->"#,
+                r#"<a>Visible</a>"#
+            )
+        );
+    }
+
+    #[test]
+    fn neutralization_returns_borrowed_html_when_no_navigation_exists() {
+        let html = r#"<link rel=stylesheet href="cas:sha256:resource"><img src=x>"#;
+
+        assert!(matches!(
+            neutralize_navigation(html),
+            std::borrow::Cow::Borrowed(value) if value == html
+        ));
     }
 
     // -------------------------------------------------------------------

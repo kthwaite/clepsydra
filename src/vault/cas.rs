@@ -11,6 +11,14 @@ pub struct StoreResult {
     pub already_existed: bool,
 }
 
+/// Metadata for a CAS blob whose database row and backing file agree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobMetadata {
+    pub content_type: String,
+    pub size: u64,
+}
+
+
 /// Content-addressed blob store.
 ///
 /// Blobs are stored on disk in a two-level fan-out directory (like git objects)
@@ -131,6 +139,38 @@ impl ContentStore {
         Ok((data, content_type))
     }
 
+    /// Inspect a blob without reading its contents.
+    ///
+    /// A row alone is not enough: callers use this for metadata-only HTTP
+    /// responses, so a missing, non-file, or length-mismatched backing object is
+    /// reported as corruption rather than as an available blob.
+    pub fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
+        Self::validate_hash(hash)?;
+        let (stored_size, content_type): (i64, String) = self.db.query_row(
+            "SELECT size, content_type FROM blobs WHERE hash = ?1",
+            params![hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let expected_size = u64::try_from(stored_size)
+            .map_err(|_| format!("invalid negative CAS size for {hash}: {stored_size}"))?;
+        let path = self.blob_path(hash)?;
+        let file = fs::metadata(&path)?;
+        if !file.is_file() {
+            return Err(format!("CAS backing path is not a file: {}", path.display()).into());
+        }
+        if file.len() != expected_size {
+            return Err(format!(
+                "CAS backing file size mismatch for {hash}: expected {expected_size}, got {}",
+                file.len()
+            )
+            .into());
+        }
+        Ok(BlobMetadata {
+            content_type,
+            size: expected_size,
+        })
+    }
+
     /// Check whether a blob exists in the store.
     pub fn exists(&self, hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
@@ -242,6 +282,35 @@ mod tests {
         let (retrieved, content_type) = store.retrieve(&result.hash).unwrap();
         assert_eq!(retrieved, data);
         assert_eq!(content_type, "text/plain");
+    }
+
+    #[test]
+    fn inspect_reports_metadata_without_returning_blob_bytes() {
+        let (store, _tmp) = test_store();
+        let result = store.store(b"metadata only", "text/html").unwrap();
+
+        let metadata = store.inspect(&result.hash).unwrap();
+
+        assert_eq!(metadata.content_type, "text/html");
+        assert_eq!(metadata.size, 13);
+    }
+
+    #[test]
+    fn inspect_rejects_a_missing_or_invalid_backing_file() {
+        let (store, _tmp) = test_store();
+        let missing = store.store(b"delete me", "text/html").unwrap();
+        fs::remove_file(store.blob_path(&missing.hash).unwrap()).unwrap();
+        assert!(
+            store.inspect(&missing.hash).is_err(),
+            "database metadata must not hide a missing backing file"
+        );
+
+        let truncated = store.store(b"truncate me", "text/html").unwrap();
+        fs::write(store.blob_path(&truncated.hash).unwrap(), b"short").unwrap();
+        assert!(
+            store.inspect(&truncated.hash).is_err(),
+            "backing-file length must agree with CAS metadata"
+        );
     }
 
     #[test]
