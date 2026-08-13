@@ -62,15 +62,76 @@ describe("WikilinkCombobox", () => {
     expect(onCreate).not.toHaveBeenCalled();
   });
 
-  it("offers creation only for a non-empty zero-match query", () => {
+  it("offers creation for a non-empty zero-match query", () => {
     renderCombobox();
     expect(screen.getByText("Create “New Topic”")).toBeInTheDocument();
   });
 
-  it("does not offer creation when a partial match exists", () => {
+  it("renders partial matches before a trailing Create row", () => {
     renderCombobox({ pages, query: "design" });
-    expect(screen.getByText("Design Notes")).toBeInTheDocument();
-    expect(screen.queryByText(/Create/)).toBeNull();
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual([
+      "Design Notesnotes/design-notes.md",
+      "Create “design”",
+    ]);
+  });
+
+  it.each([
+    ["title", "Design Notes", {}],
+    ["canonical name", "design-notes", {}],
+    ["alias", "design", { aliases: ["design"] }],
+    ["path without suffix", "notes/design-notes", {}],
+    ["path with suffix", "notes/design-notes.md", {}],
+  ])(
+    "suppresses Create for an exact %s identity",
+    (_field, query, pageOverrides) => {
+      renderCombobox({
+        pages: [{ ...pages[0], ...pageOverrides }],
+        query,
+      });
+
+      expect(screen.getByText("Design Notes")).toBeInTheDocument();
+      expect(screen.queryByText(/Create/)).toBeNull();
+    },
+  );
+
+  it("reaches the trailing Create row with the keyboard", () => {
+    const onCreate = vi.fn();
+    renderCombobox({ pages, query: "design", onCreate });
+
+    fireEvent.keyDown(document, { key: "ArrowDown" });
+    fireEvent.keyDown(document, { key: "Enter" });
+
+    expect(onCreate).toHaveBeenCalledOnce();
+    expect(onCreate).toHaveBeenCalledWith("design");
+  });
+
+  it("keeps the first eight matching pages in order before Create", () => {
+    const manyPages = Array.from({ length: 9 }, (_, index): PageSummary => ({
+      ...pages[0],
+      id: `p${index}`,
+      title: `Topic ${index}`,
+      canonical_name: `topic-${index}`,
+      path: `notes/topic-${index}.md`,
+    }));
+
+    renderCombobox({ pages: manyPages, query: "topic" });
+
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual([
+      "Topic 0notes/topic-0.md",
+      "Topic 1notes/topic-1.md",
+      "Topic 2notes/topic-2.md",
+      "Topic 3notes/topic-3.md",
+      "Topic 4notes/topic-4.md",
+      "Topic 5notes/topic-5.md",
+      "Topic 6notes/topic-6.md",
+      "Topic 7notes/topic-7.md",
+      "Create “topic”",
+    ]);
   });
 
   it("dispatches page suggestions to onSelect only", async () => {

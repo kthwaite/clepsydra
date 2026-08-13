@@ -2,6 +2,7 @@ import type { VirtualElement } from "@floating-ui/react";
 import { useMemo } from "react";
 import type { PageSummary } from "#/api/types";
 import { EditorSuggestionPopover } from "#/components/ui/editor-suggestion-popover";
+import { pageHasExactWikilinkIdentity } from "./wikilinkIdentity";
 
 interface WikilinkComboboxProps {
   pages: PageSummary[];
@@ -42,12 +43,15 @@ export function WikilinkCombobox({
     [pages, lowerQuery],
   );
   const trimmedQuery = query.trim();
-  const suggestions: WikilinkSuggestion[] =
-    filteredPages.length > 0
-      ? filteredPages.map((page) => ({ kind: "page", page }))
-      : trimmedQuery
-        ? [{ kind: "create", title: trimmedQuery }]
-        : [];
+  const exactIdentityExists = filteredPages.some((page) =>
+    pageHasExactWikilinkIdentity(page, trimmedQuery),
+  );
+  const suggestions: WikilinkSuggestion[] = [
+    ...filteredPages.map((page) => ({ kind: "page" as const, page })),
+    ...(trimmedQuery && !exactIdentityExists
+      ? [{ kind: "create" as const, title: trimmedQuery }]
+      : []),
+  ];
 
   const selectSuggestion = (suggestion: WikilinkSuggestion) => {
     if (!reference) return;
