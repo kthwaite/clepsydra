@@ -335,9 +335,7 @@ fn validate_resource_sizes(
                 resource.hash, size, max_blob_size_mb
             )));
         }
-        total = total
-            .checked_add(size)
-            .ok_or_else(&request_size_overflow)?;
+        total = total.checked_add(size).ok_or_else(&request_size_overflow)?;
     }
     if total > max_request_bytes {
         return Err(ApiError::bad_request(format!(
@@ -826,9 +824,8 @@ mod tests {
     #[test]
     fn markdown_bytes_count_toward_the_capture_budget() {
         let resources = Vec::new();
-        let error =
-            validate_resource_sizes(&resources, 1024 * 1024, 1024 * 1024 + 1, 100, 2)
-                .expect_err("snapshot plus markdown exceeds two MiB");
+        let error = validate_resource_sizes(&resources, 1024 * 1024, 1024 * 1024 + 1, 100, 2)
+            .expect_err("snapshot plus markdown exceeds two MiB");
         assert!(error.error.contains("max_request_size_mb"));
     }
 
