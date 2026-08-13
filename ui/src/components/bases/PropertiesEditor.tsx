@@ -113,7 +113,6 @@ export function PropertiesEditor({
   const newKeyInput = useRef<HTMLInputElement>(null);
   const [moveAnnouncement, setMoveAnnouncement] = useState("");
   const [focusPropertyId, setFocusPropertyId] = useState<string>();
-  const draggedPropertyId = useRef<string | undefined>(undefined);
   const reorderHandles = useRef(new Map<string, HTMLButtonElement>());
 
   useEffect(() => {
@@ -241,14 +240,20 @@ export function PropertiesEditor({
     onChange(moveItem(properties, from, to));
   }
 
-  function dropProperty(targetId: string) {
-    const draggedId = draggedPropertyId.current;
-    draggedPropertyId.current = undefined;
-    if (!draggedId) return;
-    moveProperty(
-      properties.findIndex(({ id }) => id === draggedId),
-      properties.findIndex(({ id }) => id === targetId),
-    );
+  function dropProperty(
+    sourceId: string,
+    targetId: string,
+    edge: "top" | "bottom",
+  ) {
+    const sourceIndex = properties.findIndex(({ id }) => id === sourceId);
+    const targetIndex = properties.findIndex(({ id }) => id === targetId);
+    if (sourceIndex < 0 || targetIndex < 0 || sourceIndex === targetIndex)
+      return;
+
+    const insertionIndex = targetIndex + (edge === "bottom" ? 1 : 0);
+    const destinationIndex =
+      insertionIndex - (sourceIndex < insertionIndex ? 1 : 0);
+    moveProperty(sourceIndex, destinationIndex);
   }
 
   return (
@@ -377,13 +382,7 @@ export function PropertiesEditor({
                   }
                   onChange={replaceProperty}
                   onMove={moveProperty}
-                  onDragStart={(propertyId) => {
-                    draggedPropertyId.current = propertyId;
-                  }}
-                  onDragEnd={() => {
-                    draggedPropertyId.current = undefined;
-                  }}
-                  onDrop={dropProperty}
+                  onReorder={dropProperty}
                   onHandleRef={(propertyId, element) => {
                     if (element)
                       reorderHandles.current.set(propertyId, element);

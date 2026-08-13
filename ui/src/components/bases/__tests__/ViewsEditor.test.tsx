@@ -1,3 +1,12 @@
+import type {
+  draggable as draggableAdapter,
+  dropTargetForElements as dropTargetForElementsAdapter,
+  ElementDragPayload,
+  ElementDropTargetEventPayloadMap,
+  ElementDropTargetGetFeedbackArgs,
+  ElementEventPayloadMap,
+} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import type { attachClosestEdge as attachClosestEdgeAdapter } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import {
   act,
   fireEvent,
@@ -19,6 +28,61 @@ import {
 import { ViewsEditor } from "#/components/bases/ViewsEditor";
 
 const { previewMock } = vi.hoisted(() => ({ previewMock: vi.fn() }));
+
+type DraggableRegistration = Parameters<typeof draggableAdapter>[0];
+type DropTargetRegistration = Parameters<
+  typeof dropTargetForElementsAdapter
+>[0];
+type AttachClosestEdge = typeof attachClosestEdgeAdapter;
+type ClosestEdge = "top" | "bottom";
+type DropPayload = ElementDropTargetEventPayloadMap["onDrop"];
+type DropTargetRecord = DropPayload["self"];
+type DragSource = {
+  registration: DraggableRegistration;
+  source: ElementDragPayload;
+};
+
+const dnd = vi.hoisted(() => ({
+  draggables: [] as DraggableRegistration[],
+  dropTargets: [] as DropTargetRegistration[],
+  closestEdge: "top" as ClosestEdge,
+  closestEdgeKey: Symbol("closest-edge"),
+}));
+
+function register<T>(registrations: T[], registration: T) {
+  registrations.push(registration);
+  return () => {
+    const index = registrations.indexOf(registration);
+    if (index !== -1) registrations.splice(index, 1);
+  };
+}
+
+vi.mock(
+  "@atlaskit/pragmatic-drag-and-drop/element/adapter",
+  () => ({
+    draggable: (registration: DraggableRegistration) =>
+      register(dnd.draggables, registration),
+    dropTargetForElements: (registration: DropTargetRegistration) =>
+      register(dnd.dropTargets, registration),
+  }),
+);
+
+vi.mock(
+  "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge",
+  () => ({
+    attachClosestEdge: (
+      data: Parameters<AttachClosestEdge>[0],
+      { allowedEdges }: Parameters<AttachClosestEdge>[1],
+    ) => ({
+      ...data,
+      [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
+        ? dnd.closestEdge
+        : null,
+    }),
+    extractClosestEdge: (data: Record<string | symbol, unknown>) =>
+      (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+  }),
+);
 
 vi.mock("#/api/bases", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#/api/bases")>();
@@ -92,7 +156,159 @@ function renderViews(
   return onChange;
 }
 
-beforeEach(() => previewMock.mockReset());
+const input: ElementDropTargetGetFeedbackArgs["input"] = {
+  altKey: false,
+  button: 0,
+  buttons: 1,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  clientX: 0,
+  clientY: 0,
+  pageX: 0,
+  pageY: 0,
+};
+
+function dragLocation(
+  dropTargets: DropTargetRecord[] = [],
+): DropPayload["location"] {
+  return {
+    initial: { input, dropTargets: [] },
+    current: { input, dropTargets },
+    previous: { dropTargets: [] },
+  };
+}
+
+function sourceFor(handle: HTMLElement): DragSource {
+  const registration = dnd.draggables.find(
+    (candidate) =>
+      candidate.element === handle || candidate.dragHandle === handle,
+  );
+  if (!registration) {
+    throw new Error(`No draggable registered for "${handle.textContent}"`);
+  }
+  const dragHandle = registration.dragHandle ?? null;
+  const feedback = { input, element: registration.element, dragHandle };
+  if (registration.canDrag?.(feedback) === false) {
+    throw new Error(`Dragging is disabled for "${handle.textContent}"`);
+  }
+  return {
+    registration,
+    source: {
+      element: registration.element,
+      dragHandle,
+      data: registration.getInitialData?.(feedback) ?? {},
+    },
+  };
+}
+
+function targetFor(row: Element) {
+  const registration = dnd.dropTargets.find(
+    (candidate) => candidate.element === row,
+  );
+  if (!registration) {
+    throw new Error(`No drop target registered for "${row.textContent}"`);
+  }
+  return registration;
+}
+
+function canDrop(source: ElementDragPayload, target: DropTargetRegistration) {
+  return (
+    target.canDrop?.({
+      input,
+      source,
+      element: target.element,
+    }) ?? true
+  );
+}
+
+function dispatchDrop(
+  source: DragSource,
+  target: DropTargetRegistration,
+  edge: ClosestEdge,
+) {
+  dnd.closestEdge = edge;
+  const feedback: ElementDropTargetGetFeedbackArgs = {
+    input,
+    source: source.source,
+    element: target.element,
+  };
+  if (!canDrop(source.source, target)) {
+    throw new Error(`Drop rejected by "${target.element.textContent}"`);
+  }
+  const self: DropTargetRecord = {
+    element: target.element,
+    data: target.getData?.(feedback) ?? {},
+    dropEffect: target.getDropEffect?.(feedback) ?? "move",
+    isActiveDueToStickiness: false,
+  };
+  const startLocation = dragLocation();
+  const start: ElementEventPayloadMap["onDragStart"] = {
+    location: startLocation,
+    source: source.source,
+  };
+  const location = dragLocation([self]);
+  const drop: ElementEventPayloadMap["onDrop"] = {
+    location,
+    source: source.source,
+  };
+
+  act(() => {
+    source.registration.onDragStart?.(start);
+    source.registration.onDrop?.(drop);
+    target.onDrop?.({ ...drop, self });
+  });
+  return self;
+}
+
+function dispatchExternalDrop(
+  source: ElementDragPayload,
+  target: DropTargetRegistration,
+  edge: ClosestEdge,
+) {
+  if (!canDrop(source, target)) return false;
+  dnd.closestEdge = edge;
+  const feedback: ElementDropTargetGetFeedbackArgs = {
+    input,
+    source,
+    element: target.element,
+  };
+  const self: DropTargetRecord = {
+    element: target.element,
+    data: target.getData?.(feedback) ?? {},
+    dropEffect: target.getDropEffect?.(feedback) ?? "move",
+    isActiveDueToStickiness: false,
+  };
+  const drop: ElementEventPayloadMap["onDrop"] = {
+    location: dragLocation([self]),
+    source,
+  };
+  act(() => target.onDrop?.({ ...drop, self }));
+  return true;
+}
+
+function cancelDrag(source: DragSource) {
+  const location = dragLocation();
+  const start: ElementEventPayloadMap["onDragStart"] = {
+    location,
+    source: source.source,
+  };
+  const drop: ElementEventPayloadMap["onDrop"] = {
+    location,
+    source: source.source,
+  };
+  act(() => {
+    source.registration.onDragStart?.(start);
+    source.registration.onDrop?.(drop);
+  });
+}
+
+beforeEach(() => {
+  dnd.draggables.length = 0;
+  dnd.dropTargets.length = 0;
+  dnd.closestEdge = "top";
+  previewMock.mockReset();
+});
 
 describe("ViewsEditor", () => {
   it("adds a table view with a stable fresh identity", async () => {
@@ -248,47 +464,130 @@ describe("ViewsEditor", () => {
     ).toEqual(["title", "rating", "status"]);
   });
 
-  it("reorders visible columns from a pointer drag on the named handle", () => {
-    const onChange = renderViews({
-      views: [
-        view({
-          id: "view-all",
-          columns: ["title", "rating", "status"],
+  it.each([
+    {
+      intent: "before",
+      edge: "top",
+      sourceColumn: "title",
+      sourceId: "column-0",
+      targetColumn: "status",
+      targetId: "column-2",
+      expected: ["rating", "title", "status"],
+    },
+    {
+      intent: "after",
+      edge: "bottom",
+      sourceColumn: "rating",
+      sourceId: "column-1",
+      targetColumn: "status",
+      targetId: "column-2",
+      expected: ["title", "status", "rating"],
+    },
+    {
+      intent: "before while moving upward",
+      edge: "top",
+      sourceColumn: "status",
+      sourceId: "column-2",
+      targetColumn: "title",
+      targetId: "column-0",
+      expected: ["status", "title", "rating"],
+    },
+    {
+      intent: "after while moving upward",
+      edge: "bottom",
+      sourceColumn: "status",
+      sourceId: "column-2",
+      targetColumn: "title",
+      targetId: "column-0",
+      expected: ["title", "status", "rating"],
+    },
+  ] as const)(
+    "reorders a visible column $intent the named row target",
+    ({
+      edge,
+      sourceColumn,
+      sourceId,
+      targetColumn,
+      targetId,
+      expected,
+    }) => {
+      const onChange = renderViews({
+        views: [
+          view({
+            id: "view-all",
+            columns: ["title", "rating", "status"],
+          }),
+        ],
+      });
+      const handle = screen.getByRole("button", {
+        name: `Reorder ${sourceColumn} column`,
+      });
+      const source = sourceFor(handle);
+      const target = targetFor(
+        screen.getByRole("row", {
+          name: new RegExp(targetColumn, "i"),
         }),
-      ],
-    });
+      );
 
-    fireEvent.dragStart(
+      expect(source.registration.dragHandle).toBe(handle);
+      expect(source.source.data).toEqual({
+        kind: "base-view-column",
+        columnId: sourceId,
+      });
+      const targetRecord = dispatchDrop(source, target, edge);
+
+      expect(targetRecord.data).toMatchObject({
+        kind: "base-view-column",
+        columnId: targetId,
+      });
+      expect(latest<DraftView[]>(onChange)[0].columns).toEqual(expected);
+    },
+  );
+
+  it("clears a cancelled column drag, ignores a later unrelated drop, rejects properties, and unregisters", () => {
+    const onChange = vi.fn<(views: DraftView[]) => void>();
+    const rendered = render(
+      <ViewsEditor
+        views={[
+          view({
+            id: "view-all",
+            columns: ["title", "rating", "status"],
+          }),
+        ]}
+        properties={draft().properties}
+        diagnostics={[]}
+        onChange={onChange}
+        registerFocus={() => undefined}
+      />,
+    );
+    const source = sourceFor(
       screen.getByRole("button", { name: "Reorder rating column" }),
     );
-    fireEvent.dragOver(screen.getByRole("row", { name: /status/i }));
-    fireEvent.drop(screen.getByRole("row", { name: /status/i }));
+    const target = targetFor(screen.getByRole("row", { name: /status/i }));
+    const unrelatedColumnSource: ElementDragPayload = {
+      element: document.createElement("div"),
+      dragHandle: null,
+      data: { kind: "base-view-column", columnId: "column-elsewhere" },
+    };
+    const propertySource: ElementDragPayload = {
+      element: document.createElement("div"),
+      dragHandle: null,
+      data: { kind: "base-property", propertyId: "id-rating" },
+    };
 
-    expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
-      "title",
-      "status",
-      "rating",
-    ]);
-  });
+    cancelDrag(source);
 
-  it("clears a cancelled column drag before a later drop", () => {
-    const onChange = renderViews({
-      views: [
-        view({
-          id: "view-all",
-          columns: ["title", "rating", "status"],
-        }),
-      ],
-    });
-    const handle = screen.getByRole("button", {
-      name: "Reorder rating column",
-    });
-
-    fireEvent.dragStart(handle);
-    fireEvent.dragEnd(handle);
-    fireEvent.drop(screen.getByRole("row", { name: /status/i }));
-
+    expect(dispatchExternalDrop(unrelatedColumnSource, target, "bottom")).toBe(
+      true,
+    );
+    expect(canDrop(propertySource, target)).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
+    expect(dnd.draggables).toHaveLength(3);
+    expect(dnd.dropTargets).toHaveLength(3);
+
+    rendered.unmount();
+    expect(dnd.draggables).toHaveLength(0);
+    expect(dnd.dropTargets).toHaveLength(0);
   });
 
   it("keeps the keyboard column handle focused and announces its new position", async () => {
@@ -361,9 +660,11 @@ describe("ViewsEditor", () => {
     const laterBodyHandle = bodyHandles[1];
     expect(firstBodyRow).not.toBeNull();
 
-    fireEvent.dragStart(laterBodyHandle);
-    fireEvent.dragOver(firstBodyRow!);
-    fireEvent.drop(firstBodyRow!);
+    dispatchDrop(
+      sourceFor(laterBodyHandle),
+      targetFor(firstBodyRow!),
+      "top",
+    );
 
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
       "title",
