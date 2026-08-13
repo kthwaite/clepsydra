@@ -17,6 +17,7 @@ import {
 	PendingTransferCoordinator,
 } from "#/lib/pending-transfer";
 import { RELAY_PORT_NAME, handleRelayFetchPort } from "#/lib/relay-fetch";
+import { SingleFileRuntime } from "#/lib/singlefile-runtime";
 import { convertArchiveHtml } from "#/lib/turndown-rules";
 import type {
 	ArchiveConflictDetail,
@@ -253,6 +254,10 @@ const pendingTransfers = new PendingTransferCoordinator<CaptureMetadata>({
 	},
 });
 
+const singleFileRuntime = new SingleFileRuntime((tabId, message, options) =>
+	chrome.tabs.sendMessage(tabId, message, options),
+);
+
 type WorkerMessage =
 	| CaptureMetaMessage
 	| CaptureChunk
@@ -268,32 +273,36 @@ chrome.runtime.onConnect.addListener((port) => {
 
 chrome.runtime.onMessage.addListener(
 	(
-		message: WorkerMessage,
+		message: unknown,
 		sender: chrome.runtime.MessageSender,
 		sendResponse: (response?: unknown) => void,
-	): boolean | undefined => {
-		if (message.type === "capture_status") {
+	): boolean | undefined | Promise<Record<string, never>> => {
+		const singleFileResponse = singleFileRuntime.handleMessage(message, sender);
+		if (singleFileResponse) return singleFileResponse;
+		const workerMessage = message as WorkerMessage;
+
+		if (workerMessage.type === "capture_status") {
 			// Answered synchronously, so no need to hold the channel open.
-			sendResponse({ phase: phases.get(message.tabId) ?? null });
+			sendResponse({ phase: phases.get(workerMessage.tabId) ?? null });
 			return undefined;
 		}
 
 		const tabId = sender.tab?.id;
 
-		if (message.type === "capture_meta") {
+		if (workerMessage.type === "capture_meta") {
 			reportPhase(tabId, "processing");
 			pendingTransfers.acceptMetadata(
-				message.captureId,
-				message.metadata,
+				workerMessage.captureId,
+				workerMessage.metadata,
 				tabId,
 			);
 			return undefined;
 		}
 
-		if (message.type === CAPTURE_CHUNK) {
+		if (workerMessage.type === CAPTURE_CHUNK) {
 			let completed: CompletedTransfer<CaptureMetadata> | null;
 			try {
-				completed = pendingTransfers.acceptChunk(message, tabId);
+				completed = pendingTransfers.acceptChunk(workerMessage, tabId);
 			} catch (error) {
 				reportPhase(tabId, "error");
 				showNotification(
@@ -333,14 +342,14 @@ chrome.runtime.onMessage.addListener(
 			return undefined;
 		}
 
-		if (message.type === CAPTURE_ABORT) {
-			pendingTransfers.abort(message.captureId);
+		if (workerMessage.type === CAPTURE_ABORT) {
+			pendingTransfers.abort(workerMessage.captureId);
 			return undefined;
 		}
 
-		if (message.type === "capture_error") {
+		if (workerMessage.type === "capture_error") {
 			reportPhase(tabId, "error");
-			showNotification("Capture Failed", message.error);
+			showNotification("Capture Failed", workerMessage.error);
 		}
 		return undefined;
 	},
@@ -349,6 +358,7 @@ chrome.runtime.onMessage.addListener(
 chrome.tabs.onRemoved?.addListener((tabId) => {
 	phases.delete(tabId);
 	pendingTransfers.removeTab(tabId);
+	singleFileRuntime.removeTab(tabId);
 });
 
 /** Inject the capture script, reporting why if the page forbids it. */

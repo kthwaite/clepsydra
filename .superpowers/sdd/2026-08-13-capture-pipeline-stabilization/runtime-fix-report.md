@@ -2,7 +2,7 @@
 
 ## Status
 
-Diagnosed. No source fix was applied because the blocker predates Tasks 3 and 4 and occurs before either task's changed behavior is reached.
+Implemented after the stabilization scope was explicitly extended to cover this pre-existing SingleFile integration blocker.
 
 ## Reproduction evidence
 
@@ -63,7 +63,7 @@ Task 4 changed the injected fetch function's fallback implementation from `sendM
 
 The frame responder/injection files originate in earlier commits (`30577883 feat(extension): inject the frame responder so iframes are captured` and `fb20cff8 feat(archive): fix capture pipeline, harden blob serving, declare ARCHIVE kind`), outside Task 3/4 ownership.
 
-## Scope decision
+## Initial scope decision
 
 Per the instruction to fix only a Task-3/4-caused regression, no production source or test was changed. A correct fix belongs to the earlier SingleFile integration boundary and requires an explicit design choice:
 
@@ -72,10 +72,116 @@ Per the instruction to fix only a Task-3/4-caused regression, no production sour
 
 Either changes behavior outside snapshot transfer and relay-fetch stabilization. Implementing one here would silently widen Task 4 and could create a second SingleFile integration convention.
 
-## Verification impact
+## Initial verification impact
 
 Task 4's source-level and bundle gates remain green from its reports, but end-to-end capture is blocked by this pre-existing SingleFile boundary. Real-browser archive verification cannot proceed until that boundary is repaired in the owning task.
 
 ## Commit
 
 This diagnosis is committed separately; see the commit reported to the parent agent.
+
+## Scope extension and implementation
+
+The stabilization exit gate was subsequently extended to include real-browser success, so the upstream-compatible worker integration was implemented.
+
+### Upstream reference
+
+SingleFile's background implementation at `src/lib/single-file/frame-tree/bg/frame-tree.js` handles exactly two frame methods:
+
+- `singlefile.frameTree.initResponse`
+- `singlefile.frameTree.ackInitRequest`
+
+It forwards both messages to `sender.tab.id` with `{ frameId: 0 }` and returns a resolved response to the originating runtime message.
+
+SingleFile's `src/lib/single-file/lazy/bg/lazy-timeout.js` owns per-tab, per-frame, per-type timers for:
+
+- `singlefile.lazyTimeout.setTimeout`
+- `singlefile.lazyTimeout.clearTimeout`
+
+When a timer expires it sends `singlefile.lazyTimeout.onTimeout` to the tab. Replacing a timer clears its predecessor, and tab removal drops the tab's timer state.
+
+The implemented `SingleFileRuntime` follows those upstream boundaries rather than forcing the dependency down its private same-window fallback.
+
+### RED evidence
+
+Command:
+
+```text
+bun run test -- lib/__tests__/singlefile-runtime.test.ts
+```
+
+Result before implementation: **FAILED** during collection because `#/lib/singlefile-runtime` did not exist. The absent boundary represented the runtime-observed hang: no component claimed and forwarded the frame session's init response.
+
+### Implementation
+
+- Added `extension/src/lib/singlefile-runtime.ts`.
+  - Routes validated frame init responses and request acknowledgements back to the top frame.
+  - Returns a resolved empty response so `single-file-core` knows its runtime message was handled.
+  - Implements validated, bounded lazy set/clear messages with per-tab/per-frame/per-type timer replacement.
+  - Sends the upstream `lazyTimeout.onTimeout` response and releases empty timer maps.
+  - Clears every live timer and its state when the source tab closes.
+  - Ignores unrelated or malformed messages so existing capture messages retain their current listener path.
+- Integrated the router at the start of the service worker's existing `onMessage` listener and added tab-removal cleanup.
+- Added focused tests for empty frame init-response routing (the observed plain-page hang), frame acknowledgements, lazy expiry, lazy cancellation, timer replacement, tab cleanup, and malformed/unrelated messages.
+
+### GREEN evidence
+
+Focused SingleFile runtime and relay tests:
+
+```text
+bun run test -- lib/__tests__/singlefile-runtime.test.ts lib/__tests__/relay-fetch.test.ts
+```
+
+Result: **PASS** — 2 files, 27 tests passed, 0 failed.
+
+Full extension tests:
+
+```text
+bun run test
+```
+
+Result: **PASS** — 13 files, 131 tests passed, 0 failed.
+
+Typecheck:
+
+```text
+bun run typecheck
+```
+
+Result: **PASS** — `tsc --noEmit` completed without diagnostics.
+
+Lint:
+
+```text
+bun run lint
+```
+
+Result: **PASS** — Biome checked 35 source files with no fixes or diagnostics.
+
+Chromium build:
+
+```text
+bun run build
+```
+
+Result: **PASS** — all entry points built and the DOM-free verifier loaded the worker with its 5 expected listener registrations.
+
+Firefox build:
+
+```text
+bun run build:firefox
+```
+
+Result: **PASS** — all Firefox-targeted entry points built and the verifier loaded the worker with its 5 expected listener registrations.
+
+### Self-review
+
+- The empty-frame regression exercises the actual missing worker boundary using the exact observed method, empty `frames`, session ID, sender tab, and top-frame destination. Removing the router or moving it after typed capture dispatch makes the session response unhandled again.
+- The implementation does not emulate frame sessions itself; it only restores the upstream message routing so the content-side session remains the sole owner of resolution.
+- Lazy timeout behavior matches the upstream ownership model and avoids accumulated timers by replacing identical keys and clearing all handles on tab removal.
+- Frame and lazy message validation prevents unrelated runtime traffic from being claimed. Existing capture status, metadata, chunks, aborts, errors, and Task 4 relay ports keep their current paths.
+- Task 4 direct/worker fetch options, pull/ack framing, 4 MiB raw bound, disconnect cleanup, and final URL behavior are untouched.
+
+### Runtime verification handoff
+
+The production bundles are ready for `RuntimeVerificationImplementer` to rerun the original Chrome fixture matrix against this commit.
