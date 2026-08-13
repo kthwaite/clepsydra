@@ -162,8 +162,94 @@ describe("createRelayFetch", () => {
 			cache: "force-cache",
 			headers,
 			referrerPolicy: "strict-origin-when-cross-origin",
+			signal: expect.any(AbortSignal),
 		});
 		expect(connect).not.toHaveBeenCalled();
+	});
+
+	it("times out a never-settling page fetch without opening a worker port", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(0);
+		let pageSignal: AbortSignal | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				(_url: RequestInfo | URL, init?: RequestInit) =>
+					new Promise<Response>(() => {
+						pageSignal = init?.signal ?? undefined;
+					}),
+			),
+		);
+		const connect = vi.fn();
+
+		const result = createRelayFetch(connect)("https://cdn.example.com/a.png");
+		const timedOut = expect(result).rejects.toThrow(
+			"Relay fetch timed out after 15000 ms",
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(pageSignal?.aborted).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(14_999);
+		expect(pageSignal?.aborted).toBe(false);
+		expect(connect).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(1);
+
+		await timedOut;
+		expect(pageSignal?.aborted).toBe(true);
+		expect(connect).not.toHaveBeenCalled();
+		expect(vi.getTimerCount()).toBe(0);
+	});
+
+	it("gives the worker only the time remaining from the page-fetch deadline", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(0);
+		let rejectPageFetch: ((reason?: unknown) => void) | undefined;
+		vi.stubGlobal(
+			"fetch",
+			vi.fn(
+				() =>
+					new Promise<Response>((_resolve, reject) => {
+						rejectPageFetch = reject;
+					}),
+			),
+		);
+		let workerSignal: AbortSignal | undefined;
+		const fetchImpl = vi.fn(
+			(_url: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>(() => {
+					workerSignal = init?.signal ?? undefined;
+				}),
+		);
+		const { connect, content, worker } = relayFixture(fetchImpl);
+
+		const result = createRelayFetch(connect)("https://cdn.example.com/a.png");
+		const timedOut = expect(result).rejects.toThrow(
+			"Relay fetch timed out after 15000 ms",
+		);
+		await vi.advanceTimersByTimeAsync(10_000);
+		rejectPageFetch?.(new Error("CORS"));
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fetchImpl).toHaveBeenCalledOnce();
+		expect(content.sent[0]).toEqual({
+			url: "https://cdn.example.com/a.png",
+			headers: undefined,
+			deadlineMs: 15_000,
+		});
+		expect(workerSignal?.aborted).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(4_999);
+		expect(workerSignal?.aborted).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+
+		await timedOut;
+		expect(workerSignal?.aborted).toBe(true);
+		expect(content.disconnected).toBe(true);
+		expect(worker.disconnected).toBe(true);
+		expect(content.onMessage.listenerCount).toBe(0);
+		expect(content.onDisconnect.listenerCount).toBe(0);
+		expect(worker.onMessage.listenerCount).toBe(0);
+		expect(worker.onDisconnect.listenerCount).toBe(0);
+		expect(vi.getTimerCount()).toBe(0);
 	});
 
 	it("reconstructs a resource larger than 4 MiB over bounded pull/ack chunks", async () => {
@@ -216,6 +302,7 @@ describe("createRelayFetch", () => {
 		expect(content.sent[0]).toEqual({
 			url: "https://cdn.example.com/a.png",
 			headers,
+			deadlineMs: expect.any(Number),
 		});
 		expect(result.status).toBe(206);
 		expect(result.url).toBe("https://edge.example.com/final.png");
@@ -437,10 +524,14 @@ describe("createRelayFetch", () => {
 	});
 
 	it.each([
-		["URL", { url: "", headers: {} }],
+		["URL", { url: "", headers: {}, deadlineMs: Date.now() + 15_000 }],
 		[
 			"headers",
-			{ url: "https://cdn.example.com/a.png", headers: { Accept: 7 } },
+			{
+				url: "https://cdn.example.com/a.png",
+				headers: { Accept: 7 },
+				deadlineMs: Date.now() + 15_000,
+			},
 		],
 	])("rejects an invalid relay request: %s", async (_field, request) => {
 		const { content, worker } = pairedPorts();
@@ -584,10 +675,6 @@ describe("createRelayFetch", () => {
 
 		await timedOut;
 		expect(workerSignal?.aborted).toBe(true);
-		expect(worker.sent).toContainEqual({
-			type: "abort",
-			error: "Relay fetch timed out after 15000 ms",
-		});
 		expect(content.disconnected).toBe(true);
 		expect(worker.disconnected).toBe(true);
 		expect(content.onMessage.listenerCount).toBe(0);

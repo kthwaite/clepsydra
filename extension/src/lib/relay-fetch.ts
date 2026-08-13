@@ -21,6 +21,7 @@ const MAX_RELAY_RESOURCE_BYTES = 0xffff_ffff;
 export interface RelayFetchRequest {
 	url: string;
 	headers?: Record<string, string>;
+	deadlineMs: number;
 }
 
 export interface RelayMetadata {
@@ -137,7 +138,12 @@ function isRelayFetchRequest(message: unknown): message is RelayFetchRequest {
 		message.url.trim().length > 0 &&
 		(!("headers" in message) ||
 			message.headers === undefined ||
-			isStringRecord(message.headers))
+			isStringRecord(message.headers)) &&
+		"deadlineMs" in message &&
+		typeof message.deadlineMs === "number" &&
+		Number.isSafeInteger(message.deadlineMs) &&
+		message.deadlineMs >= 0 &&
+		message.deadlineMs <= Date.now() + SNAPSHOT_NETWORK_TIMEOUT_MS
 	);
 }
 
@@ -200,22 +206,60 @@ function isRelayAbort(message: unknown): message is RelayAbort {
 	);
 }
 
+function disconnectPort(port: RelayPort): void {
+	try {
+		port.disconnect();
+	} catch {
+		// The peer already closed the port.
+	}
+}
+
 /** Content-script side: try the page, fall back to one worker port per resource. */
 export function createRelayFetch(
 	connect?: RelayConnect,
 ): (url: string, options?: FetchOptions) => Promise<SingleFileResponse> {
 	return async function relayFetch(url, options = {}) {
-		try {
-			const direct = await globalThis.fetch(url, {
-				cache: "force-cache",
-				headers: options.headers,
-				referrerPolicy: "strict-origin-when-cross-origin",
+		const deadlineMs = Date.now() + SNAPSHOT_NETWORK_TIMEOUT_MS;
+		const controller = new AbortController();
+		const timeoutError = new Error(
+			`Relay fetch timed out after ${SNAPSHOT_NETWORK_TIMEOUT_MS} ms`,
+		);
+		let timedOut = false;
+		const timeout = setTimeout(() => {
+			timedOut = true;
+			controller.abort();
+		}, SNAPSHOT_NETWORK_TIMEOUT_MS);
+		const deadline = new Promise<never>((_resolve, reject) => {
+			controller.signal.addEventListener("abort", () => reject(timeoutError), {
+				once: true,
 			});
+		});
+
+		try {
+			const direct = await Promise.race([
+				globalThis.fetch(url, {
+					cache: "force-cache",
+					headers: options.headers,
+					referrerPolicy: "strict-origin-when-cross-origin",
+					signal: controller.signal,
+				}),
+				deadline,
+			]);
 			if (direct.ok) {
+				clearTimeout(timeout);
 				return direct as unknown as SingleFileResponse;
 			}
 		} catch {
+			if (timedOut) {
+				clearTimeout(timeout);
+				throw timeoutError;
+			}
 			// CORS, mixed content, or a dead host. The relay may still manage it.
+		}
+
+		if (timedOut || Date.now() >= deadlineMs) {
+			clearTimeout(timeout);
+			throw timeoutError;
 		}
 
 		const port = connect
@@ -224,179 +268,190 @@ export function createRelayFetch(
 					name: RELAY_PORT_NAME,
 				});
 
-		return await new Promise<SingleFileResponse>((resolve, reject) => {
-			let metadata: RelayMetadata | undefined;
-			let body: Uint8Array | undefined;
-			let receivedBytes = 0;
-			let settled = false;
+		return await Promise.race([
+			new Promise<SingleFileResponse>((resolve, reject) => {
+				let metadata: RelayMetadata | undefined;
+				let body: Uint8Array | undefined;
+				let receivedBytes = 0;
+				let settled = false;
 
-			const cleanup = (): void => {
-				port.onMessage.removeListener(onMessage);
-				port.onDisconnect.removeListener(onDisconnect);
-			};
+				const cleanup = (): void => {
+					clearTimeout(timeout);
+					port.onMessage.removeListener(onMessage);
+					port.onDisconnect.removeListener(onDisconnect);
+				};
 
-			const disconnect = (): void => {
-				try {
-					port.disconnect();
-				} catch {
-					// A concurrent worker disconnect already closed the port.
-				}
-			};
-
-			const fail = (error: Error, notifyWorker: boolean): void => {
-				if (settled) return;
-				settled = true;
-				body = undefined;
-				if (notifyWorker) {
+				const disconnect = (): void => {
 					try {
-						port.postMessage({
-							type: "abort",
-							error: error.message,
-						} satisfies RelayAbort);
+						port.disconnect();
 					} catch {
-						// The disconnect itself may be the failure.
+						// A concurrent worker disconnect already closed the port.
 					}
-				}
-				cleanup();
-				disconnect();
-				reject(error);
-			};
+				};
 
-			const pull = (): void => {
+				const fail = (error: Error, notifyWorker: boolean): void => {
+					if (settled) return;
+					settled = true;
+					body = undefined;
+					if (notifyWorker) {
+						try {
+							port.postMessage({
+								type: "abort",
+								error: error.message,
+							} satisfies RelayAbort);
+						} catch {
+							// The disconnect itself may be the failure.
+						}
+					}
+					cleanup();
+					disconnect();
+					reject(error);
+				};
+
+				const pull = (): void => {
+					try {
+						port.postMessage({ type: "pull" } satisfies RelayPull);
+					} catch {
+						fail(
+							new Error(`Relay fetch disconnected before completion: ${url}`),
+							false,
+						);
+					}
+				};
+
+				const onMessage = (message: unknown): void => {
+					if (settled) return;
+
+					try {
+						if (isRelayAbort(message)) {
+							fail(new Error(message.error), false);
+							return;
+						}
+
+						const type =
+							typeof message === "object" &&
+							message !== null &&
+							"type" in message
+								? message.type
+								: undefined;
+						if (type === "abort") {
+							fail(new Error("Relay fetch received an invalid abort"), true);
+							return;
+						}
+
+						if (!metadata) {
+							if (!isRelayMetadata(message)) {
+								const reason =
+									type === "metadata"
+										? "Relay fetch received invalid metadata"
+										: type === "chunk"
+											? "Relay fetch received a chunk before metadata"
+											: "Relay fetch received an unexpected message";
+								fail(new Error(reason), true);
+								return;
+							}
+							metadata = message;
+							body = new Uint8Array(message.byteLength);
+							pull();
+							return;
+						}
+
+						if (type === "metadata") {
+							fail(new Error("Relay fetch received invalid metadata"), true);
+							return;
+						}
+						if (!isRelayChunk(message)) {
+							fail(
+								new Error(
+									type === "chunk"
+										? "Relay fetch received an invalid chunk"
+										: "Relay fetch received an unexpected message",
+								),
+								true,
+							);
+							return;
+						}
+
+						let chunk: Uint8Array;
+						try {
+							chunk = decodeBase64(message.base64);
+						} catch (error) {
+							fail(
+								new Error(
+									`Relay fetch could not decode a chunk: ${errorMessage(error)}`,
+								),
+								true,
+							);
+							return;
+						}
+						if (
+							chunk.byteLength > RELAY_CHUNK_BYTES ||
+							receivedBytes + chunk.byteLength > metadata.byteLength
+						) {
+							fail(new Error("Relay fetch received an invalid chunk"), true);
+							return;
+						}
+						body?.set(chunk, receivedBytes);
+						receivedBytes += chunk.byteLength;
+						pull();
+					} catch (error) {
+						fail(
+							new Error(
+								`Relay fetch could not process a port message: ${errorMessage(error)}`,
+							),
+							true,
+						);
+					}
+				};
+
+				const onDisconnect = (): void => {
+					if (settled) return;
+					cleanup();
+					if (!metadata || !body || receivedBytes !== metadata.byteLength) {
+						settled = true;
+						body = undefined;
+						reject(
+							new Error(`Relay fetch disconnected before completion: ${url}`),
+						);
+						return;
+					}
+
+					settled = true;
+					const completedMetadata = metadata;
+					// `body` is allocated above, so its backing store cannot be shared.
+					const completedBody = body.buffer as ArrayBuffer;
+					body = undefined;
+					resolve({
+						status: completedMetadata.status,
+						url: completedMetadata.url,
+						headers: {
+							get: (name: string) =>
+								completedMetadata.headers[name.toLowerCase()] ?? null,
+						},
+						arrayBuffer: async () => completedBody,
+					});
+				};
+
+				port.onMessage.addListener(onMessage);
+				port.onDisconnect.addListener(onDisconnect);
 				try {
-					port.postMessage({ type: "pull" } satisfies RelayPull);
+					port.postMessage({
+						url,
+						headers: options.headers,
+						deadlineMs,
+					} satisfies RelayFetchRequest);
 				} catch {
 					fail(
 						new Error(`Relay fetch disconnected before completion: ${url}`),
 						false,
 					);
 				}
-			};
-
-			const onMessage = (message: unknown): void => {
-				if (settled) return;
-
-				try {
-					if (isRelayAbort(message)) {
-						fail(new Error(message.error), false);
-						return;
-					}
-
-					const type =
-						typeof message === "object" && message !== null && "type" in message
-							? message.type
-							: undefined;
-					if (type === "abort") {
-						fail(new Error("Relay fetch received an invalid abort"), true);
-						return;
-					}
-
-					if (!metadata) {
-						if (!isRelayMetadata(message)) {
-							const reason =
-								type === "metadata"
-									? "Relay fetch received invalid metadata"
-									: type === "chunk"
-										? "Relay fetch received a chunk before metadata"
-										: "Relay fetch received an unexpected message";
-							fail(new Error(reason), true);
-							return;
-						}
-						metadata = message;
-						body = new Uint8Array(message.byteLength);
-						pull();
-						return;
-					}
-
-					if (type === "metadata") {
-						fail(new Error("Relay fetch received invalid metadata"), true);
-						return;
-					}
-					if (!isRelayChunk(message)) {
-						fail(
-							new Error(
-								type === "chunk"
-									? "Relay fetch received an invalid chunk"
-									: "Relay fetch received an unexpected message",
-							),
-							true,
-						);
-						return;
-					}
-
-					let chunk: Uint8Array;
-					try {
-						chunk = decodeBase64(message.base64);
-					} catch (error) {
-						fail(
-							new Error(
-								`Relay fetch could not decode a chunk: ${errorMessage(error)}`,
-							),
-							true,
-						);
-						return;
-					}
-					if (
-						chunk.byteLength > RELAY_CHUNK_BYTES ||
-						receivedBytes + chunk.byteLength > metadata.byteLength
-					) {
-						fail(new Error("Relay fetch received an invalid chunk"), true);
-						return;
-					}
-					body?.set(chunk, receivedBytes);
-					receivedBytes += chunk.byteLength;
-					pull();
-				} catch (error) {
-					fail(
-						new Error(
-							`Relay fetch could not process a port message: ${errorMessage(error)}`,
-						),
-						true,
-					);
-				}
-			};
-
-			const onDisconnect = (): void => {
-				if (settled) return;
-				cleanup();
-				if (!metadata || !body || receivedBytes !== metadata.byteLength) {
-					settled = true;
-					body = undefined;
-					reject(
-						new Error(`Relay fetch disconnected before completion: ${url}`),
-					);
-					return;
-				}
-
-				settled = true;
-				const completedMetadata = metadata;
-				// `body` is allocated above, so its backing store cannot be shared.
-				const completedBody = body.buffer as ArrayBuffer;
-				body = undefined;
-				resolve({
-					status: completedMetadata.status,
-					url: completedMetadata.url,
-					headers: {
-						get: (name: string) =>
-							completedMetadata.headers[name.toLowerCase()] ?? null,
-					},
-					arrayBuffer: async () => completedBody,
-				});
-			};
-
-			port.onMessage.addListener(onMessage);
-			port.onDisconnect.addListener(onDisconnect);
-			try {
-				port.postMessage({
-					url,
-					headers: options.headers,
-				} satisfies RelayFetchRequest);
-			} catch {
-				fail(
-					new Error(`Relay fetch disconnected before completion: ${url}`),
-					false,
-				);
-			}
+			}),
+			deadline,
+		]).catch((error: unknown) => {
+			clearTimeout(timeout);
+			if (timedOut) disconnectPort(port);
+			throw error;
 		});
 	};
 }
@@ -517,13 +572,14 @@ export function handleRelayFetchPort(
 					return;
 				}
 				requestReceived = true;
+				const remainingMs = Math.max(0, message.deadlineMs - Date.now());
 				timeout = setTimeout(() => {
 					reportError(
 						new Error(
 							`Relay fetch timed out after ${SNAPSHOT_NETWORK_TIMEOUT_MS} ms`,
 						),
 					);
-				}, SNAPSHOT_NETWORK_TIMEOUT_MS);
+				}, remainingMs);
 				void fetchResource(message);
 				return;
 			}
