@@ -135,7 +135,10 @@ export function useBacklinks(path: string) {
     "get",
     "/api/vault/index/backlinks/{path}",
     { params: { path: { path } } },
-    { enabled: !!path },
+    // Opt out of the global throwOnError: a transient failure must surface as
+    // error state rather than throw into FolioBoundary (same policy as
+    // useOutlinks).
+    { enabled: !!path, throwOnError: false },
   );
 }
 

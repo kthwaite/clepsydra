@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { renderHook, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import { Component, type ErrorInfo, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchClient } from "#/api/client";
 import { todayJournalPath } from "#/lib/journal";
@@ -69,6 +69,57 @@ describe("useJournalToday", () => {
       wrapper: wrapper(),
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+
+  it("settles in error state instead of throwing through the folio boundary", async () => {
+    vi.spyOn(fetchClient, "GET").mockResolvedValue({
+      data: undefined,
+      error: { error: "boom", status: 500 },
+      response: new Response(null, { status: 500 }),
+    } as never);
+
+    class TestErrorBoundary extends Component<
+      { children: ReactNode },
+      { error: Error | null }
+    > {
+      state = { error: null as Error | null };
+
+      static getDerivedStateFromError(error: Error) {
+        return { error };
+      }
+
+      componentDidCatch(_error: Error, _info: ErrorInfo) {}
+
+      render() {
+        if (this.state.error) return <p>Folio crashed.</p>;
+        return this.props.children;
+      }
+    }
+
+    function JournalTodayProbe() {
+      const journalToday = useJournalToday();
+      if (journalToday.isError) return <p role="alert">Journal unavailable.</p>;
+      return <p>{journalToday.status}</p>;
+    }
+
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, throwOnError: true },
+      },
+    });
+
+    render(
+      <QueryClientProvider client={client}>
+        <TestErrorBoundary>
+          <JournalTodayProbe />
+        </TestErrorBoundary>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Journal unavailable.",
+    );
+    expect(screen.queryByText("Folio crashed.")).not.toBeInTheDocument();
   });
 });
 

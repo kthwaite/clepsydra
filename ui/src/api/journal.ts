@@ -20,6 +20,9 @@ export function useJournalToday(enabled = true) {
   return useQuery<JournalTodayResponse | null>({
     queryKey: queryKeys.journal.today,
     enabled,
+    // Opt out of the global throwOnError: a transient failure must surface as
+    // error state rather than throw into FolioBoundary.
+    throwOnError: false,
     queryFn: async () => {
       const { data, error, response } = await fetchClient.GET(
         "/api/vault/journal/today",
