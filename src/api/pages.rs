@@ -20,6 +20,7 @@ use crate::api::events::SyncNotification;
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::canonical::CanonicalName;
 use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
+use crate::vault::kind::{Kind, resolve};
 use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
@@ -1411,6 +1412,18 @@ pub(super) fn validate_project_slug(p: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_kind_assignment(
+    path: &VaultPath,
+    declared_kind: Option<Kind>,
+    requested_kind: Kind,
+) -> Result<(), ApiError> {
+    let (current_kind, _) = resolve(path.as_str(), declared_kind);
+    if current_kind == Kind::Journal && requested_kind != Kind::Journal {
+        return Err(ApiError::bad_request("journal kind cannot be changed"));
+    }
+    Ok(())
+}
+
 #[utoipa::path(
     post,
     path = "/pages-assign/{path}",
@@ -1448,8 +1461,9 @@ pub async fn assign_page(
     }
 
     if let Some(token) = &body.kind {
-        let parsed = crate::vault::kind::Kind::from_token(token)
+        let parsed = Kind::from_token(token)
             .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))?;
+        validate_kind_assignment(&vp, page.meta.kind, parsed)?;
         page.meta.kind = Some(parsed);
     }
     let project = if body.clear_project {
@@ -1548,7 +1562,7 @@ fn plan_bulk_assignment(
         .kind
         .as_deref()
         .map(|token| {
-            crate::vault::kind::Kind::from_token(token)
+            Kind::from_token(token)
                 .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))
         })
         .transpose()?;
@@ -1574,6 +1588,7 @@ fn plan_bulk_assignment(
         let (expected, mut meta, page_body) =
             read_assignment_page_once(state, &path, indexed_paths)?;
         if let Some(kind) = assigned_kind {
+            validate_kind_assignment(&path, meta.kind, kind)?;
             meta.kind = Some(kind);
         }
         if body.clear_project {
