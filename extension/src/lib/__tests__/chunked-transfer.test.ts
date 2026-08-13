@@ -1,23 +1,43 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { ChunkAssembler, splitIntoChunks } from "#/lib/chunked-transfer";
+import {
+	CAPTURE_CHUNK,
+	CHUNK_SIZE,
+	type CaptureChunk,
+	ChunkAssembler,
+	sendCaptureTransfer,
+	splitIntoChunks,
+} from "#/lib/chunked-transfer";
+
+function chunk(overrides: Partial<CaptureChunk> = {}): CaptureChunk {
+	return {
+		type: CAPTURE_CHUNK,
+		captureId: "cap-1",
+		index: 0,
+		total: 2,
+		text: "ab",
+		...overrides,
+	};
+}
 
 describe("splitIntoChunks", () => {
 	it("splits a payload into sized pieces that concatenate back", () => {
-		const chunks = splitIntoChunks("cap-1", "abcdefg", 3);
+		const chunks = Array.from(splitIntoChunks("cap-1", "abcdefg", 3));
 
-		expect(chunks.map((c) => c.text)).toEqual(["abc", "def", "g"]);
-		expect(chunks.map((c) => c.index)).toEqual([0, 1, 2]);
-		expect(chunks.every((c) => c.total === 3)).toBe(true);
+		expect(chunks.map((part) => part.text)).toEqual(["abc", "def", "g"]);
+		expect(chunks.map((part) => part.index)).toEqual([0, 1, 2]);
+		expect(chunks.every((part) => part.total === 3)).toBe(true);
 	});
 
 	it("emits a single chunk for a short payload", () => {
-		expect(splitIntoChunks("cap-1", "abc", 1024)).toHaveLength(1);
+		const chunks = Array.from(splitIntoChunks("cap-1", "abc", 1024));
+
+		expect(chunks).toHaveLength(1);
 	});
 
 	it("emits one empty chunk for an empty payload", () => {
 		// A zero-chunk capture would never complete on the receiving side.
-		const chunks = splitIntoChunks("cap-1", "", 1024);
+		const chunks = Array.from(splitIntoChunks("cap-1", "", 1024));
 
 		expect(chunks).toEqual([
 			{
@@ -29,12 +49,30 @@ describe("splitIntoChunks", () => {
 			},
 		]);
 	});
+
+	it("returns a lazy iterable and slices only as iteration advances", () => {
+		const slice = vi.spyOn(String.prototype, "slice");
+
+		try {
+			const chunks = splitIntoChunks("cap-1", "abcdefg", 3);
+			expect(Array.isArray(chunks)).toBe(false);
+			expect(slice).not.toHaveBeenCalled();
+
+			const iterator = chunks[Symbol.iterator]();
+			expect(iterator.next().value?.text).toBe("abc");
+			expect(slice).toHaveBeenCalledTimes(1);
+			expect(iterator.next().value?.text).toBe("def");
+			expect(slice).toHaveBeenCalledTimes(2);
+		} finally {
+			slice.mockRestore();
+		}
+	});
 });
 
 describe("ChunkAssembler", () => {
 	it("returns null until the last chunk arrives", () => {
 		const assembler = new ChunkAssembler();
-		const chunks = splitIntoChunks("cap-1", "abcdefg", 3);
+		const chunks = Array.from(splitIntoChunks("cap-1", "abcdefg", 3));
 
 		expect(assembler.accept(chunks[0])).toBeNull();
 		expect(assembler.accept(chunks[1])).toBeNull();
@@ -52,42 +90,139 @@ describe("ChunkAssembler", () => {
 
 	it("keeps concurrent captures apart", () => {
 		const assembler = new ChunkAssembler();
-		const one = splitIntoChunks("cap-1", "aaaa", 2);
-		const two = splitIntoChunks("cap-2", "bbbb", 2);
+		const [oneA, oneB] = splitIntoChunks("cap-1", "aaaa", 2);
+		const [twoA, twoB] = splitIntoChunks("cap-2", "bbbb", 2);
 
-		expect(assembler.accept(one[0])).toBeNull();
-		expect(assembler.accept(two[0])).toBeNull();
-		expect(assembler.accept(one[1])).toBe("aaaa");
-		expect(assembler.accept(two[1])).toBe("bbbb");
+		expect(assembler.accept(oneA)).toBeNull();
+		expect(assembler.accept(twoA)).toBeNull();
+		expect(assembler.accept(oneB)).toBe("aaaa");
+		expect(assembler.accept(twoB)).toBe("bbbb");
 	});
 
 	it("releases its buffer once a capture completes", () => {
 		const assembler = new ChunkAssembler();
-		const chunks = splitIntoChunks("cap-1", "abcd", 2);
+		const [first, second] = splitIntoChunks("cap-1", "abcd", 2);
 
-		assembler.accept(chunks[0]);
-		assembler.accept(chunks[1]);
+		assembler.accept(first);
+		assembler.accept(second);
 
 		expect(assembler.pending).toBe(0);
 	});
 
-	it("ignores a duplicate chunk instead of double-counting it", () => {
+	it.each([
+		["zero total", chunk({ total: 0 }), "total"],
+		["negative total", chunk({ total: -1 }), "total"],
+		["fractional total", chunk({ total: 1.5 }), "total"],
+		["negative index", chunk({ index: -1 }), "index"],
+		["index equal to total", chunk({ index: 2 }), "index"],
+		["fractional index", chunk({ index: 0.5 }), "index"],
+	] as const)("rejects an invalid %s", (_case, invalid, detail) => {
 		const assembler = new ChunkAssembler();
-		const chunks = splitIntoChunks("cap-1", "abcd", 2);
 
-		assembler.accept(chunks[0]);
-		expect(assembler.accept(chunks[0])).toBeNull();
-		expect(assembler.accept(chunks[1])).toBe("abcd");
+		expect(() => assembler.accept(invalid)).toThrow(detail);
+		expect(assembler.pending).toBe(0);
+	});
+
+	it("rejects chunks larger than the transport limit", () => {
+		const assembler = new ChunkAssembler();
+
+		expect(() =>
+			assembler.accept(chunk({ text: "x".repeat(CHUNK_SIZE + 1) })),
+		).toThrow("size");
+		expect(assembler.pending).toBe(0);
+	});
+
+	it("rejects a changed total and clears the capture", () => {
+		const assembler = new ChunkAssembler();
+		assembler.accept(chunk());
+
+		expect(() =>
+			assembler.accept(chunk({ index: 1, total: 3, text: "cd" })),
+		).toThrow("total");
+		expect(assembler.pending).toBe(0);
+	});
+
+	it("accepts an exact duplicate without double-counting it", () => {
+		const assembler = new ChunkAssembler();
+		const first = chunk();
+
+		assembler.accept(first);
+		expect(assembler.accept(first)).toBeNull();
+		expect(assembler.accept(chunk({ index: 1, text: "cd" }))).toBe("abcd");
+	});
+
+	it("rejects a conflicting duplicate and clears the capture", () => {
+		const assembler = new ChunkAssembler();
+		assembler.accept(chunk());
+
+		expect(() => assembler.accept(chunk({ text: "changed" }))).toThrow(
+			"duplicate",
+		);
+		expect(assembler.pending).toBe(0);
+	});
+
+	it("clears existing state when a later chunk is malformed", () => {
+		const assembler = new ChunkAssembler();
+		assembler.accept(chunk());
+
+		expect(() => assembler.accept(chunk({ index: -1 }))).toThrow("index");
+		expect(assembler.pending).toBe(0);
 	});
 
 	it("forgets an abandoned capture", () => {
 		// A tab closed mid-transfer would otherwise pin megabytes in a worker
 		// that is meant to be able to suspend.
 		const assembler = new ChunkAssembler();
-		assembler.accept(splitIntoChunks("cap-1", "abcd", 2)[0]);
+		const [first] = splitIntoChunks("cap-1", "abcd", 2);
+		assembler.accept(first);
 
 		assembler.forget("cap-1");
 
 		expect(assembler.pending).toBe(0);
+	});
+});
+
+describe("sendCaptureTransfer", () => {
+	it("attempts an abort when metadata delivery fails", async () => {
+		const failure = new Error("metadata channel closed");
+		const send = vi
+			.fn<(message: unknown) => Promise<unknown>>()
+			.mockRejectedValueOnce(failure)
+			.mockResolvedValueOnce(undefined);
+		const metadata = { type: "capture_meta", captureId: "cap-1" };
+
+		await expect(
+			sendCaptureTransfer("cap-1", metadata, "snapshot", send),
+		).rejects.toBe(failure);
+		expect(send).toHaveBeenNthCalledWith(1, metadata);
+		expect(send).toHaveBeenNthCalledWith(2, {
+			type: "capture_abort",
+			captureId: "cap-1",
+			error: "Error: metadata channel closed",
+		});
+	});
+
+	it("attempts an abort when chunk delivery fails without masking the failure", async () => {
+		const failure = new Error("chunk channel closed");
+		const abortFailure = new Error("abort channel closed");
+		const send = vi
+			.fn<(message: unknown) => Promise<unknown>>()
+			.mockResolvedValueOnce(undefined)
+			.mockRejectedValueOnce(failure)
+			.mockRejectedValueOnce(abortFailure);
+
+		await expect(
+			sendCaptureTransfer(
+				"cap-1",
+				{ type: "capture_meta", captureId: "cap-1" },
+				"snapshot",
+				send,
+			),
+		).rejects.toBe(failure);
+		expect(send).toHaveBeenLastCalledWith({
+			type: "capture_abort",
+			captureId: "cap-1",
+			error: "Error: chunk channel closed",
+		});
 	});
 });

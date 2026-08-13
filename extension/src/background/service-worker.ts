@@ -3,13 +3,19 @@ import { ArchiveConflictError, ClepsydraClient } from "#/lib/api-client";
 import { type CapturePhase, badgeFor, isTerminal } from "#/lib/badge";
 import { CaptureQueue } from "#/lib/capture-queue";
 import {
+	CAPTURE_ABORT,
 	CAPTURE_CHUNK,
+	type CaptureAbort,
 	type CaptureChunk,
-	ChunkAssembler,
 } from "#/lib/chunked-transfer";
 import { sha256String } from "#/lib/hasher";
 import { executeCaptureScript } from "#/lib/inject-capture";
 import { describeInjectionFailure } from "#/lib/injection";
+import {
+	CAPTURE_INACTIVITY_TIMEOUT_MS,
+	type CompletedTransfer,
+	PendingTransferCoordinator,
+} from "#/lib/pending-transfer";
 import {
 	RELAY_FETCH,
 	type RelayFetchRequest,
@@ -235,17 +241,21 @@ const captureQueue = new CaptureQueue({
 	},
 });
 
-/** Snapshot chunks in flight, keyed by capture id. */
-const assembler = new ChunkAssembler();
-/** Metadata that arrived ahead of its chunks. */
-const pendingMetadata = new Map<
-	string,
-	{ metadata: CaptureMetadata; tabId?: number }
->();
+/** Snapshot chunks, metadata, and inactivity timers in flight. */
+const pendingTransfers = new PendingTransferCoordinator<CaptureMetadata>({
+	onExpire: (captureId, tabId) => {
+		reportPhase(tabId, "error");
+		showNotification(
+			"Capture Failed",
+			`Snapshot transfer ${captureId} expired after ${CAPTURE_INACTIVITY_TIMEOUT_MS / 1_000} seconds of inactivity.`,
+		);
+	},
+});
 
 type WorkerMessage =
 	| CaptureMetaMessage
 	| CaptureChunk
+	| CaptureAbort
 	| RelayFetchRequest
 	| { type: "capture_error"; error: string }
 	| { type: "capture_status"; tabId: number };
@@ -271,21 +281,31 @@ chrome.runtime.onMessage.addListener(
 
 		if (message.type === "capture_meta") {
 			reportPhase(tabId, "processing");
-			pendingMetadata.set(message.captureId, {
-				metadata: message.metadata,
+			pendingTransfers.acceptMetadata(
+				message.captureId,
+				message.metadata,
 				tabId,
-			});
+			);
 			return undefined;
 		}
 
 		if (message.type === CAPTURE_CHUNK) {
-			const snapshotHtml = assembler.accept(message);
-			if (snapshotHtml === null) return undefined;
-
-			const pending = pendingMetadata.get(message.captureId);
-			pendingMetadata.delete(message.captureId);
-			if (!pending) {
+			let completed: CompletedTransfer<CaptureMetadata> | null;
+			try {
+				completed = pendingTransfers.acceptChunk(message, tabId);
+			} catch (error) {
 				reportPhase(tabId, "error");
+				showNotification(
+					"Capture Failed",
+					`Malformed snapshot transfer: ${String(error)}`,
+				);
+				return undefined;
+			}
+			if (completed === null) return undefined;
+
+			const { metadata, snapshotHtml, tabId: completedTabId } = completed;
+			if (!metadata) {
+				reportPhase(completedTabId, "error");
 				showNotification(
 					"Archive Failed",
 					"Capture metadata was lost in transit.",
@@ -293,24 +313,27 @@ chrome.runtime.onMessage.addListener(
 				return undefined;
 			}
 
-			const started = captureQueue.run(pending.metadata.url, () =>
-				processCapture(pending.metadata, snapshotHtml, pending.tabId).catch(
-					(err) => {
-						reportPhase(pending.tabId, "error");
-						showNotification("Archive Failed", String(err));
-					},
-				),
+			const started = captureQueue.run(metadata.url, () =>
+				processCapture(metadata, snapshotHtml, completedTabId).catch((err) => {
+					reportPhase(completedTabId, "error");
+					showNotification("Archive Failed", String(err));
+				}),
 			);
 			if (!started) {
 				// Without this the tab keeps the non-clearing `processing` badge
 				// forever: the capture that owns the terminal phase is running for
 				// a different tab.
-				reportPhase(pending.tabId, "duplicate");
+				reportPhase(completedTabId, "duplicate");
 				showNotification(
 					"Capture In Progress",
-					`${pending.metadata.title} is already being archived.`,
+					`${metadata.title} is already being archived.`,
 				);
 			}
+			return undefined;
+		}
+
+		if (message.type === CAPTURE_ABORT) {
+			pendingTransfers.abort(message.captureId);
 			return undefined;
 		}
 
@@ -324,11 +347,7 @@ chrome.runtime.onMessage.addListener(
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
 	phases.delete(tabId);
-	for (const [captureId, pending] of pendingMetadata) {
-		if (pending.tabId !== tabId) continue;
-		pendingMetadata.delete(captureId);
-		assembler.forget(captureId);
-	}
+	pendingTransfers.removeTab(tabId);
 });
 
 /** Inject the capture script, reporting why if the page forbids it. */

@@ -11,7 +11,7 @@
 
 import { Readability } from "@mozilla/readability";
 import { snapshotRejection } from "#/lib/capture-hygiene";
-import { splitIntoChunks } from "#/lib/chunked-transfer";
+import { sendCaptureTransfer } from "#/lib/chunked-transfer";
 import { createRelayFetch } from "#/lib/relay-fetch";
 import { captureSnapshot } from "#/lib/singlefile";
 import { DEFAULT_SETTINGS } from "#/lib/types";
@@ -106,12 +106,7 @@ async function capture(): Promise<void> {
 		},
 	};
 
-	await send(message);
-	// Sequential, so the worker's idle timer is reset by each one and a slow
-	// upload cannot outrun its own transport.
-	for (const chunk of splitIntoChunks(captureId, snapshotHtml)) {
-		await send(chunk);
-	}
+	await sendCaptureTransfer(captureId, message, snapshotHtml, send);
 }
 
 capture().catch((err) => {
