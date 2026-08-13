@@ -444,36 +444,39 @@ fn unsupported_snapshot_response(content_type: &str) -> Response {
 fn snapshot_response_with(
     snapshot: LoadedSnapshot,
     config: &ArchiveViewConfig,
-    transform_body: impl FnOnce(Vec<u8>) -> Vec<u8>,
-) -> Response {
+    transform_body: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, ApiError>,
+) -> Result<Response, ApiError> {
     match snapshot {
         LoadedSnapshot::Metadata(metadata) => {
             if !framable_content_type(&metadata.content_type) {
-                return without_body(unsupported_snapshot_response(&metadata.content_type));
+                return Ok(without_body(unsupported_snapshot_response(
+                    &metadata.content_type,
+                )));
             }
-            (StatusCode::OK, sandbox_headers(config), Body::empty()).into_response()
+            Ok((StatusCode::OK, sandbox_headers(config), Body::empty()).into_response())
         }
         LoadedSnapshot::Body { data, content_type } => {
             if !framable_content_type(&content_type) {
-                return unsupported_snapshot_response(&content_type);
+                return Ok(unsupported_snapshot_response(&content_type));
             }
-            (
+            Ok((
                 StatusCode::OK,
                 sandbox_headers(config),
-                transform_body(data),
+                transform_body(data)?,
             )
-                .into_response()
+                .into_response())
         }
     }
 }
 
-fn prepare_snapshot_body(data: Vec<u8>) -> Vec<u8> {
+fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
     let data = rewrite_cas_urls(data);
-    match std::str::from_utf8(&data) {
-        Ok(html) => archive_snapshot::neutralize_navigation(html).into_bytes(),
-        Err(_) => archive_snapshot::neutralize_navigation(&String::from_utf8_lossy(&data))
-            .into_bytes(),
-    }
+    let html = std::str::from_utf8(&data)
+        .map(std::borrow::Cow::Borrowed)
+        .unwrap_or_else(|_| String::from_utf8_lossy(&data));
+    archive_snapshot::neutralize_navigation(&html)
+        .map(String::into_bytes)
+        .map_err(|error| ApiError::internal(format!("archived snapshot is corrupt: {error}")))
 }
 
 
@@ -780,11 +783,7 @@ pub async fn view_snapshot(
         let cas = state.cas.lock();
         load_snapshot(&*cas, &hash, SnapshotMethod::Get)?
     };
-    Ok(snapshot_response_with(
-        snapshot,
-        &config,
-        prepare_snapshot_body,
-    ))
+    snapshot_response_with(snapshot, &config, prepare_snapshot_body)
 }
 
 pub async fn head_snapshot(
@@ -797,7 +796,8 @@ pub async fn head_snapshot(
         load_snapshot(&*cas, &hash, SnapshotMethod::Head)
     };
     without_body(match snapshot {
-        Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body),
+        Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body)
+            .unwrap_or_else(IntoResponse::into_response),
         Err(error) => error.into_response(),
     })
 }
@@ -1212,9 +1212,10 @@ mod tests {
             &ArchiveViewConfig::default(),
             |data| {
                 rewrites.set(rewrites.get() + 1);
-                data
+                Ok(data)
             },
-        );
+        )
+        .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(rewrites.get(), 0);
     }

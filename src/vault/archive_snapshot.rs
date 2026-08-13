@@ -319,59 +319,89 @@ fn navigable_href(namespace: &Namespace, element: &str) -> bool {
         && matches!(element, "a" | "area")
 }
 
-fn neutralize_dom_node(node: &Handle) {
-    if let NodeData::Element {
-        name,
-        attrs,
-        template_contents,
-        ..
-    } = &node.data
-    {
-        let element = name.local.as_ref();
-        attrs.borrow_mut().retain(|attribute| {
-            let attribute_name = attribute.name.local.as_ref();
-            !(((navigable_href(&name.ns, element) || matches!(element, "a" | "area") || element.ends_with(":a"))
-                && (attribute_name == "href" || attribute_name.ends_with(":href")))
-                || (name.ns == html5ever::ns!(html)
-                    && element == "base"
-                    && matches!(attribute_name, "href" | "target"))
-                || (name.ns == html5ever::ns!(html)
-                    && element == "form"
-                    && attribute_name == "action")
-                || (name.ns == html5ever::ns!(html) && attribute_name == "formaction"))
-        });
+const DEFAULT_MAX_DOM_NODES: usize = 500_000;
+const DEFAULT_MAX_DOM_DEPTH: usize = 256;
 
-        if let Some(template) = template_contents.borrow().as_ref() {
-            neutralize_dom_children(template);
-        }
-    }
-    neutralize_dom_children(node);
+fn should_remove_node(node: &Handle) -> bool {
+    matches!(
+        &node.data,
+        NodeData::Element { name, attrs, .. }
+            if (name.ns == html5ever::ns!(html)
+                && name.local.as_ref() == "meta"
+                && attrs.borrow().iter().any(|attribute| {
+                    attribute.name.local.as_ref() == "http-equiv"
+                        && attribute.value.trim().eq_ignore_ascii_case("refresh")
+                }))
+                || (name.ns == html5ever::ns!(svg)
+                    && matches!(
+                        name.local.as_ref(),
+                        "animate" | "animateColor" | "animateMotion" | "animateTransform" | "set"
+                    ))
+    )
 }
 
-fn neutralize_dom_children(parent: &Handle) {
-    {
-        let mut children = parent.children.borrow_mut();
-        children.retain(|child| {
-            let is_refresh = matches!(
-                &child.data,
-                NodeData::Element { name, attrs, .. }
-                    if name.ns == html5ever::ns!(html)
-                        && name.local.as_ref() == "meta"
-                        && attrs.borrow().iter().any(|attribute| {
-                            attribute.name.local.as_ref() == "http-equiv"
-                                && attribute.value.trim().eq_ignore_ascii_case("refresh")
-                        })
-            );
-            if is_refresh {
-                child.parent.set(None);
+fn neutralize_dom(root: &Handle, max_nodes: usize, max_depth: usize) -> Result<(), String> {
+    let mut stack = vec![(root.clone(), 0usize)];
+    let mut visited = 0usize;
+    while let Some((node, depth)) = stack.pop() {
+        visited = visited.saturating_add(1);
+        if visited > max_nodes {
+            return Err(format!(
+                "archived snapshot DOM node limit exceeded: maximum {max_nodes}"
+            ));
+        }
+        if depth > max_depth {
+            return Err(format!(
+                "archived snapshot DOM depth limit exceeded: maximum {max_depth}"
+            ));
+        }
+
+        if let NodeData::Element {
+            name,
+            attrs,
+            template_contents,
+            ..
+        } = &node.data
+        {
+            let element = name.local.as_ref();
+            attrs.borrow_mut().retain(|attribute| {
+                let attribute_name = attribute.name.local.as_ref();
+                !(((navigable_href(&name.ns, element)
+                    || matches!(element, "a" | "area")
+                    || element.ends_with(":a"))
+                    && (attribute_name == "href" || attribute_name.ends_with(":href")))
+                    || (name.ns == html5ever::ns!(html)
+                        && element == "base"
+                        && matches!(attribute_name, "href" | "target"))
+                    || (name.ns == html5ever::ns!(html)
+                        && element == "form"
+                        && attribute_name == "action")
+                    || (name.ns == html5ever::ns!(html) && attribute_name == "formaction"))
+            });
+
+            if let Some(template) = template_contents.borrow().as_ref() {
+                stack.push((template.clone(), depth + 1));
             }
-            !is_refresh
-        });
+        }
+
+        {
+            let mut children = node.children.borrow_mut();
+            stack.extend(
+                children
+                    .iter()
+                    .rev()
+                    .map(|child| (child.clone(), depth + 1)),
+            );
+            children.retain(|child| {
+                let remove = should_remove_node(child);
+                if remove {
+                    child.parent.set(None);
+                }
+                !remove
+            });
+        }
     }
-    let children = parent.children.borrow().clone();
-    for child in children {
-        neutralize_dom_node(&child);
-    }
+    Ok(())
 }
 
 struct ArchiveDom(Handle);
@@ -429,7 +459,15 @@ impl Serialize for ArchiveDom {
     }
 }
 
-pub fn neutralize_navigation(html: &str) -> String {
+pub fn neutralize_navigation(html: &str) -> Result<String, String> {
+    neutralize_navigation_with_limits(html, DEFAULT_MAX_DOM_NODES, DEFAULT_MAX_DOM_DEPTH)
+}
+
+fn neutralize_navigation_with_limits(
+    html: &str,
+    max_nodes: usize,
+    max_depth: usize,
+) -> Result<String, String> {
     let parse_options = ParseOpts {
         tree_builder: TreeBuilderOpts {
             scripting_enabled: false,
@@ -438,7 +476,7 @@ pub fn neutralize_navigation(html: &str) -> String {
         ..Default::default()
     };
     let dom = parse_document(RcDom::default(), parse_options).one(html);
-    neutralize_dom_children(&dom.document);
+    neutralize_dom(&dom.document, max_nodes, max_depth)?;
 
     let mut output = Vec::with_capacity(html.len());
     serialize(
@@ -449,17 +487,14 @@ pub fn neutralize_navigation(html: &str) -> String {
             ..Default::default()
         },
     )
-    .expect("serializing HTML into memory cannot fail");
-    String::from_utf8(output).expect("html5ever serialization is UTF-8")
+    .map_err(|error| format!("archived snapshot serialization failed: {error}"))?;
+    String::from_utf8(output)
+        .map_err(|error| format!("archived snapshot serialization was not UTF-8: {error}"))
 }
-
-
 /// Absolute original URL → the hash of the blob that replaced it.
 ///
-/// Call this on the **deconstructed** snapshot: it pairs the
-/// `data-sf-original-src` SingleFile recorded with the `cas:` reference
-/// `deconstruct` left in that element's `src`. That pairing is the only link
-/// between the markdown — which still carries live URLs — and the blobs.
+/// Call this on the **deconstructed** snapshot: it pairs each original source
+/// URL with the `cas:` reference left in the same element.
 pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     let mut cursor = 0;
@@ -1347,7 +1382,7 @@ mod tests {
             r#"<img src=cas:sha256:image alt=kept>"#
         );
 
-        let neutralized = neutralize_navigation(html);
+        let neutralized = neutralize_navigation(html).unwrap();
         assert!(!neutralized.contains("meta.example"), "{neutralized}");
         assert!(
             neutralized.contains("cas:sha256:image"),
@@ -1430,7 +1465,7 @@ mod tests {
             r#"<img src=cas:sha256:image alt=kept>"#
         );
 
-        let neutralized = neutralize_navigation(html);
+        let neutralized = neutralize_navigation(html).unwrap();
         assert!(
             neutralized.contains(r#".example::after { content: "<a href=https://live.example>"; }"#)
         );
@@ -1459,7 +1494,7 @@ mod tests {
         ]
         .join("");
 
-        let neutralized = neutralize_navigation(&malformed);
+        let neutralized = neutralize_navigation(&malformed).unwrap();
         for forbidden in [
             "solidus-meta.example",
             "solidus-anchor.example",
@@ -1489,7 +1524,7 @@ mod tests {
             r#"<meta http-equiv=refresh content="0;url=https://refresh.example"></noscript>"#
         );
 
-        let neutralized = neutralize_navigation(html);
+        let neutralized = neutralize_navigation(html).unwrap();
         assert!(!neutralized.contains("noscript.example"), "{neutralized}");
         assert!(!neutralized.contains("refresh.example"), "{neutralized}");
         assert!(neutralized.contains("Fallback text"), "{neutralized}");
@@ -1506,7 +1541,7 @@ mod tests {
             r#"<img src=cas:sha256:template alt="Template image"></template>"#
         );
 
-        let neutralized = neutralize_navigation(html);
+        let neutralized = neutralize_navigation(html).unwrap();
         assert!(!neutralized.contains("template.example"), "{neutralized}");
         assert!(!neutralized.contains("refresh.example"), "{neutralized}");
         assert!(neutralized.contains("<template"), "{neutralized}");
@@ -1514,6 +1549,50 @@ mod tests {
         assert!(neutralized.contains("Template text"), "{neutralized}");
         assert!(neutralized.contains("cas:sha256:template"), "{neutralized}");
         assert!(neutralized.contains("alt=\"Template image\""), "{neutralized}");
+    }
+
+    #[test]
+    fn neutralization_removes_svg_smil_navigation_synthesis() {
+        let html = concat!(
+            r#"<svg><a id=target><text>Visible SVG link</text>"#,
+            r#"<animate attributeName=href values="https://one.example;https://two.example">"#,
+            r#"<set attributeName="xlink:href" to="https://set.example">"#,
+            r#"<animateTransform attributeName=href from="https://from.example" to="https://to.example">"#,
+            r#"</a><image href=cas:sha256:image></svg>"#
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        for forbidden in [
+            "<animate",
+            "<set",
+            "one.example",
+            "two.example",
+            "set.example",
+            "from.example",
+            "to.example",
+        ] {
+            assert!(!neutralized.contains(forbidden), "{neutralized}");
+        }
+        assert!(neutralized.contains("Visible SVG link"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:image"), "{neutralized}");
+    }
+
+    #[test]
+    fn neutralization_enforces_dom_node_and_depth_limits() {
+        assert!(
+            neutralize_navigation_with_limits("<div><span>ok</span></div>", 16, 8).is_ok()
+        );
+
+        let node_error =
+            neutralize_navigation_with_limits("<div><span>one</span><b>two</b></div>", 6, 8)
+                .unwrap_err();
+        assert!(node_error.contains("node limit"), "{node_error}");
+
+
+        let depth_error =
+            neutralize_navigation_with_limits("<div><span><b>deep</b></span></div>", 16, 4)
+                .unwrap_err();
+        assert!(depth_error.contains("depth limit"), "{depth_error}");
     }
 
     // -------------------------------------------------------------------
