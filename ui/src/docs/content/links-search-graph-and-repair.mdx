@@ -22,7 +22,7 @@ step and its evidence.
 
 ## Write and resolve wikilinks
 
-Write `[[Target]]` for a wikilink or `[[Target|display text]]` to show an alias without changing the target. In Folio, type `[[` to search indexed pages by title, canonical name, alias, or path. The chooser keeps **Create** available beside partial matches and suppresses it only when the query exactly matches a normalized title, canonical name, alias, or path. Select a page result to insert it, or select **Create** to use the existing create-from-wikilink flow.
+Write `[[Target]]` for a wikilink or `[[Target|display text]]` to show an alias without changing the target. In Folio, type `[[` to search indexed pages by title, canonical name, or path. The chooser keeps **Create** available beside partial matches and suppresses it only when the query exactly matches a normalized title, canonical name, alias, or path. Aliases participate only in this exact Create-suppression check; they are not visible search fields. An exact alias-only query can therefore show **A page already uses this name** with no result rows: the chooser prevents duplicate creation without adding alias substring search. Select a page result to insert it, or select **Create** to use the existing create-from-wikilink flow.
 
 A muted, dashed link is dangling. Hover or focus it to see the missing-page state. In an editable Folio, choose **Create page** or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-click the link to create or reuse a canonical blank note and open it. Read-only Folios explain the missing target but never create it.
 

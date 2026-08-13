@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PageSummary } from "#/api/types";
 import {
   normalizeWikilinkIdentity,
@@ -25,6 +25,19 @@ describe("normalizeWikilinkIdentity", () => {
 
   it("normalizes canonically equivalent Unicode", () => {
     expect(normalizeWikilinkIdentity("Cafe\u0301 Notes")).toBe("café notes");
+  });
+
+  it("uses locale-independent casing for Turkish-I-sensitive text", () => {
+    const localeLowercase = vi
+      .spyOn(String.prototype, "toLocaleLowerCase")
+      .mockReturnValue("\u{131}dea");
+
+    try {
+      expect(normalizeWikilinkIdentity("IDEA")).toBe("idea");
+      expect(localeLowercase).not.toHaveBeenCalled();
+    } finally {
+      localeLowercase.mockRestore();
+    }
   });
 });
 

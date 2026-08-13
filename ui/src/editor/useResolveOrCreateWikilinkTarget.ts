@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { fetchClient } from "#/api/client";
 import { useCreatePage } from "#/api/pages";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
@@ -17,20 +17,22 @@ function titleKey(value: string): string {
   return value.normalize("NFC").toLowerCase();
 }
 
+const inFlightRequests = new Map<
+  string,
+  Promise<ResolvedWikilinkTarget>
+>();
+
 export function useResolveOrCreateWikilinkTarget(): ResolveOrCreateWikilinkTarget {
   const { refetchAndLookup } = useWikilinkResolution();
   const createPage = useCreatePage();
   const createMutateAsync = createPage.mutateAsync;
-  const inFlightRef = useRef(
-    new Map<string, Promise<ResolvedWikilinkTarget>>(),
-  );
 
   const resolveOrCreate = useCallback(
     (targetRaw: string) => {
       const title = targetRaw.trim();
       if (!title) return Promise.reject(new Error("Page title is required"));
       const key = titleKey(title);
-      const existingRequest = inFlightRef.current.get(key);
+      const existingRequest = inFlightRequests.get(key);
       if (existingRequest) return existingRequest;
 
       const request = (async () => {
@@ -61,9 +63,9 @@ export function useResolveOrCreateWikilinkTarget(): ResolveOrCreateWikilinkTarge
           body: { title },
         });
         return { path, title };
-      })().finally(() => inFlightRef.current.delete(key));
+      })().finally(() => inFlightRequests.delete(key));
 
-      inFlightRef.current.set(key, request);
+      inFlightRequests.set(key, request);
       return request;
     },
     [createMutateAsync, refetchAndLookup],

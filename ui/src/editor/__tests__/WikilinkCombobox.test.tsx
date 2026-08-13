@@ -105,6 +105,9 @@ describe("WikilinkCombobox", () => {
 
     expect(screen.queryByText("Design Notes")).toBeNull();
     expect(screen.queryByText(/Create/)).toBeNull();
+    expect(
+      screen.getByText("A page already uses this name"),
+    ).toBeInTheDocument();
   });
 
   it.each([

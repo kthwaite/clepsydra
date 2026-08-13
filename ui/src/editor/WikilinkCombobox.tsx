@@ -71,7 +71,13 @@ export function WikilinkCombobox({
           ? `page:${suggestion.page.id}`
           : `create:${suggestion.title}`
       }
-      emptyMessage={trimmedQuery ? undefined : "Type a page name"}
+      emptyMessage={
+        !trimmedQuery
+          ? "Type a page name"
+          : exactIdentityExists && suggestions.length === 0
+            ? "A page already uses this name"
+            : undefined
+      }
       renderItem={(suggestion) => {
         if (suggestion.kind === "page") {
           const { page } = suggestion;

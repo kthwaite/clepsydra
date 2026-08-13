@@ -5,7 +5,7 @@ export function normalizeWikilinkIdentity(value: string): string {
     .normalize("NFC")
     .replace(/\s+/gu, " ")
     .trim()
-    .toLocaleLowerCase()
+    .toLowerCase()
     .replace(/\.md$/u, "");
 }
 
