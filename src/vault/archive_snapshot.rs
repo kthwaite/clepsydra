@@ -109,16 +109,47 @@ fn content_type_of(media_type: &str) -> String {
     }
 }
 
-/// Find the end of an HTML tag, ignoring `>` inside quoted attribute values.
+/// Find the end of an HTML tag with browser-like attribute-state recovery.
+///
+/// Quotes begin values only from the before-attribute-value state. In tag
+/// names, attribute names, and unquoted values they are parse-error characters,
+/// so malformed quotes cannot swallow a following tag.
 fn html_tag_end(html: &str, start: usize) -> Option<usize> {
-    let mut quote = None;
+    #[derive(Clone, Copy)]
+    enum State {
+        AttributeName,
+        AfterAttributeName,
+        BeforeAttributeValue,
+        SingleQuotedValue,
+        DoubleQuotedValue,
+        UnquotedValue,
+    }
+
+    let mut state = State::AttributeName;
     for (offset, byte) in html.as_bytes()[start..].iter().copied().enumerate() {
-        match (quote, byte) {
-            (Some(active), current) if current == active => quote = None,
-            (None, b'\'' | b'"') => quote = Some(byte),
-            (None, b'>') => return Some(start + offset),
-            _ => {}
-        }
+        state = match (state, byte) {
+            (State::SingleQuotedValue, b'\'') | (State::DoubleQuotedValue, b'"') => {
+                State::AfterAttributeName
+            }
+            (State::SingleQuotedValue | State::DoubleQuotedValue, _) => state,
+            (_, b'>') => return Some(start + offset),
+            (State::BeforeAttributeValue, byte) if byte.is_ascii_whitespace() => state,
+            (State::BeforeAttributeValue, b'\'') => State::SingleQuotedValue,
+            (State::BeforeAttributeValue, b'"') => State::DoubleQuotedValue,
+            (State::BeforeAttributeValue, _) => State::UnquotedValue,
+            (State::AttributeName, b'=') | (State::AfterAttributeName, b'=') => {
+                State::BeforeAttributeValue
+            }
+            (State::AttributeName, byte) if byte.is_ascii_whitespace() => {
+                State::AfterAttributeName
+            }
+            (State::AfterAttributeName, byte) if byte.is_ascii_whitespace() => state,
+            (State::AfterAttributeName, _) => State::AttributeName,
+            (State::UnquotedValue, byte) if byte.is_ascii_whitespace() => {
+                State::AttributeName
+            }
+            _ => state,
+        };
     }
     None
 }
@@ -388,6 +419,33 @@ fn is_meta_refresh(element: &str, attributes: &[HtmlAttribute<'_>]) -> bool {
         })
 }
 
+/// Find where an HTML comment closes according to the common browser recovery
+/// states used by captured markup.
+///
+/// Besides `-->`, browsers abruptly close `<!-->` and `<!--->`, and accept
+/// `--!>` as a parse-error close. Other `>` bytes remain comment content.
+fn html_comment_end(html: &str, after_open: usize) -> Option<usize> {
+    let bytes = html.as_bytes();
+    if bytes.get(after_open) == Some(&b'>') {
+        return Some(after_open + 1);
+    }
+    let mut cursor = after_open;
+    while cursor < bytes.len() {
+        if bytes[cursor..].starts_with(b"-->") {
+            return Some(cursor + 3);
+        }
+        if bytes[cursor..].starts_with(b"--!>") {
+            return Some(cursor + 4);
+        }
+        if cursor == after_open && bytes[cursor..].starts_with(b"->") {
+            return Some(cursor + 2);
+        }
+        cursor += 1;
+    }
+    None
+}
+
+
 /// Remove document-navigation vectors while retaining captured presentation.
 ///
 /// This runs at the view boundary, so legacy snapshots receive the same
@@ -402,17 +460,12 @@ pub fn neutralize_navigation(html: &str) -> std::borrow::Cow<'_, str> {
         let open = cursor + open_offset;
         if html[open..].starts_with("<!--") {
             let after_open = open + 4;
-            if html.as_bytes().get(after_open) == Some(&b'>') {
-                cursor = after_open + 1;
-                continue;
-            }
-            let Some(comment_end) = html[after_open..].find("-->") else {
+            let Some(comment_end) = html_comment_end(html, after_open) else {
                 break;
             };
-            cursor = after_open + comment_end + 3;
+            cursor = comment_end;
             continue;
         }
-
         let Some(close) = html_tag_end(html, open + 1) else {
             break;
         };
@@ -591,11 +644,20 @@ fn match_entity(s: &str) -> Option<(char, usize)> {
         Some(hex) => (true, hex),
         None => (false, digits_start),
     };
-    let end = digits_part.find(';')?;
-    let digits = &digits_part[..end];
-    if digits.is_empty() {
+    let digits_len = digits_part
+        .bytes()
+        .take_while(|byte| {
+            if is_hex {
+                byte.is_ascii_hexdigit()
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+        .count();
+    if digits_len == 0 {
         return None;
     }
+    let digits = &digits_part[..digits_len];
     let value = if is_hex {
         u32::from_str_radix(digits, 16).ok()?
     } else {
@@ -603,7 +665,8 @@ fn match_entity(s: &str) -> Option<(char, usize)> {
     };
     let ch = char::from_u32(value)?;
     let prefix_len = 2 + usize::from(is_hex);
-    Some((ch, prefix_len + digits.len() + 1))
+    let semicolon_len = usize::from(digits_part.as_bytes().get(digits_len) == Some(&b';'));
+    Some((ch, prefix_len + digits_len + semicolon_len))
 }
 
 /// Point every archived image in `markdown` at its blob.
@@ -1457,6 +1520,56 @@ mod tests {
             neutralize_navigation(html),
             concat!("<!-->", "<a>Visible</a>", r#"<img src=cas:sha256:image>"#)
         );
+    }
+
+    #[test]
+    fn neutralization_resumes_after_abrupt_comment_endings() {
+        for comment in ["<!--->", "<!-- --!>", "<!-- content --!>"] {
+            let html = format!(
+                r#"{comment}<meta http-equiv=refresh content="0;url=https://meta.example"><img src=cas:sha256:image>"#
+            );
+
+            assert_eq!(
+                neutralize_navigation(&html),
+                format!("{comment}<img src=cas:sha256:image>"),
+                "did not resume after {comment:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quote_parse_errors_in_attribute_names_do_not_swallow_following_tags() {
+        for malformed in ["<div a'>", r#"<div a">"#] {
+            let html = format!(
+                r#"{malformed}<meta http-equiv=refresh content="0;url=https://meta.example"><img src=cas:sha256:image>"#
+            );
+
+            assert_eq!(
+                neutralize_navigation(&html),
+                format!("{malformed}<img src=cas:sha256:image>"),
+                "quote in attribute name swallowed following markup for {malformed:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn semicolonless_numeric_references_are_decoded_for_security_attributes() {
+        for http_equiv in [
+            "&#114;efresh",
+            "&#114efresh",
+            "&#x72;efresh",
+            "&#x72&#101;&#102&#114;&#101&#115;&#104",
+        ] {
+            let html = format!(
+                r#"<meta http-equiv="{http_equiv}" content="0;url=https://meta.example"><img src=cas:sha256:image>"#
+            );
+
+            assert_eq!(
+                neutralize_navigation(&html),
+                "<img src=cas:sha256:image>",
+                "numeric reference {http_equiv:?} bypassed refresh detection"
+            );
+        }
     }
 
     // -------------------------------------------------------------------
