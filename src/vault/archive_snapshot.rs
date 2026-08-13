@@ -424,7 +424,6 @@ fn match_entity(s: &str) -> Option<(char, usize)> {
 /// An image whose URL is not in the map is left exactly as it was. Dropping it
 /// would be a silent lie about what the archive holds; leaving it is at least an
 /// honest reference to the live web.
-
 pub fn rewrite_markdown_images(
     markdown: &str,
     map: &BTreeMap<String, String>,
