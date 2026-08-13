@@ -496,7 +496,12 @@ pub async fn list_pages(
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t
                                    WHERE t.page_id = p.id AND t.computed = 1), ''),
-                        COALESCE(json_extract(p.meta_json, '$.aliases'), '[]')
+                        CASE
+                            WHEN json_type(p.meta_json, '$.aliases') IS NULL THEN '[]'
+                            WHEN json_type(p.meta_json, '$.aliases') = 'array'
+                                THEN json_extract(p.meta_json, '$.aliases')
+                            ELSE '{}'
+                        END
                    FROM pages p",
             );
             page_sql.push_str(&where_sql);

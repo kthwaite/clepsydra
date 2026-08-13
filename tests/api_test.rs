@@ -1358,26 +1358,72 @@ async fn invalid_path_in_request_returns_bad_request() {
 
 #[tokio::test]
 async fn list_pages() {
-    let (server, _tmp) = setup_server();
-
-    // Create two pages
-    server
-        .post("/api/vault/pages/alpha.md")
-        .json(&serde_json::json!({ "title": "Alpha" }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
-
-    server
-        .post("/api/vault/pages/beta.md")
-        .json(&serde_json::json!({ "title": "Beta" }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
+    let (server, _tmp) = setup_server_with_files(&[
+        (
+            "alpha.md",
+            "---\ntitle: Alpha\naliases:\n  - Design\n  - Blueprint\n---\nAlpha body.\n",
+        ),
+        ("beta.md", "---\ntitle: Beta\n---\nBeta body.\n"),
+    ]);
 
     let res = server.get("/api/vault/pages").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let items = body["items"].as_array().unwrap();
     assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["path"], "alpha.md");
+    assert_eq!(
+        items[0]["aliases"],
+        serde_json::json!(["Design", "Blueprint"])
+    );
+    assert_eq!(items[1]["path"], "beta.md");
+    assert_eq!(items[1]["aliases"], serde_json::json!([]));
+}
+
+#[tokio::test]
+async fn list_pages_and_folders_reject_non_array_alias_metadata() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("topic")).unwrap();
+            fs::write(root.join("topic/malformed.md"), "# Malformed\n").unwrap();
+        })
+        .build();
+
+    for (case, meta_json) in [
+        (
+            "scalar string containing array syntax",
+            r#"{"aliases":"[\"Masquerade\"]"}"#,
+        ),
+        ("explicit null", r#"{"aliases":null}"#),
+    ] {
+        let meta_json = meta_json.to_string();
+        fixture
+            .state
+            .index
+            .with_index(move |index, _vault| {
+                index.connection().execute(
+                    "UPDATE pages SET meta_json = ?1 WHERE path = 'topic/malformed.md'",
+                    [meta_json],
+                )
+            })
+            .await
+            .unwrap()
+            .unwrap();
+
+        let list_response = fixture.server.get("/api/vault/pages").await;
+        assert_eq!(
+            list_response.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "list pages must reject {case}"
+        );
+
+        let folder_response = fixture.server.get("/api/vault/folders/topic").await;
+        assert_eq!(
+            folder_response.status_code(),
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "folder pages must reject {case}"
+        );
+    }
 }
 
 #[tokio::test]

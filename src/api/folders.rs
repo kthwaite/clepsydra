@@ -272,7 +272,12 @@ fn filesystem_authoritative_page_summaries(
                         COALESCE((SELECT group_concat(t.tag, char(31))
                                     FROM tags t
                                    WHERE t.page_id = p.id AND t.computed = 1), ''),
-                        COALESCE(json_extract(p.meta_json, '$.aliases'), '[]')
+                        CASE
+                            WHEN json_type(p.meta_json, '$.aliases') IS NULL THEN '[]'
+                            WHEN json_type(p.meta_json, '$.aliases') = 'array'
+                                THEN json_extract(p.meta_json, '$.aliases')
+                            ELSE '{}'
+                        END
                    FROM pages p WHERE p.path = ?1",
                 params![vault_path.as_str()],
                 page_summary_from_row,
