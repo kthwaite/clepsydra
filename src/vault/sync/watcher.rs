@@ -70,6 +70,7 @@ impl VaultWatcher {
         debounce: Duration,
         tx: mpsc::UnboundedSender<ChangeEvent>,
     ) -> Result<Self, notify::Error> {
+        tracing::info!("Starting vault watcher on {:?}", root);
         let root_clone = root.clone();
         let root_canonical = std::fs::canonicalize(&root).unwrap_or(root.clone());
         let mut debouncer = new_debouncer(

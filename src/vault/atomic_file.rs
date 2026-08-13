@@ -246,6 +246,11 @@ fn restore_claim(path: &Path, claim: &Path) -> Result<(), ConditionalPublication
 /// is then synced so the new directory entry is durable. Windows cannot provide
 /// the same guarantee through the filesystem APIs used by this crate.
 pub fn atomic_create(path: &Path, content: &[u8]) -> Result<(), AtomicPublicationError> {
+    tracing::debug!(
+        "atomic_create: publishing {} bytes to {}",
+        content.len(),
+        path.display()
+    );
     atomic_write_with(
         path,
         content,
@@ -269,7 +274,11 @@ pub fn atomic_create(path: &Path, content: &[u8]) -> Result<(), AtomicPublicatio
 #[cfg(unix)]
 pub fn atomic_create_owner_only(path: &Path, content: &[u8]) -> Result<(), AtomicPublicationError> {
     use std::os::unix::fs::PermissionsExt;
-
+    tracing::debug!(
+        "atomic_create_owner_only: publishing {} bytes to {}",
+        content.len(),
+        path.display()
+    );
     atomic_write_with(
         path,
         content,
@@ -297,6 +306,11 @@ pub fn atomic_create_owner_only(path: &Path, content: &[u8]) -> Result<(), Atomi
 /// standard filesystem permissions API is platform-specific and is not part
 /// of the vault filesystem abstraction.
 pub fn atomic_replace(path: &Path, content: &[u8]) -> Result<(), AtomicPublicationError> {
+    tracing::debug!(
+        "atomic_replace: publishing {} bytes to {}",
+        content.len(),
+        path.display()
+    );
     let permissions = fs::metadata(path)
         .map_err(AtomicPublicationError::NotPublished)?
         .permissions();

@@ -18,9 +18,9 @@ use super::pages::page_detail;
 use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
+use crate::vault::kind::Kind;
 use crate::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
-use crate::vault::kind::Kind;
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 use crate::vault::reference_issues::{
@@ -101,8 +101,11 @@ pub struct AmbiguousName {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TagCount {
+    /// The tag string, e.g. "tag" or "tag/subtag".
     tag: String,
+    /// The number of pages that have this tag.
     count: i64,
+    /// The number of pages that have this tag and are computed (i.e. not explicitly tagged).
     computed_count: i64,
 }
 
@@ -256,8 +259,13 @@ pub struct ReferenceIssuesResponse {
 #[derive(Debug, Clone, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ReferenceRepairActionDto {
-    Create { folder: String, body: Option<String> },
-    Replace { candidate_page_id: String },
+    Create {
+        folder: String,
+        body: Option<String>,
+    },
+    Replace {
+        candidate_page_id: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema)]
@@ -401,8 +409,7 @@ impl ReferenceIssuesQuery {
             .transpose()?;
         let page_kind = take_single_query_value(self.page_kind, "page_kind")?
             .map(|value| {
-                Kind::from_token(&value)
-                    .ok_or_else(|| ApiError::bad_request("invalid page_kind"))
+                Kind::from_token(&value).ok_or_else(|| ApiError::bad_request("invalid page_kind"))
             })
             .transpose()?;
         let actionable = take_single_query_value(self.actionable, "actionable")?
@@ -609,9 +616,7 @@ pub async fn reference_repair_preview(
 ) -> Result<Json<ReferenceRepairPreviewResponse>, ApiError> {
     let prepared = state
         .index
-        .with_index(move |index, vault| {
-            prepare_reference_repair(vault, index, request.into())
-        })
+        .with_index(move |index, vault| prepare_reference_repair(vault, index, request.into()))
         .await
         .map_err(|_| ApiError::internal("reference repair could not be prepared"))?
         .map_err(reference_repair_error)?;
@@ -644,9 +649,7 @@ pub async fn reference_repair_apply(
     let exclusion = state.mutation_coordinator.exclude_mutations().await;
     let prepared = state
         .index
-        .with_index(move |index, vault| {
-            prepare_reference_repair(vault, index, request.into())
-        })
+        .with_index(move |index, vault| prepare_reference_repair(vault, index, request.into()))
         .await
         .map_err(|_| ApiError::internal("reference repair could not be prepared"))?
         .map_err(reference_repair_error)?;

@@ -17,6 +17,7 @@ impl PostDeleteHook for ArchiveDeleteHook {
         _page_id: &Uuid,
         meta: &PageMeta,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        tracing::debug!("ArchiveDeleteHook: page deleted, checking for archive metadata");
         // Check if this page has archive metadata
         let archive = match meta.extra.get("archive") {
             Some(toml::Value::Table(m)) => m,

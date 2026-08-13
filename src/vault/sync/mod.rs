@@ -42,11 +42,16 @@ impl SyncEngine {
         vault: &Vault,
         index: &mut VaultIndex,
     ) -> Result<SyncStats, super::index::IndexError> {
+        tracing::info!(
+            "SyncEngine: processing {} events against index",
+            events.len(),
+        );
         let mut stats = SyncStats::default();
 
         for event in events {
             match event {
                 ChangeEvent::Upsert(vp) => {
+                    tracing::debug!("SyncEngine: upserting page {:?}", vp);
                     if vault.is_excluded(vp) {
                         continue;
                     }
@@ -93,6 +98,7 @@ impl SyncEngine {
                     }
                 }
                 ChangeEvent::Remove(vp) => {
+                    tracing::debug!("SyncEngine: removing page {:?}", vp);
                     // Collect reverse deps BEFORE removing
                     let deps = index.reverse_deps(vp)?;
 
@@ -111,6 +117,9 @@ impl SyncEngine {
                     }
                 }
                 ChangeEvent::BaseChanged => {
+                    tracing::info!(
+                        "SyncEngine: base registry changed, reloading and rebuilding index"
+                    );
                     // A full build reloads the registry and runs the linkable
                     // epoch check; when the effective set changed, that build
                     // re-derives every page's frontmatter links. When it did
@@ -123,6 +132,7 @@ impl SyncEngine {
                 }
             }
         }
+        tracing::info!("SyncEngine: finished processing events: {:#?}", stats);
 
         Ok(stats)
     }

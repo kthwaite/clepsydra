@@ -6,7 +6,7 @@ use crate::vault::import_doi::generate_cite_key;
 ///
 /// ASCII spaces and hyphens are accepted as display separators. Both source
 /// formats must carry a valid check digit; ISBN-10 values are converted with
-/// the standard `978` book prefix.
+/// the standard `97(8|9)` book prefix.
 pub fn normalize_isbn(input: &str) -> Result<String, String> {
     let compact: String = input
         .chars()
@@ -36,7 +36,7 @@ fn normalize_isbn_10(compact: &str) -> Result<String, String> {
     if !checksum.is_multiple_of(11) {
         return Err("ISBN-10 check digit is invalid".to_string());
     }
-
+    // this is probably safe given how recently 979 was introduced
     let stem = format!("978{}", &compact[..9]);
     Ok(format!("{stem}{}", isbn_13_check_digit(&stem)))
 }
