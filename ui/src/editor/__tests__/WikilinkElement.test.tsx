@@ -229,6 +229,67 @@ describe("WikilinkElement dangling", () => {
     expect(resolveOrCreateMock).not.toHaveBeenCalled();
     expect(openTabMock).not.toHaveBeenCalled();
   });
+
+  it("routes Enter through editable activation and contains the keyboard event", () => {
+    const bubbledKeyDown = vi.fn();
+    document.addEventListener("keydown", bubbledKeyDown);
+    renderWikilink("Unwritten Page");
+
+    try {
+      const defaultAllowed = fireEvent.keyDown(screen.getByRole("link"), {
+        key: "Enter",
+      });
+
+      expect(defaultAllowed).toBe(false);
+      expect(bubbledKeyDown).not.toHaveBeenCalled();
+      expect(beginMock).toHaveBeenCalledWith([0, 1], "end", "after");
+      expect(resolveOrCreateMock).not.toHaveBeenCalled();
+      expect(openTabMock).not.toHaveBeenCalled();
+    } finally {
+      document.removeEventListener("keydown", bubbledKeyDown);
+    }
+  });
+
+  it.each([
+    ["Cmd", { metaKey: true }],
+    ["Ctrl", { ctrlKey: true }],
+  ])(
+    "creates and opens an unresolved target on %s+Enter",
+    async (_modifier, eventInit) => {
+      renderWikilink("New Topic");
+
+      const defaultAllowed = fireEvent.keyDown(screen.getByRole("link"), {
+        key: "Enter",
+        ...eventInit,
+      });
+
+      expect(defaultAllowed).toBe(false);
+      await waitFor(() =>
+        expect(openTabMock).toHaveBeenCalledWith("page", "notes/new-topic.md"),
+      );
+      expect(resolveOrCreateMock).toHaveBeenCalledOnce();
+      expect(resolveOrCreateMock).toHaveBeenCalledWith("New Topic");
+      expect(beginMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("contains read-only Enter without editing, creation, navigation, or Slate mutation", () => {
+    const { editor } = renderWikilink("Unwritten Page", undefined, {
+      readOnly: true,
+    });
+    const originalDescendants = structuredClone(editor.children);
+    const link = screen.getByRole("link");
+
+    expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(false);
+    expect(
+      fireEvent.keyDown(link, { key: "Enter", metaKey: true }),
+    ).toBe(false);
+
+    expect(beginMock).not.toHaveBeenCalled();
+    expect(resolveOrCreateMock).not.toHaveBeenCalled();
+    expect(openTabMock).not.toHaveBeenCalled();
+    expect(editor.children).toEqual(originalDescendants);
+  });
 });
 
 describe("WikilinkElement editing and navigation", () => {

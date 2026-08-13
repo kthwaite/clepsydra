@@ -1,4 +1,9 @@
-import { type MouseEvent, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  type MouseEvent,
+  useRef,
+  useState,
+} from "react";
 import { Path } from "slate";
 import {
   ReactEditor,
@@ -112,7 +117,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     : "cl-mono align-baseline text-[0.95em] text-ink hover:text-accent";
   const bracketClassName = dangling ? "text-ink-mute" : "text-accent";
 
-  const handleClick = (event: MouseEvent) => {
+  const handleActivation = (event: MouseEvent | KeyboardEvent) => {
     event.preventDefault();
     event.stopPropagation();
     const modifierActivation = event.metaKey || event.ctrlKey;
@@ -130,6 +135,10 @@ export function WikilinkElement({ attributes, children, element }: Props) {
     }
     closeTransientPreview();
     controller.begin(path, "end", "after");
+  };
+
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key === "Enter") handleActivation(event);
   };
 
   const linkContent = (
@@ -150,7 +159,7 @@ export function WikilinkElement({ attributes, children, element }: Props) {
         {resolved ? (
           <CLink
             path={resolved}
-            onClick={handleClick}
+            onClick={handleActivation}
             className={linkClassName}
           >
             {linkContent}
@@ -166,7 +175,8 @@ export function WikilinkElement({ attributes, children, element }: Props) {
             <span
               role="link"
               tabIndex={0}
-              onClick={handleClick}
+              onClick={handleActivation}
+              onKeyDown={handleKeyDown}
               className={`cl-link relative cursor-pointer ${linkClassName}`}
             >
               {linkContent}
