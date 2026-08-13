@@ -1572,6 +1572,17 @@ fn plan_bulk_assignment(
         validate_project_slug(project).map_err(ApiError::bad_request)?;
     }
 
+    let mut pages = Vec::with_capacity(paths.len());
+    for path in paths {
+        let path = path.clone();
+        let (expected, meta, page_body) =
+            read_assignment_page_once(state, &path, indexed_paths)?;
+        if let Some(kind) = assigned_kind {
+            validate_kind_assignment(&path, meta.kind, kind)?;
+        }
+        pages.push((path, expected, meta, page_body));
+    }
+
     let source_paths = paths
         .iter()
         .map(|path| path.as_str().to_string())
@@ -1583,12 +1594,8 @@ fn plan_bulk_assignment(
     let mut removed = BTreeSet::new();
     let mut moved_pages = Vec::new();
 
-    for path in paths {
-        let path = path.clone();
-        let (expected, mut meta, page_body) =
-            read_assignment_page_once(state, &path, indexed_paths)?;
+    for (path, expected, mut meta, page_body) in pages {
         if let Some(kind) = assigned_kind {
-            validate_kind_assignment(&path, meta.kind, kind)?;
             meta.kind = Some(kind);
         }
         if body.clear_project {
