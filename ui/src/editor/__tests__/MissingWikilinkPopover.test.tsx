@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
@@ -42,6 +42,25 @@ function renderPopover({
   };
 }
 
+function rect(
+  left: number,
+  top: number,
+  width: number,
+  height: number,
+): DOMRect {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect;
+}
+
 describe("MissingWikilinkPopover", () => {
   it("opens an accessible missing-page dialog when the trigger receives focus", async () => {
     const user = userEvent.setup();
@@ -55,6 +74,37 @@ describe("MissingWikilinkPopover", () => {
     expect(dialog).toHaveTextContent("Page does not exist.");
   });
 
+  it("composes the trigger's existing handler and ref with popover behavior", async () => {
+    const user = userEvent.setup();
+    const onFocus = vi.fn();
+    const triggerRef = vi.fn();
+    render(
+      <MissingWikilinkPopover
+        target="Unwritten Page"
+        readOnly={false}
+        creating={false}
+        error={null}
+        onCreate={async () => true}
+      >
+        <span
+          ref={triggerRef}
+          role="link"
+          tabIndex={0}
+          onFocus={onFocus}
+        >
+          Unwritten Page
+        </span>
+      </MissingWikilinkPopover>,
+    );
+
+    const trigger = screen.getByRole("link", { name: "Unwritten Page" });
+    await user.tab();
+
+    expect(onFocus).toHaveBeenCalledOnce();
+    expect(triggerRef).toHaveBeenCalledWith(trigger);
+    expect(screen.getByRole("dialog", { name: "Unwritten Page" })).toBeVisible();
+  });
+
   it("keeps the dialog open while focus moves from the trigger into its action", async () => {
     const user = userEvent.setup();
     renderPopover();
@@ -66,19 +116,41 @@ describe("MissingWikilinkPopover", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
-  it("keeps the dialog open during pointer transfer from trigger to surface", async () => {
+  it("keeps the dialog open through the pointer corridor and closes outside it", async () => {
     const { trigger } = renderPopover();
+    vi.spyOn(trigger, "getBoundingClientRect").mockReturnValue(
+      rect(100, 100, 100, 20),
+    );
 
-    fireEvent.mouseEnter(trigger, { clientX: 10, clientY: 10 });
-    const dialog = await screen.findByRole("dialog");
+    fireEvent.mouseEnter(trigger, { clientX: 150, clientY: 110 });
+    let dialog = await screen.findByRole("dialog");
+    vi.spyOn(dialog, "getBoundingClientRect").mockReturnValue(
+      rect(100, 44, 200, 50),
+    );
+
     fireEvent.mouseLeave(trigger, {
-      clientX: 12,
-      clientY: 12,
-      relatedTarget: dialog,
+      clientX: 150,
+      clientY: 100,
+      relatedTarget: document.body,
     });
-    fireEvent.mouseEnter(dialog, { clientX: 14, clientY: 14 });
+    fireEvent.mouseMove(document.body, { clientX: 150, clientY: 98 });
+    fireEvent.mouseMove(document.body, { clientX: 150, clientY: 96 });
+    fireEvent.mouseMove(dialog, { clientX: 150, clientY: 93 });
+    fireEvent.mouseEnter(dialog, { clientX: 150, clientY: 93 });
 
+    dialog = screen.getByRole("dialog");
     expect(dialog).toBeVisible();
+
+    fireEvent.mouseLeave(dialog, {
+      clientX: 150,
+      clientY: 44,
+      relatedTarget: document.body,
+    });
+    fireEvent.mouseMove(document.body, { clientX: 400, clientY: 44 });
+
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("shows the editable action and closes only after creation resolves true", async () => {
@@ -144,17 +216,35 @@ describe("MissingWikilinkPopover", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
   });
 
-  it("dismisses on Escape and restores focus to the link trigger", async () => {
+  it("dismisses on Escape, restores focus, and re-enables focus opening", async () => {
     const user = userEvent.setup();
-    const { trigger } = renderPopover();
+    const { trigger } = renderPopover({ withOutsideTarget: true });
 
     await user.tab();
     await user.tab();
     expect(screen.getByRole("button", { name: "Create page" })).toHaveFocus();
     await user.keyboard("{Escape}");
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
     expect(trigger).toHaveFocus();
+
+    await act(
+      () =>
+        new Promise<void>((resolve) => {
+          window.requestAnimationFrame(() => resolve());
+        }),
+    );
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Outside" })).toHaveFocus();
+    await user.tab({ shift: true });
+
+    expect(trigger).toHaveFocus();
+    expect(screen.getByRole("dialog", { name: "Unwritten Page" })).toBeVisible();
   });
 
   it("dismisses on outside pointer interaction", async () => {

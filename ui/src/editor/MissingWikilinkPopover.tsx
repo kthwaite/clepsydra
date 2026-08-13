@@ -16,14 +16,15 @@ import {
 import {
   Children,
   cloneElement,
+  type FocusEvent as ReactFocusEvent,
   type HTMLAttributes,
   type MutableRefObject,
   type ReactElement,
   type ReactNode,
   type Ref,
   useCallback,
-  useEffect,
   useId,
+  useRef,
   useState,
 } from "react";
 
@@ -49,16 +50,23 @@ export function MissingWikilinkPopover({
   children,
 }: MissingWikilinkPopoverProps) {
   const [open, setOpen] = useState(false);
-  const [suppressFocusOpen, setSuppressFocusOpen] = useState(false);
+  const suppressNextFocusOpenRef = useRef(false);
   const targetId = useId();
   const descriptionId = useId();
   const child = Children.only(children) as ReactElement<TriggerProps>;
   const childRef = child.props.ref;
 
+  function suppressRestoredFocusOpen() {
+    suppressNextFocusOpenRef.current = true;
+    window.requestAnimationFrame(() => {
+      suppressNextFocusOpenRef.current = false;
+    });
+  }
+
   const { refs, floatingStyles, context } = useFloating({
     open,
     onOpenChange(nextOpen) {
-      setSuppressFocusOpen(!nextOpen);
+      if (!nextOpen && open) suppressRestoredFocusOpen();
       setOpen(nextOpen);
     },
     placement: "top-start",
@@ -68,7 +76,7 @@ export function MissingWikilinkPopover({
   });
 
   const hover = useHover(context, { handleClose: safePolygon() });
-  const focus = useFocus(context, { enabled: !suppressFocusOpen });
+  const focus = useFocus(context);
   const dismiss = useDismiss(context);
   const role = useRole(context, { role: "dialog" });
   const { getReferenceProps, getFloatingProps } = useInteractions([
@@ -78,11 +86,7 @@ export function MissingWikilinkPopover({
     role,
   ]);
 
-  useEffect(() => {
-    if (open || !suppressFocusOpen) return;
-    const frame = window.requestAnimationFrame(() => setSuppressFocusOpen(false));
-    return () => window.cancelAnimationFrame(frame);
-  }, [open, suppressFocusOpen]);
+  const referenceProps = getReferenceProps(child.props);
 
   const setReference = useCallback(
     (node: HTMLElement | null) => {
@@ -99,8 +103,16 @@ export function MissingWikilinkPopover({
   return (
     <>
       {cloneElement(child, {
-        ...getReferenceProps(child.props),
+        ...referenceProps,
         ref: setReference,
+        onFocus(event: ReactFocusEvent<HTMLElement>) {
+          if (suppressNextFocusOpenRef.current) {
+            suppressNextFocusOpenRef.current = false;
+            child.props.onFocus?.(event);
+            return;
+          }
+          referenceProps.onFocus?.(event);
+        },
       })}
       {open ? (
         <FloatingPortal>
@@ -134,7 +146,7 @@ export function MissingWikilinkPopover({
                   className="cl-mono mt-3 cursor-pointer border border-ink bg-paper-2 px-2 py-1 text-[10px] text-ink hover:bg-paper-edge hover:text-accent disabled:cursor-not-allowed disabled:text-ink-mute"
                   onClick={async () => {
                     if (await onCreate()) {
-                      setSuppressFocusOpen(true);
+                      suppressRestoredFocusOpen();
                       setOpen(false);
                     }
                   }}
