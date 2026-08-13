@@ -40,39 +40,6 @@ function UtcClockText() {
   );
 }
 
-function UptimeText() {
-  const uptime = useUptime();
-  return (
-    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums opacity-70">
-      up {uptime}
-    </span>
-  );
-}
-
-function UtcClockText() {
-  const clock = formatClock(useClock(), true);
-  return (
-    <span className="flex-shrink-0 border-l border-bar-rule px-3 py-[2px] tabular-nums">
-      {clock} UTC
-    </span>
-  );
-}
-
-function useFolioCode(view: CodexView): string {
-  const { tabs, activeTabId } = useWorkspaceStore();
-  if (view === "atrium") return "ATRIUM";
-  if (view === "constellation") return "GRAPH";
-  if (view === "gazetteer") return "INDEX";
-  if (view === "tasking") return "TASKING";
-  if (view === "academic") return "ACADEMIC";
-  if (view === "bases") return "BASES";
-  if (view === "feeds") return "FEEDS";
-  if (view === "docs") return "DOC-001";
-  const active = tabs.find((t) => t.id === activeTabId);
-  if (!active?.path) return "—";
-  return shortFolio(active.path);
-}
-
 export function DesktopCodexFrame({
   bottomSlot,
   forceView,
@@ -80,8 +47,6 @@ export function DesktopCodexFrame({
   const { progress } = useReadingProgress();
   const navigate = useNavigate();
   const openSearch = useUiStore((s) => s.openSearch);
-  const openSettings = useUiStore((s) => s.openSettings);
-  const settingsOpen = useUiStore((s) => s.isSettingsOpen);
   const { toggle, resolvedTheme, diegetic } = useTheme();
   const dark = resolvedTheme === "dark";
   const activeTabId = useWorkspaceStore((s) => s.activeTabId);

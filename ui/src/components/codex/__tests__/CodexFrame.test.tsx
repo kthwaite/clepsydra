@@ -276,8 +276,8 @@ describe("CodexFrame destination integration", () => {
       ).getByRole("button", { name: /08.*DOCS/i });
       expect(docsButton).toHaveAttribute("aria-current", "page");
       expect(
-        screen.getByRole("button", { name: /08.*STATUS/i }),
-      ).toBeInTheDocument();
+        screen.queryByRole("button", { name: /08.*STATUS/i }),
+      ).not.toBeInTheDocument();
       expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
       expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
     },
@@ -335,8 +335,8 @@ describe("CodexFrame destination integration", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: /08.*STATUS/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /08.*STATUS/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE FEEDS.*VIEW FEEDS/)).toBeInTheDocument();
   });
@@ -595,7 +595,7 @@ describe("CodexFrame responsive shell", () => {
     expect(primary).toHaveClass("min-w-0", "overflow-x-auto");
     expect(feeds).toHaveClass("shrink-0");
     expect(feeds).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: /08.*status/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /⌘K/ })).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Switch to dark mode" }),
     ).toBeVisible();

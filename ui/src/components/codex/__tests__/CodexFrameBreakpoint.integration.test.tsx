@@ -292,11 +292,11 @@ describe("CodexFrame real breakpoint transitions", () => {
         screen.queryByRole("navigation", { name: "Mobile roots" }),
       ).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: /08.*status/i }));
+      await user.click(screen.getByRole("button", { name: /query/i }));
       await user.click(
         screen.getByRole("button", { name: "Switch to dark mode" }),
       );
-      expect(openSettingsMock).toHaveBeenCalledWith("appearance");
+      expect(openSearchMock).toHaveBeenCalledOnce();
       expect(toggleThemeMock).toHaveBeenCalledOnce();
     },
   );
