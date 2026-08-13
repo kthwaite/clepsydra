@@ -57,6 +57,34 @@ bun run typecheck
 Observed after the fix: exit 0; `tsc --noEmit --project tsconfig.app.json` completed without diagnostics.
 
 Review fix: the restoration registry now exposes a `useSyncExternalStore`-compatible pending-request subscription and matching location-ID snapshot. It notifies only on actual request-state changes. Folio subscribes to that identity, so same-tab/path supersession cancels the old RAF and schedules the exact newer snapshot without depending on unrelated editor or route changes.
+
+## Review round 2 evidence
+
+RED command:
+
+```text
+bun run test -- src/components/codex/__tests__/Folio.test.tsx -t \"prefers a matching history snapshot|matching missing snapshot\"
+```
+
+Observed before the precedence fix: exit 1; 2 tests failed. Draining the follow-up RAF changed history scroll `91` to latest-per-tab `12`, and changed the missing-snapshot location `23` to latest-per-tab `70`.
+
+GREEN command:
+
+```text
+bun run test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/FolioNavigation.test.tsx src/store/folioRestoration.test.ts
+```
+
+Observed after the fix: exit 0; 3 test files passed; 86 tests passed.
+
+Typecheck command:
+
+```text
+bun run typecheck
+```
+
+Observed after the fix: exit 0; `tsc --noEmit --project tsconfig.app.json` completed without diagnostics.
+
+Review fix: Folio records exact history requests it consumes and suppresses the immediate reactive location-ID-to-null effect generation. This preserves authoritative history/missing-snapshot precedence while retaining reactive same-tab supersession.
 ## Implementation summary
 
 - Added one synchronous `FolioRestoration` builder and registered it as the mounted Folio history capture; the latest-per-tab unmount save now uses the same builder.

@@ -1531,6 +1531,13 @@ describe("Folio in-session restoration", () => {
     expect(
       readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
     ).toBeNull();
+    act(() => {
+      for (const callback of restorationFrames.splice(0)) {
+        callback(performance.now());
+      }
+    });
+    // Defect caught: consuming history used to schedule latest-per-tab on the next RAF.
+    expect(restoredScroller.scrollTop).toBe(91);
   });
 
   it("consumes a matching missing snapshot without applying latest tab state", () => {
@@ -1548,6 +1555,13 @@ describe("Folio in-session restoration", () => {
     expect(
       readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
     ).toBeNull();
+    act(() => {
+      for (const callback of restorationFrames.splice(0)) {
+        callback(performance.now());
+      }
+    });
+    // Defect caught: consuming a missing snapshot used to apply latest state one RAF later.
+    expect(restoredScroller.scrollTop).toBe(23);
   });
 
   it("keeps a history request through loading and retryable error", () => {

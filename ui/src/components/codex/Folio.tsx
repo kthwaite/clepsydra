@@ -318,6 +318,7 @@ export function Folio({ tabId, path }: FolioProps) {
     available: boolean;
     getRevision: () => string;
   } | null>(null);
+  const consumedHistoryLocationIdRef = useRef<string | null>(null);
 
   const buildRestorationSnapshot = useCallback((): FolioRestoration | null => {
     const state = restorationStateRef.current;
@@ -716,6 +717,13 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   useLayoutEffect(() => {
+    if (
+      pendingHistoryLocationId === null &&
+      consumedHistoryLocationIdRef.current !== null
+    ) {
+      consumedHistoryLocationIdRef.current = null;
+      return;
+    }
     const historyRequest = readFolioHistoryRestorationRequest(tabId, path);
     if (!restorationAvailable) {
       if (!editor.isLoading && editor.pageNotFound && historyRequest) {
@@ -787,6 +795,8 @@ export function Folio({ tabId, path }: FolioProps) {
       }
 
       if (historyRequest) {
+        consumedHistoryLocationIdRef.current =
+          historyRequest.request.locationId;
         consumeFolioHistoryRestorationRequest(
           historyRequest.request.locationId,
         );
