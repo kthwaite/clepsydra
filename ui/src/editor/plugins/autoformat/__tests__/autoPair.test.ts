@@ -89,12 +89,12 @@ describe("tryAutoPair", () => {
     expect(getCursorOffset(editor)).toBe(1);
   });
 
-  it("typing ~ inserts ~|~", () => {
+  it("does not auto-pair ~ at a collapsed selection", () => {
     const editor = editorWith("", 0);
     const result = tryAutoPair(editor, "~");
-    expect(result).toBe(true);
-    expect(getText(editor)).toBe("~~");
-    expect(getCursorOffset(editor)).toBe(1);
+    expect(result).toBe(false);
+    expect(getText(editor)).toBe("");
+    expect(getCursorOffset(editor)).toBe(0);
   });
 
   it("AP-02: auto-pair fires at position after **", () => {

@@ -44,6 +44,7 @@ export function tryAutoPair(editor: Editor, ch: string): boolean {
   if (!Text.isText(node)) return false;
 
   if (Range.isCollapsed(selection)) {
+    if (ch === "~") return false;
     if (anchor.offset < node.text.length && node.text[anchor.offset] === ch)
       return false;
     if (anchor.offset > 0) {
