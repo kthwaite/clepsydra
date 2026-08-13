@@ -301,8 +301,7 @@ export const BaseTableView = forwardRef<
             '[role="grid"], table',
           );
         if (
-          !target ||
-          !target.isConnected ||
+          !target?.isConnected ||
           (target instanceof HTMLButtonElement &&
             (target.disabled ||
               target.getAttribute("aria-disabled") === "true"))
