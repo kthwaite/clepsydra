@@ -39,12 +39,39 @@ const {
 vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
 }));
+const TEST_ROUTE_VIEWS: ReadonlyArray<[prefix: string, view: string]> = [
+  ["/workspace", "workspace"],
+  ["/gazetteer", "gazetteer"],
+  ["/tasking", "tasking"],
+  ["/academic", "academic"],
+  ["/bases", "bases"],
+  ["/feeds", "feeds"],
+  ["/docs", "docs"],
+  ["/repairs", "repairs"],
+  ["/agenda", "agenda"],
+];
+
+function testMatches(pathname: string) {
+  const hit = TEST_ROUTE_VIEWS.find(
+    ([p]) => pathname === p || pathname.startsWith(`${p}/`),
+  );
+  return [
+    { staticData: { codexView: "atrium" } },
+    ...(hit ? [{ staticData: { codexView: hit[1] } }] : []),
+  ];
+}
+
 vi.mock("@tanstack/react-router", () => ({
   useLocation: () => {
     locationHookMock();
     return locationState;
   },
   useNavigate: () => navigateMock,
+  useRouterState: ({
+    select,
+  }: {
+    select: (s: { matches: unknown[] }) => unknown;
+  }) => select({ matches: testMatches(locationState.pathname) }),
 }));
 vi.mock("#/api/index", () => ({
   useContentIndex: () => ({ data: { items: [] } }),
@@ -141,11 +168,21 @@ vi.mock("#/store/workspace", () => {
     selector?: (state: typeof workspaceState) => unknown,
   ) => (selector ? selector(workspaceState) : workspaceState);
   useWorkspaceStore.getState = () => workspaceState;
+  const selectActiveTab = (state: typeof workspaceState) =>
+    state.tabs.find((t) => t.id === state.activeTabId);
+  const selectWorkspaceMode = (state: typeof workspaceState) => {
+    const active = selectActiveTab(state);
+    if (active?.type === "graph") return "constellation";
+    if (active?.type === "page" && active.path) return "folio";
+    return "launcher";
+  };
   return {
     runWorkspaceTransition: (transition: () => void) => {
       transition();
       return true;
     },
+    selectActiveTab,
+    selectWorkspaceMode,
     useWorkspaceStore,
   };
 });
@@ -239,8 +276,8 @@ describe("CodexFrame destination integration", () => {
       ).getByRole("button", { name: /08.*DOCS/i });
       expect(docsButton).toHaveAttribute("aria-current", "page");
       expect(
-        screen.getByRole("button", { name: /08.*STATUS/i }),
-      ).toBeInTheDocument();
+        screen.queryByRole("button", { name: /08.*STATUS/i }),
+      ).not.toBeInTheDocument();
       expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
       expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
     },
@@ -298,8 +335,8 @@ describe("CodexFrame destination integration", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.getByRole("button", { name: /08.*STATUS/i }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: /08.*STATUS/i }),
+    ).not.toBeInTheDocument();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE FEEDS.*VIEW FEEDS/)).toBeInTheDocument();
   });
@@ -383,6 +420,21 @@ describe("CodexFrame destination integration", () => {
 
     await user.click(academic);
     expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
+  });
+
+  it("shows the launcher state on /workspace with no active tab", () => {
+    locationState.pathname = "/workspace";
+    workspaceState.tabs = [];
+    workspaceState.activeTabId = null;
+    renderFrame();
+
+    expect(screen.getByText(/FILE —.*VIEW LAUNCHER/)).toBeInTheDocument();
+    expect(screen.getByTestId("sheaf")).toBeInTheDocument();
+
+    const folioButton = within(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    ).getByRole("button", { name: /01.*FOLIO/i });
+    expect(folioButton).toHaveAttribute("aria-current", "page");
   });
 
   it("retains the reading percentage for Folio", () => {
@@ -488,11 +540,9 @@ describe("CodexFrame responsive shell", () => {
 
     expect(openSearchMock).toHaveBeenCalledOnce();
     expect(openInscribeMock).toHaveBeenCalledOnce();
+    // Navigation to /workspace is now useOpenTab's responsibility (mocked
+    // above as workspaceState.openTab); see useOpenTab.test.tsx.
     expect(workspaceState.openTab).toHaveBeenCalledWith("graph");
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/workspace" });
-    expect(workspaceState.openTab.mock.invocationCallOrder[0]).toBeLessThan(
-      navigateMock.mock.invocationCallOrder[0],
-    );
   });
 
   it("marks Bases active on mobile and navigates to its index", async () => {
@@ -545,7 +595,7 @@ describe("CodexFrame responsive shell", () => {
     expect(primary).toHaveClass("min-w-0", "overflow-x-auto");
     expect(feeds).toHaveClass("shrink-0");
     expect(feeds).toHaveAttribute("aria-current", "page");
-    expect(screen.getByRole("button", { name: /08.*status/i })).toBeVisible();
+    expect(screen.getByRole("button", { name: /⌘K/ })).toBeVisible();
     expect(
       screen.getByRole("button", { name: "Switch to dark mode" }),
     ).toBeVisible();

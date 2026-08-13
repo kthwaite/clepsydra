@@ -15,6 +15,7 @@ import {
   type StaticCommandAction,
 } from "#/components/codex/commandRegistry";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { goToView } from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
@@ -23,7 +24,7 @@ import { cn } from "#/lib/cn";
 import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
 import { deriveQuireName } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
-import { useWorkspaceStore } from "#/store/workspace";
+import { selectActiveTab, useWorkspaceStore } from "#/store/workspace";
 
 type Command = {
   /** Drives the KIND column tag: cmd → CMD, note → FILE, tag → TAG. */
@@ -102,7 +103,7 @@ function CommandPaletteContent() {
           const action: StaticCommandAction = command.action;
           switch (action) {
             case "navigate-atrium":
-              navigate({ to: "/" });
+              goToView("atrium", { navigate, openTab });
               return;
             case "open-today-journal":
               openTodayJournal();
@@ -111,22 +112,19 @@ function CommandPaletteContent() {
               openCaptureAside();
               return;
             case "open-constellation":
-              openTab("graph");
+              goToView("constellation", { navigate, openTab });
               return;
             case "navigate-gazetteer":
-              navigate({
-                to: "/gazetteer",
-                search: { sort: "ts", page: 1 },
-              });
+              goToView("gazetteer", { navigate, openTab });
               return;
             case "navigate-bases":
-              navigate({ to: "/bases" });
+              goToView("bases", { navigate, openTab });
               return;
             case "navigate-academic":
-              navigate({ to: "/academic" });
+              goToView("academic", { navigate, openTab });
               return;
             case "navigate-repairs":
-              navigate({ to: "/repairs" });
+              goToView("repairs", { navigate, openTab });
               return;
             case "create-base":
               navigate({ to: "/bases", search: { create: true } });
@@ -193,21 +191,19 @@ function CommandPaletteContent() {
       action: () =>
         navigate({
           to: "/gazetteer",
-          search: { tags: [t.tag], sort: "ts", page: 1 },
+          search: { tags: [t.tag] },
         }),
     }));
   }, [tags, navigate]);
 
-  const workspaceTabs = useWorkspaceStore((s) => s.tabs);
   const quireMap = useWorkspaceStore((s) => s.quires);
-  const activeTabId = useWorkspaceStore((s) => s.activeTabId);
+  const activeTab = useWorkspaceStore(selectActiveTab);
 
   const quireCommands = useMemo<Command[]>(() => {
-    const active = workspaceTabs.find((t) => t.id === activeTabId);
-    if (!active || active.type !== "page") return [];
+    if (activeTab?.type !== "page") return [];
 
     return runtimeQuireCommands({
-      activeQuireId: active.quireId,
+      activeQuireId: activeTab.quireId,
       quires: Object.values(quireMap),
     }).map((command) => ({
       kind: "cmd",
@@ -217,20 +213,20 @@ function CommandPaletteContent() {
         const store = useWorkspaceStore.getState();
         switch (command.action) {
           case "create-quire":
-            store.createQuire(active.id, deriveQuireName(active.label));
+            store.createQuire(activeTab.id, deriveQuireName(activeTab.label));
             return;
           case "add-to-quire":
-            store.addTabToQuire(active.id, command.quireId);
+            store.addTabToQuire(activeTab.id, command.quireId);
             return;
           case "remove-from-quire":
-            store.removeTabFromQuire(active.id);
+            store.removeTabFromQuire(activeTab.id);
             return;
           default:
             command satisfies never;
         }
       },
     }));
-  }, [workspaceTabs, quireMap, activeTabId]);
+  }, [activeTab, quireMap]);
 
   const filtered = useMemo<Command[]>(() => {
     if (!q) return [...verbCommands, ...tagCommands].slice(0, 10);

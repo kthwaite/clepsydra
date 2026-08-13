@@ -1,4 +1,8 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  type SearchSchemaInput,
+  useNavigate,
+} from "@tanstack/react-router";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
@@ -14,7 +18,10 @@ type FeedsSearch = FeedRiverFilters & {
 };
 
 export const Route = createFileRoute("/feeds")({
-  validateSearch: (search: Record<string, unknown>): FeedsSearch => {
+  staticData: { codexView: "feeds" },
+  validateSearch: (
+    search: Record<string, unknown> & SearchSchemaInput,
+  ): FeedsSearch => {
     const parsedFeed =
       typeof search.feed === "number"
         ? search.feed

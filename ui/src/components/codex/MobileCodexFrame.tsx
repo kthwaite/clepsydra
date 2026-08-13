@@ -1,35 +1,20 @@
 import { useNavigate } from "@tanstack/react-router";
 import { createPortal } from "react-dom";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
+import { useCodexView } from "#/components/codex/useCodexView";
 import {
-  type CodexView,
-  resolveCodexView,
-} from "#/components/codex/useCodexView";
+  goToView,
+  MOBILE_NAV,
+  VIEW_REGISTRY,
+} from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
-import { runWorkspaceTransition, useWorkspaceStore } from "#/store/workspace";
-
-type MobileRoot = Extract<
-  CodexView,
-  "atrium" | "gazetteer" | "academic" | "bases" | "feeds" | "constellation"
->;
-
-const ROOTS: ReadonlyArray<
-  readonly [MobileRoot, accessibleName: string, visualLabel: string]
-> = [
-  ["atrium", "Atrium", "ATR"],
-  ["gazetteer", "Gazetteer", "GAZ"],
-  ["academic", "Academic", "ACAD"],
-  ["bases", "Bases", "BASE"],
-  ["feeds", "Feeds", "FEED"],
-  ["constellation", "Constellation", "GRAPH"],
-];
 
 export function MobileCodexFrame({
   bottomSlot,
   forceView,
-  pathname,
 }: CodexFrameChromeProps) {
   const navigate = useNavigate();
   const openSearch = useUiStore((state) => state.openSearch);
@@ -37,27 +22,9 @@ export function MobileCodexFrame({
   const openSettings = useUiStore((state) => state.openSettings);
   const { toggle, resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
-  const { tabs, activeTabId, openTab } = useWorkspaceStore();
-  const view = forceView ?? resolveCodexView(pathname, tabs, activeTabId);
-
-  const navigateToRoot = (root: MobileRoot) => {
-    if (root === "atrium") {
-      navigate({ to: "/" });
-    } else if (root === "gazetteer") {
-      navigate({ to: "/gazetteer", search: { sort: "ts", page: 1 } });
-    } else if (root === "academic") {
-      navigate({ to: "/academic" });
-    } else if (root === "bases") {
-      navigate({ to: "/bases" });
-    } else if (root === "feeds") {
-      navigate({ to: "/feeds" } as never);
-    } else {
-      runWorkspaceTransition(() => {
-        openTab("graph");
-        void navigate({ to: "/workspace" });
-      });
-    }
-  };
+  const resolved = useCodexView();
+  const view = forceView ?? resolved;
+  const openTab = useOpenTab();
 
   return (
     <>
@@ -112,14 +79,16 @@ export function MobileCodexFrame({
               aria-label="Mobile roots"
               className="cl-mobile-bottom order-3 flex flex-shrink-0 border-t border-rule bg-bar-bg"
             >
-              {ROOTS.map(([root, accessibleName, visualLabel]) => {
-                const active = view === root;
+              {MOBILE_NAV.map((root) => {
+                const { mobile } = VIEW_REGISTRY[root];
+                if (!mobile) return null;
+                const active = VIEW_REGISTRY[view].navRoot === root;
                 return (
                   <button
                     key={root}
                     type="button"
-                    onClick={() => navigateToRoot(root)}
-                    aria-label={accessibleName}
+                    onClick={() => goToView(root, { navigate, openTab })}
+                    aria-label={mobile.name}
                     aria-current={active ? "page" : undefined}
                     className={cn(
                       "cl-mono min-h-12 flex-1 px-2 py-2 text-[10px] uppercase tracking-[0.12em]",
@@ -128,7 +97,7 @@ export function MobileCodexFrame({
                         : "text-bar-fg/65",
                     )}
                   >
-                    {visualLabel}
+                    {mobile.label}
                   </button>
                 );
               })}

@@ -178,8 +178,8 @@ describe("feeds route controls", () => {
     if (typeof validateSearch !== "function") {
       throw new Error("Expected a callable search validator");
     }
-    expect(validateSearch({})).toMatchObject({ view: "all" });
-    expect(validateSearch({ view: "not-a-view" })).toMatchObject({
+    expect(validateSearch({} as any)).toMatchObject({ view: "all" });
+    expect(validateSearch({ view: "not-a-view" } as any)).toMatchObject({
       view: "all",
     });
   });

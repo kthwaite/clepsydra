@@ -17,5 +17,6 @@ function BasesRoute() {
 }
 
 export const Route = createFileRoute("/bases/$slug")({
+  staticData: { codexView: "bases" },
   component: BasesRoute,
 });

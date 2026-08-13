@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { runWorkspaceTransition, useWorkspaceStore } from "#/store/workspace";
 
 export const Route = createFileRoute("/pages/$")({
+  staticData: { codexView: "workspace" },
   component: PageRedirect,
 });
 

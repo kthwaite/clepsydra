@@ -88,6 +88,11 @@ vi.mock("@tanstack/react-router", () => ({
       location: { state: { __TSR_index: 0 } },
     },
   }),
+  useRouterState: ({
+    select,
+  }: {
+    select: (s: { matches: unknown[] }) => unknown;
+  }) => select({ matches: [{ staticData: { codexView: "workspace" } }] }),
 }));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: [] }),
@@ -287,11 +292,11 @@ describe("CodexFrame real breakpoint transitions", () => {
         screen.queryByRole("navigation", { name: "Mobile roots" }),
       ).not.toBeInTheDocument();
 
-      await user.click(screen.getByRole("button", { name: /08.*status/i }));
+      await user.click(screen.getByRole("button", { name: /query/i }));
       await user.click(
         screen.getByRole("button", { name: "Switch to dark mode" }),
       );
-      expect(openSettingsMock).toHaveBeenCalledWith("appearance");
+      expect(openSearchMock).toHaveBeenCalledOnce();
       expect(toggleThemeMock).toHaveBeenCalledOnce();
     },
   );

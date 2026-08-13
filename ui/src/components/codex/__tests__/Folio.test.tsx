@@ -108,6 +108,13 @@ vi.mock("@tanstack/react-router", () => ({
   useLocation: () => ({ pathname: "/workspace" }),
   useNavigate: () => navigateMock,
   useRouter: () => ({ history: routerHistory }),
+  useRouterState: ({
+    select,
+  }: {
+    select: (s: {
+      matches: Array<{ staticData?: { codexView?: string } }>;
+    }) => unknown;
+  }) => select({ matches: [{ staticData: { codexView: "workspace" } }] }),
 }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
@@ -1073,9 +1080,9 @@ describe("Folio property placement", () => {
       properties.compareDocumentPosition(body) &
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).not.toBe(0);
-    expect(screen.getAllByRole("region", { name: "Page metadata" })).toHaveLength(
-      1,
-    );
+    expect(
+      screen.getAllByRole("region", { name: "Page metadata" }),
+    ).toHaveLength(1);
     expect(screen.getAllByTestId("folio-properties")).toHaveLength(1);
     expect(screen.getAllByRole("textbox", { name: "Page body" })).toHaveLength(
       1,

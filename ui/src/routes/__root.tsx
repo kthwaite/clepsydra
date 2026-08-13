@@ -170,6 +170,7 @@ function OverlayLoadingFallback({
 }
 
 export const Route = createRootRoute({
+  staticData: { codexView: "atrium" },
   notFoundComponent: () => (
     <div className="cl-cap p-8 text-[var(--ink-mute)]">404 · folio missing</div>
   ),

@@ -1,4 +1,8 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  type SearchSchemaInput,
+  useNavigate,
+} from "@tanstack/react-router";
 import { Gazetteer, type GazetteerFilters } from "#/components/codex/Gazetteer";
 import type { GazetteerSort } from "#/components/codex/gazetteer-filter";
 import { KINDS, type Kind } from "#/lib/kind";
@@ -19,7 +23,10 @@ type GazetteerSearchPatch = Partial<
 const SORTS: GazetteerSort[] = ["ts", "id", "title", "words"];
 
 export const Route = createFileRoute("/gazetteer")({
-  validateSearch: (search: Record<string, unknown>): GazetteerSearch => {
+  staticData: { codexView: "gazetteer" },
+  validateSearch: (
+    search: Record<string, unknown> & SearchSchemaInput,
+  ): GazetteerSearch => {
     const rawTags = Array.isArray(search.tags)
       ? search.tags
       : typeof search.tags === "string"

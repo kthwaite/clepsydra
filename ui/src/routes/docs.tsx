@@ -2,6 +2,7 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
 import { DEFAULT_DOC_SLUG } from "#/docs/registry";
 
 export const Route = createFileRoute("/docs")({
+  staticData: { codexView: "docs" },
   beforeLoad: ({ location }) => {
     if (location.pathname === "/docs" || location.pathname === "/docs/") {
       throw redirect({

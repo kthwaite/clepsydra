@@ -113,13 +113,27 @@ export interface TabDescriptor {
   focusRequestId?: string;
 }
 
-interface WorkspaceState {
+export interface WorkspaceState {
   tabs: TabDescriptor[];
   activeTabId: string | null;
   navigationMode: NavigationMode;
   openHistory: OpenHistoryEntry[];
   quires: Record<string, Quire>;
 }
+
+type WorkspaceMode = "folio" | "constellation" | "launcher";
+
+export const selectActiveTab = (s: WorkspaceState): TabDescriptor | undefined =>
+  s.tabs.find((t) => t.id === s.activeTabId);
+
+/** The workspace surface's display mode. Chrome (footer/nav) and content
+ * (TabContent) must both read this so they cannot disagree. */
+export const selectWorkspaceMode = (s: WorkspaceState): WorkspaceMode => {
+  const active = selectActiveTab(s);
+  if (active?.type === "graph") return "constellation";
+  if (active?.type === "page" && active.path) return "folio";
+  return "launcher";
+};
 
 interface WorkspaceActions {
   openTab: (
@@ -231,7 +245,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           return;
         }
 
-        const activeTab = state.tabs.find((t) => t.id === state.activeTabId);
+        const activeTab = selectActiveTab(state);
         // New page tabs inherit the active page tab's quire (self-assembling
         // research context); graph tabs never join quires. Only the append
         // branch uses this — replace mode keeps the slot's own quire. Never
@@ -562,9 +576,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
       toggleQuireCollapse(quireId) {
         const current = get();
-        const active = current.tabs.find(
-          (tab) => tab.id === current.activeTabId,
-        );
+        const active = selectActiveTab(current);
         if (
           workspaceTransitionDepth === 0 &&
           current.quires[quireId]?.collapsed === false &&
@@ -583,7 +595,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           let activeTabId = state.activeTabId;
           if (!quire.collapsed) {
             // Collapsing: if the active tab just went hidden, re-home activation.
-            const active = state.tabs.find((t) => t.id === state.activeTabId);
+            const active = selectActiveTab(state);
             if (active?.quireId === quireId) {
               const idx = state.tabs.findIndex((t) => t.id === active.id);
               activeTabId = nearestVisibleTabId(state.tabs, quires, idx);
@@ -595,9 +607,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
 
       closeQuireTabs(quireId) {
         const current = get();
-        const active = current.tabs.find(
-          (tab) => tab.id === current.activeTabId,
-        );
+        const active = selectActiveTab(current);
         if (workspaceTransitionDepth === 0 && active?.quireId === quireId) {
           runWorkspaceTransition(() => get().closeQuireTabs(quireId));
           return;

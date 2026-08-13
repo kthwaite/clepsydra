@@ -6,5 +6,6 @@ function BasesIndexRoute() {
 }
 
 export const Route = createFileRoute("/bases/")({
+  staticData: { codexView: "bases" },
   component: BasesIndexRoute,
 });

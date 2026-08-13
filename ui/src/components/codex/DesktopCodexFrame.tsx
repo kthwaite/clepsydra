@@ -6,32 +6,21 @@ import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { Sheaf } from "#/components/codex/Sheaf";
+import { useCodexView } from "#/components/codex/useCodexView";
 import {
-  type CodexView,
-  resolveCodexView,
-} from "#/components/codex/useCodexView";
+  DESKTOP_NAV,
+  goToView,
+  VIEW_REGISTRY,
+} from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
-import { DEFAULT_DOC_SLUG } from "#/docs/constants";
 import { useClock } from "#/hooks/useClock";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { useUptime } from "#/hooks/useUptime";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";
 import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
-import { runWorkspaceTransition, useWorkspaceStore } from "#/store/workspace";
-
-/** Nav order + diegetic index numbers. */
-const NAV: ReadonlyArray<readonly [CodexView, string]> = [
-  ["atrium", "ATRIUM"],
-  ["folio", "FOLIO"],
-  ["gazetteer", "GAZETTEER"],
-  ["constellation", "CONSTELLATION"],
-  ["tasking", "TASKING"],
-  ["academic", "ACADEMIC"],
-  ["bases", "BASES"],
-  ["feeds", "FEEDS"],
-  ["docs", "DOCS"],
-];
+import { selectActiveTab, useWorkspaceStore } from "#/store/workspace";
 
 function UptimeText() {
   const uptime = useUptime();
@@ -51,72 +40,27 @@ function UtcClockText() {
   );
 }
 
-function useFolioCode(view: CodexView): string {
-  const { tabs, activeTabId } = useWorkspaceStore();
-  if (view === "atrium") return "ATRIUM";
-  if (view === "constellation") return "GRAPH";
-  if (view === "gazetteer") return "INDEX";
-  if (view === "tasking") return "TASKING";
-  if (view === "academic") return "ACADEMIC";
-  if (view === "bases") return "BASES";
-  if (view === "feeds") return "FEEDS";
-  if (view === "docs") return "DOC-001";
-  const active = tabs.find((t) => t.id === activeTabId);
-  if (!active?.path) return "—";
-  return shortFolio(active.path);
-}
-
 export function DesktopCodexFrame({
   bottomSlot,
   forceView,
-  pathname,
 }: CodexFrameChromeProps) {
   const { progress } = useReadingProgress();
   const navigate = useNavigate();
   const openSearch = useUiStore((s) => s.openSearch);
-  const openSettings = useUiStore((s) => s.openSettings);
-  const settingsOpen = useUiStore((s) => s.isSettingsOpen);
   const { toggle, resolvedTheme, diegetic } = useTheme();
   const dark = resolvedTheme === "dark";
-  const { tabs: workspaceTabs, activeTabId, openTab } = useWorkspaceStore();
+  const activeTabId = useWorkspaceStore((s) => s.activeTabId);
+  const activePath = useWorkspaceStore((s) => selectActiveTab(s)?.path);
+  const openTab = useOpenTab();
   const { data: stats, isError: statsError } = useStats();
   const syncStatus = useVaultEvents();
 
-  const view =
-    forceView ?? resolveCodexView(pathname, workspaceTabs, activeTabId);
+  const resolved = useCodexView();
+  const view = forceView ?? resolved;
+  const descriptor = VIEW_REGISTRY[view];
+  const folioCode =
+    descriptor.folioCode ?? (activePath ? shortFolio(activePath) : "—");
 
-  const onNav = (target: CodexView) => {
-    if (target === "atrium") navigate({ to: "/" });
-    else if (target === "gazetteer")
-      navigate({ to: "/gazetteer", search: { sort: "ts", page: 1 } });
-    else if (target === "academic") navigate({ to: "/academic" });
-    else if (target === "bases") navigate({ to: "/bases" });
-    else if (target === "feeds") navigate({ to: "/feeds" } as never);
-    else if (target === "docs") {
-      navigate({
-        to: "/docs/$slug",
-        params: { slug: DEFAULT_DOC_SLUG },
-      });
-    } else if (target === "constellation") {
-      runWorkspaceTransition(() => {
-        openTab("graph");
-        void navigate({ to: "/workspace" });
-      });
-    } else if (target === "tasking") navigate({ to: "/tasking" });
-    else if (target === "folio") {
-      runWorkspaceTransition(() => {
-        const store = useWorkspaceStore.getState();
-        const firstPage = workspaceTabs.find((t) => t.type === "page");
-        // With no folio open, drop focus off any lingering graph tab so the
-        // workspace shows the FolioLauncher empty state rather than the graph.
-        if (firstPage) store.activateTab(firstPage.id);
-        else store.clearActiveTab();
-        void navigate({ to: "/workspace" });
-      });
-    }
-  };
-
-  const folioCode = useFolioCode(view);
   const writing = useIsMutating() > 0;
 
   const pages = stats?.pages ?? 0;
@@ -145,14 +89,14 @@ export function DesktopCodexFrame({
           aria-label="Primary navigation"
           className="flex min-w-0 items-stretch overflow-x-auto"
         >
-          {NAV.map(([key, label], i) => {
-            const active = view === key;
+          {DESKTOP_NAV.map((key, i) => {
+            const active = VIEW_REGISTRY[view].navRoot === key;
             return (
               <button
                 key={key}
                 type="button"
                 aria-current={active ? "page" : undefined}
-                onClick={() => onNav(key)}
+                onClick={() => goToView(key, { navigate, openTab })}
                 className={cn(
                   "cl-mono flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
                   active
@@ -161,7 +105,7 @@ export function DesktopCodexFrame({
                 )}
               >
                 <span className="text-[9px] text-ink-mute">{pad2(i)}</span>
-                <span className="text-[10px]">{label}</span>
+                <span className="text-[10px]">{VIEW_REGISTRY[key].label}</span>
               </button>
             );
           })}
@@ -194,14 +138,9 @@ export function DesktopCodexFrame({
       </header>
 
       {/* ── SHEAF — hidden on full-surface destinations ─────────────── */}
-      {view !== "atrium" &&
-        view !== "academic" &&
-        view !== "bases" &&
-        view !== "constellation" &&
-        view !== "feeds" &&
-        view !== "docs" && (
-          <Sheaf activeTabId={activeTabId} className="order-1" />
-        )}
+      {descriptor.showsSheaf && (
+        <Sheaf activeTabId={activeTabId} className="order-1" />
+      )}
 
       {/* ── FOOTER RAIL ─────────────────────────────────────────────── */}
       {bottomSlot
@@ -226,7 +165,7 @@ export function DesktopCodexFrame({
                 </span>
               )}
               <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap px-3 py-[2px] opacity-80">
-                FILE {folioCode} · VIEW {view.toUpperCase()} · CORPUS {pages}/
+                FILE {folioCode} · VIEW {descriptor.label} · CORPUS {pages}/
                 {links}
               </span>
               {view === "folio" && (

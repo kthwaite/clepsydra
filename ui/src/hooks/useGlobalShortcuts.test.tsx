@@ -16,8 +16,33 @@ vi.hoisted(() => {
   });
 });
 
+// Router-sourced gates (inWorkspace/inTasking) resolve via
+// routeViewFromMatches(router.state.matches) rather than window.location, so
+// the mocked router derives a fake matches array from the live pathname on
+// every access — tests still drive routing via window.history.pushState.
+function mockCodexViewForPath(
+  pathname: string,
+): "workspace" | "tasking" | "atrium" {
+  if (pathname.startsWith("/workspace")) return "workspace";
+  if (pathname.startsWith("/tasking")) return "tasking";
+  return "atrium";
+}
+
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
+  useRouter: () => ({
+    state: {
+      get matches() {
+        return [
+          {
+            staticData: {
+              codexView: mockCodexViewForPath(window.location.pathname),
+            },
+          },
+        ];
+      },
+    },
+  }),
 }));
 vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({ toggle: toggleThemeMock }),
@@ -128,10 +153,7 @@ describe("useGlobalShortcuts", () => {
     press("d", { metaKey: true, shiftKey: true });
     expect(useUiStore.getState().isCaptureAsideOpen).toBe(true);
     press("i", { metaKey: true });
-    expect(navigateMock).toHaveBeenCalledWith({
-      to: "/gazetteer",
-      search: { sort: "ts", page: 1 },
-    });
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/gazetteer" });
     press("g", { metaKey: true });
     expect(openTabMock).toHaveBeenCalledWith("graph");
     press("\\", { metaKey: true });
