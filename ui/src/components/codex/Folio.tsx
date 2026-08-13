@@ -65,6 +65,7 @@ import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
 import {
   registerFolioHistoryTraversalGuard,
+  useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
@@ -293,7 +294,10 @@ export function Folio({ tabId, path }: FolioProps) {
       () => {
         router.history.back();
       },
-      { originTabId: router.history.location.state.folioOriginTabId },
+      {
+        originTabId: router.history.location.state.folioOriginTabId,
+        historyTraversal: true,
+      },
     );
   };
   useEffect(() => {
@@ -1935,8 +1939,8 @@ function resolveKindAndColor(path: string) {
 
 function OpenFilesAccordion({ activeTabId }: { activeTabId: string }) {
   const tabs = useWorkspaceStore((s) => s.tabs);
-  const activateTab = useWorkspaceStore((s) => s.activateTab);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const activateTab = useActivateTabWithFolioHistory();
   const [open, setOpen] = useState(true);
 
   const recent = tabs

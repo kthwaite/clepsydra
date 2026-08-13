@@ -19,6 +19,10 @@ import { goToView } from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import {
+  useActivateTabWithFolioHistory,
+  useLeaveFolioWorkspace,
+} from "#/hooks/useFolioHistoryNavigation";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
@@ -61,6 +65,8 @@ function CommandPaletteContent() {
   const runBoot = useUiStore((s) => s.runBoot);
   const navigate = useNavigate();
   const openTab = useOpenTab();
+  const activateTab = useActivateTabWithFolioHistory();
+  const leaveWorkspace = useLeaveFolioWorkspace();
   const openTodayJournal = useOpenTodayJournal();
   const { toggle: toggleTheme, diegetic, setDiegetic } = useTheme();
 
@@ -103,7 +109,12 @@ function CommandPaletteContent() {
           const action: StaticCommandAction = command.action;
           switch (action) {
             case "navigate-atrium":
-              goToView("atrium", { navigate, openTab });
+              goToView("atrium", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
               return;
             case "open-today-journal":
               openTodayJournal();
@@ -112,22 +123,49 @@ function CommandPaletteContent() {
               openCaptureAside();
               return;
             case "open-constellation":
-              goToView("constellation", { navigate, openTab });
+              goToView("constellation", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
               return;
             case "navigate-gazetteer":
-              goToView("gazetteer", { navigate, openTab });
+              goToView("gazetteer", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
               return;
             case "navigate-bases":
-              goToView("bases", { navigate, openTab });
+              goToView("bases", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
               return;
             case "navigate-academic":
-              goToView("academic", { navigate, openTab });
+              goToView("academic", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
               return;
             case "navigate-repairs":
-              goToView("repairs", { navigate, openTab });
+              goToView("repairs", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
               return;
             case "create-base":
-              navigate({ to: "/bases", search: { create: true } });
+              leaveWorkspace(() =>
+                navigate({ to: "/bases", search: { create: true } }),
+              );
               return;
             case "add-book":
               openBookImport();
@@ -158,6 +196,8 @@ function CommandPaletteContent() {
     [
       navigate,
       openTab,
+      activateTab,
+      leaveWorkspace,
       openTodayJournal,
       toggleTheme,
       openInscribe,
@@ -189,12 +229,14 @@ function CommandPaletteContent() {
       id: `tag.${t.tag}`,
       title: `${t.tag} · ${t.count ?? 0}`,
       action: () =>
-        navigate({
-          to: "/gazetteer",
-          search: { tags: [t.tag] },
-        }),
+        leaveWorkspace(() =>
+          navigate({
+            to: "/gazetteer",
+            search: { tags: [t.tag] },
+          }),
+        ),
     }));
-  }, [tags, navigate]);
+  }, [leaveWorkspace, navigate, tags]);
 
   const quireMap = useWorkspaceStore((s) => s.quires);
   const activeTab = useWorkspaceStore(selectActiveTab);

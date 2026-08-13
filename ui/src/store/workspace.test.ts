@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  clearFolioHistoryState,
+  readFolioHistoryRestorationRequest,
+  registerFolioHistoryCapture,
+  requestFolioHistoryRestoration,
+} from "./folioRestoration";
+import {
   migrateWorkspace,
   type OpenHistoryEntry,
   pushOpenHistory,
@@ -684,6 +690,80 @@ describe("moveTab drop semantics", () => {
     const { tabs } = useWorkspaceStore.getState();
     expect(tabs.map((tab) => tab.id)).toEqual(["0", "1", "2"]);
     expect(tabs.find((tab) => tab.id === "1")?.quireId).toBeUndefined();
+  });
+});
+
+describe("workspace Folio history lifecycle", () => {
+  function request(tabId: string, path = `${tabId}.md`) {
+    requestFolioHistoryRestoration({
+      tabId,
+      path,
+      locationId: `visit-${tabId}`,
+    });
+  }
+
+  it("clears a pending history request when its tab closes before restoration", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha"), pageTab("beta")],
+      activeTabId: "alpha",
+    });
+    request("alpha");
+
+    useWorkspaceStore.getState().closeTab("alpha");
+
+    expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
+  });
+
+  it("clears old history identity when replace mode reuses a tab ID", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("slot")],
+      activeTabId: "slot",
+      navigationMode: "replace",
+    });
+    request("slot");
+
+    useWorkspaceStore.getState().openTab("page", "replacement.md", "New");
+
+    expect(readFolioHistoryRestorationRequest("slot", "slot.md")).toBeNull();
+  });
+
+  it("clears removed tabs during closeOtherTabs while preserving the kept tab", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha"), pageTab("beta")],
+      activeTabId: "alpha",
+    });
+    const unregister = registerFolioHistoryCapture(
+      "alpha",
+      "alpha.md",
+      () => null,
+    );
+    request("beta");
+
+    useWorkspaceStore.getState().closeOtherTabs("alpha");
+
+    expect(readFolioHistoryRestorationRequest("beta", "beta.md")).toBeNull();
+    unregister();
+  });
+
+  it("clears all Folio history during workspace teardown", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha")],
+      activeTabId: "alpha",
+    });
+    request("alpha");
+
+    useWorkspaceStore.getState().clearWorkspace();
+
+    expect(useWorkspaceStore.getState().tabs).toEqual([]);
+    expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
   });
 });
 

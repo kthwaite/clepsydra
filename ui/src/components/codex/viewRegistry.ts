@@ -1,9 +1,12 @@
 import type { useNavigate } from "@tanstack/react-router";
 import type { CodexView } from "#/components/codex/useCodexView";
+import type {
+  ActivateTabWithFolioHistory,
+  LeaveFolioWorkspace,
+} from "#/hooks/useFolioHistoryNavigation";
 import { DEFAULT_DOC_SLUG } from "#/docs/constants";
 import {
   type OpenTabTarget,
-  runWorkspaceTransition,
   type TabType,
   useWorkspaceStore,
 } from "#/store/workspace";
@@ -18,6 +21,8 @@ export interface ViewNavDeps {
     label?: string,
     target?: OpenTabTarget,
   ) => void;
+  activateTab: ActivateTabWithFolioHistory;
+  leaveWorkspace: LeaveFolioWorkspace;
 }
 
 interface ViewDescriptor {
@@ -50,14 +55,15 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     showsSheaf: true,
     navRoot: "folio",
     mobile: null,
-    go: ({ navigate }) => {
-      runWorkspaceTransition(() => {
-        const store = useWorkspaceStore.getState();
-        const firstPage = store.tabs.find((t) => t.type === "page");
-        // With no folio open, drop focus off any lingering graph tab so the
-        // workspace shows the FolioLauncher empty state rather than the graph.
-        if (firstPage) store.activateTab(firstPage.id);
-        else store.clearActiveTab();
+    go: ({ activateTab, leaveWorkspace, navigate }) => {
+      const store = useWorkspaceStore.getState();
+      const firstPage = store.tabs.find((tab) => tab.type === "page");
+      if (firstPage) {
+        activateTab(firstPage.id);
+        return;
+      }
+      leaveWorkspace(() => {
+        store.clearActiveTab();
         void navigate({ to: "/workspace" });
       });
     },
@@ -168,5 +174,11 @@ export const MOBILE_NAV: readonly CodexView[] = [
 ];
 
 export function goToView(view: CodexView, deps: ViewNavDeps): void {
-  VIEW_REGISTRY[view].go?.(deps);
+  const go = VIEW_REGISTRY[view].go;
+  if (!go) return;
+  if (view === "folio" || view === "constellation") {
+    go(deps);
+    return;
+  }
+  deps.leaveWorkspace(() => go(deps));
 }

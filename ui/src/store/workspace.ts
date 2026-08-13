@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { clearFolioRestoration } from "#/store/folioRestoration";
+import {
+  clearFolioHistoryForTab,
+  clearFolioHistoryState,
+  clearFolioRestoration,
+} from "#/store/folioRestoration";
 import {
   nearestVisibleTabId,
   nextQuireColor,
@@ -150,6 +154,8 @@ interface WorkspaceActions {
   activateTabFromHistory: (tabId: string) => void;
   /** Drop focus without closing any tab — surfaces the empty-state launcher. */
   clearActiveTab: () => void;
+  /** Clear all workspace and visit state when the workspace/vault is torn down. */
+  clearWorkspace: () => void;
   clearTabFocus: (tabId: string) => void;
   takeTabFocus: (tabId: string, requestId: string) => string | undefined;
   moveTab: (
@@ -315,6 +321,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             (activeTab.type !== type || activeTab.path !== path)
           ) {
             clearFolioRestoration(activeTab.id);
+            clearFolioHistoryForTab(activeTab.id);
           }
           // Replace the active tab's content; the slot keeps its quire.
           set(
@@ -368,6 +375,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         }
 
         clearFolioRestoration(tabId);
+        clearFolioHistoryForTab(tabId);
 
         const nextTabs = state.tabs.filter((t) => t.id !== tabId);
         let nextActive = state.activeTabId;
@@ -394,6 +402,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         if (workspaceTransitionDepth === 0 && get().activeTabId !== tabId) {
           runWorkspaceTransition(() => get().closeOtherTabs(tabId));
           return;
+        }
+        for (const tab of get().tabs) {
+          if (tab.id !== tabId) clearFolioHistoryForTab(tab.id);
         }
         set((state) =>
           normalized(
@@ -425,6 +436,16 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
           activeTabId: null,
           tabs: state.tabs.map(withoutTabFocus),
         }));
+      },
+
+      clearWorkspace() {
+        clearFolioHistoryState();
+        set({
+          tabs: [],
+          activeTabId: null,
+          openHistory: [],
+          quires: {},
+        });
       },
 
       clearTabFocus(tabId) {

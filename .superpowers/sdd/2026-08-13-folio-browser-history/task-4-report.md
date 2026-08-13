@@ -89,3 +89,41 @@ Added real memory-router integration coverage for all nine required Folio histor
 - Actual Sheaf suite: 1 file passed; 25 tests passed.
 - Changed-file lint: the same 13 unrelated baseline diagnostics remain; no review-owned diagnostic was introduced.
 - Typecheck: exit 0.
+
+## Final review correction round 2
+
+### RED
+
+- Workspace lifecycle target: 4/4 failures showed pending requests survived close, replacement, bulk close, and no teardown action existed.
+- Graph target: explicit-null Forward activated graph instead of remaining inert.
+- Representative navigation targets initially failed before shared view-navigation and tab-shortcut cutovers; mobile raw + second-blocker coverage exposed mutation timing when using the mobile Back control.
+
+### Corrections
+
+- `goToView` is now the single coordinated boundary for every non-workspace route exit; desktop logo/rail, mobile roots, command palette actions, and global shortcuts supply the history departure coordinator.
+- Open Files and next/previous shortcuts now use `useActivateTabWithFolioHistory`; remaining production raw activation is confined to the coordinator and workspace-store internals.
+- Mobile usable-history Back runs every traversal guard before capture or origin mutation, then carries one-shot approvals into the actual Back without bypassing other blockers.
+- Workspace replace, close, and bulk close clear removed tab visit state; `clearWorkspace` clears all workspace and Folio history state for workspace/vault teardown.
+- Explicit-null graph entries remain tuple-cleared but are ignored by the Folio coordinator on traversal.
+
+### Evidence
+
+- Lifecycle RED: 4 selected tests failed; lifecycle GREEN: 4 selected tests passed.
+- Graph RED: 1 selected test failed; graph GREEN: 1 selected test passed.
+- Exit/tab/mobile blocker targets: 4 selected tests passed after correction.
+- `FolioNavigation.test.tsx`: 31/31 passed.
+- Expanded feature-focused suites: 11 files, 272 tests passed.
+- Typecheck: exit 0.
+- Expanded changed-file lint: 20 baseline diagnostics in nine files. The only initially introduced exhaustive-dependency diagnostics in `CommandPalette.tsx` were removed; no correction-owned diagnostic remains.
+
+### Additional files
+
+- `ui/src/components/codex/viewRegistry.ts`
+- `ui/src/components/codex/viewRegistry.test.ts`
+- `ui/src/components/codex/DesktopCodexFrame.tsx`
+- `ui/src/components/codex/MobileCodexFrame.tsx`
+- `ui/src/components/codex/CommandPalette.tsx`
+- `ui/src/components/codex/__tests__/CommandPalette.test.tsx`
+- `ui/src/hooks/useGlobalShortcuts.tsx`
+- `ui/src/store/workspace.ts`
+- `ui/src/store/workspace.test.ts`

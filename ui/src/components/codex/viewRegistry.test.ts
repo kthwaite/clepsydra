@@ -12,13 +12,19 @@ import { DEFAULT_DOC_SLUG } from "#/docs/constants";
 const deps = (): ViewNavDeps & {
   navigate: ReturnType<typeof vi.fn>;
   openTab: ReturnType<typeof vi.fn>;
+  activateTab: ReturnType<typeof vi.fn>;
+  leaveWorkspace: ReturnType<typeof vi.fn>;
 } =>
   ({
     navigate: vi.fn() as ReturnType<typeof useNavigate>,
     openTab: vi.fn(),
+    activateTab: vi.fn(),
+    leaveWorkspace: vi.fn((proceed: () => void) => proceed()),
   }) as ViewNavDeps & {
     navigate: ReturnType<typeof vi.fn>;
     openTab: ReturnType<typeof vi.fn>;
+    activateTab: ReturnType<typeof vi.fn>;
+    leaveWorkspace: ReturnType<typeof vi.fn>;
   };
 
 describe("VIEW_REGISTRY", () => {
@@ -91,6 +97,7 @@ describe("goToView", () => {
     const d = deps();
     goToView("gazetteer", d);
     expect(d.navigate).toHaveBeenCalledWith({ to: "/gazetteer" });
+    expect(d.leaveWorkspace).toHaveBeenCalledOnce();
   });
   it("routes docs to the default slug", () => {
     const d = deps();
@@ -99,12 +106,14 @@ describe("goToView", () => {
       to: "/docs/$slug",
       params: { slug: DEFAULT_DOC_SLUG },
     });
+    expect(d.leaveWorkspace).toHaveBeenCalledOnce();
   });
   it("routes constellation through openTab (folioOrigin-stamping path)", () => {
     const d = deps();
     goToView("constellation", d);
     expect(d.openTab).toHaveBeenCalledWith("graph");
     expect(d.navigate).not.toHaveBeenCalled();
+    expect(d.leaveWorkspace).not.toHaveBeenCalled();
   });
   it("is a no-op for launcher", () => {
     const d = deps();

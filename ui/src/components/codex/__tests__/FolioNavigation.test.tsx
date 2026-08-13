@@ -25,6 +25,10 @@ import "./FolioProperties.mock";
 import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+vi.mock("@tanstack/react-query", async (importOriginal) => ({
+  ...(await importOriginal()),
+  useIsMutating: () => 0,
+}));
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { Constellation } from "#/components/codex/Constellation";
 import { Folio } from "#/components/codex/Folio";
@@ -36,6 +40,7 @@ import {
   registerFolioHistoryTraversalGuard,
   useFolioHistoryController,
 } from "#/hooks/useFolioHistoryNavigation";
+import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 import { useConstellationStore } from "#/store/constellation";
 import * as folioRestorationStore from "#/store/folioRestoration";
 import {
@@ -43,6 +48,7 @@ import {
   clearFolioRestoration,
   readFolioHistoryDestination,
   readFolioHistoryLocation,
+  readFolioHistoryRestorationRequest,
 } from "#/store/folioRestoration";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { useWorkspaceStore } from "#/store/workspace";
@@ -50,12 +56,14 @@ import { useWorkspaceStore } from "#/store/workspace";
 const {
   editorCapture,
   editorMountCount,
+  mobileLayout,
   mutatePage,
   pageEditorState,
   refetchPage,
 } = vi.hoisted(() => ({
   editorCapture: { current: null as CustomEditor | null },
   editorMountCount: { current: 0 },
+  mobileLayout: { current: true },
   mutatePage: vi.fn().mockResolvedValue(undefined),
   pageEditorState: {
     body: "Focused source block ^abc123DEF0\n",
@@ -82,12 +90,15 @@ function publishPageState(
   for (const listener of pageEditorState.listeners) listener();
 }
 
-vi.mock("#/hooks/useMobileLayout", () => ({ useMobileLayout: () => true }));
+vi.mock("#/hooks/useMobileLayout", () => ({
+  useMobileLayout: () => mobileLayout.current,
+}));
 vi.mock("#/api/index", () => ({
   useBacklinks: () => ({ data: undefined }),
   useOutlinks: () => ({ data: undefined }),
   useSimilar: () => ({ data: undefined }),
   useTags: () => ({ data: [] }),
+  useStats: () => ({ data: undefined, isError: false }),
   useTagSuggestions: () => ({
     data: [],
     isFetching: false,
@@ -187,6 +198,10 @@ vi.mock("#/components/page-tree/PageActionsMenu", () => ({
 vi.mock("#/components/page-tree/FolderActionsMenu", () => ({
   FolderActionsMenu: () => null,
 }));
+vi.mock("#/hooks/useVaultEvents", () => ({
+  useVaultEvents: () => "connected",
+}));
+vi.mock("#/hooks/useUptime", () => ({ useUptime: () => "00:00" }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/components/ForceGraph", () => ({
   ForceGraph: () => <div role="img" aria-label="Constellation graph" />,
@@ -319,6 +334,7 @@ function Workspace() {
   return (
     <>
       <HistoryControls />
+      <GlobalShortcuts />
       <CodexFrame>{content}</CodexFrame>
     </>
   );
@@ -392,9 +408,9 @@ function activePagePath() {
 
 function currentFolioScroller() {
   const editor = screen.getByRole("textbox", { name: "Page body" });
-  const scrollContainer = editor.closest<HTMLDivElement>(
-    ".cl-noscroll.overflow-y-auto",
-  );
+  const scrollContainer =
+    editor.closest<HTMLDivElement>(".cl-noscroll.overflow-y-auto") ??
+    editor.closest<HTMLDivElement>(".cl-noscroll.overflow-auto");
   if (!scrollContainer) throw new Error("Expected mobile Folio scroller");
   return scrollContainer;
 }
@@ -438,6 +454,7 @@ describe("mobile Folio Back", () => {
       value: scrollIntoView,
     });
     scrollIntoView.mockReset();
+    mobileLayout.current = true;
     editorCapture.current = null;
     editorMountCount.current = 0;
     clearFolioRestoration("alpha");
@@ -1312,7 +1329,7 @@ describe("mobile Folio Back", () => {
         },
       );
 
-      act(() => router.history.back());
+      await user.click(screen.getByRole("button", { name: "Back" }));
       expect(
         await screen.findByRole("dialog", { name: "Unsaved raw Markdown" }),
       ).toBeVisible();
@@ -1433,7 +1450,7 @@ describe("mobile Folio Back", () => {
       expect(router.history.length).toBe(1);
     });
 
-    it("treats graph entries as a tuple boundary during later traversal", async () => {
+    it("ignores explicit-null graph entries during later traversal", async () => {
       const user = userEvent.setup();
       seedHistoryTabs();
       const router = renderNavigation("/workspace");
@@ -1454,12 +1471,17 @@ describe("mobile Folio Back", () => {
       act(() => router.history.forward());
 
       await waitFor(() =>
-        expect(useWorkspaceStore.getState().activeTabId).toBe("graph"),
+        expect(router.history.location.state).toMatchObject({
+          folioTabId: null,
+          folioPath: null,
+          folioLocationId: null,
+        }),
       );
+      expect(useWorkspaceStore.getState().activeTabId).toBe("alpha");
+      expect(activePagePath()).toBe("notes/alpha.md");
       expect(
-        await screen.findByRole("img", { name: "Constellation graph" }),
-      ).toBeVisible();
-      expect(activePagePath()).toBeUndefined();
+        readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
+      ).toBeNull();
     });
 
     it("restores a direct Folio after fallback to Atrium and browser Back", async () => {
@@ -1494,6 +1516,92 @@ describe("mobile Folio Back", () => {
 
       await expectFolioPosition("notes/alpha.md", 808, 8);
       expect(router.state.location.pathname).toBe("/workspace");
+    });
+
+    it.each([
+      {
+        name: "mobile root",
+        setup: () => undefined,
+        exit: async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.click(screen.getByRole("button", { name: "Gazetteer" }));
+        },
+      },
+      {
+        name: "desktop rail",
+        setup: () => {
+          mobileLayout.current = false;
+        },
+        exit: async (user: ReturnType<typeof userEvent.setup>) => {
+          await user.click(screen.getByRole("button", { name: /GAZETTEER/ }));
+        },
+      },
+      {
+        name: "keyboard shortcut",
+        setup: () => undefined,
+        exit: async () => {
+          fireEvent.keyDown(window, { key: "i", ctrlKey: true });
+        },
+      },
+    ])(
+      "checkpoints a positioned Folio for $name exit and restores it on Back",
+      async ({ setup, exit }) => {
+        const user = userEvent.setup();
+        setup();
+        useWorkspaceStore.setState({
+          tabs: [
+            {
+              id: "alpha",
+              type: "page",
+              path: "notes/alpha.md",
+              label: "Alpha",
+            },
+          ],
+          activeTabId: "alpha",
+        });
+        const router = renderNavigation("/workspace");
+        await screen.findByRole("textbox", { name: "Page body" });
+        await waitFor(() =>
+          expect(
+            readFolioHistoryDestination(router.history.location.state),
+          ).not.toBeNull(),
+        );
+        setFolioPosition(919, 9);
+
+        await exit(user);
+        await waitFor(() =>
+          expect(router.state.location.pathname).toBe("/gazetteer"),
+        );
+        act(() => router.history.back());
+
+        await expectFolioPosition("notes/alpha.md", 919, 9);
+      },
+    );
+
+    it("pushes a fresh tuple for next-tab shortcut and restores Back position", async () => {
+      seedHistoryTabs();
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).not.toBeNull(),
+      );
+      const alphaDestination = readFolioHistoryDestination(
+        router.history.location.state,
+      );
+      setFolioPosition(313, 3);
+
+      fireEvent.keyDown(window, { key: "Tab", ctrlKey: true });
+
+      await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+      const betaDestination = readFolioHistoryDestination(
+        router.history.location.state,
+      );
+      expect(betaDestination?.folioLocationId).not.toBe(
+        alphaDestination?.folioLocationId,
+      );
+      act(() => router.history.back());
+      await expectFolioPosition("notes/alpha.md", 313, 3);
     });
 
     it("applies Back without pushing, replacing, or recursively traversing", async () => {
