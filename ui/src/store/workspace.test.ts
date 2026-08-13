@@ -3,6 +3,7 @@ import {
   migrateWorkspace,
   type OpenHistoryEntry,
   pushOpenHistory,
+  registerWorkspaceTransitionGuard,
   useWorkspaceStore,
 } from "./workspace";
 
@@ -66,6 +67,51 @@ describe("useWorkspaceStore openTab wiring", () => {
     expect(useWorkspaceStore.getState().openHistory.map((e) => e.path)).toEqual(
       ["x.md"],
     );
+  });
+
+  it("activateTabFromHistory applies activation without re-entering the guard", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+          focusBlockId: "block-alpha",
+          focusRequestId: "focus-alpha",
+        },
+        {
+          id: "beta",
+          type: "page",
+          path: "notes/beta.md",
+          label: "Beta",
+        },
+      ],
+      activeTabId: "alpha",
+      openHistory: [],
+      quires: {},
+    });
+    let guardCalls = 0;
+    const unregister = registerWorkspaceTransitionGuard(() => {
+      guardCalls += 1;
+      return true;
+    });
+
+    try {
+      useWorkspaceStore.getState().activateTabFromHistory("beta");
+    } finally {
+      unregister();
+    }
+
+    const state = useWorkspaceStore.getState();
+    expect(guardCalls).toBe(0);
+    expect(state.activeTabId).toBe("beta");
+    expect(state.tabs.find((tab) => tab.id === "alpha")).not.toHaveProperty(
+      "focusBlockId",
+    );
+    expect(state.openHistory.map((entry) => entry.path)).toEqual([
+      "notes/beta.md",
+    ]);
   });
 });
 
