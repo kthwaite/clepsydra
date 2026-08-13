@@ -1091,6 +1091,32 @@ describe("Folio raw Markdown mode", () => {
     );
   });
 });
+describe("Folio kind assignment", () => {
+  it("renders the resolved Journal kind as fixed", () => {
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      kind: "JOURNAL",
+    });
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/alpha.md", label: "Alpha" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const kind = screen.getByRole("button", { name: "Kind" });
+    expect(kind).toBeDisabled();
+    expect(kind).toHaveTextContent("JOURNAL");
+    expect(kind).toHaveTextContent("fixed");
+    expect(kind).toHaveAccessibleDescription(
+      "Journal kind cannot be changed.",
+    );
+  });
+});
+
 
 describe("Folio property placement", () => {
   it("places projected properties between the desktop header and body", () => {

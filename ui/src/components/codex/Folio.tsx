@@ -1137,6 +1137,11 @@ export function Folio({ tabId, path }: FolioProps) {
               <KindSelect
                 value={kind}
                 inferred={inferred}
+                immutableReason={
+                  kind === "JOURNAL"
+                    ? "Journal kind cannot be changed."
+                    : undefined
+                }
                 onAssign={(k) =>
                   assign.mutate(
                     { params: { path: { path } }, body: { kind: k } },

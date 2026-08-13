@@ -3549,6 +3549,122 @@ async fn page_mutation_update_resolves_links_bidirectionally() {
 }
 
 #[tokio::test]
+async fn journal_kind_assignment_rejects_reclassification_but_allows_other_metadata() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000223
+title: Daily
+type: JOURNAL
+---
+Daily body.
+";
+    let (server, tmp) = setup_server_with_files(&[("journals/daily.md", source)]);
+    let vault_root = tmp.path().join("vault");
+    let source_path = vault_root.join("journals/daily.md");
+    let original = fs::read(&source_path).unwrap();
+
+    let rejected = server
+        .post("/api/vault/pages-assign/journals/daily.md")
+        .json(&serde_json::json!({ "kind": "NOTE" }))
+        .await;
+
+    rejected.assert_status_bad_request();
+    let error: serde_json::Value = rejected.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal kind cannot be changed")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        fs::read(&source_path).unwrap(),
+        original,
+        "a rejected assignment must not modify the journal"
+    );
+    assert!(
+        !vault_root.join("notes/daily.md").exists(),
+        "a rejected assignment must not publish a NOTE destination"
+    );
+
+    let retained = server
+        .post("/api/vault/pages-assign/journals/daily.md")
+        .json(&serde_json::json!({ "kind": "JOURNAL" }))
+        .await;
+    retained.assert_status_ok();
+    let retained: serde_json::Value = retained.json();
+    let retained_path = retained["path"].as_str().unwrap();
+    assert_eq!(retained["kind"], "JOURNAL");
+
+    let project_assigned = server
+        .post(&format!("/api/vault/pages-assign/{retained_path}"))
+        .json(&serde_json::json!({ "project": "personal" }))
+        .await;
+    project_assigned.assert_status_ok();
+    assert_eq!(
+        project_assigned.json::<serde_json::Value>()["kind"],
+        "JOURNAL"
+    );
+}
+
+#[tokio::test]
+async fn inferred_journal_kind_assignment_rejects_reclassification() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000224
+title: Inferred
+---
+Inferred journal body.
+";
+    let (server, tmp) = setup_server_with_files(&[("journals/inferred.md", source)]);
+    let vault_root = tmp.path().join("vault");
+    let source_path = vault_root.join("journals/inferred.md");
+    let original = fs::read(&source_path).unwrap();
+
+    let response = server
+        .post("/api/vault/pages-assign/journals/inferred.md")
+        .json(&serde_json::json!({ "kind": "NOTE" }))
+        .await;
+
+    response.assert_status_bad_request();
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal kind cannot be changed")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        fs::read(source_path).unwrap(),
+        original,
+        "a rejected assignment must not modify an inferred journal"
+    );
+}
+
+#[tokio::test]
+async fn non_journal_can_be_assigned_to_journal() {
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000225
+title: Log
+type: NOTE
+---
+Log body.
+";
+    let (server, tmp) = setup_server_with_files(&[("notes/log.md", source)]);
+
+    let response = server
+        .post("/api/vault/pages-assign/notes/log.md")
+        .json(&serde_json::json!({ "kind": "JOURNAL" }))
+        .await;
+
+    response.assert_status_ok();
+    let assigned: serde_json::Value = response.json();
+    assert_eq!(assigned["kind"], "JOURNAL");
+    assert_eq!(assigned["path"], "journals/log.md");
+    assert!(tmp.path().join("vault/journals/log.md").exists());
+}
+
+#[tokio::test]
 async fn page_mutation_project_assignment_destination_collision_returns_409() {
     let source = "\
 ---
@@ -3589,6 +3705,70 @@ Destination body.
             .unwrap()
             .contains("Destination body."),
         "the collision destination must not be overwritten"
+    );
+}
+
+#[tokio::test]
+async fn bulk_kind_assignment_rejects_journal_reclassification_atomically() {
+    let ordinary = "\
+---
+id: 00000000-0000-0000-0000-000000000226
+title: Ordinary
+type: NOTE
+---
+Ordinary body.
+";
+    let journal = "\
+---
+id: 00000000-0000-0000-0000-000000000227
+title: Daily
+type: JOURNAL
+---
+Daily body.
+";
+    let (server, tmp) = setup_server_with_files(&[
+        ("notes/ordinary.md", ordinary),
+        ("journals/daily.md", journal),
+    ]);
+    let vault_root = tmp.path().join("vault");
+    let ordinary_path = vault_root.join("notes/ordinary.md");
+    let journal_path = vault_root.join("journals/daily.md");
+    let original_ordinary = fs::read(&ordinary_path).unwrap();
+    let original_journal = fs::read(&journal_path).unwrap();
+
+    let response = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes/ordinary.md", "journals/daily.md"],
+            "kind": "QUOTE"
+        }))
+        .await;
+
+    response.assert_status_bad_request();
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal kind cannot be changed")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        fs::read(ordinary_path).unwrap(),
+        original_ordinary,
+        "a rejected bulk assignment must not modify an ordinary source"
+    );
+    assert_eq!(
+        fs::read(journal_path).unwrap(),
+        original_journal,
+        "a rejected bulk assignment must not modify a journal source"
+    );
+    assert!(
+        !vault_root.join("quotes/ordinary.md").exists(),
+        "a rejected bulk assignment must not publish the ordinary destination"
+    );
+    assert!(
+        !vault_root.join("quotes/daily.md").exists(),
+        "a rejected bulk assignment must not publish the journal destination"
     );
 }
 
