@@ -1,9 +1,4 @@
-import {
-  type KeyboardEvent,
-  type MouseEvent,
-  useRef,
-  useState,
-} from "react";
+import { type KeyboardEvent, type MouseEvent, useRef, useState } from "react";
 import { Path } from "slate";
 import {
   ReactEditor,
@@ -12,8 +7,8 @@ import {
   useSlateStatic,
 } from "slate-react";
 import { CLink } from "#/components/codex/CLink";
-import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
+import type { WikilinkElement as WikilinkElementType } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import { WikilinkInlineEditor } from "#/editor/WikilinkInlineEditor";
 import { useWikilinkEditing } from "#/editor/wikilinkEditing";
@@ -172,15 +167,17 @@ export function WikilinkElement({ attributes, children, element }: Props) {
             error={createError}
             onCreate={() => openTarget(element.target)}
           >
-            <span
-              role="link"
+            <a
+              {...{
+                role: "link" as const,
+                onClick: handleActivation,
+                onKeyDown: handleKeyDown,
+              }}
               tabIndex={0}
-              onClick={handleActivation}
-              onKeyDown={handleKeyDown}
               className={`cl-link relative cursor-pointer ${linkClassName}`}
             >
               {linkContent}
-            </span>
+            </a>
           </MissingWikilinkPopover>
         )}
       </span>

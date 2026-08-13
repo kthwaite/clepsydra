@@ -82,15 +82,19 @@ vi.mock("#/components/codex/CLink", () => ({
   CLink: (props: CapturedCLinkProps) => {
     clinkCalls.push(props);
     return (
-      <span
-        role="link"
+      <a
+        {...{
+          role: "link" as const,
+          onClick: props.onClick,
+          onKeyDown: (event: { key: string }) => {
+            if (event.key === "Enter") props.onClick?.(event);
+          },
+        }}
         tabIndex={0}
         className={props.className}
-        onClick={props.onClick}
-        onKeyDown={() => {}}
       >
         {props.children}
-      </span>
+      </a>
     );
   },
 }));
@@ -207,6 +211,7 @@ describe("WikilinkElement dangling", () => {
 
     expect(clinkCalls).toHaveLength(0);
     const link = screen.getByRole("link");
+    expect(link).not.toHaveAttribute("href");
     expect(link.className).toContain("text-ink-mute");
     expect(link.className).toContain("decoration-dashed");
     expect(link.className).toContain("cursor-pointer");
@@ -281,9 +286,9 @@ describe("WikilinkElement dangling", () => {
     const link = screen.getByRole("link");
 
     expect(fireEvent.keyDown(link, { key: "Enter" })).toBe(false);
-    expect(
-      fireEvent.keyDown(link, { key: "Enter", metaKey: true }),
-    ).toBe(false);
+    expect(fireEvent.keyDown(link, { key: "Enter", metaKey: true })).toBe(
+      false,
+    );
 
     expect(beginMock).not.toHaveBeenCalled();
     expect(resolveOrCreateMock).not.toHaveBeenCalled();

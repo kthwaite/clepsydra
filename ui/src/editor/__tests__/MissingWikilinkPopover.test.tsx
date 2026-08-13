@@ -1,4 +1,10 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { MissingWikilinkPopover } from "#/editor/MissingWikilinkPopover";
@@ -27,9 +33,9 @@ function renderPopover({
         error={error}
         onCreate={onCreate}
       >
-        <span role="link" tabIndex={0}>
+        <a {...{ role: "link" as const }} tabIndex={0}>
           Unwritten Page
-        </span>
+        </a>
       </MissingWikilinkPopover>
       {withOutsideTarget ? <button type="button">Outside</button> : null}
     </>,
@@ -86,14 +92,16 @@ describe("MissingWikilinkPopover", () => {
         error={null}
         onCreate={async () => true}
       >
-        <span
-          ref={triggerRef}
-          role="link"
+        <a
+          {...{
+            ref: triggerRef,
+            role: "link" as const,
+            onFocus,
+          }}
           tabIndex={0}
-          onFocus={onFocus}
         >
           Unwritten Page
-        </span>
+        </a>
       </MissingWikilinkPopover>,
     );
 
@@ -102,7 +110,9 @@ describe("MissingWikilinkPopover", () => {
 
     expect(onFocus).toHaveBeenCalledOnce();
     expect(triggerRef).toHaveBeenCalledWith(trigger);
-    expect(screen.getByRole("dialog", { name: "Unwritten Page" })).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "Unwritten Page" }),
+    ).toBeVisible();
   });
 
   it("keeps the dialog open while focus moves from the trigger into its action", async () => {
@@ -162,7 +172,9 @@ describe("MissingWikilinkPopover", () => {
     await user.click(screen.getByRole("button", { name: "Create page" }));
 
     expect(onCreate).toHaveBeenCalledOnce();
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 
   it("keeps the retry surface open when creation resolves false", async () => {
@@ -185,7 +197,9 @@ describe("MissingWikilinkPopover", () => {
     await user.tab();
 
     expect(screen.getByRole("dialog")).toBeVisible();
-    expect(screen.queryByRole("button", { name: "Create page" })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Create page" }),
+    ).not.toBeInTheDocument();
   });
 
   it("disables duplicate activation while creation is pending", async () => {
@@ -244,7 +258,9 @@ describe("MissingWikilinkPopover", () => {
     await user.tab({ shift: true });
 
     expect(trigger).toHaveFocus();
-    expect(screen.getByRole("dialog", { name: "Unwritten Page" })).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "Unwritten Page" }),
+    ).toBeVisible();
   });
 
   it("dismisses on outside pointer interaction", async () => {
@@ -255,6 +271,8 @@ describe("MissingWikilinkPopover", () => {
     expect(screen.getByRole("dialog")).toBeVisible();
     fireEvent.pointerDown(screen.getByRole("button", { name: "Outside" }));
 
-    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
   });
 });
