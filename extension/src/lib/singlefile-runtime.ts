@@ -24,18 +24,34 @@ function methodOf(message: unknown): unknown {
 		: undefined;
 }
 
-function isFrameMessage(message: unknown): boolean {
-	if (typeof message !== "object" || message === null) return false;
-	const method = methodOf(message);
-	if (method !== FRAME_INIT_RESPONSE && method !== FRAME_ACK_INIT_REQUEST) {
-		return false;
-	}
-	if (!("sessionId" in message) || typeof message.sessionId !== "string") {
-		return false;
-	}
+function isFrameInitResponse(message: unknown): boolean {
 	return (
-		method !== FRAME_INIT_RESPONSE ||
-		("frames" in message && Array.isArray(message.frames))
+		typeof message === "object" &&
+		message !== null &&
+		methodOf(message) === FRAME_INIT_RESPONSE &&
+		"sessionId" in message &&
+		typeof message.sessionId === "string" &&
+		"frames" in message &&
+		Array.isArray(message.frames) &&
+		message.frames.every(
+			(frame) =>
+				typeof frame === "object" &&
+				frame !== null &&
+				"windowId" in frame &&
+				typeof frame.windowId === "string",
+		)
+	);
+}
+
+function isFrameAck(message: unknown): boolean {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		methodOf(message) === FRAME_ACK_INIT_REQUEST &&
+		"sessionId" in message &&
+		typeof message.sessionId === "string" &&
+		"windowId" in message &&
+		typeof message.windowId === "string"
 	);
 }
 
@@ -83,7 +99,7 @@ export class SingleFileRuntime {
 		const tabId = sender.tab?.id;
 		if (tabId === undefined) return undefined;
 
-		if (isFrameMessage(message)) {
+		if (isFrameInitResponse(message) || isFrameAck(message)) {
 			void this.sendToTab(tabId, message, { frameId: 0 }).catch(() => {});
 			return Promise.resolve({});
 		}

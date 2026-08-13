@@ -16,22 +16,54 @@ describe("SingleFileRuntime", () => {
 		vi.useRealTimers();
 	});
 
-	it.each([FRAME_RESPONSE, FRAME_ACK])(
-		"routes %s back to the top frame so the capture session can resolve",
-		async (method) => {
-			const sendToTab = vi.fn().mockResolvedValue({});
-			const runtime = new SingleFileRuntime(sendToTab);
-			const message = {
-				method,
-				frames: [],
-				sessionId: "session-1",
-			};
+	it("routes an empty init response back to the top-frame capture session", async () => {
+		const sendToTab = vi.fn().mockResolvedValue({});
+		const runtime = new SingleFileRuntime(sendToTab);
+		const message = {
+			method: FRAME_RESPONSE,
+			frames: [],
+			sessionId: "session-1",
+		};
 
-			const response = runtime.handleMessage(message, sender());
-			await expect(response).resolves.toEqual({});
-			expect(sendToTab).toHaveBeenCalledWith(17, message, { frameId: 0 });
-		},
-	);
+		const response = runtime.handleMessage(message, sender());
+		await expect(response).resolves.toEqual({});
+		expect(sendToTab).toHaveBeenCalledWith(17, message, { frameId: 0 });
+	});
+
+	it("routes a frame request acknowledgement back to the top frame", async () => {
+		const sendToTab = vi.fn().mockResolvedValue({});
+		const runtime = new SingleFileRuntime(sendToTab);
+		const message = {
+			method: FRAME_ACK,
+			sessionId: "session-1",
+			windowId: "0.0",
+		};
+
+		const response = runtime.handleMessage(message, sender());
+		await expect(response).resolves.toEqual({});
+		expect(sendToTab).toHaveBeenCalledWith(17, message, { frameId: 0 });
+	});
+
+	it.each([
+		[
+			"acknowledgement without a window ID",
+			{ method: FRAME_ACK, sessionId: "session-1" },
+		],
+		[
+			"init response containing null frame data",
+			{ method: FRAME_RESPONSE, sessionId: "session-1", frames: [null] },
+		],
+		[
+			"init response frame without a window ID",
+			{ method: FRAME_RESPONSE, sessionId: "session-1", frames: [{}] },
+		],
+	])("does not claim %s", (_case, message) => {
+		const sendToTab = vi.fn().mockResolvedValue({});
+		const runtime = new SingleFileRuntime(sendToTab);
+
+		expect(runtime.handleMessage(message, sender())).toBeUndefined();
+		expect(sendToTab).not.toHaveBeenCalled();
+	});
 
 	it("runs and clears SingleFile lazy timers through worker messages", async () => {
 		vi.useFakeTimers();

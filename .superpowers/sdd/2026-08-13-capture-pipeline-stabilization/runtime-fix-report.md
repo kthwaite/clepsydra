@@ -185,3 +185,79 @@ Result: **PASS** — all Firefox-targeted entry points built and the verifier lo
 ### Runtime verification handoff
 
 The production bundles are ready for `RuntimeVerificationImplementer` to rerun the original Chrome fixture matrix against this commit.
+
+## Runtime routing review fix round 1
+
+### Finding addressed
+
+- Split the shared frame discriminator check into method-specific wire validators.
+- `singlefile.frameTree.initResponse` now requires a string `sessionId` and a `frames` array. Every frame entry must be a non-null object with a string `windowId`; the observed/upstream empty array remains valid.
+- `singlefile.frameTree.ackInitRequest` now requires both a string `sessionId` and string `windowId`.
+- Malformed frame messages are not sent to the tab and are not claimed by the SingleFile runtime handler, allowing other listeners or Chrome's normal unhandled-message behavior to apply.
+
+### RED evidence
+
+Command:
+
+```text
+bun run test -- lib/__tests__/singlefile-runtime.test.ts
+```
+
+Result before the validator split: **FAILED** — 11 tests ran, 3 failed. An acknowledgement missing `windowId`, an init response containing a null frame, and an init response containing a frame without `windowId` all returned a handled promise and called the tab sender instead of returning `undefined`.
+
+### GREEN evidence
+
+Focused runtime and relay tests:
+
+```text
+bun run test -- lib/__tests__/singlefile-runtime.test.ts lib/__tests__/relay-fetch.test.ts
+```
+
+Result: **PASS** — 2 files, 30 tests passed, 0 failed.
+
+Full extension tests:
+
+```text
+bun run test
+```
+
+Result: **PASS** — 13 files, 134 tests passed, 0 failed.
+
+Typecheck:
+
+```text
+bun run typecheck
+```
+
+Result: **PASS** — `tsc --noEmit` completed without diagnostics.
+
+Lint:
+
+```text
+bun run lint
+```
+
+Result: **PASS** — Biome checked 35 source files with no fixes or diagnostics.
+
+Chromium build:
+
+```text
+bun run build
+```
+
+Result: **PASS** — all entry points built and the DOM-free verifier loaded the worker with its 5 expected listener registrations.
+
+Firefox build:
+
+```text
+bun run build:firefox
+```
+
+Result: **PASS** — all Firefox-targeted entry points built and the verifier loaded the worker with its 5 expected listener registrations.
+
+### Self-review
+
+- Positive tests now use the exact upstream shapes independently: an empty frame init response and an acknowledgement carrying `windowId`.
+- Negative tests assert both sides of the boundary contract: malformed messages return `undefined` and `sendToTab` remains uncalled.
+- Frame-entry validation accepts the upstream empty `frames` response that unblocked plain pages while rejecting entries that content-side `initResponse` cannot safely consume.
+- Lazy runtime handling, capture message handling, relay ports, and Task 3 transfer lifecycle are unchanged.
