@@ -194,3 +194,11 @@ Added real memory-router integration coverage for all nine required Folio histor
 - Typecheck: exit 0.
 - Changed-file lint: 20 pre-existing diagnostics in nine files; no round-owned diagnostic.
 - Adjacent callsite review found non-workspace Atrium repairs navigation and registry leaf navigators correctly outside the guarded Folio boundary; no additional raw production tab activation consumer remains.
+
+## Post-round verification repair
+
+- RED: the complete `FolioAiConversation.test.tsx` and `FolioRecipe.test.tsx` suites failed 23 tests because their router mocks omitted the now-consumed `useRouterState` export.
+- Correction: both mocks now use the same selector-driven workspace match fixture as `Folio.test.tsx`; no production behavior changed.
+- GREEN: both repaired suites passed, 2 files and 25 tests.
+- Expanded focused verification: 16 files, 314 tests passed.
+- Typecheck: exit 0.
