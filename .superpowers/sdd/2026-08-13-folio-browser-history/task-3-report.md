@@ -1,0 +1,58 @@
+# Task 3 report — Folio capture and restoration precedence
+
+## RED evidence
+
+Command:
+
+```text
+bun run test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/FolioNavigation.test.tsx
+```
+
+Observed before production changes: exit 1; 2 test files failed; 10 tests failed. The failures were the expected missing behavior: stale-selection scroll stayed at `0` instead of `64`; latest-per-tab scroll won over history (`12` instead of `91`); a missing history snapshot applied latest state (`70` instead of preserving `23`); loading/retry, locked, and read-only requests never scheduled restoration; the superseded effect applied latest scroll (`5` instead of history `44`); settled not-found left its request pending; and both mobile Back paths had no captured history record (`undefined` instead of `137` / `149`).
+
+## GREEN evidence
+
+Command:
+
+```text
+bun run test -- src/components/codex/__tests__/Folio.test.tsx src/components/codex/__tests__/FolioNavigation.test.tsx
+```
+
+Observed after implementation: exit 0; 2 test files passed; 65 tests passed.
+
+## Typecheck evidence
+
+Command:
+
+```text
+bun run typecheck
+```
+
+Observed: exit 0; `tsc --noEmit --project tsconfig.app.json` completed without diagnostics.
+
+## Implementation summary
+
+- Added one synchronous `FolioRestoration` builder and registered it as the mounted Folio history capture; the latest-per-tab unmount save now uses the same builder.
+- Made matching history requests authoritative, including missing snapshots; retained requests across loading, retryable errors, and encryption locks; discarded settled not-found or destination-mismatched requests; consumed exact location IDs only after an available Folio handled them.
+- Restored scroll independently from selection validation and retained the existing validated-selection/focus behavior.
+- Routed both mobile Back branches through `useLeaveFolioWorkspace`, so checkpoint capture precedes origin activation/history Back or fallback navigation to `/`.
+
+## Self-review
+
+- Capture validation is single-sourced and synchronous; no new store or hook API was introduced.
+- History precedence cannot fall through to latest-per-tab state when a matching request exists, including a missing record.
+- Exact-ID consumption preserves a superseding request; unavailable transient states do not consume it.
+- Read-only conversation presentation still mounts the source editor and completes restoration.
+- Focused tests cover every brief-listed regression and assert DOM/store outcomes rather than implementation call counts.
+- No formatter, linter, build, project-wide test, unrelated cleanup, plan/spec/ledger, or earlier report was touched.
+
+## Files
+
+- `ui/src/components/codex/Folio.tsx`
+- `ui/src/components/codex/__tests__/Folio.test.tsx`
+- `ui/src/components/codex/__tests__/FolioNavigation.test.tsx`
+- `.superpowers/sdd/2026-08-13-folio-browser-history/task-3-report.md`
+
+## Commit
+
+`feat(ui): restore Folio locations from browser history`

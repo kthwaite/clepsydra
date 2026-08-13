@@ -32,8 +32,14 @@ import { renderElement } from "#/editor/elements/renderElement";
 import { withSchema } from "#/editor/schema/withSchema";
 import type { CustomEditor } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useFolioHistoryController } from "#/hooks/useFolioHistoryNavigation";
 import { useConstellationStore } from "#/store/constellation";
-import { clearFolioRestoration } from "#/store/folioRestoration";
+import {
+  clearFolioHistoryState,
+  clearFolioRestoration,
+  readFolioHistoryDestination,
+  readFolioHistoryLocation,
+} from "#/store/folioRestoration";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -271,6 +277,7 @@ function GazetteerOrigin() {
 
 function Workspace() {
   const tabs = useWorkspaceStore((state) => state.tabs);
+  useFolioHistoryController();
   const activeTabId = useWorkspaceStore((state) => state.activeTabId);
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const content =
@@ -338,6 +345,7 @@ describe("mobile Folio Back", () => {
     editorMountCount.current = 0;
     clearFolioRestoration("alpha");
     clearFolioRestoration("other");
+    clearFolioHistoryState();
     pageEditorState.body = "Focused source block ^abc123DEF0\n";
     pageEditorState.isLoading = false;
     pageEditorState.kind = "NOTE";
@@ -752,7 +760,7 @@ describe("mobile Folio Back", () => {
     expect(pageTabStillExists()).toBe(true);
   });
 
-  it("returns to Constellation through history, preserving anchor, depth, journal, orphan, and list state without closing the page tab", async () => {
+  it("checkpoints before restoring the Constellation origin through history", async () => {
     const user = userEvent.setup();
     useWorkspaceStore.setState({
       tabs: [{ id: "graph", type: "graph", label: "Graph" }],
@@ -769,7 +777,18 @@ describe("mobile Folio Back", () => {
     await user.click(screen.getByRole("switch", { name: "Show orphans" }));
     await user.click(screen.getByRole("button", { name: "List view" }));
     await user.click(screen.getByRole("button", { name: "Open Alpha" }));
-    await user.click(await screen.findByRole("button", { name: "Back" }));
+    const editor = await screen.findByRole("textbox", { name: "Page body" });
+    const scrollContainer = editor.closest<HTMLDivElement>(
+      ".cl-noscroll.overflow-y-auto",
+    );
+    if (!scrollContainer) throw new Error("Expected mobile Folio scroller");
+    scrollContainer.scrollTop = 137;
+    const destination = readFolioHistoryDestination(
+      router.history.location.state,
+    );
+    if (!destination) throw new Error("Expected Folio history destination");
+
+    await user.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/workspace"),
@@ -788,9 +807,17 @@ describe("mobile Folio Back", () => {
       "true",
     );
     expect(pageTabStillExists()).toBe(true);
+    // Defect caught: origin activation used to unmount Folio before its visit was checkpointed.
+    expect(
+      readFolioHistoryLocation(
+        destination.folioLocationId,
+        destination.folioTabId,
+        destination.folioPath,
+      )?.scrollTop,
+    ).toBe(137);
   });
 
-  it("falls back to Atrium when a directly-loaded Folio has no usable in-app history", async () => {
+  it("checkpoints before falling back from direct-loaded Folio to Atrium", async () => {
     const user = userEvent.setup();
     useWorkspaceStore.setState({
       tabs: [
@@ -804,14 +831,37 @@ describe("mobile Folio Back", () => {
       activeTabId: "page",
     });
     const router = renderNavigation("/workspace");
+    const editor = await screen.findByRole("textbox", { name: "Page body" });
+    const scrollContainer = editor.closest<HTMLDivElement>(
+      ".cl-noscroll.overflow-y-auto",
+    );
+    if (!scrollContainer) throw new Error("Expected mobile Folio scroller");
+    scrollContainer.scrollTop = 149;
+    await waitFor(() =>
+      expect(
+        readFolioHistoryDestination(router.history.location.state),
+      ).not.toBeNull(),
+    );
+    const destination = readFolioHistoryDestination(
+      router.history.location.state,
+    );
+    if (!destination) throw new Error("Expected Folio history destination");
 
-    await user.click(await screen.findByRole("button", { name: "Back" }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/"));
     expect(
       screen.getByRole("heading", { name: "Atrium origin" }),
     ).toBeVisible();
     expect(pageTabStillExists()).toBe(true);
+    // Defect caught: fallback navigation used to leave before synchronously checkpointing.
+    expect(
+      readFolioHistoryLocation(
+        destination.folioLocationId,
+        destination.folioTabId,
+        destination.folioPath,
+      )?.scrollTop,
+    ).toBe(149);
   });
 
   it("keeps frame graph activation and router navigation in one raw-draft confirmation", async () => {

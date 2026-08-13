@@ -260,9 +260,14 @@ import { TabContent } from "#/components/TabContent";
 import { todayJournalPath } from "#/lib/journal";
 import { queryClient } from "#/lib/queryClient";
 import {
+  captureFolioHistoryLocation,
+  clearFolioHistoryState,
   clearFolioRestoration,
   type FolioRestoration,
+  readFolioHistoryRestorationRequest,
   readFolioRestoration,
+  registerFolioHistoryCapture,
+  requestFolioHistoryRestoration,
   saveFolioRestoration,
 } from "#/store/folioRestoration";
 import { useWorkspaceStore } from "#/store/workspace";
@@ -275,6 +280,7 @@ beforeEach(() => {
   journalTodayState.isLoading = false;
   outlinksState.data = undefined;
   clearFolioRestoration("t1");
+  clearFolioHistoryState();
   folioPropertiesMock.mockClear();
   folioPropertiesState.failed = false;
   mountedSlateEditors.length = 0;
@@ -412,6 +418,29 @@ function restorationRecord(
     focus: { path: [0, 0], offset: 7, text: "Editable body" },
     ...overrides,
   };
+}
+
+function queueHistoryRestoration(
+  locationId: string,
+  path: string,
+  restoration: FolioRestoration | null,
+) {
+  if (restoration) {
+    const unregister = registerFolioHistoryCapture(
+      restoration.tabId,
+      restoration.path,
+      () => restoration,
+    );
+    expect(
+      captureFolioHistoryLocation(
+        locationId,
+        restoration.tabId,
+        restoration.path,
+      ),
+    ).toBe(true);
+    unregister();
+  }
+  requestFolioHistoryRestoration({ tabId: "t1", path, locationId });
 }
 
 describe("Folio invalid-tab recovery", () => {
@@ -1457,7 +1486,7 @@ describe("Folio in-session restoration", () => {
     expect(restoredEditor.selection).toEqual(savedSelection);
   });
 
-  it("leaves scroll and selection untouched when changed-revision text is stale", () => {
+  it("restores scroll when changed-revision selection text is stale", () => {
     const departing = editableEditor();
     departing.getRevision.mockReturnValue("revision-1");
     usePageEditorMock.mockReturnValue(departing);
@@ -1479,8 +1508,200 @@ describe("Folio in-session restoration", () => {
 
     flushRestorationFrame();
 
-    expect(restoredScroller.scrollTop).toBe(0);
+    // Defect caught: invalid stale selection used to abort independent scroll restoration.
+    expect(restoredScroller.scrollTop).toBe(64);
     expect(restoredEditor.selection).toBeNull();
+  });
+
+  it("prefers a matching history snapshot over latest tab state", () => {
+    saveFolioRestoration(restorationRecord({ scrollTop: 12 }));
+    queueHistoryRestoration(
+      "history-alpha",
+      "notes/alpha.md",
+      restorationRecord({ scrollTop: 91 }),
+    );
+    usePageEditorMock.mockReturnValue(editableEditor());
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredScroller = folioScrollContainer();
+    flushRestorationFrame();
+
+    // Defect caught: latest-per-tab state used to override the visited history location.
+    expect(restoredScroller.scrollTop).toBe(91);
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
+    ).toBeNull();
+  });
+
+  it("consumes a matching missing snapshot without applying latest tab state", () => {
+    saveFolioRestoration(restorationRecord({ scrollTop: 70 }));
+    queueHistoryRestoration("history-missing", "notes/alpha.md", null);
+    usePageEditorMock.mockReturnValue(editableEditor());
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredScroller = folioScrollContainer();
+    restoredScroller.scrollTop = 23;
+    flushRestorationFrame();
+
+    // Defect caught: a missing history snapshot used to fall through to a different visit.
+    expect(restoredScroller.scrollTop).toBe(23);
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
+    ).toBeNull();
+  });
+
+  it("keeps a history request through loading and retryable error", () => {
+    queueHistoryRestoration(
+      "history-after-retry",
+      "notes/alpha.md",
+      restorationRecord({ scrollTop: 83 }),
+    );
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      isLoading: true,
+    });
+    const view = render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    // Defect caught: loading used to strand the request before content could restore it.
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md")?.request
+        .locationId,
+    ).toBe("history-after-retry");
+
+    usePageEditorMock.mockReturnValue({
+      ...errorEditor(),
+      error: { status: 500, error: "index unavailable" },
+      pageNotFound: false,
+    });
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    // Defect caught: a retryable failure used to discard the pending visit.
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md")?.request
+        .locationId,
+    ).toBe("history-after-retry");
+
+    usePageEditorMock.mockReturnValue(editableEditor());
+    view.rerender(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredScroller = folioScrollContainer();
+    flushRestorationFrame();
+
+    expect(restoredScroller.scrollTop).toBe(83);
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
+    ).toBeNull();
+  });
+
+  it("keeps a history request locked until the Folio unlocks", () => {
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "notes/private.md", label: "Private" },
+      ],
+      activeTabId: "t1",
+    });
+    queueHistoryRestoration(
+      "history-private",
+      "notes/private.md",
+      restorationRecord({
+        path: "notes/private.md",
+        scrollTop: 57,
+        anchor: null,
+        focus: null,
+      }),
+    );
+    const lockedEditor = {
+      ...editableEditor(),
+      encrypted: true,
+      encryptionState: { status: "locked" as const },
+    };
+    usePageEditorMock.mockReturnValue(lockedEditor);
+    const view = render(<Folio tabId="t1" path="notes/private.md" />);
+
+    // Defect caught: the locked shell used to lose the visit before an editor existed.
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/private.md")?.request
+        .locationId,
+    ).toBe("history-private");
+
+    usePageEditorMock.mockReturnValue({
+      ...lockedEditor,
+      encryptionState: { status: "plain" as const, body: "Editable body" },
+    });
+    view.rerender(<Folio tabId="t1" path="notes/private.md" />);
+    const restoredScroller = folioScrollContainer();
+    flushRestorationFrame();
+
+    expect(restoredScroller.scrollTop).toBe(57);
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/private.md"),
+    ).toBeNull();
+  });
+
+  it("consumes a valid history request in read-only conversation mode", () => {
+    queueHistoryRestoration(
+      "history-conversation",
+      "notes/alpha.md",
+      restorationRecord({
+        scrollTop: 36,
+        anchor: null,
+        focus: null,
+      }),
+    );
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      kind: "AI_CONVERSATION",
+    });
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredScroller = folioScrollContainer();
+    flushRestorationFrame();
+
+    // Defect caught: read-only presentation used to leave a valid visit pending forever.
+    expect(restoredScroller.scrollTop).toBe(36);
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
+    ).toBeNull();
+  });
+
+  it("does not let an older restore effect consume a superseding request", () => {
+    saveFolioRestoration(restorationRecord({ scrollTop: 5 }));
+    queueHistoryRestoration(
+      "history-first",
+      "notes/alpha.md",
+      restorationRecord({ scrollTop: 44 }),
+    );
+    usePageEditorMock.mockReturnValue(editableEditor());
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+    const restoredScroller = folioScrollContainer();
+
+    requestFolioHistoryRestoration({
+      tabId: "t1",
+      path: "notes/alpha.md",
+      locationId: "history-second",
+    });
+    flushRestorationFrame();
+
+    expect(restoredScroller.scrollTop).toBe(44);
+    // Defect caught: completion of the first effect used to erase the newer exact-ID request.
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md")?.request
+        .locationId,
+    ).toBe("history-second");
+  });
+
+  it("discards a matching history request after a settled not-found", () => {
+    queueHistoryRestoration(
+      "history-gone",
+      "notes/alpha.md",
+      restorationRecord(),
+    );
+    usePageEditorMock.mockReturnValue(errorEditor());
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    // Defect caught: an impossible destination used to remain pending after a settled 404.
+    expect(
+      readFolioHistoryRestorationRequest("t1", "notes/alpha.md"),
+    ).toBeNull();
   });
 
   it("restores scroll and selection when changed-revision text remains compatible", () => {
