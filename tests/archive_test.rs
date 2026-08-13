@@ -77,11 +77,7 @@ fn archive_delete_hook_reports_cas_decrement_failure() {
 
     assert!(error.to_string().contains("hash must start with 'sha256:'"));
     assert_eq!(
-        state
-            .cas
-            .lock()
-            .gc(std::time::Duration::ZERO)
-            .unwrap(),
+        state.cas.lock().gc(std::time::Duration::ZERO).unwrap(),
         1,
         "a failing decrement must not prevent later references from being compensated"
     );
@@ -147,11 +143,13 @@ async fn rollback_on_index_failure_preserves_primary_and_compensates_every_blob(
         .unwrap()
         .unwrap();
 
-    let first = b"first rollback blob";
-    let second = b"second rollback blob";
-    let first_hash = sha256_hash(first);
-    let second_hash = sha256_hash(second);
+    // One inlined image plus the snapshot itself: two blobs incremented, both
+    // of which must be compensated when the index insert fails.
+    let image = b"rollback image bytes";
+    let image_b64 = BASE64.encode(image);
     let markdown = "# Rollback";
+    let snapshot_html =
+        format!(r#"<html><body><img src="data:image/png;base64,{image_b64}"></body></html>"#);
     let response = server
         .post("/api/vault/archive")
         .json(&serde_json::json!({
@@ -160,21 +158,9 @@ async fn rollback_on_index_failure_preserves_primary_and_compensates_every_blob(
             "title": "Rollback",
             "captured_at": "2026-07-11T00:00:00Z",
             "content_hash": content_hash(markdown),
-            "snapshot_hash": second_hash,
+            "snapshot_html": snapshot_html,
             "markdown_body": markdown,
             "tags": ["archive"],
-            "blobs": [
-                {
-                    "hash": first_hash,
-                    "content_type": "application/octet-stream",
-                    "data": BASE64.encode(first),
-                },
-                {
-                    "hash": second_hash,
-                    "content_type": "application/octet-stream",
-                    "data": BASE64.encode(second),
-                }
-            ]
         }))
         .await;
 
@@ -210,6 +196,8 @@ async fn archive_ingest_creates_page_and_stores_blobs() {
     let blob_hash = sha256_hash(blob_data);
     let blob_b64 = BASE64.encode(blob_data);
     let body = "# Example Article\n\nThis is the archived content.";
+    let snapshot_html =
+        format!(r#"<html><body><img src="data:image/png;base64,{blob_b64}"></body></html>"#);
 
     let payload = serde_json::json!({
         "url": "https://example.com/article",
@@ -217,21 +205,18 @@ async fn archive_ingest_creates_page_and_stores_blobs() {
         "title": "Example Article",
         "captured_at": "2026-02-14T12:00:00Z",
         "content_hash": content_hash(body),
-        "snapshot_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000002",
+        "snapshot_html": snapshot_html,
         "markdown_body": body,
         "tags": ["archive", "example.com"],
-        "blobs": [{
-            "hash": blob_hash,
-            "content_type": "image/png",
-            "data": blob_b64,
-        }],
     });
 
     let res = server.post("/api/vault/archive").json(&payload).await;
     res.assert_status(StatusCode::CREATED);
     let body: serde_json::Value = res.json();
 
-    assert_eq!(body["blobs_stored"], 1);
+    // The inlined image plus the snapshot itself: two blobs, where the client
+    // used to send only one.
+    assert_eq!(body["blobs_stored"], 2);
     assert_eq!(body["blobs_deduped"], 0);
     assert_eq!(body["status"], "created");
     assert!(
@@ -264,10 +249,9 @@ async fn archive_duplicate_url_same_content_returns_200() {
         "title": "Dup Article",
         "captured_at": "2026-02-14T12:00:00Z",
         "content_hash": content_hash(body),
-        "snapshot_hash": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "snapshot_html": "<html><body><p>ok</p></body></html>",
         "markdown_body": body,
         "tags": ["archive", "example.com"],
-        "blobs": [],
     });
 
     // First ingest
@@ -294,10 +278,9 @@ async fn archive_duplicate_url_different_content_returns_409() {
         "title": "Conflict Article",
         "captured_at": "2026-02-14T12:00:00Z",
         "content_hash": content_hash(body1),
-        "snapshot_hash": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+        "snapshot_html": "<html><body><p>ok</p></body></html>",
         "markdown_body": body1,
         "tags": ["archive", "example.com"],
-        "blobs": [],
     });
 
     // First ingest
@@ -312,10 +295,9 @@ async fn archive_duplicate_url_different_content_returns_409() {
         "title": "Conflict Article",
         "captured_at": "2026-02-14T13:00:00Z",
         "content_hash": content_hash(body2),
-        "snapshot_hash": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+        "snapshot_html": "<html><body><p>ok</p></body></html>",
         "markdown_body": body2,
         "tags": ["archive", "example.com"],
-        "blobs": [],
     });
 
     let res2 = server.post("/api/vault/archive").json(&payload2).await;
@@ -344,10 +326,9 @@ async fn archive_page_is_readable_via_pages_api() {
         "title": "Readable Article",
         "captured_at": "2026-02-14T12:00:00Z",
         "content_hash": content_hash(md_body),
-        "snapshot_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "snapshot_html": "<html><body><p>ok</p></body></html>",
         "markdown_body": md_body,
         "tags": ["archive", "example.com"],
-        "blobs": [],
     });
 
     let res = server.post("/api/vault/archive").json(&payload).await;
@@ -397,70 +378,6 @@ async fn archive_page_is_readable_via_pages_api() {
 }
 
 #[tokio::test]
-async fn archive_blob_deduplication() {
-    let (server, _tmp, _state) = setup_server();
-
-    // Shared blob between two archives
-    let shared_blob_data = b"shared image bytes";
-    let shared_blob_hash = sha256_hash(shared_blob_data);
-    let shared_blob_b64 = BASE64.encode(shared_blob_data);
-
-    let body1 = "# Page One\n\nFirst page.";
-    let payload1 = serde_json::json!({
-        "url": "https://example.com/page-one",
-        "domain": "example.com",
-        "title": "Page One",
-        "captured_at": "2026-02-14T12:00:00Z",
-        "content_hash": content_hash(body1),
-        "snapshot_hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
-        "markdown_body": body1,
-        "tags": ["archive", "example.com"],
-        "blobs": [{
-            "hash": shared_blob_hash.clone(),
-            "content_type": "image/jpeg",
-            "data": shared_blob_b64.clone(),
-        }],
-    });
-
-    // First archive — blob is new
-    let res1 = server.post("/api/vault/archive").json(&payload1).await;
-    res1.assert_status(StatusCode::CREATED);
-    let body1_resp: serde_json::Value = res1.json();
-    assert_eq!(body1_resp["blobs_stored"], 1);
-    assert_eq!(body1_resp["blobs_deduped"], 0);
-
-    let body2 = "# Page Two\n\nSecond page with same image.";
-    let payload2 = serde_json::json!({
-        "url": "https://example.com/page-two",
-        "domain": "example.com",
-        "title": "Page Two",
-        "captured_at": "2026-02-14T12:01:00Z",
-        "content_hash": content_hash(body2),
-        "snapshot_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab",
-        "markdown_body": body2,
-        "tags": ["archive", "example.com"],
-        "blobs": [{
-            "hash": shared_blob_hash,
-            "content_type": "image/jpeg",
-            "data": shared_blob_b64,
-        }],
-    });
-
-    // Second archive — same blob already stored, should be deduped
-    let res2 = server.post("/api/vault/archive").json(&payload2).await;
-    res2.assert_status(StatusCode::CREATED);
-    let body2_resp: serde_json::Value = res2.json();
-    assert_eq!(
-        body2_resp["blobs_stored"], 0,
-        "expected 0 new blobs stored on second ingest"
-    );
-    assert_eq!(
-        body2_resp["blobs_deduped"], 1,
-        "expected 1 deduped blob on second ingest"
-    );
-}
-
-#[tokio::test]
 async fn archive_content_hash_mismatch_rejected() {
     let (server, _tmp, _state) = setup_server();
 
@@ -470,10 +387,9 @@ async fn archive_content_hash_mismatch_rejected() {
         "title": "Bad Hash",
         "captured_at": "2026-02-14T12:00:00Z",
         "content_hash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
-        "snapshot_hash": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+        "snapshot_html": "<html><body><p>ok</p></body></html>",
         "markdown_body": "# Real content that doesn't match the declared hash",
         "tags": ["archive"],
-        "blobs": [],
     });
 
     let res = server.post("/api/vault/archive").json(&payload).await;
@@ -497,6 +413,8 @@ async fn archive_delete_decrements_cas_ref_count() {
     let blob_hash = sha256_hash(blob_data);
     let blob_b64 = BASE64.encode(blob_data);
     let md_body = "# Delete Test\n\nPage to be deleted.";
+    let snapshot_html =
+        format!(r#"<html><body><img src="data:image/png;base64,{blob_b64}"></body></html>"#);
 
     let payload = serde_json::json!({
         "url": "https://example.com/delete-me",
@@ -504,14 +422,9 @@ async fn archive_delete_decrements_cas_ref_count() {
         "title": "Delete Test",
         "captured_at": "2026-02-14T12:00:00Z",
         "content_hash": content_hash(md_body),
-        "snapshot_hash": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "snapshot_html": snapshot_html,
         "markdown_body": md_body,
         "tags": ["archive"],
-        "blobs": [{
-            "hash": blob_hash.clone(),
-            "content_type": "image/png",
-            "data": blob_b64,
-        }],
     });
 
     // Ingest
@@ -554,6 +467,8 @@ async fn delete_folder_recursive_runs_delete_hooks() {
     let blob_hash = sha256_hash(blob_data);
     let blob_b64 = BASE64.encode(blob_data);
     let md_body = "# Folder Delete Test\n\nIn a folder.";
+    let snapshot_html =
+        format!(r#"<html><body><img src="data:image/png;base64,{blob_b64}"></body></html>"#);
 
     let payload = serde_json::json!({
         "url": "https://example.com/folder-delete",
@@ -561,14 +476,9 @@ async fn delete_folder_recursive_runs_delete_hooks() {
         "title": "Folder Delete Test",
         "captured_at": "2026-04-28T12:00:00Z",
         "content_hash": content_hash(md_body),
-        "snapshot_hash": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "snapshot_html": snapshot_html,
         "markdown_body": md_body,
         "tags": ["archive"],
-        "blobs": [{
-            "hash": blob_hash.clone(),
-            "content_type": "image/png",
-            "data": blob_b64,
-        }],
     });
 
     let res = server.post("/api/vault/archive").json(&payload).await;
@@ -610,20 +520,25 @@ async fn delete_folder_recursive_runs_delete_hooks() {
 async fn ingest_blob(server: &TestServer, url: &str, content_type: &str, data: &[u8]) -> String {
     let hash = sha256_hash(data);
     let body = "# Snapshot\n\nbody";
+    let data_b64 = BASE64.encode(data);
+    // A data URI's media-type field cannot carry whitespace (the deconstruction
+    // regex stops at the first space), so collapse it the way a real capture
+    // would; `is_active_content` only inspects the part before the `;` anyway.
+    let media_type: String = content_type
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let snapshot_html =
+        format!(r#"<html><body><img src="data:{media_type};base64,{data_b64}"></body></html>"#);
     let payload = serde_json::json!({
         "url": url,
         "domain": "evil.example",
         "title": "Snapshot",
         "captured_at": "2026-08-12T12:00:00Z",
         "content_hash": content_hash(body),
-        "snapshot_hash": hash,
+        "snapshot_html": snapshot_html,
         "markdown_body": body,
         "tags": ["archive"],
-        "blobs": [{
-            "hash": hash,
-            "content_type": content_type,
-            "data": BASE64.encode(data),
-        }],
     });
     server
         .post("/api/vault/archive")
@@ -730,10 +645,9 @@ async fn ingest_simple(server: &TestServer, url: &str, body: &str) -> String {
         "title": "Protected Article",
         "captured_at": "2026-08-12T12:00:00Z",
         "content_hash": content_hash(body),
-        "snapshot_hash": "sha256:00000000000000000000000000000000000000000000000000000000000000ff",
+        "snapshot_html": "<html><body><p>ok</p></body></html>",
         "markdown_body": body,
         "tags": ["archive"],
-        "blobs": [],
     });
     let res = server.post("/api/vault/archive").json(&payload).await;
     res.assert_status(StatusCode::CREATED);
@@ -744,7 +658,12 @@ async fn ingest_simple(server: &TestServer, url: &str, body: &str) -> String {
 #[tokio::test]
 async fn archived_page_reports_itself_read_only() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-1", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-1",
+        "# Article\n\nOriginal.",
+    )
+    .await;
 
     let page = server.get(&format!("/api/vault/pages/{path}")).await;
     page.assert_status(StatusCode::OK);
@@ -756,7 +675,12 @@ async fn archived_page_reports_itself_read_only() {
 #[tokio::test]
 async fn editing_an_archived_body_is_refused() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-2", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-2",
+        "# Article\n\nOriginal.",
+    )
+    .await;
 
     let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
     let res = server
@@ -781,7 +705,12 @@ async fn editing_an_archived_body_is_refused() {
 #[tokio::test]
 async fn metadata_edits_to_an_archived_page_still_work() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-3", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-3",
+        "# Article\n\nOriginal.",
+    )
+    .await;
 
     let page: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
     // Filing and tagging an archive is the whole point of having it in a vault,
@@ -805,7 +734,12 @@ async fn metadata_edits_to_an_archived_page_still_work() {
 #[tokio::test]
 async fn clearing_readonly_unlocks_the_body() {
     let (server, _tmp, _state) = setup_server();
-    let path = ingest_simple(&server, "https://example.com/ro-4", "# Article\n\nOriginal.").await;
+    let path = ingest_simple(
+        &server,
+        "https://example.com/ro-4",
+        "# Article\n\nOriginal.",
+    )
+    .await;
     let url = format!("/api/vault/pages/{path}");
 
     // Unlock. This is a metadata-only write, so the guard lets it through even
@@ -844,7 +778,12 @@ async fn clearing_readonly_unlocks_the_body() {
     );
 
     let after: serde_json::Value = server.get(&url).await.json();
-    assert!(after["body"].as_str().unwrap().contains("Annotated by hand."));
+    assert!(
+        after["body"]
+            .as_str()
+            .unwrap()
+            .contains("Annotated by hand.")
+    );
 }
 
 #[tokio::test]
@@ -882,4 +821,346 @@ async fn readonly_can_be_declared_on_any_page() {
         }))
         .await;
     res.assert_status(StatusCode::FORBIDDEN);
+}
+
+// ---------------------------------------------------------------------------
+// Fidelity capture: the server deconstructs the snapshot into the CAS
+// ---------------------------------------------------------------------------
+
+/// The full pipeline over one capture: a snapshot with an inlined image, and
+/// markdown that still points at the live URL.
+fn fidelity_payload(url: &str, markdown: &str) -> serde_json::Value {
+    // The `url` comment makes each page's snapshot distinct, so a shared image
+    // is the only thing two captures can deduplicate on.
+    let snapshot = format!(
+        concat!(
+            r#"<html><!-- {} --><body><img data-sf-original-src="https://cdn.example.com/a.png" "#,
+            r#"src="data:image/png;base64,iVBORw0KGgo="></body></html>"#
+        ),
+        url
+    );
+    serde_json::json!({
+        "url": url,
+        "domain": "example.com",
+        "title": "Fidelity Article",
+        "captured_at": "2026-08-12T12:00:00Z",
+        "content_hash": content_hash(markdown),
+        "snapshot_html": snapshot,
+        "markdown_body": markdown,
+        "tags": ["archive", "example.com"],
+    })
+}
+
+/// Like `fidelity_payload`, but the image's original URL carries a
+/// two-parameter query string. SingleFile's `data-sf-original-src` is
+/// serialized via `outerHTML`, which HTML-escapes `&` as `&amp;`; the
+/// markdown carries the literal, decoded `&` turndown read from the DOM.
+/// Regression fixture for the C1 join failure: `original_url_map` used to
+/// key on the escaped form and never match the decoded markdown URL.
+fn fidelity_payload_with_query_image(url: &str, markdown: &str) -> serde_json::Value {
+    let snapshot = format!(
+        concat!(
+            r#"<html><!-- {} --><body><img "#,
+            r#"data-sf-original-src="https://cdn.example.com/a.png?w=800&amp;q=75" "#,
+            r#"src="data:image/png;base64,iVBORw0KGgo="></body></html>"#
+        ),
+        url
+    );
+    serde_json::json!({
+        "url": url,
+        "domain": "example.com",
+        "title": "Fidelity Article",
+        "captured_at": "2026-08-12T12:00:00Z",
+        "content_hash": content_hash(markdown),
+        "snapshot_html": snapshot,
+        "markdown_body": markdown,
+        "tags": ["archive", "example.com"],
+    })
+}
+
+#[tokio::test]
+async fn ingest_rewrites_an_image_whose_original_url_had_an_entity_escaped_query_string() {
+    let (server, _tmp, _state) = setup_server();
+    let markdown = "![a](https://cdn.example.com/a.png?w=800&q=75)";
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload_with_query_image(
+            "https://example.com/query-image",
+            markdown,
+        ))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let path = res.json::<serde_json::Value>()["vault_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let detail: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    let body = detail["body"].as_str().unwrap();
+    assert!(
+        body.contains("cas:"),
+        "expected the image rewritten to a cas: reference, got: {body}"
+    );
+    assert!(
+        !body.contains("cdn.example.com"),
+        "the original URL should not remain in the stored body: {body}"
+    );
+}
+
+#[tokio::test]
+async fn ingest_deconstructs_the_snapshot_into_the_cas() {
+    let (server, _tmp, _state) = setup_server();
+    let markdown = "![a](https://cdn.example.com/a.png)";
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload("https://example.com/one", markdown))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+
+    // The image and the snapshot: two blobs, neither sent by the client.
+    assert_eq!(body["blobs_stored"], 2);
+
+    let png_hash = sha256_hash(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    let blob = server.get(&format!("/api/vault/cas/{png_hash}")).await;
+    blob.assert_status(StatusCode::OK);
+}
+
+#[tokio::test]
+async fn stored_markdown_points_at_the_blob() {
+    let (server, _tmp, _state) = setup_server();
+    let markdown = "![a](https://cdn.example.com/a.png)";
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload("https://example.com/two", markdown))
+        .await;
+    let path = res.json::<serde_json::Value>()["vault_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let page = server.get(&format!("/api/vault/pages/{path}")).await;
+    let detail: serde_json::Value = page.json();
+    let png_hash = sha256_hash(&[0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]);
+    assert_eq!(
+        detail["body"].as_str().unwrap().trim(),
+        format!("![a](cas:{png_hash})")
+    );
+}
+
+#[tokio::test]
+async fn stored_snapshot_has_no_inlined_resources() {
+    let (server, _tmp, _state) = setup_server();
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload(
+            "https://example.com/three",
+            "![a](https://cdn.example.com/a.png)",
+        ))
+        .await;
+    let path = res.json::<serde_json::Value>()["vault_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let detail: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    let snapshot_hash = detail["meta"]["archive"]["snapshot_hash"].as_str().unwrap();
+    let snapshot = server.get(&format!("/api/vault/cas/{snapshot_hash}")).await;
+    let html = String::from_utf8(snapshot.as_bytes().to_vec()).unwrap();
+
+    assert!(
+        !html.contains("base64,"),
+        "snapshot still inlines a resource"
+    );
+    assert!(html.contains("src=\"cas:sha256:"), "got: {html}");
+}
+
+#[tokio::test]
+async fn content_hash_describes_the_stored_body_and_source_hash_the_capture() {
+    let (server, _tmp, _state) = setup_server();
+    let markdown = "![a](https://cdn.example.com/a.png)";
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload("https://example.com/four", markdown))
+        .await;
+    let path = res.json::<serde_json::Value>()["vault_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let detail: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    let archive = &detail["meta"]["archive"];
+    assert_eq!(
+        archive["source_hash"].as_str().unwrap(),
+        content_hash(markdown)
+    );
+    assert_eq!(
+        archive["content_hash"].as_str().unwrap(),
+        content_hash(detail["body"].as_str().unwrap())
+    );
+    assert_ne!(archive["content_hash"], archive["source_hash"]);
+    assert_eq!(archive["resource_count"].as_i64(), Some(1));
+}
+
+#[tokio::test]
+async fn re_encoding_an_image_does_not_read_as_a_changed_page() {
+    // Change detection keys on the captured markdown, so a byte-different but
+    // textually identical capture is the same page.
+    let (server, _tmp, _state) = setup_server();
+    let markdown = "![a](https://cdn.example.com/a.png)";
+    let url = "https://example.com/five";
+
+    server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload(url, markdown))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let mut second = fidelity_payload(url, markdown);
+    second["snapshot_html"] = serde_json::json!(concat!(
+        r#"<html><body><img data-sf-original-src="https://cdn.example.com/a.png" "#,
+        r#"src="data:image/png;base64,iVBORw0KGgoAAAA="></body></html>"#
+    ));
+
+    server
+        .post("/api/vault/archive")
+        .json(&second)
+        .await
+        .assert_status(StatusCode::OK);
+}
+
+#[tokio::test]
+async fn an_unmatched_markdown_image_is_left_intact() {
+    let (server, _tmp, _state) = setup_server();
+    let markdown = "![b](https://cdn.example.com/b.png)";
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload("https://example.com/six", markdown))
+        .await;
+    let path = res.json::<serde_json::Value>()["vault_path"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let detail: serde_json::Value = server.get(&format!("/api/vault/pages/{path}")).await.json();
+    assert_eq!(detail["body"].as_str().unwrap().trim(), markdown);
+}
+
+#[tokio::test]
+async fn two_pages_sharing_an_image_store_one_blob() {
+    // The dedup regression. It used to be the extension's job and is now a
+    // property of the CAS, so it needs pinning at the new boundary.
+    let (server, _tmp, state) = setup_server();
+
+    server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload(
+            "https://example.com/a",
+            "![a](https://cdn.example.com/a.png)",
+        ))
+        .await
+        .assert_status(StatusCode::CREATED);
+    let after_first = state.cas.lock().stats().unwrap().blob_count;
+
+    let res = server
+        .post("/api/vault/archive")
+        .json(&fidelity_payload(
+            "https://example.com/b",
+            "![a](https://cdn.example.com/a.png)",
+        ))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+
+    // The shared image dedupes; only the second snapshot is a new blob. The two
+    // snapshots differ because `fidelity_payload` embeds each page's own URL
+    // in an HTML comment.
+    assert_eq!(body["blobs_deduped"], 1);
+    assert_eq!(body["blobs_stored"], 1);
+    assert_eq!(
+        state.cas.lock().stats().unwrap().blob_count,
+        after_first + 1
+    );
+}
+
+/// A server whose archive limits are small enough to exceed cheaply. The
+/// defaults are 100 MB and 250 MB; driving a test payload past those would cost
+/// hundreds of megabytes of allocation to prove a comparison.
+fn setup_server_with_small_limits() -> (TestServer, TempDir, Arc<AppState>) {
+    ApiFixture::builder()
+        .configure(|root| {
+            std::fs::write(
+                root.join(".clepsydra/config.toml"),
+                "[archive]\nmax_blob_size_mb = 1\nmax_request_size_mb = 2\n",
+            )
+            .unwrap();
+        })
+        .delete_hooks_with(|cas| {
+            vec![Box::new(ArchiveDeleteHook {
+                cas: Arc::clone(cas),
+            }) as Box<dyn PostDeleteHook>]
+        })
+        .build()
+        .into_parts()
+}
+
+#[tokio::test]
+async fn an_oversized_resource_fails_the_whole_capture() {
+    // A deliberate reversal of the skip-and-continue behaviour this replaced:
+    // right for a best-effort image scrape, wrong for an archive.
+    let (server, _tmp, state) = setup_server_with_small_limits();
+    let before = state.cas.lock().stats().unwrap().blob_count;
+
+    // 2 MB of base64 decodes to ~1.5 MB, over the configured 1 MB per resource.
+    let payload_b64 = "A".repeat(2 * 1024 * 1024);
+    let mut request = fidelity_payload("https://example.com/huge", "body");
+    request["snapshot_html"] = serde_json::json!(format!(
+        r#"<img src="data:image/png;base64,{payload_b64}">"#
+    ));
+
+    let res = server.post("/api/vault/archive").json(&request).await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert!(
+        res.text().contains("max_blob_size_mb"),
+        "got: {}",
+        res.text()
+    );
+    // Size validation runs before anything is stored, so there is nothing to
+    // roll back — which is the property worth pinning.
+    assert_eq!(state.cas.lock().stats().unwrap().blob_count, before);
+}
+
+#[tokio::test]
+async fn a_capture_over_the_total_budget_fails() {
+    let (server, _tmp, state) = setup_server_with_small_limits();
+    let before = state.cas.lock().stats().unwrap().blob_count;
+
+    // Three resources, each under the 1 MB per-resource cap, together over the
+    // 2 MB request cap. Distinct bytes, or the CAS would dedupe them to one.
+    let images: String = ["A", "B", "C"]
+        .iter()
+        .map(|c| {
+            let payload = c.repeat(1024 * 1024);
+            format!(r#"<img src="data:image/png;base64,{payload}">"#)
+        })
+        .collect();
+    let mut request = fidelity_payload("https://example.com/budget", "body");
+    request["snapshot_html"] = serde_json::json!(images);
+
+    let res = server.post("/api/vault/archive").json(&request).await;
+
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert!(
+        res.text().contains("max_request_size_mb"),
+        "got: {}",
+        res.text()
+    );
+    assert_eq!(state.cas.lock().stats().unwrap().blob_count, before);
 }

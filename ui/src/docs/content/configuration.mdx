@@ -313,14 +313,22 @@ The exact root `feeds.md` is always excluded independently of this list.
 | `enabled` | bool | `true` |
 | `cas_path` | string | `~/.clepsydra/cas` |
 | `default_path_prefix` | string | `archive` |
-| `max_blob_size_mb` | integer | `50` |
-| `max_request_size_mb` | integer | `100` |
+| `max_blob_size_mb` | integer | `100` |
+| `max_request_size_mb` | integer | `250` |
 | `gc_min_age_days` | integer | `30` |
 
 Notes:
 
 - `cas_path` supports `~/...` (expanded to your home directory).
-- Archive request size limits are enforced at ingest time.
+- Archive request size limits are enforced at ingest time. `max_blob_size_mb`
+  bounds one deconstructed resource; `max_request_size_mb` bounds the whole
+  capture (the deconstructed snapshot plus every resource it references).
+  Both budget decoded bytes.
+- The HTTP body limit on `POST /api/vault/archive` is derived from
+  `max_request_size_mb`, not equal to it: the wire payload is JSON carrying
+  base64, which inflates decoded bytes by 4/3, so the body limit is
+  `max_request_size_mb * 4 / 3` MB. This keeps the 400 from the resource-size
+  check firing before a bare 413 would.
 
 ### Encrypted-note files and lock behavior
 
@@ -416,8 +424,8 @@ annotations_folder = "library/annotations"
 enabled = true
 cas_path = "~/.clepsydra/cas"
 default_path_prefix = "archive"
-max_blob_size_mb = 50
-max_request_size_mb = 100
+max_blob_size_mb = 100
+max_request_size_mb = 250
 gc_min_age_days = 30
 ```
 

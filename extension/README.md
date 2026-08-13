@@ -62,9 +62,13 @@ bun run build:firefox
 
 1. Click the extension icon, then open **Settings**.
 2. Set **Server URL** (default: `http://localhost:3000`).
-3. (Optional) Set default tags, notification preferences, and the size
-   limits. The two size fields should match the server's
-   `archive.max_blob_size_mb` / `archive.max_request_size_mb`.
+3. (Optional) Set default tags, notification preferences, and the maximum
+   resource size (default 100 MB). It should match the server's
+   `archive.max_blob_size_mb`: a resource over this size is declined during
+   capture, so the page is archived without it. There is no client-side
+   control for the total capture budget — the server alone enforces
+   `archive.max_request_size_mb` (default 250 MB) when the capture is
+   ingested.
 4. Click **Save**.
 5. Confirm the status box shows **Connected**.
 
@@ -120,7 +124,3 @@ Then reload the temporary add-on from
     vault path it lives at
   - Updating in place would need a server-side update endpoint; there is none
     today, so the extension deliberately exposes no conflict-resolution setting
-- **“N resources could not be archived”**
-  - Appended to the page body when images were skipped — too large for
-    `max_blob_size_mb`, beyond the per-capture budget, unreachable, or past the
-    50-image cap. The archive records this rather than looking complete

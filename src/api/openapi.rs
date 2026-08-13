@@ -344,7 +344,6 @@ impl Modify for SchemaOverrides {
             crate::vault::import_zotero::ImportZoteroRequest,
             // Archive / CAS
             crate::api::archive::ArchiveRequest,
-            crate::api::archive::BlobUpload,
             crate::api::archive::ArchiveResponse,
             crate::api::archive::ArchiveStatus,
             crate::api::archive::ArchiveStatsResponse,

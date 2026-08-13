@@ -1,18 +1,26 @@
 /**
  * Content script injected into the active tab.
- * Runs Readability for content extraction and captures the full DOM HTML.
- * Results are messaged back to the background service worker.
+ *
+ * Captures the page twice from one visit: SingleFile for a snapshot that still
+ * renders when the origin is gone, and Readability for the article body that
+ * becomes the markdown. SingleFile runs first because loading deferred images
+ * scrolls the page, so the Readability clone taken afterwards sees images that
+ * were not there before. SingleFile works on a serialized copy of the document,
+ * so it does not corrupt the DOM that clone comes from.
  */
 
 import { Readability } from "@mozilla/readability";
+import { snapshotRejection } from "#/lib/capture-hygiene";
+import { splitIntoChunks } from "#/lib/chunked-transfer";
+import { createRelayFetch } from "#/lib/relay-fetch";
+import { captureSnapshot } from "#/lib/singlefile";
+import { DEFAULT_SETTINGS } from "#/lib/types";
 
-export interface CaptureResult {
-	type: "capture_result";
+export interface CaptureMetadata {
 	url: string;
 	canonical_url?: string;
 	title: string;
 	description?: string;
-	singlefile_html: string;
 	article_html: string | null;
 	article_text_length: number;
 	/**
@@ -27,57 +35,85 @@ export interface CaptureResult {
 	excerpt?: string;
 }
 
+export interface CaptureMetaMessage {
+	type: "capture_meta";
+	captureId: string;
+	/** Nested rather than spread, so the worker never has to strip envelope
+	 *  fields back off with an unused-binding destructure. */
+	metadata: CaptureMetadata;
+}
+
 /** Trim to a non-empty string, or drop it. */
 function clean(value: string | null | undefined): string | undefined {
 	const trimmed = value?.trim();
 	return trimmed ? trimmed : undefined;
 }
 
-async function capture(): Promise<CaptureResult> {
-	const url = window.location.href;
-	const canonical = document.querySelector<HTMLLinkElement>(
-		"link[rel=canonical]",
-	)?.href;
-	const title = document.title;
-	const description = document.querySelector<HTMLMetaElement>(
-		"meta[name=description]",
-	)?.content;
-
-	// Capture full HTML snapshot
-	// TODO: integrate single-file-core library for faithful archive
-	const singlefile_html = document.documentElement.outerHTML;
-
-	// Run Readability on a cloned document (it mutates the DOM)
-	const clonedDoc = document.cloneNode(true) as Document;
-	const article = new Readability(clonedDoc).parse();
-
-	return {
-		type: "capture_result",
-		url,
-		canonical_url: canonical || undefined,
-		title,
-		description: description || undefined,
-		singlefile_html,
-		article_html: article?.content || null,
-		article_text_length: article?.textContent?.length || 0,
-		byline: clean(article?.byline),
-		site_name: clean(article?.siteName),
-		published_time: clean(article?.publishedTime),
-		// Readability does not report the document language; take it from the
-		// document element, which is where pages actually declare it.
-		lang: clean(article?.lang ?? document.documentElement.lang),
-		excerpt: clean(article?.excerpt),
-	};
+function send(message: unknown): Promise<unknown> {
+	return chrome.runtime.sendMessage(message);
 }
 
-// Execute capture and send result to background
-capture()
-	.then((result) => {
-		chrome.runtime.sendMessage(result);
-	})
-	.catch((err) => {
-		chrome.runtime.sendMessage({
-			type: "capture_error",
-			error: String(err),
-		});
-	});
+async function maxResourceSizeMb(): Promise<number> {
+	try {
+		const stored = await chrome.storage.sync.get("settings");
+		const settings = { ...DEFAULT_SETTINGS, ...stored.settings };
+		return settings.max_blob_size_mb;
+	} catch {
+		return DEFAULT_SETTINGS.max_blob_size_mb;
+	}
+}
+
+async function capture(): Promise<void> {
+	const relayFetch = createRelayFetch(send);
+	const snapshotHtml = await captureSnapshot(
+		{ maxResourceSizeMb: await maxResourceSizeMb() },
+		{ fetch: relayFetch, frameFetch: relayFetch },
+	);
+
+	// Readability mutates the document it is given, so it gets a clone.
+	const clonedDoc = document.cloneNode(true) as Document;
+	const article = new Readability(clonedDoc).parse();
+	const articleTextLength = article?.textContent?.length || 0;
+
+	const rejection = snapshotRejection(snapshotHtml, article?.textContent ?? "");
+	if (rejection) {
+		await send({ type: "capture_error", error: rejection });
+		return;
+	}
+
+	const captureId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+	const message: CaptureMetaMessage = {
+		type: "capture_meta",
+		captureId,
+		metadata: {
+			url: window.location.href,
+			canonical_url:
+				document.querySelector<HTMLLinkElement>("link[rel=canonical]")?.href ||
+				undefined,
+			title: document.title,
+			description:
+				document.querySelector<HTMLMetaElement>("meta[name=description]")
+					?.content || undefined,
+			article_html: article?.content || null,
+			article_text_length: articleTextLength,
+			byline: clean(article?.byline),
+			site_name: clean(article?.siteName),
+			published_time: clean(article?.publishedTime),
+			// Readability does not report the document language; take it from the
+			// document element, which is where pages actually declare it.
+			lang: clean(article?.lang ?? document.documentElement.lang),
+			excerpt: clean(article?.excerpt),
+		},
+	};
+
+	await send(message);
+	// Sequential, so the worker's idle timer is reset by each one and a slow
+	// upload cannot outrun its own transport.
+	for (const chunk of splitIntoChunks(captureId, snapshotHtml)) {
+		await send(chunk);
+	}
+}
+
+capture().catch((err) => {
+	void send({ type: "capture_error", error: String(err) });
+});

@@ -181,11 +181,14 @@ fn default_archive_path_prefix() -> String {
 }
 
 fn default_max_blob_size_mb() -> u64 {
-    50
+    // Matches gwern's `--max-resource-size 100`. A media-heavy capture inlines
+    // tens of megabytes and base64 adds a third.
+    100
 }
 
 fn default_max_request_size_mb() -> u64 {
-    100
+    // One page carrying several large resources, plus base64 overhead.
+    250
 }
 
 fn default_gc_min_age_days() -> u32 {
@@ -218,8 +221,8 @@ mod tests {
         assert!(config.archive.enabled);
         assert_eq!(config.archive.cas_path, "~/.clepsydra/cas");
         assert_eq!(config.archive.default_path_prefix, "archive");
-        assert_eq!(config.archive.max_blob_size_mb, 50);
-        assert_eq!(config.archive.max_request_size_mb, 100);
+        assert_eq!(config.archive.max_blob_size_mb, 100);
+        assert_eq!(config.archive.max_request_size_mb, 250);
         assert_eq!(config.archive.gc_min_age_days, 30);
     }
 

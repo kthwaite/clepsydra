@@ -29,10 +29,9 @@ function makeManifest(
 		title: "Test Article",
 		captured_at: "2026-02-14T00:00:00Z",
 		content_hash: "abc123",
-		snapshot_hash: "def456",
+		snapshot_html: "<html><body>Test</body></html>",
 		markdown_body: "# Test\n\nHello world.",
 		tags: ["test"],
-		blobs: [],
 		...overrides,
 	};
 }

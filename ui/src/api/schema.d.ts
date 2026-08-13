@@ -1521,11 +1521,14 @@ export interface components {
             status: number;
         };
         ArchiveRequest: {
-            blobs: components["schemas"]["BlobUpload"][];
             /** @description Article byline, as parsed by Readability in the page context. */
             byline?: string | null;
             canonical_url?: string | null;
             captured_at: string;
+            /**
+             * @description sha256 of `markdown_body` exactly as sent. Verified on arrival as a
+             *     transport check, then stored as `archive.source_hash`.
+             */
             content_hash: string;
             description?: string | null;
             domain: string;
@@ -1538,7 +1541,11 @@ export interface components {
             published_time?: string | null;
             /** @description Publication name (og:site_name or equivalent). */
             site_name?: string | null;
-            snapshot_hash: string;
+            /**
+             * @description The SingleFile capture, resources still inlined as `data:` URIs. The
+             *     server deconstructs it; the extension does not hash or split it.
+             */
+            snapshot_html: string;
             tags: string[];
             title: string;
             url: string;
@@ -1733,11 +1740,6 @@ export interface components {
              *     `None` when unconfigured.
              */
             remaining_seconds?: number | null;
-        };
-        BlobUpload: {
-            content_type: string;
-            data: string;
-            hash: string;
         };
         BlockResponse: {
             block_id?: string | null;

@@ -13,12 +13,15 @@
 ## Global Constraints
 
 - **Licence.** `single-file-core` is AGPL-3.0-or-later. Clepsydra has no `LICENSE` file and no `license` field, so it is private and unconveyed and the obligation does not attach. If the extension is ever published it must be AGPL-3.0-or-later. Do not add a `LICENSE` file as part of this work.
-- **Size defaults.** `max_blob_size_mb` = **100**, `max_request_size_mb` = **250**. Both hardcoded 100 MB fallbacks (`src/api/mod.rs::api_router`, `src/api/archive.rs::router`) rise to 250 MB with them.
+- **Size defaults.** `max_blob_size_mb` = **100**, `max_request_size_mb` = **250**, both measured in **decoded** bytes.
+- **The HTTP body limit is derived, not equal.** `max_request_size_mb` is a *decoded content* budget; the transport carries base64, which inflates by 4/3. Setting `DefaultBodyLimit` to the same number makes the decoded check unreachable — the wire limit always fires first, and the reader gets a bare `413` naming nothing, which the Risks section says will read as a bug. The transport limit is therefore `max_request_size_mb * 4 / 3`, and the hardcoded router fallbacks match that derivation.
 - **Hash split.** `archive.source_hash` = sha256 of the markdown **as captured** (pre-rewrite); duplicate detection keys on it. `archive.content_hash` = sha256 of the markdown **as stored** (post-rewrite); the read-only justification depends on it.
 - **Strikethrough** stays single-tilde `~text~`, never GFM `~~text~~`.
-- **Never run `biome check --write` across `ui/src`.** The repo is not in a biome-formatted state; it would rewrite ~200 unrelated files. `bun run lint` in `extension/` is scoped to `extension/src` and is safe.
+- **Never reformat files this work does not touch.** Two formatters here will do it if invoked broadly:
+  - **Never run bare `cargo fmt`.** `develop` is **not** `cargo fmt --check` clean — 22 pre-existing files fail it (139 hunks). A workspace-wide format rewrites files this work never touched. Check only what you changed: `rustfmt --check --edition 2024 <changed .rs files>` — and do **not** pass a `mod.rs`, because rustfmt follows `mod` declarations into every child and you are formatting the world again. A one-line `pub mod` addition needs no format check.
+  - **Never run `biome check --write` across `ui/src`.** Same situation: the repo is not in a biome-formatted state and it would rewrite ~200 unrelated files. `bun run lint` in `extension/` is scoped to `extension/src` and is safe.
 - **`bun run openapi` targets `localhost:3000`.** Regenerating against a server running an older binary silently produces a schema missing the new fields that still typechecks. Regenerate against a server built from the working tree (see Task 10).
-- **Verification gates.** `cargo fmt`, `cargo clippy`, `cargo test` for Rust; `bun run typecheck`, `bun run lint`, `bun run test`, `bun run build` in `extension/`. Report results explicitly.
+- **Verification gates.** Scoped `rustfmt --check`, `cargo clippy --all-targets -- -D warnings`, `cargo test` for Rust; `bun run typecheck`, `bun run lint`, `bun run test`, `bun run build` in `extension/`. Report results explicitly.
 
 ## Deliberate deviations from the spec
 
@@ -363,7 +366,7 @@ Expected: 9 passed.
 
 - [ ] **Step 5: Verify the gates**
 
-Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run, as separate commands: `rustfmt --check --edition 2024 src/vault/archive_snapshot.rs`; `cargo clippy --all-targets -- -D warnings`. Do not run bare `cargo fmt`, and do not pass `src/vault/mod.rs` to rustfmt — see Global Constraints.
 Expected: clean.
 
 - [ ] **Step 6: Commit**
@@ -646,11 +649,11 @@ fn absolutise(raw: &str, base_url: &str) -> Option<String> {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `cargo test --lib archive_snapshot`
-Expected: 20 passed.
+Expected: 21 passed.
 
 - [ ] **Step 5: Verify the gates**
 
-Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run, as separate commands: `rustfmt --check --edition 2024 src/vault/archive_snapshot.rs`; `cargo clippy --all-targets -- -D warnings`. Do not run bare `cargo fmt` — see Global Constraints.
 Expected: clean.
 
 - [ ] **Step 6: Commit**
@@ -1289,7 +1292,7 @@ Expected: all pass, including the seven new integration tests.
 
 - [ ] **Step 9: Verify the gates**
 
-Run: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | grep -c '^test result: FAILED'`
+Run, as separate commands: `rustfmt --check --edition 2024 src/api/archive.rs src/vault/config.rs src/vault/index.rs tests/archive_test.rs`; `cargo clippy --all-targets -- -D warnings`; `cargo test 2>&1 | grep -c '^test result: FAILED'`. Do not run bare `cargo fmt` — see Global Constraints.
 Expected: clippy clean; the grep prints `0`. Count failures explicitly — parsing the summary line by field position mis-reads the `FAILED.` variant and has reported a green run over an aborted one.
 
 - [ ] **Step 10: Commit**
@@ -1804,7 +1807,7 @@ export class ChunkAssembler {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `bun run test chunked-transfer`
-Expected: 10 passed.
+Expected: 9 passed.
 
 - [ ] **Step 5: Commit**
 
@@ -1824,10 +1827,12 @@ Refuse a capture that is corrupt or is an error page wearing an HTTP 200. Each c
 - Test: `extension/src/lib/__tests__/capture-hygiene.test.ts`
 
 **Interfaces:**
-- Produces: `snapshotRejection(snapshotHtml: string, articleTextLength: number): string | null` — the reason to refuse, or `null` to proceed.
+- Produces: `snapshotRejection(snapshotHtml: string, articleText: string): string | null` — the reason to refuse, or `null` to proceed.
 - Consumed by: Task 7 (content script).
 
-Note the deviation recorded in **Global Constraints → Deliberate deviations #4**: gwern greps the raw snapshot unconditionally and accepts false positives because he reviews every capture in a browser. We gate the marker check on a short article, so a piece *about* HTTP status codes still archives.
+Note the deviation recorded in **Global Constraints → Deliberate deviations #4**: gwern greps the raw snapshot unconditionally and accepts false positives because he reviews every capture in a browser.
+
+We do two things differently, and the second was a correction. First, the marker check is gated on a short article, so a piece *about* HTTP status codes still archives. Second — and this is the part the first draft got wrong — the markers are matched against **Readability's extracted article text, not the raw snapshot**. The length gate alone protects only the long-article case; a *short, valid* page whose nav, footer or cookie banner happens to contain "Access Denied" would still have been refused. Nav and footers are not the article, and a marker there is not evidence of an error page. Matching the extraction also makes detection sharper, not blunter: a real error page yields almost no article text, and what little it yields is the marker.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1837,8 +1842,8 @@ import { describe, expect, it } from "vitest";
 
 import { snapshotRejection } from "#/lib/capture-hygiene";
 
-const LONG_ARTICLE = 5000;
-const SHORT_ARTICLE = 100;
+const LONG_ARTICLE = "Real prose about something. ".repeat(200); // 5600 chars
+const SHORT_ARTICLE = "A short but real post.";
 
 function snapshot(body: string): string {
 	return `<html><body>${body}${"x".repeat(2000)}</body></html>`;
@@ -1856,7 +1861,7 @@ describe("snapshotRejection", () => {
 	});
 
 	it("refuses an error page that returned HTTP 200", () => {
-		const reason = snapshotRejection(snapshot("<h1>404 Not Found</h1>"), SHORT_ARTICLE);
+		const reason = snapshotRejection(snapshot("<h1>404 Not Found</h1>"), "404 Not Found");
 
 		expect(reason).toMatch(/404 Not Found/);
 	});
@@ -1868,15 +1873,24 @@ describe("snapshotRejection", () => {
 		"Instance has been rate limited",
 		"Token is required",
 	])("refuses a page reading %s", (marker) => {
-		expect(snapshotRejection(snapshot(`<h1>${marker}</h1>`), SHORT_ARTICLE)).toContain(marker);
+		expect(snapshotRejection(snapshot(`<h1>${marker}</h1>`), marker)).toContain(marker);
 	});
 
 	it("archives a long article that merely discusses an error code", () => {
 		// The marker check is what makes false positives possible, so it only
 		// fires on a page that also yielded almost no article text.
-		expect(
-			snapshotRejection(snapshot("<p>On seeing 404 Not Found in the wild…</p>"), LONG_ARTICLE),
-		).toBeNull();
+		const article = `On seeing 404 Not Found in the wild. ${LONG_ARTICLE}`;
+
+		expect(snapshotRejection(snapshot("<p>On 404s…</p>"), article)).toBeNull();
+	});
+
+	it("archives a short page whose chrome mentions an error, not its article", () => {
+		// The case matching raw HTML got wrong: nav, footers and cookie banners
+		// are not the article, and a marker in them is not evidence of an error
+		// page. Only the extraction is consulted.
+		const withChrome = snapshot("<nav>Access Denied</nav><p>A short but real post.</p>");
+
+		expect(snapshotRejection(withChrome, SHORT_ARTICLE)).toBeNull();
 	});
 
 	it("accepts a short capture with no error marker", () => {
@@ -1925,15 +1939,20 @@ const ERROR_PAGE_MARKERS = [
 /** Why this capture must not be archived, or null to proceed. */
 export function snapshotRejection(
 	snapshotHtml: string,
-	articleTextLength: number,
+	articleText: string,
 ): string | null {
 	if (snapshotHtml.length < MIN_SNAPSHOT_BYTES) {
 		return `The capture is only ${snapshotHtml.length} bytes — under 1 KB, so it is truncated or empty rather than a page.`;
 	}
 
-	if (articleTextLength >= ARTICLE_TEXT_FLOOR) return null;
+	if (articleText.length >= ARTICLE_TEXT_FLOOR) return null;
 
-	const marker = ERROR_PAGE_MARKERS.find((m) => snapshotHtml.includes(m));
+	// Match the extraction, not the raw page. Nav, footers and cookie banners
+	// are not the article, and a marker sitting in them is not evidence that the
+	// server returned an error page. Consulting the extraction also sharpens
+	// detection rather than blunting it: a real error page extracts almost
+	// nothing, and what little it does extract is the marker itself.
+	const marker = ERROR_PAGE_MARKERS.find((m) => articleText.includes(m));
 	if (marker) {
 		return `The page reads as an error page ("${marker}") despite loading successfully. Nothing was archived.`;
 	}
@@ -1945,7 +1964,7 @@ export function snapshotRejection(
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `bun run test capture-hygiene`
-Expected: 11 passed.
+Expected: 11 passed (6 plain cases plus the 5-marker `it.each`).
 
 - [ ] **Step 5: Commit**
 
@@ -1975,8 +1994,8 @@ Order matters: SingleFile runs **first** because `loadDeferredImages` scrolls th
 - Produces:
   - `snapshotOptions(input: { maxResourceSizeMb: number }): Record<string, unknown>`
   - `captureSnapshot(input: { maxResourceSizeMb: number }, initOptions: { fetch: unknown; frameFetch: unknown }): Promise<string>`
-  - `CaptureResult` on `#/content/capture` loses nothing and gains nothing — `singlefile_html` now holds a real snapshot.
-  - New message: `{ type: "capture_meta"; captureId: string } & Omit<CaptureResult, "singlefile_html">`, followed by the chunks.
+  - `CaptureResult` is **deleted** and replaced by `CaptureMetadata` (the page facts) plus `CaptureMetaMessage` (the envelope). Step 5's code is authoritative.
+  - New message: `{ type: "capture_meta"; captureId: string; metadata: CaptureMetadata }` — the payload is **nested under `metadata`**, not spread flat, so the worker never has to strip envelope fields off with an unused-binding destructure. **Task 8 must read `message.metadata.*`.** Followed by the chunks.
 
 - [ ] **Step 1: Install the dependency**
 
@@ -2259,7 +2278,7 @@ async function capture(): Promise<void> {
 	const article = new Readability(clonedDoc).parse();
 	const articleTextLength = article?.textContent?.length || 0;
 
-	const rejection = snapshotRejection(snapshotHtml, articleTextLength);
+	const rejection = snapshotRejection(snapshotHtml, article?.textContent ?? "");
 	if (rejection) {
 		await send({ type: "capture_error", error: rejection });
 		return;
@@ -2306,7 +2325,7 @@ capture().catch((err) => {
 - [ ] **Step 6: Run the tests to verify they pass**
 
 Run: `bun run test singlefile && bun run typecheck`
-Expected: 8 passed; typecheck clean. `service-worker.ts` will still reference the old `CaptureResult` — that is Task 8; if `typecheck` fails only there, proceed.
+Expected: 9 passed; typecheck clean. `service-worker.ts` will still reference the old `CaptureResult` — that is Task 8; if `typecheck` fails only there, proceed.
 
 - [ ] **Step 7: Commit**
 
@@ -2743,7 +2762,65 @@ if (!contentSource.includes("saveOriginalURLs")) {
 			"server cannot join a markdown image to its stored blob",
 	);
 }
+
+// `captureSnapshot` imports single-file-core dynamically (a Vitest TDZ
+// workaround). If a bundler change ever emits that as a separate chunk instead
+// of inlining it, the content script would try to resolve `import("./chunk-*")`
+// against the PAGE's origin in the isolated world and 404 — every capture on
+// every site would fail. The size check above catches the common case (an
+// externalised SingleFile collapses the bundle to ~40 KB), but check directly
+// too, and confirm no sibling chunk was emitted alongside it.
+// The match REQUIRES a string or template-literal argument. A bare
+// `\bimport\s*\(` also matches single-file-core's zip worker bootstrap, which
+// embeds `await import(t)` as literal STRING content — the source of a Blob it
+// turns into a Worker — where the specifier is a variable evaluated in that
+// worker's own scope, not a gap in this module graph. A real bundler-emitted
+// chunk reference always has a static specifier, because Rollup can only split
+// what it can resolve statically.
+if (/\bimport\s*\(\s*["'`]/.test(contentSource)) {
+	failures.push(
+		"content bundle contains an unresolved dynamic import() — it will " +
+			"resolve against the page origin at injection time and 404",
+	);
+}
+
+const emittedChunks = (await readdir(resolve(distDir, "assets"), { withFileTypes: true }).catch(
+	() => [],
+)).filter((entry) => entry.isFile() && /^chunk-/.test(entry.name));
+if (emittedChunks.length > 0) {
+	failures.push(
+		`bundler emitted ${emittedChunks.length} shared chunk(s) under assets/ ` +
+			"— a content script injected by file cannot load them",
+	);
+}
+
+// Task 11's frame responder. Its injection failure is swallowed on purpose — a
+// frame we may not script is not a reason to abandon the page — which means a
+// BUILD regression that drops this bundle would be completely invisible at
+// runtime: captures would silently revert to burning a 5s timeout per iframe
+// and archiving nothing from it. This is the only place that can notice.
+const framesPath = resolve(distDir, "content/frames.js");
+const framesSource = await readFile(framesPath, "utf8").catch(() => null);
+if (framesSource === null) {
+	failures.push(
+		"content/frames.js is missing — iframes will silently fail to capture " +
+			"and each will cost a 5s timeout",
+	);
+} else {
+	const framesKb = framesSource.length / 1024;
+	// It carries the frame-tree processor only. Measured at ~24 KB against
+	// capture.js's ~840 KB; an order of magnitude either way means the import
+	// graph changed.
+	if (framesKb < 5 || framesKb > 200) {
+		failures.push(
+			`content/frames.js is ${framesKb.toFixed(0)} KB, outside the expected ` +
+				"5–200 KB — the frame-tree import graph changed",
+		);
+	}
+}
 ```
+
+Add `readdir` to the `node:fs/promises` import at the top of the file.
 
 Also add `onRemoved: listenerStub("tabs.onRemoved")` to the `chrome.tabs` stub, so the worker's module-scope registration does not throw.
 
@@ -2832,26 +2909,27 @@ git diff --stat ui/src/api/schema.d.ts
 
 Expected: tens of lines. **A diff of thousands of lines means biome reformatted the file** — restore it from HEAD and regenerate without running any formatter over it.
 
-- [ ] **Step 2: Update the options copy**
+- [ ] **Step 2: Fix the options copy, and remove the control that no longer does anything**
 
-The two size fields no longer skip an image; they fail a capture. `extension/src/options/options.html`:
+`max_blob_size_mb` is still live: Task 7 feeds it to SingleFile as `maxResourceSize`, so a resource over it is declined at capture time. Its description was wrong, though — it never "skipped an image and carried on".
+
+`max_request_size_mb` is now **inert on the client**. Its only consumer was `buildResourceMap`'s total budget, which Task 8 deleted; nothing in the capture path reads it any more, and the server enforces the real budget. Leaving a control that silently does nothing is worse than not having it, so remove the field rather than rewording it.
+
+In `extension/src/options/options.html`, replace both blocks with:
 
 ```html
   <label for="max-blob-mb">Maximum resource size (MB)</label>
   <input type="number" id="max-blob-mb" min="1" step="1" />
   <p class="hint">
-    A resource larger than this is left out of the capture. Match the server's
-    <code>archive.max_blob_size_mb</code>.
-  </p>
-
-  <label for="max-request-mb">Maximum total capture size (MB)</label>
-  <input type="number" id="max-request-mb" min="1" step="1" />
-  <p class="hint">
-    A capture over this size is refused outright rather than trimmed — a snapshot
-    missing arbitrary resources is not a snapshot. Match the server's
-    <code>archive.max_request_size_mb</code>.
+    A resource larger than this is declined during capture, so the page is
+    archived without it. Match the server's <code>archive.max_blob_size_mb</code>.
+    The total capture budget is enforced by the server alone.
   </p>
 ```
+
+In `extension/src/options/options.ts`, drop the `max-request-mb` read and the `max_request_size_mb` line from the saved settings object. **Keep the field on `ExtensionSettings` and in `DEFAULT_SETTINGS`** — removing it from the type would break any stored settings object round-tripping through `{ ...DEFAULT_SETTINGS, ...stored.settings }`, and it costs nothing to retain. Add a comment on the type saying it is server-enforced and no longer read by the extension.
+
+Verify with `grep -rn 'max_request_size_mb' extension/src` that the only remaining references are the type, the default, and that comment.
 
 - [ ] **Step 3: Update the docs**
 
@@ -2871,7 +2949,8 @@ The two size fields no longer skip an image; they fail a capture. `extension/src
 - [ ] **Step 4: Verify the gates**
 
 ```bash
-cargo fmt --check
+# Scoped: bare `cargo fmt` would rewrite 22 pre-existing files that already fail fmt on develop.
+rustfmt --check --edition 2024 src/vault/archive_snapshot.rs src/api/archive.rs src/vault/config.rs src/vault/index.rs tests/archive_test.rs
 cargo clippy --all-targets -- -D warnings
 cargo test 2>&1 | grep -c '^test result: FAILED'   # expect 0
 cd extension && bun run typecheck && bun run lint && bun run test && bun run build
@@ -2902,3 +2981,241 @@ git commit -m "docs: describe the SingleFile capture pipeline"
 **Capture is slow and heavy.** SingleFile drives the page, forces lazy images, and waits. Captures will take seconds to tens of seconds. The queue, keepalive, per-request timeouts and badge phases were built for this and become load-bearing rather than precautionary.
 
 **Follow-on.** The viewer spec (`2026-08-12-archived-page-viewer-design.md`) is unblocked by this work and is a short plan once it lands. It must implement the `cas:` → `/api/vault/cas/` rewrite at serve time (deviation #5), and it must resolve the SVG question recorded in Task 9 Step 4.
+
+---
+
+## Task 11: Capture inside iframes
+
+**Sequencing: execute this after Task 8 and before Task 9.** Task 9 verifies the built bundles and does the manual capture, and it must see both content scripts.
+
+Task 7 set `removeFrames: false`, which tells SingleFile to walk the frame tree. The top frame's capture asks each child frame to identify itself over `postMessage`, and `content-frame-tree.js` answers — but only if it is running *in that frame*. We inject into the top frame only, so nothing answers: each child frame burns a 5000 ms `TIMEOUT_INIT_REQUEST_MESSAGE` and then serialises empty. Roughly five seconds added to any page carrying an embed, comment widget or consent frame, in exchange for nothing.
+
+This task makes `removeFrames: false` mean what it says.
+
+**Files:**
+- Create: `extension/src/content/frames.ts`
+- Modify: `extension/src/types/single-file-core.d.ts`
+- Modify: `extension/vite.config.ts`
+- Modify: `extension/src/lib/inject-capture.ts`
+- Test: `extension/src/lib/__tests__/inject-capture.test.ts` (new)
+
+**Interfaces:**
+- Consumes: `executeCaptureScript(tabId)`, unchanged in signature.
+- Produces: a second content-script bundle at `content/frames.js`, injected into every frame before the capture script runs in the top frame.
+
+**Verified mechanics** (checked against `single-file-core@1.5.84`, so the implementer does not have to):
+- `single-file-core/single-file-frames.js` re-exports `processors/frame-tree/content/content-frame-tree.js`, which calls `init()` at module scope. Importing it *is* the whole job — `init()` registers the `message` listener that answers the handshake.
+- Injecting into all frames also injects into the top frame, where Task 7's capture bundle already contains its own copy of the frame-tree code. **This is harmless.** The two bundles hold separate module state: the `frames.js` copy has no session registered, so its `INIT_RESPONSE_MESSAGE` branch is gated behind `sessions.get(message.sessionId)` and no-ops, and its `ACK` branch clears timeouts from its own empty maps. `event.stopPropagation()` does not suppress the sibling listener (that would need `stopImmediatePropagation`).
+- Child frames call `globalThis.stop()` on receiving the init request. That is intended: it freezes the frame for capture.
+
+- [ ] **Step 1: Write the failing tests**
+
+`inject-capture.ts` has no test today. It gains ordering and failure-tolerance behaviour worth pinning.
+
+```ts
+// extension/src/lib/__tests__/inject-capture.test.ts
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { executeCaptureScript } from "#/lib/inject-capture";
+
+interface Injection {
+	target: { tabId: number; allFrames?: boolean };
+	files: string[];
+}
+
+function stubScripting(impl?: (injection: Injection) => Promise<unknown>) {
+	const calls: Injection[] = [];
+	const executeScript = vi.fn(async (injection: Injection) => {
+		calls.push(injection);
+		return impl ? impl(injection) : [];
+	});
+	vi.stubGlobal("chrome", { scripting: { executeScript }, runtime: {}, tabs: {} });
+	return calls;
+}
+
+describe("executeCaptureScript", () => {
+	beforeEach(() => {
+		vi.unstubAllGlobals();
+	});
+
+	it("injects the frame responder into every frame", async () => {
+		const calls = stubScripting();
+
+		await executeCaptureScript(7);
+
+		expect(calls[0]).toEqual({
+			target: { tabId: 7, allFrames: true },
+			files: ["content/frames.js"],
+		});
+	});
+
+	it("injects the capture script into the top frame only", async () => {
+		const calls = stubScripting();
+
+		await executeCaptureScript(7);
+
+		expect(calls[1]).toEqual({ target: { tabId: 7 }, files: ["content/capture.js"] });
+		expect(calls[1].target.allFrames).toBeUndefined();
+	});
+
+	it("runs the responder before the capture", async () => {
+		// The responders must be listening before the top frame starts the
+		// handshake, or they miss the init request and we are back to paying the
+		// 5s timeout this task exists to remove.
+		const calls = stubScripting();
+
+		await executeCaptureScript(7);
+
+		expect(calls.map((c) => c.files[0])).toEqual([
+			"content/frames.js",
+			"content/capture.js",
+		]);
+	});
+
+	it("captures anyway when a frame cannot be scripted", async () => {
+		// A sandboxed or restricted frame is not a reason to abandon the page.
+		const calls = stubScripting(async (injection) => {
+			if (injection.files[0] === "content/frames.js") {
+				throw new Error("Cannot access contents of the frame");
+			}
+			return [];
+		});
+
+		await expect(executeCaptureScript(7)).resolves.toBeUndefined();
+		expect(calls.map((c) => c.files[0])).toContain("content/capture.js");
+	});
+
+	it("still rejects when the capture script itself cannot be injected", async () => {
+		// This one must propagate — the caller reports it to the user.
+		stubScripting(async (injection) => {
+			if (injection.files[0] === "content/capture.js") {
+				throw new Error("Cannot access a chrome:// URL");
+			}
+			return [];
+		});
+
+		await expect(executeCaptureScript(7)).rejects.toThrow(/chrome:\/\//);
+	});
+});
+```
+
+- [ ] **Step 2: Run the tests to verify they fail**
+
+Run: `bun run test inject-capture`
+Expected: FAIL — only one injection is recorded, so `calls[0]` is the capture script rather than the frame responder.
+
+- [ ] **Step 3: Create the frames content script**
+
+```ts
+// extension/src/content/frames.ts
+/**
+ * Injected into every frame, so SingleFile's frame-tree handshake has someone
+ * to answer.
+ *
+ * The top frame's capture asks each child frame to identify itself over
+ * postMessage. Without this responder present no frame replies, each one burns
+ * a 5s TIMEOUT_INIT_REQUEST_MESSAGE, and the iframe serialises empty anyway —
+ * five seconds per iframe-bearing page in exchange for nothing.
+ *
+ * Importing the module is the entire job: `content-frame-tree.js` calls `init()`
+ * at module scope, which registers the `message` listener.
+ *
+ * This also lands in the top frame, where the capture bundle already carries its
+ * own copy of the same code. That is harmless: the two bundles hold separate
+ * module state, so this copy has no session registered and its message branches
+ * no-op.
+ */
+import "single-file-core/single-file-frames.js";
+```
+
+Add to `extension/src/types/single-file-core.d.ts`:
+
+```ts
+declare module "single-file-core/single-file-frames.js";
+```
+
+Add `content/frames.ts` to `additionalInputs` in `extension/vite.config.ts`:
+
+```ts
+			additionalInputs: [
+				"content/capture.ts",
+				"content/frames.ts",
+				"public/icons/icon-128.png",
+			],
+```
+
+- [ ] **Step 4: Inject it**
+
+Rewrite `executeCaptureScript` in `extension/src/lib/inject-capture.ts`:
+
+```ts
+const FRAMES_SCRIPT = "content/frames.js";
+const CAPTURE_SCRIPT = "content/capture.js";
+
+/**
+ * Inject the frame responder everywhere, then the capture into the top frame.
+ *
+ * Order matters: the responders must be listening before the top frame starts
+ * SingleFile's handshake, or they miss the init request and each frame falls
+ * back to the 5s timeout.
+ */
+export async function executeCaptureScript(tabId: number): Promise<void> {
+	if (chrome.scripting?.executeScript) {
+		try {
+			await chrome.scripting.executeScript({
+				target: { tabId, allFrames: true },
+				files: [FRAMES_SCRIPT],
+			});
+		} catch {
+			// A frame we cannot script — sandboxed, or restricted by the page — is
+			// not a reason to abandon the capture. That frame simply will not be
+			// archived, exactly as before this task.
+		}
+		await chrome.scripting.executeScript({
+			target: { tabId },
+			files: [CAPTURE_SCRIPT],
+		});
+		return;
+	}
+
+	const legacyTabs = chrome.tabs as typeof chrome.tabs & LegacyTabsApi;
+	if (!legacyTabs.executeScript) {
+		throw new Error("scripting API unavailable");
+	}
+	await new Promise<void>((resolve) => {
+		legacyTabs.executeScript?.(tabId, { file: FRAMES_SCRIPT, allFrames: true }, () => {
+			// Read and discard lastError; a frame we cannot script is tolerable.
+			void lastError();
+			resolve();
+		});
+	});
+	await new Promise<void>((resolve, reject) => {
+		legacyTabs.executeScript?.(tabId, { file: CAPTURE_SCRIPT }, () => {
+			const message = lastError();
+			if (message) reject(new Error(message));
+			else resolve();
+		});
+	});
+}
+```
+
+Widen `LegacyTabsApi`'s `executeScript` details type to `{ file: string; allFrames?: boolean }`.
+
+- [ ] **Step 5: Run the tests to verify they pass**
+
+Run: `bun run test inject-capture`, then `bun run test`, `bun run typecheck`, `bun run lint`.
+Expected: 5 new tests pass, whole suite green, typecheck and lint clean.
+
+- [ ] **Step 6: Verify the bundle**
+
+Run: `bun run build`
+Expected: `dist/content/frames.js` exists and is well under 100 KB — it carries only the frame-tree processor, not the whole of SingleFile. Measured on this branch: **23.9 KB, 9 modules**, against `capture.js`'s 840 KB and 52 modules. If it is ~800 KB, the import pulled in the full library; report that rather than working around it.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add extension/src/content/frames.ts extension/src/lib/inject-capture.ts \
+        extension/src/lib/__tests__/inject-capture.test.ts \
+        extension/src/types/single-file-core.d.ts extension/vite.config.ts
+git commit -m "feat(extension): inject the frame responder so iframes are captured"
+```

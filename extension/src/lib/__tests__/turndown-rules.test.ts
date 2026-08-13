@@ -1,7 +1,6 @@
 import TurndownService from "turndown";
 import { describe, expect, it } from "vitest";
 import {
-	addCasImageRule,
 	addDemoteHeadingsRule,
 	addFigureRule,
 	addStrikethroughRule,
@@ -20,29 +19,29 @@ function run(td: TurndownService, html: string): string {
 	return td.turndown(parseArchiveHtml(html));
 }
 
-describe("turndown CAS rules", () => {
-	it("replaces img src with cas: URI when in resource map", () => {
-		const td = new TurndownService();
-		const resourceMap = new Map([
-			["https://example.com/photo.png", "sha256:abc123"],
-		]);
-		addCasImageRule(td, resourceMap);
+describe("image URLs", () => {
+	it("keeps the original image URL for the server to rewrite", () => {
+		// The server owns resource identity now: it holds the only map from an
+		// original URL to a stored blob, so the markdown must arrive with the URL
+		// that map is keyed on.
+		const markdown = convertArchiveHtml(
+			'<img src="https://cdn.example.com/a.png" alt="a cat">',
+		);
 
-		const html = `<img src="https://example.com/photo.png" alt="A photo" />`;
-		const md = run(td, html);
-		expect(md).toBe("![A photo](cas:sha256:abc123)");
+		expect(markdown).toBe("![a cat](https://cdn.example.com/a.png)");
 	});
 
-	it("keeps original URL when not in resource map", () => {
-		const td = new TurndownService();
-		addCasImageRule(td, new Map());
+	it("no longer emits cas: references", () => {
+		const markdown = convertArchiveHtml(
+			'<img src="https://cdn.example.com/a.png">',
+		);
 
-		const html = `<img src="https://example.com/missing.png" alt="Missing" />`;
-		const md = run(td, html);
-		expect(md).toContain("https://example.com/missing.png");
-		expect(md).toContain("unarchived");
+		expect(markdown).not.toContain("cas:");
+		expect(markdown).not.toContain("unarchived");
 	});
+});
 
+describe("heading demotion", () => {
 	it("demotes headings by one level", () => {
 		const td = new TurndownService();
 		addDemoteHeadingsRule(td);
@@ -101,13 +100,12 @@ describe("table support", () => {
 describe("figure support", () => {
 	it("emits the image followed by its caption", () => {
 		const td = new TurndownService();
-		addCasImageRule(td, new Map([["/chart.png", "sha256:deadbeef"]]));
 		addFigureRule(td);
 
 		const html = `<figure><img src="/chart.png" alt="Chart" /><figcaption>Quarterly revenue</figcaption></figure>`;
 		const md = run(td, html);
 
-		expect(md).toContain("![Chart](cas:sha256:deadbeef)");
+		expect(md).toContain("![Chart](/chart.png)");
 		expect(md).toContain("Quarterly revenue");
 		// caption must not be glued to the image markup
 		expect(md).not.toContain(")Quarterly");
@@ -115,7 +113,6 @@ describe("figure support", () => {
 
 	it("handles a figure with no caption", () => {
 		const td = new TurndownService();
-		addCasImageRule(td, new Map());
 		addFigureRule(td);
 
 		const html = `<figure><img src="/plain.png" alt="Plain" /></figure>`;
@@ -146,13 +143,12 @@ describe("convertArchiveHtml", () => {
 			 <figure><img src="/c.png" alt="Chart" /><figcaption>Caption</figcaption></figure>
 			 <table><thead><tr><th>A</th><th>B</th></tr></thead>
 			   <tbody><tr><td>1</td><td>2</td></tr></tbody></table>`,
-			new Map([["/c.png", "sha256:cafe"]]),
 		);
 
 		expect(md).toContain("## Heading"); // demoted
 		expect(md).toContain("~struck~"); // single tilde
 		expect(md).toContain("**bold**");
-		expect(md).toContain("![Chart](cas:sha256:cafe)"); // CAS rewrite
+		expect(md).toContain("![Chart](/c.png)"); // image URL left for the server
 		expect(md).toContain("Caption");
 		expect(md).toContain("| A | B |"); // table survives
 		expect(md).toContain("| --- | --- |");
@@ -164,6 +160,6 @@ describe("convertArchiveHtml", () => {
 		// these are genuinely absent here just as they are in an MV3 worker.
 		expect(typeof globalThis.document).toBe("undefined");
 		expect((globalThis as { DOMParser?: unknown }).DOMParser).toBeUndefined();
-		expect(convertArchiveHtml("<p>plain</p>", new Map())).toBe("plain");
+		expect(convertArchiveHtml("<p>plain</p>")).toBe("plain");
 	});
 });

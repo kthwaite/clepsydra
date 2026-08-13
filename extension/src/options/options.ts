@@ -29,11 +29,14 @@ async function init() {
 	input("notify-success").checked = settings.notify_on_success;
 	input("notify-duplicate").checked = settings.notify_on_duplicate;
 	input("max-blob-mb").value = String(settings.max_blob_size_mb);
-	input("max-request-mb").value = String(settings.max_request_size_mb);
 
 	// Save handler
 	element("save-btn").addEventListener("click", async () => {
 		const newSettings: ExtensionSettings = {
+			// max_request_size_mb has no form field to read any more (see the
+			// comment on ExtensionSettings), so the loaded value carries forward
+			// unchanged; the fields below override what the form does edit.
+			...settings,
 			server_url: input("server-url").value.replace(/\/$/, ""),
 			default_tags: input("default-tags")
 				.value.split(",")
@@ -44,10 +47,6 @@ async function init() {
 			max_blob_size_mb: positiveNumber(
 				"max-blob-mb",
 				DEFAULT_SETTINGS.max_blob_size_mb,
-			),
-			max_request_size_mb: positiveNumber(
-				"max-request-mb",
-				DEFAULT_SETTINGS.max_request_size_mb,
 			),
 		};
 

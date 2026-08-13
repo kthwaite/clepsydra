@@ -8,13 +8,12 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use base64::Engine;
-use base64::engine::general_purpose::STANDARD as BASE64;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
+use crate::vault::archive_snapshot::{self, SnapshotResource};
 use crate::vault::cas::ContentStore;
 use crate::vault::index_policy::IndexMutation;
 use crate::vault::kind::Kind;
@@ -30,11 +29,14 @@ pub struct ArchiveRequest {
     pub title: String,
     pub description: Option<String>,
     pub captured_at: String,
+    /// sha256 of `markdown_body` exactly as sent. Verified on arrival as a
+    /// transport check, then stored as `archive.source_hash`.
     pub content_hash: String,
-    pub snapshot_hash: String,
+    /// The SingleFile capture, resources still inlined as `data:` URIs. The
+    /// server deconstructs it; the extension does not hash or split it.
+    pub snapshot_html: String,
     pub markdown_body: String,
     pub tags: Vec<String>,
-    pub blobs: Vec<BlobUpload>,
     /// Article byline, as parsed by Readability in the page context.
     #[serde(default)]
     pub byline: Option<String>,
@@ -50,13 +52,6 @@ pub struct ArchiveRequest {
     /// Short summary extracted from the article body.
     #[serde(default)]
     pub excerpt: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Clone, ToSchema)]
-pub struct BlobUpload {
-    pub hash: String,
-    pub content_type: String,
-    pub data: String, // base64
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -219,13 +214,24 @@ fn rollback_cas(primary: ApiError, state: &AppState, hashes: &[String]) -> ApiEr
     rollback_cas_with(primary, hashes, |hash| cas.decrement_ref(hash))
 }
 
+/// The HTTP body limit implied by a decoded-content budget.
+///
+/// `max_request_size_mb` budgets DECODED resource bytes, but the request
+/// carries base64, which inflates by 4/3. Without the multiplier the
+/// transport limit fires first and the reader gets a bare 413 naming
+/// nothing, instead of the 400 from `validate_resource_sizes` that names the
+/// limit it exceeded.
+pub(crate) fn archive_body_limit_bytes(max_request_size_mb: u64) -> usize {
+    (max_request_size_mb as usize) * 4 / 3 * 1024 * 1024
+}
+
 /// Build the archive router.
 ///
 /// The body limit for the ingest endpoint is set by the caller via
 /// `archive_router_with_limit` to respect the configured `max_request_size_mb`.
-/// This default uses 100 MB.
+/// This default derives from a 250 MB decoded budget.
 pub fn router() -> Router<Arc<AppState>> {
-    router_with_body_limit(100 * 1024 * 1024)
+    router_with_body_limit(archive_body_limit_bytes(250))
 }
 
 /// Build the archive router with a specific body size limit (in bytes).
@@ -290,58 +296,38 @@ pub(crate) fn slugify(title: &str, max_len: usize) -> String {
     }
 }
 
-/// Validate per-blob and total request sizes against configured MB limits.
-fn validate_blob_sizes(
-    blobs: &[BlobUpload],
+/// Reject a capture that exceeds the configured limits.
+///
+/// Unlike the resource scrape this replaced, an oversized capture fails the
+/// whole archive rather than being trimmed: a snapshot missing arbitrary
+/// resources is not a snapshot. The per-resource limit also bounds what
+/// SingleFile is configured to inline, so hitting it here means the extension's
+/// limit and the server's disagree.
+fn validate_resource_sizes(
+    resources: &[SnapshotResource],
+    snapshot_len: usize,
     max_blob_size_mb: u64,
     max_request_size_mb: u64,
 ) -> Result<(), ApiError> {
     let max_blob_bytes = max_blob_size_mb * 1024 * 1024;
     let max_request_bytes = max_request_size_mb * 1024 * 1024;
-    let mut total_blob_bytes: u64 = 0;
-    for blob in blobs {
-        let estimated_size = (blob.data.len() as u64) * 3 / 4;
-        if estimated_size > max_blob_bytes {
+    let mut total = snapshot_len as u64;
+    for resource in resources {
+        let size = resource.bytes.len() as u64;
+        if size > max_blob_bytes {
             return Err(ApiError::bad_request(format!(
-                "blob {} exceeds max_blob_size_mb ({} MB)",
-                blob.hash, max_blob_size_mb
+                "archived resource {} is {} bytes, over max_blob_size_mb ({} MB)",
+                resource.hash, size, max_blob_size_mb
             )));
         }
-        total_blob_bytes += estimated_size;
+        total += size;
     }
-    if total_blob_bytes > max_request_bytes {
+    if total > max_request_bytes {
         return Err(ApiError::bad_request(format!(
-            "total blob size (~{} bytes) exceeds max_request_size_mb ({} MB)",
-            total_blob_bytes, max_request_size_mb
+            "capture is {total} bytes, over max_request_size_mb ({max_request_size_mb} MB)"
         )));
     }
     Ok(())
-}
-
-/// Decode base64 blobs, dedup by hash, and verify each against its declared hash.
-/// Returns `(hash, bytes, content_type)` per unique blob.
-fn decode_and_verify_blobs(
-    blobs: &[BlobUpload],
-) -> Result<Vec<(String, Vec<u8>, String)>, ApiError> {
-    let mut seen_hashes = std::collections::HashSet::new();
-    let mut decoded_blobs: Vec<(String, Vec<u8>, String)> = Vec::with_capacity(blobs.len());
-    for blob in blobs {
-        if !seen_hashes.insert(blob.hash.clone()) {
-            continue;
-        }
-        let data = BASE64
-            .decode(&blob.data)
-            .map_err(|e| ApiError::bad_request(format!("invalid base64 in blob: {e}")))?;
-        let computed_hash = ContentStore::hash_bytes(&data);
-        if computed_hash != blob.hash {
-            return Err(ApiError::bad_request(format!(
-                "blob hash mismatch: declared={}, computed={}",
-                blob.hash, computed_hash
-            )));
-        }
-        decoded_blobs.push((blob.hash.clone(), data, blob.content_type.clone()));
-    }
-    Ok(decoded_blobs)
 }
 
 /// Resolve a non-colliding `{prefix}/{domain}/{slug}.md` page path. Empty slug
@@ -367,12 +353,23 @@ fn resolve_page_path(
     Ok(page_path)
 }
 
+/// The four hashes an archive page records, all computed by the server.
+struct ArchiveHashes {
+    /// Over the markdown as captured, before rewriting. Change detection keys on
+    /// this, so a re-encoded image does not read as "the page changed".
+    source_hash: String,
+    /// Over the markdown as stored, after rewriting. Archived bodies are
+    /// write-protected on the stated grounds that this describes the stored
+    /// body, so it must be computed post-rewrite or that justification fails.
+    content_hash: String,
+    snapshot_hash: String,
+    /// Every deconstructed resource, excluding the snapshot itself. The delete
+    /// hook decrements each of these.
+    resource_hashes: Vec<String>,
+}
+
 /// Build the PageMeta (with nested `archive` TOML table) for an ingest request.
-/// `decoded_blobs` supplies the non-snapshot blob hash list stored in frontmatter.
-fn build_archive_meta(
-    req: &ArchiveRequest,
-    decoded_blobs: &[(String, Vec<u8>, String)],
-) -> PageMeta {
+fn build_archive_meta(req: &ArchiveRequest, hashes: &ArchiveHashes) -> PageMeta {
     fn ts(s: &str) -> toml::Value {
         toml::Value::String(s.to_string())
     }
@@ -390,8 +387,13 @@ fn build_archive_meta(
     }
     archive_map.insert("domain".into(), ts(&req.domain));
     archive_map.insert("captured_at".into(), ts(&req.captured_at));
-    archive_map.insert("content_hash".into(), ts(&req.content_hash));
-    archive_map.insert("snapshot_hash".into(), ts(&req.snapshot_hash));
+    archive_map.insert("content_hash".into(), ts(&hashes.content_hash));
+    archive_map.insert("source_hash".into(), ts(&hashes.source_hash));
+    archive_map.insert("snapshot_hash".into(), ts(&hashes.snapshot_hash));
+    archive_map.insert(
+        "resource_count".into(),
+        toml::Value::Integer(hashes.resource_hashes.len() as i64),
+    );
     if let Some(ref description) = req.description {
         archive_map.insert("description".into(), ts(description));
     }
@@ -407,13 +409,13 @@ fn build_archive_meta(
         }
     }
 
-    let non_snapshot_blobs: Vec<toml::Value> = decoded_blobs
-        .iter()
-        .filter(|(h, _, _)| *h != req.snapshot_hash)
-        .map(|(h, _, _)| toml::Value::String(h.clone()))
-        .collect();
-    if !non_snapshot_blobs.is_empty() {
-        archive_map.insert("blobs".into(), toml::Value::Array(non_snapshot_blobs));
+    if !hashes.resource_hashes.is_empty() {
+        let blobs: Vec<toml::Value> = hashes
+            .resource_hashes
+            .iter()
+            .map(|h| toml::Value::String(h.clone()))
+            .collect();
+        archive_map.insert("blobs".into(), toml::Value::Array(blobs));
     }
 
     meta.extra
@@ -580,17 +582,17 @@ pub async fn ingest_archive(
             req.content_hash, computed_content_hash
         )));
     }
-
-    validate_blob_sizes(
-        &req.blobs,
-        archive_config.max_blob_size_mb,
-        archive_config.max_request_size_mb,
-    )?;
+    // The verified transport hash is exactly "the markdown as captured".
+    let source_hash = req.content_hash.clone();
 
     let prefix = archive_config.default_path_prefix.clone();
+    let max_blob_size_mb = archive_config.max_blob_size_mb;
+    let max_request_size_mb = archive_config.max_request_size_mb;
 
-    // Serialize the entire mutating section to prevent concurrent races
-    // (duplicate URL check + path collision + file write + index commit).
+    // Serializes the whole ingest: the duplicate-URL check, path-collision
+    // resolution, the CAS/file writes, and the index commit. Without it, two
+    // concurrent captures of the same URL could both pass the duplicate check
+    // and race to create two pages for one archive.
     let _ingest_guard = state.archive_ingest_lock.lock().await;
 
     // 1. Check for existing archive of this URL via the index
@@ -603,7 +605,7 @@ pub async fn ingest_archive(
         .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?;
 
     if let Some((page_id, vault_path, existing_hash)) = existing {
-        if existing_hash == req.content_hash {
+        if existing_hash == source_hash {
             return Ok((
                 StatusCode::OK,
                 Json(ArchiveResponse {
@@ -615,17 +617,16 @@ pub async fn ingest_archive(
                 }),
             )
                 .into_response());
-        } else {
-            return Err(ApiError::conflict_with_detail(
-                format!("archive exists with different content: {}", req.url),
-                serde_json::json!({
-                    "existing_hash": existing_hash,
-                    "new_hash": req.content_hash,
-                    "page_id": page_id,
-                    "vault_path": vault_path,
-                }),
-            ));
         }
+        return Err(ApiError::conflict_with_detail(
+            format!("archive exists with different content: {}", req.url),
+            serde_json::json!({
+                "existing_hash": existing_hash,
+                "new_hash": source_hash,
+                "page_id": page_id,
+                "vault_path": vault_path,
+            }),
+        ));
     }
 
     // 2. Validate path BEFORE touching CAS (prevents orphaned blobs on bad input)
@@ -637,21 +638,66 @@ pub async fn ingest_archive(
     let vault_path = VaultPath::new(&page_path)
         .map_err(|e| ApiError::bad_request(format!("invalid generated path: {e}")))?;
 
-    // 3. Decode and verify all blobs before storing anything (fail fast).
-    let decoded_blobs = decode_and_verify_blobs(&req.blobs)?;
+    // 3. Deconstruct the snapshot and rewrite both artifacts from one map. The
+    //    server is the only component that decides what a resource's identity
+    //    is; splitting that across the extension let the markdown and the
+    //    snapshot disagree about what they referenced.
+    let deconstructed = archive_snapshot::deconstruct(&req.snapshot_html);
+    validate_resource_sizes(
+        &deconstructed.resources,
+        deconstructed.html.len(),
+        max_blob_size_mb,
+        max_request_size_mb,
+    )?;
+
+    // The map is built from the rewritten snapshot, because it pairs each
+    // `data-sf-original-src` with the `cas:` reference that just replaced that
+    // element's `src`.
+    let url_map = archive_snapshot::original_url_map(&deconstructed.html, &req.url);
+    let markdown_body =
+        archive_snapshot::rewrite_markdown_images(&req.markdown_body, &url_map, &req.url);
+    let content_hash = ContentStore::hash_bytes(markdown_body.as_bytes());
+
+    let snapshot_bytes = deconstructed.html.into_bytes();
+    let snapshot_hash = ContentStore::hash_bytes(&snapshot_bytes);
+
+    let resource_hashes: Vec<String> = deconstructed
+        .resources
+        .iter()
+        .map(|r| r.hash.clone())
+        .collect();
+
+    let mut to_store: Vec<(String, Vec<u8>, String)> = deconstructed
+        .resources
+        .into_iter()
+        .map(|r| (r.hash, r.bytes, r.content_type))
+        .collect();
+    to_store.push((
+        snapshot_hash.clone(),
+        snapshot_bytes,
+        "text/html".to_string(),
+    ));
 
     let (blobs_stored, blobs_deduped, stored_hashes) =
-        match store_decoded_blobs(&state.cas, &decoded_blobs) {
+        match store_decoded_blobs(&state.cas, &to_store) {
             Ok(stored) => stored,
             Err(failure) => {
                 return Err(rollback_cas(failure.primary, &state, &failure.ref_hashes));
             }
         };
 
-    // 5. Create and index the page through the reviewed Created policy.
-    let meta = build_archive_meta(&req, &decoded_blobs);
+    // 4. Create and index the page through the reviewed Created policy.
+    let meta = build_archive_meta(
+        &req,
+        &ArchiveHashes {
+            source_hash,
+            content_hash,
+            snapshot_hash,
+            resource_hashes,
+        },
+    );
     let page_id = meta.id.to_string();
-    let expected_page_content = write_page_content(&meta, &req.markdown_body);
+    let expected_page_content = write_page_content(&meta, &markdown_body);
     let notify = super::mutation_notifier(state.as_ref());
     if let Err(error) = state
         .mutation_coordinator
@@ -661,7 +707,7 @@ pub async fn ingest_archive(
             CreatePageCommand {
                 path: vault_path.clone(),
                 meta,
-                body: req.markdown_body,
+                body: markdown_body,
             },
             notify,
         )
@@ -729,7 +775,7 @@ pub async fn ingest_archive(
         ));
     }
 
-    // 8. Return response
+    // 5. Return response
     Ok((
         StatusCode::CREATED,
         Json(ArchiveResponse {
@@ -746,6 +792,18 @@ pub async fn ingest_archive(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // ---------------------------------------------------------------------------
+    // archive_body_limit_bytes tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn the_body_limit_exceeds_the_decoded_budget_it_guards() {
+        // If these ever converge, an over-budget capture 413s before
+        // validate_resource_sizes can report which limit it broke.
+        let budget_bytes = 250 * 1024 * 1024;
+        assert!(archive_body_limit_bytes(250) > budget_bytes);
+    }
 
     // ---------------------------------------------------------------------------
     // slugify tests (existing)
@@ -803,124 +861,6 @@ mod tests {
         let title = "café résumé à la mode extrêmement long titre pour tester";
         let slug = slugify(title, 30);
         assert!(slug.chars().count() <= 30);
-    }
-
-    // ---------------------------------------------------------------------------
-    // validate_blob_sizes tests
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn validate_blob_sizes_accepts_within_limits() {
-        // 1 MB limit per blob, 10 MB total; data well under that
-        let blobs = vec![BlobUpload {
-            hash: String::new(),
-            content_type: String::new(),
-            data: "A".repeat(100),
-        }];
-        assert!(validate_blob_sizes(&blobs, 1, 10).is_ok());
-    }
-
-    #[test]
-    fn validate_blob_sizes_rejects_oversized_blob() {
-        // 1 MB limit; ~1.5 MB of base64 data → estimated ~1.125 MB decoded
-        let blobs = vec![BlobUpload {
-            hash: "testhash".to_string(),
-            content_type: String::new(),
-            // 1.5 MB of base64 chars → estimated decoded size = 1.5*1024*1024 * 3/4 > 1 MB
-            data: "A".repeat(2 * 1024 * 1024),
-        }];
-        let err = validate_blob_sizes(&blobs, 1, 100).unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("testhash") || msg.contains("max_blob_size_mb"));
-    }
-
-    #[test]
-    fn validate_blob_sizes_rejects_oversized_request_total() {
-        // 2 MB per blob, but 3 MB total limit; two blobs each ~1.5 MB decoded
-        let large_data = "A".repeat(2 * 1024 * 1024); // ~1.5 MB decoded
-        let blobs = vec![
-            BlobUpload {
-                hash: String::new(),
-                content_type: String::new(),
-                data: large_data.clone(),
-            },
-            BlobUpload {
-                hash: String::new(),
-                content_type: String::new(),
-                data: large_data,
-            },
-        ];
-        // per-blob limit = 2 MB (each passes), total limit = 2 MB (combined ~3 MB fails)
-        let err = validate_blob_sizes(&blobs, 2, 2).unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("max_request_size_mb") || msg.contains("total blob size"));
-    }
-
-    // ---------------------------------------------------------------------------
-    // decode_and_verify_blobs tests
-    // ---------------------------------------------------------------------------
-
-    #[test]
-    fn decode_and_verify_blobs_valid() {
-        let data = b"hello archive blob";
-        let hash = ContentStore::hash_bytes(data);
-        let b64 = BASE64.encode(data);
-        let blobs = vec![BlobUpload {
-            hash: hash.clone(),
-            content_type: "text/plain".to_string(),
-            data: b64,
-        }];
-        let result = decode_and_verify_blobs(&blobs).unwrap();
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].0, hash);
-        assert_eq!(result[0].1, data);
-        assert_eq!(result[0].2, "text/plain");
-    }
-
-    #[test]
-    fn decode_and_verify_blobs_deduplicates() {
-        let data = b"duplicate blob data";
-        let hash = ContentStore::hash_bytes(data);
-        let b64 = BASE64.encode(data);
-        let blob = BlobUpload {
-            hash: hash.clone(),
-            content_type: "image/png".to_string(),
-            data: b64,
-        };
-        let blobs = vec![blob.clone(), blob];
-        let result = decode_and_verify_blobs(&blobs).unwrap();
-        assert_eq!(
-            result.len(),
-            1,
-            "duplicate blob should be deduped to 1 entry"
-        );
-    }
-
-    #[test]
-    fn decode_and_verify_blobs_rejects_hash_mismatch() {
-        let data = b"some data";
-        let b64 = BASE64.encode(data);
-        let blobs = vec![BlobUpload {
-            hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000"
-                .to_string(),
-            content_type: "text/plain".to_string(),
-            data: b64,
-        }];
-        let err = decode_and_verify_blobs(&blobs).unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("hash mismatch") || msg.contains("mismatch"));
-    }
-
-    #[test]
-    fn decode_and_verify_blobs_rejects_invalid_base64() {
-        let blobs = vec![BlobUpload {
-            hash: "sha256:anything".to_string(),
-            content_type: "text/plain".to_string(),
-            data: "not-valid-base64!!!".to_string(),
-        }];
-        let err = decode_and_verify_blobs(&blobs).unwrap_err();
-        let msg = format!("{err:?}");
-        assert!(msg.contains("base64") || msg.contains("invalid"));
     }
 
     // ---------------------------------------------------------------------------
@@ -987,7 +927,7 @@ mod tests {
     #[test]
     fn build_archive_meta_declares_the_archive_kind() {
         let req = request_fixture();
-        let meta = build_archive_meta(&req, &[]);
+        let meta = build_archive_meta(&req, &hashes_fixture());
         assert_eq!(meta.kind, Some(Kind::Archive));
     }
 
@@ -1000,7 +940,7 @@ mod tests {
         req.lang = Some("en-GB".to_string());
         req.excerpt = Some("A short summary.".to_string());
 
-        let meta = build_archive_meta(&req, &[]);
+        let meta = build_archive_meta(&req, &hashes_fixture());
         let archive = match meta.extra.get("archive") {
             Some(toml::Value::Table(m)) => m,
             other => panic!("expected archive mapping, got {other:?}"),
@@ -1019,7 +959,7 @@ mod tests {
         req.byline = Some("   ".to_string());
         req.lang = None;
 
-        let meta = build_archive_meta(&req, &[]);
+        let meta = build_archive_meta(&req, &hashes_fixture());
         let archive = match meta.extra.get("archive") {
             Some(toml::Value::Table(m)) => m,
             other => panic!("expected archive mapping, got {other:?}"),
@@ -1040,15 +980,23 @@ mod tests {
             description: None,
             captured_at: "2026-01-01T00:00:00Z".to_string(),
             content_hash: "sha256:abc".to_string(),
-            snapshot_hash: "sha256:def".to_string(),
+            snapshot_html: String::new(),
             markdown_body: "# Test".to_string(),
             tags: vec!["archive".to_string()],
-            blobs: vec![],
             byline: None,
             site_name: None,
             published_time: None,
             lang: None,
             excerpt: None,
+        }
+    }
+
+    fn hashes_fixture() -> ArchiveHashes {
+        ArchiveHashes {
+            source_hash: "sha256:src".to_string(),
+            content_hash: "sha256:content".to_string(),
+            snapshot_hash: "sha256:snap".to_string(),
+            resource_hashes: vec!["sha256:img".to_string()],
         }
     }
 
@@ -1062,13 +1010,12 @@ mod tests {
             description: None,
             captured_at: "2026-01-01T00:00:00Z".to_string(),
             content_hash: "sha256:abc".to_string(),
-            snapshot_hash: "sha256:def".to_string(),
+            snapshot_html: String::new(),
             markdown_body: "# Test".to_string(),
             tags: vec!["archive".to_string()],
-            blobs: vec![],
             ..request_fixture()
         };
-        let meta = build_archive_meta(&req, &[]);
+        let meta = build_archive_meta(&req, &hashes_fixture());
         assert!(
             meta.extra.contains_key("archive"),
             "meta.extra should have 'archive' key"
@@ -1077,54 +1024,23 @@ mod tests {
     }
 
     #[test]
-    fn build_archive_meta_includes_optional_fields_and_filters_snapshot_blob() {
-        let req = ArchiveRequest {
-            url: "https://example.com/test".to_string(),
-            canonical_url: Some("https://example.com/canonical".to_string()),
-            domain: "example.com".to_string(),
-            title: "Test Article".to_string(),
-            description: Some("a description".to_string()),
-            captured_at: "2026-01-01T00:00:00Z".to_string(),
-            content_hash: "sha256:abc".to_string(),
-            snapshot_hash: "sha256:snap".to_string(),
-            markdown_body: "# Test".to_string(),
-            tags: vec![],
-            blobs: vec![],
-            ..request_fixture()
-        };
-        // One ordinary blob plus the snapshot blob; only the former should appear.
-        let decoded = vec![
-            ("sha256:img".to_string(), vec![1u8], "image/png".to_string()),
-            (
-                "sha256:snap".to_string(),
-                vec![2u8],
-                "text/html".to_string(),
-            ),
-        ];
-        let meta = build_archive_meta(&req, &decoded);
+    fn build_archive_meta_lists_only_resource_blobs() {
+        let meta = build_archive_meta(&request_fixture(), &hashes_fixture());
 
         let archive = match meta.extra.get("archive") {
             Some(toml::Value::Table(m)) => m,
             other => panic!("expected archive mapping, got {other:?}"),
         };
-        let get = |k: &str| archive.get(k);
-        assert_eq!(
-            get("canonical_url").and_then(|v| v.as_str()),
-            Some("https://example.com/canonical")
-        );
-        assert_eq!(
-            get("description").and_then(|v| v.as_str()),
-            Some("a description")
-        );
-        let blobs = get("blobs")
-            .and_then(|v| v.as_array())
-            .expect("blobs array present");
-        let blob_hashes: Vec<&str> = blobs.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(
-            blob_hashes,
-            vec!["sha256:img"],
-            "snapshot_hash must be excluded from the blobs list"
-        );
+        let blobs: Vec<&str> = archive["blobs"]
+            .as_array()
+            .expect("blobs array present")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(blobs, vec!["sha256:img"]);
+        assert_eq!(archive["resource_count"].as_integer(), Some(1));
+        assert_eq!(archive["snapshot_hash"].as_str(), Some("sha256:snap"));
+        assert_eq!(archive["source_hash"].as_str(), Some("sha256:src"));
     }
 
     // ---------------------------------------------------------------------------

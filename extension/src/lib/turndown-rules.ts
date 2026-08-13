@@ -3,29 +3,6 @@ import TurndownService from "turndown";
 import { tables } from "turndown-plugin-gfm";
 
 /**
- * Replace image URLs with cas:<hash> URIs for archived resources.
- * Falls back to original URL with "unarchived" title for unknown images.
- */
-export function addCasImageRule(
-	td: TurndownService,
-	resourceMap: Map<string, string>,
-): void {
-	td.addRule("cas-images", {
-		filter: "img",
-		replacement(_content, node) {
-			const el = node as HTMLImageElement;
-			const src = el.getAttribute("src") || "";
-			const alt = el.getAttribute("alt") || "";
-			const hash = resourceMap.get(src);
-			if (hash) {
-				return `![${alt}](cas:${hash})`;
-			}
-			return `![${alt}](${src} "unarchived")`;
-		},
-	});
-}
-
-/**
  * Demote all headings by one level (h1 -> h2, etc.)
  * since the page title is already the top-level heading.
  */
@@ -123,12 +100,8 @@ export function addStrikethroughRule(td: TurndownService): void {
 }
 
 /** Register every archive conversion rule on a Turndown instance. */
-export function addArchiveRules(
-	td: TurndownService,
-	resourceMap: Map<string, string>,
-): void {
+export function addArchiveRules(td: TurndownService): void {
 	addTableSupport(td);
-	addCasImageRule(td, resourceMap);
 	addDemoteHeadingsRule(td);
 	addFigureRule(td);
 	addStrikethroughRule(td);
@@ -145,15 +118,18 @@ export function parseArchiveHtml(html: string): HTMLElement {
 	return domino.createDocument(html).body as unknown as HTMLElement;
 }
 
-/** Convert archived article HTML to markdown with CAS image references. */
-export function convertArchiveHtml(
-	html: string,
-	resourceMap: Map<string, string>,
-): string {
+/**
+ * Convert archived article HTML to markdown.
+ *
+ * Image URLs are left exactly as Readability resolved them — absolute, pointing
+ * at the live web. The server rewrites them to `cas:` references, because it
+ * holds the only map from an original URL to a stored blob.
+ */
+export function convertArchiveHtml(html: string): string {
 	const td = new TurndownService({
 		headingStyle: "atx",
 		codeBlockStyle: "fenced",
 	});
-	addArchiveRules(td, resourceMap);
+	addArchiveRules(td);
 	return td.turndown(parseArchiveHtml(html));
 }

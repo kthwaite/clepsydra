@@ -232,6 +232,15 @@ it("renders self-contained browser extension setup", () => {
   expect(
     screen.getByText("on_content_changed", { exact: true }),
   ).toBeInTheDocument();
+  // Pin what the worker's fallback Markdown actually emits (no snapshot
+  // link — buildFallbackMarkdown only records the URL and capture time) so
+  // this doc can't drift from extension/src/background/service-worker.ts
+  // again without failing here.
+  expect(
+    screen.getByText(
+      /noting that the captured snapshot is still archived and viewable/,
+    ),
+  ).toBeInTheDocument();
 });
 
 it("renders the Books and Reading workflow", () => {
@@ -376,23 +385,49 @@ it("documents conversation results and exact MCP stale-guard ownership", () => {
   expect(source).toContain("do not send a revision");
 });
 
-it("documents the exact extension manifest and blob construction", () => {
+it("documents the SingleFile capture and server-side deconstruction pipeline", () => {
   const source = registeredGuideSource("browser-extension");
 
-  expect(source).toContain("every distinct base64 `data:` URI");
-  expect(source).toContain("no count cap on these inline");
-  expect(source).toContain("first 50 raw `src` strings");
-  expect(source).toContain("deduplicates blobs by hash");
-  expect(source).toContain("full HTML snapshot as its own `text/html` blob");
+  // A second content script answers SingleFile's frame-tree handshake, or
+  // every iframe on the page burns a five-second timeout and archives nothing.
+  expect(source).toContain(
+    "A second content script is injected into every frame",
+  );
+  expect(source).toContain("frame-tree handshake");
+  // Cross-origin fetches relay through the worker because a content script's
+  // `fetch` is bound by the page's CORS policy, not the extension's host
+  // permissions.
+  expect(source).toMatch(/bound by the \*page.s\* CORS policy/);
+  expect(source).toContain("relays through the background worker instead");
+  // The extension no longer owns the resource map: it posts one inlined
+  // snapshot and the server alone deconstructs, hashes, and rewrites it.
+  expect(source).toContain(
+    "The extension does not hash, split, or deduplicate resources itself.",
+  );
+  expect(source).toContain("server alone deconstructs `snapshot_html`");
+  expect(source).toContain("`cas:` references from a single resource map");
+  // source_hash (captured) and content_hash (stored) are distinct hashes over
+  // the Markdown before and after image-URL rewriting, not the same value
+  // under two names.
+  expect(source).toContain("`archive.source_hash`");
+  expect(source).toContain("`archive.content_hash`");
+  // Per-resource limit is declined at capture time; the total budget is
+  // enforced by the server alone, not the client.
+  expect(source).toContain(
+    "that exceeds `max_blob_size_mb`, is left out of the snapshot",
+  );
+  expect(source).toContain("exceeds `max_request_size_mb`");
   for (const field of [
     "`domain`",
     "`captured_at`",
     "`content_hash`",
-    "`snapshot_hash`",
+    "`snapshot_html`",
     "`markdown_body`",
-    "`hash`",
-    "`content_type`",
-    "base64 `data`",
+    "`byline`",
+    "`site_name`",
+    "`published_time`",
+    "`lang`",
+    "`excerpt`",
   ]) {
     expect(source).toContain(field);
   }
@@ -436,7 +471,17 @@ it("documents extension permissions and complete capture scope", () => {
   );
   expect(source).toContain("`http://*/*` and `https://*/*`");
   expect(source).toContain("current page DOM");
-  expect(source).toMatch(/cross-origin image\s+resources/);
+  // SingleFile fetches every resource type it can reach, not just images; a
+  // fetch that fails under the page's CORS policy relays through the worker.
+  expect(source).toMatch(/relay any cross-origin\s+resource fetch/);
+  // The server, not the extension, owns the resource map: it deconstructs the
+  // one posted snapshot and computes its own hashes for every resource in it.
+  expect(source).toMatch(
+    /computes its own hashes for the snapshot and\s+every resource it deconstructs from it/,
+  );
+  expect(source).toContain(
+    "does not hash, split, or upload resources itself.",
+  );
   expect(source).toMatch(/configured\s+Clepsydra server/);
 });
 

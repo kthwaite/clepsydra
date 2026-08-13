@@ -15,6 +15,7 @@
 	},
 	"dependencies": {
 		"@mozilla/readability": "^0.5.0",
+		"single-file-core": "1.5.84",
 		"turndown": "^7.2.0",
 		"turndown-plugin-gfm": "^1.0.2"
 	},

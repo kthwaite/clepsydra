@@ -24,25 +24,31 @@ website or exposes a public feed.
 ### Capture a browser page
 
 On a normal `http://` or `https://` page, choose **Capture This Page** in the
-extension or use its keyboard shortcut. The client sends extracted Markdown,
-source and canonical URLs, title, capture time, tags, content hash, snapshot
-hash, and base64 resource blobs to `POST /api/vault/archive`.
+extension or use its keyboard shortcut. The extension posts extracted
+Markdown, source and canonical URLs, title, capture time, tags, a content
+hash, and a self-contained SingleFile snapshot (every reachable resource
+inlined as a `data:` URI) to `POST /api/vault/archive`. The server
+deconstructs the snapshot and stores its resources in the CAS; the extension
+does not hash, split, or upload resources itself.
 
 The Chromium manifest requests `activeTab`, `storage`, `notifications`, and
 `scripting`, plus host access for `http://*/*` and `https://*/*`. The Firefox
 manifest puts the same HTTP(S) host patterns directly in `permissions` alongside
 `activeTab`, `storage`, and `notifications`. This scope lets the injected script
-read the current page DOM, lets the background worker fetch cross-origin image
-resources with browser credentials, and lets it contact the configured
-Clepsydra server. Review the captured payload rather than assuming the
-permissions constrain extraction to public text or same-origin resources.
+read the current page DOM, lets the background worker relay any cross-origin
+resource fetch the content script's own `fetch` cannot make under the page's
+CORS policy, and lets it contact the configured Clepsydra server. Review the
+captured payload rather than assuming the permissions constrain extraction to
+public text or same-origin resources.
 
-The server verifies the Markdown and every blob against its declared SHA-256
-hash, enforces per-blob and total limits, and creates a non-colliding archive
-Folio under the configured prefix and domain. A repeated URL with the same
-content returns **already exists** without adding references. A repeated URL
-with different content returns HTTP 409; the shipped extension only reports
-**Content Changed** and does not update or retry the existing archive.
+The server verifies the Markdown against its declared SHA-256 hash — the only
+hash the client declares — then computes its own hashes for the snapshot and
+every resource it deconstructs from it, enforces per-blob and total limits,
+and creates a non-colliding archive Folio under the configured prefix and
+domain. A repeated URL with the same content returns **already exists**
+without adding references. A repeated URL with different content returns HTTP
+409; the shipped extension only reports **Content Changed** and does not
+update or retry the existing archive.
 
 ### Understand archive Folios and CAS blobs
 
