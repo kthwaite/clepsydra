@@ -2,16 +2,18 @@ mod support;
 
 use std::sync::Arc;
 
+use axum::Router;
 use axum::http::StatusCode;
 use axum_test::TestServer;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use sha2::{Digest, Sha256};
 
-use clepsydra::api::AppState;
-use clepsydra::api::archive::rollback_cas_with;
+use clepsydra::api::archive::{ArchiveViewConfig, rollback_cas_with};
 use clepsydra::api::error::ApiError;
 use clepsydra::api::events::SyncNotification;
+use clepsydra::api::{AppState, api_router_with_archive_limit};
+use clepsydra::{ServerSettings, TlsSettings};
 use clepsydra::vault::archive_hook::ArchiveDeleteHook;
 use clepsydra::vault::hooks::PostDeleteHook;
 use tempfile::TempDir;
@@ -36,6 +38,38 @@ fn sha256_hash(data: &[u8]) -> String {
 
 fn content_hash(body: &str) -> String {
     sha256_hash(body.as_bytes())
+}
+
+fn setup_archive_view_server() -> (TestServer, TempDir, Arc<AppState>) {
+    let (_fixture_server, temp_dir, state) = ApiFixture::builder().build().into_parts();
+    let server_settings = ServerSettings {
+        host: "vault.example".to_string(),
+        port: 7443,
+        dev_mode: false,
+        tls: TlsSettings {
+            enabled: true,
+            cert_path: None,
+            key_path: None,
+        },
+    };
+    let view_config = ArchiveViewConfig::from_server_settings(&server_settings).unwrap();
+    let app = Router::new()
+        .nest(
+            "/api/vault",
+            api_router_with_archive_limit(1, view_config),
+        )
+        .with_state(Arc::clone(&state));
+    let server = TestServer::new(app).unwrap();
+    (server, temp_dir, state)
+}
+
+fn store_blob(state: &AppState, data: &[u8], content_type: &str) -> String {
+    state
+        .cas
+        .lock()
+        .store(data, content_type)
+        .unwrap()
+        .hash
 }
 
 #[test]
@@ -512,6 +546,159 @@ async fn delete_folder_recursive_runs_delete_hooks() {
         assert!(
             !cas.exists(&blob_hash).unwrap(),
             "blob should be gone from CAS after recursive folder delete + GC"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sandboxed archive snapshot view
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn archive_view_serves_html_with_configuration_bound_sandbox() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let resource_hash = format!("sha256:{}", "a".repeat(64));
+    let html = format!(
+        r#"<html><body><img src="cas:{resource_hash}"><p>cas:{resource_hash}.</p><img src="cas:{resource_hash}/../pages/private"><img src="cas:{resource_hash};/../../pages/private"><img src="cas:{resource_hash},/../../pages/private"><a href="cas:../pages/private">bad</a></body></html>"#
+    );
+    let hash = store_blob(&state, html.as_bytes(), "text/html");
+
+    let response = server
+        .get(&format!("/api/vault/archive/view/{hash}"))
+        .add_header("host", "attacker.example")
+        .await;
+
+    response.assert_status(StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("content-type")
+            .map(|value| value.to_str().unwrap()),
+        Some("text/html")
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("x-content-type-options")
+            .map(|value| value.to_str().unwrap()),
+        Some("nosniff")
+    );
+    assert!(
+        response.headers().get("content-disposition").is_none(),
+        "the dedicated view route must render snapshots inline"
+    );
+    assert_eq!(
+        response
+            .headers()
+            .get("content-security-policy")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "sandbox; default-src 'none'; img-src https://vault.example:7443 data:; \
+         media-src https://vault.example:7443 data:; style-src 'unsafe-inline' \
+         https://vault.example:7443 data:; font-src https://vault.example:7443 data:"
+    );
+    let expected_html = format!(
+        r#"<html><body><img src="/api/vault/cas/{resource_hash}"><p>cas:{resource_hash}.</p><img src="cas:{resource_hash}/../pages/private"><img src="cas:{resource_hash};/../../pages/private"><img src="cas:{resource_hash},/../../pages/private"><a href="cas:../pages/private">bad</a></body></html>"#
+    );
+    assert_eq!(response.as_bytes().as_ref(), expected_html.as_bytes());
+
+    let cas_response = server.get(&format!("/api/vault/cas/{hash}")).await;
+    cas_response.assert_status(StatusCode::OK);
+    assert_eq!(
+        cas_response
+            .headers()
+            .get("content-disposition")
+            .map(|value| value.to_str().unwrap()),
+        Some("attachment"),
+        "the general CAS route must keep active content downloadable"
+    );
+}
+
+#[tokio::test]
+async fn archive_view_missing_hash_names_the_hash() {
+    let (server, _tmp, _state) = setup_archive_view_server();
+    let missing = format!("sha256:{}", "0".repeat(64));
+
+    let response = server
+        .get(&format!("/api/vault/archive/view/{missing}"))
+        .await;
+
+    response.assert_status(StatusCode::NOT_FOUND);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"].as_str().unwrap().contains(&missing),
+        "error did not name missing hash: {body}"
+    );
+}
+
+#[tokio::test]
+async fn archive_view_rejects_non_html_and_names_its_content_type() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let hash = store_blob(&state, b"\x89PNG not html", "image/png");
+
+    let response = server
+        .get(&format!("/api/vault/archive/view/{hash}"))
+        .await;
+
+    response.assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-clepsydra-archive-content-type")
+            .map(|value| value.to_str().unwrap()),
+        Some("image/png")
+    );
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["error"].as_str().unwrap().contains("image/png"),
+        "error did not name corrupt content type: {body}"
+    );
+
+    let head_response = server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{hash}"),
+        )
+        .await;
+    head_response.assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
+    assert_eq!(
+        head_response
+            .headers()
+            .get("x-clepsydra-archive-content-type")
+            .map(|value| value.to_str().unwrap()),
+        Some("image/png")
+    );
+    assert!(
+        head_response.as_bytes().is_empty(),
+        "HEAD must not send the error body"
+    );
+}
+
+#[test]
+fn archive_view_rejects_an_invalid_configured_host() {
+    for host in [
+        "vault.example; img-src https://attacker.example",
+        "0.0.0.0",
+        "::",
+        "[::]",
+    ] {
+        let server_settings = ServerSettings {
+            host: host.to_string(),
+            port: 7443,
+            dev_mode: false,
+            tls: TlsSettings {
+                enabled: true,
+                cert_path: None,
+                key_path: None,
+            },
+        };
+
+        let error = ArchiveViewConfig::from_server_settings(&server_settings).unwrap_err();
+
+        assert!(
+            error.contains("server.host"),
+            "configuration error did not identify server.host {host:?}: {error}"
         );
     }
 }

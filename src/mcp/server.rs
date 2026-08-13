@@ -1668,7 +1668,12 @@ mod tests {
         .unwrap();
 
         let state = crate::build_app_state(&root).await.unwrap();
-        let app = crate::build_router(state, 1024 * 1024, true);
+        let app = crate::build_router(
+            state,
+            1024 * 1024,
+            crate::api::archive::ArchiveViewConfig::default(),
+            true,
+        );
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr: SocketAddr = listener.local_addr().unwrap();

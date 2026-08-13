@@ -4,15 +4,17 @@ use std::sync::Arc;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
+use url::Host;
 
 use super::AppState;
 use super::error::ApiError;
+use crate::ServerSettings;
 use crate::vault::archive_snapshot::{self, SnapshotResource};
 use crate::vault::cas::ContentStore;
 use crate::vault::index_policy::IndexMutation;
@@ -227,21 +229,69 @@ pub(crate) fn archive_body_limit_bytes(max_request_size_mb: u64) -> usize {
     budget.saturating_mul(2).saturating_add(1024 * 1024)
 }
 
-/// Build the archive router.
+/// Immutable response policy for the dedicated archive snapshot view.
 ///
-/// The body limit for the ingest endpoint is set by the caller via
-/// `archive_router_with_limit` to respect the configured `max_request_size_mb`.
-/// This default derives from a 250 MB decoded budget.
-pub fn router() -> Router<Arc<AppState>> {
-    router_with_body_limit(archive_body_limit_bytes(250))
+/// The complete CSP value is assembled once from server configuration. Request
+/// headers never participate in the policy.
+#[derive(Clone, Debug)]
+pub struct ArchiveViewConfig {
+    content_security_policy: HeaderValue,
 }
 
-/// Build the archive router with a specific body size limit (in bytes).
-pub fn router_with_body_limit(max_bytes: usize) -> Router<Arc<AppState>> {
+impl ArchiveViewConfig {
+    pub fn from_server_settings(settings: &ServerSettings) -> Result<Self, String> {
+        let raw_host = settings.server_host_for_origin()?;
+        let host = match raw_host {
+            Host::Domain(host) => host,
+            Host::Ipv4(host) => host.to_string(),
+            Host::Ipv6(host) => format!("[{host}]"),
+        };
+        let scheme = if settings.tls.enabled { "https" } else { "http" };
+        let origin = format!("{scheme}://{host}:{}", settings.port);
+        let policy = format!(
+            "sandbox; default-src 'none'; img-src {origin} data:; \
+             media-src {origin} data:; style-src 'unsafe-inline' {origin} data:; \
+             font-src {origin} data:"
+        );
+        let content_security_policy = HeaderValue::from_str(&policy)
+            .map_err(|error| format!("invalid archive view CSP from server configuration: {error}"))?;
+        Ok(Self {
+            content_security_policy,
+        })
+    }
+}
+
+impl Default for ArchiveViewConfig {
+    fn default() -> Self {
+        Self::from_server_settings(&ServerSettings::default())
+            .expect("default server settings must produce a valid archive view origin")
+    }
+}
+
+/// Build the archive router.
+///
+/// The body limit applies only to archive ingest. Snapshot views and status
+/// requests do not consume the ingest budget.
+pub fn router() -> Router<Arc<AppState>> {
+    router_with_body_limit(
+        archive_body_limit_bytes(250),
+        ArchiveViewConfig::default(),
+    )
+}
+
+/// Build the archive router with a specific ingest body size limit (in bytes).
+pub fn router_with_body_limit(
+    max_bytes: usize,
+    view_config: ArchiveViewConfig,
+) -> Router<Arc<AppState>> {
     Router::new()
-        .route("/", post(ingest_archive))
+        .route(
+            "/",
+            post(ingest_archive).layer(axum::extract::DefaultBodyLimit::max(max_bytes)),
+        )
         .route("/status", get(archive_status))
-        .layer(axum::extract::DefaultBodyLimit::max(max_bytes))
+        .route("/view/{hash}", get(view_snapshot))
+        .layer(Extension(view_config))
 }
 
 pub fn cas_router() -> Router<Arc<AppState>> {
@@ -270,6 +320,97 @@ fn is_active_content(content_type: &str) -> bool {
             | "application/rdf+xml"
             | "text/xsl"
     )
+}
+
+/// Only captured HTML is valid on the dedicated framable route.
+fn framable_content_type(content_type: &str) -> bool {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .eq_ignore_ascii_case("text/html")
+}
+
+fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("text/html"),
+    );
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        config.content_security_policy.clone(),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers
+}
+
+const STORED_CAS_URL_PREFIX: &[u8] = b"cas:sha256:";
+const SERVED_CAS_URL_PREFIX: &[u8] = b"/api/vault/cas/";
+const SHA256_HEX_LEN: usize = 64;
+
+fn cas_url_boundary(byte: u8) -> bool {
+    byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b')' | b'>')
+}
+
+fn cas_url_start_boundary(data: &[u8], start: usize) -> bool {
+    start == 0
+        || data[start - 1].is_ascii_whitespace()
+        || matches!(data[start - 1], b'"' | b'\'' | b'(' | b'=' | b',')
+}
+
+fn find_cas_url(data: &[u8], from: usize) -> Option<(usize, usize)> {
+    let mut search_start = from;
+    while let Some(offset) = data[search_start..]
+        .windows(STORED_CAS_URL_PREFIX.len())
+        .position(|window| window == STORED_CAS_URL_PREFIX)
+    {
+        let start = search_start + offset;
+        let hash_start = start + STORED_CAS_URL_PREFIX.len();
+        let end = hash_start + SHA256_HEX_LEN;
+        let canonical_hash = end <= data.len()
+            && data[hash_start..end]
+                .iter()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'));
+        let bounded = canonical_hash
+            && cas_url_start_boundary(data, start)
+            && (end == data.len() || cas_url_boundary(data[end]));
+        if bounded {
+            return Some((start, end));
+        }
+        search_start = start + 1;
+    }
+    None
+}
+
+/// Resolve canonical, origin-independent stored CAS URLs for the browser.
+fn rewrite_cas_urls(data: Vec<u8>) -> Vec<u8> {
+    let mut occurrences = 0usize;
+    let mut search_start = 0;
+    while let Some((_, end)) = find_cas_url(&data, search_start) {
+        occurrences += 1;
+        search_start = end;
+    }
+    if occurrences == 0 {
+        return data;
+    }
+
+    let extra_bytes = occurrences.saturating_mul(SERVED_CAS_URL_PREFIX.len() - b"cas:".len());
+    let mut rewritten = Vec::with_capacity(data.len().saturating_add(extra_bytes));
+    let mut copied_through = 0;
+    search_start = 0;
+    while let Some((start, end)) = find_cas_url(&data, search_start) {
+        rewritten.extend_from_slice(&data[copied_through..start]);
+        rewritten.extend_from_slice(SERVED_CAS_URL_PREFIX);
+        copied_through = start + b"cas:".len();
+        search_start = end;
+    }
+    rewritten.extend_from_slice(&data[copied_through..]);
+    rewritten
 }
 
 /// Convert a title to a URL-safe slug, truncated to `max_len` characters.
@@ -487,6 +628,53 @@ fn store_decoded_blobs(
             .store(data, content_type)
             .map(|result| result.already_existed)
     })
+}
+
+#[utoipa::path(
+    get,
+    path = "/archive/view/{hash}",
+    context_path = "/api/vault",
+    tag = "Archive",
+    params(("hash" = String, Path, description = "Archived snapshot blob hash")),
+    responses(
+        (status = 200, description = "Sandboxed archived HTML snapshot", body = String, content_type = "text/html"),
+        (status = 404, description = "Snapshot blob not found", body = ApiError),
+        (status = 415, description = "Blob is not an HTML snapshot", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn view_snapshot(
+    State(state): State<Arc<AppState>>,
+    Extension(config): Extension<ArchiveViewConfig>,
+    Path(hash): Path<String>,
+) -> Result<Response, ApiError> {
+    let (data, content_type) = {
+        let cas = state.cas.lock();
+        cas.retrieve(&hash)
+            .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))?
+    };
+    if !framable_content_type(&content_type) {
+        let error = ApiError {
+            status: StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16(),
+            error: format!("snapshot is not text/html: {content_type}"),
+            detail: None,
+            hint: None,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-clepsydra-archive-content-type",
+            HeaderValue::from_str(&content_type)
+                .unwrap_or_else(|_| HeaderValue::from_static(OCTET_STREAM)),
+        );
+        return Ok((StatusCode::UNSUPPORTED_MEDIA_TYPE, headers, Json(error)).into_response());
+    }
+
+    Ok((
+        StatusCode::OK,
+        sandbox_headers(&config),
+        rewrite_cas_urls(data),
+    )
+        .into_response())
 }
 
 #[utoipa::path(

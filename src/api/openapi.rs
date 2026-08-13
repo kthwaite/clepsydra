@@ -148,6 +148,7 @@ impl Modify for SchemaOverrides {
         // Archive / CAS
         crate::api::archive::ingest_archive,
         crate::api::archive::archive_status,
+        crate::api::archive::view_snapshot,
         crate::api::archive::serve_blob,
         // Conversations
         crate::api::conversations::capture_conversation,
@@ -576,6 +577,11 @@ mod tests {
         assert!(spec.paths.paths.contains_key("/api/vault/folders/{path}"));
         assert!(spec.paths.paths.contains_key("/api/vault/index/search"));
         assert!(spec.paths.paths.contains_key("/api/vault/academic/works"));
+        assert!(
+            spec.paths
+                .paths
+                .contains_key("/api/vault/archive/view/{hash}")
+        );
         assert!(
             spec.paths
                 .paths

@@ -160,11 +160,18 @@ pub(crate) fn mutation_error(
 /// Build the API router mounted at `/api/vault`.
 pub fn api_router() -> Router<Arc<AppState>> {
     // Derived from a 250 MB decoded-content budget; see `archive_body_limit_bytes`.
-    api_router_with_archive_limit(archive::archive_body_limit_bytes(250))
+    api_router_with_archive_limit(
+        archive::archive_body_limit_bytes(250),
+        archive::ArchiveViewConfig::default(),
+    )
 }
 
-/// Build the API router with a custom archive body limit (in bytes).
-pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<AppState>> {
+/// Build the API router with a custom archive ingest body limit (in bytes) and
+/// a configuration-derived snapshot view policy.
+pub fn api_router_with_archive_limit(
+    archive_body_limit: usize,
+    archive_view_config: archive::ArchiveViewConfig,
+) -> Router<Arc<AppState>> {
     Router::new()
         .route("/events", axum::routing::get(events::event_stream))
         .nest("/encryption", encryption::router())
@@ -181,7 +188,7 @@ pub fn api_router_with_archive_limit(archive_body_limit: usize) -> Router<Arc<Ap
         .nest("/academic", academic::router())
         .nest(
             "/archive",
-            archive::router_with_body_limit(archive_body_limit),
+            archive::router_with_body_limit(archive_body_limit, archive_view_config),
         )
         .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
