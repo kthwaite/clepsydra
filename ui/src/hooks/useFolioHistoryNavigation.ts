@@ -44,6 +44,19 @@ export type LeaveFolioWorkspace = (
 
 let trackedHistoryDestination: FolioHistoryDestination | null = null;
 let capturedDepartureLocationId: string | null = null;
+type FolioHistoryTraversalGuard = (proceed: () => void) => boolean;
+let folioHistoryTraversalGuard: FolioHistoryTraversalGuard | null = null;
+
+export function registerFolioHistoryTraversalGuard(
+  guard: FolioHistoryTraversalGuard,
+): () => void {
+  folioHistoryTraversalGuard = guard;
+  return () => {
+    if (folioHistoryTraversalGuard === guard) {
+      folioHistoryTraversalGuard = null;
+    }
+  };
+}
 
 function captureTrackedHistoryDestination(): void {
   const destination = trackedHistoryDestination;
@@ -99,6 +112,23 @@ function applyHistoryDestination(
   });
 }
 
+function applyGraphHistoryBoundary(state: HistoryState): boolean {
+  if (
+    state.folioTabId !== null ||
+    state.folioPath !== null ||
+    state.folioLocationId !== null ||
+    typeof state.folioOriginTabId !== "string"
+  ) {
+    return false;
+  }
+
+  const workspace = useWorkspaceStore.getState();
+  const graph = workspace.tabs.find((tab) => tab.type === "graph");
+  if (!graph) return false;
+  workspace.activateTabFromHistory(graph.id);
+  return true;
+}
+
 
 export function useFolioHistoryController(): void {
   const router = useRouter();
@@ -109,6 +139,30 @@ export function useFolioHistoryController(): void {
       history.location.state,
     );
     trackedHistoryDestination = initialDestination;
+    const back = history.back;
+    const forward = history.forward;
+    const guardedBack: typeof history.back = (options) => {
+      const guard = folioHistoryTraversalGuard;
+      if (
+        options?.ignoreBlocker ||
+        !guard ||
+        !guard(() => back({ ...options, ignoreBlocker: true }))
+      ) {
+        back(options);
+      }
+    };
+    const guardedForward: typeof history.forward = (options) => {
+      const guard = folioHistoryTraversalGuard;
+      if (
+        options?.ignoreBlocker ||
+        !guard ||
+        !guard(() => forward({ ...options, ignoreBlocker: true }))
+      ) {
+        forward(options);
+      }
+    };
+    history.back = guardedBack;
+    history.forward = guardedForward;
 
     const unsubscribe = history.subscribe(({ action, location }) => {
       const destination = readFolioHistoryDestination(location.state);
@@ -136,11 +190,12 @@ export function useFolioHistoryController(): void {
       capturedDepartureLocationId = null;
       trackedHistoryDestination = destination;
       if (destination) applyHistoryDestination(destination);
+      else applyGraphHistoryBoundary(location.state);
     });
 
     if (initialDestination) {
       applyHistoryDestination(initialDestination);
-    } else {
+    } else if (!applyGraphHistoryBoundary(history.location.state)) {
       const initialState = activeDestinationState(
         history.location.state.folioOriginTabId ?? null,
       );
@@ -155,6 +210,8 @@ export function useFolioHistoryController(): void {
 
     return () => {
       unsubscribe();
+      if (history.back === guardedBack) history.back = back;
+      if (history.forward === guardedForward) history.forward = forward;
       trackedHistoryDestination = null;
       capturedDepartureLocationId = null;
     };

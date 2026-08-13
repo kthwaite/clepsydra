@@ -63,7 +63,10 @@ import type { CustomEditor } from "#/editor/types";
 import { usePageEditor } from "#/editor/usePageEditor";
 import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
-import { useLeaveFolioWorkspace } from "#/hooks/useFolioHistoryNavigation";
+import {
+  registerFolioHistoryTraversalGuard,
+  useLeaveFolioWorkspace,
+} from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
 import { todayJournalPath } from "#/lib/journal";
@@ -136,13 +139,22 @@ function RawMarkdownNavigationGuard({
 
   useEffect(() => {
     if (!dirty) return;
-    return registerWorkspaceTransitionGuard((proceed) => {
+    const guard = (proceed: () => void) => {
+      if (leaveApprovedRef.current) return false;
       const pending = { proceed };
       pendingTransitionRef.current = pending;
       setPendingTransition(pending);
       leaveApprovedRef.current = false;
       return true;
-    });
+    };
+    const unregisterWorkspaceGuard =
+      registerWorkspaceTransitionGuard(guard);
+    const unregisterHistoryGuard =
+      registerFolioHistoryTraversalGuard(guard);
+    return () => {
+      unregisterWorkspaceGuard();
+      unregisterHistoryGuard();
+    };
   }, [dirty]);
 
   const stay = () => {

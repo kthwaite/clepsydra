@@ -250,6 +250,29 @@ function OpenAlpha({ origin, blockId }: { origin: string; blockId?: string }) {
   );
 }
 
+function HistoryControls() {
+  const openTab = useOpenTab();
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => openTab("page", "notes/alpha.md", "Alpha")}
+      >
+        Visit Alpha
+      </button>
+      <button
+        type="button"
+        onClick={() => openTab("page", "notes/beta.md", "Beta")}
+      >
+        Visit Beta
+      </button>
+      <button type="button" onClick={() => openTab("graph")}>
+        Visit graph
+      </button>
+    </div>
+  );
+}
+
 function AtriumOrigin() {
   return (
     <section>
@@ -289,7 +312,12 @@ function Workspace() {
       <p>No active workspace tab</p>
     );
 
-  return <CodexFrame>{content}</CodexFrame>;
+  return (
+    <>
+      <HistoryControls />
+      <CodexFrame>{content}</CodexFrame>
+    </>
+  );
 }
 
 function renderNavigation(initialEntry: string, strictMode = false) {
@@ -330,6 +358,71 @@ function pageTabStillExists() {
     .tabs.some((tab) => tab.type === "page" && tab.path === "notes/alpha.md");
 }
 
+function seedHistoryTabs(
+  activeTabId: "alpha" | "beta" | "graph" = "alpha",
+) {
+  useWorkspaceStore.setState({
+    tabs: [
+      {
+        id: "alpha",
+        type: "page",
+        path: "notes/alpha.md",
+        label: "Alpha",
+      },
+      {
+        id: "beta",
+        type: "page",
+        path: "notes/beta.md",
+        label: "Beta",
+      },
+      { id: "graph", type: "graph", label: "Graph" },
+    ],
+    activeTabId,
+  });
+}
+
+function activePagePath() {
+  const workspace = useWorkspaceStore.getState();
+  return workspace.tabs.find((tab) => tab.id === workspace.activeTabId)?.path;
+}
+
+function currentFolioScroller() {
+  const editor = screen.getByRole("textbox", { name: "Page body" });
+  const scrollContainer = editor.closest<HTMLDivElement>(
+    ".cl-noscroll.overflow-y-auto",
+  );
+  if (!scrollContainer) throw new Error("Expected mobile Folio scroller");
+  return scrollContainer;
+}
+
+function setFolioPosition(scrollTop: number, offset: number) {
+  const editor = editorCapture.current;
+  if (!editor) throw new Error("Expected the hydrated Slate editor");
+  currentFolioScroller().scrollTop = scrollTop;
+  act(() => {
+    Transforms.select(editor, {
+      anchor: { path: [0, 0], offset },
+      focus: { path: [0, 0], offset },
+    });
+  });
+}
+
+async function expectFolioPosition(
+  path: string,
+  scrollTop: number,
+  offset: number,
+) {
+  await waitFor(() => expect(activePagePath()).toBe(path));
+  await screen.findByRole("textbox", { name: "Page body" });
+  await waitFor(() => expect(currentFolioScroller().scrollTop).toBe(scrollTop));
+  await waitFor(() =>
+    expect(editorCapture.current?.selection).toEqual({
+      anchor: { path: [0, 0], offset },
+      focus: { path: [0, 0], offset },
+    }),
+  );
+}
+
 describe("mobile Folio Back", () => {
   const scrollIntoView = vi.fn();
 
@@ -344,6 +437,7 @@ describe("mobile Folio Back", () => {
     editorCapture.current = null;
     editorMountCount.current = 0;
     clearFolioRestoration("alpha");
+    clearFolioRestoration("beta");
     clearFolioRestoration("other");
     clearFolioHistoryState();
     pageEditorState.body = "Focused source block ^abc123DEF0\n";
@@ -976,5 +1070,326 @@ describe("mobile Folio Back", () => {
     });
     expect(navigateSpy).toHaveBeenCalledOnce();
     expect(navigateSpy).toHaveBeenCalledWith({ to: "/" });
+  });
+
+  describe("real memory-history traversal", () => {
+    it("restores both departure positions across A to B, Back, and Forward", async () => {
+      const user = userEvent.setup();
+      seedHistoryTabs();
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioTabId: "alpha" }),
+      );
+      setFolioPosition(111, 1);
+
+      await user.click(screen.getByRole("button", { name: "Visit Beta" }));
+      await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+      await screen.findByRole("textbox", { name: "Page body" });
+      setFolioPosition(222, 2);
+
+      act(() => router.history.back());
+      await expectFolioPosition("notes/alpha.md", 111, 1);
+
+      act(() => router.history.forward());
+      await expectFolioPosition("notes/beta.md", 222, 2);
+      expect(router.state.location.pathname).toBe("/workspace");
+    });
+
+    it("keeps distinct restoration locations for repeated visits to A", async () => {
+      const user = userEvent.setup();
+      seedHistoryTabs();
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).not.toBeNull(),
+      );
+      const firstA = readFolioHistoryDestination(
+        router.history.location.state,
+      );
+      setFolioPosition(101, 1);
+
+      await user.click(screen.getByRole("button", { name: "Visit Beta" }));
+      await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+      setFolioPosition(202, 2);
+
+      const betaEditor = editorCapture.current;
+      await user.click(screen.getByRole("button", { name: "Visit Alpha" }));
+      await waitFor(() => expect(activePagePath()).toBe("notes/alpha.md"));
+      await waitFor(() => expect(editorCapture.current).not.toBe(betaEditor));
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state)
+            ?.folioLocationId,
+        ).not.toBe(firstA?.folioLocationId),
+      );
+      setFolioPosition(303, 3);
+
+      act(() => router.history.back());
+      await expectFolioPosition("notes/beta.md", 202, 2);
+      act(() => router.history.back());
+      await expectFolioPosition("notes/alpha.md", 101, 1);
+      act(() => router.history.forward());
+      await expectFolioPosition("notes/beta.md", 202, 2);
+      act(() => router.history.forward());
+      await expectFolioPosition("notes/alpha.md", 303, 3);
+    });
+
+    it("refreshes A's checkpoint when A moves between Back and Forward", async () => {
+      const user = userEvent.setup();
+      seedHistoryTabs();
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      setFolioPosition(110, 1);
+
+      await user.click(screen.getByRole("button", { name: "Visit Beta" }));
+      await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+      setFolioPosition(220, 2);
+
+      act(() => router.history.back());
+      await expectFolioPosition("notes/alpha.md", 110, 1);
+      setFolioPosition(330, 3);
+
+      act(() => router.history.forward());
+      await expectFolioPosition("notes/beta.md", 220, 2);
+      act(() => router.history.back());
+      await expectFolioPosition("notes/alpha.md", 330, 3);
+    });
+
+    it("keeps dirty native Back inert until Leave checkpoints and traverses once", async () => {
+      const user = userEvent.setup();
+      const router = renderNavigation("/");
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Open Alpha from Atrium",
+        }),
+      );
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).not.toBeNull(),
+      );
+      const destination = readFolioHistoryDestination(
+        router.history.location.state,
+      );
+      if (!destination) throw new Error("Expected Folio history destination");
+      setFolioPosition(404, 4);
+      const tabsBefore = useWorkspaceStore.getState().tabs;
+      const stateBefore = router.history.location.state;
+      const actions: string[] = [];
+      const unsubscribe = router.history.subscribe(({ action }) => {
+        actions.push(action.type);
+      });
+
+      await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+        target: { value: "Dirty native Back draft  \n" },
+      });
+      act(() => router.history.back());
+
+      expect(
+        await screen.findByRole("dialog", { name: "Unsaved raw Markdown" }),
+      ).toBeVisible();
+      expect(router.state.location.pathname).toBe("/workspace");
+      expect(router.history.location.state).toEqual(stateBefore);
+      expect(useWorkspaceStore.getState().tabs).toEqual(tabsBefore);
+      expect(useWorkspaceStore.getState().activeTabId).toBe(
+        destination.folioTabId,
+      );
+      expect(
+        readFolioHistoryLocation(
+          destination.folioLocationId,
+          destination.folioTabId,
+          destination.folioPath,
+        ),
+      ).toBeNull();
+      expect(actions).toEqual([]);
+
+      await user.click(screen.getByRole("button", { name: "Leave" }));
+      await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+      expect(actions).toEqual(["BACK"]);
+      expect(
+        readFolioHistoryLocation(
+          destination.folioLocationId,
+          destination.folioTabId,
+          destination.folioPath,
+        ),
+      ).toMatchObject({
+        scrollTop: 404,
+        anchor: { offset: 4 },
+        focus: { offset: 4 },
+      });
+      unsubscribe();
+    });
+
+    it.each(["closed", "replace-reused"] as const)(
+      "does not activate a %s stale tuple when its snapshot is missing",
+      async (staleKind) => {
+        const user = userEvent.setup();
+        if (staleKind === "replace-reused") {
+          useWorkspaceStore.setState({
+            tabs: [
+              {
+                id: "slot",
+                type: "page",
+                path: "notes/alpha.md",
+                label: "Alpha",
+              },
+            ],
+            activeTabId: "slot",
+            navigationMode: "replace",
+          });
+        } else {
+          useWorkspaceStore.setState({
+            tabs: [
+              {
+                id: "alpha",
+                type: "page",
+                path: "notes/alpha.md",
+                label: "Alpha",
+              },
+            ],
+            activeTabId: "alpha",
+          });
+        }
+        const router = renderNavigation("/workspace");
+        await screen.findByRole("textbox", { name: "Page body" });
+        await waitFor(() =>
+          expect(
+            readFolioHistoryDestination(router.history.location.state),
+          ).toMatchObject({ folioPath: "notes/alpha.md" }),
+        );
+
+        await user.click(screen.getByRole("button", { name: "Visit Beta" }));
+        await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+        if (staleKind === "closed") {
+          act(() => useWorkspaceStore.getState().closeTab("alpha"));
+        }
+        clearFolioHistoryState();
+
+        act(() => router.history.back());
+
+        await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+        expect(router.state.location.pathname).toBe("/workspace");
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" });
+      },
+    );
+
+    it("replaces direct workspace initialization without adding a Back step", async () => {
+      seedHistoryTabs();
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({
+          folioTabId: "alpha",
+          folioPath: "notes/alpha.md",
+        }),
+      );
+      expect(router.history.length).toBe(1);
+      expect(router.history.canGoBack()).toBe(false);
+
+      act(() => router.history.back());
+
+      await waitFor(() =>
+        expect(router.state.location.pathname).toBe("/workspace"),
+      );
+      expect(activePagePath()).toBe("notes/alpha.md");
+      expect(router.history.length).toBe(1);
+    });
+
+    it("treats graph entries as a tuple boundary during later traversal", async () => {
+      const user = userEvent.setup();
+      seedHistoryTabs();
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      setFolioPosition(707, 7);
+
+      await user.click(screen.getByRole("button", { name: "Visit graph" }));
+      await screen.findByRole("img", { name: "Constellation graph" });
+      expect(useWorkspaceStore.getState().activeTabId).toBe("graph");
+      expect(router.history.location.state).toMatchObject({
+        folioTabId: null,
+        folioPath: null,
+        folioLocationId: null,
+      });
+
+      act(() => router.history.back());
+      await expectFolioPosition("notes/alpha.md", 707, 7);
+      act(() => router.history.forward());
+
+      await waitFor(() =>
+        expect(useWorkspaceStore.getState().activeTabId).toBe("graph"),
+      );
+      expect(
+        await screen.findByRole("img", { name: "Constellation graph" }),
+      ).toBeVisible();
+      expect(activePagePath()).toBeUndefined();
+    });
+
+    it("restores a direct Folio after fallback to Atrium and browser Back", async () => {
+      const user = userEvent.setup();
+      useWorkspaceStore.setState({
+        tabs: [
+          {
+            id: "alpha",
+            type: "page",
+            path: "notes/alpha.md",
+            label: "Alpha",
+          },
+        ],
+        activeTabId: "alpha",
+      });
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).not.toBeNull(),
+      );
+      setFolioPosition(808, 8);
+
+      await user.click(screen.getByRole("button", { name: "Back" }));
+      await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+      expect(
+        screen.getByRole("heading", { name: "Atrium origin" }),
+      ).toBeVisible();
+
+      act(() => router.history.back());
+
+      await expectFolioPosition("notes/alpha.md", 808, 8);
+      expect(router.state.location.pathname).toBe("/workspace");
+    });
+
+    it("applies Back without pushing, replacing, or recursively traversing", async () => {
+      const user = userEvent.setup();
+      seedHistoryTabs();
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await user.click(screen.getByRole("button", { name: "Visit Beta" }));
+      await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+      const actions: string[] = [];
+      const unsubscribe = router.history.subscribe(({ action }) => {
+        actions.push(action.type);
+      });
+      const navigateSpy = vi.spyOn(router, "navigate");
+      navigateSpy.mockClear();
+
+      act(() => router.history.back());
+
+      await waitFor(() => expect(activePagePath()).toBe("notes/alpha.md"));
+      expect(actions).toEqual(["BACK"]);
+      expect(navigateSpy).not.toHaveBeenCalled();
+      expect(router.state.location.pathname).toBe("/workspace");
+      unsubscribe();
+    });
   });
 });
