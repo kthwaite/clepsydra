@@ -6,9 +6,13 @@
 //! seeing anything. We pull those resources back out into the CAS and leave
 //! `cas:<hash>` references behind.
 //!
-//! Everything here operates on attacker-authored markup. It executes nothing and
-//! constructs no DOM — local scanners identify the source bytes to rewrite.
+//! Everything here operates on attacker-authored markup. Resource extraction
+//! uses bounded local scans; the view security boundary uses html5ever's parser.
 
+use html5ever::serialize::{SerializeOpts, serialize};
+use html5ever::tendril::TendrilSink;
+use html5ever::{Namespace, parse_document};
+use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use pulldown_cmark::{Event, Options, Parser, Tag};
@@ -307,213 +311,82 @@ fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
     (original, hash)
 }
 
-#[derive(Debug)]
-struct HtmlAttribute<'a> {
-    name: &'a str,
-    value: Option<&'a str>,
-    span: Range<usize>,
+fn navigable_href(namespace: &Namespace, element: &str) -> bool {
+    (namespace == &html5ever::ns!(html)
+        || namespace == &html5ever::ns!(svg)
+        || namespace == &html5ever::ns!(mathml))
+        && matches!(element, "a" | "area")
 }
 
-/// Structurally scan a start tag's attributes, retaining their source ranges.
-///
-/// Attribute values may be single-quoted, double-quoted, or unquoted. The
-/// solidus is a browser parse error outside the self-closing position, not a
-/// terminator: `<a/href=...>` still produces an `a` element with an `href`.
-fn html_attributes<'a>(tag: &'a str, mut cursor: usize) -> Vec<HtmlAttribute<'a>> {
-    let bytes = tag.as_bytes();
-    let mut attributes = Vec::new();
-    while cursor < bytes.len() {
-        let leading_start = cursor;
-        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-            cursor += 1;
-        }
-        while bytes.get(cursor) == Some(&b'/') {
-            cursor += 1;
-            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-                cursor += 1;
-            }
-        }
-        if cursor == bytes.len() {
-            break;
-        }
+fn neutralize_dom_node(node: &Handle) {
+    if let NodeData::Element {
+        name,
+        attrs,
+        template_contents,
+        ..
+    } = &node.data
+    {
+        let element = name.local.as_ref();
+        attrs.borrow_mut().retain(|attribute| {
+            let attribute_name = attribute.name.local.as_ref();
+            !(((navigable_href(&name.ns, element) || matches!(element, "a" | "area") || element.ends_with(":a"))
+                && (attribute_name == "href" || attribute_name.ends_with(":href")))
+                || (name.ns == html5ever::ns!(html)
+                    && element == "base"
+                    && matches!(attribute_name, "href" | "target"))
+                || (name.ns == html5ever::ns!(html)
+                    && element == "form"
+                    && attribute_name == "action")
+                || (name.ns == html5ever::ns!(html) && attribute_name == "formaction"))
+        });
 
-        let name_start = cursor;
-        while cursor < bytes.len()
-            && !bytes[cursor].is_ascii_whitespace()
-            && !matches!(bytes[cursor], b'=' | b'/')
-        {
-            cursor += 1;
+        if let Some(template) = template_contents.borrow().as_ref() {
+            neutralize_dom_children(template);
         }
-        if cursor == name_start {
-            cursor += 1;
-            continue;
-        }
-        let name_end = cursor;
-        let name = &tag[name_start..name_end];
-        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-            cursor += 1;
-        }
+    }
+    neutralize_dom_children(node);
+}
 
-        let mut value = None;
-        if bytes.get(cursor) == Some(&b'=') {
-            cursor += 1;
-            while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
-                cursor += 1;
+fn neutralize_dom_children(parent: &Handle) {
+    {
+        let mut children = parent.children.borrow_mut();
+        children.retain(|child| {
+            let is_refresh = matches!(
+                &child.data,
+                NodeData::Element { name, attrs, .. }
+                    if name.ns == html5ever::ns!(html)
+                        && name.local.as_ref() == "meta"
+                        && attrs.borrow().iter().any(|attribute| {
+                            attribute.name.local.as_ref() == "http-equiv"
+                                && attribute.value.trim().eq_ignore_ascii_case("refresh")
+                        })
+            );
+            if is_refresh {
+                child.parent.set(None);
             }
-            if let Some(&quote @ (b'\'' | b'"')) = bytes.get(cursor) {
-                cursor += 1;
-                let value_start = cursor;
-                while cursor < bytes.len() && bytes[cursor] != quote {
-                    cursor += 1;
-                }
-                value = Some(&tag[value_start..cursor]);
-                if cursor < bytes.len() {
-                    cursor += 1;
-                }
-            } else {
-                let value_start = cursor;
-                while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
-                    cursor += 1;
-                }
-                value = Some(&tag[value_start..cursor]);
-            }
-        } else {
-            cursor = name_end;
-        }
-        attributes.push(HtmlAttribute {
-            name,
-            value,
-            span: leading_start..cursor,
+            !is_refresh
         });
     }
-    attributes
-}
-
-fn element_local_name(name: &str) -> &str {
-    name.rsplit_once(':').map_or(name, |(_, local)| local)
-}
-
-fn is_navigation_attribute(element: &str, attribute: &str) -> bool {
-    let element = element_local_name(element);
-    let is_href = attribute.eq_ignore_ascii_case("href")
-        || attribute.eq_ignore_ascii_case("xlink:href");
-
-    (is_href
-        && (element.eq_ignore_ascii_case("a") || element.eq_ignore_ascii_case("area")))
-        || (element.eq_ignore_ascii_case("base")
-            && (attribute.eq_ignore_ascii_case("href")
-                || attribute.eq_ignore_ascii_case("target")))
-        || (element.eq_ignore_ascii_case("form") && attribute.eq_ignore_ascii_case("action"))
-        || attribute.eq_ignore_ascii_case("formaction")
-}
-
-fn is_meta_refresh(element: &str, attributes: &[HtmlAttribute<'_>]) -> bool {
-    element_local_name(element).eq_ignore_ascii_case("meta")
-        && attributes.iter().any(|attribute| {
-            attribute.name.eq_ignore_ascii_case("http-equiv")
-                && attribute.value.is_some_and(|value| {
-                    decode_html_entities(value)
-                        .trim()
-                        .eq_ignore_ascii_case("refresh")
-                })
-        })
-}
-
-/// Find where an HTML comment closes according to the common browser recovery
-/// states used by captured markup.
-///
-/// Besides `-->`, browsers abruptly close `<!-->` and `<!--->`, and accept
-/// `--!>` as a parse-error close. Other `>` bytes remain comment content.
-fn html_comment_end(html: &str, after_open: usize) -> Option<usize> {
-    let bytes = html.as_bytes();
-    if bytes.get(after_open) == Some(&b'>') {
-        return Some(after_open + 1);
+    let children = parent.children.borrow().clone();
+    for child in children {
+        neutralize_dom_node(&child);
     }
-    let mut cursor = after_open;
-    while cursor < bytes.len() {
-        if bytes[cursor..].starts_with(b"-->") {
-            return Some(cursor + 3);
-        }
-        if bytes[cursor..].starts_with(b"--!>") {
-            return Some(cursor + 4);
-        }
-        if cursor == after_open && bytes[cursor..].starts_with(b"->") {
-            return Some(cursor + 2);
-        }
-        cursor += 1;
-    }
-    None
 }
 
+/// Parse, mutate, and serialize snapshot HTML using the standards parser model
+/// browsers use. Navigation decisions use resolved namespaces and local names,
+/// never source-text recovery heuristics.
+pub fn neutralize_navigation(html: &str) -> String {
+    let dom = parse_document(RcDom::default(), Default::default()).one(html);
+    neutralize_dom_children(&dom.document);
 
-/// Remove document-navigation vectors while retaining captured presentation.
-///
-/// This runs at the view boundary, so legacy snapshots receive the same
-/// protection as newly ingested captures. It edits only structural tag ranges:
-/// link text, styles, resource-bearing `src`, HTML stylesheet `href`, and
-/// SVG/MathML resource references remain byte-for-byte intact.
-pub fn neutralize_navigation(html: &str) -> std::borrow::Cow<'_, str> {
-    let mut removals = Vec::<Range<usize>>::new();
-    let mut cursor = 0;
-
-    while let Some(open_offset) = html[cursor..].find('<') {
-        let open = cursor + open_offset;
-        if html[open..].starts_with("<!--") {
-            let after_open = open + 4;
-            let Some(comment_end) = html_comment_end(html, after_open) else {
-                break;
-            };
-            cursor = comment_end;
-            continue;
-        }
-        let Some(close) = html_tag_end(html, open + 1) else {
-            break;
-        };
-        cursor = close + 1;
-        if matches!(html.as_bytes().get(open + 1), Some(b'!' | b'?')) {
-            continue;
-        }
-
-        let tag = &html[open + 1..close];
-        let Some((false, name, attributes_start)) = html_tag_name(tag) else {
-            continue;
-        };
-        let attributes = html_attributes(tag, attributes_start);
-        if is_meta_refresh(name, &attributes) {
-            removals.push(open..close + 1);
-        } else {
-            removals.extend(
-                attributes
-                    .iter()
-                    .filter(|attribute| is_navigation_attribute(name, attribute.name))
-                    .map(|attribute| {
-                        open + 1 + attribute.span.start..open + 1 + attribute.span.end
-                    }),
-            );
-        }
-
-        if let Some(inert) = inert_html_content(name) {
-            cursor = match inert {
-                InertHtmlContent::UntilEndTag => {
-                    raw_text_end(html, cursor, name).unwrap_or(html.len())
-                }
-                InertHtmlContent::ThroughEof => html.len(),
-            };
-        }
-    }
-    if removals.is_empty() {
-        return std::borrow::Cow::Borrowed(html);
-    }
-    let removed_bytes = removals.iter().map(|range| range.len()).sum::<usize>();
-    let mut neutralized = String::with_capacity(html.len().saturating_sub(removed_bytes));
-    let mut copied_through = 0;
-    for range in removals {
-        neutralized.push_str(&html[copied_through..range.start]);
-        copied_through = range.end;
-    }
-    neutralized.push_str(&html[copied_through..]);
-    std::borrow::Cow::Owned(neutralized)
+    let document: SerializableHandle = dom.document.into();
+    let mut output = Vec::with_capacity(html.len());
+    serialize(&mut output, &document, SerializeOpts::default())
+        .expect("serializing HTML into memory cannot fail");
+    String::from_utf8(output).expect("html5ever serialization is UTF-8")
 }
+
 
 /// Absolute original URL → the hash of the blob that replaced it.
 ///
@@ -1399,6 +1272,27 @@ mod tests {
         assert_eq!(out, "![b](https://cdn.example.com/b.png)");
     }
 
+
+    #[test]
+    fn standards_parser_recovers_latest_malformed_attribute_bypass() {
+        let html = concat!(
+            r#"<div x=""='>"#,
+            r#"<meta http-equiv=refresh content="0;url=https://meta.example">"#,
+            r#"<img src=cas:sha256:image alt=kept>"#
+        );
+
+        let neutralized = neutralize_navigation(html);
+        assert!(!neutralized.contains("meta.example"), "{neutralized}");
+        assert!(
+            neutralized.contains("cas:sha256:image"),
+            "resource URL was lost: {neutralized}"
+        );
+        assert!(
+            neutralized.contains("alt=\"kept\""),
+            "resource presentation was lost: {neutralized}"
+        );
+    }
+
     #[test]
     fn leaves_ordinary_links_alone() {
         // A link should still point at the live web; only images become blobs.
@@ -1460,116 +1354,66 @@ mod tests {
     }
 
     #[test]
-    fn neutralization_does_not_parse_navigation_text_inside_raw_content() {
+    fn neutralization_preserves_raw_content_comments_and_resources() {
         let html = concat!(
             r#"<style>.example::after { content: "<a href=https://live.example>"; }</style>"#,
             r#"<textarea><form action=https://live.example></textarea>"#,
             r#"<!-- <meta http-equiv=refresh content="0; url=https://live.example"> -->"#,
-            r#"<a href=https://remove.example>Visible</a>"#
+            r#"<a href=https://remove.example>Visible</a>"#,
+            r#"<link rel=stylesheet href=cas:sha256:style>"#,
+            r#"<img src=cas:sha256:image alt=kept>"#
         );
 
-        assert_eq!(
-            neutralize_navigation(html),
-            concat!(
-                r#"<style>.example::after { content: "<a href=https://live.example>"; }</style>"#,
-                r#"<textarea><form action=https://live.example></textarea>"#,
-                r#"<!-- <meta http-equiv=refresh content="0; url=https://live.example"> -->"#,
-                r#"<a>Visible</a>"#
-            )
+        let neutralized = neutralize_navigation(html);
+        assert!(
+            neutralized.contains(r#".example::after { content: "<a href=https://live.example>"; }"#)
         );
+        assert!(neutralized.contains("<textarea>"));
+        assert!(neutralized.contains("&lt;form action=https://live.example&gt;"));
+        assert!(neutralized.contains("<!-- <meta http-equiv=refresh"));
+        assert!(neutralized.contains("<a>Visible</a>"));
+        assert!(neutralized.contains("href=\"cas:sha256:style\""));
+        assert!(neutralized.contains("src=\"cas:sha256:image\""));
+        assert!(neutralized.contains("alt=\"kept\""));
     }
 
     #[test]
-    fn neutralization_returns_borrowed_html_when_no_navigation_exists() {
-        let html = r#"<link rel=stylesheet href="cas:sha256:resource"><img src=x>"#;
+    fn standards_parser_recovers_all_malformed_navigation_vectors() {
+        let malformed = [
+            r#"<meta/http-equiv=refresh content="0;url=https://solidus-meta.example">"#,
+            r#"<a/href=https://solidus-anchor.example data-label=kept>Visible solidus</a>"#,
+            r#"<!--><a href=https://empty-comment.example>Visible comment</a>"#,
+            r#"<!---><meta http-equiv=refresh content="0;url=https://abrupt-comment.example">"#,
+            r#"<!-- --!><meta http-equiv=refresh content="0;url=https://bang-comment.example">"#,
+            r#"<div a'><meta http-equiv=refresh content="0;url=https://single-quote.example">"#,
+            r#"<div a"><meta http-equiv=refresh content="0;url=https://double-quote.example">"#,
+            r#"<div x=""='><meta http-equiv=refresh content="0;url=https://latest.example">"#,
+            r#"<meta http-equiv="&#114efresh" content="0;url=https://numeric.example">"#,
+            r#"<img/src=cas:sha256:image alt=kept>"#,
+        ]
+        .join("");
 
-        assert!(matches!(
-            neutralize_navigation(html),
-            std::borrow::Cow::Borrowed(value) if value == html
-        ));
-    }
-
-    #[test]
-    fn neutralization_recovers_attributes_after_malformed_solidus() {
-        let html = concat!(
-            r#"<meta/http-equiv=refresh content="0;url=https://meta.example">"#,
-            r#"<a/href=https://anchor.example data-label=kept>Visible</a>"#,
-            r#"<img/src=cas:sha256:image alt=kept>"#
-        );
-
-        assert_eq!(
-            neutralize_navigation(html),
-            concat!(
-                r#""#,
-                r#"<a data-label=kept>Visible</a>"#,
-                r#"<img/src=cas:sha256:image alt=kept>"#
-            )
-        );
-    }
-
-    #[test]
-    fn neutralization_resumes_after_browser_closed_empty_comment() {
-        let html = concat!(
-            "<!-->",
-            r#"<a href=https://anchor.example>Visible</a>"#,
-            r#"<meta http-equiv=refresh content="0;url=https://meta.example">"#,
-            r#"<img src=cas:sha256:image>"#
-        );
-
-        assert_eq!(
-            neutralize_navigation(html),
-            concat!("<!-->", "<a>Visible</a>", r#"<img src=cas:sha256:image>"#)
-        );
-    }
-
-    #[test]
-    fn neutralization_resumes_after_abrupt_comment_endings() {
-        for comment in ["<!--->", "<!-- --!>", "<!-- content --!>"] {
-            let html = format!(
-                r#"{comment}<meta http-equiv=refresh content="0;url=https://meta.example"><img src=cas:sha256:image>"#
-            );
-
-            assert_eq!(
-                neutralize_navigation(&html),
-                format!("{comment}<img src=cas:sha256:image>"),
-                "did not resume after {comment:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn quote_parse_errors_in_attribute_names_do_not_swallow_following_tags() {
-        for malformed in ["<div a'>", r#"<div a">"#] {
-            let html = format!(
-                r#"{malformed}<meta http-equiv=refresh content="0;url=https://meta.example"><img src=cas:sha256:image>"#
-            );
-
-            assert_eq!(
-                neutralize_navigation(&html),
-                format!("{malformed}<img src=cas:sha256:image>"),
-                "quote in attribute name swallowed following markup for {malformed:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn semicolonless_numeric_references_are_decoded_for_security_attributes() {
-        for http_equiv in [
-            "&#114;efresh",
-            "&#114efresh",
-            "&#x72;efresh",
-            "&#x72&#101;&#102&#114;&#101&#115;&#104",
+        let neutralized = neutralize_navigation(&malformed);
+        for forbidden in [
+            "solidus-meta.example",
+            "solidus-anchor.example",
+            "empty-comment.example",
+            "abrupt-comment.example",
+            "bang-comment.example",
+            "single-quote.example",
+            "double-quote.example",
+            "latest.example",
+            "numeric.example",
         ] {
-            let html = format!(
-                r#"<meta http-equiv="{http_equiv}" content="0;url=https://meta.example"><img src=cas:sha256:image>"#
-            );
-
-            assert_eq!(
-                neutralize_navigation(&html),
-                "<img src=cas:sha256:image>",
-                "numeric reference {http_equiv:?} bypassed refresh detection"
+            assert!(
+                !neutralized.contains(forbidden),
+                "{forbidden:?} survived: {neutralized}"
             );
         }
+        assert!(neutralized.contains("Visible solidus"));
+        assert!(neutralized.contains("Visible comment"));
+        assert!(neutralized.contains("cas:sha256:image"));
+        assert!(neutralized.contains("alt=\"kept\""));
     }
 
     // -------------------------------------------------------------------

@@ -691,10 +691,20 @@ async fn archive_view_serves_html_with_configuration_bound_sandbox() {
          media-src https://vault.example:7443 data:; style-src 'unsafe-inline' \
          https://vault.example:7443 data:; font-src https://vault.example:7443 data:"
     );
-    let expected_html = format!(
-        r#"<html><body><img src="/api/vault/cas/{resource_hash}"><p>cas:{resource_hash}.</p><img src="cas:{resource_hash}/../pages/private"><img src="cas:{resource_hash};/../../pages/private"><img src="cas:{resource_hash},/../../pages/private"><a>bad</a></body></html>"#
-    );
-    assert_eq!(response.as_bytes().as_ref(), expected_html.as_bytes());
+    let rendered = response.text();
+    assert!(rendered.contains(&format!(r#"src="/api/vault/cas/{resource_hash}""#)));
+    assert!(rendered.contains(&format!(r#"<p>cas:{resource_hash}.</p>"#)));
+    assert!(rendered.contains(r#"<a>bad</a>"#));
+    for invalid in [
+        format!("cas:{resource_hash}/../pages/private"),
+        format!("cas:{resource_hash};/../../pages/private"),
+        format!("cas:{resource_hash},/../../pages/private"),
+    ] {
+        assert!(
+            rendered.contains(&invalid),
+            "invalid CAS-like text was unexpectedly rewritten: {rendered}"
+        );
+    }
 
 
     let head_response = server
@@ -803,9 +813,9 @@ async fn archive_view_structurally_neutralizes_navigation_without_losing_resourc
         );
     }
     assert!(body.contains(r#"<meta http-equiv="content-type" content="text/html">"#));
-    assert!(body.contains("<a data-label=boolean>Boolean attribute visible</a>"));
+    assert!(body.contains(r#"<a data-label="boolean">Boolean attribute visible</a>"#));
     assert!(body.contains(&format!(
-        r#"<link rel=stylesheet href="/api/vault/cas/{resource_hash}">"#
+        r#"<link rel="stylesheet" href="/api/vault/cas/{resource_hash}">"#
     )));
     assert!(body.contains(&format!(
         r#"@font-face {{ src: url(/api/vault/cas/{resource_hash}); }}"#

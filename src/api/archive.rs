@@ -470,12 +470,8 @@ fn snapshot_response_with(
 fn prepare_snapshot_body(data: Vec<u8>) -> Vec<u8> {
     let data = rewrite_cas_urls(data);
     match std::str::from_utf8(&data) {
-        Ok(html) => match archive_snapshot::neutralize_navigation(html) {
-            std::borrow::Cow::Borrowed(_) => data,
-            std::borrow::Cow::Owned(neutralized) => neutralized.into_bytes(),
-        },
+        Ok(html) => archive_snapshot::neutralize_navigation(html).into_bytes(),
         Err(_) => archive_snapshot::neutralize_navigation(&String::from_utf8_lossy(&data))
-            .into_owned()
             .into_bytes(),
     }
 }
