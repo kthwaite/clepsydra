@@ -564,6 +564,14 @@ describe("withAutoformat integration", () => {
       ).toBe(true);
     });
 
+    it("keeps strikethrough literal until the closing ~ is typed", () => {
+      const editor = makeEditor();
+      type(editor, "~hello");
+      const para = editor.children[0] as any;
+      expect(Node.string(para)).toBe("~hello");
+      expect(para.children.some((leaf: any) => leaf.strikethrough)).toBe(false);
+    });
+
     it("`text` applies code mark", () => {
       const editor = makeEditor();
       type(editor, "`code`");
