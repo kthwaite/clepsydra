@@ -1,236 +1,273 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { cn } from "#/lib/cn";
+import {
+  type DOMAttributes,
+  type FormEvent,
+  type JSX,
+  type ReactElement,
+  useId,
+  useState,
+} from "react";
+import { Button } from "#/components/ui/button";
+import { Dialog } from "#/components/ui/dialog";
+import {
+  ContextMenuTrigger,
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  SubmenuTrigger,
+} from "#/components/ui/menu";
+import { TextField } from "#/components/ui/text-field";
 import { QUIRE_COLORS, quireColorVar } from "#/store/quires";
 import { useWorkspaceStore } from "#/store/workspace";
 
 export type MenuTarget =
-  | { kind: "tab"; tabId: string; x: number; y: number }
-  | { kind: "quire"; quireId: string; x: number; y: number };
+  | { kind: "tab"; tabId: string }
+  | { kind: "quire"; quireId: string };
 
-type SheafContextMenuProps = {
+export interface SheafContextMenuProps {
   target: MenuTarget;
-  onClose: () => void;
-};
+  children: ReactElement<DOMAttributes<HTMLElement>, string>;
+}
 
-const MENU_WIDTH = 220;
+type NamingAction =
+  | { kind: "create"; tabId: string; draft: string }
+  | { kind: "rename"; quireId: string; draft: string }
+  | null;
 
-/** Hand-rolled context menu for SHEAF tabs and quire labels. RAC menus were
- * deferred for the tab strip (docs/design-notes/defer-tabbar-rac-migration.md);
- * this portals a panel styled after the CommandPalette dialog and dismisses on
- * outside mousedown (no overlay, so retargeting is a single gesture). */
-export function SheafContextMenu({ target, onClose }: SheafContextMenuProps) {
-  const tabs = useWorkspaceStore((s) => s.tabs);
-  const quires = useWorkspaceStore((s) => s.quires);
-  // null = root menu; a string = a name being drafted (new quire / rename).
-  const [draft, setDraft] = useState<string | null>(null);
-  const panelRef = useRef<HTMLDivElement | null>(null);
+export function SheafContextMenu({
+  target,
+  children,
+}: SheafContextMenuProps): JSX.Element {
+  const tabs = useWorkspaceStore((state) => state.tabs);
+  const quires = useWorkspaceStore((state) => state.quires);
+  const [namingAction, setNamingAction] = useState<NamingAction>(null);
+  const namingFormId = useId();
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  const tab =
+    target.kind === "tab"
+      ? tabs.find((candidate) => candidate.id === target.tabId)
+      : undefined;
+  const quire = target.kind === "quire" ? quires[target.quireId] : undefined;
 
-  // Close on any mousedown outside the panel — including the right-click that
-  // opens a *different* target's menu, so retargeting is a single gesture.
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!panelRef.current?.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [onClose]);
+  const handleRootAction = (key: React.Key) => {
+    const state = useWorkspaceStore.getState();
 
-  const store = () => useWorkspaceStore.getState();
-  const act = (fn: () => void) => () => {
-    fn();
-    onClose();
+    if (target.kind === "tab") {
+      const currentTab = state.tabs.find(
+        (candidate) => candidate.id === target.tabId,
+      );
+      if (!currentTab) return;
+
+      switch (key) {
+        case "close":
+          state.closeTab(target.tabId);
+          break;
+        case "close-others":
+          state.closeOtherTabs(target.tabId);
+          break;
+        case "new-quire":
+          setNamingAction({ kind: "create", tabId: target.tabId, draft: "" });
+          break;
+        case "remove-from-quire":
+          state.removeTabFromQuire(target.tabId);
+          break;
+      }
+      return;
+    }
+
+    const currentQuire = state.quires[target.quireId];
+    if (!currentQuire) return;
+
+    switch (key) {
+      case "rename":
+        setNamingAction({
+          kind: "rename",
+          quireId: target.quireId,
+          draft: currentQuire.name,
+        });
+        break;
+      case "toggle-collapse":
+        state.toggleQuireCollapse(target.quireId);
+        break;
+      case "ungroup":
+        state.ungroupQuire(target.quireId);
+        break;
+      case "close-quire":
+        state.closeQuireTabs(target.quireId);
+        break;
+    }
   };
 
-  const left = Math.max(
-    4,
-    Math.min(target.x, window.innerWidth - MENU_WIDTH - 8),
-  );
-  const top = Math.max(4, Math.min(target.y, window.innerHeight - 280));
+  const handleAddToQuire = (key: React.Key) => {
+    const state = useWorkspaceStore.getState();
+    if (target.kind !== "tab" || typeof key !== "string") return;
 
-  let content: React.ReactNode = null;
-
-  if (target.kind === "tab") {
-    const tab = tabs.find((t) => t.id === target.tabId);
-    if (!tab) return null;
-    content = (
-      <>
-        <Row label="CLOSE" onPick={act(() => store().closeTab(tab.id))} />
-        <Row
-          label="CLOSE OTHERS"
-          onPick={act(() => store().closeOtherTabs(tab.id))}
-        />
-        <Divider />
-        {draft === null ? (
-          <Row label="NEW QUIRE…" onPick={() => setDraft("")} />
-        ) : (
-          <NameInput
-            value={draft}
-            onChange={setDraft}
-            onCommit={(name) => {
-              store().createQuire(tab.id, name);
-              onClose();
-            }}
-            onCancel={onClose}
-          />
-        )}
-        {Object.values(quires)
-          .filter((q) => q.id !== tab.quireId)
-          .map((q) => (
-            <Row
-              key={q.id}
-              label={`ADD TO ${q.name}`}
-              swatch={quireColorVar(q.color)}
-              onPick={act(() => store().addTabToQuire(tab.id, q.id))}
-            />
-          ))}
-        {tab.quireId && (
-          <Row
-            label="REMOVE FROM QUIRE"
-            onPick={act(() => store().removeTabFromQuire(tab.id))}
-          />
-        )}
-      </>
+    const currentTab = state.tabs.find(
+      (candidate) => candidate.id === target.tabId,
     );
-  } else {
-    const quire = quires[target.quireId];
-    if (!quire) return null;
-    content = (
-      <>
-        {draft === null ? (
-          <Row label="RENAME…" onPick={() => setDraft(quire.name)} />
-        ) : (
-          <NameInput
-            value={draft}
-            onChange={setDraft}
-            onCommit={(name) => {
-              store().renameQuire(quire.id, name);
-              onClose();
-            }}
-            onCancel={onClose}
-          />
-        )}
-        <div
-          role="group"
-          aria-label="quire color"
-          className="flex items-center gap-2 px-3 py-[5px]"
+    if (!currentTab || !state.quires[key]) return;
+
+    state.addTabToQuire(target.tabId, key);
+  };
+
+  const handleColorAction = (key: React.Key) => {
+    const state = useWorkspaceStore.getState();
+    if (target.kind !== "quire" || !state.quires[target.quireId]) return;
+
+    const color = QUIRE_COLORS.find((candidate) => candidate === key);
+    if (!color) return;
+
+    state.recolorQuire(target.quireId, color);
+  };
+
+  const updateNamingDraft = (draft: string) => {
+    setNamingAction((current) => (current ? { ...current, draft } : null));
+  };
+
+  const commitNamingAction = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!namingAction) return;
+
+    const name = namingAction.draft.trim();
+    if (!name) return;
+
+    const state = useWorkspaceStore.getState();
+    if (namingAction.kind === "create") {
+      if (
+        state.tabs.some((candidate) => candidate.id === namingAction.tabId)
+      ) {
+        state.createQuire(namingAction.tabId, name);
+      }
+    } else if (state.quires[namingAction.quireId]) {
+      state.renameQuire(namingAction.quireId, name);
+    }
+
+    setNamingAction(null);
+  };
+
+  const otherQuires = tab
+    ? Object.values(quires).filter((candidate) => candidate.id !== tab.quireId)
+    : [];
+
+  let menu: JSX.Element | null = null;
+  if (tab) {
+    menu = (
+      <ContextMenuTrigger>
+        {children}
+        <Menu
+          className="w-[220px]"
+          aria-label="sheaf context menu"
+          onAction={handleRootAction}
         >
-          {QUIRE_COLORS.map((c) => (
-            <button
-              key={c}
-              type="button"
-              role="menuitem"
-              aria-label={`recolor ${c}`}
-              onClick={act(() => store().recolorQuire(quire.id, c))}
-              className={cn(
-                "h-[10px] w-[10px] cursor-pointer",
-                quire.color === c && "outline outline-1 outline-ink",
-              )}
-              style={{ background: quireColorVar(c) }}
-            />
-          ))}
-        </div>
-        <Row
-          label={quire.collapsed ? "EXPAND" : "COLLAPSE"}
-          onPick={act(() => store().toggleQuireCollapse(quire.id))}
-        />
-        <Divider />
-        <Row
-          label="UNGROUP"
-          onPick={act(() => store().ungroupQuire(quire.id))}
-        />
-        <Row
-          label="CLOSE QUIRE"
-          onPick={act(() => store().closeQuireTabs(quire.id))}
-        />
-      </>
+          <MenuItem id="close">CLOSE</MenuItem>
+          <MenuItem id="close-others">CLOSE OTHERS</MenuItem>
+          <MenuSeparator />
+          <MenuItem id="new-quire">NEW QUIRE…</MenuItem>
+          {otherQuires.length > 0 && (
+            <SubmenuTrigger>
+              <MenuItem id="add-to-quire">ADD TO QUIRE</MenuItem>
+              <Menu aria-label="Add to quire" onAction={handleAddToQuire}>
+                {otherQuires.map((candidate) => (
+                  <MenuItem
+                    key={candidate.id}
+                    id={candidate.id}
+                    swatch={quireColorVar(candidate.color)}
+                  >
+                    {candidate.name.toUpperCase()}
+                  </MenuItem>
+                ))}
+              </Menu>
+            </SubmenuTrigger>
+          )}
+          {tab.quireId && (
+            <MenuItem id="remove-from-quire">REMOVE FROM QUIRE</MenuItem>
+          )}
+        </Menu>
+      </ContextMenuTrigger>
+    );
+  } else if (quire) {
+    menu = (
+      <ContextMenuTrigger>
+        {children}
+        <Menu
+          className="w-[220px]"
+          aria-label="sheaf context menu"
+          onAction={handleRootAction}
+        >
+          <MenuItem id="rename">RENAME…</MenuItem>
+          <SubmenuTrigger>
+            <MenuItem id="color">COLOR</MenuItem>
+            <Menu
+              aria-label="Color"
+              selectionMode="single"
+              selectedKeys={new Set([quire.color])}
+              onAction={handleColorAction}
+            >
+              {QUIRE_COLORS.map((color) => (
+                <MenuItem
+                  key={color}
+                  id={color}
+                  swatch={quireColorVar(color)}
+                >
+                  {color.toUpperCase()}
+                </MenuItem>
+              ))}
+            </Menu>
+          </SubmenuTrigger>
+          <MenuItem id="toggle-collapse">
+            {quire.collapsed ? "EXPAND" : "COLLAPSE"}
+          </MenuItem>
+          <MenuSeparator />
+          <MenuItem id="ungroup">UNGROUP</MenuItem>
+          <MenuItem id="close-quire" variant="destructive">
+            CLOSE QUIRE
+          </MenuItem>
+        </Menu>
+      </ContextMenuTrigger>
     );
   }
 
-  return createPortal(
-    <div
-      ref={panelRef}
-      role="menu"
-      aria-label="sheaf context menu"
-      className="cl-mono fixed z-[60] flex w-[220px] flex-col border-[1.5px] border-ink bg-paper py-1 text-[10px] uppercase tracking-[0.08em] text-ink"
-      style={{ left, top }}
-    >
-      {content}
-    </div>,
-    document.body,
-  );
-}
-
-function Row({
-  label,
-  onPick,
-  swatch,
-}: {
-  label: string;
-  onPick: () => void;
-  swatch?: string;
-}) {
   return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onPick}
-      className="flex cursor-pointer items-center gap-2 px-3 py-[5px] text-left hover:bg-ink hover:text-paper"
-    >
-      {swatch && (
-        <span
-          className="inline-block h-[6px] w-[6px] flex-shrink-0"
-          style={{ background: swatch }}
-          aria-hidden
-        />
-      )}
-      <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-        {label}
-      </span>
-    </button>
-  );
-}
-
-function Divider() {
-  return <div className="my-1 border-t border-rule-soft" />;
-}
-
-function NameInput({
-  value,
-  onChange,
-  onCommit,
-  onCancel,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  onCommit: (v: string) => void;
-  onCancel: () => void;
-}) {
-  return (
-    <div className="px-3 py-[5px]">
-      <input
-        autoFocus
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === "Escape") {
-            e.stopPropagation();
-            e.preventDefault();
-            if (e.key === "Enter") onCommit(value);
-            else onCancel();
+    <>
+      {menu ?? children}
+      {namingAction && (
+        <Dialog
+          isOpen
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setNamingAction(null);
+          }}
+          title={
+            namingAction.kind === "create" ? "New quire" : "Rename quire"
           }
-        }}
-        placeholder="QUIRE NAME"
-        className="w-full border border-ink/40 bg-transparent px-2 py-[3px] text-[10px] uppercase tracking-[0.08em] text-ink outline-none placeholder:text-ink-faint"
-      />
-    </div>
+          size="sm"
+          footer={
+            <>
+              <Button
+                type="button"
+                onPress={() => setNamingAction(null)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                form={namingFormId}
+                variant="primary"
+                isDisabled={!namingAction.draft.trim()}
+              >
+                {namingAction.kind === "create" ? "Create" : "Rename"}
+              </Button>
+            </>
+          }
+        >
+          <form id={namingFormId} onSubmit={commitNamingAction}>
+            <TextField
+              label="Quire name"
+              value={namingAction.draft}
+              onChange={updateNamingDraft}
+              autoFocus
+            />
+          </form>
+        </Dialog>
+      )}
+    </>
   );
 }
