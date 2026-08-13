@@ -457,9 +457,6 @@ function FolioTab({
   return (
     <div
       ref={ref}
-      onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
-      onMouseLeave={onLeave}
-      onContextMenu={(e) => onContextMenu(e, t.id)}
       className={cn(
         "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
         active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
@@ -469,6 +466,9 @@ function FolioTab({
         ref={dragHandleRef}
         type="button"
         onClick={() => onActivate(t.id)}
+        onMouseEnter={(e) => onEnter(t.id, t.path, e.currentTarget)}
+        onMouseLeave={onLeave}
+        onContextMenu={(e) => onContextMenu(e, t.id)}
         title={t.path ? undefined : t.label}
         aria-label={t.label || t.path || "untitled folio"}
         className={cn(

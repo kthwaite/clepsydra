@@ -558,7 +558,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       createQuire(tabId, name) {
         set((state) => {
           const tab = state.tabs.find((t) => t.id === tabId);
-          if (!tab || tab.type !== "page") return state;
+          if (tab?.type !== "page") return state;
           const quire: Quire = {
             id: crypto.randomUUID(),
             name: name.trim() || "QUIRE",
