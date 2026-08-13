@@ -312,8 +312,8 @@ fn validate_resource_sizes(
     max_blob_size_mb: u64,
     max_request_size_mb: u64,
 ) -> Result<(), ApiError> {
-    let max_blob_bytes = max_blob_size_mb * 1024 * 1024;
-    let max_request_bytes = max_request_size_mb * 1024 * 1024;
+    let max_blob_bytes = max_blob_size_mb.saturating_mul(1024 * 1024);
+    let max_request_bytes = max_request_size_mb.saturating_mul(1024 * 1024);
     let request_size_overflow = || {
         ApiError::bad_request(format!(
             "capture size overflow, over max_request_size_mb ({max_request_size_mb} MB)"
@@ -833,6 +833,12 @@ mod tests {
     }
 
     #[test]
+    fn semantic_limits_saturate_for_unrepresentable_budgets() {
+        validate_resource_sizes(&[], 1, 1, u64::MAX, u64::MAX)
+            .expect("unrepresentable MiB ceilings should behave as unbounded byte ceilings");
+    }
+
+    #[test]
     fn body_limit_is_twice_budget_plus_envelope_headroom() {
         assert_eq!(archive_body_limit_bytes(2), 5 * 1024 * 1024);
     }
@@ -840,6 +846,15 @@ mod tests {
     #[test]
     fn body_limit_saturates_for_unrepresentable_budgets() {
         assert_eq!(archive_body_limit_bytes(u64::MAX), usize::MAX);
+    }
+
+    #[cfg(target_pointer_width = "32")]
+    #[test]
+    fn body_limit_saturates_when_budget_exceeds_usize() {
+        assert_eq!(
+            archive_body_limit_bytes(u64::from(u32::MAX) + 1),
+            usize::MAX
+        );
     }
 
     // ---------------------------------------------------------------------------
