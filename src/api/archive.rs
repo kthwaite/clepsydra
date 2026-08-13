@@ -216,13 +216,15 @@ fn rollback_cas(primary: ApiError, state: &AppState, hashes: &[String]) -> ApiEr
 
 /// The HTTP body limit implied by a decoded-content budget.
 ///
-/// `max_request_size_mb` budgets DECODED resource bytes, but the request
-/// carries base64, which inflates by 4/3. Without the multiplier the
-/// transport limit fires first and the reader gets a bare 413 naming
-/// nothing, instead of the 400 from `validate_resource_sizes` that names the
-/// limit it exceeded.
+/// `max_request_size_mb` budgets decoded snapshot, resource, and Markdown
+/// bytes. The request carries base64 resources inside a JSON envelope, so the
+/// transport allowance is twice that semantic budget plus one MiB of envelope
+/// headroom.
 pub(crate) fn archive_body_limit_bytes(max_request_size_mb: u64) -> usize {
-    (max_request_size_mb as usize) * 4 / 3 * 1024 * 1024
+    let budget = usize::try_from(max_request_size_mb)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(1024 * 1024);
+    budget.saturating_mul(2).saturating_add(1024 * 1024)
 }
 
 /// Build the archive router.
@@ -306,21 +308,36 @@ pub(crate) fn slugify(title: &str, max_len: usize) -> String {
 fn validate_resource_sizes(
     resources: &[SnapshotResource],
     snapshot_len: usize,
+    markdown_len: usize,
     max_blob_size_mb: u64,
     max_request_size_mb: u64,
 ) -> Result<(), ApiError> {
     let max_blob_bytes = max_blob_size_mb * 1024 * 1024;
     let max_request_bytes = max_request_size_mb * 1024 * 1024;
-    let mut total = snapshot_len as u64;
+    let request_size_overflow = || {
+        ApiError::bad_request(format!(
+            "capture size overflow, over max_request_size_mb ({max_request_size_mb} MB)"
+        ))
+    };
+    let mut total = u64::try_from(snapshot_len)
+        .ok()
+        .and_then(|snapshot| {
+            u64::try_from(markdown_len)
+                .ok()
+                .and_then(|markdown| snapshot.checked_add(markdown))
+        })
+        .ok_or_else(&request_size_overflow)?;
     for resource in resources {
-        let size = resource.bytes.len() as u64;
+        let size = u64::try_from(resource.bytes.len()).map_err(|_| request_size_overflow())?;
         if size > max_blob_bytes {
             return Err(ApiError::bad_request(format!(
                 "archived resource {} is {} bytes, over max_blob_size_mb ({} MB)",
                 resource.hash, size, max_blob_size_mb
             )));
         }
-        total += size;
+        total = total
+            .checked_add(size)
+            .ok_or_else(&request_size_overflow)?;
     }
     if total > max_request_bytes {
         return Err(ApiError::bad_request(format!(
@@ -646,6 +663,7 @@ pub async fn ingest_archive(
     validate_resource_sizes(
         &deconstructed.resources,
         deconstructed.html.len(),
+        req.markdown_body.len(),
         max_blob_size_mb,
         max_request_size_mb,
     )?;
@@ -803,6 +821,25 @@ mod tests {
         // validate_resource_sizes can report which limit it broke.
         let budget_bytes = 250 * 1024 * 1024;
         assert!(archive_body_limit_bytes(250) > budget_bytes);
+    }
+
+    #[test]
+    fn markdown_bytes_count_toward_the_capture_budget() {
+        let resources = Vec::new();
+        let error =
+            validate_resource_sizes(&resources, 1024 * 1024, 1024 * 1024 + 1, 100, 2)
+                .expect_err("snapshot plus markdown exceeds two MiB");
+        assert!(error.error.contains("max_request_size_mb"));
+    }
+
+    #[test]
+    fn body_limit_is_twice_budget_plus_envelope_headroom() {
+        assert_eq!(archive_body_limit_bytes(2), 5 * 1024 * 1024);
+    }
+
+    #[test]
+    fn body_limit_saturates_for_unrepresentable_budgets() {
+        assert_eq!(archive_body_limit_bytes(u64::MAX), usize::MAX);
     }
 
     // ---------------------------------------------------------------------------
