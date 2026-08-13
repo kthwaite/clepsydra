@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { fetchClient } from "#/api/client";
 import { useCreatePage } from "#/api/pages";
 import { useWikilinkResolution } from "#/editor/wikilinkResolution";
+import { normalizeWikilinkIdentity } from "#/editor/wikilinkIdentity";
 import { generateShortId, intakePath } from "#/lib/intake";
 
 export interface ResolvedWikilinkTarget {
@@ -11,10 +12,6 @@ export interface ResolvedWikilinkTarget {
 
 export interface ResolveOrCreateWikilinkTarget {
   resolveOrCreate(targetRaw: string): Promise<ResolvedWikilinkTarget>;
-}
-
-function titleKey(value: string): string {
-  return value.normalize("NFC").toLowerCase();
 }
 
 const inFlightRequests = new Map<
@@ -31,7 +28,7 @@ export function useResolveOrCreateWikilinkTarget(): ResolveOrCreateWikilinkTarge
     (targetRaw: string) => {
       const title = targetRaw.trim();
       if (!title) return Promise.reject(new Error("Page title is required"));
-      const key = titleKey(title);
+      const key = normalizeWikilinkIdentity(title);
       const existingRequest = inFlightRequests.get(key);
       if (existingRequest) return existingRequest;
 
@@ -47,7 +44,9 @@ export function useResolveOrCreateWikilinkTarget(): ResolveOrCreateWikilinkTarge
         );
         if (error) throw error;
         const exact = (data ?? []).find(
-          (entry) => entry.title != null && titleKey(entry.title) === key,
+          (entry) =>
+            entry.title != null &&
+            normalizeWikilinkIdentity(entry.title) === key,
         );
         if (exact) return { path: exact.path, title };
 

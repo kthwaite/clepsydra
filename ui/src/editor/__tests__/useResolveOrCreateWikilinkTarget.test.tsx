@@ -135,29 +135,33 @@ it("coalesces simultaneous requests for the same normalized target", async () =>
   await expect(Promise.all([first, second])).resolves.toHaveLength(2);
 });
 
-it("coalesces equivalent targets across independent hook consumers", async () => {
-  const pending = deferred<unknown>();
-  generateShortIdMock.mockReturnValue("a1B2c3D4");
-  createMutateAsyncMock.mockReturnValue(pending.promise);
-  const firstHook = renderHook(() => useResolveOrCreateWikilinkTarget());
-  const secondHook = renderHook(() => useResolveOrCreateWikilinkTarget());
+it.each([
+  ["NFC and case", "CAF\u{c9} Notes", " cafe\u{301} notes "],
+  ["collapsed whitespace", "New Topic", "New   Topic"],
+  ["an optional Markdown suffix", "Topic", "Topic.md"],
+])(
+  "coalesces targets equivalent by %s across independent hook consumers",
+  async (_normalization, firstTarget, secondTarget) => {
+    const pending = deferred<unknown>();
+    generateShortIdMock.mockReturnValue("a1B2c3D4");
+    createMutateAsyncMock.mockReturnValue(pending.promise);
+    const firstHook = renderHook(() => useResolveOrCreateWikilinkTarget());
+    const secondHook = renderHook(() => useResolveOrCreateWikilinkTarget());
 
-  const first = firstHook.result.current.resolveOrCreate("CAF\u{c9} Notes");
-  const second = secondHook.result.current.resolveOrCreate(
-    " cafe\u{301} notes ",
-  );
+    const first = firstHook.result.current.resolveOrCreate(firstTarget);
+    const second = secondHook.result.current.resolveOrCreate(secondTarget);
+    const sharedPromise = second === first;
 
-  expect(second).toBe(first);
-  await waitFor(() => expect(createMutateAsyncMock).toHaveBeenCalled());
-  pending.resolve({});
-  const [firstResult, secondResult] = await Promise.all([first, second]);
+    await waitFor(() => expect(createMutateAsyncMock).toHaveBeenCalled());
+    pending.resolve({});
+    const [firstResult, secondResult] = await Promise.all([first, second]);
 
-  expect(createMutateAsyncMock).toHaveBeenCalledOnce();
-  expect(secondResult).toBe(firstResult);
-  expect(firstResult).toMatchObject({
-    title: "CAF\u{c9} Notes",
-    path: expect.stringMatching(
-      /^notes\/\d{8}\.caf-notes\.a1B2c3D4\.md$/,
-    ),
-  });
-});
+    expect(sharedPromise).toBe(true);
+    expect(createMutateAsyncMock).toHaveBeenCalledOnce();
+    expect(secondResult).toBe(firstResult);
+    expect(firstResult.title).toBe(firstTarget.trim());
+    expect(createMutateAsyncMock).toHaveBeenCalledWith(
+      expect.objectContaining({ body: { title: firstTarget.trim() } }),
+    );
+  },
+);
