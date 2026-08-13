@@ -650,30 +650,47 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     seed(false);
     render(<Sheaf activeTabId="t3" />);
     const source = sourceFor(screen.getByRole("button", { name: "Alpha" }));
-    const gamma = screen.getByRole("button", { name: "Gamma" });
-    const target = dropTargetFor(gamma);
-    const idleStyle = gamma.getAttribute("style");
+    const activation = screen.getByRole("button", { name: "Gamma" });
+    const wrapper = activation.parentElement;
+    if (!(wrapper instanceof HTMLElement)) {
+      throw new Error("Gamma tab wrapper was not rendered");
+    }
+    const close = screen
+      .getAllByRole("button", { name: "close folio" })
+      .find((button) => button.parentElement === wrapper);
+    if (!(close instanceof HTMLElement)) {
+      throw new Error("Gamma close control was not rendered");
+    }
+    const target = dropTargetFor(wrapper);
+    expect(target.element).toBe(wrapper);
+    const idleActivationStyle = activation.getAttribute("style");
     dispatchDragStart(source);
 
     dispatchTargetEnter(source, target, "left");
-    expect(gamma.style.boxShadow).toContain(
+    expect(activation.style.boxShadow).toContain(
       "inset 2px 0 0 0 var(--accent)",
     );
+    expect(close.style.boxShadow).not.toContain("var(--accent)");
 
     dispatchTargetDrag(source, target, "right");
-    expect(gamma.style.boxShadow).not.toContain(
+    expect(activation.style.boxShadow).not.toContain(
       "inset 2px 0 0 0 var(--accent)",
     );
-    expect(gamma.style.boxShadow).toContain(
+    expect(activation.style.boxShadow).not.toContain(
+      "inset -2px 0 0 0 var(--accent)",
+    );
+    expect(close.style.boxShadow).toBe(
       "inset -2px 0 0 0 var(--accent)",
     );
 
     dispatchTargetLeave(source, target);
-    expect(gamma.getAttribute("style")).toBe(idleStyle);
+    expect(activation.getAttribute("style")).toBe(idleActivationStyle);
+    expect(close.style.boxShadow).toBe("");
 
-    dispatchTargetEnter(source, target, "left");
-    dispatchDrop({ source, target, edge: "left" });
-    expect(gamma).toHaveAttribute("style", idleStyle ?? "");
+    dispatchTargetEnter(source, target, "right");
+    dispatchDrop({ source, target, edge: "right" });
+    expect(activation.getAttribute("style")).toBe(idleActivationStyle);
+    expect(close.style.boxShadow).toBe("");
   });
 
   it("highlights a quire join target distinctly and clears it on leave or drop", () => {
