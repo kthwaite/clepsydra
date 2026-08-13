@@ -4,7 +4,7 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { useCallback, useEffect } from "react";
+import { useCallback, useLayoutEffect } from "react";
 import { routeViewFromMatches } from "#/components/codex/useCodexView";
 import {
   captureFolioHistoryLocation,
@@ -103,7 +103,7 @@ function applyHistoryDestination(
 export function useFolioHistoryController(): void {
   const router = useRouter();
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const history = router.history;
     const initialDestination = readFolioHistoryDestination(
       history.location.state,
@@ -176,6 +176,7 @@ export function useOpenTabWithFolioHistory(): OpenTabWithFolioHistory {
           : tab.type === "page" && tab.path === path,
       );
       if (
+        onWorkspaceRoute &&
         requested?.id === workspace.activeTabId &&
         !(type === "page" && target?.blockId)
       ) {
@@ -240,9 +241,7 @@ export function useLeaveFolioWorkspace(): LeaveFolioWorkspace {
     runWorkspaceTransition(() => {
       const outgoing = trackedHistoryDestination;
       captureTrackedHistoryDestination();
-      capturedDepartureLocationId = options
-        ? (outgoing?.folioLocationId ?? null)
-        : null;
+      capturedDepartureLocationId = outgoing?.folioLocationId ?? null;
 
       const originTabId = options?.originTabId;
       if (originTabId) {
@@ -252,6 +251,7 @@ export function useLeaveFolioWorkspace(): LeaveFolioWorkspace {
         }
       }
       navigateAway();
+      capturedDepartureLocationId = null;
     });
   }, []);
 }

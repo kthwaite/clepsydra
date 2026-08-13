@@ -114,3 +114,43 @@ it("stamps folioOriginTabId as null when navigating from off the workspace route
     folioLocationId: expect.any(String),
   });
 });
+
+it("navigates from off-workspace when the persisted page is already active", () => {
+  routeMatchesRef.current = OFF_WORKSPACE_ROUTE;
+  const { result } = renderHook(() => useOpenTab());
+
+  act(() => {
+    result.current("page", "notes/alpha.md", "Alpha");
+  });
+
+  expect(navigateMock).toHaveBeenCalledOnce();
+  const state = navigateMock.mock.calls[0][0].state({});
+  expect(state.folioOriginTabId).toBeNull();
+  expect(readFolioHistoryDestination(state)).toEqual({
+    folioTabId: "alpha",
+    folioPath: "notes/alpha.md",
+    folioLocationId: expect.any(String),
+  });
+});
+
+it("navigates from off-workspace when the persisted graph is already active", () => {
+  routeMatchesRef.current = OFF_WORKSPACE_ROUTE;
+  useWorkspaceStore.setState({
+    tabs: [{ id: "graph", type: "graph", label: "Graph" }],
+    activeTabId: "graph",
+  });
+  const { result } = renderHook(() => useOpenTab());
+
+  act(() => {
+    result.current("graph");
+  });
+
+  expect(navigateMock).toHaveBeenCalledOnce();
+  const state = navigateMock.mock.calls[0][0].state({});
+  expect(state).toMatchObject({
+    folioTabId: null,
+    folioPath: null,
+    folioLocationId: null,
+    folioOriginTabId: null,
+  });
+});

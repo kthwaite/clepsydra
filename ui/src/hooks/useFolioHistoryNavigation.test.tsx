@@ -412,6 +412,46 @@ describe("programmatic Folio navigation", () => {
     act(() => proceed?.());
     expect(order).toEqual(["capture", "navigate"]);
   });
+
+  it("deduplicates synchronous history-back capture and applies the destination once", async () => {
+    seedWorkspace("beta");
+    const { actions, history } = renderHarness({
+      states: [
+        pageState("alpha", "notes/alpha.md", "location-alpha"),
+        pageState("beta", "notes/beta.md", "location-beta"),
+      ],
+    });
+    await waitForController();
+    actions.splice(0);
+    let captureCalls = 0;
+    registerCapture("beta", "notes/beta.md", () => {
+      captureCalls += 1;
+      return restoration("beta", "notes/beta.md");
+    });
+    let guardCalls = 0;
+    cleanups.push(
+      registerWorkspaceTransitionGuard(() => {
+        guardCalls += 1;
+        return false;
+      }),
+    );
+
+    act(() => currentControls().leave(() => history.back()));
+
+    expect(captureCalls).toBe(1);
+    expect(guardCalls).toBe(1);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("alpha");
+    expect(actions).toEqual(["BACK"]);
+    expect(
+      readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
+    ).toMatchObject({
+      request: {
+        tabId: "alpha",
+        path: "notes/alpha.md",
+        locationId: "location-alpha",
+      },
+    });
+  });
 });
 
 describe("native history tuple application", () => {
