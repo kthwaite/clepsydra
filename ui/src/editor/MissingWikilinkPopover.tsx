@@ -86,7 +86,7 @@ export function MissingWikilinkPopover({
     role,
   ]);
 
-  const referenceProps = getReferenceProps(child.props);
+  const referenceProps = getReferenceProps(child.props) as TriggerProps;
 
   const setReference = useCallback(
     (node: HTMLElement | null) => {
