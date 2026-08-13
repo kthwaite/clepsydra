@@ -1,4 +1,13 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import type {
+  draggable as draggableAdapter,
+  dropTargetForElements as dropTargetForElementsAdapter,
+  ElementDragPayload,
+  ElementDropTargetEventPayloadMap,
+  ElementDropTargetGetFeedbackArgs,
+  ElementEventPayloadMap,
+} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import type { attachClosestEdge as attachClosestEdgeAdapter } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type {
@@ -14,6 +23,61 @@ import {
 } from "#/components/bases/PropertiesEditor";
 
 const { updateMock } = vi.hoisted(() => ({ updateMock: vi.fn() }));
+
+type DraggableRegistration = Parameters<typeof draggableAdapter>[0];
+type DropTargetRegistration = Parameters<
+  typeof dropTargetForElementsAdapter
+>[0];
+type AttachClosestEdge = typeof attachClosestEdgeAdapter;
+type ClosestEdge = "top" | "bottom";
+type DropPayload = ElementDropTargetEventPayloadMap["onDrop"];
+type DropTargetRecord = DropPayload["self"];
+type DragSource = {
+  registration: DraggableRegistration;
+  source: ElementDragPayload;
+};
+
+const dnd = vi.hoisted(() => ({
+  draggables: [] as DraggableRegistration[],
+  dropTargets: [] as DropTargetRegistration[],
+  closestEdge: "top" as ClosestEdge,
+  closestEdgeKey: Symbol("closest-edge"),
+}));
+
+function register<T>(registrations: T[], registration: T) {
+  registrations.push(registration);
+  return () => {
+    const index = registrations.indexOf(registration);
+    if (index !== -1) registrations.splice(index, 1);
+  };
+}
+
+vi.mock(
+  "@atlaskit/pragmatic-drag-and-drop/element/adapter",
+  () => ({
+    draggable: (registration: DraggableRegistration) =>
+      register(dnd.draggables, registration),
+    dropTargetForElements: (registration: DropTargetRegistration) =>
+      register(dnd.dropTargets, registration),
+  }),
+);
+
+vi.mock(
+  "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge",
+  () => ({
+    attachClosestEdge: (
+      data: Parameters<AttachClosestEdge>[0],
+      { allowedEdges }: Parameters<AttachClosestEdge>[1],
+    ) => ({
+      ...data,
+      [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
+        ? dnd.closestEdge
+        : null,
+    }),
+    extractClosestEdge: (data: Record<string | symbol, unknown>) =>
+      (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+  }),
+);
 
 vi.mock("@tanstack/react-router", () => ({
   useBlocker: () => ({ status: "idle" }),
@@ -55,6 +119,153 @@ function renderProperties(overrides: Partial<PropertiesEditorProps> = {}) {
     onChange,
     onDiagnosticsChange,
   };
+}
+
+const input: ElementDropTargetGetFeedbackArgs["input"] = {
+  altKey: false,
+  button: 0,
+  buttons: 1,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  clientX: 0,
+  clientY: 0,
+  pageX: 0,
+  pageY: 0,
+};
+
+function dragLocation(
+  dropTargets: DropTargetRecord[] = [],
+): DropPayload["location"] {
+  return {
+    initial: { input, dropTargets: [] },
+    current: { input, dropTargets },
+    previous: { dropTargets: [] },
+  };
+}
+
+function sourceFor(handle: HTMLElement): DragSource {
+  const registration = dnd.draggables.find(
+    (candidate) =>
+      candidate.element === handle || candidate.dragHandle === handle,
+  );
+  if (!registration) {
+    throw new Error(`No draggable registered for "${handle.textContent}"`);
+  }
+  const dragHandle = registration.dragHandle ?? null;
+  const feedback = { input, element: registration.element, dragHandle };
+  if (registration.canDrag?.(feedback) === false) {
+    throw new Error(`Dragging is disabled for "${handle.textContent}"`);
+  }
+  return {
+    registration,
+    source: {
+      element: registration.element,
+      dragHandle,
+      data: registration.getInitialData?.(feedback) ?? {},
+    },
+  };
+}
+
+function targetFor(row: Element) {
+  const registration = dnd.dropTargets.find(
+    (candidate) => candidate.element === row,
+  );
+  if (!registration) {
+    throw new Error(`No drop target registered for "${row.textContent}"`);
+  }
+  return registration;
+}
+
+function canDrop(source: ElementDragPayload, target: DropTargetRegistration) {
+  return (
+    target.canDrop?.({
+      input,
+      source,
+      element: target.element,
+    }) ?? true
+  );
+}
+
+function dispatchDrop(
+  source: DragSource,
+  target: DropTargetRegistration,
+  edge: ClosestEdge,
+) {
+  dnd.closestEdge = edge;
+  const feedback: ElementDropTargetGetFeedbackArgs = {
+    input,
+    source: source.source,
+    element: target.element,
+  };
+  if (!canDrop(source.source, target)) {
+    throw new Error(`Drop rejected by "${target.element.textContent}"`);
+  }
+  const self: DropTargetRecord = {
+    element: target.element,
+    data: target.getData?.(feedback) ?? {},
+    dropEffect: target.getDropEffect?.(feedback) ?? "move",
+    isActiveDueToStickiness: false,
+  };
+  const startLocation = dragLocation();
+  const start: ElementEventPayloadMap["onDragStart"] = {
+    location: startLocation,
+    source: source.source,
+  };
+  const location = dragLocation([self]);
+  const drop: ElementEventPayloadMap["onDrop"] = {
+    location,
+    source: source.source,
+  };
+
+  act(() => {
+    source.registration.onDragStart?.(start);
+    source.registration.onDrop?.(drop);
+    target.onDrop?.({ ...drop, self });
+  });
+  return self;
+}
+
+function dispatchExternalDrop(
+  source: ElementDragPayload,
+  target: DropTargetRegistration,
+  edge: ClosestEdge,
+) {
+  if (!canDrop(source, target)) return false;
+  dnd.closestEdge = edge;
+  const feedback: ElementDropTargetGetFeedbackArgs = {
+    input,
+    source,
+    element: target.element,
+  };
+  const self: DropTargetRecord = {
+    element: target.element,
+    data: target.getData?.(feedback) ?? {},
+    dropEffect: target.getDropEffect?.(feedback) ?? "move",
+    isActiveDueToStickiness: false,
+  };
+  const drop: ElementEventPayloadMap["onDrop"] = {
+    location: dragLocation([self]),
+    source,
+  };
+  act(() => target.onDrop?.({ ...drop, self }));
+  return true;
+}
+
+function cancelDrag(source: DragSource) {
+  const location = dragLocation();
+  const start: ElementEventPayloadMap["onDragStart"] = {
+    location,
+    source: source.source,
+  };
+  const drop: ElementEventPayloadMap["onDrop"] = {
+    location,
+    source: source.source,
+  };
+  act(() => {
+    source.registration.onDragStart?.(start);
+    source.registration.onDrop?.(drop);
+  });
 }
 
 function latest(onChange: Mock) {
@@ -108,6 +319,9 @@ const emptyDetail: BaseDetailResponse = {
 };
 
 beforeEach(() => {
+  dnd.draggables.length = 0;
+  dnd.dropTargets.length = 0;
+  dnd.closestEdge = "top";
   updateMock.mockReset();
   baseState = {
     data: emptyDetail,
@@ -190,40 +404,111 @@ describe("PropertiesEditor", () => {
     expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
   });
 
-  it("reorders from a pointer drag on the named handle without persisting", () => {
+  it.each([
+    {
+      intent: "before",
+      edge: "top",
+      sourceKey: "alpha",
+      sourceId: "id-alpha",
+      targetKey: "gamma",
+      targetId: "id-gamma",
+      expected: ["id-beta", "id-alpha", "id-gamma"],
+    },
+    {
+      intent: "after",
+      edge: "bottom",
+      sourceKey: "beta",
+      sourceId: "id-beta",
+      targetKey: "gamma",
+      targetId: "id-gamma",
+      expected: ["id-alpha", "id-gamma", "id-beta"],
+    },
+    {
+      intent: "before while moving upward",
+      edge: "top",
+      sourceKey: "gamma",
+      sourceId: "id-gamma",
+      targetKey: "alpha",
+      targetId: "id-alpha",
+      expected: ["id-gamma", "id-alpha", "id-beta"],
+    },
+    {
+      intent: "after while moving upward",
+      edge: "bottom",
+      sourceKey: "gamma",
+      sourceId: "id-gamma",
+      targetKey: "alpha",
+      targetId: "id-alpha",
+      expected: ["id-alpha", "id-gamma", "id-beta"],
+    },
+  ] as const)(
+    "reorders a property $intent the named row target without persisting",
+    ({ edge, sourceKey, sourceId, targetKey, targetId, expected }) => {
+      const properties = [
+        property("alpha", "text"),
+        property("beta", "number"),
+        property("gamma", "bool"),
+      ];
+      const { onChange } = renderProperties({ properties });
+      const handle = screen.getByRole("button", {
+        name: `Reorder ${sourceKey}`,
+      });
+      const source = sourceFor(handle);
+      const target = targetFor(
+        screen.getByRole("row", { name: new RegExp(targetKey, "i") }),
+      );
+
+      expect(source.registration.dragHandle).toBe(handle);
+      expect(source.source.data).toEqual({
+        kind: "base-property",
+        propertyId: sourceId,
+      });
+      const targetRecord = dispatchDrop(source, target, edge);
+
+      expect(targetRecord.data).toMatchObject({
+        kind: "base-property",
+        propertyId: targetId,
+      });
+      expect(latest(onChange).map(({ id }) => id)).toEqual(expected);
+      expect(updateMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("clears a cancelled property drag, ignores a later unrelated drop, rejects columns, and unregisters", () => {
     const properties = [
       property("alpha", "text"),
       property("beta", "number"),
       property("gamma", "bool"),
     ];
-    const { onChange } = renderProperties({ properties });
+    const rendered = renderProperties({ properties });
+    const source = sourceFor(
+      screen.getByRole("button", { name: "Reorder beta" }),
+    );
+    const target = targetFor(screen.getByRole("row", { name: /gamma/i }));
+    const unrelatedPropertySource: ElementDragPayload = {
+      element: document.createElement("div"),
+      dragHandle: null,
+      data: { kind: "base-property", propertyId: "id-elsewhere" },
+    };
+    const columnSource: ElementDragPayload = {
+      element: document.createElement("div"),
+      dragHandle: null,
+      data: { kind: "base-view-column", columnId: "column-1" },
+    };
 
-    fireEvent.dragStart(screen.getByRole("button", { name: "Reorder beta" }));
-    fireEvent.dragOver(screen.getByRole("row", { name: /gamma/i }));
-    fireEvent.drop(screen.getByRole("row", { name: /gamma/i }));
+    cancelDrag(source);
 
-    expect(latest(onChange).map(({ id }) => id)).toEqual([
-      "id-alpha",
-      "id-gamma",
-      "id-beta",
-    ]);
-    expect(updateMock).not.toHaveBeenCalled();
-  });
+    expect(dispatchExternalDrop(unrelatedPropertySource, target, "bottom")).toBe(
+      true,
+    );
+    expect(canDrop(columnSource, target)).toBe(false);
+    expect(rendered.onChange).not.toHaveBeenCalled();
+    expect(dnd.draggables).toHaveLength(3);
+    expect(dnd.dropTargets).toHaveLength(3);
 
-  it("clears a cancelled pointer drag before a later drop", () => {
-    const properties = [
-      property("alpha", "text"),
-      property("beta", "number"),
-      property("gamma", "bool"),
-    ];
-    const { onChange } = renderProperties({ properties });
-    const handle = screen.getByRole("button", { name: "Reorder beta" });
-
-    fireEvent.dragStart(handle);
-    fireEvent.dragEnd(handle);
-    fireEvent.drop(screen.getByRole("row", { name: /gamma/i }));
-
-    expect(onChange).not.toHaveBeenCalled();
+    rendered.unmount();
+    expect(dnd.draggables).toHaveLength(0);
+    expect(dnd.dropTargets).toHaveLength(0);
   });
 
   it("keeps the keyboard handle focused and politely announces its new position", async () => {

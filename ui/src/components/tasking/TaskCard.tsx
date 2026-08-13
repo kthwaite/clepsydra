@@ -1,10 +1,12 @@
 /**
- * TaskCard — individual kanban card with HTML5 drag handles.
+ * TaskCard — individual kanban card with Pragmatic drag-and-drop.
  *
  * Mirrors the kc-* / kb-card anatomy from styles-board.css exactly,
  * translated to Tailwind + Vessel design tokens.
  */
 
+import { draggable } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import { useEffect, useRef, useState } from "react";
 import type { BoardTask } from "#/api/board";
 import { type ColLabelFn, priColor, StatePip } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
@@ -17,9 +19,7 @@ export interface TaskCardProps {
   task: BoardTask;
   /** Show the operation/project code in the top row (used when ALL ops visible) */
   showOp: boolean;
-  isDragging: boolean;
-  onDragStart: (e: React.DragEvent) => void;
-  onDragEnd: (e: React.DragEvent) => void;
+  /** Opens the task editor from card click/keyboard activation. */
   onClick: () => void;
   onOpenDossier?: (link: string) => void;
   /** Resolves a column id to its server-supplied display label. */
@@ -29,13 +29,28 @@ export interface TaskCardProps {
 export function TaskCard({
   task: t,
   showOp,
-  isDragging,
-  onDragStart,
-  onDragEnd,
   onClick,
   onOpenDossier,
   colLabel,
 }: TaskCardProps) {
+  const cardRef = useRef<HTMLDivElement>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    const element = cardRef.current;
+    if (!element) return;
+
+    return draggable({
+      element,
+      getInitialData: () => ({
+        kind: "task-card",
+        taskId: t.id,
+        status: t.status,
+      }),
+      onDragStart: () => setIsDragging(true),
+      onDrop: () => setIsDragging(false),
+    });
+  }, [t.id, t.status]);
   const {
     done,
     total,
@@ -47,20 +62,11 @@ export function TaskCard({
 
   return (
     <div
+      ref={cardRef}
       className="group relative cursor-grab border border-[var(--rule)] bg-[var(--bg)] p-[9px_11px_9px_14px] transition-[border-color,background,transform] duration-[80ms,120ms,80ms] hover:border-[var(--hot)] hover:bg-[var(--bg-3)] active:cursor-grabbing"
       style={isDragging ? { opacity: 0.35, borderStyle: "dashed" } : undefined}
-      draggable
       role="button"
       tabIndex={0}
-      onDragStart={(e) => {
-        // Firefox refuses to initiate an HTML5 drag without setData.
-        if (e.dataTransfer) {
-          e.dataTransfer.setData("text/plain", t.id);
-          e.dataTransfer.effectAllowed = "move";
-        }
-        onDragStart(e);
-      }}
-      onDragEnd={onDragEnd}
       onClick={onClick}
       onKeyDown={(e) => {
         if (e.target !== e.currentTarget) return;

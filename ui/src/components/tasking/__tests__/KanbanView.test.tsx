@@ -1,18 +1,25 @@
 /**
  * KanbanView + TaskCard tests.
  *
- * DnD assertions use fireEvent (not userEvent) because HTML5 drag events
- * are synthetic and do not rely on pointer simulation.
- *
  * Fetch stub pattern: vi.fn() returning a Response-shaped object — same
  * approach used across the tasking test suite.
  */
 
+import type {
+  draggable as draggableAdapter,
+  dropTargetForElements as dropTargetForElementsAdapter,
+  ElementDragPayload,
+  ElementDropTargetEventPayloadMap,
+  ElementDropTargetGetFeedbackArgs,
+  ElementEventPayloadMap,
+} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardTask } from "#/api/board";
+import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
 import { KanbanView, visibleInKanban } from "../KanbanView";
 import {
@@ -22,6 +29,40 @@ import {
   FIXTURE_COL_LABEL,
   SEALED_IN_CLOSED_CYCLE_TASK,
 } from "./fixtures";
+
+type DraggableRegistration = Parameters<typeof draggableAdapter>[0];
+type DropTargetRegistration = Parameters<
+  typeof dropTargetForElementsAdapter
+>[0];
+type DropPayload = ElementDropTargetEventPayloadMap["onDrop"];
+type DropTargetRecord = DropPayload["self"];
+type DragSource = {
+  registration: DraggableRegistration;
+  source: ElementDragPayload;
+};
+
+const dnd = vi.hoisted(() => ({
+  draggables: [] as DraggableRegistration[],
+  dropTargets: [] as DropTargetRegistration[],
+}));
+
+function register<T>(registrations: T[], registration: T) {
+  registrations.push(registration);
+  return () => {
+    const index = registrations.indexOf(registration);
+    if (index !== -1) registrations.splice(index, 1);
+  };
+}
+
+vi.mock(
+  "@atlaskit/pragmatic-drag-and-drop/element/adapter",
+  () => ({
+    draggable: (registration: DraggableRegistration) =>
+      register(dnd.draggables, registration),
+    dropTargetForElements: (registration: DropTargetRegistration) =>
+      register(dnd.dropTargets, registration),
+  }),
+);
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -49,9 +90,193 @@ function makeStub(board = BOARD_FIXTURE) {
   });
 }
 
+const dndInput: ElementDropTargetGetFeedbackArgs["input"] = {
+  altKey: false,
+  button: 0,
+  buttons: 1,
+  ctrlKey: false,
+  metaKey: false,
+  shiftKey: false,
+  clientX: 0,
+  clientY: 0,
+  pageX: 0,
+  pageY: 0,
+};
+
+function dragLocation(
+  dropTargets: DropTargetRecord[] = [],
+): DropPayload["location"] {
+  return {
+    initial: { input: dndInput, dropTargets: [] },
+    current: { input: dndInput, dropTargets },
+    previous: { dropTargets: [] },
+  };
+}
+
+function sourceFor(card: HTMLElement): DragSource {
+  const registration = dnd.draggables.find(
+    (candidate) =>
+      candidate.element === card || candidate.dragHandle === card,
+  );
+  if (!registration) {
+    throw new Error(`No draggable registered for "${card.textContent}"`);
+  }
+  const dragHandle = registration.dragHandle ?? null;
+  const feedback = {
+    input: dndInput,
+    element: registration.element,
+    dragHandle,
+  };
+  return {
+    registration,
+    source: {
+      element: registration.element,
+      dragHandle,
+      data: registration.getInitialData?.(feedback) ?? {},
+    },
+  };
+}
+
+function targetFor(column: HTMLElement) {
+  const registration = dnd.dropTargets.find(
+    (candidate) => candidate.element === column,
+  );
+  if (!registration) {
+    throw new Error(`No drop target registered for "${column.textContent}"`);
+  }
+  return registration;
+}
+
+function canDrop(source: ElementDragPayload, target: DropTargetRegistration) {
+  return (
+    target.canDrop?.({
+      input: dndInput,
+      source,
+      element: target.element,
+    }) ?? true
+  );
+}
+
+function targetRecord(
+  source: ElementDragPayload,
+  target: DropTargetRegistration,
+): DropTargetRecord {
+  const feedback: ElementDropTargetGetFeedbackArgs = {
+    input: dndInput,
+    source,
+    element: target.element,
+  };
+  return {
+    element: target.element,
+    data: target.getData?.(feedback) ?? {},
+    dropEffect: target.getDropEffect?.(feedback) ?? "move",
+    isActiveDueToStickiness: false,
+  };
+}
+
+function dispatchDragStart(source: DragSource) {
+  const event: ElementEventPayloadMap["onDragStart"] = {
+    location: dragLocation(),
+    source: source.source,
+  };
+  act(() => source.registration.onDragStart?.(event));
+}
+
+function dispatchDragEnd(source: DragSource) {
+  const event: ElementEventPayloadMap["onDrop"] = {
+    location: dragLocation(),
+    source: source.source,
+  };
+  act(() => source.registration.onDrop?.(event));
+}
+
+function dispatchDragEnter(
+  source: ElementDragPayload,
+  target: DropTargetRegistration,
+) {
+  if (!canDrop(source, target)) return false;
+  const self = targetRecord(source, target);
+  const event: ElementDropTargetEventPayloadMap["onDragEnter"] = {
+    location: dragLocation([self]),
+    self,
+    source,
+  };
+  act(() => target.onDragEnter?.(event));
+  return true;
+}
+
+function dispatchDragLeave(
+  source: ElementDragPayload,
+  target: DropTargetRegistration,
+) {
+  const self = targetRecord(source, target);
+  const event: ElementDropTargetEventPayloadMap["onDragLeave"] = {
+    location: dragLocation(),
+    self,
+    source,
+  };
+  act(() => target.onDragLeave?.(event));
+}
+
+function dispatchDrop(
+  source: ElementDragPayload,
+  target: DropTargetRegistration,
+  draggable?: DraggableRegistration,
+) {
+  if (!canDrop(source, target)) return false;
+  const self = targetRecord(source, target);
+  const location = dragLocation([self]);
+  const targetEvent: ElementDropTargetEventPayloadMap["onDrop"] = {
+    location,
+    self,
+    source,
+  };
+  const sourceEvent: ElementEventPayloadMap["onDrop"] = { location, source };
+  act(() => {
+    target.onDrop?.(targetEvent);
+    draggable?.onDrop?.(sourceEvent);
+  });
+  return true;
+}
+
+
+function renderDndKanban(fetchStub = makeStub()) {
+  vi.stubGlobal("fetch", fetchStub);
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  qc.setQueryData(queryKeys.board.all, BOARD_FIXTURE);
+  const view = (boardTasks: BoardTask[]) => (
+    <QueryClientProvider client={qc}>
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={boardTasks}
+        cycles={cycles}
+        showOp={false}
+      />
+    </QueryClientProvider>
+  );
+  const rendered = render(view(tasks));
+  return {
+    fetchStub,
+    rerenderTasks: (boardTasks: BoardTask[]) =>
+      rendered.rerender(view(boardTasks)),
+  };
+}
+
+function patchCalls(fetchStub: Mock) {
+  return fetchStub.mock.calls.filter((args) => {
+    const opts = args[1] as RequestInit | undefined;
+    return opts?.method === "PATCH";
+  });
+}
+
 const { columns, tasks, cycles } = BOARD_FIXTURE;
 
 beforeEach(() => {
+  dnd.draggables.length = 0;
+  dnd.dropTargets.length = 0;
   useBoardStore.setState({
     mode: "card",
     opFilter: "ALL",
@@ -754,7 +979,7 @@ describe("KanbanView — column + button", () => {
 // ── drag-and-drop ─────────────────────────────────────────────────────────────
 
 describe("KanbanView — drag-and-drop", () => {
-  it("writes the task id to dataTransfer on drag start", () => {
+  it("exposes the task identity and current status at the drag-source boundary", () => {
     wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
@@ -764,106 +989,17 @@ describe("KanbanView — drag-and-drop", () => {
         showOp={false}
       />,
     );
-    const setData = vi.fn();
-    const card = screen.getByTestId("task-card-t1");
-    fireEvent.dragStart(card, {
-      dataTransfer: { setData, effectAllowed: "" },
-    });
-    expect(setData).toHaveBeenCalledWith("text/plain", "t1");
-  });
 
-  it("drop fires PATCH to /api/vault/board/tasks/{id} with {status: colId}", async () => {
-    const stub = makeStub();
-    vi.stubGlobal("fetch", stub);
+    const source = sourceFor(screen.getByTestId("task-card-t1"));
 
-    // Need a QueryClient that is already hydrated — wrap the component
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    // Pre-populate the cache so usePatchTask onMutate doesn't error
-    const { queryKeys } = await import("#/api/keys");
-    qc.setQueryData(queryKeys.board.all, BOARD_FIXTURE);
-
-    render(
-      <QueryClientProvider client={qc}>
-        <KanbanView
-          colLabel={FIXTURE_COL_LABEL}
-          columns={columns}
-          tasks={tasks}
-          cycles={cycles}
-          showOp={false}
-        />
-      </QueryClientProvider>,
-    );
-
-    // Drag t1 (FIELD) to REVIEW column
-    const card = screen.getByTestId("task-card-t1");
-    const reviewCol = screen.getByTestId("kb-col-REVIEW");
-
-    fireEvent.dragStart(card);
-    fireEvent.dragOver(reviewCol);
-    fireEvent.drop(reviewCol);
-
-    // Wait for the mutation to fire
-    await waitFor(() => {
-      const patchCalls = stub.mock.calls.filter((args) => {
-        const url = args[0] as string;
-        const opts = args[1] as RequestInit | undefined;
-        return (
-          typeof url === "string" &&
-          url.includes("/tasks/t1") &&
-          opts?.method === "PATCH"
-        );
-      });
-      expect(patchCalls.length).toBeGreaterThan(0);
-      const opts = patchCalls[0][1] as RequestInit;
-      const body = JSON.parse(opts.body as string) as Record<string, unknown>;
-      expect(body).toEqual({ status: "REVIEW" });
+    expect(source.source.data).toEqual({
+      kind: "task-card",
+      taskId: "t1",
+      status: "FIELD",
     });
   });
 
-  it("same-column drop fires NO PATCH request", async () => {
-    const stub = makeStub();
-    vi.stubGlobal("fetch", stub);
-
-    const qc = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    const { queryKeys } = await import("#/api/keys");
-    qc.setQueryData(queryKeys.board.all, BOARD_FIXTURE);
-
-    render(
-      <QueryClientProvider client={qc}>
-        <KanbanView
-          colLabel={FIXTURE_COL_LABEL}
-          columns={columns}
-          tasks={tasks}
-          cycles={cycles}
-          showOp={false}
-        />
-      </QueryClientProvider>,
-    );
-
-    // Drag t1 (FIELD) and drop it back onto its own FIELD column
-    const card = screen.getByTestId("task-card-t1");
-    const fieldCol = screen.getByTestId("kb-col-FIELD");
-
-    fireEvent.dragStart(card);
-    fireEvent.dragOver(fieldCol);
-    fireEvent.drop(fieldCol);
-
-    // Flush microtasks so any (incorrect) mutation would have fired
-    await Promise.resolve();
-    await Promise.resolve();
-
-    const patchCalls = stub.mock.calls.filter((args) => {
-      const opts = args[1] as RequestInit | undefined;
-      return opts?.method === "PATCH";
-    });
-    expect(patchCalls).toHaveLength(0);
-  });
-
-  it("dragEnd clears the drag state (card no longer has dragging style)", () => {
+  it("sets and resets card dragging feedback through the adapter lifecycle", () => {
     wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
@@ -874,14 +1010,156 @@ describe("KanbanView — drag-and-drop", () => {
       />,
     );
     const card = screen.getByTestId("task-card-t1");
-    fireEvent.dragStart(card);
-    // During drag the card should have reduced opacity
-    // (isDragging=true → style opacity:0.35)
+    const source = sourceFor(card);
+
+    dispatchDragStart(source);
     expect(card).toHaveStyle({ opacity: "0.35" });
 
-    fireEvent.dragEnd(card);
-    // After dragEnd, opacity should be gone
+    dispatchDragEnd(source);
     expect(card).not.toHaveStyle({ opacity: "0.35" });
+  });
+
+  it("sends one exact status PATCH when dropped in another column", async () => {
+    const { fetchStub: stub } = renderDndKanban();
+    const source = sourceFor(screen.getByTestId("task-card-t1"));
+    const reviewTarget = targetFor(screen.getByTestId("kb-col-REVIEW"));
+
+    dispatchDrop(source.source, reviewTarget, source.registration);
+
+    await waitFor(() => {
+      expect(patchCalls(stub)).toEqual([
+        [
+          "/api/vault/board/tasks/t1",
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "REVIEW" }),
+          },
+        ],
+      ]);
+    });
+  });
+
+  it("does not PATCH when dropped back in the current column", async () => {
+    const { fetchStub: stub } = renderDndKanban();
+    const source = sourceFor(screen.getByTestId("task-card-t1"));
+    const fieldTarget = targetFor(screen.getByTestId("kb-col-FIELD"));
+
+    dispatchDrop(source.source, fieldTarget, source.registration);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(patchCalls(stub)).toHaveLength(0);
+  });
+
+  it("highlights an entered target and clears it on leave and drop", () => {
+    renderDndKanban();
+    const source = sourceFor(screen.getByTestId("task-card-t1"));
+    const fieldColumn = screen.getByTestId("kb-col-FIELD");
+    const fieldTarget = targetFor(fieldColumn);
+
+    dispatchDragEnter(source.source, fieldTarget);
+    expect(fieldColumn).toHaveStyle({
+      background: "color-mix(in oklab, var(--accent) 7%, transparent)",
+    });
+
+    dispatchDragLeave(source.source, fieldTarget);
+    expect(fieldColumn).not.toHaveStyle({
+      background: "color-mix(in oklab, var(--accent) 7%, transparent)",
+    });
+
+    dispatchDragEnter(source.source, fieldTarget);
+    expect(fieldColumn).toHaveStyle({
+      background: "color-mix(in oklab, var(--accent) 7%, transparent)",
+    });
+
+    dispatchDrop(source.source, fieldTarget, source.registration);
+    expect(fieldColumn).not.toHaveStyle({
+      background: "color-mix(in oklab, var(--accent) 7%, transparent)",
+    });
+  });
+
+  it("rejects unrelated drag data and cannot mutate a task", async () => {
+    const { fetchStub: stub } = renderDndKanban();
+    const reviewTarget = targetFor(screen.getByTestId("kb-col-REVIEW"));
+    const unrelatedSource: ElementDragPayload = {
+      element: document.createElement("div"),
+      dragHandle: null,
+      data: { kind: "not-a-task-card", taskId: "t1", status: "FIELD" },
+    };
+
+    expect(canDrop(unrelatedSource, reviewTarget)).toBe(false);
+    dispatchDrop(unrelatedSource, reviewTarget);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(patchCalls(stub)).toHaveLength(0);
+  });
+
+  it("uses the current task status when stale drag data is dropped on the original column", async () => {
+    const { fetchStub, rerenderTasks } = renderDndKanban();
+    const source = sourceFor(screen.getByTestId("task-card-t1"));
+    dispatchDragStart(source);
+
+    rerenderTasks(
+      tasks.map((task) =>
+        task.id === "t1" ? { ...task, status: "REVIEW" } : task,
+      ),
+    );
+    const fieldTarget = targetFor(screen.getByTestId("kb-col-FIELD"));
+    dispatchDrop(source.source, fieldTarget);
+
+    await waitFor(() => {
+      expect(patchCalls(fetchStub)).toEqual([
+        [
+          "/api/vault/board/tasks/t1",
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ status: "FIELD" }),
+          },
+        ],
+      ]);
+    });
+  });
+
+  it("uses the current task status to make a stale-source drop a no-op", async () => {
+    const { fetchStub, rerenderTasks } = renderDndKanban();
+    const source = sourceFor(screen.getByTestId("task-card-t1"));
+    dispatchDragStart(source);
+
+    rerenderTasks(
+      tasks.map((task) =>
+        task.id === "t1" ? { ...task, status: "REVIEW" } : task,
+      ),
+    );
+    const reviewTarget = targetFor(screen.getByTestId("kb-col-REVIEW"));
+    dispatchDrop(source.source, reviewTarget);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(patchCalls(fetchStub)).toHaveLength(0);
+  });
+
+  it("rejects a drag source whose task was removed during the drag", async () => {
+    const { fetchStub, rerenderTasks } = renderDndKanban();
+    const source = sourceFor(screen.getByTestId("task-card-t1"));
+    dispatchDragStart(source);
+
+    rerenderTasks(tasks.filter((task) => task.id !== "t1"));
+    const reviewColumn = screen.getByTestId("kb-col-REVIEW");
+    const reviewTarget = targetFor(reviewColumn);
+
+    expect(canDrop(source.source, reviewTarget)).toBe(false);
+    expect(dispatchDragEnter(source.source, reviewTarget)).toBe(false);
+    expect(reviewColumn).not.toHaveStyle({
+      background: "color-mix(in oklab, var(--accent) 7%, transparent)",
+    });
+    expect(dispatchDrop(source.source, reviewTarget)).toBe(false);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(patchCalls(fetchStub)).toHaveLength(0);
   });
 });
 

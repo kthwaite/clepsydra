@@ -1,5 +1,20 @@
+import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
+import {
+  draggable,
+  dropTargetForElements,
+} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
+import {
+  attachClosestEdge,
+  extractClosestEdge,
+} from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import { ArrowDown, ArrowUp, GripVertical, Pencil, Trash2 } from "lucide-react";
-import { Fragment, type KeyboardEvent, useState } from "react";
+import {
+  Fragment,
+  type KeyboardEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
@@ -53,9 +68,11 @@ interface PropertyDefinitionEditorProps {
   renameError?: string;
   onChange(property: DraftProperty): void;
   onMove(from: number, to: number): void;
-  onDragStart(propertyId: string): void;
-  onDragEnd(): void;
-  onDrop(propertyId: string): void;
+  onReorder(
+    sourcePropertyId: string,
+    targetPropertyId: string,
+    edge: "top" | "bottom",
+  ): void;
   onHandleRef(propertyId: string, element: HTMLButtonElement | null): void;
   onRemove(property: DraftProperty): void;
   onRename(property: DraftProperty, key: string): void;
@@ -263,9 +280,7 @@ export function PropertyDefinitionEditor({
   renameError,
   onChange,
   onMove,
-  onDragStart,
-  onDrop,
-  onDragEnd,
+  onReorder,
   onHandleRef,
   onRemove,
   onRename,
@@ -276,6 +291,47 @@ export function PropertyDefinitionEditor({
   const [renameKey, setRenameKey] = useState("");
   const [editing, setEditing] = useState(false);
 
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const handleRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const element = rowRef.current;
+    const dragHandle = handleRef.current;
+    if (!element || !dragHandle) return;
+
+    return combine(
+      draggable({
+        element,
+        dragHandle,
+        getInitialData: () => ({
+          kind: "base-property",
+          propertyId: property.id,
+        }),
+      }),
+      dropTargetForElements({
+        element,
+        canDrop: ({ source }) =>
+          source.data.kind === "base-property" &&
+          typeof source.data.propertyId === "string",
+        getData: ({ input }) =>
+          attachClosestEdge(
+            { kind: "base-property", propertyId: property.id },
+            { element, input, allowedEdges: ["top", "bottom"] },
+          ),
+        onDrop: ({ source, self }) => {
+          const sourcePropertyId = source.data.propertyId;
+          const edge = extractClosestEdge(self.data);
+          if (
+            source.data.kind !== "base-property" ||
+            typeof sourcePropertyId !== "string" ||
+            (edge !== "top" && edge !== "bottom")
+          )
+            return;
+          onReorder(sourcePropertyId, property.id, edge);
+        },
+      }),
+    );
+  }, [onReorder, property.id]);
   function handleKeyboardMove(event: KeyboardEvent<HTMLButtonElement>) {
     if (!event.altKey) return;
     if (event.key === "ArrowUp" && index > 0) {
@@ -296,26 +352,22 @@ export function PropertyDefinitionEditor({
     <Fragment>
       <tr
         ref={(element) => {
+          rowRef.current = element;
           if (!renaming) registerFocus(`properties.${property.key}`, element);
         }}
         tabIndex={-1}
-        onDragOver={(event) => event.preventDefault()}
-        onDrop={(event) => {
-          event.preventDefault();
-          onDrop(property.id);
-        }}
         className="border-b border-border align-top outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
       >
         <td className="w-10 px-1 py-2 align-top sm:px-2">
           <button
-            ref={(element) => onHandleRef(property.id, element)}
+            ref={(element) => {
+              handleRef.current = element;
+              onHandleRef(property.id, element);
+            }}
             type="button"
             aria-label={`Reorder ${property.key}`}
             aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
             title={`Drag to reorder ${property.key}. Alt + Up or Down also reorders.`}
-            draggable
-            onDragStart={() => onDragStart(property.id)}
-            onDragEnd={onDragEnd}
             onKeyDown={handleKeyboardMove}
             className="inline-flex h-7 w-7 cursor-grab items-center justify-center border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 active:cursor-grabbing [&_svg]:h-4 [&_svg]:w-4"
           >
