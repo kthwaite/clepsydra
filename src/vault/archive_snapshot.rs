@@ -139,10 +139,7 @@ fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
         return None;
     }
     let start = cursor;
-    while cursor < bytes.len()
-        && !bytes[cursor].is_ascii_whitespace()
-        && bytes[cursor] != b'/'
-    {
+    while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
         cursor += 1;
     }
     (cursor > start).then_some((closing, &tag[start..cursor]))
@@ -157,8 +154,7 @@ enum InertHtmlContent {
 /// Classify elements whose text must not be scanned as nested markup.
 fn inert_html_content(name: &str) -> Option<InertHtmlContent> {
     if [
-        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes",
-        "noscript",
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript",
     ]
     .iter()
     .any(|candidate| name.eq_ignore_ascii_case(candidate))
@@ -185,9 +181,9 @@ fn raw_text_end(html: &str, start: usize, name: &str) -> Option<usize> {
         }
         name_start += 1;
         let name_end = name_start.checked_add(name.len())?;
-        let valid_boundary = bytes.get(name_end).is_none_or(|byte| {
-            matches!(byte, b'/' | b'>') || byte.is_ascii_whitespace()
-        });
+        let valid_boundary = bytes
+            .get(name_end)
+            .is_none_or(|byte| matches!(byte, b'/' | b'>') || byte.is_ascii_whitespace());
         if name_end <= bytes.len()
             && valid_boundary
             && html[name_start..name_end].eq_ignore_ascii_case(name)
@@ -214,16 +210,12 @@ fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
     if bytes.get(cursor) == Some(&b'/') {
         cursor += 1;
     }
-    while cursor < bytes.len()
-        && !bytes[cursor].is_ascii_whitespace()
-        && bytes[cursor] != b'/'
-    {
+    while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
         cursor += 1;
     }
 
     while cursor < bytes.len() {
-        while cursor < bytes.len()
-            && (bytes[cursor].is_ascii_whitespace() || bytes[cursor] == b'/')
+        while cursor < bytes.len() && (bytes[cursor].is_ascii_whitespace() || bytes[cursor] == b'/')
         {
             cursor += 1;
         }
@@ -433,9 +425,7 @@ pub fn rewrite_markdown_images(
 ) -> String {
     let mut replacements: Vec<(Range<usize>, &str)> = Vec::new();
 
-    for (event, source_range) in
-        Parser::new_ext(markdown, Options::all()).into_offset_iter()
-    {
+    for (event, source_range) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
         let Event::Start(Tag::Image { dest_url, .. }) = event else {
             continue;
         };
@@ -598,11 +588,7 @@ fn valid_image_suffix(bytes: &[u8], mut cursor: usize) -> bool {
     bytes.get(cursor) == Some(&b')') && cursor + 1 == bytes.len()
 }
 
-fn lookup<'a>(
-    map: &'a BTreeMap<String, String>,
-    url: &str,
-    base_url: &str,
-) -> Option<&'a str> {
+fn lookup<'a>(map: &'a BTreeMap<String, String>, url: &str, base_url: &str) -> Option<&'a str> {
     if let Some(hash) = map.get(url) {
         return Some(hash);
     }
@@ -792,8 +778,7 @@ mod tests {
 
     #[test]
     fn scans_double_quoted_original_url_with_apostrophe_and_greater_than() {
-        let html =
-            r#"<img data-sf-original-src="https://cdn.example/a'b>c.png?x=1&amp;y=2" src="cas:sha256:aa">"#;
+        let html = r#"<img data-sf-original-src="https://cdn.example/a'b>c.png?x=1&amp;y=2" src="cas:sha256:aa">"#;
 
         let map = original_url_map(html, BASE);
 
@@ -864,8 +849,7 @@ mod tests {
 
     #[test]
     fn ignores_resource_like_markup_inside_title_text() {
-        let html =
-            r#"<title><img data-sf-original-src="https://cdn.example/title>b.png" src="cas:sha256:title"></TITLE>"#;
+        let html = r#"<title><img data-sf-original-src="https://cdn.example/title>b.png" src="cas:sha256:title"></TITLE>"#;
 
         let map = original_url_map(html, BASE);
 
