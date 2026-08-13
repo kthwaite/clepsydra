@@ -13,6 +13,8 @@
 
 export const RELAY_PORT_NAME = "singlefile-relay";
 const RELAY_CHUNK_BYTES = 4 * 1024 * 1024;
+const MAX_RELAY_CHUNK_BASE64_LENGTH = 4 * Math.ceil(RELAY_CHUNK_BYTES / 3);
+const MAX_RELAY_RESOURCE_BYTES = 0xffff_ffff;
 
 export interface RelayFetchRequest {
 	url: string;
@@ -101,18 +103,98 @@ function encodeBase64(bytes: Uint8Array): string {
 }
 
 function errorMessage(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
+	const message = error instanceof Error ? error.message : String(error);
+	return message || "Unknown relay fetch error";
 }
 
-function isRelayMessage(message: unknown): message is RelayPortMessage {
-	if (typeof message !== "object" || message === null || !("type" in message)) {
-		return false;
-	}
+function isStringRecord(value: unknown): value is Record<string, string> {
 	return (
-		message.type === "metadata" ||
-		message.type === "chunk" ||
-		message.type === "pull" ||
-		message.type === "abort"
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		Object.values(value).every((entry) => typeof entry === "string")
+	);
+}
+
+function isValidByteLength(value: unknown): value is number {
+	return (
+		typeof value === "number" &&
+		Number.isSafeInteger(value) &&
+		value >= 0 &&
+		value <= MAX_RELAY_RESOURCE_BYTES
+	);
+}
+
+function isRelayFetchRequest(message: unknown): message is RelayFetchRequest {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		!Array.isArray(message) &&
+		"url" in message &&
+		typeof message.url === "string" &&
+		message.url.trim().length > 0 &&
+		(!("headers" in message) ||
+			message.headers === undefined ||
+			isStringRecord(message.headers))
+	);
+}
+
+function isRelayMetadata(message: unknown): message is RelayMetadata {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		!Array.isArray(message) &&
+		"type" in message &&
+		message.type === "metadata" &&
+		"status" in message &&
+		typeof message.status === "number" &&
+		Number.isInteger(message.status) &&
+		message.status >= 0 &&
+		message.status <= 599 &&
+		"url" in message &&
+		typeof message.url === "string" &&
+		message.url.trim().length > 0 &&
+		"headers" in message &&
+		isStringRecord(message.headers) &&
+		"byteLength" in message &&
+		isValidByteLength(message.byteLength)
+	);
+}
+
+function isRelayChunk(message: unknown): message is RelayChunk {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		!Array.isArray(message) &&
+		"type" in message &&
+		message.type === "chunk" &&
+		"base64" in message &&
+		typeof message.base64 === "string" &&
+		message.base64.length > 0 &&
+		message.base64.length <= MAX_RELAY_CHUNK_BASE64_LENGTH
+	);
+}
+
+function isRelayPull(message: unknown): message is RelayPull {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		!Array.isArray(message) &&
+		"type" in message &&
+		message.type === "pull"
+	);
+}
+
+function isRelayAbort(message: unknown): message is RelayAbort {
+	return (
+		typeof message === "object" &&
+		message !== null &&
+		!Array.isArray(message) &&
+		"type" in message &&
+		message.type === "abort" &&
+		"error" in message &&
+		typeof message.error === "string" &&
+		message.error.length > 0
 	);
 }
 
@@ -190,35 +272,68 @@ export function createRelayFetch(
 			};
 
 			const onMessage = (message: unknown): void => {
-				if (settled || !isRelayMessage(message)) return;
+				if (settled) return;
 
-				if (message.type === "abort") {
-					fail(new Error(message.error), false);
-					return;
-				}
+				try {
+					if (isRelayAbort(message)) {
+						fail(new Error(message.error), false);
+						return;
+					}
 
-				if (message.type === "metadata") {
-					if (
-						metadata ||
-						!Number.isSafeInteger(message.byteLength) ||
-						message.byteLength < 0
-					) {
+					const type =
+						typeof message === "object" && message !== null && "type" in message
+							? message.type
+							: undefined;
+					if (type === "abort") {
+						fail(new Error("Relay fetch received an invalid abort"), true);
+						return;
+					}
+
+					if (!metadata) {
+						if (!isRelayMetadata(message)) {
+							const reason =
+								type === "metadata"
+									? "Relay fetch received invalid metadata"
+									: type === "chunk"
+										? "Relay fetch received a chunk before metadata"
+										: "Relay fetch received an unexpected message";
+							fail(new Error(reason), true);
+							return;
+						}
+						metadata = message;
+						body = new Uint8Array(message.byteLength);
+						pull();
+						return;
+					}
+
+					if (type === "metadata") {
 						fail(new Error("Relay fetch received invalid metadata"), true);
 						return;
 					}
-					metadata = message;
-					body = new Uint8Array(message.byteLength);
-					pull();
-					return;
-				}
+					if (!isRelayChunk(message)) {
+						fail(
+							new Error(
+								type === "chunk"
+									? "Relay fetch received an invalid chunk"
+									: "Relay fetch received an unexpected message",
+							),
+							true,
+						);
+						return;
+					}
 
-				if (message.type !== "chunk" || !metadata || !body) {
-					fail(new Error("Relay fetch received an unexpected message"), true);
-					return;
-				}
-
-				try {
-					const chunk = decodeBase64(message.base64);
+					let chunk: Uint8Array;
+					try {
+						chunk = decodeBase64(message.base64);
+					} catch (error) {
+						fail(
+							new Error(
+								`Relay fetch could not decode a chunk: ${errorMessage(error)}`,
+							),
+							true,
+						);
+						return;
+					}
 					if (
 						chunk.byteLength > RELAY_CHUNK_BYTES ||
 						receivedBytes + chunk.byteLength > metadata.byteLength
@@ -226,13 +341,13 @@ export function createRelayFetch(
 						fail(new Error("Relay fetch received an invalid chunk"), true);
 						return;
 					}
-					body.set(chunk, receivedBytes);
+					body?.set(chunk, receivedBytes);
 					receivedBytes += chunk.byteLength;
 					pull();
 				} catch (error) {
 					fail(
 						new Error(
-							`Relay fetch could not decode a chunk: ${errorMessage(error)}`,
+							`Relay fetch could not process a port message: ${errorMessage(error)}`,
 						),
 						true,
 					);
@@ -337,19 +452,30 @@ export function handleRelayFetchPort(
 			});
 			const buffer = await response.arrayBuffer();
 			if (!active) return;
+			if (!isValidByteLength(buffer.byteLength)) {
+				reportError(new Error("Relay fetch response is too large"));
+				return;
+			}
 
 			bytes = new Uint8Array(buffer);
 			const headers: Record<string, string> = {};
 			response.headers.forEach((value, key) => {
 				headers[key.toLowerCase()] = value;
 			});
-			port.postMessage({
+			const metadata: RelayMetadata = {
 				type: "metadata",
 				status: response.status,
 				url: response.url,
 				headers,
 				byteLength: bytes.byteLength,
-			} satisfies RelayMetadata);
+			};
+			if (!isRelayMetadata(metadata)) {
+				reportError(
+					new Error("Relay fetch received invalid response metadata"),
+				);
+				return;
+			}
+			port.postMessage(metadata);
 		} catch (error) {
 			reportError(error);
 		}
@@ -365,10 +491,10 @@ export function handleRelayFetchPort(
 			return;
 		}
 
-		const end = Math.min(offset + RELAY_CHUNK_BYTES, bytes.byteLength);
-		const base64 = encodeBase64(bytes.subarray(offset, end));
-		offset = end;
 		try {
+			const end = Math.min(offset + RELAY_CHUNK_BYTES, bytes.byteLength);
+			const base64 = encodeBase64(bytes.subarray(offset, end));
+			offset = end;
 			port.postMessage({ type: "chunk", base64 } satisfies RelayChunk);
 		} catch (error) {
 			reportError(error);
@@ -377,34 +503,44 @@ export function handleRelayFetchPort(
 
 	const onMessage = (message: unknown): void => {
 		if (!active) return;
-		if (!requestReceived) {
-			if (
-				typeof message !== "object" ||
-				message === null ||
-				!("url" in message) ||
-				typeof message.url !== "string"
-			) {
-				reportError(new Error("Relay fetch received an invalid request"));
+		try {
+			if (!requestReceived) {
+				if (!isRelayFetchRequest(message)) {
+					reportError(new Error("Relay fetch received an invalid request"));
+					return;
+				}
+				requestReceived = true;
+				void fetchResource(message);
 				return;
 			}
-			requestReceived = true;
-			void fetchResource(message as RelayFetchRequest);
-			return;
-		}
 
-		if (!isRelayMessage(message)) {
-			reportError(new Error("Relay fetch received an unexpected message"));
-			return;
+			if (isRelayAbort(message)) {
+				disconnect();
+				return;
+			}
+			if (
+				typeof message === "object" &&
+				message !== null &&
+				"type" in message &&
+				message.type === "abort"
+			) {
+				reportError(new Error("Relay fetch received an invalid abort"));
+				return;
+			}
+			if (isRelayPull(message)) {
+				sendNextChunk();
+				return;
+			}
+			reportError(
+				new Error("Relay fetch received an unexpected worker message"),
+			);
+		} catch (error) {
+			reportError(
+				new Error(
+					`Relay fetch could not process a content message: ${errorMessage(error)}`,
+				),
+			);
 		}
-		if (message.type === "abort") {
-			disconnect();
-			return;
-		}
-		if (message.type === "pull") {
-			sendNextChunk();
-			return;
-		}
-		reportError(new Error("Relay fetch received an unexpected worker message"));
 	};
 
 	const onDisconnect = (): void => {

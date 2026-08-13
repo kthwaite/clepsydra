@@ -119,6 +119,20 @@ function isMessageType(
 	);
 }
 
+async function expectPortsReleased(
+	content: FakePort,
+	worker: FakePort,
+): Promise<void> {
+	await vi.waitFor(() => {
+		expect(content.disconnected).toBe(true);
+		expect(worker.disconnected).toBe(true);
+		expect(content.onMessage.listenerCount).toBe(0);
+		expect(content.onDisconnect.listenerCount).toBe(0);
+		expect(worker.onMessage.listenerCount).toBe(0);
+		expect(worker.onDisconnect.listenerCount).toBe(0);
+	});
+}
+
 describe("createRelayFetch", () => {
 	beforeEach(() => {
 		vi.unstubAllGlobals();
@@ -268,6 +282,276 @@ describe("createRelayFetch", () => {
 			new Uint8Array([1, 2]),
 		);
 		expect(connect).toHaveBeenCalledOnce();
+	});
+
+	it("preserves an empty non-2xx response without emitting a chunk", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+		const { connect, content, worker } = relayFixture(
+			vi.fn().mockResolvedValue(
+				response(new Uint8Array(), {
+					status: 404,
+					url: "https://edge.example.com/missing.png",
+					headers: { "Content-Type": "image/png" },
+				}),
+			),
+		);
+
+		const result = await createRelayFetch(connect)(
+			"https://cdn.example.com/missing.png",
+		);
+
+		expect(result.status).toBe(404);
+		expect(result.url).toBe("https://edge.example.com/missing.png");
+		expect(new Uint8Array(await result.arrayBuffer())).toEqual(
+			new Uint8Array(),
+		);
+		expect(
+			worker.sent.filter((message) => isMessageType(message, "chunk")),
+		).toEqual([]);
+		expect(
+			content.sent.filter((message) => isMessageType(message, "pull")),
+		).toHaveLength(1);
+		await expectPortsReleased(content, worker);
+	});
+
+	it.each([
+		[
+			"status",
+			{
+				type: "metadata",
+				status: 600,
+				url: "https://edge.example.com/a.png",
+				headers: {},
+				byteLength: 0,
+			},
+		],
+		[
+			"final URL",
+			{
+				type: "metadata",
+				status: 200,
+				url: "",
+				headers: {},
+				byteLength: 0,
+			},
+		],
+		[
+			"headers",
+			{
+				type: "metadata",
+				status: 200,
+				url: "https://edge.example.com/a.png",
+				headers: { "content-type": 7 },
+				byteLength: 0,
+			},
+		],
+		[
+			"byte length",
+			{
+				type: "metadata",
+				status: 200,
+				url: "https://edge.example.com/a.png",
+				headers: {},
+				byteLength: 0x1_0000_0000,
+			},
+		],
+	])("rejects invalid relay metadata: %s", async (_field, invalidMetadata) => {
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+		const { content, worker } = pairedPorts();
+		const result = createRelayFetch(() => content)(
+			"https://cdn.example.com/a.png",
+		);
+		await vi.waitFor(() => expect(content.sent).toHaveLength(1));
+
+		worker.postMessage(invalidMetadata);
+		queueMicrotask(() => worker.disconnect());
+
+		await expect(result).rejects.toThrow("invalid metadata");
+		await expectPortsReleased(content, worker);
+	});
+
+	it.each([
+		["unknown", { type: "mystery" }, "unexpected message"],
+		["chunk base64", { type: "chunk", base64: 7 }, "invalid chunk"],
+		["abort error", { type: "abort", error: 7 }, "invalid abort"],
+	])(
+		"rejects an invalid worker frame: %s",
+		async (_frame, invalidFrame, expectedError) => {
+			vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+			const { content, worker } = pairedPorts();
+			const result = createRelayFetch(() => content)(
+				"https://cdn.example.com/a.png",
+			);
+			await vi.waitFor(() => expect(content.sent).toHaveLength(1));
+
+			if (isMessageType(invalidFrame, "chunk")) {
+				worker.postMessage({
+					type: "metadata",
+					status: 200,
+					url: "https://edge.example.com/a.png",
+					headers: {},
+					byteLength: 1,
+				});
+				await vi.waitFor(() =>
+					expect(
+						content.sent.some((message) => isMessageType(message, "pull")),
+					).toBe(true),
+				);
+			}
+			worker.postMessage(invalidFrame);
+			queueMicrotask(() => worker.disconnect());
+
+			await expect(result).rejects.toThrow(expectedError);
+			await expectPortsReleased(content, worker);
+		},
+	);
+
+	it("routes malformed base64 decoding through protocol cleanup", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+		const { content, worker } = pairedPorts();
+		const result = createRelayFetch(() => content)(
+			"https://cdn.example.com/a.png",
+		);
+		await vi.waitFor(() => expect(content.sent).toHaveLength(1));
+		worker.postMessage({
+			type: "metadata",
+			status: 200,
+			url: "https://edge.example.com/a.png",
+			headers: {},
+			byteLength: 1,
+		});
+		await vi.waitFor(() =>
+			expect(
+				content.sent.some((message) => isMessageType(message, "pull")),
+			).toBe(true),
+		);
+
+		worker.postMessage({ type: "chunk", base64: "not base64!" });
+
+		await expect(result).rejects.toThrow("could not decode a chunk");
+		await expectPortsReleased(content, worker);
+	});
+
+	it.each([
+		["URL", { url: "", headers: {} }],
+		[
+			"headers",
+			{ url: "https://cdn.example.com/a.png", headers: { Accept: 7 } },
+		],
+	])("rejects an invalid relay request: %s", async (_field, request) => {
+		const { content, worker } = pairedPorts();
+		const fetchImpl = vi.fn().mockRejectedValue(new Error("must not fetch"));
+		handleRelayFetchPort(worker, fetchImpl);
+		const onMessage = (message: unknown): void => {
+			if (isMessageType(message, "abort")) {
+				content.onMessage.removeListener(onMessage);
+				content.disconnect();
+			}
+		};
+		content.onMessage.addListener(onMessage);
+
+		content.postMessage(request);
+
+		await vi.waitFor(() => {
+			expect(worker.sent).toContainEqual({
+				type: "abort",
+				error: "Relay fetch received an invalid request",
+			});
+		});
+		expect(fetchImpl).not.toHaveBeenCalled();
+		await expectPortsReleased(content, worker);
+	});
+
+	it("rejects a pull received before worker metadata is ready", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+		let workerSignal: AbortSignal | undefined;
+		const fetchImpl = vi.fn(
+			(_url: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					workerSignal = init?.signal ?? undefined;
+					workerSignal?.addEventListener(
+						"abort",
+						() => reject(new DOMException("Aborted", "AbortError")),
+						{ once: true },
+					);
+				}),
+		);
+		const { connect, content, worker } = relayFixture(fetchImpl);
+		const result = createRelayFetch(connect)("https://cdn.example.com/a.png");
+		await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+
+		content.postMessage({ type: "pull" });
+
+		await expect(result).rejects.toThrow("pull before metadata");
+		expect(workerSignal?.aborted).toBe(true);
+		await expectPortsReleased(content, worker);
+	});
+
+	it("aborts a deferred worker fetch when the port disconnects", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+		let abortCallbackCalled = false;
+		const fetchImpl = vi.fn(
+			(_url: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>((_resolve, reject) => {
+					init?.signal?.addEventListener(
+						"abort",
+						() => {
+							abortCallbackCalled = true;
+							reject(new DOMException("Aborted", "AbortError"));
+						},
+						{ once: true },
+					);
+				}),
+		);
+		const { connect, content, worker } = relayFixture(fetchImpl);
+		const result = createRelayFetch(connect)("https://cdn.example.com/a.png");
+		await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+
+		content.disconnect();
+
+		await expect(result).rejects.toThrow(
+			"Relay fetch disconnected before completion",
+		);
+		expect(abortCallbackCalled).toBe(true);
+		await expectPortsReleased(content, worker);
+	});
+
+	it("aborts a deferred response body read when the port disconnects", async () => {
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+		let bodyReadStarted = false;
+		let abortCallbackCalled = false;
+		const fetchImpl = vi.fn(
+			async (_url: RequestInfo | URL, init?: RequestInit) =>
+				({
+					status: 200,
+					url: "https://edge.example.com/a.png",
+					headers: new Headers(),
+					arrayBuffer: () => {
+						bodyReadStarted = true;
+						return new Promise<ArrayBuffer>((_resolve, reject) => {
+							init?.signal?.addEventListener(
+								"abort",
+								() => {
+									abortCallbackCalled = true;
+									reject(new DOMException("Aborted", "AbortError"));
+								},
+								{ once: true },
+							);
+						});
+					},
+				}) as Response,
+		);
+		const { connect, content, worker } = relayFixture(fetchImpl);
+		const result = createRelayFetch(connect)("https://cdn.example.com/a.png");
+		await vi.waitFor(() => expect(bodyReadStarted).toBe(true));
+
+		content.disconnect();
+
+		await expect(result).rejects.toThrow(
+			"Relay fetch disconnected before completion",
+		);
+		expect(abortCallbackCalled).toBe(true);
+		await expectPortsReleased(content, worker);
 	});
 
 	it("rejects a premature disconnect and aborts and releases the worker transfer", async () => {
