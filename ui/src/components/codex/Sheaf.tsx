@@ -446,8 +446,11 @@ function FolioTab({
     quire ? `inset 0 2px 0 0 ${quireColorVar(quire.color)}` : null,
     active ? "inset 0 -2px 0 0 var(--accent)" : null,
     dropEdge === "left" ? "inset 2px 0 0 0 var(--accent)" : null,
-    dropEdge === "right" ? "inset -2px 0 0 0 var(--accent)" : null,
   ].filter(Boolean);
+  const closeButtonStyle =
+    dropEdge === "right"
+      ? { boxShadow: "inset -2px 0 0 0 var(--accent)" }
+      : undefined;
 
   return (
     <div
@@ -486,6 +489,7 @@ function FolioTab({
         onClick={onClose}
         aria-label="close folio"
         className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
+        style={closeButtonStyle}
       >
         <X size={11} />
       </button>
