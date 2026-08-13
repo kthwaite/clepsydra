@@ -11,6 +11,8 @@
  * capture happens in the browser at all.
  */
 
+import { SNAPSHOT_NETWORK_TIMEOUT_MS } from "#/lib/singlefile";
+
 export const RELAY_PORT_NAME = "singlefile-relay";
 const RELAY_CHUNK_BYTES = 4 * 1024 * 1024;
 const MAX_RELAY_CHUNK_BASE64_LENGTH = 4 * Math.ceil(RELAY_CHUNK_BYTES / 3);
@@ -409,10 +411,15 @@ export function handleRelayFetchPort(
 	let offset = 0;
 	let requestReceived = false;
 	let active = true;
+	let timeout: number | NodeJS.Timeout | undefined;
 
 	const cleanup = (): void => {
 		if (!active) return;
 		active = false;
+		if (timeout !== undefined) {
+			clearTimeout(timeout);
+			timeout = undefined;
+		}
 		controller.abort();
 		bytes = undefined;
 		port.onMessage.removeListener(onMessage);
@@ -510,6 +517,13 @@ export function handleRelayFetchPort(
 					return;
 				}
 				requestReceived = true;
+				timeout = setTimeout(() => {
+					reportError(
+						new Error(
+							`Relay fetch timed out after ${SNAPSHOT_NETWORK_TIMEOUT_MS} ms`,
+						),
+					);
+				}, SNAPSHOT_NETWORK_TIMEOUT_MS);
 				void fetchResource(message);
 				return;
 			}

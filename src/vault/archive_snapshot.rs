@@ -424,31 +424,46 @@ fn match_entity(s: &str) -> Option<(char, usize)> {
 /// An image whose URL is not in the map is left exactly as it was. Dropping it
 /// would be a silent lie about what the archive holds; leaving it is at least an
 /// honest reference to the live web.
+
 pub fn rewrite_markdown_images(
     markdown: &str,
     map: &BTreeMap<String, String>,
     base_url: &str,
 ) -> String {
-    let mut replacements: Vec<(Range<usize>, &str)> = Vec::new();
-
-    for (event, source_range) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
+    let mut candidates = Vec::new();
+    for (event, source) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
         let Event::Start(Tag::Image { dest_url, .. }) = event else {
-            continue;
-        };
-        let Some(source) = markdown.get(source_range.clone()) else {
-            continue;
-        };
-        let Some(destination) = image_destination_range(source) else {
             continue;
         };
         let Some(hash) = lookup(map, dest_url.as_ref(), base_url) else {
             continue;
         };
-        let destination =
-            source_range.start + destination.start..source_range.start + destination.end;
-        replacements.push((destination, hash));
+        candidates.push(ImageCandidate {
+            source,
+            label_end: None,
+            hash,
+        });
     }
 
+    if candidates.is_empty() {
+        return markdown.to_string();
+    }
+    candidates.sort_unstable_by_key(|candidate| (candidate.source.start, candidate.source.end));
+    find_image_label_ends(markdown, &mut candidates);
+
+    let mut replacements: Vec<(Range<usize>, &str)> = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let source = markdown.get(candidate.source.clone())?;
+            let label_end = candidate.label_end?.checked_sub(candidate.source.start)?;
+            let destination = image_destination_after_label(source, label_end + 1)?;
+            Some((
+                candidate.source.start + destination.start
+                    ..candidate.source.start + destination.end,
+                candidate.hash,
+            ))
+        })
+        .collect();
     replacements.sort_unstable_by_key(|(destination, _)| (destination.start, destination.end));
     let mut previous_end = 0;
     replacements.retain(|(destination, _)| {
@@ -473,38 +488,99 @@ pub fn rewrite_markdown_images(
     output.push_str(&markdown[copied_through..]);
     output
 }
+struct ImageCandidate<'a> {
+    source: Range<usize>,
+    label_end: Option<usize>,
+    hash: &'a str,
+}
 
-/// Locate an inline image destination within the parser-provided source range.
-fn image_destination_range(source: &str) -> Option<Range<usize>> {
-    let bytes = source.as_bytes();
-    if !bytes.starts_with(b"![") {
-        return None;
-    }
+#[cfg(test)]
+thread_local! {
+    static DESTINATION_SCAN_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
 
-    let mut cursor = 2;
-    let mut brackets = 1usize;
-    while cursor < bytes.len() {
-        match bytes[cursor] {
-            b'\\' => cursor = (cursor + 2).min(bytes.len()),
-            b'[' => {
-                brackets += 1;
-                cursor += 1;
-            }
-            b']' => {
-                brackets -= 1;
-                cursor += 1;
-                if brackets == 0 {
-                    break;
-                }
-            }
-            _ => cursor += 1,
+#[cfg(test)]
+fn record_destination_scan(bytes: usize) {
+    DESTINATION_SCAN_BYTES.with(|count| count.set(count.get().saturating_add(bytes)));
+}
+
+#[cfg(test)]
+fn reset_destination_scan_bytes() {
+    DESTINATION_SCAN_BYTES.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn destination_scan_bytes() -> usize {
+    DESTINATION_SCAN_BYTES.with(std::cell::Cell::get)
+}
+
+/// Match each image's closing label bracket in one pass over the Markdown.
+///
+/// Parser source ranges for nested images all end at the outermost image. If
+/// each candidate searched that complete range independently, adversarially
+/// nested labels would be quadratic. A stack makes every byte participate in
+/// at most one label scan.
+fn find_image_label_ends(markdown: &str, candidates: &mut [ImageCandidate<'_>]) {
+    let bytes = markdown.as_bytes();
+    let mut next_candidate = 0;
+    let mut candidate_stack: Vec<(usize, usize)> = Vec::new();
+    let mut bracket_depth = 0usize;
+    let mut escaped = false;
+
+    for (cursor, byte) in bytes.iter().copied().enumerate() {
+        #[cfg(test)]
+        record_destination_scan(1);
+
+        if escaped {
+            escaped = false;
+            continue;
         }
+        if byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+
+        if byte == b'[' {
+            bracket_depth = bracket_depth.saturating_add(1);
+            while candidates
+                .get(next_candidate)
+                .is_some_and(|candidate| candidate.source.start + 1 == cursor)
+            {
+                candidate_stack.push((bracket_depth, next_candidate));
+                next_candidate += 1;
+            }
+            continue;
+        }
+        if byte != b']' {
+            continue;
+        }
+
+        if candidate_stack
+            .last()
+            .is_some_and(|(depth, _)| *depth == bracket_depth)
+        {
+            let (_, candidate_index) = candidate_stack
+                .pop()
+                .expect("last candidate was checked above");
+            let candidate = &mut candidates[candidate_index];
+            if cursor < candidate.source.end {
+                candidate.label_end = Some(cursor);
+            }
+        }
+        bracket_depth = bracket_depth.saturating_sub(1);
     }
-    if brackets != 0 || bytes.get(cursor) != Some(&b'(') {
+}
+
+/// Locate an inline image destination after a label whose closing bracket is known.
+fn image_destination_after_label(source: &str, mut cursor: usize) -> Option<Range<usize>> {
+    let bytes = source.as_bytes();
+    if bytes.get(cursor) != Some(&b'(') {
         return None;
     }
     cursor += 1;
     while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        #[cfg(test)]
+        record_destination_scan(1);
         cursor += 1;
     }
 
@@ -512,6 +588,8 @@ fn image_destination_range(source: &str) -> Option<Range<usize>> {
         let destination_start = cursor + 1;
         cursor += 1;
         while cursor < bytes.len() {
+            #[cfg(test)]
+            record_destination_scan(1);
             match bytes[cursor] {
                 b'\\' => cursor = (cursor + 2).min(bytes.len()),
                 b'>' => {
@@ -527,6 +605,8 @@ fn image_destination_range(source: &str) -> Option<Range<usize>> {
     let destination_start = cursor;
     let mut parentheses = 0usize;
     while cursor < bytes.len() {
+        #[cfg(test)]
+        record_destination_scan(1);
         match bytes[cursor] {
             b'\\' => cursor = (cursor + 2).min(bytes.len()),
             b'(' => {
@@ -553,6 +633,8 @@ fn image_destination_range(source: &str) -> Option<Range<usize>> {
 /// Validate whitespace, an optional title, and the inline image's closing `)`.
 fn valid_image_suffix(bytes: &[u8], mut cursor: usize) -> bool {
     while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        #[cfg(test)]
+        record_destination_scan(1);
         cursor += 1;
     }
     if bytes.get(cursor) == Some(&b')') {
@@ -565,6 +647,8 @@ fn valid_image_suffix(bytes: &[u8], mut cursor: usize) -> bool {
     cursor += 1;
     let mut nested = usize::from(delimiter == b'(');
     while cursor < bytes.len() {
+        #[cfg(test)]
+        record_destination_scan(1);
         match bytes[cursor] {
             b'\\' => cursor = (cursor + 2).min(bytes.len()),
             b'(' if delimiter == b'(' => {
@@ -589,6 +673,8 @@ fn valid_image_suffix(bytes: &[u8], mut cursor: usize) -> bool {
         return false;
     }
     while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        #[cfg(test)]
+        record_destination_scan(1);
         cursor += 1;
     }
     bytes.get(cursor) == Some(&b')') && cursor + 1 == bytes.len()
@@ -1022,6 +1108,34 @@ mod tests {
                 "before ![outer ![inner](cas:sha256:inner \"Inner\") tail]",
                 "(cas:sha256:outer \"Outer\") after"
             )
+        );
+    }
+
+    #[test]
+    fn nested_image_destination_scanning_is_linearly_bounded() {
+        const DEPTH: usize = 128;
+        const URL: &str = "https://cdn.example/deep.png";
+        let mut markdown = String::new();
+        for _ in 0..DEPTH {
+            markdown.push_str("![");
+        }
+        markdown.push_str("leaf");
+        for _ in 0..DEPTH {
+            markdown.push_str("](");
+            markdown.push_str(URL);
+            markdown.push(')');
+        }
+        let map = one_entry(URL, "sha256:deep");
+
+        reset_destination_scan_bytes();
+        let out = rewrite_markdown_images(&markdown, &map, BASE);
+        let scanned = destination_scan_bytes();
+
+        assert_eq!(out, markdown.replace(URL, "cas:sha256:deep"));
+        assert!(
+            scanned <= markdown.len().saturating_mul(2),
+            "destination discovery scanned {scanned} bytes for {} bytes of Markdown",
+            markdown.len()
         );
     }
 

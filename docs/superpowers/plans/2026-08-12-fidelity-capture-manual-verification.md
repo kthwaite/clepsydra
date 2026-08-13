@@ -65,7 +65,7 @@ Note separately: SingleFile inlines SVG as `data:image/svg+xml,<raw>` with no `;
 
 Capture something enormous, or lower `archive.max_blob_size_mb` in the scratch vault's config to force it.
 
-You should get a **400 naming the limit**, not a bare 413. That distinction is the whole point of deriving the HTTP body limit as `max_request_size_mb * 4 / 3`; a bare 413 means the derivation regressed.
+You should get a **400 naming the limit**, not a bare 413. That distinction is the whole point of deriving the HTTP body limit as `2 × decoded budget + 1 MiB`, with saturating arithmetic; a bare 413 means the derivation regressed.
 
 ### 7. Authenticated capture
 

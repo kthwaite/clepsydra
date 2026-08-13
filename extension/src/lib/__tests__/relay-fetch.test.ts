@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
 	type RelayPort,
@@ -136,6 +136,10 @@ async function expectPortsReleased(
 describe("createRelayFetch", () => {
 	beforeEach(() => {
 		vi.unstubAllGlobals();
+	});
+
+	afterEach(() => {
+		vi.useRealTimers();
 	});
 
 	it("uses the page fetch first with its existing options", async () => {
@@ -552,6 +556,45 @@ describe("createRelayFetch", () => {
 		);
 		expect(abortCallbackCalled).toBe(true);
 		await expectPortsReleased(content, worker);
+	});
+
+	it("times out a never-settling worker fetch and releases both port peers", async () => {
+		vi.useFakeTimers();
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("CORS")));
+		let workerSignal: AbortSignal | undefined;
+		const fetchImpl = vi.fn(
+			(_url: RequestInfo | URL, init?: RequestInit) =>
+				new Promise<Response>(() => {
+					workerSignal = init?.signal ?? undefined;
+				}),
+		);
+		const { connect, content, worker } = relayFixture(fetchImpl);
+
+		const result = createRelayFetch(connect)("https://cdn.example.com/a.png");
+		const timedOut = expect(result).rejects.toThrow(
+			"Relay fetch timed out after 15000 ms",
+		);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(fetchImpl).toHaveBeenCalledOnce();
+		expect(workerSignal?.aborted).toBe(false);
+
+		await vi.advanceTimersByTimeAsync(14_999);
+		expect(workerSignal?.aborted).toBe(false);
+		await vi.advanceTimersByTimeAsync(1);
+
+		await timedOut;
+		expect(workerSignal?.aborted).toBe(true);
+		expect(worker.sent).toContainEqual({
+			type: "abort",
+			error: "Relay fetch timed out after 15000 ms",
+		});
+		expect(content.disconnected).toBe(true);
+		expect(worker.disconnected).toBe(true);
+		expect(content.onMessage.listenerCount).toBe(0);
+		expect(vi.getTimerCount()).toBe(0);
+		expect(content.onDisconnect.listenerCount).toBe(0);
+		expect(worker.onMessage.listenerCount).toBe(0);
+		expect(worker.onDisconnect.listenerCount).toBe(0);
 	});
 
 	it("rejects a premature disconnect and aborts and releases the worker transfer", async () => {

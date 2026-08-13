@@ -5,6 +5,8 @@
  * carries the reason it is set — because the failure mode of getting one wrong
  * is a snapshot that renders blank, not a crash.
  */
+
+export const SNAPSHOT_NETWORK_TIMEOUT_MS = 15_000;
 export function snapshotOptions(input: {
 	maxResourceSizeMb: number;
 }): Record<string, unknown> {
@@ -56,7 +58,7 @@ export function snapshotOptions(input: {
 		// SingleFile disables its network timeout by default. The per-request
 		// bound that `fetchRemoteImages` used to carry has to live somewhere, or
 		// one hung CDN stalls the whole capture indefinitely.
-		networkTimeout: 15_000,
+		networkTimeout: SNAPSHOT_NETWORK_TIMEOUT_MS,
 
 		// Declined at capture time rather than producing a payload the server
 		// will reject. Mirrors the server's archive.max_blob_size_mb.
