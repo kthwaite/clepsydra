@@ -349,6 +349,31 @@ describe("Gazetteer controller", () => {
     expect(onSelectedTagsChange).toHaveBeenCalledWith(["research"]);
   });
 
+  it("layers tag suggestions above the sticky Gazetteer header", async () => {
+    const user = userEvent.setup();
+    layoutState.mobile = false;
+    render(createElement(Gazetteer));
+
+    await user.type(
+      screen.getByRole("combobox", { name: "Filter by tags" }),
+      "res",
+    );
+
+    const listbox = screen.getByRole("listbox", {
+      name: "Tag suggestions",
+    });
+    const stickyHeader = screen.getByRole("table").querySelector("thead");
+    const listboxLayer = [...listbox.classList]
+      .find((className) => /^z-\d+$/.test(className))
+      ?.slice(2);
+    const stickyHeaderLayer = [...(stickyHeader?.classList ?? [])]
+      .find((className) => /^z-\d+$/.test(className))
+      ?.slice(2);
+
+    expect(stickyHeader).toHaveClass("sticky", "z-10");
+    expect(Number(listboxLayer)).toBeGreaterThan(Number(stickyHeaderLayer));
+  });
+
   it("keeps unknown URL tags removable while rejecting unknown drafts", async () => {
     const user = userEvent.setup();
     const onSelectedTagsChange = vi.fn();

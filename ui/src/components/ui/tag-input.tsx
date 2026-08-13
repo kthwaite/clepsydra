@@ -330,7 +330,7 @@ export function TagInput({
           role="listbox"
           aria-label="Tag suggestions"
           className={cn(
-            "absolute left-0 right-0 top-full z-10 m-0 max-h-[200px] list-none overflow-auto border border-border bg-background p-0.5",
+            "absolute left-0 right-0 top-full z-20 m-0 max-h-[200px] list-none overflow-auto border border-border bg-background p-0.5",
             variant === "codex" && "cl-mono border-rule bg-paper",
           )}
         >
