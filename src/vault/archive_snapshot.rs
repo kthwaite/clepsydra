@@ -173,10 +173,17 @@ pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> 
     map
 }
 
-/// Decode the handful of HTML entities SingleFile's serialization can
-/// introduce into an attribute value: the five named entities `outerHTML`
-/// actually emits, plus numeric character references (`&#NN;`, `&#xHH;`) for
-/// anything a hand-authored page might contribute.
+/// Decode the HTML entities that can appear in a captured attribute value.
+///
+/// Deliberately not exhaustive, and the omission matters: per the WHATWG
+/// fragment-serialization algorithm, an *attribute value* escapes only three
+/// things — `&` as `&amp;`, U+00A0 as `&nbsp;`, and `"` as `&quot;`. `<`, `>`
+/// and `'` are not escaped in attribute position, so `&lt;`/`&gt;`/`&apos;`
+/// are accepted here purely as harmless breadth. **`&nbsp;` is not handled**:
+/// a URL containing U+00A0 is malformed to begin with, and decoding it would
+/// still not make the two sides of the join agree, since turndown's copy would
+/// carry the raw character. If a real capture ever produces one, the symptom is
+/// the same silent join miss this function exists to prevent — add it then.
 ///
 /// A single left-to-right scan, not a chain of sequential `replace` calls —
 /// decoding `&amp;` first in a chain would corrupt the literal text
