@@ -176,6 +176,51 @@ function dropRecordFor(
   };
 }
 
+function dispatchTargetEnter(
+  source: DragSource,
+  target: DropTargetRegistration,
+  edge?: ClosestEdge,
+) {
+  if (edge) dnd.closestEdge = edge;
+  const self = dropRecordFor(source, target);
+  const event: ElementDropTargetEventPayloadMap["onDragEnter"] = {
+    location: dragLocation([self]),
+    self,
+    source: source.source,
+  };
+  act(() => target.onDragEnter?.(event));
+  return self;
+}
+
+function dispatchTargetDrag(
+  source: DragSource,
+  target: DropTargetRegistration,
+  edge: ClosestEdge,
+) {
+  dnd.closestEdge = edge;
+  const self = dropRecordFor(source, target);
+  const event: ElementDropTargetEventPayloadMap["onDrag"] = {
+    location: dragLocation([self]),
+    self,
+    source: source.source,
+  };
+  act(() => target.onDrag?.(event));
+  return self;
+}
+
+function dispatchTargetLeave(
+  source: DragSource,
+  target: DropTargetRegistration,
+) {
+  const self = dropRecordFor(source, target);
+  const event: ElementDropTargetEventPayloadMap["onDragLeave"] = {
+    location: dragLocation(),
+    self,
+    source: source.source,
+  };
+  act(() => target.onDragLeave?.(event));
+}
+
 function dispatchDrop({
   source,
   target,
@@ -239,8 +284,11 @@ function dispatchDragEnd(source: DragSource) {
   act(() => source.registration.onDrop?.(event));
 }
 
-function dispatchMonitorDrop(source: DragSource) {
-  const location = dragLocation();
+function dispatchMonitorDrop(
+  source: DragSource,
+  dropTargets: DropTargetRecord[] = [],
+) {
+  const location = dragLocation(dropTargets);
   const event: ElementEventPayloadMap["onDrop"] = {
     location,
     source: source.source,
@@ -597,4 +645,94 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     }).toEqual(idlePresentation);
     expect(useWorkspaceStore.getState().activeTabId).toBe("t3");
   });
+
+  it("shows the tab insertion rule at the live closest edge and clears it", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const source = sourceFor(screen.getByRole("button", { name: "Alpha" }));
+    const gamma = screen.getByRole("button", { name: "Gamma" });
+    const target = dropTargetFor(gamma);
+    const idleStyle = gamma.getAttribute("style");
+    dispatchDragStart(source);
+
+    dispatchTargetEnter(source, target, "left");
+    expect(gamma.style.boxShadow).toContain(
+      "inset 2px 0 0 0 var(--accent)",
+    );
+
+    dispatchTargetDrag(source, target, "right");
+    expect(gamma.style.boxShadow).not.toContain(
+      "inset 2px 0 0 0 var(--accent)",
+    );
+    expect(gamma.style.boxShadow).toContain(
+      "inset -2px 0 0 0 var(--accent)",
+    );
+
+    dispatchTargetLeave(source, target);
+    expect(gamma.getAttribute("style")).toBe(idleStyle);
+
+    dispatchTargetEnter(source, target, "left");
+    dispatchDrop({ source, target, edge: "left" });
+    expect(gamma).toHaveAttribute("style", idleStyle ?? "");
+  });
+
+  it("highlights a quire join target distinctly and clears it on leave or drop", () => {
+    seed(false);
+    render(<Sheaf activeTabId="t3" />);
+    const source = sourceFor(screen.getByRole("button", { name: "Gamma" }));
+    const quire = screen.getByRole("button", { name: /quire thesis/i });
+    const target = dropTargetFor(quire);
+    const idleStyle = quire.getAttribute("style");
+    dispatchDragStart(source);
+
+    dispatchTargetEnter(source, target);
+    expect(quire.getAttribute("style")).not.toBe(idleStyle);
+    expect(quire.getAttribute("style")).toContain("var(--accent)");
+    expect(quire.style.boxShadow).not.toContain("inset 2px 0 0 0 var(--accent)");
+    expect(quire.style.boxShadow).not.toContain(
+      "inset -2px 0 0 0 var(--accent)",
+    );
+
+    dispatchTargetLeave(source, target);
+    expect(quire.getAttribute("style")).toBe(idleStyle);
+
+    dispatchTargetEnter(source, target);
+    dispatchDrop({ source, target });
+    expect(quire.getAttribute("style")).toBe(idleStyle);
+  });
+
+  it.each([
+    { completion: "drop", includeTarget: true },
+    { completion: "cancel", includeTarget: false },
+  ])(
+    "parent monitor clears target feedback on $completion after the source closes",
+    ({ includeTarget }) => {
+      seed(false);
+      render(<Sheaf activeTabId="t3" />);
+      const alpha = screen.getByRole("button", { name: "Alpha" });
+      const source = sourceFor(alpha);
+      const gamma = screen.getByRole("button", { name: "Gamma" });
+      const target = dropTargetFor(gamma);
+      const idleStyle = gamma.getAttribute("style");
+      dispatchDragStart(source);
+      const targetRecord = dispatchTargetEnter(source, target, "left");
+      expect(gamma.style.boxShadow).toContain(
+        "inset 2px 0 0 0 var(--accent)",
+      );
+      const close = source.registration.element.querySelector(
+        '[aria-label="close folio"]',
+      );
+      if (!(close instanceof HTMLElement)) {
+        throw new Error("Alpha close control was not rendered");
+      }
+
+      fireEvent.click(close);
+      expect(
+        screen.queryByRole("button", { name: "Alpha" }),
+      ).not.toBeInTheDocument();
+      dispatchMonitorDrop(source, includeTarget ? [targetRecord] : []);
+
+      expect(gamma.getAttribute("style")).toBe(idleStyle);
+    },
+  );
 });

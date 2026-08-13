@@ -42,6 +42,11 @@ type SheafTabDragData = {
   tabId: string;
 };
 
+type SheafDropFeedback =
+  | { kind: "tab"; tabId: string; edge: "left" | "right" }
+  | { kind: "quire"; quireId: string }
+  | null;
+
 function getSheafTabId(data: Record<string, unknown>): string | null {
   return data.kind === "sheaf-tab" && typeof data.tabId === "string"
     ? data.tabId
@@ -66,6 +71,7 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   );
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null);
+  const [dropFeedback, setDropFeedback] = useState<SheafDropFeedback>(null);
   const sheafRef = useRef<HTMLDivElement>(null);
   const openTimer = useRef<number | null>(null);
 
@@ -89,6 +95,7 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
       clearOpenTimer();
       setHovered(null);
       setDraggedTabId(tabId);
+      setDropFeedback(null);
     },
     [clearOpenTimer],
   );
@@ -97,6 +104,7 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
     clearOpenTimer();
     setHovered(null);
     setDraggedTabId(null);
+    setDropFeedback(null);
   }, [clearOpenTimer]);
 
   const onTabEnter = (
@@ -183,6 +191,13 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
             tab={seg.tab}
             active={seg.tab.id === activeTabId}
             dragged={seg.tab.id === draggedTabId}
+            dropEdge={
+              dropFeedback?.kind === "tab" &&
+              dropFeedback.tabId === seg.tab.id
+                ? dropFeedback.edge
+                : null
+            }
+            setDropFeedback={setDropFeedback}
             onDndStart={onTabDndStart}
             onDndEnd={onTabDndEnd}
             onActivate={onActivate}
@@ -198,6 +213,11 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
             <QuireHeader
               quire={seg.quire}
               memberCount={seg.members.length}
+              highlighted={
+                dropFeedback?.kind === "quire" &&
+                dropFeedback.quireId === seg.quire.id
+              }
+              setDropFeedback={setDropFeedback}
               onToggle={() => toggleQuireCollapse(seg.quire.id)}
               onContextMenu={(e) => {
                 e.preventDefault();
@@ -217,6 +237,13 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
                   quire={seg.quire}
                   active={t.id === activeTabId}
                   dragged={t.id === draggedTabId}
+                  dropEdge={
+                    dropFeedback?.kind === "tab" &&
+                    dropFeedback.tabId === t.id
+                      ? dropFeedback.edge
+                      : null
+                  }
+                  setDropFeedback={setDropFeedback}
                   onDndStart={onTabDndStart}
                   onDndEnd={onTabDndEnd}
                   onActivate={onActivate}
@@ -265,6 +292,8 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
 type QuireHeaderProps = {
   quire: Quire;
   memberCount: number;
+  highlighted: boolean;
+  setDropFeedback: (feedback: SheafDropFeedback) => void;
   onToggle: () => void;
   onContextMenu: (e: ReactMouseEvent) => void;
 };
@@ -272,6 +301,8 @@ type QuireHeaderProps = {
 function QuireHeader({
   quire,
   memberCount,
+  highlighted,
+  setDropFeedback,
   onToggle,
   onContextMenu,
 }: QuireHeaderProps) {
@@ -286,12 +317,16 @@ function QuireHeader({
       element,
       getData: () => ({ kind: "sheaf-quire", quireId: quire.id }),
       canDrop: ({ source }) => getSheafTabId(source.data) !== null,
+      onDragEnter: () =>
+        setDropFeedback({ kind: "quire", quireId: quire.id }),
+      onDragLeave: () => setDropFeedback(null),
       onDrop: ({ source }) => {
+        setDropFeedback(null);
         const sourceTabId = getSheafTabId(source.data);
         if (sourceTabId) moveTab(sourceTabId, { quireId: quire.id });
       },
     });
-  }, [moveTab, quire.id]);
+  }, [moveTab, quire.id, setDropFeedback]);
 
   return (
     <button
@@ -306,6 +341,8 @@ function QuireHeader({
       style={{
         color: quireColorVar(quire.color),
         boxShadow: `inset 0 2px 0 0 ${quireColorVar(quire.color)}`,
+        outline: highlighted ? "1px solid var(--accent)" : undefined,
+        outlineOffset: highlighted ? "-1px" : undefined,
       }}
     >
       {quire.name}
@@ -321,6 +358,8 @@ type FolioTabProps = {
   quire?: Quire;
   active: boolean;
   dragged: boolean;
+  dropEdge: "left" | "right" | null;
+  setDropFeedback: (feedback: SheafDropFeedback) => void;
   onDndStart: (tabId: string) => void;
   onActivate: (id: string) => void;
   onDndEnd: () => void;
@@ -334,6 +373,8 @@ function FolioTab({
   quire,
   active,
   dragged,
+  dropEdge,
+  setDropFeedback,
   onDndStart,
   onDndEnd,
   onActivate,
@@ -376,7 +417,25 @@ function FolioTab({
             { kind: "sheaf-tab-target", tabId: t.id },
             { element, input, allowedEdges: ["left", "right"] },
           ),
+        onDragEnter: ({ self }) => {
+          const edge = extractClosestEdge(self.data);
+          setDropFeedback(
+            edge === "left" || edge === "right"
+              ? { kind: "tab", tabId: t.id, edge }
+              : null,
+          );
+        },
+        onDrag: ({ self }) => {
+          const edge = extractClosestEdge(self.data);
+          setDropFeedback(
+            edge === "left" || edge === "right"
+              ? { kind: "tab", tabId: t.id, edge }
+              : null,
+          );
+        },
+        onDragLeave: () => setDropFeedback(null),
         onDrop: ({ source, self }) => {
+          setDropFeedback(null);
           const sourceTabId = getSheafTabId(source.data);
           const edge = extractClosestEdge(self.data);
           if (!sourceTabId || (edge !== "left" && edge !== "right")) return;
@@ -387,10 +446,12 @@ function FolioTab({
         },
       }),
     );
-  }, [moveTab, onDndEnd, onDndStart, t.id]);
+  }, [moveTab, onDndEnd, onDndStart, setDropFeedback, t.id]);
   const rules = [
     quire ? `inset 0 2px 0 0 ${quireColorVar(quire.color)}` : null,
     active ? "inset 0 -2px 0 0 var(--accent)" : null,
+    dropEdge === "left" ? "inset 2px 0 0 0 var(--accent)" : null,
+    dropEdge === "right" ? "inset -2px 0 0 0 var(--accent)" : null,
   ].filter(Boolean);
 
   return (
