@@ -140,6 +140,35 @@ describe("Folio history restoration registry", () => {
     ).toBeNull();
   });
 
+  it.each([
+    {
+      emptyField: "folioTabId",
+      state: {
+        folioTabId: "",
+        folioPath: "notes/alpha.md",
+        folioLocationId: "history-alpha",
+      },
+    },
+    {
+      emptyField: "folioPath",
+      state: {
+        folioTabId: "alpha",
+        folioPath: "",
+        folioLocationId: "history-alpha",
+      },
+    },
+    {
+      emptyField: "folioLocationId",
+      state: {
+        folioTabId: "alpha",
+        folioPath: "notes/alpha.md",
+        folioLocationId: "",
+      },
+    },
+  ])("rejects an empty $emptyField", ({ state }) => {
+    expect(readFolioHistoryDestination(state)).toBeNull();
+  });
+
   it("captures only the active tab and path and clones stored records and reads", () => {
     const source = restoration("alpha");
     let calls = 0;

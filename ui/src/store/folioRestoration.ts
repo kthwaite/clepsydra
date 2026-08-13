@@ -86,8 +86,11 @@ export function readFolioHistoryDestination(
   const candidate = state as Record<string, unknown>;
   if (
     typeof candidate.folioTabId !== "string" ||
+    candidate.folioTabId.length === 0 ||
     typeof candidate.folioPath !== "string" ||
-    typeof candidate.folioLocationId !== "string"
+    candidate.folioPath.length === 0 ||
+    typeof candidate.folioLocationId !== "string" ||
+    candidate.folioLocationId.length === 0
   ) {
     return null;
   }
