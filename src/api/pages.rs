@@ -81,6 +81,34 @@ pub struct EncryptionMetaResponse {
     pub key_id: String,
 }
 
+/// OpenAPI schema for the flattened `[archive]` frontmatter table.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ArchiveMetaResponse {
+    pub url: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_url: Option<String>,
+    pub domain: String,
+    pub captured_at: String,
+    pub content_hash: String,
+    pub source_hash: String,
+    pub snapshot_hash: String,
+    pub resource_count: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub byline: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_time: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lang: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub excerpt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blobs: Option<Vec<String>>,
+}
+
 /// OpenAPI schema for page metadata exposed in `PageDetail`.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PageMetaResponse {
@@ -95,6 +123,8 @@ pub struct PageMetaResponse {
     pub created_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub archive: Option<ArchiveMetaResponse>,
 }
 /// OpenAPI schema for page detail responses.
 #[derive(Debug, Serialize, ToSchema)]

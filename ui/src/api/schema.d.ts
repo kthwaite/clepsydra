@@ -228,6 +228,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/archive/view/{hash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["view_snapshot"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/attachments": {
         parameters: {
             query?: never;
@@ -1520,6 +1536,25 @@ export interface components {
             /** Format: int32 */
             status: number;
         };
+        /** @description OpenAPI schema for the flattened `[archive]` frontmatter table. */
+        ArchiveMetaResponse: {
+            blobs?: string[] | null;
+            byline?: string | null;
+            canonical_url?: string | null;
+            captured_at: string;
+            content_hash: string;
+            description?: string | null;
+            domain: string;
+            excerpt?: string | null;
+            lang?: string | null;
+            published_time?: string | null;
+            /** Format: int64 */
+            resource_count: number;
+            site_name?: string | null;
+            snapshot_hash: string;
+            source_hash: string;
+            url: string;
+        };
         ArchiveRequest: {
             /** @description Article byline, as parsed by Readability in the page context. */
             byline?: string | null;
@@ -2336,6 +2371,7 @@ export interface components {
         /** @description OpenAPI schema for page metadata exposed in `PageDetail`. */
         PageMetaResponse: {
             aliases?: string[] | null;
+            archive?: null | components["schemas"]["ArchiveMetaResponse"];
             created_at?: string | null;
             id: string;
             tags?: string[] | null;
@@ -2690,10 +2726,17 @@ export interface components {
             type: "feed_changed";
         };
         TagCount: {
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The number of pages that have this tag and are computed (i.e. not explicitly tagged).
+             */
             computed_count: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description The number of pages that have this tag.
+             */
             count: number;
+            /** @description The tag string, e.g. "tag" or "tag/subtag". */
             tag: string;
         };
         TaskCompletionDay: {
@@ -3630,6 +3673,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ArchiveStatsResponse"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    view_snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Archived snapshot blob hash */
+                hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sandboxed archived HTML snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/html": string;
+                };
+            };
+            /** @description Snapshot blob not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Blob is not an HTML snapshot */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Internal server error */
