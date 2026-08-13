@@ -32,8 +32,12 @@ import { renderElement } from "#/editor/elements/renderElement";
 import { withSchema } from "#/editor/schema/withSchema";
 import type { CustomEditor } from "#/editor/types";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { useFolioHistoryController } from "#/hooks/useFolioHistoryNavigation";
+import {
+  registerFolioHistoryTraversalGuard,
+  useFolioHistoryController,
+} from "#/hooks/useFolioHistoryNavigation";
 import { useConstellationStore } from "#/store/constellation";
+import * as folioRestorationStore from "#/store/folioRestoration";
 import {
   clearFolioHistoryState,
   clearFolioRestoration,
@@ -1185,6 +1189,11 @@ describe("mobile Folio Back", () => {
       const unsubscribe = router.history.subscribe(({ action }) => {
         actions.push(action.type);
       });
+      const captureSpy = vi.spyOn(
+        folioRestorationStore,
+        "captureFolioHistoryLocation",
+      );
+      captureSpy.mockClear();
 
       await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
       fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
@@ -1210,9 +1219,41 @@ describe("mobile Folio Back", () => {
       ).toBeNull();
       expect(actions).toEqual([]);
 
+      await user.click(screen.getByRole("button", { name: "Stay" }));
+      await waitFor(() =>
+        expect(
+          screen.queryByRole("dialog", { name: "Unsaved raw Markdown" }),
+        ).not.toBeInTheDocument(),
+      );
+      expect(router.history.location.state).toEqual(stateBefore);
+      expect(router.history.location.state.__TSR_index).toBe(
+        stateBefore.__TSR_index,
+      );
+      expect(router.history.canGoBack()).toBe(true);
+      expect(router.state.location.pathname).toBe("/workspace");
+      expect(activePagePath()).toBe(destination.folioPath);
+      expect(useWorkspaceStore.getState().activeTabId).toBe(
+        destination.folioTabId,
+      );
+      expect(useWorkspaceStore.getState().tabs).toEqual(tabsBefore);
+      expect(actions).toEqual([]);
+      expect(
+        readFolioHistoryLocation(
+          destination.folioLocationId,
+          destination.folioTabId,
+          destination.folioPath,
+        ),
+      ).toBeNull();
+      expect(captureSpy).not.toHaveBeenCalled();
+
+      act(() => router.history.back());
+      expect(
+        await screen.findByRole("dialog", { name: "Unsaved raw Markdown" }),
+      ).toBeVisible();
       await user.click(screen.getByRole("button", { name: "Leave" }));
       await waitFor(() => expect(router.state.location.pathname).toBe("/"));
       expect(actions).toEqual(["BACK"]);
+      expect(captureSpy).toHaveBeenCalledOnce();
       expect(
         readFolioHistoryLocation(
           destination.folioLocationId,
@@ -1225,6 +1266,92 @@ describe("mobile Folio Back", () => {
         focus: { offset: 4 },
       });
       unsubscribe();
+      captureSpy.mockRestore();
+    });
+
+    it("scopes raw approval so another traversal blocker can still reject Back", async () => {
+      const user = userEvent.setup();
+      const router = renderNavigation("/");
+      await user.click(
+        await screen.findByRole("button", {
+          name: "Open Alpha from Atrium",
+        }),
+      );
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).not.toBeNull(),
+      );
+      const destination = readFolioHistoryDestination(
+        router.history.location.state,
+      );
+      if (!destination) throw new Error("Expected Folio history destination");
+      setFolioPosition(505, 5);
+      const actions: string[] = [];
+      const unsubscribeHistory = router.history.subscribe(({ action }) => {
+        actions.push(action.type);
+      });
+      const captureSpy = vi.spyOn(
+        folioRestorationStore,
+        "captureFolioHistoryLocation",
+      );
+      captureSpy.mockClear();
+
+      await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+        target: { value: "Two blockers must approve  \n" },
+      });
+      let permitSecondBlocker: (() => void) | null = null;
+      let secondBlockerCalls = 0;
+      const unregisterSecondBlocker = registerFolioHistoryTraversalGuard(
+        (proceed) => {
+          secondBlockerCalls += 1;
+          permitSecondBlocker = proceed;
+          return true;
+        },
+      );
+
+      act(() => router.history.back());
+      expect(
+        await screen.findByRole("dialog", { name: "Unsaved raw Markdown" }),
+      ).toBeVisible();
+      expect(secondBlockerCalls).toBe(0);
+
+      await user.click(screen.getByRole("button", { name: "Leave" }));
+
+      await waitFor(() => expect(secondBlockerCalls).toBe(1));
+      expect(router.state.location.pathname).toBe("/workspace");
+      expect(activePagePath()).toBe(destination.folioPath);
+      expect(actions).toEqual([]);
+      expect(captureSpy).not.toHaveBeenCalled();
+      expect(
+        readFolioHistoryLocation(
+          destination.folioLocationId,
+          destination.folioTabId,
+          destination.folioPath,
+        ),
+      ).toBeNull();
+
+      act(() => permitSecondBlocker?.());
+
+      await waitFor(() => expect(router.state.location.pathname).toBe("/"));
+      expect(actions).toEqual(["BACK"]);
+      expect(captureSpy).toHaveBeenCalledOnce();
+      expect(
+        readFolioHistoryLocation(
+          destination.folioLocationId,
+          destination.folioTabId,
+          destination.folioPath,
+        ),
+      ).toMatchObject({
+        scrollTop: 505,
+        anchor: null,
+        focus: null,
+      });
+      unregisterSecondBlocker();
+      unsubscribeHistory();
+      captureSpy.mockRestore();
     });
 
     it.each(["closed", "replace-reused"] as const)(

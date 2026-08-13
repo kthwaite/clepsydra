@@ -45,16 +45,14 @@ export type LeaveFolioWorkspace = (
 let trackedHistoryDestination: FolioHistoryDestination | null = null;
 let capturedDepartureLocationId: string | null = null;
 type FolioHistoryTraversalGuard = (proceed: () => void) => boolean;
-let folioHistoryTraversalGuard: FolioHistoryTraversalGuard | null = null;
+const folioHistoryTraversalGuards = new Set<FolioHistoryTraversalGuard>();
 
 export function registerFolioHistoryTraversalGuard(
   guard: FolioHistoryTraversalGuard,
 ): () => void {
-  folioHistoryTraversalGuard = guard;
+  folioHistoryTraversalGuards.add(guard);
   return () => {
-    if (folioHistoryTraversalGuard === guard) {
-      folioHistoryTraversalGuard = null;
-    }
+    folioHistoryTraversalGuards.delete(guard);
   };
 }
 
@@ -141,25 +139,43 @@ export function useFolioHistoryController(): void {
     trackedHistoryDestination = initialDestination;
     const back = history.back;
     const forward = history.forward;
-    const guardedBack: typeof history.back = (options) => {
-      const guard = folioHistoryTraversalGuard;
-      if (
-        options?.ignoreBlocker ||
-        !guard ||
-        !guard(() => back({ ...options, ignoreBlocker: true }))
-      ) {
+    const runGuardedBack = (
+      options?: Parameters<typeof back>[0],
+      approved = new Set<FolioHistoryTraversalGuard>(),
+    ) => {
+      if (options?.ignoreBlocker) {
         back(options);
+        return;
       }
+      for (const guard of folioHistoryTraversalGuards) {
+        if (approved.has(guard)) continue;
+        const nextApproved = new Set(approved);
+        nextApproved.add(guard);
+        if (guard(() => runGuardedBack(options, nextApproved))) return;
+      }
+      back(options);
+    };
+    const runGuardedForward = (
+      options?: Parameters<typeof forward>[0],
+      approved = new Set<FolioHistoryTraversalGuard>(),
+    ) => {
+      if (options?.ignoreBlocker) {
+        forward(options);
+        return;
+      }
+      for (const guard of folioHistoryTraversalGuards) {
+        if (approved.has(guard)) continue;
+        const nextApproved = new Set(approved);
+        nextApproved.add(guard);
+        if (guard(() => runGuardedForward(options, nextApproved))) return;
+      }
+      forward(options);
+    };
+    const guardedBack: typeof history.back = (options) => {
+      runGuardedBack(options);
     };
     const guardedForward: typeof history.forward = (options) => {
-      const guard = folioHistoryTraversalGuard;
-      if (
-        options?.ignoreBlocker ||
-        !guard ||
-        !guard(() => forward({ ...options, ignoreBlocker: true }))
-      ) {
-        forward(options);
-      }
+      runGuardedForward(options);
     };
     history.back = guardedBack;
     history.forward = guardedForward;

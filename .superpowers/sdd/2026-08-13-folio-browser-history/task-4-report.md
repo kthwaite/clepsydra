@@ -64,3 +64,28 @@ Added real memory-router integration coverage for all nine required Folio histor
 ## Commit
 
 `test(ui): cover Folio browser history traversal`
+
+## Review correction round 1
+
+### RED
+
+`bun run test -- src/components/codex/__tests__/FolioNavigation.test.tsx -t "keeps dirty native Back inert|scopes raw approval"`
+
+- 1 of 2 selected tests failed as intended.
+- Registering a second rejecting traversal blocker replaced the raw-draft guard, so Back did not present the raw confirmation dialog. This demonstrated that the singleton guard and global blocker bypass could not preserve independent approvals.
+
+### Corrections
+
+- Dirty native Back now exercises Stay first and proves the dialog closes while the exact history state and `__TSR_index`, active tab/path, tab registry, action list, and restoration registry remain unchanged.
+- The same test retries Back, approves Leave, directly spies on `captureFolioHistoryLocation`, and proves exactly one capture, one Back action, and the final scroll/selection snapshot.
+- Traversal guard registration now preserves multiple guards. Each approved continuation carries only that guard's one-shot approval through the retry chain. The original Back/Forward call is ultimately retried without `ignoreBlocker`, so unrelated blockers retain normal authority.
+- A second rejecting-blocker integration case proves raw approval alone does not capture, apply, or traverse. The traversal completes and checkpoints exactly once only after the second blocker permits.
+
+### GREEN and gates
+
+- Targeted review tests: 1 file passed; 2 selected tests passed.
+- `FolioNavigation.test.tsx`: 1 file passed; 27 tests passed.
+- Exact focused command: 6 files passed; 166 tests passed. The brief's absent `src/components/codex/Sheaf.test.tsx` path was ignored by Vitest.
+- Actual Sheaf suite: 1 file passed; 25 tests passed.
+- Changed-file lint: the same 13 unrelated baseline diagnostics remain; no review-owned diagnostic was introduced.
+- Typecheck: exit 0.
