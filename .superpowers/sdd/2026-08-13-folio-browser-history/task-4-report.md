@@ -147,3 +147,23 @@ Added real memory-router integration coverage for all nine required Folio histor
 
 - `ui/src/crypto/EncryptionProvider.tsx`
 - `ui/src/crypto/__tests__/EncryptionProvider.test.tsx`
+
+## Final review correction round 4
+
+### RED
+
+- Rejected-pop identity simulation failed because an unchanged-entry BACK notification captured the current Folio.
+- Explicit lifecycle review showed unconditional provider cleanup would run during StrictMode rehearsal and could erase persisted workspace state.
+
+### Corrections
+
+- The coordinator now tracks TanStack entry identity, preferring `__TSR_key`/legacy `key` and falling back to `__TSR_index`. BACK/FORWARD/GO notifications with unchanged identity return before capture, tracking updates, activation, or restoration request. Same-path repeated visits remain distinct because identity is entry-based, not URL-based.
+- Workspace clearing moved from provider effect cleanup to successful explicit vault lock, after flushers and session clearing succeed. StrictMode rehearsal and ordinary unmount preserve workspace tabs; explicit lock clears workspace and Folio state.
+
+### Evidence
+
+- Identity RED: 1 selected failure; GREEN: 1/1 selected passed.
+- Lifecycle StrictMode + explicit lock targets: 2/2 passed.
+- Full feature-focused suites: 12 files, 280 tests passed.
+- Typecheck: exit 0.
+- Changed-file lint: 20 baseline diagnostics; the introduced provider dependency diagnostic was corrected.

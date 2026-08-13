@@ -596,5 +596,37 @@ describe("native history tuple application", () => {
     expect(useWorkspaceStore.getState().activeTabId).toBe("beta");
     expect(readFolioHistoryDestination(history.location.state)).toBeNull();
   });
+
+  it("ignores a rejected-pop notification with unchanged entry identity", async () => {
+    seedWorkspace("beta");
+    const { actions, history } = renderHarness({
+      states: [
+        pageState("alpha", "notes/alpha.md", "location-alpha"),
+        pageState("beta", "notes/beta.md", "location-beta"),
+      ],
+    });
+    await waitForController();
+    actions.splice(0);
+    let captureCalls = 0;
+    registerCapture("beta", "notes/beta.md", () => {
+      captureCalls += 1;
+      return restoration("beta", "notes/beta.md");
+    });
+
+    act(() => history.notify({ type: "BACK" }));
+
+    expect(actions).toEqual(["BACK"]);
+    expect(captureCalls).toBe(0);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("beta");
+    expect(
+      readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
+    ).toBeNull();
+
+    act(() => history.back());
+
+    expect(captureCalls).toBe(1);
+    expect(useWorkspaceStore.getState().activeTabId).toBe("alpha");
+  });
 });
+
 

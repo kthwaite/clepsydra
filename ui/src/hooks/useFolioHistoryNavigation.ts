@@ -49,6 +49,18 @@ let trackedHistoryDestination: FolioHistoryDestination | null = null;
 let capturedDepartureLocationId: string | null = null;
 type FolioHistoryTraversalGuard = (proceed: () => void) => boolean;
 const folioHistoryTraversalGuards = new Set<FolioHistoryTraversalGuard>();
+let trackedHistoryEntryIdentity: string | null = null;
+
+function historyEntryIdentity(state: HistoryState): string {
+  const parsed = state as HistoryState & {
+    __TSR_key?: string;
+    __TSR_index?: number;
+    key?: string;
+  };
+  if (parsed.__TSR_key) return `key:${parsed.__TSR_key}`;
+  if (parsed.key) return `key:${parsed.key}`;
+  return `index:${parsed.__TSR_index ?? "unknown"}`;
+}
 
 function runFolioHistoryTraversalGuards(
   proceed: (approved: Set<FolioHistoryTraversalGuard>) => void,
@@ -142,6 +154,7 @@ export function useFolioHistoryController(): void {
     trackedHistoryDestination = initialDestination;
     const back = history.back;
     const forward = history.forward;
+    trackedHistoryEntryIdentity = historyEntryIdentity(history.location.state);
     const runGuardedBack = (
       options?: Parameters<typeof back>[0],
       approved = new Set<FolioHistoryTraversalGuard>(),
@@ -173,15 +186,18 @@ export function useFolioHistoryController(): void {
 
     const unsubscribe = history.subscribe(({ action, location }) => {
       const destination = readFolioHistoryDestination(location.state);
+      const entryIdentity = historyEntryIdentity(location.state);
       if (
         action.type !== "BACK" &&
         action.type !== "FORWARD" &&
         action.type !== "GO"
       ) {
         capturedDepartureLocationId = null;
+        trackedHistoryEntryIdentity = entryIdentity;
         trackedHistoryDestination = destination;
         return;
       }
+      if (entryIdentity === trackedHistoryEntryIdentity) return;
 
       const outgoing = trackedHistoryDestination;
       if (
@@ -196,6 +212,7 @@ export function useFolioHistoryController(): void {
       }
       capturedDepartureLocationId = null;
       trackedHistoryDestination = destination;
+      trackedHistoryEntryIdentity = entryIdentity;
       if (destination) applyHistoryDestination(destination);
     });
 
@@ -219,6 +236,7 @@ export function useFolioHistoryController(): void {
       if (history.back === guardedBack) history.back = back;
       if (history.forward === guardedForward) history.forward = forward;
       trackedHistoryDestination = null;
+      trackedHistoryEntryIdentity = null;
       capturedDepartureLocationId = null;
     };
   }, [router]);

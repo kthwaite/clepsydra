@@ -264,15 +264,36 @@ describe("EncryptionProvider", () => {
     expect(activeWindowListeners("pointerdown")).toBe(1);
     expect(activeWindowListeners("keydown")).toBe(1);
     expect(activeDocumentListeners("visibilitychange")).toBe(1);
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
 
     view.unmount();
+    expect(useWorkspaceStore.getState().tabs).toHaveLength(1);
     expect(activeWindowListeners("pointerdown")).toBe(0);
     expect(activeWindowListeners("keydown")).toBe(0);
     expect(activeDocumentListeners("visibilitychange")).toBe(0);
   });
 
-  it("clears workspace and Folio visit state when the vault provider tears down", () => {
+  it("clears workspace and Folio visit state after explicit successful lock", async () => {
     clearFolioHistoryState();
+    const wrapped = await wrapIdentity(fixtureIdentity, "correct-password-value");
+    configHook.value = {
+      ...configHook.value,
+      data: {
+        ...configHook.value.data,
+        wrapped_identity: wrapped,
+      },
+    };
     useWorkspaceStore.setState({
       tabs: [
         {
@@ -289,13 +310,16 @@ describe("EncryptionProvider", () => {
       path: "notes/alpha.md",
       locationId: "visit-alpha",
     });
-    const view = render(
+    render(
       <EncryptionProvider>
         <ActionsProbe />
       </EncryptionProvider>,
     );
-
-    view.unmount();
+    await waitFor(() => expect(latestActions).not.toBeNull());
+    await act(async () => {
+      await latestActions?.unlockWithPassword("correct-password-value");
+      await latestActions?.lock();
+    });
 
     expect(useWorkspaceStore.getState().tabs).toEqual([]);
     expect(

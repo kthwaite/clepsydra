@@ -67,7 +67,8 @@ export function useOptionalEncryptionActions(): EncryptionActions | null {
 export function EncryptionProvider({
   children,
   idleTimeoutMs = null,
-}: EncryptionProviderProps) {
+  onVaultTerminate,
+}: EncryptionProviderProps & { onVaultTerminate?: () => void }) {
   const config = useEncryptionConfig();
   const sessionRef = useRef<EncryptionSession | null>(null);
   if (!sessionRef.current) {
@@ -126,7 +127,6 @@ export function EncryptionProvider({
 
   useEffect(
     () => () => {
-      useWorkspaceStore.getState().clearWorkspace();
       sessionRef.current?.clear();
     },
     [],
@@ -167,6 +167,8 @@ export function EncryptionProvider({
             error: null,
             lockEpoch: previous.lockEpoch + 1,
           }));
+          onVaultTerminate?.();
+          useWorkspaceStore.getState().clearWorkspace();
           return true;
         } catch {
           setStatus((previous) => ({
@@ -236,7 +238,7 @@ export function EncryptionProvider({
         };
       },
     };
-  }, []);
+  }, [onVaultTerminate]);
 
   useEffect(() => {
     if (idleTimeoutMs === null || idleTimeoutMs <= 0) {
