@@ -158,6 +158,7 @@ enum InertHtmlContent {
 fn inert_html_content(name: &str) -> Option<InertHtmlContent> {
     if [
         "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes",
+        "noscript",
     ]
     .iter()
     .any(|candidate| name.eq_ignore_ascii_case(candidate))
@@ -845,11 +846,26 @@ mod tests {
     }
 
     #[test]
-    fn ignores_resource_like_markup_inside_textarea_and_title_text() {
+    fn matches_only_a_bounded_case_insensitive_textarea_end_tag() {
         let html = concat!(
-            r#"<TEXTAREA><img data-sf-original-src="https://cdn.example/textarea>a.png" src="cas:sha256:textarea"></textarea>"#,
-            r#"<title><img data-sf-original-src="https://cdn.example/title>b.png" src="cas:sha256:title"></TITLE>"#
+            r#"<TEXTAREA><img data-sf-original-src="https://cdn.example/inert>a.png" src="cas:sha256:inert">"#,
+            r#"</textarea-extra><img data-sf-original-src="https://cdn.example/still-inert>b.png" src="cas:sha256:still-inert">"#,
+            r#"</TeXtArEa><img data-sf-original-src="https://cdn.example/genuine.png" src="cas:sha256:genuine">"#
         );
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("https://cdn.example/genuine.png"),
+            Some(&"sha256:genuine".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_title_text() {
+        let html =
+            r#"<title><img data-sf-original-src="https://cdn.example/title>b.png" src="cas:sha256:title"></TITLE>"#;
 
         let map = original_url_map(html, BASE);
 
@@ -866,6 +882,34 @@ mod tests {
         let map = original_url_map(html, BASE);
 
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_noembed_and_noframes_text() {
+        let html = concat!(
+            r#"<noembed><img data-sf-original-src="https://cdn.example/noembed>a.png" src="cas:sha256:noembed"></noembed>"#,
+            r#"<NOFRAMES><img data-sf-original-src="https://cdn.example/noframes>b.png" src="cas:sha256:noframes"></noframes>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn skips_noscript_text_then_maps_a_post_close_resource() {
+        let html = concat!(
+            r#"<NoScRiPt><img data-sf-original-src="https://cdn.example/noscript>a.png" src="cas:sha256:noscript"></NOSCRIPT>"#,
+            r#"<img data-sf-original-src="https://cdn.example/after.png" src="cas:sha256:after">"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("https://cdn.example/after.png"),
+            Some(&"sha256:after".to_string())
+        );
     }
 
     #[test]
