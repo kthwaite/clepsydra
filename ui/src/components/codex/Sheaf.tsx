@@ -12,7 +12,6 @@ import { useNavigate } from "@tanstack/react-router";
 import { Plus, X } from "lucide-react";
 import type { MouseEvent as ReactMouseEvent } from "react";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { useStats } from "#/api/index";
 import {
   type MenuTarget,
   SheafContextMenu,
@@ -61,7 +60,6 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
   const activateTab = useWorkspaceStore((s) => s.activateTab);
   const toggleQuireCollapse = useWorkspaceStore((s) => s.toggleQuireCollapse);
   const moveTab = useWorkspaceStore((s) => s.moveTab);
-  const { data: stats } = useStats();
 
   const pageTabs = tabs.filter((tab) => tab.type === "page");
   const segments = sheafSegments(pageTabs, quires);
