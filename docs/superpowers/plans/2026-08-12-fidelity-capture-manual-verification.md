@@ -1,6 +1,6 @@
 # Fidelity capture — manual verification (Task 9, Step 4)
 
-**Status:** outstanding. Everything else on `feature/fidelity-capture` is implemented, reviewed and gated.
+**Status:** completed in Chrome on 2026-08-13. Firefox/MV2 was built and bundle-verified but not exercised in a browser.
 
 This is the half of Task 9 that no test on the branch can replace. `capture()` runs at module scope in a content script, `getPageData` needs a real DOM, layout and network stack, and three of the branch's assumptions are only decidable against a live page.
 
@@ -84,3 +84,58 @@ The worker's idle timer is reset only incidentally by inbound relay-fetch and ch
 **Firefox / MV2 is entirely unexercised.** `manifest.v2.json` ships, Task 11 added new asymmetric behaviour to the MV2 injection path (frames injection resolves unconditionally and discards `lastError`; capture injection rejects on it), and no test reaches it. If Firefox is in your supported matrix, `bun run build:firefox` and repeat checks 1–4 there.
 
 **The SingleFile-before-Readability ordering.** If those two calls in `capture.ts` were ever reversed, every capture would still succeed and every archive would quietly lose its lazy-loaded images. There is no automated guard at any layer. Check 2 on a lazy-loading page is the only thing standing behind it — so pick one that lazy-loads.
+
+## Verification run — 2026-08-13
+
+### Environment and setup
+
+- macOS/Darwin 25.5.0 on Apple M4 Max.
+- Google Chrome for Testing 148.0.7778.96, launched by the harness browser driver with `extension/dist` loaded unpacked. The extension service worker was `chrome-extension://cfifcfenpoaocacnppcclceocpmadfdp/background/service-worker.js`.
+- Branded Google Chrome 151.0.7922.109 ignored the unpacked-extension launch flags, so it was not used for the results below. The Playwright-installed Chrome for Testing binary loaded the same production bundle successfully.
+- Disposable root: `/tmp/clepsydra-task5.hjFUpX`. The vault, archive CAS and XDG config were all inside that root. The final scratch server listened on `127.0.0.1:35871` and reported `0 blobs, 0.0 MB` before capture.
+- Deterministic page and cross-origin resource servers listened on `127.0.0.1:34988` and `localhost:34989`. The large bitmap was 6,297,654 bytes; CORS was deliberately absent so SingleFile's page fetch failed and the extension worker relay had to fetch it.
+- Production Chromium and Firefox builds both passed bundle verification with five registered worker listeners. The first Chromium and Firefox builds exposed a missing `runtime.onConnect` verifier mock and failed; commit `5c84e15e` repaired that verifier, after which both builds passed.
+
+### Browser matrix
+
+| Check | Result | Observed evidence |
+|---|---|---|
+| 1. Ordinary capture and progress | PASS | The final framed/lazy article completed in 7.5 seconds. The observed phases were `uploading` then `done`, and the toolbar badge ended at `✓`. Before the SingleFile runtime router was repaired, the popup closed but the phase and badge stayed empty for 30–180 seconds; only `singlefile.frameTree.initResponse` reached the worker. The routing fix made the same fixture complete. |
+| 2. Images in the reading view | PASS | The final Markdown rewrote the small query image, 6.0 MiB balanced-parentheses bitmap, and SVG to `cas:`. Chromium loaded the three CAS endpoints as 1×1 PNG, 2048×1025 BMP, and 180×80 SVG. An earlier run exposed the unquoted-attribute join bug; after its fix, `task-5-capture-matrix-article-3.md` lines 37, 39 and 41 are all `cas:`. |
+| 3. Self-contained snapshot | PASS | Snapshot `sha256:78143776115d96e96afff4bbbe6a925a98e1b22b5a4fab35d7d7f2576c2be5c3` contains no `base64,`; every active image `src` is `cas:sha256:…`. Remaining HTTP strings occur only in inert provenance (`data-sf-original-src`) and the canonical link, not resource-loading attributes. `GET /api/vault/cas/sha256:…` returned `200`, `Content-Type: text/html`, CSP sandboxing and `Content-Disposition: attachment`. Frontmatter records `resource_count = 3`. |
+| 4. Iframe | PASS | The full capture completed in under 8 seconds. The stored snapshot contains the child frame's title, URL and all three frame paragraphs in `srcdoc`, not an empty iframe. Runtime traffic included frame init/ack and the 6 s idle/30 s maximum lazy-timeout routes. |
+| 5. SVG | PASS | The SVG is CAS-backed and rendered at 180×80 in Chromium despite `Content-Disposition: attachment`. Its direct CAS response was `200 image/svg+xml` with sandbox CSP, `nosniff`, and attachment disposition. |
+| 6. Clean size failure | PASS | With the scratch vault's `max_blob_size_mb = 1` and the extension still capped at 100 MiB, the capture ended in the `error` phase with badge `!`. The recorded archive response was HTTP 400, not 413: `archived resource sha256:ebbf… is 6297654 bytes, over max_blob_size_mb (1 MB)`. |
+| 7. Authenticated capture | PASS | `/auth/login` set an HttpOnly session cookie and redirected to the protected article. The capture completed in 3.1 seconds; the fixture log shows the capture-time `/auth/image.png?private=(yes)` request carried `task5_session=authenticated`. The stored archive contains the protected resource. |
+| 8. Long, quiet page | PASS | A same-origin page with 250,029 DOM elements and no cross-origin resources captured in 50.958 seconds. Phases were `processing` at 16.088 s, `uploading` at 49.141 s and `done` at 50.958 s; the worker remained alive beyond 30 seconds. |
+| >4 MiB worker relay | PASS | With CORS absent, the worker observed a `singlefile-relay` port for each cross-origin resource. The 6,297,654-byte BMP port received the URL request plus three pull messages, no abort, and the archive finished `done` in 7.9 seconds. |
+| Query and balanced-parentheses join | PASS | The final Markdown rewrote `small_(balanced).png?width=800&token=a(b)c`, `large_(relay).bmp?sig=(abc)&variant=full`, and `logo_(vector).svg?theme=(navy)` to their three CAS hashes. |
+| Interrupted transfer cleanup | PASS | Navigation after snapshot chunks 0 and 1 of 3 left the tab in `processing`; after the 30-second inactivity timeout it moved to `error` with badge `!` at 33.381 seconds rather than remaining stuck. A subsequent capture on the same tab completed and the success badge cleared normally, demonstrating that expired transfer state was removed. |
+| Unmatched-resource accounting | PASS | With the extension's per-resource cap temporarily set to 1 MiB, the large bitmap was deliberately declined. `task-5-capture-matrix-article-4.md` keeps its HTTP URL, records `resource_count = 2`, and lists only the PNG and SVG hashes; the unmatched bitmap is not falsely claimed. |
+
+### Stored evidence and memory
+
+- Final joined Markdown: `/tmp/clepsydra-task5.hjFUpX/vault/archive/127.0.0.1/task-5-capture-matrix-article-3.md`.
+- Deliberately unmatched Markdown: `/tmp/clepsydra-task5.hjFUpX/vault/archive/127.0.0.1/task-5-capture-matrix-article-4.md`.
+- Final snapshot bytes: `/tmp/clepsydra-task5.hjFUpX/cas/78/78143776115d96e96afff4bbbe6a925a98e1b22b5a4fab35d7d7f2576c2be5c3`.
+- Request evidence: `/tmp/clepsydra-task5.hjFUpX/artifacts/fixture-requests.log`; exact size-limit response: `/tmp/clepsydra-task5.hjFUpX/artifacts/limit-proxy.log`.
+- RSS samples: `/tmp/clepsydra-task5.hjFUpX/artifacts/server-rss-success.tsv` and `server-rss-relay.tsv`. On the first 6.0 MiB successful capture, server RSS was 43,680 KiB before capture and peaked at 77,104 KiB (increase 33,424 KiB). On the forced worker-relay repeat, the warmed server began at 70,928 KiB and peaked at 81,792 KiB (increase 10,864 KiB).
+- Raw snapshot HTML remains download-only. This run does not claim inline snapshot rendering.
+
+### Repository gates
+
+| Command | Result |
+|---|---|
+| `cargo fmt --all -- --check` | FAIL: widespread pre-existing formatting drift in unrelated Rust files under rustfmt 1.9.0-stable. The changed stabilization files pass `rustfmt --edition 2024 --check src/api/archive.rs src/vault/archive_snapshot.rs`. No unrelated files were reformatted. |
+| `cargo clippy --all-targets -- -D warnings` | PASS |
+| `cargo test` | PASS — 1,806 tests |
+| extension `bun run typecheck` | PASS |
+| extension `bun run lint` | PASS — 35 files |
+| extension `bun run test` | PASS — 13 files, 134 tests |
+| extension `bun run build` | PASS, including Chromium bundle verification |
+| extension `bun run build:firefox` | PASS, including Firefox bundle verification |
+| UI `bun run typecheck` | PASS |
+| UI `bun run lint` | FAIL: 20 pre-existing diagnostics in 10 unrelated files; no warnings were suppressed and no unrelated UI code was changed. |
+| UI `bun run test` | PASS — 273 files, 3,492 tests; Vite emitted its existing native-config compatibility warning. |
+
+Firefox/MV2 runtime remains the only browser limitation of this run.
