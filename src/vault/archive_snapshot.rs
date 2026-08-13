@@ -123,6 +123,59 @@ fn html_tag_end(html: &str, start: usize) -> Option<usize> {
     None
 }
 
+/// Return whether a tag is closing and its ASCII-insensitive element name.
+fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
+    let bytes = tag.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    let closing = bytes.get(cursor) == Some(&b'/');
+    cursor += usize::from(closing);
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if matches!(bytes.get(cursor), None | Some(b'!' | b'?')) {
+        return None;
+    }
+    let start = cursor;
+    while cursor < bytes.len()
+        && !bytes[cursor].is_ascii_whitespace()
+        && bytes[cursor] != b'/'
+    {
+        cursor += 1;
+    }
+    (cursor > start).then_some((closing, &tag[start..cursor]))
+}
+
+/// Skip an HTML raw-text element through its matching closing tag.
+fn raw_text_end(html: &str, start: usize, name: &str) -> Option<usize> {
+    let bytes = html.as_bytes();
+    let mut cursor = start;
+
+    while let Some(open_offset) = html[cursor..].find('<') {
+        let open = cursor + open_offset;
+        let mut name_start = open + 1;
+        if bytes.get(name_start) != Some(&b'/') {
+            cursor = name_start;
+            continue;
+        }
+        name_start += 1;
+        let name_end = name_start.checked_add(name.len())?;
+        let valid_boundary = bytes.get(name_end).is_none_or(|byte| {
+            matches!(byte, b'/' | b'>') || byte.is_ascii_whitespace()
+        });
+        if name_end <= bytes.len()
+            && valid_boundary
+            && html[name_start..name_end].eq_ignore_ascii_case(name)
+        {
+            return html_tag_end(html, name_end).map(|close| close + 1);
+        }
+        cursor = open + 1;
+    }
+    None
+}
+
 /// Read the two exact, quoted attributes used to join snapshot HTML to Markdown.
 ///
 /// Values borrow the tag: scanning does not allocate or copy each element.
@@ -213,12 +266,30 @@ pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> 
 
     while let Some(open_offset) = html[cursor..].find('<') {
         let open = cursor + open_offset;
+        if html[open..].starts_with("<!--") {
+            let Some(comment_end) = html[open + 4..].find("-->") else {
+                break;
+            };
+            cursor = open + 4 + comment_end + 3;
+            continue;
+        }
+
         let Some(close) = html_tag_end(html, open + 1) else {
             break;
         };
         cursor = close + 1;
+        if matches!(html.as_bytes().get(open + 1), Some(b'!' | b'?')) {
+            continue;
+        }
 
-        let (Some(original), Some(hash)) = resource_attributes(&html[open + 1..close]) else {
+        let tag = &html[open + 1..close];
+        if let Some((false, name)) = html_tag_name(tag)
+            && (name.eq_ignore_ascii_case("script") || name.eq_ignore_ascii_case("style"))
+        {
+            cursor = raw_text_end(html, cursor, name).unwrap_or(html.len());
+        }
+
+        let (Some(original), Some(hash)) = resource_attributes(tag) else {
             continue;
         };
         let raw = original.trim();
@@ -351,14 +422,18 @@ pub fn rewrite_markdown_images(
         };
         let destination =
             source_range.start + destination.start..source_range.start + destination.end;
-        if replacements
-            .last()
-            .is_some_and(|(previous, _)| destination.start < previous.end)
-        {
-            continue;
-        }
         replacements.push((destination, hash));
     }
+
+    replacements.sort_unstable_by_key(|(destination, _)| (destination.start, destination.end));
+    let mut previous_end = 0;
+    replacements.retain(|(destination, _)| {
+        let disjoint = destination.start >= previous_end;
+        if disjoint {
+            previous_end = destination.end;
+        }
+        disjoint
+    });
 
     if replacements.is_empty() {
         return markdown.to_string();
@@ -719,6 +794,42 @@ mod tests {
     }
 
     #[test]
+    fn ignores_resource_like_markup_inside_comments() {
+        let html = concat!(
+            "<!-- <img data-sf-original-src=",
+            r#""https://cdn.example/comment>a.png" src="cas:sha256:comment"> -->"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_script_and_style_text() {
+        let html = concat!(
+            r#"<script>const image = '<img data-sf-original-src="https://cdn.example/script>a.png" src="cas:sha256:script">';</script>"#,
+            r#"<style>/* <img data-sf-original-src="https://cdn.example/style>b.png" src="cas:sha256:style"> */</style>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_attributes_in_declarations_and_processing_instructions() {
+        let html = concat!(
+            r#"<!DOCTYPE img data-sf-original-src="https://cdn.example/doctype>a.png" src="cas:sha256:doctype">"#,
+            r#"<?capture data-sf-original-src="https://cdn.example/pi>b.png" src="cas:sha256:pi"?>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
     fn pairs_within_one_tag_only() {
         let html = concat!(
             r#"<img data-sf-original-src="https://cdn.example.com/a.png">"#,
@@ -791,6 +902,29 @@ mod tests {
         assert_eq!(
             out,
             r#"before ![spaced](<cas:sha256:spaced> "Caption") after"#
+        );
+    }
+
+    #[test]
+    fn rewrites_disjoint_destinations_in_nested_images() {
+        let markdown = concat!(
+            "before ![outer ![inner](https://cdn.example/inner.png \"Inner\") tail]",
+            "(https://cdn.example/outer.png \"Outer\") after"
+        );
+        let mut map = one_entry("https://cdn.example/inner.png", "sha256:inner");
+        map.insert(
+            "https://cdn.example/outer.png".to_string(),
+            "sha256:outer".to_string(),
+        );
+
+        let out = rewrite_markdown_images(markdown, &map, BASE);
+
+        assert_eq!(
+            out,
+            concat!(
+                "before ![outer ![inner](cas:sha256:inner \"Inner\") tail]",
+                "(cas:sha256:outer \"Outer\") after"
+            )
         );
     }
 
