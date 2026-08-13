@@ -27,6 +27,7 @@ function listenerStub(name) {
 globalThis.chrome = {
 	runtime: {
 		onMessage: listenerStub("runtime.onMessage"),
+		onConnect: listenerStub("runtime.onConnect"),
 		getPlatformInfo: async () => ({ os: "mac" }),
 		openOptionsPage: () => {},
 		lastError: undefined,

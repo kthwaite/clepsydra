@@ -3,18 +3,21 @@ import { ArchiveConflictError, ClepsydraClient } from "#/lib/api-client";
 import { type CapturePhase, badgeFor, isTerminal } from "#/lib/badge";
 import { CaptureQueue } from "#/lib/capture-queue";
 import {
+	CAPTURE_ABORT,
 	CAPTURE_CHUNK,
+	type CaptureAbort,
 	type CaptureChunk,
-	ChunkAssembler,
 } from "#/lib/chunked-transfer";
 import { sha256String } from "#/lib/hasher";
 import { executeCaptureScript } from "#/lib/inject-capture";
 import { describeInjectionFailure } from "#/lib/injection";
 import {
-	RELAY_FETCH,
-	type RelayFetchRequest,
-	performRelayFetch,
-} from "#/lib/relay-fetch";
+	CAPTURE_INACTIVITY_TIMEOUT_MS,
+	type CompletedTransfer,
+	PendingTransferCoordinator,
+} from "#/lib/pending-transfer";
+import { RELAY_PORT_NAME, handleRelayFetchPort } from "#/lib/relay-fetch";
+import { SingleFileRuntime } from "#/lib/singlefile-runtime";
 import { convertArchiveHtml } from "#/lib/turndown-rules";
 import type {
 	ArchiveConflictDetail,
@@ -220,72 +223,99 @@ function reportPhase(tabId: number | undefined, phase: CapturePhase): void {
 }
 
 /**
+ * Any extension API call resets the MV3 idle timer. MV2 background pages are
+ * not suspended, so inability to call it there is benign.
+ */
+function keepServiceWorkerAlive(): void {
+	try {
+		void Promise.resolve(chrome.runtime.getPlatformInfo()).catch(() => {});
+	} catch {
+		// ignored
+	}
+}
+
+/**
  * Guards every capture: suppresses duplicates for a URL already being captured,
  * and keeps the service worker alive while asynchronous work is outstanding.
  */
 const captureQueue = new CaptureQueue({
-	keepAlive: () => {
-		// Any extension API call resets the service worker's idle timer. The
-		// result is irrelevant; only the call matters.
-		try {
-			void Promise.resolve(chrome.runtime.getPlatformInfo()).catch(() => {});
-		} catch {
-			// MV2 background pages are not suspended, so a failure here is benign.
-		}
+	keepAlive: keepServiceWorkerAlive,
+});
+
+/** Snapshot chunks, metadata, and inactivity timers in flight. */
+const pendingTransfers = new PendingTransferCoordinator<CaptureMetadata>({
+	keepAlive: keepServiceWorkerAlive,
+	onExpire: (captureId, tabId) => {
+		reportPhase(tabId, "error");
+		showNotification(
+			"Capture Failed",
+			`Snapshot transfer ${captureId} expired after ${CAPTURE_INACTIVITY_TIMEOUT_MS / 1_000} seconds of inactivity.`,
+		);
 	},
 });
 
-/** Snapshot chunks in flight, keyed by capture id. */
-const assembler = new ChunkAssembler();
-/** Metadata that arrived ahead of its chunks. */
-const pendingMetadata = new Map<
-	string,
-	{ metadata: CaptureMetadata; tabId?: number }
->();
+const singleFileRuntime = new SingleFileRuntime((tabId, message, options) =>
+	chrome.tabs.sendMessage(tabId, message, options),
+);
 
 type WorkerMessage =
 	| CaptureMetaMessage
 	| CaptureChunk
-	| RelayFetchRequest
+	| CaptureAbort
 	| { type: "capture_error"; error: string }
 	| { type: "capture_status"; tabId: number };
 
+chrome.runtime.onConnect.addListener((port) => {
+	if (port.name === RELAY_PORT_NAME) {
+		handleRelayFetchPort(port);
+	}
+});
+
 chrome.runtime.onMessage.addListener(
 	(
-		message: WorkerMessage,
+		message: unknown,
 		sender: chrome.runtime.MessageSender,
 		sendResponse: (response?: unknown) => void,
-	): boolean | undefined => {
-		if (message.type === "capture_status") {
-			// Answered synchronously, so no need to hold the channel open.
-			sendResponse({ phase: phases.get(message.tabId) ?? null });
-			return undefined;
-		}
+	): boolean | undefined | Promise<Record<string, never>> => {
+		const singleFileResponse = singleFileRuntime.handleMessage(message, sender);
+		if (singleFileResponse) return singleFileResponse;
+		const workerMessage = message as WorkerMessage;
 
-		if (message.type === RELAY_FETCH) {
-			void performRelayFetch(message.url, message.headers).then(sendResponse);
-			return true; // keep the channel open for the async reply
+		if (workerMessage.type === "capture_status") {
+			// Answered synchronously, so no need to hold the channel open.
+			sendResponse({ phase: phases.get(workerMessage.tabId) ?? null });
+			return undefined;
 		}
 
 		const tabId = sender.tab?.id;
 
-		if (message.type === "capture_meta") {
+		if (workerMessage.type === "capture_meta") {
 			reportPhase(tabId, "processing");
-			pendingMetadata.set(message.captureId, {
-				metadata: message.metadata,
+			pendingTransfers.acceptMetadata(
+				workerMessage.captureId,
+				workerMessage.metadata,
 				tabId,
-			});
+			);
 			return undefined;
 		}
 
-		if (message.type === CAPTURE_CHUNK) {
-			const snapshotHtml = assembler.accept(message);
-			if (snapshotHtml === null) return undefined;
-
-			const pending = pendingMetadata.get(message.captureId);
-			pendingMetadata.delete(message.captureId);
-			if (!pending) {
+		if (workerMessage.type === CAPTURE_CHUNK) {
+			let completed: CompletedTransfer<CaptureMetadata> | null;
+			try {
+				completed = pendingTransfers.acceptChunk(workerMessage, tabId);
+			} catch (error) {
 				reportPhase(tabId, "error");
+				showNotification(
+					"Capture Failed",
+					`Malformed snapshot transfer: ${String(error)}`,
+				);
+				return undefined;
+			}
+			if (completed === null) return undefined;
+
+			const { metadata, snapshotHtml, tabId: completedTabId } = completed;
+			if (!metadata) {
+				reportPhase(completedTabId, "error");
 				showNotification(
 					"Archive Failed",
 					"Capture metadata was lost in transit.",
@@ -293,30 +323,33 @@ chrome.runtime.onMessage.addListener(
 				return undefined;
 			}
 
-			const started = captureQueue.run(pending.metadata.url, () =>
-				processCapture(pending.metadata, snapshotHtml, pending.tabId).catch(
-					(err) => {
-						reportPhase(pending.tabId, "error");
-						showNotification("Archive Failed", String(err));
-					},
-				),
+			const started = captureQueue.run(metadata.url, () =>
+				processCapture(metadata, snapshotHtml, completedTabId).catch((err) => {
+					reportPhase(completedTabId, "error");
+					showNotification("Archive Failed", String(err));
+				}),
 			);
 			if (!started) {
 				// Without this the tab keeps the non-clearing `processing` badge
 				// forever: the capture that owns the terminal phase is running for
 				// a different tab.
-				reportPhase(pending.tabId, "duplicate");
+				reportPhase(completedTabId, "duplicate");
 				showNotification(
 					"Capture In Progress",
-					`${pending.metadata.title} is already being archived.`,
+					`${metadata.title} is already being archived.`,
 				);
 			}
 			return undefined;
 		}
 
-		if (message.type === "capture_error") {
+		if (workerMessage.type === CAPTURE_ABORT) {
+			pendingTransfers.abort(workerMessage.captureId);
+			return undefined;
+		}
+
+		if (workerMessage.type === "capture_error") {
 			reportPhase(tabId, "error");
-			showNotification("Capture Failed", message.error);
+			showNotification("Capture Failed", workerMessage.error);
 		}
 		return undefined;
 	},
@@ -324,11 +357,8 @@ chrome.runtime.onMessage.addListener(
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
 	phases.delete(tabId);
-	for (const [captureId, pending] of pendingMetadata) {
-		if (pending.tabId !== tabId) continue;
-		pendingMetadata.delete(captureId);
-		assembler.forget(captureId);
-	}
+	pendingTransfers.removeTab(tabId);
+	singleFileRuntime.removeTab(tabId);
 });
 
 /** Inject the capture script, reporting why if the page forbids it. */

@@ -6,13 +6,15 @@
 //! seeing anything. We pull those resources back out into the CAS and leave
 //! `cas:<hash>` references behind.
 //!
-//! Everything here operates on attacker-authored markup. It parses nothing and
-//! executes nothing — it matches a self-delimiting token and rewrites it.
+//! Everything here operates on attacker-authored markup. It executes nothing and
+//! constructs no DOM — local scanners identify the source bytes to rewrite.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use pulldown_cmark::{Event, Options, Parser, Tag};
 use regex::Regex;
 use std::collections::BTreeMap;
+use std::ops::Range;
 use url::Url;
 
 use crate::vault::cas::ContentStore;
@@ -107,34 +109,170 @@ fn content_type_of(media_type: &str) -> String {
     }
 }
 
-/// One HTML tag, so an original URL is only ever paired with a `cas:` reference
-/// that sits on the same element.
-fn tag_regex() -> &'static Regex {
-    use std::sync::OnceLock;
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r"<[^>]+>").unwrap())
+/// Find the end of an HTML tag, ignoring `>` inside quoted attribute values.
+fn html_tag_end(html: &str, start: usize) -> Option<usize> {
+    let mut quote = None;
+    for (offset, byte) in html.as_bytes()[start..].iter().copied().enumerate() {
+        match (quote, byte) {
+            (Some(active), current) if current == active => quote = None,
+            (None, b'\'' | b'"') => quote = Some(byte),
+            (None, b'>') => return Some(start + offset),
+            _ => {}
+        }
+    }
+    None
 }
 
-/// `data-sf-original-src="…"`, written by SingleFile's `saveOriginalURLs`.
-fn original_src_regex() -> &'static Regex {
-    use std::sync::OnceLock;
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"data-sf-original-src\s*=\s*["']([^"']*)["']"#).unwrap())
+/// Return whether a tag is closing and its ASCII-insensitive element name.
+fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
+    let bytes = tag.as_bytes();
+    let mut cursor = 0;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    let closing = bytes.get(cursor) == Some(&b'/');
+    cursor += usize::from(closing);
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if matches!(bytes.get(cursor), None | Some(b'!' | b'?')) {
+        return None;
+    }
+    let start = cursor;
+    while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
+        cursor += 1;
+    }
+    (cursor > start).then_some((closing, &tag[start..cursor]))
 }
 
-/// `src="cas:…"`. The leading `(?:^|\s)` keeps this off `data-sf-original-src`,
-/// which ends in `-src`; anchoring `src\s*=` keeps it off `srcset`.
-fn cas_src_regex() -> &'static Regex {
-    use std::sync::OnceLock;
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"(?:^|\s)src\s*=\s*["']cas:([^"']*)["']"#).unwrap())
+#[derive(Clone, Copy)]
+enum InertHtmlContent {
+    UntilEndTag,
+    ThroughEof,
 }
 
-/// A markdown inline image, with an optional quoted title.
-fn markdown_image_regex() -> &'static Regex {
-    use std::sync::OnceLock;
-    static RE: OnceLock<Regex> = OnceLock::new();
-    RE.get_or_init(|| Regex::new(r#"!\[([^\]]*)\]\(\s*([^()\s]+)((?:\s+"[^"]*")?)\s*\)"#).unwrap())
+/// Classify elements whose text must not be scanned as nested markup.
+fn inert_html_content(name: &str) -> Option<InertHtmlContent> {
+    if [
+        "script", "style", "textarea", "title", "xmp", "iframe", "noembed", "noframes", "noscript",
+    ]
+    .iter()
+    .any(|candidate| name.eq_ignore_ascii_case(candidate))
+    {
+        Some(InertHtmlContent::UntilEndTag)
+    } else if name.eq_ignore_ascii_case("plaintext") {
+        Some(InertHtmlContent::ThroughEof)
+    } else {
+        None
+    }
+}
+
+/// Skip an HTML raw-text element through its matching closing tag.
+fn raw_text_end(html: &str, start: usize, name: &str) -> Option<usize> {
+    let bytes = html.as_bytes();
+    let mut cursor = start;
+
+    while let Some(open_offset) = html[cursor..].find('<') {
+        let open = cursor + open_offset;
+        let mut name_start = open + 1;
+        if bytes.get(name_start) != Some(&b'/') {
+            cursor = name_start;
+            continue;
+        }
+        name_start += 1;
+        let name_end = name_start.checked_add(name.len())?;
+        let valid_boundary = bytes
+            .get(name_end)
+            .is_none_or(|byte| matches!(byte, b'/' | b'>') || byte.is_ascii_whitespace());
+        if name_end <= bytes.len()
+            && valid_boundary
+            && html[name_start..name_end].eq_ignore_ascii_case(name)
+        {
+            return html_tag_end(html, name_end).map(|close| close + 1);
+        }
+        cursor = open + 1;
+    }
+    None
+}
+
+/// Read the two exact, quoted attributes used to join snapshot HTML to Markdown.
+///
+/// Values borrow the tag: scanning does not allocate or copy each element.
+fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
+    let bytes = tag.as_bytes();
+    let mut cursor = 0;
+    let mut original = None;
+    let mut hash = None;
+
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        cursor += 1;
+    }
+    if bytes.get(cursor) == Some(&b'/') {
+        cursor += 1;
+    }
+    while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
+        cursor += 1;
+    }
+
+    while cursor < bytes.len() {
+        while cursor < bytes.len() && (bytes[cursor].is_ascii_whitespace() || bytes[cursor] == b'/')
+        {
+            cursor += 1;
+        }
+        let name_start = cursor;
+        while cursor < bytes.len()
+            && !bytes[cursor].is_ascii_whitespace()
+            && bytes[cursor] != b'='
+            && bytes[cursor] != b'/'
+        {
+            cursor += 1;
+        }
+        if cursor == name_start {
+            cursor += 1;
+            continue;
+        }
+        let name = &tag[name_start..cursor];
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        if bytes.get(cursor) != Some(&b'=') {
+            continue;
+        }
+        cursor += 1;
+        while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+            cursor += 1;
+        }
+        let value = if let Some(&quote @ (b'\'' | b'"')) = bytes.get(cursor) {
+            cursor += 1;
+            let value_start = cursor;
+            while cursor < bytes.len() && bytes[cursor] != quote {
+                cursor += 1;
+            }
+            if cursor == bytes.len() {
+                break;
+            }
+            let value = &tag[value_start..cursor];
+            cursor += 1;
+            value
+        } else {
+            let value_start = cursor;
+            while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            if cursor == value_start {
+                continue;
+            }
+            &tag[value_start..cursor]
+        };
+
+        if original.is_none() && name.eq_ignore_ascii_case("data-sf-original-src") {
+            original = Some(value);
+        } else if hash.is_none() && name.eq_ignore_ascii_case("src") {
+            hash = value.strip_prefix("cas:");
+        }
+    }
+
+    (original, hash)
 }
 
 /// Absolute original URL → the hash of the blob that replaced it.
@@ -145,15 +283,42 @@ fn markdown_image_regex() -> &'static Regex {
 /// between the markdown — which still carries live URLs — and the blobs.
 pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
-    for tag in tag_regex().find_iter(html) {
-        let tag = tag.as_str();
-        let (Some(original), Some(hash)) = (
-            original_src_regex().captures(tag),
-            cas_src_regex().captures(tag),
-        ) else {
+    let mut cursor = 0;
+
+    while let Some(open_offset) = html[cursor..].find('<') {
+        let open = cursor + open_offset;
+        if html[open..].starts_with("<!--") {
+            let Some(comment_end) = html[open + 4..].find("-->") else {
+                break;
+            };
+            cursor = open + 4 + comment_end + 3;
+            continue;
+        }
+
+        let Some(close) = html_tag_end(html, open + 1) else {
+            break;
+        };
+        cursor = close + 1;
+        if matches!(html.as_bytes().get(open + 1), Some(b'!' | b'?')) {
+            continue;
+        }
+
+        let tag = &html[open + 1..close];
+        if let Some((false, name)) = html_tag_name(tag)
+            && let Some(inert) = inert_html_content(name)
+        {
+            cursor = match inert {
+                InertHtmlContent::UntilEndTag => {
+                    raw_text_end(html, cursor, name).unwrap_or(html.len())
+                }
+                InertHtmlContent::ThroughEof => html.len(),
+            };
+        }
+
+        let (Some(original), Some(hash)) = resource_attributes(tag) else {
             continue;
         };
-        let raw = original[1].trim();
+        let raw = original.trim();
         if raw.is_empty() {
             continue;
         }
@@ -168,7 +333,7 @@ pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> 
             continue;
         }
         let key = absolutise(&decoded, base_url).unwrap_or_else(|| decoded.into_owned());
-        map.insert(key, hash[1].to_string());
+        map.insert(key, hash.to_string());
     }
     map
 }
@@ -264,25 +429,262 @@ pub fn rewrite_markdown_images(
     map: &BTreeMap<String, String>,
     base_url: &str,
 ) -> String {
-    markdown_image_regex()
-        .replace_all(markdown, |caps: &regex::Captures<'_>| {
-            let alt = &caps[1];
-            let url = &caps[2];
-            let title = &caps[3];
-            match lookup(map, url, base_url) {
-                Some(hash) => format!("![{alt}](cas:{hash}{title})"),
-                None => caps[0].to_string(),
-            }
+    let mut candidates = Vec::new();
+    for (event, source) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
+        let Event::Start(Tag::Image { dest_url, .. }) = event else {
+            continue;
+        };
+        let Some(hash) = lookup(map, dest_url.as_ref(), base_url) else {
+            continue;
+        };
+        candidates.push(ImageCandidate {
+            source,
+            label_end: None,
+            hash,
+        });
+    }
+
+    if candidates.is_empty() {
+        return markdown.to_string();
+    }
+    candidates.sort_unstable_by_key(|candidate| (candidate.source.start, candidate.source.end));
+    find_image_label_ends(markdown, &mut candidates);
+
+    let mut replacements: Vec<(Range<usize>, &str)> = candidates
+        .into_iter()
+        .filter_map(|candidate| {
+            let source = markdown.get(candidate.source.clone())?;
+            let label_end = candidate.label_end?.checked_sub(candidate.source.start)?;
+            let destination = image_destination_after_label(source, label_end + 1)?;
+            Some((
+                candidate.source.start + destination.start
+                    ..candidate.source.start + destination.end,
+                candidate.hash,
+            ))
         })
-        .into_owned()
+        .collect();
+    replacements.sort_unstable_by_key(|(destination, _)| (destination.start, destination.end));
+    let mut previous_end = 0;
+    replacements.retain(|(destination, _)| {
+        let disjoint = destination.start >= previous_end;
+        if disjoint {
+            previous_end = destination.end;
+        }
+        disjoint
+    });
+
+    if replacements.is_empty() {
+        return markdown.to_string();
+    }
+    let mut output = String::with_capacity(markdown.len());
+    let mut copied_through = 0;
+    for (destination, hash) in replacements {
+        output.push_str(&markdown[copied_through..destination.start]);
+        output.push_str("cas:");
+        output.push_str(hash);
+        copied_through = destination.end;
+    }
+    output.push_str(&markdown[copied_through..]);
+    output
+}
+struct ImageCandidate<'a> {
+    source: Range<usize>,
+    label_end: Option<usize>,
+    hash: &'a str,
 }
 
-fn lookup(map: &BTreeMap<String, String>, url: &str, base_url: &str) -> Option<String> {
+#[cfg(test)]
+thread_local! {
+    static DESTINATION_SCAN_BYTES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+fn record_destination_scan(bytes: usize) {
+    DESTINATION_SCAN_BYTES.with(|count| count.set(count.get().saturating_add(bytes)));
+}
+
+#[cfg(test)]
+fn reset_destination_scan_bytes() {
+    DESTINATION_SCAN_BYTES.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+fn destination_scan_bytes() -> usize {
+    DESTINATION_SCAN_BYTES.with(std::cell::Cell::get)
+}
+
+/// Match each image's closing label bracket in one pass over the Markdown.
+///
+/// Parser source ranges for nested images all end at the outermost image. If
+/// each candidate searched that complete range independently, adversarially
+/// nested labels would be quadratic. A stack makes every byte participate in
+/// at most one label scan.
+fn find_image_label_ends(markdown: &str, candidates: &mut [ImageCandidate<'_>]) {
+    let bytes = markdown.as_bytes();
+    let mut next_candidate = 0;
+    let mut candidate_stack: Vec<(usize, usize)> = Vec::new();
+    let mut bracket_depth = 0usize;
+    let mut escaped = false;
+
+    for (cursor, byte) in bytes.iter().copied().enumerate() {
+        #[cfg(test)]
+        record_destination_scan(1);
+
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if byte == b'\\' {
+            escaped = true;
+            continue;
+        }
+
+        if byte == b'[' {
+            bracket_depth = bracket_depth.saturating_add(1);
+            while candidates
+                .get(next_candidate)
+                .is_some_and(|candidate| candidate.source.start + 1 == cursor)
+            {
+                candidate_stack.push((bracket_depth, next_candidate));
+                next_candidate += 1;
+            }
+            continue;
+        }
+        if byte != b']' {
+            continue;
+        }
+
+        if candidate_stack
+            .last()
+            .is_some_and(|(depth, _)| *depth == bracket_depth)
+        {
+            let (_, candidate_index) = candidate_stack
+                .pop()
+                .expect("last candidate was checked above");
+            let candidate = &mut candidates[candidate_index];
+            if cursor < candidate.source.end {
+                candidate.label_end = Some(cursor);
+            }
+        }
+        bracket_depth = bracket_depth.saturating_sub(1);
+    }
+}
+
+/// Locate an inline image destination after a label whose closing bracket is known.
+fn image_destination_after_label(source: &str, mut cursor: usize) -> Option<Range<usize>> {
+    let bytes = source.as_bytes();
+    if bytes.get(cursor) != Some(&b'(') {
+        return None;
+    }
+    cursor += 1;
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        #[cfg(test)]
+        record_destination_scan(1);
+        cursor += 1;
+    }
+
+    if bytes.get(cursor) == Some(&b'<') {
+        let destination_start = cursor + 1;
+        cursor += 1;
+        while cursor < bytes.len() {
+            #[cfg(test)]
+            record_destination_scan(1);
+            match bytes[cursor] {
+                b'\\' => cursor = (cursor + 2).min(bytes.len()),
+                b'>' => {
+                    let destination = destination_start..cursor;
+                    return valid_image_suffix(bytes, cursor + 1).then_some(destination);
+                }
+                _ => cursor += 1,
+            }
+        }
+        return None;
+    }
+
+    let destination_start = cursor;
+    let mut parentheses = 0usize;
+    while cursor < bytes.len() {
+        #[cfg(test)]
+        record_destination_scan(1);
+        match bytes[cursor] {
+            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+            b'(' => {
+                parentheses += 1;
+                cursor += 1;
+            }
+            b')' if parentheses == 0 => {
+                return (cursor + 1 == bytes.len()).then_some(destination_start..cursor);
+            }
+            b')' => {
+                parentheses -= 1;
+                cursor += 1;
+            }
+            byte if byte.is_ascii_whitespace() && parentheses == 0 => {
+                let destination = destination_start..cursor;
+                return valid_image_suffix(bytes, cursor).then_some(destination);
+            }
+            _ => cursor += 1,
+        }
+    }
+    None
+}
+
+/// Validate whitespace, an optional title, and the inline image's closing `)`.
+fn valid_image_suffix(bytes: &[u8], mut cursor: usize) -> bool {
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        #[cfg(test)]
+        record_destination_scan(1);
+        cursor += 1;
+    }
+    if bytes.get(cursor) == Some(&b')') {
+        return cursor + 1 == bytes.len();
+    }
+
+    let Some(&delimiter @ (b'\'' | b'"' | b'(')) = bytes.get(cursor) else {
+        return false;
+    };
+    cursor += 1;
+    let mut nested = usize::from(delimiter == b'(');
+    while cursor < bytes.len() {
+        #[cfg(test)]
+        record_destination_scan(1);
+        match bytes[cursor] {
+            b'\\' => cursor = (cursor + 2).min(bytes.len()),
+            b'(' if delimiter == b'(' => {
+                nested += 1;
+                cursor += 1;
+            }
+            b')' if delimiter == b'(' => {
+                nested -= 1;
+                cursor += 1;
+                if nested == 0 {
+                    break;
+                }
+            }
+            current if delimiter != b'(' && current == delimiter => {
+                cursor += 1;
+                break;
+            }
+            _ => cursor += 1,
+        }
+    }
+    if delimiter == b'(' && nested != 0 {
+        return false;
+    }
+    while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
+        #[cfg(test)]
+        record_destination_scan(1);
+        cursor += 1;
+    }
+    bytes.get(cursor) == Some(&b')') && cursor + 1 == bytes.len()
+}
+
+fn lookup<'a>(map: &'a BTreeMap<String, String>, url: &str, base_url: &str) -> Option<&'a str> {
     if let Some(hash) = map.get(url) {
-        return Some(hash.clone());
+        return Some(hash);
     }
     let absolute = absolutise(url, base_url)?;
-    map.get(&absolute).cloned()
+    map.get(&absolute).map(String::as_str)
 }
 
 fn absolutise(raw: &str, base_url: &str) -> Option<String> {
@@ -466,6 +868,150 @@ mod tests {
     }
 
     #[test]
+    fn scans_double_quoted_original_url_with_apostrophe_and_greater_than() {
+        let html = r#"<img data-sf-original-src="https://cdn.example/a'b>c.png?x=1&amp;y=2" src="cas:sha256:aa">"#;
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(
+            map.get("https://cdn.example/a'b%3Ec.png?x=1&y=2"),
+            Some(&"sha256:aa".to_string())
+        );
+    }
+
+    #[test]
+    fn scans_exact_case_insensitive_single_quoted_attributes() {
+        let html = concat!(
+            "<img DATA-SF-ORIGINAL-SRCSET='https://cdn.example/wide.png 2x'\n",
+            " DATA-SF-ORIGINAL-SRC='https://cdn.example/a\"b.png'\n",
+            " SRCSET='cas:sha256:distractor 2x'\n",
+            " SRC='cas:sha256:bb'>"
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("https://cdn.example/a%22b.png"),
+            Some(&"sha256:bb".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_comments() {
+        let html = concat!(
+            "<!-- <img data-sf-original-src=",
+            r#""https://cdn.example/comment>a.png" src="cas:sha256:comment"> -->"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_script_and_style_text() {
+        let html = concat!(
+            r#"<script>const image = '<img data-sf-original-src="https://cdn.example/script>a.png" src="cas:sha256:script">';</script>"#,
+            r#"<style>/* <img data-sf-original-src="https://cdn.example/style>b.png" src="cas:sha256:style"> */</style>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn matches_only_a_bounded_case_insensitive_textarea_end_tag() {
+        let html = concat!(
+            r#"<TEXTAREA><img data-sf-original-src="https://cdn.example/inert>a.png" src="cas:sha256:inert">"#,
+            r#"</textarea-extra><img data-sf-original-src="https://cdn.example/still-inert>b.png" src="cas:sha256:still-inert">"#,
+            r#"</TeXtArEa><img data-sf-original-src="https://cdn.example/genuine.png" src="cas:sha256:genuine">"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("https://cdn.example/genuine.png"),
+            Some(&"sha256:genuine".to_string())
+        );
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_title_text() {
+        let html = r#"<title><img data-sf-original-src="https://cdn.example/title>b.png" src="cas:sha256:title"></TITLE>"#;
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_xmp_and_iframe_text() {
+        let html = concat!(
+            r#"<xmp><img data-sf-original-src="https://cdn.example/xmp>a.png" src="cas:sha256:xmp"></xmp>"#,
+            r#"<IFRAME><img data-sf-original-src="https://cdn.example/iframe>b.png" src="cas:sha256:iframe"></iframe>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_markup_inside_noembed_and_noframes_text() {
+        let html = concat!(
+            r#"<noembed><img data-sf-original-src="https://cdn.example/noembed>a.png" src="cas:sha256:noembed"></noembed>"#,
+            r#"<NOFRAMES><img data-sf-original-src="https://cdn.example/noframes>b.png" src="cas:sha256:noframes"></noframes>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn skips_noscript_text_then_maps_a_post_close_resource() {
+        let html = concat!(
+            r#"<NoScRiPt><img data-sf-original-src="https://cdn.example/noscript>a.png" src="cas:sha256:noscript"></NOSCRIPT>"#,
+            r#"<img data-sf-original-src="https://cdn.example/after.png" src="cas:sha256:after">"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert_eq!(map.len(), 1);
+        assert_eq!(
+            map.get("https://cdn.example/after.png"),
+            Some(&"sha256:after".to_string())
+        );
+    }
+
+    #[test]
+    fn plaintext_consumes_resource_like_markup_through_eof() {
+        let html = concat!(
+            "<plaintext>",
+            r#"<img data-sf-original-src="https://cdn.example/plaintext>a.png" src="cas:sha256:plaintext">"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn ignores_resource_like_attributes_in_declarations_and_processing_instructions() {
+        let html = concat!(
+            r#"<!DOCTYPE img data-sf-original-src="https://cdn.example/doctype>a.png" src="cas:sha256:doctype">"#,
+            r#"<?capture data-sf-original-src="https://cdn.example/pi>b.png" src="cas:sha256:pi"?>"#
+        );
+
+        let map = original_url_map(html, BASE);
+
+        assert!(map.is_empty());
+    }
+
+    #[test]
     fn pairs_within_one_tag_only() {
         let html = concat!(
             r#"<img data-sf-original-src="https://cdn.example.com/a.png">"#,
@@ -510,6 +1056,89 @@ mod tests {
     }
 
     #[test]
+    fn rewrites_a_balanced_parenthesized_destination_only() {
+        let markdown = concat!(
+            "before [ordinary](https://cdn.example/plot_(final).png \"Link\")\n",
+            "![plot](https://cdn.example/plot_(final).png \"Final\") after"
+        );
+        let map = one_entry("https://cdn.example/plot_(final).png", "sha256:plot");
+
+        let out = rewrite_markdown_images(markdown, &map, BASE);
+
+        assert_eq!(
+            out,
+            concat!(
+                "before [ordinary](https://cdn.example/plot_(final).png \"Link\")\n",
+                "![plot](cas:sha256:plot \"Final\") after"
+            )
+        );
+    }
+
+    #[test]
+    fn rewrites_an_angle_bracket_destination_with_spaces_only() {
+        let markdown = r#"before ![spaced](<https://cdn.example/a b.png> "Caption") after"#;
+        let map = one_entry("https://cdn.example/a b.png", "sha256:spaced");
+
+        let out = rewrite_markdown_images(markdown, &map, BASE);
+
+        assert_eq!(
+            out,
+            r#"before ![spaced](<cas:sha256:spaced> "Caption") after"#
+        );
+    }
+
+    #[test]
+    fn rewrites_disjoint_destinations_in_nested_images() {
+        let markdown = concat!(
+            "before ![outer ![inner](https://cdn.example/inner.png \"Inner\") tail]",
+            "(https://cdn.example/outer.png \"Outer\") after"
+        );
+        let mut map = one_entry("https://cdn.example/inner.png", "sha256:inner");
+        map.insert(
+            "https://cdn.example/outer.png".to_string(),
+            "sha256:outer".to_string(),
+        );
+
+        let out = rewrite_markdown_images(markdown, &map, BASE);
+
+        assert_eq!(
+            out,
+            concat!(
+                "before ![outer ![inner](cas:sha256:inner \"Inner\") tail]",
+                "(cas:sha256:outer \"Outer\") after"
+            )
+        );
+    }
+
+    #[test]
+    fn nested_image_destination_scanning_is_linearly_bounded() {
+        const DEPTH: usize = 128;
+        const URL: &str = "https://cdn.example/deep.png";
+        let mut markdown = String::new();
+        for _ in 0..DEPTH {
+            markdown.push_str("![");
+        }
+        markdown.push_str("leaf");
+        for _ in 0..DEPTH {
+            markdown.push_str("](");
+            markdown.push_str(URL);
+            markdown.push(')');
+        }
+        let map = one_entry(URL, "sha256:deep");
+
+        reset_destination_scan_bytes();
+        let out = rewrite_markdown_images(&markdown, &map, BASE);
+        let scanned = destination_scan_bytes();
+
+        assert_eq!(out, markdown.replace(URL, "cas:sha256:deep"));
+        assert!(
+            scanned <= markdown.len().saturating_mul(2),
+            "destination discovery scanned {scanned} bytes for {} bytes of Markdown",
+            markdown.len()
+        );
+    }
+
+    #[test]
     fn leaves_an_unmatched_image_intact() {
         // Silently dropping it would produce markdown that claims an image was
         // archived when it was not.
@@ -551,6 +1180,33 @@ mod tests {
 
         let hash = &deconstructed.resources[0].hash;
         assert_eq!(out, format!("![a](cas:{hash})"));
+    }
+
+    #[test]
+    fn joins_runtime_balanced_url_when_cas_src_is_unquoted() {
+        let html = concat!(
+            r#"<img loading=lazy alt="large relay bitmap" "#,
+            r#"src=cas:sha256:relay "#,
+            r#"data-sf-original-src="http://localhost:34989/large_(relay).bmp?sig=(abc)&amp;variant=full">"#
+        );
+        let markdown = "![large relay bitmap](http://localhost:34989/large_(relay).bmp?sig=(abc)&variant=full)";
+
+        // The exact parser event/range and balanced scanner succeed when the
+        // map is supplied directly; the runtime miss originated in HTML join
+        // extraction, where SingleFile serialized this `src` without quotes.
+        let direct_map = one_entry(
+            "http://localhost:34989/large_(relay).bmp?sig=(abc)&variant=full",
+            "sha256:relay",
+        );
+        assert_eq!(
+            rewrite_markdown_images(markdown, &direct_map, "http://localhost:34989/article"),
+            "![large relay bitmap](cas:sha256:relay)"
+        );
+
+        let map = original_url_map(html, "http://localhost:34989/article");
+        let out = rewrite_markdown_images(markdown, &map, "http://localhost:34989/article");
+
+        assert_eq!(out, "![large relay bitmap](cas:sha256:relay)");
     }
 
     // -------------------------------------------------------------------
