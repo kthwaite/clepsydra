@@ -40,6 +40,7 @@ vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
 }));
 const TEST_ROUTE_VIEWS: ReadonlyArray<[prefix: string, view: string]> = [
+  ["/archive", "archive"],
   ["/workspace", "workspace"],
   ["/gazetteer", "gazetteer"],
   ["/tasking", "tasking"],
@@ -191,7 +192,7 @@ import { Atrium } from "#/components/codex/Atrium";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { DEFAULT_DOC_SLUG } from "#/docs/registry";
 
-function renderFrame(forceView?: "folio") {
+function renderFrame(forceView?: "folio" | "archive") {
   return render(
     <CodexFrame {...(forceView ? { forceView } : {})}>
       <section>Frame content</section>
@@ -477,6 +478,18 @@ describe("CodexFrame responsive shell", () => {
     expect(
       screen.queryByRole("navigation", { name: "Mobile roots" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("gives the archive route the full content window without codex chrome", () => {
+    locationState.pathname = "/archive/archive/example/page.md";
+    renderFrame();
+
+    expect(screen.getByText("Frame content")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "CLEPSYDRA — return to Atrium" }),
+    ).not.toBeInTheDocument();
+    expect(document.querySelector("footer")).not.toBeInTheDocument();
+    expect(document.querySelector("main")).toHaveClass("h-full");
   });
 
   it("shows the six roots and global actions in the mobile chrome", () => {

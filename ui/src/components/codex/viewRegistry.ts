@@ -26,6 +26,8 @@ interface ViewDescriptor {
   /** Footer FILE code; null = derive from the active folio's path. */
   folioCode: string | null;
   showsSheaf: boolean;
+  /** Route owns the entire content window; suppress both responsive shells. */
+  fullPage?: boolean;
   /** Which rail/mobile entry highlights while this view is current; null =
    * no highlight (repairs, agenda). */
   navRoot: CodexView | null;
@@ -126,6 +128,15 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     mobile: null,
     go: ({ navigate }) =>
       void navigate({ to: "/docs/$slug", params: { slug: DEFAULT_DOC_SLUG } }),
+  },
+  archive: {
+    label: "ARCHIVE",
+    folioCode: "ARCHIVE",
+    showsSheaf: false,
+    fullPage: true,
+    navRoot: null,
+    mobile: null,
+    go: null,
   },
   repairs: {
     label: "REPAIRS",

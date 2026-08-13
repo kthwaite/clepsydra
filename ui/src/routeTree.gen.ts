@@ -19,6 +19,7 @@ import { Route as GraphRouteImport } from './routes/graph'
 import { Route as RepairsRouteImport } from './routes/repairs'
 import { Route as TaskingRouteImport } from './routes/tasking'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
+import { Route as ArchiveSplatRouteImport } from './routes/archive.$'
 import { Route as BasesIndexRouteImport } from './routes/bases.index'
 import { Route as BasesSlugRouteImport } from './routes/bases.$slug'
 import { Route as DocsSlugRouteImport } from './routes/docs.$slug'
@@ -75,6 +76,11 @@ const WorkspaceRoute = WorkspaceRouteImport.update({
   path: '/workspace',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ArchiveSplatRoute = ArchiveSplatRouteImport.update({
+  id: '/archive/$',
+  path: '/archive/$',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const BasesIndexRoute = BasesIndexRouteImport.update({
   id: '/bases/',
   path: '/bases/',
@@ -112,6 +118,7 @@ export interface FileRoutesByFullPath {
   '/repairs': typeof RepairsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
+  '/archive/$': typeof ArchiveSplatRoute
   '/bases/$slug': typeof BasesSlugRouteWithChildren
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
@@ -129,6 +136,7 @@ export interface FileRoutesByTo {
   '/repairs': typeof RepairsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
+  '/archive/$': typeof ArchiveSplatRoute
   '/bases/$slug': typeof BasesSlugRouteWithChildren
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
@@ -147,6 +155,7 @@ export interface FileRoutesById {
   '/repairs': typeof RepairsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
+  '/archive/$': typeof ArchiveSplatRoute
   '/bases/$slug': typeof BasesSlugRouteWithChildren
   '/docs/$slug': typeof DocsSlugRoute
   '/pages/$': typeof PagesSplatRoute
@@ -166,6 +175,7 @@ export interface FileRouteTypes {
     | '/repairs'
     | '/tasking'
     | '/workspace'
+    | '/archive/$'
     | '/bases/$slug'
     | '/docs/$slug'
     | '/pages/$'
@@ -183,6 +193,7 @@ export interface FileRouteTypes {
     | '/repairs'
     | '/tasking'
     | '/workspace'
+    | '/archive/$'
     | '/bases/$slug'
     | '/docs/$slug'
     | '/pages/$'
@@ -200,6 +211,7 @@ export interface FileRouteTypes {
     | '/repairs'
     | '/tasking'
     | '/workspace'
+    | '/archive/$'
     | '/bases/$slug'
     | '/docs/$slug'
     | '/pages/$'
@@ -218,6 +230,7 @@ export interface RootRouteChildren {
   RepairsRoute: typeof RepairsRoute
   TaskingRoute: typeof TaskingRoute
   WorkspaceRoute: typeof WorkspaceRoute
+  ArchiveSplatRoute: typeof ArchiveSplatRoute
   BasesSlugRoute: typeof BasesSlugRouteWithChildren
   PagesSplatRoute: typeof PagesSplatRoute
   BasesIndexRoute: typeof BasesIndexRoute
@@ -295,6 +308,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/archive/$': {
+      id: '/archive/$'
+      path: '/archive/$'
+      fullPath: '/archive/$'
+      preLoaderRoute: typeof ArchiveSplatRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/bases/': {
       id: '/bases/'
       path: '/bases'
@@ -366,6 +386,7 @@ const rootRouteChildren: RootRouteChildren = {
   RepairsRoute: RepairsRoute,
   TaskingRoute: TaskingRoute,
   WorkspaceRoute: WorkspaceRoute,
+  ArchiveSplatRoute: ArchiveSplatRoute,
   BasesSlugRoute: BasesSlugRouteWithChildren,
   PagesSplatRoute: PagesSplatRoute,
   BasesIndexRoute: BasesIndexRoute,

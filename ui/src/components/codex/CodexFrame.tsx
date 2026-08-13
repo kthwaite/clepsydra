@@ -2,7 +2,9 @@ import { useLocation } from "@tanstack/react-router";
 import { type ReactNode, useState } from "react";
 import { DesktopCodexFrame } from "#/components/codex/DesktopCodexFrame";
 import { MobileCodexFrame } from "#/components/codex/MobileCodexFrame";
+import { useCodexView } from "#/components/codex/useCodexView";
 import type { CodexView } from "#/components/codex/useCodexView";
+import { VIEW_REGISTRY } from "#/components/codex/viewRegistry";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
 
@@ -20,6 +22,9 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
   const mobile = useMobileLayout();
   const { pathname } = useLocation();
   const [bottomSlot, setBottomSlot] = useState<HTMLDivElement | null>(null);
+  const resolvedView = useCodexView();
+  const view = forceView ?? resolvedView;
+  const fullPage = VIEW_REGISTRY[view].fullPage === true;
 
   return (
     <div
@@ -28,16 +33,21 @@ export function CodexFrame({ children, forceView }: CodexFrameProps) {
         mobile ? "h-dvh" : "h-screen",
       )}
     >
-      {mobile ? (
-        <MobileCodexFrame bottomSlot={bottomSlot} forceView={forceView} />
-      ) : (
-        <DesktopCodexFrame bottomSlot={bottomSlot} forceView={forceView} />
-      )}
+      {!fullPage &&
+        (mobile ? (
+          <MobileCodexFrame bottomSlot={bottomSlot} forceView={forceView} />
+        ) : (
+          <DesktopCodexFrame bottomSlot={bottomSlot} forceView={forceView} />
+        ))}
       <main
-        className={cn(
-          "order-2 flex-1 overflow-auto",
-          mobile ? "min-h-0" : "cl-noscroll relative",
-        )}
+        className={
+          fullPage
+            ? "h-full min-h-0"
+            : cn(
+                "order-2 flex-1 overflow-auto",
+                mobile ? "min-h-0" : "cl-noscroll relative",
+              )
+        }
       >
         <div
           key={pathname}
