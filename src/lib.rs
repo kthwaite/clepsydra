@@ -137,19 +137,25 @@ impl ServerSettings {
         if raw.is_empty() {
             return Err("server.host must not be empty".to_string());
         }
+        if raw.contains('*') {
+            return Err(format!(
+                "server.host must not contain a wildcard: {raw}"
+            ));
+        }
 
         let parsed_host = if let Some(inner) = raw
             .strip_prefix('[')
             .and_then(|host| host.strip_suffix(']'))
         {
-            match url::Host::parse(inner) {
-                Ok(url::Host::Ipv6(address)) => url::Host::Ipv6(address),
-                _ => {
-                    return Err(format!(
-                        "server.host must contain a valid host name or IP address: {raw}"
-                    ));
-                }
-            }
+            let address = inner.parse::<std::net::Ipv6Addr>().map_err(|error| {
+                format!("server.host must contain a valid host name or IP address: {raw}: {error}")
+            })?;
+            url::Host::Ipv6(address)
+        } else if raw.contains(':') {
+            let address = raw.parse::<std::net::Ipv6Addr>().map_err(|error| {
+                format!("server.host must contain a valid host name or IP address: {raw}: {error}")
+            })?;
+            url::Host::Ipv6(address)
         } else {
             url::Host::parse(raw).map_err(|error| {
                 format!("server.host must contain a valid host name or IP address: {raw}: {error}")

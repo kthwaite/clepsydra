@@ -997,6 +997,44 @@ pub async fn ingest_archive(
 mod tests {
     use super::*;
 
+    #[test]
+    fn configured_hosts_and_ports_are_formatted_as_concrete_csp_origins() {
+        let explicit = |host: &str, port: u16, tls_enabled: bool| ServerSettings {
+            host: host.to_string(),
+            port,
+            dev_mode: false,
+            tls: crate::TlsSettings {
+                enabled: tls_enabled,
+                cert_path: None,
+                key_path: None,
+            },
+        };
+        let cases = [
+            (ServerSettings::default(), "http://localhost:16667"),
+            (
+                explicit("vault.example", 7443, true),
+                "https://vault.example:7443",
+            ),
+            (
+                explicit("127.0.0.1", 3000, false),
+                "http://127.0.0.1:3000",
+            ),
+            (explicit("[::1]", 7443, true), "https://[::1]:7443"),
+            (explicit("::1", 8080, false), "http://[::1]:8080"),
+        ];
+
+        for (settings, expected_origin) in cases {
+            let config = ArchiveViewConfig::from_server_settings(&settings).unwrap();
+            let policy = config.content_security_policy.to_str().unwrap();
+
+            assert_eq!(
+                policy.matches(expected_origin).count(),
+                4,
+                "CSP did not use {expected_origin:?} in every resource directive: {policy}"
+            );
+        }
+    }
+
     // ---------------------------------------------------------------------------
     // archive_body_limit_bytes tests
     // ---------------------------------------------------------------------------

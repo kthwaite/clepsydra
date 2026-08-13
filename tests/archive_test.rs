@@ -682,6 +682,8 @@ fn archive_view_rejects_an_invalid_configured_host() {
         "0.0.0.0",
         "::",
         "[::]",
+        "*",
+        "*.example.com",
     ] {
         let server_settings = ServerSettings {
             host: host.to_string(),
