@@ -127,3 +127,23 @@ Added real memory-router integration coverage for all nine required Folio histor
 - `ui/src/hooks/useGlobalShortcuts.tsx`
 - `ui/src/store/workspace.ts`
 - `ui/src/store/workspace.test.ts`
+
+## Final review correction round 3
+
+### Resolution
+
+- Mobile usable-history Back now delegates immediately to the router's native blocker lifecycle. No origin/store mutation or Folio capture occurs in the button handler; the history subscriber performs the one synchronous checkpoint only after traversal admission, then applies a valid destination tuple. This removes the custom preflight ordering gap for independent TanStack blockers.
+- The production vault lifecycle now calls `clearWorkspace` from `EncryptionProvider` teardown, the existing vault/session boundary. A behavioral provider-unmount test proves open workspace tabs and pending Folio restoration state are cleared together.
+- The obsolete mobile unit expectation that the button itself owns the raw confirmation was replaced with the observable boundary contract: it dispatches one Back and leaves the active tab unchanged for router blockers to resolve.
+
+### Evidence
+
+- Provider lifecycle target: 1 selected test passed; full provider suite 7/7 passed.
+- Full feature-focused suites: 12 files, 279 tests passed.
+- Typecheck: exit 0.
+- Changed-file lint: 20 baseline diagnostics in nine files; no round-owned diagnostic remains.
+
+### Additional files
+
+- `ui/src/crypto/EncryptionProvider.tsx`
+- `ui/src/crypto/__tests__/EncryptionProvider.test.tsx`

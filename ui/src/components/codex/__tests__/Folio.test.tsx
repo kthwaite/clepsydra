@@ -1370,7 +1370,7 @@ describe("Folio mobile presentation", () => {
     expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
   });
 
-  it("blocks mobile back before restoring the origin tab and goes back once on Leave", async () => {
+  it("delegates mobile usable-history Back to the router blocker lifecycle", async () => {
     const user = userEvent.setup();
     const editor = editableEditor();
     usePageEditorMock.mockReturnValue(editor);
@@ -1393,29 +1393,10 @@ describe("Folio mobile presentation", () => {
     });
     render(<TabContent />);
 
-    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
-      target: { value: "Exact mobile draft  \n" },
-    });
     await user.click(screen.getByRole("button", { name: "Back" }));
 
-    expect(useWorkspaceStore.getState().activeTabId).toBe("t1");
-    expect(routerHistory.back).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
-    ).toBeVisible();
-    await user.click(screen.getByRole("button", { name: "Stay" }));
-    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
-      "Exact mobile draft  \n",
-    );
-    await user.click(screen.getByRole("button", { name: "Back" }));
-
-    await user.click(screen.getByRole("button", { name: "Leave" }));
-
-    await waitFor(() =>
-      expect(useWorkspaceStore.getState().activeTabId).toBe("origin"),
-    );
     expect(routerHistory.back).toHaveBeenCalledOnce();
+    expect(useWorkspaceStore.getState().activeTabId).toBe("t1");
   });
 
   it("passes breakpoint changes as the scroll-spy reattach discriminator", () => {

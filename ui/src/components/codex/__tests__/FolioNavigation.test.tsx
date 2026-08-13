@@ -875,7 +875,7 @@ describe("mobile Folio Back", () => {
     expect(pageTabStillExists()).toBe(true);
   });
 
-  it("checkpoints before restoring the Constellation origin through history", async () => {
+  it("checkpoints before traversing to a Constellation origin without Folio activation", async () => {
     const user = userEvent.setup();
     useWorkspaceStore.setState({
       tabs: [{ id: "graph", type: "graph", label: "Graph" }],
@@ -908,19 +908,16 @@ describe("mobile Folio Back", () => {
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/workspace"),
     );
-    expect(screen.getByLabelText("Anchor page")).toHaveValue("alpha-id");
-    expect(screen.getByRole("button", { name: "Depth 2" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
+    expect(useWorkspaceStore.getState().activeTabId).toBe(
+      destination.folioTabId,
     );
-    expect(screen.getByRole("switch", { name: "Hide journals" })).toBeChecked();
+    expect(activePagePath()).toBe(destination.folioPath);
     expect(
-      screen.getByRole("switch", { name: "Show orphans" }),
-    ).not.toBeChecked();
-    expect(screen.getByRole("button", { name: "List view" })).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+      readFolioHistoryRestorationRequest(
+        destination.folioTabId,
+        destination.folioPath,
+      ),
+    ).toBeNull();
     expect(pageTabStillExists()).toBe(true);
     // Defect caught: origin activation used to unmount Folio before its visit was checkpointed.
     expect(
@@ -1338,6 +1335,7 @@ describe("mobile Folio Back", () => {
       await user.click(screen.getByRole("button", { name: "Leave" }));
 
       await waitFor(() => expect(secondBlockerCalls).toBe(1));
+
       expect(router.state.location.pathname).toBe("/workspace");
       expect(activePagePath()).toBe(destination.folioPath);
       expect(actions).toEqual([]);

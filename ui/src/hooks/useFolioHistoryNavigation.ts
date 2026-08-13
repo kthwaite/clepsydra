@@ -49,9 +49,6 @@ let trackedHistoryDestination: FolioHistoryDestination | null = null;
 let capturedDepartureLocationId: string | null = null;
 type FolioHistoryTraversalGuard = (proceed: () => void) => boolean;
 const folioHistoryTraversalGuards = new Set<FolioHistoryTraversalGuard>();
-let approvedTraversalGuardsForNextAction:
-  | Set<FolioHistoryTraversalGuard>
-  | null = null;
 
 function runFolioHistoryTraversalGuards(
   proceed: (approved: Set<FolioHistoryTraversalGuard>) => void,
@@ -67,6 +64,7 @@ function runFolioHistoryTraversalGuards(
   }
   proceed(approved);
 }
+
 
 export function registerFolioHistoryTraversalGuard(
   guard: FolioHistoryTraversalGuard,
@@ -146,10 +144,8 @@ export function useFolioHistoryController(): void {
     const forward = history.forward;
     const runGuardedBack = (
       options?: Parameters<typeof back>[0],
-      approved = approvedTraversalGuardsForNextAction ??
-        new Set<FolioHistoryTraversalGuard>(),
+      approved = new Set<FolioHistoryTraversalGuard>(),
     ) => {
-      approvedTraversalGuardsForNextAction = null;
       if (options?.ignoreBlocker) {
         back(options);
         return;
@@ -158,10 +154,8 @@ export function useFolioHistoryController(): void {
     };
     const runGuardedForward = (
       options?: Parameters<typeof forward>[0],
-      approved = approvedTraversalGuardsForNextAction ??
-        new Set<FolioHistoryTraversalGuard>(),
+      approved = new Set<FolioHistoryTraversalGuard>(),
     ) => {
-      approvedTraversalGuardsForNextAction = null;
       if (options?.ignoreBlocker) {
         forward(options);
         return;
@@ -307,30 +301,20 @@ export function useActivateTabWithFolioHistory(): ActivateTabWithFolioHistory {
 
 export function useLeaveFolioWorkspace(): LeaveFolioWorkspace {
   return useCallback((navigateAway, options) => {
-    const proceed = (approved: Set<FolioHistoryTraversalGuard>) => {
-      if (options?.historyTraversal) {
-        approvedTraversalGuardsForNextAction = approved;
-      }
-      runWorkspaceTransition(() => {
-        const outgoing = trackedHistoryDestination;
-        captureTrackedHistoryDestination();
-        capturedDepartureLocationId = outgoing?.folioLocationId ?? null;
+    runWorkspaceTransition(() => {
+      const outgoing = trackedHistoryDestination;
+      captureTrackedHistoryDestination();
+      capturedDepartureLocationId = outgoing?.folioLocationId ?? null;
 
-        const originTabId = options?.originTabId;
-        if (originTabId) {
-          const workspace = useWorkspaceStore.getState();
-          if (workspace.tabs.some((tab) => tab.id === originTabId)) {
-            workspace.activateTabFromHistory(originTabId);
-          }
+      const originTabId = options?.originTabId;
+      if (originTabId) {
+        const workspace = useWorkspaceStore.getState();
+        if (workspace.tabs.some((tab) => tab.id === originTabId)) {
+          workspace.activateTabFromHistory(originTabId);
         }
-        navigateAway();
-        capturedDepartureLocationId = null;
-      });
-    };
-    if (options?.historyTraversal) {
-      runFolioHistoryTraversalGuards(proceed);
-    } else {
-      proceed(new Set());
-    }
+      }
+      navigateAway();
+      capturedDepartureLocationId = null;
+    });
   }, []);
 }

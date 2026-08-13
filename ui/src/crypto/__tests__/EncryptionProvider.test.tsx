@@ -1,6 +1,12 @@
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { type ReactNode, StrictMode, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  clearFolioHistoryState,
+  readFolioHistoryRestorationRequest,
+  requestFolioHistoryRestoration,
+} from "#/store/folioRestoration";
+import { useWorkspaceStore } from "#/store/workspace";
 import { createVaultIdentity, wrapIdentity } from "../age";
 import {
   type EncryptionActions,
@@ -263,5 +269,37 @@ describe("EncryptionProvider", () => {
     expect(activeWindowListeners("pointerdown")).toBe(0);
     expect(activeWindowListeners("keydown")).toBe(0);
     expect(activeDocumentListeners("visibilitychange")).toBe(0);
+  });
+
+  it("clears workspace and Folio visit state when the vault provider tears down", () => {
+    clearFolioHistoryState();
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    requestFolioHistoryRestoration({
+      tabId: "alpha",
+      path: "notes/alpha.md",
+      locationId: "visit-alpha",
+    });
+    const view = render(
+      <EncryptionProvider>
+        <ActionsProbe />
+      </EncryptionProvider>,
+    );
+
+    view.unmount();
+
+    expect(useWorkspaceStore.getState().tabs).toEqual([]);
+    expect(
+      readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
+    ).toBeNull();
   });
 });

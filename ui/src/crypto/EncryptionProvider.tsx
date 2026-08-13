@@ -8,6 +8,7 @@ import {
   useState,
 } from "react";
 import { useEncryptionConfig } from "#/api/encryption";
+import { useWorkspaceStore } from "#/store/workspace";
 import { EncryptionSession } from "./session";
 
 export type EncryptionStatus = {
@@ -125,6 +126,7 @@ export function EncryptionProvider({
 
   useEffect(
     () => () => {
+      useWorkspaceStore.getState().clearWorkspace();
       sessionRef.current?.clear();
     },
     [],

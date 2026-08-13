@@ -290,15 +290,7 @@ export function Folio({ tabId, path }: FolioProps) {
       return;
     }
 
-    leaveFolioWorkspace(
-      () => {
-        router.history.back();
-      },
-      {
-        originTabId: router.history.location.state.folioOriginTabId,
-        historyTraversal: true,
-      },
-    );
+    router.history.back();
   };
   useEffect(() => {
     if (isTodayDraftPath && journalToday?.path && journalToday.path !== path) {
