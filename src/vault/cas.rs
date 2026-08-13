@@ -1,5 +1,6 @@
 //! Content-addressed storage for blobs, with reference counting and garbage collection.
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, params};
@@ -17,6 +18,25 @@ pub struct BlobMetadata {
     pub content_type: String,
     pub size: u64,
 }
+
+#[derive(Debug)]
+pub enum RetrieveLimitedError {
+    TooLarge { size: u64, limit: usize },
+    Store(String),
+}
+
+impl std::fmt::Display for RetrieveLimitedError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLarge { size, limit } => {
+                write!(formatter, "CAS blob size {size} exceeds read limit {limit}")
+            }
+            Self::Store(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RetrieveLimitedError {}
 
 
 /// Content-addressed blob store.
@@ -137,6 +157,56 @@ impl ContentStore {
         let path = self.blob_path(hash)?;
         let data = fs::read(&path)?;
         Ok((data, content_type))
+    }
+
+    /// Retrieve at most `limit` bytes, rejecting known oversize blobs before
+    /// opening their backing file and bounding reads against metadata races.
+    pub fn retrieve_limited(
+        &self,
+        hash: &str,
+        limit: usize,
+    ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
+        self.retrieve_limited_with(hash, limit, |path| File::open(path))
+    }
+
+    fn retrieve_limited_with(
+        &self,
+        hash: &str,
+        limit: usize,
+        open: impl FnOnce(&Path) -> std::io::Result<File>,
+    ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
+        let metadata = self
+            .inspect(hash)
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        if metadata.size > limit as u64 {
+            return Err(RetrieveLimitedError::TooLarge {
+                size: metadata.size,
+                limit,
+            });
+        }
+
+        let path = self
+            .blob_path(hash)
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        let file = open(&path).map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        let mut reader = file.take((limit as u64).saturating_add(1));
+        let mut data = Vec::with_capacity(metadata.size as usize);
+        reader.read_to_end(&mut data)
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        if data.len() > limit {
+            return Err(RetrieveLimitedError::TooLarge {
+                size: data.len() as u64,
+                limit,
+            });
+        }
+        if data.len() as u64 != metadata.size {
+            return Err(RetrieveLimitedError::Store(format!(
+                "CAS backing file size changed while reading {hash}: expected {}, got {}",
+                metadata.size,
+                data.len()
+            )));
+        }
+        Ok((data, metadata.content_type))
     }
 
     /// Inspect a blob without reading its contents.
@@ -311,6 +381,41 @@ mod tests {
             store.inspect(&truncated.hash).is_err(),
             "backing-file length must agree with CAS metadata"
         );
+    }
+
+    #[test]
+    fn retrieve_limited_rejects_known_oversize_before_opening_backing_file() {
+        use std::cell::Cell;
+
+        let (store, _tmp) = test_store();
+        let result = store.store(b"larger than limit", "text/html").unwrap();
+        let opens = Cell::new(0);
+        let error = store
+            .retrieve_limited_with(&result.hash, 4, |path| {
+                opens.set(opens.get() + 1);
+                std::fs::File::open(path)
+            })
+            .unwrap_err();
+
+        assert_eq!(opens.get(), 0, "oversize blob backing file was opened");
+        assert!(matches!(
+            error,
+            RetrieveLimitedError::TooLarge {
+                size: 17,
+                limit: 4
+            }
+        ));
+    }
+
+    #[test]
+    fn retrieve_limited_accepts_a_blob_exactly_at_the_limit() {
+        let (store, _tmp) = test_store();
+        let result = store.store(b"exact", "text/html").unwrap();
+
+        let (data, content_type) = store.retrieve_limited(&result.hash, 5).unwrap();
+
+        assert_eq!(data, b"exact");
+        assert_eq!(content_type, "text/html");
     }
 
     #[test]

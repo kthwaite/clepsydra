@@ -813,9 +813,9 @@ async fn archive_view_structurally_neutralizes_navigation_without_losing_resourc
         );
     }
     assert!(body.contains(r#"<meta http-equiv="content-type" content="text/html">"#));
-    assert!(body.contains(r#"<a data-label="boolean">Boolean attribute visible</a>"#));
+    assert!(body.contains(r#"<a data-label=boolean>Boolean attribute visible</a>"#));
     assert!(body.contains(&format!(
-        r#"<link rel="stylesheet" href="/api/vault/cas/{resource_hash}">"#
+        r#"<link rel=stylesheet href="/api/vault/cas/{resource_hash}">"#
     )));
     assert!(body.contains(&format!(
         r#"@font-face {{ src: url(/api/vault/cas/{resource_hash}); }}"#
@@ -923,25 +923,6 @@ async fn archive_view_head_treats_a_missing_backing_file_as_not_found() {
     assert!(response.as_bytes().is_empty());
 }
 
-#[tokio::test]
-async fn archive_view_reports_overly_deep_snapshot_markup_as_corrupt() {
-    let (server, _tmp, state) = setup_archive_view_server();
-    let mut html = "<!doctype html>".to_string();
-    html.push_str(&"<div>".repeat(300));
-    html.push_str("visible");
-    html.push_str(&"</div>".repeat(300));
-    let hash = store_blob(&state, html.as_bytes(), "text/html");
-
-    let response = server
-        .get(&format!("/api/vault/archive/view/{hash}"))
-        .await;
-
-    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
-    let body: serde_json::Value = response.json();
-    let error = body["error"].as_str().unwrap();
-    assert!(error.contains("archived snapshot is corrupt"), "{error}");
-    assert!(error.contains("depth limit"), "{error}");
-}
 
 #[tokio::test]
 async fn archive_view_rejects_non_html_and_names_its_content_type() {

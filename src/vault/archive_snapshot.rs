@@ -7,13 +7,11 @@
 //! `cas:<hash>` references behind.
 //!
 //! Everything here operates on attacker-authored markup. Resource extraction
-//! uses bounded local scans; the view security boundary uses html5ever's parser.
+//! uses bounded local scans; the view security boundary uses lol_html's
+//! browser-compatible streaming tokenizer and rewriter.
 
-use html5ever::serialize::{Serialize, SerializeOpts, Serializer, TraversalScope, serialize};
-use html5ever::tendril::TendrilSink;
-use html5ever::tree_builder::TreeBuilderOpts;
-use html5ever::{Namespace, ParseOpts, parse_document};
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
+use lol_html::html_content::Element;
+use lol_html::{HtmlRewriter, MemorySettings, Settings, element};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use pulldown_cmark::{Event, Options, Parser, Tag};
@@ -312,184 +310,143 @@ fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
     (original, hash)
 }
 
-fn navigable_href(namespace: &Namespace, element: &str) -> bool {
-    (namespace == &html5ever::ns!(html)
-        || namespace == &html5ever::ns!(svg)
-        || namespace == &html5ever::ns!(mathml))
-        && matches!(element, "a" | "area")
-}
+const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
+const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
+const MATHML_NAMESPACE: &str = "http://www.w3.org/1998/Math/MathML";
+const DEFAULT_REWRITER_MEMORY_BYTES: usize = 16 * 1024 * 1024;
+pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 160 * 1024 * 1024;
+const REWRITER_CHUNK_BYTES: usize = 16 * 1024;
 
-const DEFAULT_MAX_DOM_NODES: usize = 100_000;
-const DEFAULT_MAX_DOM_DEPTH: usize = 256;
+fn rewrite_navigation_element(element: &mut Element<'_, '_>) -> Result<(), String> {
+    let namespace = element.namespace_uri();
+    let mut tag = element.tag_name();
+    if namespace == HTML_NAMESPACE && tag == "clepsydra-noscript" {
+        element
+            .set_tag_name("noscript")
+            .map_err(|error| error.to_string())?;
+        tag = "noscript".to_string();
+    }
 
-fn should_remove_node(node: &Handle) -> bool {
-    matches!(
-        &node.data,
-        NodeData::Element { name, attrs, .. }
-            if (name.ns == html5ever::ns!(html)
-                && name.local.as_ref() == "meta"
-                && attrs.borrow().iter().any(|attribute| {
-                    attribute.name.local.as_ref() == "http-equiv"
-                        && attribute.value.trim().eq_ignore_ascii_case("refresh")
-                }))
-                || (name.ns == html5ever::ns!(svg)
-                    && matches!(
-                        name.local.as_ref(),
-                        "animate" | "animateColor" | "animateMotion" | "animateTransform" | "set"
-                    ))
-    )
-}
+    if (namespace == HTML_NAMESPACE
+        && tag == "meta"
+        && element.get_attribute("http-equiv").is_some_and(|value| {
+            decode_html_entities(&value)
+                .trim()
+                .eq_ignore_ascii_case("refresh")
+        }))
+        || (namespace == SVG_NAMESPACE
+            && matches!(
+                tag.as_str(),
+                "animate" | "animatecolor" | "animatemotion" | "animatetransform" | "set"
+            ))
+    {
+        element.remove();
+        return Ok(());
+    }
 
-fn neutralize_dom(root: &Handle, max_nodes: usize, max_depth: usize) -> Result<(), String> {
-    let mut stack = vec![(root.clone(), 0usize)];
-    let mut visited = 0usize;
-    while let Some((node, depth)) = stack.pop() {
-        visited = visited.saturating_add(1);
-        if visited > max_nodes {
-            return Err(format!(
-                "archived snapshot DOM node limit exceeded: maximum {max_nodes}"
-            ));
-        }
-        if depth > max_depth {
-            return Err(format!(
-                "archived snapshot DOM depth limit exceeded: maximum {max_depth}"
-            ));
-        }
-
-        if let NodeData::Element {
-            name,
-            attrs,
-            template_contents,
-            ..
-        } = &node.data
-        {
-            let element = name.local.as_ref();
-            attrs.borrow_mut().retain(|attribute| {
-                let attribute_name = attribute.name.local.as_ref();
-                !(((navigable_href(&name.ns, element)
-                    || matches!(element, "a" | "area")
-                    || element.ends_with(":a"))
-                    && (attribute_name == "href" || attribute_name.ends_with(":href")))
-                    || (name.ns == html5ever::ns!(html)
-                        && element == "base"
-                        && matches!(attribute_name, "href" | "target"))
-                    || (name.ns == html5ever::ns!(html)
-                        && element == "form"
-                        && attribute_name == "action")
-                    || (name.ns == html5ever::ns!(html) && attribute_name == "formaction"))
-            });
-
-            if let Some(template) = template_contents.borrow().as_ref() {
-                stack.push((template.clone(), depth + 1));
-            }
-        }
-
-        {
-            let mut children = node.children.borrow_mut();
-            stack.extend(
-                children
-                    .iter()
-                    .rev()
-                    .map(|child| (child.clone(), depth + 1)),
-            );
-            children.retain(|child| {
-                let remove = should_remove_node(child);
-                if remove {
-                    child.parent.set(None);
-                }
-                !remove
-            });
-        }
+    let navigation_names = element
+        .attributes()
+        .iter()
+        .map(|attribute| attribute.name())
+        .filter(|attribute| {
+            (((matches!(namespace, HTML_NAMESPACE | SVG_NAMESPACE | MATHML_NAMESPACE)
+                && matches!(tag.as_str(), "a" | "area"))
+                || tag.ends_with(":a"))
+                && (attribute == "href" || attribute.ends_with(":href")))
+                || (namespace == HTML_NAMESPACE
+                    && tag == "base"
+                    && matches!(attribute.as_str(), "href" | "target"))
+                || (namespace == HTML_NAMESPACE && tag == "form" && attribute == "action")
+                || (namespace == HTML_NAMESPACE && attribute == "formaction")
+        })
+        .collect::<Vec<_>>();
+    for attribute in navigation_names {
+        element.remove_attribute(&attribute);
     }
     Ok(())
 }
 
-struct ArchiveDom(Handle);
-
-impl Serialize for ArchiveDom {
-    fn serialize<S>(&self, serializer: &mut S, scope: TraversalScope) -> std::io::Result<()>
-    where
-        S: Serializer,
-    {
-        fn children<S: Serializer>(node: &Handle, serializer: &mut S) -> std::io::Result<()> {
-            for child in node.children.borrow().iter() {
-                node_with_templates(child, serializer)?;
-            }
-            Ok(())
-        }
-
-        fn node_with_templates<S: Serializer>(
-            node: &Handle,
-            serializer: &mut S,
-        ) -> std::io::Result<()> {
-            match &node.data {
-                NodeData::Document => children(node, serializer),
-                NodeData::Doctype { name, .. } => serializer.write_doctype(name),
-                NodeData::Text { contents } => serializer.write_text(&contents.borrow()),
-                NodeData::Comment { contents } => serializer.write_comment(contents),
-                NodeData::ProcessingInstruction { target, contents } => {
-                    serializer.write_processing_instruction(target, contents)
-                }
-                NodeData::Element {
-                    name,
-                    attrs,
-                    template_contents,
-                    ..
-                } => {
-                    serializer.start_elem(
-                        name.clone(),
-                        attrs.borrow().iter().map(|attribute| {
-                            (&attribute.name, attribute.value.as_ref())
-                        }),
-                    )?;
-                    if let Some(template) = template_contents.borrow().as_ref() {
-                        children(template, serializer)?;
-                    } else {
-                        children(node, serializer)?;
-                    }
-                    serializer.end_elem(name.clone())
-                }
-            }
-        }
-
-        match scope {
-            TraversalScope::IncludeNode => node_with_templates(&self.0, serializer),
-            TraversalScope::ChildrenOnly(_) => children(&self.0, serializer),
-        }
+fn rewriting_error(error: impl std::fmt::Display) -> String {
+    let message = error.to_string();
+    if message.to_ascii_lowercase().contains("memory") {
+        format!("archived snapshot rewrite memory limit exceeded: {message}")
+    } else {
+        format!("archived snapshot rewrite failed: {message}")
     }
 }
 
-pub fn neutralize_navigation(html: &str) -> Result<String, String> {
-    neutralize_navigation_with_limits(html, DEFAULT_MAX_DOM_NODES, DEFAULT_MAX_DOM_DEPTH)
+pub fn neutralize_navigation_bytes(html: &[u8]) -> Result<Vec<u8>, String> {
+    neutralize_navigation_bytes_with_limits(
+        html,
+        DEFAULT_REWRITER_MEMORY_BYTES,
+        DEFAULT_REWRITTEN_SNAPSHOT_BYTES,
+    )
 }
 
-fn neutralize_navigation_with_limits(
-    html: &str,
-    max_nodes: usize,
-    max_depth: usize,
-) -> Result<String, String> {
-    let parse_options = ParseOpts {
-        tree_builder: TreeBuilderOpts {
-            scripting_enabled: false,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let dom = parse_document(RcDom::default(), parse_options).one(html);
-    neutralize_dom(&dom.document, max_nodes, max_depth)?;
+fn rewrite_pass(
+    html: &[u8],
+    max_memory_bytes: usize,
+    max_output_bytes: usize,
+    expose_noscript: bool,
+) -> Result<Vec<u8>, String> {
+    let mut output = Vec::with_capacity(html.len().min(max_output_bytes));
+    let mut output_bytes = 0usize;
+    let mut output_exceeded = false;
+    {
+        let settings = Settings::new()
+            .with_memory_settings(
+                MemorySettings::new()
+                    .with_preallocated_parsing_buffer_size(0)
+                    .with_max_allowed_memory_usage(max_memory_bytes),
+            )
+            .with_strict(false)
+            .with_adjust_charset_on_meta_tag(false)
+            .append_element_content_handler(element!("*", move |element| {
+                if expose_noscript {
+                    if element.namespace_uri() == HTML_NAMESPACE
+                        && element.tag_name() == "noscript"
+                    {
+                        element.set_tag_name("clepsydra-noscript")?;
+                    }
+                } else {
+                    rewrite_navigation_element(element)
+                        .map_err(std::io::Error::other)?;
+                }
+                Ok(())
+            }));
+        let mut rewriter = HtmlRewriter::new(settings, |chunk: &[u8]| {
+            output_bytes = output_bytes.saturating_add(chunk.len());
+            if output_bytes <= max_output_bytes {
+                output.extend_from_slice(chunk);
+            } else {
+                output_exceeded = true;
+            }
+        });
+        for chunk in html.chunks(REWRITER_CHUNK_BYTES) {
+            rewriter.write(chunk).map_err(rewriting_error)?;
+        }
+        rewriter.end().map_err(rewriting_error)?;
+    }
+    if output_exceeded {
+        return Err(format!(
+            "archived snapshot rewrite output limit exceeded: maximum {max_output_bytes} bytes"
+        ));
+    }
+    Ok(output)
+}
 
-    let mut output = Vec::with_capacity(html.len());
-    serialize(
-        &mut output,
-        &ArchiveDom(dom.document),
-        SerializeOpts {
-            scripting_enabled: false,
-            ..Default::default()
-        },
-    )
-    .map_err(|error| format!("archived snapshot serialization failed: {error}"))?;
-    String::from_utf8(output)
-        .map_err(|error| format!("archived snapshot serialization was not UTF-8: {error}"))
+fn neutralize_navigation_bytes_with_limits(
+    html: &[u8],
+    max_memory_bytes: usize,
+    max_output_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    let exposed = rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
+    rewrite_pass(&exposed, max_memory_bytes, max_output_bytes, false)
+}
+
+pub fn neutralize_navigation(html: &str) -> Result<String, String> {
+    neutralize_navigation_bytes(html.as_bytes())
+        .and_then(|output| String::from_utf8(output).map_err(|error| error.to_string()))
 }
 /// Absolute original URL → the hash of the blob that replaced it.
 ///
@@ -1389,7 +1346,7 @@ mod tests {
             "resource URL was lost: {neutralized}"
         );
         assert!(
-            neutralized.contains("alt=\"kept\""),
+            neutralized.contains("alt=kept"),
             "resource presentation was lost: {neutralized}"
         );
     }
@@ -1470,12 +1427,12 @@ mod tests {
             neutralized.contains(r#".example::after { content: "<a href=https://live.example>"; }"#)
         );
         assert!(neutralized.contains("<textarea>"));
-        assert!(neutralized.contains("&lt;form action=https://live.example&gt;"));
+        assert!(neutralized.contains("<form action=https://live.example>"));
         assert!(neutralized.contains("<!-- <meta http-equiv=refresh"));
         assert!(neutralized.contains("<a>Visible</a>"));
-        assert!(neutralized.contains("href=\"cas:sha256:style\""));
-        assert!(neutralized.contains("src=\"cas:sha256:image\""));
-        assert!(neutralized.contains("alt=\"kept\""));
+        assert!(neutralized.contains("href=cas:sha256:style"));
+        assert!(neutralized.contains("src=cas:sha256:image"));
+        assert!(neutralized.contains("alt=kept"));
     }
 
     #[test]
@@ -1514,7 +1471,7 @@ mod tests {
         assert!(neutralized.contains("Visible solidus"));
         assert!(neutralized.contains("Visible comment"));
         assert!(neutralized.contains("cas:sha256:image"));
-        assert!(neutralized.contains("alt=\"kept\""));
+        assert!(neutralized.contains("alt=kept"));
     }
 
     #[test]
@@ -1577,22 +1534,18 @@ mod tests {
         assert!(neutralized.contains("cas:sha256:image"), "{neutralized}");
     }
 
+
     #[test]
-    fn neutralization_enforces_dom_node_and_depth_limits() {
-        assert!(
-            neutralize_navigation_with_limits("<div><span>ok</span></div>", 16, 8).is_ok()
-        );
-
-        let node_error =
-            neutralize_navigation_with_limits("<div><span>one</span><b>two</b></div>", 6, 8)
+    fn streaming_neutralizer_names_memory_and_output_limit_failures() {
+        let memory_error =
+            neutralize_navigation_bytes_with_limits(b"<div>visible</div>", 1, 1024)
                 .unwrap_err();
-        assert!(node_error.contains("node limit"), "{node_error}");
+        assert!(memory_error.contains("memory limit"), "{memory_error}");
 
-
-        let depth_error =
-            neutralize_navigation_with_limits("<div><span><b>deep</b></span></div>", 16, 4)
+        let output_error =
+            neutralize_navigation_bytes_with_limits(b"<div>visible</div>", 1024 * 1024, 4)
                 .unwrap_err();
-        assert!(depth_error.contains("depth limit"), "{depth_error}");
+        assert!(output_error.contains("output limit"), "{output_error}");
     }
 
     // -------------------------------------------------------------------

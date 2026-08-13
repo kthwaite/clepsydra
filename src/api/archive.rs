@@ -17,7 +17,7 @@ use super::AppState;
 use super::error::ApiError;
 use crate::ServerSettings;
 use crate::vault::archive_snapshot::{self, SnapshotResource};
-use crate::vault::cas::{BlobMetadata, ContentStore};
+use crate::vault::cas::{BlobMetadata, ContentStore, RetrieveLimitedError};
 use crate::vault::index_policy::IndexMutation;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator, MutationGuard};
@@ -389,8 +389,11 @@ enum LoadedSnapshot {
 
 trait SnapshotStore {
     fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>>;
-    fn retrieve(&self, hash: &str)
-    -> Result<(Vec<u8>, String), Box<dyn std::error::Error>>;
+    fn retrieve_limited(
+        &self,
+        hash: &str,
+        limit: usize,
+    ) -> Result<(Vec<u8>, String), RetrieveLimitedError>;
 }
 
 impl SnapshotStore for ContentStore {
@@ -398,11 +401,12 @@ impl SnapshotStore for ContentStore {
         ContentStore::inspect(self, hash)
     }
 
-    fn retrieve(
+    fn retrieve_limited(
         &self,
         hash: &str,
-    ) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
-        ContentStore::retrieve(self, hash)
+        limit: usize,
+    ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
+        ContentStore::retrieve_limited(self, hash, limit)
     }
 }
 
@@ -412,12 +416,33 @@ fn load_snapshot(
     method: SnapshotMethod,
 ) -> Result<LoadedSnapshot, ApiError> {
     match method {
-        SnapshotMethod::Get => store
-            .retrieve(hash)
-            .map(|(data, content_type)| LoadedSnapshot::Body { data, content_type }),
-        SnapshotMethod::Head => store.inspect(hash).map(LoadedSnapshot::Metadata),
+        SnapshotMethod::Get => {
+            match store.retrieve_limited(hash, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES) {
+                Ok((data, content_type)) => Ok(LoadedSnapshot::Body { data, content_type }),
+                Err(RetrieveLimitedError::TooLarge { size, limit }) => {
+                    Err(ApiError::internal(format!(
+                        "archived snapshot is corrupt: snapshot size {size} exceeds view input limit {limit}"
+                    )))
+                }
+                Err(RetrieveLimitedError::Store(_)) => {
+                    Err(ApiError::not_found(format!("snapshot not found: {hash}")))
+                }
+            }
+        }
+        SnapshotMethod::Head => {
+            let metadata = store
+                .inspect(hash)
+                .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))?;
+            if metadata.size > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 {
+                return Err(ApiError::internal(format!(
+                    "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
+                    metadata.size,
+                    MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES
+                )));
+            }
+            Ok(LoadedSnapshot::Metadata(metadata))
+        }
     }
-    .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))
 }
 
 fn without_body(response: Response) -> Response {
@@ -469,44 +494,50 @@ fn snapshot_response_with(
     }
 }
 
-// Parsing attacker-authored HTML builds a DOM with materially greater heap use
-// than its source bytes. Keep the view boundary to an 8 MiB source envelope;
-// with the DOM node cap this leaves headroom for input, DOM, and serialized
-// output within a conservative 128 MiB per-request working-memory budget.
-const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
+// CAS retrieval and rewriting are both bounded before they allocate their full
+// outputs. A 128 MiB input supports large deconstructed SingleFile documents;
+// the 160 MiB rewrite ceiling covers worst-case expansion of validated CAS URLs.
+const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
 
 fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
-    prepare_snapshot_body_with(data, archive_snapshot::neutralize_navigation)
+    prepare_snapshot_body_with(
+        data,
+        MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES,
+        archive_snapshot::neutralize_navigation_bytes,
+    )
 }
 
 fn prepare_snapshot_body_with(
     data: Vec<u8>,
-    neutralize: impl FnOnce(&str) -> Result<String, String>,
+    input_limit: usize,
+    neutralize: impl FnOnce(&[u8]) -> Result<Vec<u8>, String>,
 ) -> Result<Vec<u8>, ApiError> {
-    if data.len() > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES {
+    if data.len() > input_limit {
         return Err(ApiError::internal(format!(
-            "archived snapshot is corrupt: snapshot size {} exceeds view byte limit {}",
+            "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
             data.len(),
-            MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES
+            input_limit
         )));
     }
     let data = rewrite_cas_urls(data);
-    let html = std::str::from_utf8(&data)
-        .map(std::borrow::Cow::Borrowed)
-        .unwrap_or_else(|_| String::from_utf8_lossy(&data));
-    neutralize(&html)
-        .map(String::into_bytes)
+    if data.len() > archive_snapshot::DEFAULT_REWRITTEN_SNAPSHOT_BYTES {
+        return Err(ApiError::internal(format!(
+            "archived snapshot is corrupt: CAS rewrite size {} exceeds rewrite input limit {}",
+            data.len(),
+            archive_snapshot::DEFAULT_REWRITTEN_SNAPSHOT_BYTES
+        )));
+    }
+    neutralize(&data)
         .map_err(|error| ApiError::internal(format!("archived snapshot is corrupt: {error}")))
+}
+fn cas_url_boundary(byte: u8) -> bool {
+    byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b')' | b'>' | b'#')
 }
 
 
 const STORED_CAS_URL_PREFIX: &[u8] = b"cas:sha256:";
 const SERVED_CAS_URL_PREFIX: &[u8] = b"/api/vault/cas/";
 const SHA256_HEX_LEN: usize = 64;
-
-fn cas_url_boundary(byte: u8) -> bool {
-    byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b')' | b'>' | b'#')
-}
 
 fn cas_url_start_boundary(data: &[u8], start: usize) -> bool {
     start == 0
@@ -1206,10 +1237,11 @@ mod tests {
                 })
             }
 
-            fn retrieve(
+            fn retrieve_limited(
                 &self,
                 _hash: &str,
-            ) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
+                _limit: usize,
+            ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
                 self.retrievals.set(self.retrievals.get() + 1);
                 Ok((
                     b"<a href=https://live.example>live</a>".to_vec(),
@@ -1242,34 +1274,76 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_view_byte_limit_runs_parser_at_limit_and_rejects_over_limit_before_parse() {
+    fn head_snapshot_rejects_oversize_metadata_without_retrieving_bytes() {
         use std::cell::Cell;
 
-        let parses = Cell::new(0);
-        let at_limit = vec![b' '; MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES];
-        let result = prepare_snapshot_body_with(at_limit, |html| {
-            parses.set(parses.get() + 1);
-            assert_eq!(html.len(), MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES);
-            Ok(html.to_owned())
+        struct OversizeStore {
+            retrievals: Cell<usize>,
+        }
+
+        impl SnapshotStore for OversizeStore {
+            fn inspect(
+                &self,
+                _hash: &str,
+            ) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
+                Ok(BlobMetadata {
+                    content_type: "text/html".to_string(),
+                    size: MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 + 1,
+                })
+            }
+
+            fn retrieve_limited(
+                &self,
+                _hash: &str,
+                _limit: usize,
+            ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
+                self.retrievals.set(self.retrievals.get() + 1);
+                unreachable!("HEAD retrieved body bytes")
+            }
+        }
+
+        let store = OversizeStore {
+            retrievals: Cell::new(0),
+        };
+        let error = match load_snapshot(&store, "sha256:test", SnapshotMethod::Head) {
+            Ok(_) => panic!("oversize HEAD metadata was accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(store.retrievals.get(), 0);
+        assert_eq!(error.status, 500);
+        assert!(error.error.contains("view input limit"), "{}", error.error);
+    }
+
+    #[test]
+    fn snapshot_view_byte_limit_runs_rewriter_at_limit_and_rejects_over_limit_before_rewrite() {
+        use std::cell::Cell;
+
+        let rewrites = Cell::new(0);
+        let input_limit = 16;
+        let at_limit = vec![b' '; input_limit];
+        let result = prepare_snapshot_body_with(at_limit, input_limit, |html| {
+            rewrites.set(rewrites.get() + 1);
+            assert_eq!(html.len(), input_limit);
+            Ok(html.to_vec())
         });
         assert!(result.is_ok());
-        assert_eq!(parses.get(), 1);
+        assert_eq!(rewrites.get(), 1);
 
-        let over_limit = vec![b' '; MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES + 1];
-        let error = prepare_snapshot_body_with(over_limit, |_| {
-            parses.set(parses.get() + 1);
-            Ok(String::new())
+        let over_limit = vec![b' '; input_limit + 1];
+        let error = prepare_snapshot_body_with(over_limit, input_limit, |_| {
+            rewrites.set(rewrites.get() + 1);
+            Ok(Vec::new())
         })
         .unwrap_err();
-        assert_eq!(parses.get(), 1, "over-limit input reached the parser seam");
+        assert_eq!(
+            rewrites.get(),
+            1,
+            "over-limit input reached the rewriter seam"
+        );
         assert_eq!(error.status, 500);
         assert!(error.error.contains("archived snapshot is corrupt"));
-        assert!(error.error.contains("view byte limit"));
-        assert!(
-            error
-                .error
-                .contains(&MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES.to_string())
-        );
+        assert!(error.error.contains("view input limit"));
+        assert!(error.error.contains(&input_limit.to_string()));
     }
 
     // ---------------------------------------------------------------------------
