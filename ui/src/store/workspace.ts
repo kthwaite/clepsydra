@@ -154,7 +154,8 @@ interface WorkspaceActions {
     sourceTabId: string,
     target:
       | { tabId: string; position: "before" | "after" }
-      | { quireId: string },
+      | { quireId: string }
+      | { position: "end" },
   ) => void;
   updateTabLabel: (tabId: string, label: string) => void;
   updateTabPath: (tabId: string, path: string, label?: string) => void;
@@ -463,7 +464,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             if (targetIndex === -1) return state;
             targetQuireId = withoutSource[targetIndex].quireId;
             insertAt = targetIndex + (target.position === "after" ? 1 : 0);
-          } else {
+          } else if ("quireId" in target) {
             if (!state.quires[target.quireId]) return state;
             targetQuireId = target.quireId;
             const lastMemberIndex = withoutSource.reduce(
@@ -475,6 +476,9 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
               lastMemberIndex === -1
                 ? Math.min(sourceIndex, withoutSource.length)
                 : lastMemberIndex + 1;
+          } else {
+            targetQuireId = undefined;
+            insertAt = withoutSource.length;
           }
 
           const moved =

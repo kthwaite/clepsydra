@@ -471,6 +471,35 @@ describe("moveTab drop semantics", () => {
     expect(quires.q1).toBeDefined();
   });
 
+  it("moves a quire member to the ungrouped end", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("q-a", "q1"),
+        pageTab("q-b", "q1"),
+        pageTab("plain"),
+        pageTab("tail"),
+      ],
+      activeTabId: "q-a",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+
+    useWorkspaceStore.getState().moveTab("q-a", { position: "end" });
+
+    const { tabs, quires } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual([
+      "q-b",
+      "plain",
+      "tail",
+      "q-a",
+    ]);
+    expect(tabs.find((tab) => tab.id === "q-a")?.quireId).toBeUndefined();
+    expect(tabs.find((tab) => tab.id === "q-b")?.quireId).toBe("q1");
+    expect(quires.q1).toBeDefined();
+  });
+
   it("joins a target member's quire at the requested position", () => {
     resetStore();
     useWorkspaceStore.setState({
