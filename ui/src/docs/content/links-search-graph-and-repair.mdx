@@ -22,7 +22,9 @@ step and its evidence.
 
 ## Write and resolve wikilinks
 
-Write `[[Target]]` for a wikilink or `[[Target|display text]]` to show an alias without changing the target. In Folio, type `[[` to search indexed pages by title, canonical name, or path. Select a result to insert it. A muted, dashed link is dangling: the current page's indexed outlinks do not contain a unique target for it.
+Write `[[Target]]` for a wikilink or `[[Target|display text]]` to show an alias without changing the target. In Folio, type `[[` to search indexed pages by title, canonical name, alias, or path. The chooser keeps **Create** available beside partial matches and suppresses it only when the query exactly matches a normalized title, canonical name, alias, or path. Select a page result to insert it, or select **Create** to use the existing create-from-wikilink flow.
+
+A muted, dashed link is dangling. Hover or focus it to see the missing-page state. In an editable Folio, choose **Create page** or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-click the link to create or reuse a canonical blank note and open it. Read-only Folios explain the missing target but never create it.
 
 Link lookup normalizes a target with Unicode NFC normalization, Unicode-aware lowercase, collapsed whitespace, trimming, and an optional `.md` suffix removed. Each folio contributes canonical names from its frontmatter title, filename, vault-relative path without `.md`, and every frontmatter alias—titles, filenames, paths, and aliases all participate in the same lookup. A path such as `[[projects/atlas]]` is therefore the normal way to distinguish pages that share `Atlas` as a title or filename.
 
@@ -36,9 +38,9 @@ The index's unresolved-link diagnostics expose candidates for ambiguous targets.
 
 ### Create from a dangling link
 
-In an editable Folio, <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-click a dangling wikilink to resolve or create it. Clepsydra first refreshes the source page's outlinks, then checks full-text results for an exact case-insensitive title. If neither finds a page, it creates a new `NOTE` with the link target as its title and opens it. Concurrent requests for the same normalized title share one in-flight creation request. If creation fails, the original wikilink remains dangling.
+Creating from the missing-page popover or <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>-clicking a dangling wikilink uses the same guarded operation. Clepsydra first refreshes the source page's outlinks, then checks full-text results for an exact case-insensitive title. If neither finds a page, it creates a new `NOTE` with the link target as its title and opens it. Repeated activations on one rendered link share its in-flight request, and concurrent requests for the same normalized title coalesce in the resolver. If creation fails, the original wikilink remains dangling and the popover offers a retry.
 
-Read-only rendered Markdown does not create a page when a dangling link is clicked.
+Creation never rewrites the source wikilink. A later index refresh resolves it through the normal canonical lookup.
 
 ## Outlinks and backlinks
 
