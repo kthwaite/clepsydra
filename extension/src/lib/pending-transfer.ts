@@ -2,6 +2,7 @@ import type { CaptureChunk } from "#/lib/chunked-transfer";
 import { ChunkAssembler } from "#/lib/chunked-transfer";
 
 export const CAPTURE_INACTIVITY_TIMEOUT_MS = 30_000;
+export const PENDING_TRANSFER_KEEP_ALIVE_MS = 20_000;
 
 interface PendingTransfer<T> {
 	metadata?: T;
@@ -18,6 +19,9 @@ export interface CompletedTransfer<T> {
 interface PendingTransferCoordinatorOptions {
 	assembler?: ChunkAssembler;
 	inactivityMs?: number;
+	/** Called on one shared interval while any transfer is pending. */
+	keepAlive?: () => void;
+	keepAliveMs?: number;
 	onExpire: (captureId: string, tabId: number | undefined) => void;
 }
 
@@ -25,12 +29,17 @@ interface PendingTransferCoordinatorOptions {
 export class PendingTransferCoordinator<T> {
 	private readonly assembler: ChunkAssembler;
 	private readonly inactivityMs: number;
+	private readonly keepAlive: (() => void) | undefined;
+	private readonly keepAliveMs: number;
 	private readonly onExpire: PendingTransferCoordinatorOptions["onExpire"];
 	private readonly transfers = new Map<string, PendingTransfer<T>>();
+	private cancelKeepAlive: (() => void) | null = null;
 
 	constructor(options: PendingTransferCoordinatorOptions) {
 		this.assembler = options.assembler ?? new ChunkAssembler();
 		this.inactivityMs = options.inactivityMs ?? CAPTURE_INACTIVITY_TIMEOUT_MS;
+		this.keepAlive = options.keepAlive;
+		this.keepAliveMs = options.keepAliveMs ?? PENDING_TRANSFER_KEEP_ALIVE_MS;
 		this.onExpire = options.onExpire;
 	}
 
@@ -99,7 +108,14 @@ export class PendingTransferCoordinator<T> {
 			cancelTimer: () => clearTimeout(timer),
 		};
 		this.transfers.set(captureId, transfer);
+		this.startKeepAlive();
 		return transfer;
+	}
+
+	private startKeepAlive(): void {
+		if (this.cancelKeepAlive !== null || !this.keepAlive) return;
+		const handle = setInterval(this.keepAlive, this.keepAliveMs);
+		this.cancelKeepAlive = () => clearInterval(handle);
 	}
 
 	private cleanup(captureId: string): void {
@@ -107,5 +123,8 @@ export class PendingTransferCoordinator<T> {
 		const transfer = this.transfers.get(captureId);
 		if (transfer) transfer.cancelTimer();
 		this.transfers.delete(captureId);
+		if (this.transfers.size > 0 || this.cancelKeepAlive === null) return;
+		this.cancelKeepAlive();
+		this.cancelKeepAlive = null;
 	}
 }

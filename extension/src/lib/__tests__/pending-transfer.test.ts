@@ -5,7 +5,10 @@ import {
 	type CaptureChunk,
 	ChunkAssembler,
 } from "#/lib/chunked-transfer";
-import { PendingTransferCoordinator } from "#/lib/pending-transfer";
+import {
+	PENDING_TRANSFER_KEEP_ALIVE_MS,
+	PendingTransferCoordinator,
+} from "#/lib/pending-transfer";
 
 interface Metadata {
 	url: string;
@@ -137,5 +140,45 @@ describe("PendingTransferCoordinator", () => {
 			/cap-1.*total/,
 		);
 		expectCleared(coordinator, assembler);
+	});
+
+	it("clears coordinator state when aggregate text exceeds its bound", () => {
+		const assembler = new ChunkAssembler({ maxTextLength: 5 });
+		const coordinator = new PendingTransferCoordinator<Metadata>({
+			assembler,
+			inactivityMs: 1_000,
+			onExpire: vi.fn(),
+		});
+		coordinator.acceptMetadata("cap-1", metadata, 7);
+		coordinator.acceptChunk(chunk(0, "abc"), 7);
+
+		expect(() => coordinator.acceptChunk(chunk(1, "def"), 7)).toThrow(
+			"aggregate",
+		);
+		expectCleared(coordinator, assembler);
+	});
+
+	it("shares one keepalive until the last pending transfer terminates", () => {
+		const keepAlive = vi.fn();
+		const coordinator = new PendingTransferCoordinator<Metadata>({
+			inactivityMs: 60_000,
+			keepAlive,
+			onExpire: vi.fn(),
+		});
+
+		coordinator.acceptMetadata("cap-1", metadata, 7);
+		expect(vi.getTimerCount()).toBe(2);
+		vi.advanceTimersByTime(PENDING_TRANSFER_KEEP_ALIVE_MS);
+		expect(keepAlive).toHaveBeenCalledOnce();
+
+		coordinator.acceptMetadata("cap-2", metadata, 8);
+		expect(vi.getTimerCount()).toBe(3);
+		vi.advanceTimersByTime(PENDING_TRANSFER_KEEP_ALIVE_MS);
+		expect(keepAlive).toHaveBeenCalledTimes(2);
+
+		coordinator.abort("cap-1");
+		expect(vi.getTimerCount()).toBe(2);
+		coordinator.abort("cap-2");
+		expect(vi.getTimerCount()).toBe(0);
 	});
 });

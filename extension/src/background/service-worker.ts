@@ -226,23 +226,28 @@ function reportPhase(tabId: number | undefined, phase: CapturePhase): void {
 }
 
 /**
+ * Any extension API call resets the MV3 idle timer. MV2 background pages are
+ * not suspended, so inability to call it there is benign.
+ */
+function keepServiceWorkerAlive(): void {
+	try {
+		void Promise.resolve(chrome.runtime.getPlatformInfo()).catch(() => {});
+	} catch {
+		// ignored
+	}
+}
+
+/**
  * Guards every capture: suppresses duplicates for a URL already being captured,
  * and keeps the service worker alive while asynchronous work is outstanding.
  */
 const captureQueue = new CaptureQueue({
-	keepAlive: () => {
-		// Any extension API call resets the service worker's idle timer. The
-		// result is irrelevant; only the call matters.
-		try {
-			void Promise.resolve(chrome.runtime.getPlatformInfo()).catch(() => {});
-		} catch {
-			// MV2 background pages are not suspended, so a failure here is benign.
-		}
-	},
+	keepAlive: keepServiceWorkerAlive,
 });
 
 /** Snapshot chunks, metadata, and inactivity timers in flight. */
 const pendingTransfers = new PendingTransferCoordinator<CaptureMetadata>({
+	keepAlive: keepServiceWorkerAlive,
 	onExpire: (captureId, tabId) => {
 		reportPhase(tabId, "error");
 		showNotification(

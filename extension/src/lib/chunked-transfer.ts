@@ -11,6 +11,8 @@
  */
 
 export const CHUNK_SIZE = 4 * 1024 * 1024;
+export const MAX_CAPTURE_CHUNKS = 128;
+export const MAX_CAPTURE_TEXT_LENGTH = 512 * 1024 * 1024;
 
 export const CAPTURE_CHUNK = "capture_chunk";
 export const CAPTURE_ABORT = "capture_abort";
@@ -78,38 +80,65 @@ export async function sendCaptureTransfer(
 
 interface CaptureBuffer {
 	total: number;
+	length: number;
 	parts: Map<number, string>;
+}
+
+export interface ChunkAssemblerOptions {
+	/** Optionally impose a stricter per-consumer aggregate limit. */
+	maxTextLength?: number;
 }
 
 export class ChunkAssembler {
 	private buffers = new Map<string, CaptureBuffer>();
+	private readonly maxTextLength: number;
+
+	constructor(options: ChunkAssemblerOptions = {}) {
+		this.maxTextLength = Math.min(
+			options.maxTextLength ?? MAX_CAPTURE_TEXT_LENGTH,
+			MAX_CAPTURE_TEXT_LENGTH,
+		);
+	}
 
 	/** The reassembled payload once every chunk has arrived, else null. */
 	accept(chunk: CaptureChunk): string | null {
-		const existing = this.buffers.get(chunk.captureId);
+		const captureId: unknown = chunk.captureId;
+		if (typeof captureId !== "string" || captureId.length === 0) {
+			return this.reject(captureId, "captureId must be a non-empty string");
+		}
 
-		if (!Number.isInteger(chunk.total) || chunk.total < 1) {
-			return this.reject(chunk.captureId, "total must be a positive integer");
+		const existing = this.buffers.get(captureId);
+		if (!Number.isSafeInteger(chunk.total) || chunk.total < 1) {
+			return this.reject(captureId, "total must be a positive safe integer");
+		}
+		if (chunk.total > MAX_CAPTURE_CHUNKS) {
+			return this.reject(
+				captureId,
+				`total ${chunk.total} exceeds the ${MAX_CAPTURE_CHUNKS}-chunk limit`,
+			);
 		}
 		if (
-			!Number.isInteger(chunk.index) ||
+			!Number.isSafeInteger(chunk.index) ||
 			chunk.index < 0 ||
 			chunk.index >= chunk.total
 		) {
 			return this.reject(
-				chunk.captureId,
-				`index ${chunk.index} must be an integer between 0 and ${chunk.total - 1}`,
+				captureId,
+				`index ${chunk.index} must be a safe integer between 0 and ${chunk.total - 1}`,
 			);
+		}
+		if (typeof chunk.text !== "string") {
+			return this.reject(captureId, "text must be a string");
 		}
 		if (chunk.text.length > CHUNK_SIZE) {
 			return this.reject(
-				chunk.captureId,
+				captureId,
 				`chunk size ${chunk.text.length} exceeds ${CHUNK_SIZE} characters`,
 			);
 		}
 		if (existing && existing.total !== chunk.total) {
 			return this.reject(
-				chunk.captureId,
+				captureId,
 				`total changed from ${existing.total} to ${chunk.total}`,
 			);
 		}
@@ -118,17 +147,27 @@ export class ChunkAssembler {
 		if (duplicate !== undefined) {
 			if (duplicate === chunk.text) return null;
 			return this.reject(
-				chunk.captureId,
+				captureId,
 				`duplicate index ${chunk.index} has conflicting content`,
+			);
+		}
+
+		const aggregateLength = (existing?.length ?? 0) + chunk.text.length;
+		if (aggregateLength > this.maxTextLength) {
+			return this.reject(
+				captureId,
+				`aggregate text length ${aggregateLength} exceeds ${this.maxTextLength} characters`,
 			);
 		}
 
 		const buffer = existing ?? {
 			total: chunk.total,
+			length: 0,
 			parts: new Map<number, string>(),
 		};
-		if (!existing) this.buffers.set(chunk.captureId, buffer);
+		if (!existing) this.buffers.set(captureId, buffer);
 		buffer.parts.set(chunk.index, chunk.text);
+		buffer.length = aggregateLength;
 
 		if (buffer.parts.size < buffer.total) return null;
 
@@ -136,13 +175,15 @@ export class ChunkAssembler {
 		for (let index = 0; index < buffer.total; index++) {
 			ordered.push(buffer.parts.get(index) ?? "");
 		}
-		this.buffers.delete(chunk.captureId);
+		this.buffers.delete(captureId);
 		return ordered.join("");
 	}
 
-	private reject(captureId: string, reason: string): never {
-		this.buffers.delete(captureId);
-		throw new Error(`Invalid capture chunk "${captureId}": ${reason}`);
+	private reject(captureId: unknown, reason: string): never {
+		if (typeof captureId === "string") this.buffers.delete(captureId);
+		throw new Error(
+			`Invalid capture chunk ${JSON.stringify(captureId)}: ${reason}`,
+		);
 	}
 
 	/** Drop a capture that will never complete, e.g. its tab closed. */

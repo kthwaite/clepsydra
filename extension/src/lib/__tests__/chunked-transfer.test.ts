@@ -5,6 +5,8 @@ import {
 	CHUNK_SIZE,
 	type CaptureChunk,
 	ChunkAssembler,
+	MAX_CAPTURE_CHUNKS,
+	MAX_CAPTURE_TEXT_LENGTH,
 	sendCaptureTransfer,
 	splitIntoChunks,
 } from "#/lib/chunked-transfer";
@@ -113,9 +115,19 @@ describe("ChunkAssembler", () => {
 		["zero total", chunk({ total: 0 }), "total"],
 		["negative total", chunk({ total: -1 }), "total"],
 		["fractional total", chunk({ total: 1.5 }), "total"],
+		[
+			"unsafe total",
+			chunk({ total: Number.MAX_SAFE_INTEGER + 1 }),
+			"safe integer",
+		],
 		["negative index", chunk({ index: -1 }), "index"],
 		["index equal to total", chunk({ index: 2 }), "index"],
 		["fractional index", chunk({ index: 0.5 }), "index"],
+		[
+			"unsafe index",
+			chunk({ index: Number.MAX_SAFE_INTEGER + 1 }),
+			"safe integer",
+		],
 	] as const)("rejects an invalid %s", (_case, invalid, detail) => {
 		const assembler = new ChunkAssembler();
 
@@ -123,13 +135,72 @@ describe("ChunkAssembler", () => {
 		expect(assembler.pending).toBe(0);
 	});
 
-	it("rejects chunks larger than the transport limit", () => {
-		const assembler = new ChunkAssembler();
+	it("accepts the maximum declared total and rejects one above it", () => {
+		expect(MAX_CAPTURE_CHUNKS).toBe(128);
+		const accepted = new ChunkAssembler();
+		expect(accepted.accept(chunk({ total: MAX_CAPTURE_CHUNKS }))).toBeNull();
+		expect(accepted.pending).toBe(1);
 
+		const rejected = new ChunkAssembler();
 		expect(() =>
-			assembler.accept(chunk({ text: "x".repeat(CHUNK_SIZE + 1) })),
-		).toThrow("size");
+			rejected.accept(chunk({ total: MAX_CAPTURE_CHUNKS + 1 })),
+		).toThrow(/total.*128/);
+		expect(rejected.pending).toBe(0);
+	});
+
+	it.each([
+		["empty", ""],
+		["non-string", 42],
+	] as const)("rejects a %s capture id", (_case, captureId) => {
+		const assembler = new ChunkAssembler();
+		const invalid = { ...chunk(), captureId } as unknown as CaptureChunk;
+
+		expect(() => assembler.accept(invalid)).toThrow("captureId");
 		expect(assembler.pending).toBe(0);
+	});
+
+	it.each([
+		["null", null],
+		["number", 42],
+	] as const)(
+		"rejects %s chunk text and clears existing state",
+		(_case, text) => {
+			const assembler = new ChunkAssembler();
+			assembler.accept(chunk());
+			const invalid = {
+				...chunk({ index: 1 }),
+				text,
+			} as unknown as CaptureChunk;
+
+			expect(() => assembler.accept(invalid)).toThrow("text");
+			expect(assembler.pending).toBe(0);
+		},
+	);
+
+	it("accepts the chunk-size boundary and rejects one character above it", () => {
+		const accepted = new ChunkAssembler();
+		expect(accepted.accept(chunk({ text: "x".repeat(CHUNK_SIZE) }))).toBeNull();
+		expect(accepted.pending).toBe(1);
+
+		const rejected = new ChunkAssembler();
+		expect(() =>
+			rejected.accept(chunk({ text: "x".repeat(CHUNK_SIZE + 1) })),
+		).toThrow("size");
+		expect(rejected.pending).toBe(0);
+	});
+
+	it("accepts the aggregate boundary and rejects one character above it", () => {
+		expect(MAX_CAPTURE_TEXT_LENGTH).toBe(512 * 1024 * 1024);
+		const accepted = new ChunkAssembler({ maxTextLength: 5 });
+		accepted.accept(chunk({ text: "ab" }));
+		expect(accepted.accept(chunk({ index: 1, text: "cde" }))).toBe("abcde");
+
+		const rejected = new ChunkAssembler({ maxTextLength: 5 });
+		rejected.accept(chunk({ text: "abc" }));
+		expect(() => rejected.accept(chunk({ index: 1, text: "def" }))).toThrow(
+			/aggregate.*5/,
+		);
+		expect(rejected.pending).toBe(0);
 	});
 
 	it("rejects a changed total and clears the capture", () => {
