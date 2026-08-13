@@ -319,7 +319,7 @@ fn navigable_href(namespace: &Namespace, element: &str) -> bool {
         && matches!(element, "a" | "area")
 }
 
-const DEFAULT_MAX_DOM_NODES: usize = 500_000;
+const DEFAULT_MAX_DOM_NODES: usize = 100_000;
 const DEFAULT_MAX_DOM_DEPTH: usize = 256;
 
 fn should_remove_node(node: &Handle) -> bool {

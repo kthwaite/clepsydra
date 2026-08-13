@@ -469,12 +469,32 @@ fn snapshot_response_with(
     }
 }
 
+// Parsing attacker-authored HTML builds a DOM with materially greater heap use
+// than its source bytes. Keep the view boundary to an 8 MiB source envelope;
+// with the DOM node cap this leaves headroom for input, DOM, and serialized
+// output within a conservative 128 MiB per-request working-memory budget.
+const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
+
 fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
+    prepare_snapshot_body_with(data, archive_snapshot::neutralize_navigation)
+}
+
+fn prepare_snapshot_body_with(
+    data: Vec<u8>,
+    neutralize: impl FnOnce(&str) -> Result<String, String>,
+) -> Result<Vec<u8>, ApiError> {
+    if data.len() > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES {
+        return Err(ApiError::internal(format!(
+            "archived snapshot is corrupt: snapshot size {} exceeds view byte limit {}",
+            data.len(),
+            MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES
+        )));
+    }
     let data = rewrite_cas_urls(data);
     let html = std::str::from_utf8(&data)
         .map(std::borrow::Cow::Borrowed)
         .unwrap_or_else(|_| String::from_utf8_lossy(&data));
-    archive_snapshot::neutralize_navigation(&html)
+    neutralize(&html)
         .map(String::into_bytes)
         .map_err(|error| ApiError::internal(format!("archived snapshot is corrupt: {error}")))
 }
@@ -1202,6 +1222,7 @@ mod tests {
             inspections: Cell::new(0),
             retrievals: Cell::new(0),
         };
+
         let snapshot = load_snapshot(&store, "sha256:test", SnapshotMethod::Head).unwrap();
         assert_eq!(store.inspections.get(), 1);
         assert_eq!(store.retrievals.get(), 0);
@@ -1218,6 +1239,37 @@ mod tests {
         .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
         assert_eq!(rewrites.get(), 0);
+    }
+
+    #[test]
+    fn snapshot_view_byte_limit_runs_parser_at_limit_and_rejects_over_limit_before_parse() {
+        use std::cell::Cell;
+
+        let parses = Cell::new(0);
+        let at_limit = vec![b' '; MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES];
+        let result = prepare_snapshot_body_with(at_limit, |html| {
+            parses.set(parses.get() + 1);
+            assert_eq!(html.len(), MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES);
+            Ok(html.to_owned())
+        });
+        assert!(result.is_ok());
+        assert_eq!(parses.get(), 1);
+
+        let over_limit = vec![b' '; MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES + 1];
+        let error = prepare_snapshot_body_with(over_limit, |_| {
+            parses.set(parses.get() + 1);
+            Ok(String::new())
+        })
+        .unwrap_err();
+        assert_eq!(parses.get(), 1, "over-limit input reached the parser seam");
+        assert_eq!(error.status, 500);
+        assert!(error.error.contains("archived snapshot is corrupt"));
+        assert!(error.error.contains("view byte limit"));
+        assert!(
+            error
+                .error
+                .contains(&MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES.to_string())
+        );
     }
 
     // ---------------------------------------------------------------------------
