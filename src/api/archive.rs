@@ -373,11 +373,6 @@ fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
     headers
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SnapshotMethod {
-    Get,
-    Head,
-}
 
 enum LoadedSnapshot {
     Body {
@@ -389,60 +384,28 @@ enum LoadedSnapshot {
 
 trait SnapshotStore {
     fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>>;
-    fn retrieve_limited(
-        &self,
-        hash: &str,
-        limit: usize,
-    ) -> Result<(Vec<u8>, String), RetrieveLimitedError>;
 }
 
 impl SnapshotStore for ContentStore {
     fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
         ContentStore::inspect(self, hash)
     }
-
-    fn retrieve_limited(
-        &self,
-        hash: &str,
-        limit: usize,
-    ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
-        ContentStore::retrieve_limited(self, hash, limit)
-    }
 }
 
-fn load_snapshot(
+fn load_snapshot_metadata(
     store: &impl SnapshotStore,
     hash: &str,
-    method: SnapshotMethod,
 ) -> Result<LoadedSnapshot, ApiError> {
-    match method {
-        SnapshotMethod::Get => {
-            match store.retrieve_limited(hash, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES) {
-                Ok((data, content_type)) => Ok(LoadedSnapshot::Body { data, content_type }),
-                Err(RetrieveLimitedError::TooLarge { size, limit }) => {
-                    Err(ApiError::internal(format!(
-                        "archived snapshot is corrupt: snapshot size {size} exceeds view input limit {limit}"
-                    )))
-                }
-                Err(RetrieveLimitedError::Store(_)) => {
-                    Err(ApiError::not_found(format!("snapshot not found: {hash}")))
-                }
-            }
-        }
-        SnapshotMethod::Head => {
-            let metadata = store
-                .inspect(hash)
-                .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))?;
-            if metadata.size > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 {
-                return Err(ApiError::internal(format!(
-                    "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
-                    metadata.size,
-                    MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES
-                )));
-            }
-            Ok(LoadedSnapshot::Metadata(metadata))
-        }
+    let metadata = store
+        .inspect(hash)
+        .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))?;
+    if metadata.size > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 {
+        return Err(ApiError::internal(format!(
+            "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
+            metadata.size, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES
+        )));
     }
+    Ok(LoadedSnapshot::Metadata(metadata))
 }
 
 fn without_body(response: Response) -> Response {
@@ -494,10 +457,10 @@ fn snapshot_response_with(
     }
 }
 
-// CAS retrieval and rewriting are both bounded before they allocate their full
-// outputs. A 128 MiB input supports large deconstructed SingleFile documents;
-// the 160 MiB rewrite ceiling covers worst-case expansion of validated CAS URLs.
-const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 128 * 1024 * 1024;
+// Ingest, GET, and HEAD share the 32 MiB stored-snapshot ceiling; the 64 MiB
+// rewrite ceiling covers expansion of validated CAS URLs.
+const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize =
+    archive_snapshot::ARCHIVE_VIEW_SNAPSHOT_BYTES;
 
 fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
     prepare_snapshot_body_with(
@@ -510,7 +473,7 @@ fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
 fn prepare_snapshot_body_with(
     data: Vec<u8>,
     input_limit: usize,
-    neutralize: impl FnOnce(&[u8]) -> Result<Vec<u8>, String>,
+    neutralize: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, String>,
 ) -> Result<Vec<u8>, ApiError> {
     if data.len() > input_limit {
         return Err(ApiError::internal(format!(
@@ -527,7 +490,7 @@ fn prepare_snapshot_body_with(
             archive_snapshot::DEFAULT_REWRITTEN_SNAPSHOT_BYTES
         )));
     }
-    neutralize(&data)
+    neutralize(data)
         .map_err(|error| ApiError::internal(format!("archived snapshot is corrupt: {error}")))
 }
 fn cas_url_boundary(byte: u8) -> bool {
@@ -635,6 +598,11 @@ fn validate_resource_sizes(
     max_blob_size_mb: u64,
     max_request_size_mb: u64,
 ) -> Result<(), ApiError> {
+    if snapshot_len > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "archived snapshot is {snapshot_len} bytes, over shared snapshot view limit ({MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES} bytes)"
+        )));
+    }
     let max_blob_bytes = max_blob_size_mb.saturating_mul(1024 * 1024);
     let max_request_bytes = max_request_size_mb.saturating_mul(1024 * 1024);
     let request_size_overflow = || {
@@ -812,6 +780,26 @@ fn store_decoded_blobs(
     })
 }
 
+async fn acquire_archive_view_permit(
+    semaphore: Arc<tokio::sync::Semaphore>,
+) -> Result<tokio::sync::OwnedSemaphorePermit, ApiError> {
+    semaphore
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal("archive snapshot viewer is unavailable"))
+}
+
+fn limited_snapshot_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
+    match error {
+        RetrieveLimitedError::TooLarge { size, limit } => ApiError::internal(format!(
+            "archived snapshot is corrupt: snapshot size {size} exceeds view input limit {limit}"
+        )),
+        RetrieveLimitedError::Store(_) => {
+            ApiError::not_found(format!("snapshot not found: {hash}"))
+        }
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/archive/view/{hash}",
@@ -830,11 +818,34 @@ pub async fn view_snapshot(
     Extension(config): Extension<ArchiveViewConfig>,
     Path(hash): Path<String>,
 ) -> Result<Response, ApiError> {
-    let snapshot = {
-        let cas = state.cas.lock();
-        load_snapshot(&*cas, &hash, SnapshotMethod::Get)?
-    };
-    snapshot_response_with(snapshot, &config, prepare_snapshot_body)
+    let permit =
+        acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await?;
+    let cas = Arc::clone(&state.cas);
+    let worker_hash = hash.clone();
+    let snapshot = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let opened = {
+            let cas = cas.lock();
+            cas.open_limited(&worker_hash, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
+                .map_err(|error| limited_snapshot_error(&worker_hash, error))?
+        };
+        let content_type = opened.content_type().to_string();
+        if !framable_content_type(&content_type) {
+            return Ok(LoadedSnapshot::Body {
+                data: Vec::new(),
+                content_type,
+            });
+        }
+        let (data, content_type) = opened
+            .read_limited(MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
+            .map_err(|error| limited_snapshot_error(&worker_hash, error))?;
+        let data = prepare_snapshot_body(data)?;
+        Ok::<_, ApiError>(LoadedSnapshot::Body { data, content_type })
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("archive snapshot worker failed: {error}")))??;
+
+    snapshot_response_with(snapshot, &config, Ok)
 }
 
 pub async fn head_snapshot(
@@ -844,7 +855,7 @@ pub async fn head_snapshot(
 ) -> Response {
     let snapshot = {
         let cas = state.cas.lock();
-        load_snapshot(&*cas, &hash, SnapshotMethod::Head)
+        load_snapshot_metadata(&*cas, &hash)
     };
     without_body(match snapshot {
         Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body)
@@ -1215,6 +1226,33 @@ mod tests {
             );
         }
     }
+    #[tokio::test]
+    async fn archive_view_permit_stays_with_blocking_worker() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = acquire_archive_view_permit(Arc::clone(&semaphore))
+            .await
+            .unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            acquire_archive_view_permit(Arc::clone(&semaphore)),
+        )
+        .await;
+        assert!(blocked.is_err(), "a concurrent working set acquired a permit");
+
+        release_tx.send(()).unwrap();
+        worker.await.unwrap();
+        let _permit = acquire_archive_view_permit(semaphore).await.unwrap();
+    }
+
 
     #[test]
     fn head_snapshot_uses_metadata_without_retrieving_or_rewriting_bytes() {
@@ -1222,7 +1260,6 @@ mod tests {
 
         struct ProbeStore {
             inspections: Cell<usize>,
-            retrievals: Cell<usize>,
         }
 
         impl SnapshotStore for ProbeStore {
@@ -1236,28 +1273,14 @@ mod tests {
                     size: 1024,
                 })
             }
-
-            fn retrieve_limited(
-                &self,
-                _hash: &str,
-                _limit: usize,
-            ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
-                self.retrievals.set(self.retrievals.get() + 1);
-                Ok((
-                    b"<a href=https://live.example>live</a>".to_vec(),
-                    "text/html".to_string(),
-                ))
-            }
         }
 
         let store = ProbeStore {
             inspections: Cell::new(0),
-            retrievals: Cell::new(0),
         };
 
-        let snapshot = load_snapshot(&store, "sha256:test", SnapshotMethod::Head).unwrap();
+        let snapshot = load_snapshot_metadata(&store, "sha256:test").unwrap();
         assert_eq!(store.inspections.get(), 1);
-        assert_eq!(store.retrievals.get(), 0);
 
         let rewrites = Cell::new(0);
         let response = snapshot_response_with(
@@ -1275,11 +1298,7 @@ mod tests {
 
     #[test]
     fn head_snapshot_rejects_oversize_metadata_without_retrieving_bytes() {
-        use std::cell::Cell;
-
-        struct OversizeStore {
-            retrievals: Cell<usize>,
-        }
+        struct OversizeStore;
 
         impl SnapshotStore for OversizeStore {
             fn inspect(
@@ -1291,25 +1310,13 @@ mod tests {
                     size: MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 + 1,
                 })
             }
-
-            fn retrieve_limited(
-                &self,
-                _hash: &str,
-                _limit: usize,
-            ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
-                self.retrievals.set(self.retrievals.get() + 1);
-                unreachable!("HEAD retrieved body bytes")
-            }
         }
 
-        let store = OversizeStore {
-            retrievals: Cell::new(0),
-        };
-        let error = match load_snapshot(&store, "sha256:test", SnapshotMethod::Head) {
+        let store = OversizeStore;
+        let error = match load_snapshot_metadata(&store, "sha256:test") {
             Ok(_) => panic!("oversize HEAD metadata was accepted"),
             Err(error) => error,
         };
-        assert_eq!(store.retrievals.get(), 0);
         assert_eq!(error.status, 500);
         assert!(error.error.contains("view input limit"), "{}", error.error);
     }
@@ -1324,7 +1331,7 @@ mod tests {
         let result = prepare_snapshot_body_with(at_limit, input_limit, |html| {
             rewrites.set(rewrites.get() + 1);
             assert_eq!(html.len(), input_limit);
-            Ok(html.to_vec())
+            Ok(html)
         });
         assert!(result.is_ok());
         assert_eq!(rewrites.get(), 1);

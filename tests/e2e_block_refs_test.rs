@@ -64,6 +64,7 @@ fn setup_server_with_files(pre_index: impl FnOnce(&Path)) -> (TestServer, TempDi
         feed_manifest_lock: tokio::sync::Mutex::new(()),
         feed_settings,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         bcl: None,
         location: parking_lot::RwLock::new(None),
     });

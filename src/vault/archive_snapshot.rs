@@ -313,8 +313,12 @@ fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
 const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 const MATHML_NAMESPACE: &str = "http://www.w3.org/1998/Math/MathML";
+pub const ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
 const DEFAULT_REWRITER_MEMORY_BYTES: usize = 16 * 1024 * 1024;
-pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 160 * 1024 * 1024;
+pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_START_TAG_BYTES: usize = 1024 * 1024;
+const MAX_ATTRIBUTES_PER_TAG: usize = 4096;
+const MAX_NOSCRIPT_DEPTH: usize = 16;
 const REWRITER_CHUNK_BYTES: usize = 16 * 1024;
 
 fn rewrite_navigation_element(element: &mut Element<'_, '_>) -> Result<(), String> {
@@ -344,24 +348,33 @@ fn rewrite_navigation_element(element: &mut Element<'_, '_>) -> Result<(), Strin
         return Ok(());
     }
 
-    let navigation_names = element
-        .attributes()
-        .iter()
-        .map(|attribute| attribute.name())
-        .filter(|attribute| {
-            (((matches!(namespace, HTML_NAMESPACE | SVG_NAMESPACE | MATHML_NAMESPACE)
-                && matches!(tag.as_str(), "a" | "area"))
-                || tag.ends_with(":a"))
-                && (attribute == "href" || attribute.ends_with(":href")))
-                || (namespace == HTML_NAMESPACE
-                    && tag == "base"
-                    && matches!(attribute.as_str(), "href" | "target"))
-                || (namespace == HTML_NAMESPACE && tag == "form" && attribute == "action")
-                || (namespace == HTML_NAMESPACE && attribute == "formaction")
-        })
-        .collect::<Vec<_>>();
-    for attribute in navigation_names {
-        element.remove_attribute(&attribute);
+    if (matches!(namespace, HTML_NAMESPACE | SVG_NAMESPACE | MATHML_NAMESPACE)
+        && matches!(tag.as_str(), "a" | "area"))
+        || tag.ends_with(":a")
+    {
+        element.remove_attribute("href");
+        element.remove_attribute("xlink:href");
+        // Legacy captures may preserve an arbitrary namespace prefix. Only
+        // link elements need this uncommon materialized-attribute fallback.
+        let prefixed_hrefs = element
+            .attributes()
+            .iter()
+            .map(|attribute| attribute.name())
+            .filter(|attribute| attribute.ends_with(":href"))
+            .collect::<Vec<_>>();
+        for attribute in prefixed_hrefs {
+            element.remove_attribute(&attribute);
+        }
+    }
+    if namespace == HTML_NAMESPACE {
+        if tag == "base" {
+            element.remove_attribute("href");
+            element.remove_attribute("target");
+        }
+        if tag == "form" {
+            element.remove_attribute("action");
+        }
+        element.remove_attribute("formaction");
     }
     Ok(())
 }
@@ -375,7 +388,84 @@ fn rewriting_error(error: impl std::fmt::Display) -> String {
     }
 }
 
-pub fn neutralize_navigation_bytes(html: &[u8]) -> Result<Vec<u8>, String> {
+fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
+    let mut cursor = 0usize;
+    while let Some(relative) = html[cursor..].iter().position(|byte| *byte == b'<') {
+        let start = cursor + relative;
+        let Some(first) = html.get(start + 1).copied() else {
+            break;
+        };
+        if !first.is_ascii_alphabetic() {
+            cursor = start + 1;
+            continue;
+        }
+
+        let mut index = start + 1;
+        while html.get(index).is_some_and(u8::is_ascii_alphanumeric) {
+            index += 1;
+        }
+        let mut quote = None;
+        let mut after_quoted_value = false;
+        let mut attributes = 0usize;
+        let mut between_attributes = false;
+        loop {
+            if index.saturating_sub(start) > MAX_START_TAG_BYTES {
+                return Err(format!(
+                    "archived snapshot start tag limit exceeded: maximum {MAX_START_TAG_BYTES} bytes"
+                ));
+            }
+            let Some(byte) = html.get(index).copied() else {
+                return Err("archived snapshot rewrite failed: unterminated start tag".to_string());
+            };
+            if let Some(active) = quote {
+                if byte == active {
+                    quote = None;
+                    after_quoted_value = true;
+                }
+                index += 1;
+                continue;
+            }
+            if after_quoted_value {
+                match byte {
+                    b'>' => {
+                        cursor = index + 1;
+                        break;
+                    }
+                    byte if byte.is_ascii_whitespace() => {
+                        after_quoted_value = false;
+                        between_attributes = true;
+                    }
+                    _ => {}
+                }
+                index += 1;
+                continue;
+            }
+            match byte {
+                b'\'' | b'"' => quote = Some(byte),
+                b'>' => {
+                    cursor = index + 1;
+                    break;
+                }
+                byte if byte.is_ascii_whitespace() => between_attributes = true,
+                b'/' => {}
+                _ if between_attributes => {
+                    attributes += 1;
+                    if attributes > MAX_ATTRIBUTES_PER_TAG {
+                        return Err(format!(
+                            "archived snapshot attribute limit exceeded: maximum {MAX_ATTRIBUTES_PER_TAG} per tag"
+                        ));
+                    }
+                    between_attributes = false;
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+    }
+    Ok(())
+}
+
+pub fn neutralize_navigation_bytes(html: Vec<u8>) -> Result<Vec<u8>, String> {
     neutralize_navigation_bytes_with_limits(
         html,
         DEFAULT_REWRITER_MEMORY_BYTES,
@@ -384,14 +474,18 @@ pub fn neutralize_navigation_bytes(html: &[u8]) -> Result<Vec<u8>, String> {
 }
 
 fn rewrite_pass(
-    html: &[u8],
+    html: Vec<u8>,
     max_memory_bytes: usize,
     max_output_bytes: usize,
     expose_noscript: bool,
-) -> Result<Vec<u8>, String> {
-    let mut output = Vec::with_capacity(html.len().min(max_output_bytes));
-    let mut output_bytes = 0usize;
-    let mut output_exceeded = false;
+) -> Result<(Vec<u8>, usize), String> {
+    use std::cell::{Cell, RefCell};
+
+    validate_token_bounds(&html)?;
+    let renamed = Cell::new(0usize);
+    let output = RefCell::new(Vec::new());
+    let output_bytes = Cell::new(0usize);
+    let sink_error = RefCell::new(None::<String>);
     {
         let settings = Settings::new()
             .with_memory_settings(
@@ -401,51 +495,79 @@ fn rewrite_pass(
             )
             .with_strict(false)
             .with_adjust_charset_on_meta_tag(false)
-            .append_element_content_handler(element!("*", move |element| {
+            .append_element_content_handler(element!("*", |element| {
                 if expose_noscript {
                     if element.namespace_uri() == HTML_NAMESPACE
                         && element.tag_name() == "noscript"
                     {
                         element.set_tag_name("clepsydra-noscript")?;
+                        renamed.set(renamed.get() + 1);
                     }
                 } else {
-                    rewrite_navigation_element(element)
-                        .map_err(std::io::Error::other)?;
+                    rewrite_navigation_element(element).map_err(std::io::Error::other)?;
                 }
                 Ok(())
             }));
         let mut rewriter = HtmlRewriter::new(settings, |chunk: &[u8]| {
-            output_bytes = output_bytes.saturating_add(chunk.len());
-            if output_bytes <= max_output_bytes {
-                output.extend_from_slice(chunk);
-            } else {
-                output_exceeded = true;
+            if sink_error.borrow().is_some() {
+                return;
             }
+            let Some(next) = output_bytes.get().checked_add(chunk.len()) else {
+                *sink_error.borrow_mut() =
+                    Some("archived snapshot rewrite output size overflow".to_string());
+                return;
+            };
+            if next > max_output_bytes {
+                *sink_error.borrow_mut() = Some(format!(
+                    "archived snapshot rewrite output limit exceeded: maximum {max_output_bytes} bytes"
+                ));
+                return;
+            }
+            let mut output = output.borrow_mut();
+            if output.try_reserve_exact(chunk.len()).is_err() {
+                *sink_error.borrow_mut() =
+                    Some("archived snapshot rewrite output allocation failed".to_string());
+                return;
+            }
+            output.extend_from_slice(chunk);
+            output_bytes.set(next);
         });
         for chunk in html.chunks(REWRITER_CHUNK_BYTES) {
             rewriter.write(chunk).map_err(rewriting_error)?;
         }
         rewriter.end().map_err(rewriting_error)?;
     }
-    if output_exceeded {
-        return Err(format!(
-            "archived snapshot rewrite output limit exceeded: maximum {max_output_bytes} bytes"
-        ));
+    if let Some(error) = sink_error.into_inner() {
+        return Err(error);
     }
-    Ok(output)
+    Ok((output.into_inner(), renamed.get()))
 }
 
 fn neutralize_navigation_bytes_with_limits(
-    html: &[u8],
+    mut html: Vec<u8>,
     max_memory_bytes: usize,
     max_output_bytes: usize,
 ) -> Result<Vec<u8>, String> {
-    let exposed = rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
-    rewrite_pass(&exposed, max_memory_bytes, max_output_bytes, false)
+    for depth in 0..=MAX_NOSCRIPT_DEPTH {
+        let (exposed, renamed) =
+            rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
+        html = exposed;
+        if renamed == 0 {
+            let (neutralized, _) =
+                rewrite_pass(html, max_memory_bytes, max_output_bytes, false)?;
+            return Ok(neutralized);
+        }
+        if depth == MAX_NOSCRIPT_DEPTH {
+            return Err(format!(
+                "archived snapshot noscript depth limit exceeded: maximum {MAX_NOSCRIPT_DEPTH}"
+            ));
+        }
+    }
+    unreachable!("bounded noscript exposure loop always returns")
 }
 
 pub fn neutralize_navigation(html: &str) -> Result<String, String> {
-    neutralize_navigation_bytes(html.as_bytes())
+    neutralize_navigation_bytes(html.as_bytes().to_vec())
         .and_then(|output| String::from_utf8(output).map_err(|error| error.to_string()))
 }
 /// Absolute original URL → the hash of the blob that replaced it.
@@ -1538,14 +1660,61 @@ mod tests {
     #[test]
     fn streaming_neutralizer_names_memory_and_output_limit_failures() {
         let memory_error =
-            neutralize_navigation_bytes_with_limits(b"<div>visible</div>", 1, 1024)
+            neutralize_navigation_bytes_with_limits(b"<div>visible</div>".to_vec(), 1, 1024)
                 .unwrap_err();
         assert!(memory_error.contains("memory limit"), "{memory_error}");
 
         let output_error =
-            neutralize_navigation_bytes_with_limits(b"<div>visible</div>", 1024 * 1024, 4)
+            neutralize_navigation_bytes_with_limits(
+                b"<div>visible</div>".to_vec(),
+                1024 * 1024,
+                4,
+            )
                 .unwrap_err();
         assert!(output_error.contains("output limit"), "{output_error}");
+    }
+
+    #[test]
+    fn nested_noscript_layers_are_exposed_and_neutralized() {
+        let html = concat!(
+            "<template><noscript><noscript>",
+            "<a href=https://nested.example>Nested visible</a>",
+            "<meta http-equiv=refresh content='0;url=https://refresh.example'>",
+            "<img src=cas:sha256:nested alt=Nested>",
+            "</noscript></noscript></template>"
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        assert!(!neutralized.contains("nested.example"), "{neutralized}");
+        assert!(!neutralized.contains("refresh.example"), "{neutralized}");
+        assert!(neutralized.contains("Nested visible"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:nested"), "{neutralized}");
+        assert_eq!(neutralized.matches("<noscript").count(), 2, "{neutralized}");
+    }
+
+    #[test]
+    fn nested_noscript_depth_and_token_complexity_are_bounded_before_rewrite() {
+        let too_deep = format!(
+            "{}<a href=https://deep.example>visible</a>{}",
+            "<noscript>".repeat(MAX_NOSCRIPT_DEPTH + 1),
+            "</noscript>".repeat(MAX_NOSCRIPT_DEPTH + 1)
+        );
+        let depth_error = neutralize_navigation(&too_deep).unwrap_err();
+        assert!(depth_error.contains("noscript depth limit"), "{depth_error}");
+
+        let long_tag = format!("<div {}>", "x".repeat(MAX_START_TAG_BYTES + 1));
+        let tag_error = neutralize_navigation(&long_tag).unwrap_err();
+        assert!(tag_error.contains("start tag limit"), "{tag_error}");
+
+        let many_attributes = format!(
+            "<div {}>",
+            (0..=MAX_ATTRIBUTES_PER_TAG)
+                .map(|index| format!("a{index}=x"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        let attribute_error = neutralize_navigation(&many_attributes).unwrap_err();
+        assert!(attribute_error.contains("attribute limit"), "{attribute_error}");
     }
 
     // -------------------------------------------------------------------
