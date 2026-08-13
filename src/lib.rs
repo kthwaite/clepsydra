@@ -164,6 +164,15 @@ impl ServerSettings {
 
         if matches!(
             &parsed_host,
+            url::Host::Domain(domain) if domain.contains('*')
+        ) {
+            return Err(format!(
+                "server.host must not decode to a wildcard domain: {raw}"
+            ));
+        }
+
+        if matches!(
+            &parsed_host,
             url::Host::Ipv4(address) if address.is_unspecified()
         ) || matches!(
             &parsed_host,
