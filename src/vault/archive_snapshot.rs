@@ -242,22 +242,28 @@ fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
         while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
             cursor += 1;
         }
-        let Some(&quote @ (b'\'' | b'"')) = bytes.get(cursor) else {
+        let value = if let Some(&quote @ (b'\'' | b'"')) = bytes.get(cursor) {
+            cursor += 1;
+            let value_start = cursor;
+            while cursor < bytes.len() && bytes[cursor] != quote {
+                cursor += 1;
+            }
+            if cursor == bytes.len() {
+                break;
+            }
+            let value = &tag[value_start..cursor];
+            cursor += 1;
+            value
+        } else {
+            let value_start = cursor;
             while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() {
                 cursor += 1;
             }
-            continue;
+            if cursor == value_start {
+                continue;
+            }
+            &tag[value_start..cursor]
         };
-        cursor += 1;
-        let value_start = cursor;
-        while cursor < bytes.len() && bytes[cursor] != quote {
-            cursor += 1;
-        }
-        if cursor == bytes.len() {
-            break;
-        }
-        let value = &tag[value_start..cursor];
-        cursor += 1;
 
         if original.is_none() && name.eq_ignore_ascii_case("data-sf-original-src") {
             original = Some(value);
@@ -1061,6 +1067,33 @@ mod tests {
 
         let hash = &deconstructed.resources[0].hash;
         assert_eq!(out, format!("![a](cas:{hash})"));
+    }
+
+    #[test]
+    fn joins_runtime_balanced_url_when_cas_src_is_unquoted() {
+        let html = concat!(
+            r#"<img loading=lazy alt="large relay bitmap" "#,
+            r#"src=cas:sha256:relay "#,
+            r#"data-sf-original-src="http://localhost:34989/large_(relay).bmp?sig=(abc)&amp;variant=full">"#
+        );
+        let markdown = "![large relay bitmap](http://localhost:34989/large_(relay).bmp?sig=(abc)&variant=full)";
+
+        // The exact parser event/range and balanced scanner succeed when the
+        // map is supplied directly; the runtime miss originated in HTML join
+        // extraction, where SingleFile serialized this `src` without quotes.
+        let direct_map = one_entry(
+            "http://localhost:34989/large_(relay).bmp?sig=(abc)&variant=full",
+            "sha256:relay",
+        );
+        assert_eq!(
+            rewrite_markdown_images(markdown, &direct_map, "http://localhost:34989/article"),
+            "![large relay bitmap](cas:sha256:relay)"
+        );
+
+        let map = original_url_map(html, "http://localhost:34989/article");
+        let out = rewrite_markdown_images(markdown, &map, "http://localhost:34989/article");
+
+        assert_eq!(out, "![large relay bitmap](cas:sha256:relay)");
     }
 
     // -------------------------------------------------------------------
