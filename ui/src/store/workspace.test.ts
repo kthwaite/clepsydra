@@ -391,6 +391,227 @@ function pageTab(id: string, quireId?: string) {
   };
 }
 
+describe("moveTab drop semantics", () => {
+  function arrangeCollapsedDestination() {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("plain"),
+        pageTab("q-a", "q1"),
+        pageTab("q-b", "q1"),
+        pageTab("tail"),
+      ],
+      activeTabId: "plain",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: true },
+      },
+    });
+  }
+
+  it("places a tab before a target tab by stable ID", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("a"), pageTab("b"), pageTab("c"), pageTab("d")],
+      activeTabId: "a",
+    });
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("d", { tabId: "b", position: "before" });
+
+    const { tabs } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual(["a", "d", "b", "c"]);
+    expect(tabs.find((tab) => tab.id === "d")?.quireId).toBeUndefined();
+  });
+
+  it("places a tab after a target tab by stable ID", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("a"), pageTab("b"), pageTab("c"), pageTab("d")],
+      activeTabId: "a",
+    });
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("a", { tabId: "c", position: "after" });
+
+    const { tabs } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual(["b", "c", "a", "d"]);
+    expect(tabs.find((tab) => tab.id === "a")?.quireId).toBeUndefined();
+  });
+
+  it("removes quire membership when moving beside a plain tab", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("q-a", "q1"),
+        pageTab("q-b", "q1"),
+        pageTab("plain"),
+        pageTab("tail"),
+      ],
+      activeTabId: "q-a",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("q-a", { tabId: "plain", position: "after" });
+
+    const { tabs, quires } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual([
+      "q-b",
+      "plain",
+      "q-a",
+      "tail",
+    ]);
+    expect(tabs.find((tab) => tab.id === "q-a")?.quireId).toBeUndefined();
+    expect(tabs.find((tab) => tab.id === "q-b")?.quireId).toBe("q1");
+    expect(quires.q1).toBeDefined();
+  });
+
+  it("joins a target member's quire at the requested position", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("plain"),
+        pageTab("q-a", "q1"),
+        pageTab("q-b", "q1"),
+        pageTab("tail"),
+      ],
+      activeTabId: "plain",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("plain", { tabId: "q-b", position: "before" });
+
+    const { tabs } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual([
+      "q-a",
+      "plain",
+      "q-b",
+      "tail",
+    ]);
+    expect(tabs.find((tab) => tab.id === "plain")?.quireId).toBe("q1");
+  });
+
+  it("moves a tab into a quire at the end of its run", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        pageTab("plain"),
+        pageTab("q-a", "q1"),
+        pageTab("q-b", "q1"),
+        pageTab("tail"),
+      ],
+      activeTabId: "plain",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+
+    useWorkspaceStore.getState().moveTab("plain", { quireId: "q1" });
+
+    const { tabs } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual([
+      "q-a",
+      "q-b",
+      "plain",
+      "tail",
+    ]);
+    expect(tabs.find((tab) => tab.id === "plain")?.quireId).toBe("q1");
+  });
+  it("expands a collapsed target quire when moving the active tab relative to a member", () => {
+    arrangeCollapsedDestination();
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("plain", { tabId: "q-b", position: "before" });
+
+    const { tabs, quires } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => [tab.id, tab.quireId ?? null])).toEqual([
+      ["q-a", "q1"],
+      ["plain", "q1"],
+      ["q-b", "q1"],
+      ["tail", null],
+    ]);
+    expect(quires.q1.collapsed).toBe(false);
+  });
+
+  it("expands a collapsed target quire when moving the active tab directly into it", () => {
+    arrangeCollapsedDestination();
+
+    useWorkspaceStore.getState().moveTab("plain", { quireId: "q1" });
+
+    const { tabs, quires } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => [tab.id, tab.quireId ?? null])).toEqual([
+      ["q-a", "q1"],
+      ["q-b", "q1"],
+      ["plain", "q1"],
+      ["tail", null],
+    ]);
+    expect(quires.q1.collapsed).toBe(false);
+  });
+
+
+  it("dissolves the source quire when its final member moves out", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("solo", "q1"), pageTab("plain"), pageTab("tail")],
+      activeTabId: "solo",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("solo", { tabId: "plain", position: "after" });
+
+    const { tabs, quires } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual(["plain", "solo", "tail"]);
+    expect(tabs.find((tab) => tab.id === "solo")?.quireId).toBeUndefined();
+    expect(quires.q1).toBeUndefined();
+  });
+
+  it("does nothing when a tab targets itself", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("0"), pageTab("1"), pageTab("2")],
+      activeTabId: "0",
+    });
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("2", { tabId: "2", position: "after" });
+
+    const { tabs } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual(["0", "1", "2"]);
+    expect(tabs.find((tab) => tab.id === "2")?.quireId).toBeUndefined();
+  });
+
+  it("does nothing when the requested position is already effective", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("0"), pageTab("1"), pageTab("2")],
+      activeTabId: "0",
+    });
+
+    useWorkspaceStore
+      .getState()
+      .moveTab("1", { tabId: "2", position: "before" });
+
+    const { tabs } = useWorkspaceStore.getState();
+    expect(tabs.map((tab) => tab.id)).toEqual(["0", "1", "2"]);
+    expect(tabs.find((tab) => tab.id === "1")?.quireId).toBeUndefined();
+  });
+});
+
 describe("quire actions", () => {
   it("createQuire assigns membership and rotates colors", () => {
     resetStore();

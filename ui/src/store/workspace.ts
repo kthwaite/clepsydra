@@ -150,7 +150,12 @@ interface WorkspaceActions {
   clearActiveTab: () => void;
   clearTabFocus: (tabId: string) => void;
   takeTabFocus: (tabId: string, requestId: string) => string | undefined;
-  moveTab: (fromIndex: number, toIndex: number) => void;
+  moveTab: (
+    sourceTabId: string,
+    target:
+      | { tabId: string; position: "before" | "after" }
+      | { quireId: string },
+  ) => void;
   updateTabLabel: (tabId: string, label: string) => void;
   updateTabPath: (tabId: string, path: string, label?: string) => void;
   setNavigationMode: (mode: NavigationMode) => void;
@@ -436,12 +441,68 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         return tab.focusBlockId;
       },
 
-      moveTab(fromIndex, toIndex) {
+      moveTab(sourceTabId, target) {
         set((state) => {
-          const tabs = [...state.tabs];
-          const [moved] = tabs.splice(fromIndex, 1);
-          tabs.splice(toIndex, 0, moved);
-          return normalized(tabs, state.quires);
+          const sourceIndex = state.tabs.findIndex(
+            (tab) => tab.id === sourceTabId,
+          );
+          if (sourceIndex === -1) return state;
+
+          const source = state.tabs[sourceIndex];
+          const withoutSource = state.tabs.filter(
+            (tab) => tab.id !== sourceTabId,
+          );
+          let targetQuireId: string | undefined;
+          let insertAt: number;
+
+          if ("tabId" in target) {
+            if (target.tabId === sourceTabId) return state;
+            const targetIndex = withoutSource.findIndex(
+              (tab) => tab.id === target.tabId,
+            );
+            if (targetIndex === -1) return state;
+            targetQuireId = withoutSource[targetIndex].quireId;
+            insertAt = targetIndex + (target.position === "after" ? 1 : 0);
+          } else {
+            if (!state.quires[target.quireId]) return state;
+            targetQuireId = target.quireId;
+            const lastMemberIndex = withoutSource.reduce(
+              (last, tab, index) =>
+                tab.quireId === target.quireId ? index : last,
+              -1,
+            );
+            insertAt =
+              lastMemberIndex === -1
+                ? Math.min(sourceIndex, withoutSource.length)
+                : lastMemberIndex + 1;
+          }
+
+          const moved =
+            source.quireId === targetQuireId
+              ? source
+              : { ...source, quireId: targetQuireId };
+          const tabs = [
+            ...withoutSource.slice(0, insertAt),
+            moved,
+            ...withoutSource.slice(insertAt),
+          ];
+          const targetQuire = targetQuireId
+            ? state.quires[targetQuireId]
+            : undefined;
+          const quires =
+            sourceTabId === state.activeTabId && targetQuire?.collapsed
+              ? {
+                  ...state.quires,
+                  [targetQuire.id]: { ...targetQuire, collapsed: false },
+                }
+              : state.quires;
+          if (
+            tabs.every((tab, index) => tab === state.tabs[index]) &&
+            quires === state.quires
+          ) {
+            return state;
+          }
+          return normalized(tabs, quires);
         });
       },
 
