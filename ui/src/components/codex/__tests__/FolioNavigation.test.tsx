@@ -32,6 +32,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { Constellation } from "#/components/codex/Constellation";
 import { Folio } from "#/components/codex/Folio";
+import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 import { renderElement } from "#/editor/elements/renderElement";
 import { withSchema } from "#/editor/schema/withSchema";
 import type { CustomEditor } from "#/editor/types";
@@ -51,6 +52,7 @@ import {
   readFolioHistoryRestorationRequest,
 } from "#/store/folioRestoration";
 import { useGazetteerStore } from "#/store/gazetteer";
+import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
 
 const {
@@ -59,6 +61,7 @@ const {
   mobileLayout,
   mutatePage,
   pageEditorState,
+  showIndexHealth,
   refetchPage,
 } = vi.hoisted(() => ({
   editorCapture: { current: null as CustomEditor | null },
@@ -74,6 +77,7 @@ const {
     revision: "revision-a",
     version: 0,
   },
+  showIndexHealth: { current: false },
   refetchPage: vi.fn(),
 }));
 
@@ -99,6 +103,8 @@ vi.mock("#/api/index", () => ({
   useSimilar: () => ({ data: undefined }),
   useTags: () => ({ data: [] }),
   useStats: () => ({ data: undefined, isError: false }),
+  useIndexWarnings: () => ({ data: [], isPending: false, error: null }),
+  useRebuildIndex: () => ({ mutateAsync: vi.fn(), isPending: false }),
   useTagSuggestions: () => ({
     data: [],
     isFetching: false,
@@ -294,11 +300,13 @@ function HistoryControls() {
 
 function AtriumOrigin() {
   return (
-    <section>
-      <h1>Atrium origin</h1>
-      <OpenAlpha origin="Atrium" />
-      <OpenAlpha origin="source reference" blockId="abc123DEF0" />
-    </section>
+    <CodexFrame>
+      <section>
+        <h1>Atrium origin</h1>
+        <OpenAlpha origin="Atrium" />
+        <OpenAlpha origin="source reference" blockId="abc123DEF0" />
+      </section>
+    </CodexFrame>
   );
 }
 
@@ -316,6 +324,10 @@ function GazetteerOrigin() {
     </section>
   );
 }
+function RepairsOrigin() {
+  return <h1>Reference repairs</h1>;
+}
+
 
 function Workspace() {
   const tabs = useWorkspaceStore((state) => state.tabs);
@@ -335,6 +347,7 @@ function Workspace() {
     <>
       <HistoryControls />
       <GlobalShortcuts />
+      {showIndexHealth.current ? <IndexHealthPanel /> : null}
       <CodexFrame>{content}</CodexFrame>
     </>
   );
@@ -358,9 +371,15 @@ function renderNavigation(initialEntry: string, strictMode = false) {
     staticData: { codexView: "workspace" },
     component: Workspace,
   });
+  const repairsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/repairs",
+    component: RepairsOrigin,
+  });
   const router = createRouter({
     routeTree: rootRoute.addChildren([
       atriumRoute,
+      repairsRoute,
       gazetteerRoute,
       workspaceRoute,
     ]),
@@ -455,6 +474,7 @@ describe("mobile Folio Back", () => {
     });
     scrollIntoView.mockReset();
     mobileLayout.current = true;
+    showIndexHealth.current = false;
     editorCapture.current = null;
     editorMountCount.current = 0;
     clearFolioRestoration("alpha");
@@ -835,6 +855,35 @@ describe("mobile Folio Back", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
   });
 
+  it("opens an already-active persisted Folio from the desktop control off-workspace", async () => {
+    const user = userEvent.setup();
+    mobileLayout.current = false;
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "alpha",
+    });
+    const router = renderNavigation("/");
+
+    await user.click(await screen.findByRole("button", { name: /FOLIO/ }));
+
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/workspace"),
+    );
+    expect(readFolioHistoryDestination(router.history.location.state)).toEqual({
+      folioTabId: "alpha",
+      folioPath: "notes/alpha.md",
+      folioLocationId: expect.any(String),
+    });
+    expect(router.history.location.state.folioOriginTabId).toBeNull();
+  });
+
   it("returns to Atrium through history without closing the page tab", async () => {
     const user = userEvent.setup();
     const router = renderNavigation("/");
@@ -875,7 +924,7 @@ describe("mobile Folio Back", () => {
     expect(pageTabStillExists()).toBe(true);
   });
 
-  it("checkpoints before traversing to a Constellation origin without Folio activation", async () => {
+  it("checkpoints before restoring the Constellation origin on Back", async () => {
     const user = userEvent.setup();
     useWorkspaceStore.setState({
       tabs: [{ id: "graph", type: "graph", label: "Graph" }],
@@ -908,16 +957,12 @@ describe("mobile Folio Back", () => {
     await waitFor(() =>
       expect(router.state.location.pathname).toBe("/workspace"),
     );
-    expect(useWorkspaceStore.getState().activeTabId).toBe(
-      destination.folioTabId,
+    expect(useWorkspaceStore.getState().activeTabId).toBe("graph");
+    expect(screen.getByLabelText("Anchor page")).toHaveValue("alpha-id");
+    expect(screen.getByRole("button", { name: "Depth 2" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     );
-    expect(activePagePath()).toBe(destination.folioPath);
-    expect(
-      readFolioHistoryRestorationRequest(
-        destination.folioTabId,
-        destination.folioPath,
-      ),
-    ).toBeNull();
     expect(pageTabStillExists()).toBe(true);
     // Defect caught: origin activation used to unmount Folio before its visit was checkpointed.
     expect(
@@ -1166,6 +1211,7 @@ describe("mobile Folio Back", () => {
 
       await user.click(screen.getByRole("button", { name: "Visit Beta" }));
       await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+
       setFolioPosition(220, 2);
 
       act(() => router.history.back());
@@ -1176,6 +1222,76 @@ describe("mobile Folio Back", () => {
       await expectFolioPosition("notes/beta.md", 220, 2);
       act(() => router.history.back());
       await expectFolioPosition("notes/alpha.md", 330, 3);
+    });
+    it("defers Settings repairs departure until raw-draft Leave captures and exits", async () => {
+      const user = userEvent.setup();
+      showIndexHealth.current = true;
+      useUiStore.setState({ isSettingsOpen: true });
+      seedHistoryTabs("alpha");
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).not.toBeNull(),
+      );
+      const destination = readFolioHistoryDestination(
+        router.history.location.state,
+      );
+      if (!destination) throw new Error("Expected Folio destination");
+      setFolioPosition(246, 2);
+      await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
+      fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
+        target: { value: "dirty settings departure\n" },
+      });
+      const workspaceBefore = {
+        tabs: useWorkspaceStore.getState().tabs,
+        activeTabId: useWorkspaceStore.getState().activeTabId,
+      };
+
+      await user.click(
+        screen.getByRole("button", { name: "Open Reference Repairs" }),
+      );
+
+      expect(
+        await screen.findByRole("dialog", { name: "Unsaved raw Markdown" }),
+      ).toBeVisible();
+      expect(router.state.location.pathname).toBe("/workspace");
+      expect(useUiStore.getState().isSettingsOpen).toBe(true);
+      expect({
+        tabs: useWorkspaceStore.getState().tabs,
+        activeTabId: useWorkspaceStore.getState().activeTabId,
+      }).toEqual(workspaceBefore);
+      expect(
+        readFolioHistoryLocation(
+          destination.folioLocationId,
+          destination.folioTabId,
+          destination.folioPath,
+        ),
+      ).toBeNull();
+
+      await user.click(screen.getByRole("button", { name: "Stay" }));
+      expect(router.state.location.pathname).toBe("/workspace");
+      expect(useUiStore.getState().isSettingsOpen).toBe(true);
+
+      await user.click(
+        screen.getByRole("button", { name: "Open Reference Repairs" }),
+      );
+      await user.click(
+        await screen.findByRole("button", { name: "Leave" }),
+      );
+
+      await waitFor(() =>
+        expect(router.state.location.pathname).toBe("/repairs"),
+      );
+      expect(useUiStore.getState().isSettingsOpen).toBe(false);
+      expect(
+        readFolioHistoryLocation(
+          destination.folioLocationId,
+          destination.folioTabId,
+          destination.folioPath,
+        )?.scrollTop,
+      ).toBe(246);
     });
 
     it("keeps dirty native Back inert until Leave checkpoints and traverses once", async () => {

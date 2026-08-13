@@ -30,6 +30,22 @@ function mockCodexViewForPath(
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: {
+      matches: Array<{ staticData: { codexView: string } }>;
+    }) => unknown;
+  }) =>
+    select({
+      matches: [
+        {
+          staticData: {
+            codexView: mockCodexViewForPath(window.location.pathname),
+          },
+        },
+      ],
+    }),
   useRouter: () => ({
     state: {
       get matches() {

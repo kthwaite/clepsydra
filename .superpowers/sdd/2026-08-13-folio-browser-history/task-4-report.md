@@ -167,3 +167,30 @@ Added real memory-router integration coverage for all nine required Folio histor
 - Full feature-focused suites: 12 files, 280 tests passed.
 - Typecheck: exit 0.
 - Changed-file lint: 20 baseline diagnostics; the introduced provider dependency diagnostic was corrected.
+
+## Final review correction round 5
+
+### RED
+
+- Off-workspace desktop FOLIO control target failed because the already-active preflight returned on `/` and left the route unchanged.
+- Constellation origin target failed because admitted Back checkpointed the outgoing Folio but left that Folio active instead of restoring the outgoing entry's graph origin.
+- Settings repairs target failed because `closeSettings` ran before the raw-draft guard resolved, so Stay preserved route/workspace/registry but not Settings.
+- Workspace cleanup targets failed because `updateTabPath` retained pending/visit history and `closeQuireTabs` retained latest/visit state for every removed member.
+
+### Corrections
+
+- `useActivateTabWithFolioHistory` now treats already-active as a no-op only on `/workspace`, in both preflight and guarded recheck. Off-workspace activation creates a fresh complete tuple with null origin and navigates; a real desktop FOLIO control test covers `/` with a persisted active page.
+- The coordinator tracks each outgoing entry's `folioOriginTabId`. After an admitted BACK and synchronous Folio capture, a missing incoming tuple activates a still-valid outgoing origin through `activateTabFromHistory`. FORWARD and arbitrary tuple boundaries do not use this fallback.
+- Settings IndexHealthPanel routes repairs through `useLeaveFolioWorkspace`; `closeSettings` and navigation share the deferred callback. Integration coverage proves Stay leaves Settings, route, workspace, and registry inert, while Leave captures then closes and navigates.
+- Real `updateTabPath` changes clear latest plus visit/pending history. `closeQuireTabs` snapshots and clears every removed member before the Zustand updater, preserving unrelated tab records and requests.
+
+### Evidence
+
+- Route-aware activation RED: 1 selected failure; GREEN: 1/1.
+- Constellation origin RED: 1 selected failure; GREEN: 1/1.
+- Settings departure RED: 1 selected failure; GREEN: 1/1.
+- Cleanup RED: 2/2 selected failures; GREEN: 2/2.
+- Expanded focused suites: 14 files, 289 tests passed. Final navigation suite: 33/33 passed.
+- Typecheck: exit 0.
+- Changed-file lint: 20 pre-existing diagnostics in nine files; no round-owned diagnostic.
+- Adjacent callsite review found non-workspace Atrium repairs navigation and registry leaf navigators correctly outside the guarded Folio boundary; no additional raw production tab activation consumer remains.

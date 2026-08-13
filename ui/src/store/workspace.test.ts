@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  captureFolioHistoryLocation,
   clearFolioHistoryState,
   readFolioHistoryRestorationRequest,
+  readFolioHistoryLocation,
+  readFolioRestoration,
   registerFolioHistoryCapture,
   requestFolioHistoryRestoration,
+  saveFolioRestoration,
 } from "./folioRestoration";
 import {
   migrateWorkspace,
@@ -701,6 +705,20 @@ describe("workspace Folio history lifecycle", () => {
       locationId: `visit-${tabId}`,
     });
   }
+  function seedRecord(tabId: string, path = `${tabId}.md`) {
+    const record = {
+      tabId,
+      path,
+      revision: `revision-${tabId}`,
+      scrollTop: 10,
+      anchor: null,
+      focus: null,
+    };
+    saveFolioRestoration(record);
+    const unregister = registerFolioHistoryCapture(tabId, path, () => record);
+    captureFolioHistoryLocation(`visit-${tabId}`, tabId, path);
+    unregister();
+  }
 
   it("clears a pending history request when its tab closes before restoration", () => {
     clearFolioHistoryState();
@@ -714,6 +732,32 @@ describe("workspace Folio history lifecycle", () => {
     useWorkspaceStore.getState().closeTab("alpha");
 
     expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
+  });
+
+  it("clears pending, latest, and visit state when a tab path changes", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("alpha"), pageTab("other")],
+      activeTabId: "other",
+    });
+    request("alpha");
+    seedRecord("alpha");
+    seedRecord("other");
+
+    useWorkspaceStore
+      .getState()
+      .updateTabPath("alpha", "renamed.md", "Renamed");
+
+    expect(readFolioHistoryRestorationRequest("alpha", "alpha.md")).toBeNull();
+    expect(readFolioRestoration("alpha", "alpha.md")).toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-alpha", "alpha", "alpha.md"),
+    ).toBeNull();
+    expect(readFolioRestoration("other", "other.md")).not.toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-other", "other", "other.md"),
+    ).not.toBeNull();
   });
 
   it("clears old history identity when replace mode reuses a tab ID", () => {
@@ -749,6 +793,45 @@ describe("workspace Folio history lifecycle", () => {
 
     expect(readFolioHistoryRestorationRequest("beta", "beta.md")).toBeNull();
     unregister();
+  });
+
+  it("clears every removed quire tab while preserving unrelated history", () => {
+    clearFolioHistoryState();
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [
+        { ...pageTab("alpha"), quireId: "q1" },
+        { ...pageTab("beta"), quireId: "q1" },
+        pageTab("other"),
+      ],
+      activeTabId: "other",
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+    for (const tabId of ["alpha", "beta", "other"]) {
+      request(tabId);
+      seedRecord(tabId);
+    }
+
+    useWorkspaceStore.getState().closeQuireTabs("q1");
+
+    for (const tabId of ["alpha", "beta"]) {
+      expect(
+        readFolioHistoryRestorationRequest(tabId, `${tabId}.md`),
+      ).toBeNull();
+      expect(readFolioRestoration(tabId, `${tabId}.md`)).toBeNull();
+      expect(
+        readFolioHistoryLocation(`visit-${tabId}`, tabId, `${tabId}.md`),
+      ).toBeNull();
+    }
+    expect(
+      readFolioHistoryRestorationRequest("other", "other.md"),
+    ).not.toBeNull();
+    expect(readFolioRestoration("other", "other.md")).not.toBeNull();
+    expect(
+      readFolioHistoryLocation("visit-other", "other", "other.md"),
+    ).not.toBeNull();
   });
 
   it("clears all Folio history during workspace teardown", () => {

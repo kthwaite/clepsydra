@@ -83,6 +83,7 @@ vi.mock(
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => () => {},
+  useRouterState: () => true,
 }));
 vi.mock("#/api/index", () => ({
   useStats: () => ({ data: undefined }),

@@ -559,6 +559,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         }
         if (currentTab && currentTab.path !== path) {
           clearFolioRestoration(tabId);
+          clearFolioHistoryForTab(tabId);
         }
         set((state) => {
           const tab = state.tabs.find((t) => t.id === tabId);
@@ -707,6 +708,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         if (workspaceTransitionDepth === 0 && active?.quireId === quireId) {
           runWorkspaceTransition(() => get().closeQuireTabs(quireId));
           return;
+        }
+        for (const tab of current.tabs) {
+          if (tab.quireId !== quireId) continue;
+          clearFolioRestoration(tab.id);
+          clearFolioHistoryForTab(tab.id);
         }
         set((state) => {
           const firstIdx = state.tabs.findIndex(

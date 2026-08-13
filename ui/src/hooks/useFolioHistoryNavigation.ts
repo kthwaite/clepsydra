@@ -50,6 +50,7 @@ let capturedDepartureLocationId: string | null = null;
 type FolioHistoryTraversalGuard = (proceed: () => void) => boolean;
 const folioHistoryTraversalGuards = new Set<FolioHistoryTraversalGuard>();
 let trackedHistoryEntryIdentity: string | null = null;
+let trackedHistoryOriginTabId: string | null = null;
 
 function historyEntryIdentity(state: HistoryState): string {
   const parsed = state as HistoryState & {
@@ -152,6 +153,8 @@ export function useFolioHistoryController(): void {
       history.location.state,
     );
     trackedHistoryDestination = initialDestination;
+    trackedHistoryOriginTabId =
+      history.location.state.folioOriginTabId ?? null;
     const back = history.back;
     const forward = history.forward;
     trackedHistoryEntryIdentity = historyEntryIdentity(history.location.state);
@@ -186,6 +189,7 @@ export function useFolioHistoryController(): void {
 
     const unsubscribe = history.subscribe(({ action, location }) => {
       const destination = readFolioHistoryDestination(location.state);
+      const incomingOriginTabId = location.state.folioOriginTabId ?? null;
       const entryIdentity = historyEntryIdentity(location.state);
       if (
         action.type !== "BACK" &&
@@ -195,11 +199,13 @@ export function useFolioHistoryController(): void {
         capturedDepartureLocationId = null;
         trackedHistoryEntryIdentity = entryIdentity;
         trackedHistoryDestination = destination;
+        trackedHistoryOriginTabId = incomingOriginTabId;
         return;
       }
       if (entryIdentity === trackedHistoryEntryIdentity) return;
 
       const outgoing = trackedHistoryDestination;
+      const outgoingOriginTabId = trackedHistoryOriginTabId;
       if (
         outgoing &&
         capturedDepartureLocationId !== outgoing.folioLocationId
@@ -213,7 +219,14 @@ export function useFolioHistoryController(): void {
       capturedDepartureLocationId = null;
       trackedHistoryDestination = destination;
       trackedHistoryEntryIdentity = entryIdentity;
+      trackedHistoryOriginTabId = incomingOriginTabId;
       if (destination) applyHistoryDestination(destination);
+      if (!destination && action.type === "BACK" && outgoingOriginTabId) {
+        const workspace = useWorkspaceStore.getState();
+        if (workspace.tabs.some((tab) => tab.id === outgoingOriginTabId)) {
+          workspace.activateTabFromHistory(outgoingOriginTabId);
+        }
+      }
     });
 
     if (initialDestination) {
@@ -236,6 +249,7 @@ export function useFolioHistoryController(): void {
       if (history.back === guardedBack) history.back = back;
       if (history.forward === guardedForward) history.forward = forward;
       trackedHistoryDestination = null;
+      trackedHistoryOriginTabId = null;
       trackedHistoryEntryIdentity = null;
       capturedDepartureLocationId = null;
     };
@@ -284,12 +298,15 @@ export function useOpenTabWithFolioHistory(): OpenTabWithFolioHistory {
 
 export function useActivateTabWithFolioHistory(): ActivateTabWithFolioHistory {
   const navigate = useNavigate();
+  const onWorkspaceRoute = useRouterState({
+    select: (state) => routeViewFromMatches(state.matches) === "workspace",
+  });
 
   return useCallback(
     (tabId) => {
       const workspace = useWorkspaceStore.getState();
       if (
-        workspace.activeTabId === tabId ||
+        (onWorkspaceRoute && workspace.activeTabId === tabId) ||
         !workspace.tabs.some((tab) => tab.id === tabId)
       ) {
         return;
@@ -298,12 +315,12 @@ export function useActivateTabWithFolioHistory(): ActivateTabWithFolioHistory {
       runWorkspaceTransition(() => {
         const current = useWorkspaceStore.getState();
         if (
-          current.activeTabId === tabId ||
+          (onWorkspaceRoute && current.activeTabId === tabId) ||
           !current.tabs.some((tab) => tab.id === tabId)
         ) {
           return;
         }
-        const folioOriginTabId = current.activeTabId;
+        const folioOriginTabId = onWorkspaceRoute ? current.activeTabId : null;
         captureTrackedHistoryDestination();
         current.activateTab(tabId);
         const destinationState = activeDestinationState(folioOriginTabId);
@@ -313,7 +330,7 @@ export function useActivateTabWithFolioHistory(): ActivateTabWithFolioHistory {
         });
       });
     },
-    [navigate],
+    [navigate, onWorkspaceRoute],
   );
 }
 
