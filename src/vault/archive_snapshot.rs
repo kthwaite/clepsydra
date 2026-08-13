@@ -9,10 +9,11 @@
 //! Everything here operates on attacker-authored markup. Resource extraction
 //! uses bounded local scans; the view security boundary uses html5ever's parser.
 
-use html5ever::serialize::{SerializeOpts, serialize};
+use html5ever::serialize::{Serialize, SerializeOpts, Serializer, TraversalScope, serialize};
 use html5ever::tendril::TendrilSink;
-use html5ever::{Namespace, parse_document};
-use markup5ever_rcdom::{Handle, NodeData, RcDom, SerializableHandle};
+use html5ever::tree_builder::TreeBuilderOpts;
+use html5ever::{Namespace, ParseOpts, parse_document};
+use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use pulldown_cmark::{Event, Options, Parser, Tag};
@@ -373,17 +374,82 @@ fn neutralize_dom_children(parent: &Handle) {
     }
 }
 
-/// Parse, mutate, and serialize snapshot HTML using the standards parser model
-/// browsers use. Navigation decisions use resolved namespaces and local names,
-/// never source-text recovery heuristics.
+struct ArchiveDom(Handle);
+
+impl Serialize for ArchiveDom {
+    fn serialize<S>(&self, serializer: &mut S, scope: TraversalScope) -> std::io::Result<()>
+    where
+        S: Serializer,
+    {
+        fn children<S: Serializer>(node: &Handle, serializer: &mut S) -> std::io::Result<()> {
+            for child in node.children.borrow().iter() {
+                node_with_templates(child, serializer)?;
+            }
+            Ok(())
+        }
+
+        fn node_with_templates<S: Serializer>(
+            node: &Handle,
+            serializer: &mut S,
+        ) -> std::io::Result<()> {
+            match &node.data {
+                NodeData::Document => children(node, serializer),
+                NodeData::Doctype { name, .. } => serializer.write_doctype(name),
+                NodeData::Text { contents } => serializer.write_text(&contents.borrow()),
+                NodeData::Comment { contents } => serializer.write_comment(contents),
+                NodeData::ProcessingInstruction { target, contents } => {
+                    serializer.write_processing_instruction(target, contents)
+                }
+                NodeData::Element {
+                    name,
+                    attrs,
+                    template_contents,
+                    ..
+                } => {
+                    serializer.start_elem(
+                        name.clone(),
+                        attrs.borrow().iter().map(|attribute| {
+                            (&attribute.name, attribute.value.as_ref())
+                        }),
+                    )?;
+                    if let Some(template) = template_contents.borrow().as_ref() {
+                        children(template, serializer)?;
+                    } else {
+                        children(node, serializer)?;
+                    }
+                    serializer.end_elem(name.clone())
+                }
+            }
+        }
+
+        match scope {
+            TraversalScope::IncludeNode => node_with_templates(&self.0, serializer),
+            TraversalScope::ChildrenOnly(_) => children(&self.0, serializer),
+        }
+    }
+}
+
 pub fn neutralize_navigation(html: &str) -> String {
-    let dom = parse_document(RcDom::default(), Default::default()).one(html);
+    let parse_options = ParseOpts {
+        tree_builder: TreeBuilderOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let dom = parse_document(RcDom::default(), parse_options).one(html);
     neutralize_dom_children(&dom.document);
 
-    let document: SerializableHandle = dom.document.into();
     let mut output = Vec::with_capacity(html.len());
-    serialize(&mut output, &document, SerializeOpts::default())
-        .expect("serializing HTML into memory cannot fail");
+    serialize(
+        &mut output,
+        &ArchiveDom(dom.document),
+        SerializeOpts {
+            scripting_enabled: false,
+            ..Default::default()
+        },
+    )
+    .expect("serializing HTML into memory cannot fail");
     String::from_utf8(output).expect("html5ever serialization is UTF-8")
 }
 
@@ -1414,6 +1480,40 @@ mod tests {
         assert!(neutralized.contains("Visible comment"));
         assert!(neutralized.contains("cas:sha256:image"));
         assert!(neutralized.contains("alt=\"kept\""));
+    }
+
+    #[test]
+    fn neutralization_matches_script_disabled_noscript_rendering() {
+        let html = concat!(
+            r#"<noscript><a href=https://noscript.example><img src=cas:sha256:noscript alt="Fallback">Fallback text</a>"#,
+            r#"<meta http-equiv=refresh content="0;url=https://refresh.example"></noscript>"#
+        );
+
+        let neutralized = neutralize_navigation(html);
+        assert!(!neutralized.contains("noscript.example"), "{neutralized}");
+        assert!(!neutralized.contains("refresh.example"), "{neutralized}");
+        assert!(neutralized.contains("Fallback text"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:noscript"), "{neutralized}");
+        assert!(neutralized.contains("alt=\"Fallback\""), "{neutralized}");
+    }
+
+    #[test]
+    fn neutralization_preserves_and_secures_template_contents() {
+        let html = concat!(
+            r#"<template id=captured><style>.captured { color: red }</style>"#,
+            r#"<a href=https://template.example>Template text</a>"#,
+            r#"<meta http-equiv=refresh content="0;url=https://refresh.example">"#,
+            r#"<img src=cas:sha256:template alt="Template image"></template>"#
+        );
+
+        let neutralized = neutralize_navigation(html);
+        assert!(!neutralized.contains("template.example"), "{neutralized}");
+        assert!(!neutralized.contains("refresh.example"), "{neutralized}");
+        assert!(neutralized.contains("<template"), "{neutralized}");
+        assert!(neutralized.contains(".captured { color: red }"), "{neutralized}");
+        assert!(neutralized.contains("Template text"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:template"), "{neutralized}");
+        assert!(neutralized.contains("alt=\"Template image\""), "{neutralized}");
     }
 
     // -------------------------------------------------------------------
