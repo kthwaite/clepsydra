@@ -140,6 +140,9 @@ pub(crate) fn mutation_error(
         MutationError::NotFound(path) => {
             error::ApiError::not_found(format!("page not found: {}", path.as_str()))
         }
+        MutationError::RubbishItemNotFound(item_id) => {
+            error::ApiError::not_found(format!("rubbish item not found: {item_id}"))
+        }
         MutationError::Conflict(message) => error::ApiError::conflict(message),
         MutationError::Stale(path) => {
             error::ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))

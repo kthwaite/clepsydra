@@ -13,6 +13,7 @@ use super::canonical::CanonicalName;
 use super::index::{IndexError, VaultIndex};
 use super::page::parse_or_repair_frontmatter;
 use super::path::VaultPath;
+use super::rubbish::{RubbishItem, RubbishManifest};
 use super::rewriter;
 use super::sync::ChangeEvent;
 
@@ -152,6 +153,14 @@ pub enum MutationOp {
     MovePage { source: String, destination: String },
     DeletePage { path: String, rewrite: RewriteMode },
     MoveFolder { source: String, destination: String },
+    ArchivePage {
+        path: String,
+        expected_bytes: Vec<u8>,
+        manifest: RubbishManifest,
+    },
+    RestorePage {
+        item: RubbishItem,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +189,8 @@ pub enum FileOpKind {
     Delete,
     CreateDir,
     CreateFile,
+    Archive,
+    Restore,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -429,6 +440,47 @@ impl MutationPlan {
                         });
                     }
                 }
+                FileOpKind::Archive => {
+                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let represented = primary_intents.iter().any(|intent| {
+                        matches!(
+                            intent,
+                            BatchPathIntent::ArchivePage {
+                                path: planned,
+                                expected_source,
+                                ..
+                            } if planned == &path
+                                && op.content_hash.as_deref()
+                                    == Some(blake3::hash(expected_source).to_hex().as_str())
+                        )
+                    });
+                    if !represented {
+                        return Err(IndexError::Other(format!(
+                            "archive plan is missing immutable content for {}",
+                            path.as_str()
+                        )));
+                    }
+                }
+                FileOpKind::Restore => {
+                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let represented = primary_intents.iter().any(|intent| {
+                        matches!(
+                            intent,
+                            BatchPathIntent::RestorePage {
+                                destination,
+                                item,
+                            } if destination == &path
+                                && op.content_hash.as_deref()
+                                    == Some(blake3::hash(&item.bytes).to_hex().as_str())
+                        )
+                    });
+                    if !represented {
+                        return Err(IndexError::Other(format!(
+                            "restore plan is missing immutable content for {}",
+                            path.as_str()
+                        )));
+                    }
+                }
             }
         }
         intents.extend(primary_intents);
@@ -469,7 +521,83 @@ impl<'a> MutationPlanner<'a> {
                 source,
                 destination,
             } => self.plan_folder_move(source, destination),
+            MutationOp::ArchivePage {
+                path,
+                expected_bytes,
+                manifest,
+            } => self.plan_page_archive(path, expected_bytes, manifest),
+            MutationOp::RestorePage { item } => self.plan_page_restore(item),
         }
+    }
+
+    fn plan_page_archive(
+        &self,
+        path: &str,
+        expected_bytes: &[u8],
+        manifest: &RubbishManifest,
+    ) -> Result<MutationPlan, IndexError> {
+        let path = VaultPath::new(path).map_err(vp_err)?;
+        if manifest.original_path != path.as_str() {
+            return Err(IndexError::Other(format!(
+                "rubbish manifest original path {} does not match archive path {}",
+                manifest.original_path,
+                path.as_str()
+            )));
+        }
+
+        let indexed_page_id = self
+            .index
+            .connection()
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![path.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(IndexError::Sqlite)?;
+        if indexed_page_id != manifest.page_id.to_string() {
+            return Err(IndexError::Other(format!(
+                "rubbish manifest page ID {} does not match indexed page ID {}",
+                manifest.page_id, indexed_page_id
+            )));
+        }
+
+        let mut plan = MutationPlan::empty();
+        plan.file_ops.push(PlannedFileOp {
+            kind: FileOpKind::Archive,
+            path: path.as_str().to_owned(),
+            destination: None,
+            content_hash: Some(blake3::hash(expected_bytes).to_hex().to_string()),
+        });
+        plan.primary_intents.push(BatchPathIntent::ArchivePage {
+            path: path.clone(),
+            expected_source: expected_bytes.to_vec(),
+            manifest: manifest.clone(),
+        });
+        plan.index_events.push(ChangeEvent::Remove(path));
+        Ok(plan)
+    }
+
+    fn plan_page_restore(&self, item: &RubbishItem) -> Result<MutationPlan, IndexError> {
+        let destination = VaultPath::new(&item.manifest.original_path).map_err(vp_err)?;
+        let mut plan = MutationPlan::empty();
+        collect_missing_parent_directories(
+            self.vault,
+            &destination,
+            &mut plan.create_directories,
+        )?;
+        plan.file_ops.push(PlannedFileOp {
+            kind: FileOpKind::Restore,
+            path: destination.as_str().to_owned(),
+            destination: None,
+            content_hash: Some(blake3::hash(&item.bytes).to_hex().to_string()),
+        });
+        plan.primary_intents.push(BatchPathIntent::RestorePage {
+            destination: destination.clone(),
+            item: item.clone(),
+        });
+        plan.index_events.push(ChangeEvent::Upsert(destination));
+        plan.expose_create_directories();
+        Ok(plan)
     }
 
     fn plan_page_move(&self, source: &str, destination: &str) -> Result<MutationPlan, IndexError> {

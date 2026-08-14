@@ -18,6 +18,7 @@ use super::atomic_file::{
 use super::batch_mutation::{self, BatchMutationCommand, BatchMutationError};
 use super::hooks::PostMoveHook;
 use super::index::IndexError;
+use super::rubbish::RubbishListEntry;
 use super::index_handle::IndexHandle;
 use super::index_policy::{IndexMutation, IndexPolicyError};
 use super::page::{Page, PageMeta, write_page_content};
@@ -35,11 +36,34 @@ type CreateRollbackSyncHook = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
 type BeforeLockAcquireHook = dyn Fn(&VaultPath) + Send + Sync;
 #[cfg(test)]
 type BeforeBatchLockHook = dyn Fn(&[VaultPath]) + Send + Sync;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum MutationLockKey {
+    Path(VaultPath),
+    RubbishItem(uuid::Uuid),
+}
+
+impl Ord for MutationLockKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Self::Path(left), Self::Path(right)) => left.as_str().cmp(right.as_str()),
+            (Self::RubbishItem(left), Self::RubbishItem(right)) => left.cmp(right),
+            (Self::Path(_), Self::RubbishItem(_)) => std::cmp::Ordering::Less,
+            (Self::RubbishItem(_), Self::Path(_)) => std::cmp::Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for MutationLockKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
     mutation_gate: Arc<RwLock<()>>,
-    locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
+    locks: parking_lot::Mutex<HashMap<MutationLockKey, Weak<RwLock<()>>>>,
     before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
     after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
     create_publication_hook: parking_lot::Mutex<Option<Arc<CreatePublicationHook>>>,
@@ -157,6 +181,8 @@ pub enum BatchRecoveryError {
     Index(#[source] IndexError),
     #[error("transaction workspace cleanup failed: {0}")]
     Workspace(#[source] BatchMutationError),
+    #[error("transaction finalization failed: {0}")]
+    Transaction(#[source] BatchMutationError),
 }
 #[derive(Debug, Error)]
 pub enum MutationError {
@@ -164,6 +190,8 @@ pub enum MutationError {
     InvalidInput(String),
     #[error("page not found: {0}")]
     NotFound(VaultPath),
+    #[error("rubbish item not found: {0}")]
+    RubbishItemNotFound(uuid::Uuid),
     #[error("mutation conflict: {0}")]
     Conflict(String),
     #[error("stale page content: {0}")]
@@ -277,6 +305,7 @@ impl MutationError {
             | Self::BatchPublish { .. }
             | Self::InvalidInput(_)
             | Self::NotFound(_)
+            | Self::RubbishItemNotFound(_)
             | Self::Conflict(_)
             | Self::Stale(_) => false,
         }
@@ -319,14 +348,22 @@ where
             source: io::Error::other(format!("shielded mutation task failed: {error}")),
         })?
 }
-
 fn batch_prepare_error(source: BatchMutationError) -> MutationError {
-    match source.stale_vault_path() {
-        Some(path) => MutationError::Stale(path),
-        None => {
-            let directory = source.retained_directory().map(Path::to_path_buf);
-            MutationError::BatchPrepare { directory, source }
+    match source {
+        BatchMutationError::PageNotFound(path) => MutationError::NotFound(
+            VaultPath::new(&path).expect("validated archive path"),
+        ),
+        BatchMutationError::RubbishItemNotFound(item_id) => {
+            MutationError::RubbishItemNotFound(item_id)
         }
+        BatchMutationError::LifecycleConflict(message) => MutationError::Conflict(message),
+        source => match source.stale_vault_path() {
+            Some(path) => MutationError::Stale(path),
+            None => {
+                let directory = source.retained_directory().map(Path::to_path_buf);
+                MutationError::BatchPrepare { directory, source }
+            }
+        },
     }
 }
 
@@ -372,7 +409,14 @@ fn publish_batch(
         Some(intent_index) => prepared.publish_with_failure_at(intent_index),
         None => prepared.publish(),
     };
-    if let Err(publish) = publication.and_then(|()| prepared.mark_filesystem_committed()) {
+    let publication = publication.and_then(|()| {
+        if command.contains_rubbish_lifecycle() {
+            Ok(())
+        } else {
+            prepared.mark_filesystem_committed()
+        }
+    });
+    if let Err(publish) = publication {
         return match prepared.rollback() {
             Ok(()) => Err(MutationError::BatchPublish { source: publish }),
             Err(rollback) => Err(MutationError::BatchRollback {
@@ -397,6 +441,7 @@ fn reconcile_batch_index(
     hooks: &[Box<dyn PostMoveHook>],
     index_events: &[ChangeEvent],
     moved_pages: &[(VaultPath, VaultPath)],
+    rubbish_catalog_events: &[batch_mutation::RubbishCatalogEvent],
     identity: MovedPageIdentity,
 ) -> Result<(), IndexError> {
     let mut hook_events = Vec::new();
@@ -429,6 +474,16 @@ fn reconcile_batch_index(
         }
     }
     SyncEngine::process_events(index_events, vault, index)?;
+    for event in rubbish_catalog_events {
+        match event {
+            batch_mutation::RubbishCatalogEvent::Upsert(manifest) => {
+                index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest.clone()))?;
+            }
+            batch_mutation::RubbishCatalogEvent::Remove(item_id) => {
+                index.remove_rubbish_entry(&item_id.to_string())?;
+            }
+        }
+    }
     SyncEngine::process_events(&hook_events, vault, index).map(|_| ())
 }
 
@@ -444,6 +499,7 @@ pub(crate) fn reconcile_recovered_batch_index(
         hooks,
         &recovered.index_events,
         &recovered.moved_pages,
+        &recovered.rubbish_catalog_events,
         MovedPageIdentity::Destination,
     )
 }
@@ -572,20 +628,44 @@ impl MutationCoordinator {
     /// subtrees proceed concurrently while a folder deletion excludes all
     /// descendants.
     pub async fn lock_paths(&self, paths: &[VaultPath]) -> MutationGuard {
+        self.lock_resources(paths, &[]).await
+    }
+
+    async fn lock_resources(
+        &self,
+        paths: &[VaultPath],
+        rubbish_items: &[uuid::Uuid],
+    ) -> MutationGuard {
         let gate_guard = Arc::clone(&self.mutation_gate).read_owned().await;
-        let mut guard = self.lock_paths_excluded(paths).await;
+        let mut guard = self.lock_resources_excluded(paths, rubbish_items).await;
         guard._gate_guard = Some(gate_guard);
         guard
     }
 
     async fn lock_paths_excluded(&self, paths: &[VaultPath]) -> MutationGuard {
-        let mut requests = BTreeMap::<String, bool>::new();
+        self.lock_resources_excluded(paths, &[]).await
+    }
+
+    async fn lock_resources_excluded(
+        &self,
+        paths: &[VaultPath],
+        rubbish_items: &[uuid::Uuid],
+    ) -> MutationGuard {
+        let mut requests = BTreeMap::<MutationLockKey, bool>::new();
         for path in paths {
             let components = path.as_str().split('/').collect::<Vec<_>>();
             for end in 1..components.len() {
-                requests.entry(components[..end].join("/")).or_insert(false);
+                requests
+                    .entry(MutationLockKey::Path(
+                        VaultPath::new(&components[..end].join("/"))
+                            .expect("normalized path prefix"),
+                    ))
+                    .or_insert(false);
             }
-            requests.insert(path.as_str().to_string(), true);
+            requests.insert(MutationLockKey::Path(path.clone()), true);
+        }
+        for item_id in rubbish_items {
+            requests.insert(MutationLockKey::RubbishItem(*item_id), true);
         }
 
         let locks = {
@@ -594,9 +674,11 @@ impl MutationCoordinator {
             requests
                 .into_iter()
                 .map(|(key, write)| {
-                    let key = VaultPath::new(&key).expect("normalized path prefix");
                     #[cfg(test)]
-                    let observed_path = key.clone();
+                    let observed_path = match &key {
+                        MutationLockKey::Path(path) => Some(path.clone()),
+                        MutationLockKey::RubbishItem(_) => None,
+                    };
                     let lock = if let Some(lock) = table.get(&key).and_then(Weak::upgrade) {
                         lock
                     } else {
@@ -617,8 +699,10 @@ impl MutationCoordinator {
         let mut guards = Vec::with_capacity(locks.len());
         for request in &locks {
             #[cfg(test)]
-            if let Some(hook) = self.before_lock_acquire_hook.lock().clone() {
-                hook(&request.observed_path);
+            if let Some(path) = &request.observed_path
+                && let Some(hook) = self.before_lock_acquire_hook.lock().clone()
+            {
+                hook(path);
             }
             guards.push(if request.write {
                 MutationLockGuard::Write {
@@ -663,6 +747,8 @@ impl MutationCoordinator {
         command: BatchMutationCommand,
     ) -> Result<MutationNotification, MutationError> {
         let notification = batch_notification(&command.index_events);
+        let rubbish_catalog_events = command.rubbish_catalog_events();
+        let deferred_commit = command.contains_rubbish_lifecycle();
         let prepared = publish_batch(vault.root(), &command, None)?;
         let directory = prepared.directory().to_path_buf();
         if let Err(source) = reconcile_batch_index(
@@ -671,12 +757,22 @@ impl MutationCoordinator {
             hooks,
             &command.index_events,
             &command.moved_pages,
+            &rubbish_catalog_events,
             MovedPageIdentity::Source,
         ) {
             return Err(MutationError::BatchRecovery {
                 directory,
                 source: BatchRecoveryError::Index(source),
             });
+        }
+        let mut prepared = prepared;
+        if deferred_commit {
+            prepared
+                .mark_filesystem_committed()
+                .map_err(|source| MutationError::BatchRecovery {
+                    directory: directory.clone(),
+                    source: BatchRecoveryError::Transaction(source),
+                })?;
         }
         prepared.finish().map_err(|source| MutationError::BatchRecovery {
             directory,
@@ -694,11 +790,14 @@ impl MutationCoordinator {
         notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
     ) -> Result<MutationNotification, MutationError> {
         let affected_paths = command.affected_paths();
+        let affected_rubbish_items = command.affected_rubbish_items();
         #[cfg(test)]
         if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
             hook(&affected_paths);
         }
-        let guard = self.lock_paths(&affected_paths).await;
+        let guard = self
+            .lock_resources(&affected_paths, &affected_rubbish_items)
+            .await;
         self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
             .await
     }
@@ -718,11 +817,14 @@ impl MutationCoordinator {
             ));
         }
         let affected_paths = command.affected_paths();
+        let affected_rubbish_items = command.affected_rubbish_items();
         #[cfg(test)]
         if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
             hook(&affected_paths);
         }
-        let mut guard = self.lock_paths_excluded(&affected_paths).await;
+        let mut guard = self
+            .lock_resources_excluded(&affected_paths, &affected_rubbish_items)
+            .await;
         guard._exclusion_guard = Some(exclusion);
         self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
             .await
@@ -743,6 +845,8 @@ impl MutationCoordinator {
         let notification = batch_notification(&command.index_events);
         let index_events = command.index_events.clone();
         let moved_pages = command.moved_pages.clone();
+        let rubbish_catalog_events = command.rubbish_catalog_events();
+        let deferred_commit = command.contains_rubbish_lifecycle();
         let batch_publication_failure = self.batch_publication_failure.lock().take();
 
         run_shielded_mutation(shield_path, move |filesystem_applied| async move {
@@ -767,7 +871,7 @@ impl MutationCoordinator {
                 )),
             })??;
 
-            let (guard, prepared) = prepared;
+            let (guard, mut prepared) = prepared;
             let directory = prepared.directory().to_path_buf();
             let reconciliation = index
                 .with_index(move |vault_index, index_vault| {
@@ -777,6 +881,7 @@ impl MutationCoordinator {
                         hooks.as_ref(),
                         &index_events,
                         &moved_pages,
+                        &rubbish_catalog_events,
                         MovedPageIdentity::Source,
                     )
                 })
@@ -792,6 +897,9 @@ impl MutationCoordinator {
             let cleanup_directory = directory.clone();
             tokio::task::spawn_blocking(move || {
                 let _guard = guard;
+                if deferred_commit {
+                    prepared.mark_filesystem_committed()?;
+                }
                 prepared.finish()
             })
             .await
@@ -1453,7 +1561,6 @@ impl MutationCoordinator {
                         filesystem_applied: true,
                         source: Box::new(source),
                     })?;
-                removed.push(path.as_str().to_string());
             }
             Ok(DeleteFolderResult {
                 removed,
@@ -1481,7 +1588,7 @@ impl Default for MutationCoordinator {
 
 struct MutationLockRequest {
     #[cfg(test)]
-    observed_path: VaultPath,
+    observed_path: Option<VaultPath>,
     lock: Arc<RwLock<()>>,
     write: bool,
 }
@@ -1549,6 +1656,114 @@ mod tests {
         fn root(&self) -> &Path {
             self.vault.root()
         }
+    }
+
+    #[tokio::test]
+    async fn rubbish_item_lock_serializes_the_same_internal_identity() {
+        let coordinator = Arc::new(MutationCoordinator::new());
+        let item_id =
+            uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000091").unwrap();
+        let first_guard = coordinator.lock_resources(&[], &[item_id]).await;
+        let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(1);
+
+        let second_coordinator = Arc::clone(&coordinator);
+        let second = tokio::spawn(async move {
+            let _guard = second_coordinator.lock_resources(&[], &[item_id]).await;
+            entered_tx.send(()).await.unwrap();
+        });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), entered_rx.recv())
+                .await
+                .is_err(),
+            "a second lifecycle mutation entered while the item guard was held"
+        );
+        drop(first_guard);
+        tokio::time::timeout(std::time::Duration::from_secs(1), entered_rx.recv())
+            .await
+            .expect("second lifecycle mutation remained blocked")
+            .expect("second lifecycle mutation exited without entering");
+        second.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn rubbish_archive_revalidates_exact_bytes_after_resource_locks() {
+        let page = batch_page(
+            "019fd000-0000-7000-8000-000000000211",
+            "Target",
+            "body",
+        );
+        let fixture = BatchFixture::new(&[("target.md", &page)]);
+        let path = VaultPath::new("target.md").unwrap();
+        let expected = fs::read(fixture.root().join(path.as_str())).unwrap();
+        let item_id =
+            uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000212").unwrap();
+        let manifest = crate::vault::rubbish::RubbishManifest::new(
+            item_id,
+            uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000211").unwrap(),
+            path.as_str(),
+            "Target",
+            "note",
+            "2026-08-14T12:00:00Z".parse().unwrap(),
+            None,
+        )
+        .unwrap();
+        let command = fixture
+            .index
+            .with_index(move |index, vault| {
+                crate::vault::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::vault::mutation::MutationOp::ArchivePage {
+                        path: "target.md".to_owned(),
+                        expected_bytes: expected,
+                        manifest,
+                    })?
+                    .into_batch_command(vault)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let held = fixture.coordinator.lock_paths(std::slice::from_ref(&path)).await;
+        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
+        let waiting_tx = Arc::new(parking_lot::Mutex::new(Some(waiting_tx)));
+        let observed_waiting = Arc::clone(&waiting_tx);
+        fixture
+            .coordinator
+            .set_before_batch_lock_hook(Some(Arc::new(move |_| {
+                if let Some(sender) = observed_waiting.lock().take() {
+                    let _ = sender.send(());
+                }
+            })));
+        let coordinator = Arc::clone(&fixture.coordinator);
+        let vault = fixture.vault.clone();
+        let index = fixture.index.clone();
+        let pending = tokio::spawn(async move {
+            coordinator
+                .execute_batch(
+                    &vault,
+                    &index,
+                    Arc::new(Vec::new()),
+                    command,
+                    Arc::new(|_| panic!("conflicted archive must not notify")),
+                )
+                .await
+        });
+        waiting_rx.await.expect("archive did not reach resource locks");
+        fs::write(fixture.root().join(path.as_str()), b"changed while waiting").unwrap();
+        drop(held);
+
+        let error = pending.await.unwrap().unwrap_err();
+
+        assert!(matches!(
+            error,
+            MutationError::Conflict(message) if message.contains("active page bytes changed")
+        ));
+        assert_eq!(
+            fs::read(fixture.root().join(path.as_str())).unwrap(),
+            b"changed while waiting"
+        );
+        assert!(crate::vault::rubbish::RubbishStore::for_vault(fixture.root())
+            .read_item(&item_id.to_string())
+            .is_err());
     }
 
     fn batch_page(id: &str, title: &str, body: &str) -> String {

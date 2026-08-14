@@ -10,12 +10,15 @@ use clepsydra::vault::atomic_file::{
     AtomicPublicationError, atomic_create, atomic_create_owner_only, atomic_replace,
     atomic_replace_with,
 };
+use clepsydra::vault::cas::ContentStore;
+use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{
     FileOpKind, MutationOp, MutationPlan, MutationPlanner, PlannedFileOp, RewriteMode,
 };
+use clepsydra::vault::rubbish::{RubbishManifest, RubbishStore};
 use clepsydra::vault::mutation_coordinator::{
     CreatePageCommand, MutationCoordinator, MutationError,
 };
@@ -24,6 +27,7 @@ use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::sync::ChangeEvent;
 
 use tempfile::TempDir;
+use uuid::Uuid;
 
 fn setup_vault(files: &[(&str, &str)]) -> (TempDir, Vault) {
     let tmp = TempDir::new().unwrap();
@@ -110,6 +114,814 @@ fn assert_protected_referrer(vault: &Vault) {
     assert!(meta.encryption.is_some());
 }
 
+struct CountingMoveHook(Arc<std::sync::atomic::AtomicUsize>);
+
+impl PostMoveHook for CountingMoveHook {
+    fn on_page_moved(
+        &self,
+        _old_path: &VaultPath,
+        _new_path: &VaultPath,
+        _page_id: &Uuid,
+        _vault: &Vault,
+        _index: &VaultIndex,
+    ) -> Result<Vec<VaultPath>, Box<dyn std::error::Error>> {
+        self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(Vec::new())
+    }
+}
+
+
+// ---------------------------------------------------------------------------
+// Rubbish lifecycle mutations
+// ---------------------------------------------------------------------------
+
+#[test]
+fn rubbish_archive_and_restore_preserve_exact_bytes_identity_and_backlinks() {
+    let backlink =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000051\"\ntitle = \"Backlink\"\n+++\nSee [[Target]].\n";
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000052\"\ntitle = \"Target\"\nkind = \"note\"\nreadonly = true\n+++\nExact target bytes.\n";
+    let (_tmp, vault) = setup_vault(&[("backlink.md", backlink), ("target.md", target)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+    let backlink_bytes = fs::read(vault.root().join("backlink.md")).unwrap();
+
+    let target_path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&target_path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000053").unwrap();
+    let page_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000052").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        page_id,
+        target_path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+
+    let archive = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::ArchivePage {
+            path: target_path.as_str().to_owned(),
+            expected_bytes: expected_bytes.clone(),
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    let archive_notification =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], archive).unwrap();
+
+    assert_eq!(archive_notification.removed, vec!["target.md"]);
+    assert!(archive_notification.upserted.is_empty());
+    assert!(!vault.resolve(&target_path).exists());
+    assert_eq!(
+        fs::read(vault.root().join("backlink.md")).unwrap(),
+        backlink_bytes
+    );
+    let store = RubbishStore::for_vault(vault.root());
+    let item = store.read_item(&item_id.to_string()).unwrap();
+    assert_eq!(item.bytes, expected_bytes);
+    assert_eq!(item.manifest.page_id, page_id);
+    assert!(index
+        .rubbish_entry(&item_id.to_string())
+        .unwrap()
+        .is_some());
+    let resolved_target: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = ?1",
+            [Uuid::parse_str("019fd000-0000-7000-8000-000000000051")
+                .unwrap()
+                .to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(resolved_target, None);
+
+    let restore = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::RestorePage { item: item.clone() })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    let restore_notification =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], restore).unwrap();
+
+    assert_eq!(restore_notification.upserted, vec!["target.md"]);
+    assert!(restore_notification.removed.is_empty());
+    assert_eq!(fs::read(vault.resolve(&target_path)).unwrap(), expected_bytes);
+    assert!(store.read_item(&item_id.to_string()).is_err());
+    assert!(index
+        .rubbish_entry(&item_id.to_string())
+        .unwrap()
+        .is_none());
+    let resolved_target: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT target_id FROM links WHERE source_id = ?1",
+            [Uuid::parse_str("019fd000-0000-7000-8000-000000000051")
+                .unwrap()
+                .to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(resolved_target, Some(page_id.to_string()));
+    assert_eq!(
+        fs::read(vault.root().join("backlink.md")).unwrap(),
+        backlink_bytes
+    );
+}
+
+#[test]
+fn rubbish_restore_recreates_missing_original_parent_directories() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000221\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("nested/target.md", target)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let path = VaultPath::new("nested/target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000222").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000221").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let archive = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes: expected_bytes.clone(),
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], archive).unwrap();
+    fs::remove_dir(vault.root().join("nested")).unwrap();
+    let item = RubbishStore::for_vault(vault.root())
+        .read_item(&item_id.to_string())
+        .unwrap();
+    let restore = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::RestorePage { item })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], restore).unwrap();
+
+    assert_eq!(fs::read(vault.resolve(&path)).unwrap(), expected_bytes);
+}
+
+#[test]
+fn rubbish_archive_reports_missing_source_without_creating_item() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000061\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000062").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000061").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let command = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes,
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    fs::remove_file(vault.resolve(&path)).unwrap();
+
+    let error =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap_err();
+
+    assert!(matches!(error, MutationError::NotFound(found) if found == path));
+    assert!(RubbishStore::for_vault(vault.root())
+        .read_item(&item_id.to_string())
+        .is_err());
+}
+
+#[test]
+fn rubbish_archive_reports_byte_drift_as_conflict_without_creating_item() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000071\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000072").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000071").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let command = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes,
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    fs::write(vault.resolve(&path), b"changed after planning").unwrap();
+
+    let error =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::Conflict(message) if message.contains("active page bytes changed")
+    ));
+    assert_eq!(
+        fs::read(vault.resolve(&path)).unwrap(),
+        b"changed after planning"
+    );
+    assert!(RubbishStore::for_vault(vault.root())
+        .read_item(&item_id.to_string())
+        .is_err());
+}
+
+#[test]
+fn rubbish_restore_conflict_retains_item_and_catalog() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000081\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000082").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000081").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let archive = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes,
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], archive).unwrap();
+    let store = RubbishStore::for_vault(vault.root());
+    let item = store.read_item(&item_id.to_string()).unwrap();
+    let restore = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::RestorePage { item: item.clone() })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    fs::write(vault.resolve(&path), b"occupied").unwrap();
+
+    let error =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], restore).unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::Conflict(message) if message.contains("restore destination is occupied")
+    ));
+    assert_eq!(fs::read(vault.resolve(&path)).unwrap(), b"occupied");
+    assert_eq!(store.read_item(&item_id.to_string()).unwrap(), item);
+    assert!(index
+        .rubbish_entry(&item_id.to_string())
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn rubbish_restore_rejects_item_byte_drift_without_consuming_item() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000201\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000202").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000201").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let archive = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes,
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], archive).unwrap();
+    let store = RubbishStore::for_vault(vault.root());
+    let item = store.read_item(&item_id.to_string()).unwrap();
+    let restore = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::RestorePage { item })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    fs::write(
+        vault
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(item_id.to_string())
+            .join("page.md"),
+        b"drifted item bytes",
+    )
+    .unwrap();
+
+    let error =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], restore).unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::Conflict(message)
+            if message.contains("rubbish item bytes or manifest changed")
+    ));
+    assert!(!vault.resolve(&path).exists());
+    assert_eq!(
+        store.read_item(&item_id.to_string()).unwrap().bytes,
+        b"drifted item bytes"
+    );
+    assert!(index
+        .rubbish_entry(&item_id.to_string())
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn rubbish_restore_reports_missing_item_without_touching_active_or_catalog_state() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000231\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000232").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000231").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let archive = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes,
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], archive).unwrap();
+    let store = RubbishStore::for_vault(vault.root());
+    let item = store.read_item(&item_id.to_string()).unwrap();
+    let restore = MutationPlanner::new(&vault, &index)
+        .plan(&MutationOp::RestorePage { item })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    fs::remove_dir_all(
+        vault
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(item_id.to_string()),
+    )
+    .unwrap();
+
+    let error =
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], restore).unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::RubbishItemNotFound(found) if found == item_id
+    ));
+    assert!(!vault.resolve(&path).exists());
+    assert!(index
+        .rubbish_entry(&item_id.to_string())
+        .unwrap()
+        .is_some());
+}
+
+#[test]
+fn rubbish_lifecycle_is_opaque_to_protected_captured_and_encrypted_bytes() {
+    let cas_temp = tempfile::tempdir().unwrap();
+    let cas = ContentStore::open(cas_temp.path()).unwrap();
+    let blob_hash = cas.store(b"captured snapshot", "text/html").unwrap().hash;
+    let cas_db = rusqlite::Connection::open(cas_temp.path().join("cas.db")).unwrap();
+    let blob_ref_count: i64 = cas_db
+        .query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            [&blob_hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let protected =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000121\"\ntitle = \"Protected\"\n+++\nProtected archive body.\n";
+    let readonly =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000125\"\ntitle = \"Readonly\"\nreadonly = true\n+++\nReadonly body.\n";
+    let captured = format!(
+        "+++\nid = \"019fd000-0000-7000-8000-000000000122\"\ntitle = \"Captured\"\n[archive]\nurl = \"https://example.test/article\"\nsnapshot_hash = \"{blob_hash}\"\n+++\nCaptured body.\n"
+    );
+    let encrypted =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000123\"\ntitle = \"Encrypted\"\nencryption = { format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000124\" }\n+++\n-----BEGIN AGE ENCRYPTED FILE-----\nopaque ciphertext bytes\n-----END AGE ENCRYPTED FILE-----\n";
+    let (_tmp, vault) = setup_vault(&[
+        ("readonly.md", readonly),
+        ("archive/protected.md", protected),
+        ("archive/captured.md", captured.as_str()),
+        ("encrypted.md", encrypted),
+    ]);
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let move_hook_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let hooks: Vec<Box<dyn PostMoveHook>> =
+        vec![Box::new(CountingMoveHook(Arc::clone(&move_hook_calls)))];
+    let cases = [
+        (
+            "archive/protected.md",
+            "019fd000-0000-7000-8000-000000000121",
+            "019fd000-0000-7000-8000-000000000131",
+            "Protected",
+            "archive",
+            None,
+        ),
+        (
+            "archive/captured.md",
+            "019fd000-0000-7000-8000-000000000122",
+            "019fd000-0000-7000-8000-000000000132",
+            "Captured",
+            "archive",
+            Some("https://example.test/article".to_owned()),
+        ),
+        (
+            "encrypted.md",
+            "019fd000-0000-7000-8000-000000000123",
+            "019fd000-0000-7000-8000-000000000133",
+            "Encrypted",
+            "note",
+            None,
+        ),
+        (
+            "readonly.md",
+            "019fd000-0000-7000-8000-000000000125",
+            "019fd000-0000-7000-8000-000000000134",
+            "Readonly",
+            "note",
+            None,
+        ),
+    ];
+    let store = RubbishStore::for_vault(vault.root());
+
+    for (path, page_id, item_id, title, kind, archive_url) in cases {
+        let path = VaultPath::new(path).unwrap();
+        let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+        let item_id = Uuid::parse_str(item_id).unwrap();
+        let manifest = RubbishManifest::new(
+            item_id,
+            Uuid::parse_str(page_id).unwrap(),
+            path.as_str(),
+            title,
+            kind,
+            "2026-08-14T12:00:00Z".parse().unwrap(),
+            archive_url,
+        )
+        .unwrap();
+        let archive = MutationPlanner::new(&vault, &index)
+            .plan(&MutationOp::ArchivePage {
+                path: path.as_str().to_owned(),
+                expected_bytes: expected_bytes.clone(),
+                manifest,
+            })
+            .unwrap()
+            .into_batch_command(&vault)
+            .unwrap();
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &hooks, archive).unwrap();
+        let item = store.read_item(&item_id.to_string()).unwrap();
+        assert_eq!(item.bytes, expected_bytes);
+
+        let restore = MutationPlanner::new(&vault, &index)
+            .plan(&MutationOp::RestorePage { item })
+            .unwrap()
+            .into_batch_command(&vault)
+            .unwrap();
+        MutationCoordinator::execute_batch_direct(&vault, &mut index, &hooks, restore).unwrap();
+        assert_eq!(fs::read(vault.resolve(&path)).unwrap(), expected_bytes);
+    }
+
+    assert_eq!(
+        move_hook_calls.load(std::sync::atomic::Ordering::SeqCst),
+        0
+    );
+    let final_blob_ref_count: i64 = cas_db
+        .query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            [&blob_hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(final_blob_ref_count, blob_ref_count);
+    assert_eq!(cas.gc(std::time::Duration::ZERO).unwrap(), 0);
+    assert!(cas.exists(&blob_hash).unwrap());
+}
+
+#[tokio::test]
+async fn rubbish_lifecycle_notifies_once_only_after_publication_and_indexing() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000141\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000142").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000141").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let archive = MutationPlanner::new(&vault, &raw_index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes: expected_bytes.clone(),
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&notifications);
+    let archive_root = vault.root().to_path_buf();
+    coordinator
+        .execute_batch(
+            &vault,
+            &index,
+            Arc::new(Vec::new()),
+            archive,
+            Arc::new(move |notification| {
+                assert!(!archive_root.join("target.md").exists());
+                assert!(RubbishStore::for_vault(&archive_root)
+                    .read_item(&item_id.to_string())
+                    .is_ok());
+                let db =
+                    rusqlite::Connection::open(archive_root.join(".clepsydra/cache.db")).unwrap();
+                let active_count: i64 = db
+                    .query_row(
+                        "SELECT COUNT(*) FROM pages WHERE path = 'target.md'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let catalog_count: i64 = db
+                    .query_row(
+                        "SELECT COUNT(*) FROM rubbish_items WHERE item_id = ?1",
+                        [item_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(active_count, 0);
+                assert_eq!(catalog_count, 1);
+                observed.lock().push(notification);
+            }),
+        )
+        .await
+        .unwrap();
+    assert_eq!(notifications.lock().len(), 1);
+    assert_eq!(notifications.lock()[0].removed, vec!["target.md"]);
+    assert!(notifications.lock()[0].upserted.is_empty());
+
+    let item = RubbishStore::for_vault(vault.root())
+        .read_item(&item_id.to_string())
+        .unwrap();
+    let restore = index
+        .with_index(move |index, vault| {
+            MutationPlanner::new(vault, index)
+                .plan(&MutationOp::RestorePage { item })?
+                .into_batch_command(vault)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    let observed = Arc::clone(&notifications);
+    let restore_root = vault.root().to_path_buf();
+    let restored_bytes = expected_bytes.clone();
+    coordinator
+        .execute_batch(
+            &vault,
+            &index,
+            Arc::new(Vec::new()),
+            restore,
+            Arc::new(move |notification| {
+                assert_eq!(
+                    fs::read(restore_root.join("target.md")).unwrap(),
+                    restored_bytes
+                );
+                assert!(RubbishStore::for_vault(&restore_root)
+                    .read_item(&item_id.to_string())
+                    .is_err());
+                let db =
+                    rusqlite::Connection::open(restore_root.join(".clepsydra/cache.db")).unwrap();
+                let active_count: i64 = db
+                    .query_row(
+                        "SELECT COUNT(*) FROM pages WHERE path = 'target.md'",
+                        [],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                let catalog_count: i64 = db
+                    .query_row(
+                        "SELECT COUNT(*) FROM rubbish_items WHERE item_id = ?1",
+                        [item_id.to_string()],
+                        |row| row.get(0),
+                    )
+                    .unwrap();
+                assert_eq!(active_count, 1);
+                assert_eq!(catalog_count, 0);
+                observed.lock().push(notification);
+            }),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(notifications.lock().len(), 2);
+    assert_eq!(notifications.lock()[1].upserted, vec!["target.md"]);
+    assert!(notifications.lock()[1].removed.is_empty());
+}
+
+#[tokio::test]
+async fn rubbish_archive_publication_failure_rolls_back_without_notification() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000151\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000152").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000151").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let mut command = MutationPlanner::new(&vault, &raw_index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes: expected_bytes.clone(),
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    command.intents.push(BatchPathIntent::Write {
+        path: VaultPath::new("sentinel.md").unwrap(),
+        expected: ExpectedPathState::Missing,
+        content: b"must not publish".to_vec(),
+    });
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_batch_publication_fail_after(Some(1));
+    let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&notifications);
+
+    let error = coordinator
+        .execute_batch(
+            &vault,
+            &index,
+            Arc::new(Vec::new()),
+            command,
+            Arc::new(move |notification| observed.lock().push(notification)),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, MutationError::BatchPublish { .. }));
+    assert_eq!(fs::read(vault.resolve(&path)).unwrap(), expected_bytes);
+    assert!(!vault.root().join("sentinel.md").exists());
+    assert!(RubbishStore::for_vault(vault.root())
+        .read_item(&item_id.to_string())
+        .is_err());
+    assert!(notifications.lock().is_empty());
+}
+
+#[tokio::test]
+async fn rubbish_restore_publication_failure_rolls_back_without_notification() {
+    let target =
+        "+++\nid = \"019fd000-0000-7000-8000-000000000161\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let (_tmp, vault) = setup_vault(&[("target.md", target)]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let path = VaultPath::new("target.md").unwrap();
+    let expected_bytes = fs::read(vault.resolve(&path)).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000162").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        Uuid::parse_str("019fd000-0000-7000-8000-000000000161").unwrap(),
+        path.as_str(),
+        "Target",
+        "note",
+        "2026-08-14T12:00:00Z".parse().unwrap(),
+        None,
+    )
+    .unwrap();
+    let archive = MutationPlanner::new(&vault, &raw_index)
+        .plan(&MutationOp::ArchivePage {
+            path: path.as_str().to_owned(),
+            expected_bytes,
+            manifest,
+        })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    MutationCoordinator::execute_batch_direct(&vault, &mut raw_index, &[], archive).unwrap();
+    let store = RubbishStore::for_vault(vault.root());
+    let item = store.read_item(&item_id.to_string()).unwrap();
+    let mut command = MutationPlanner::new(&vault, &raw_index)
+        .plan(&MutationOp::RestorePage { item: item.clone() })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    command.intents.push(BatchPathIntent::Write {
+        path: VaultPath::new("sentinel.md").unwrap(),
+        expected: ExpectedPathState::Missing,
+        content: b"must not publish".to_vec(),
+    });
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_batch_publication_fail_after(Some(1));
+    let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let observed = Arc::clone(&notifications);
+
+    let error = coordinator
+        .execute_batch(
+            &vault,
+            &index,
+            Arc::new(Vec::new()),
+            command,
+            Arc::new(move |notification| observed.lock().push(notification)),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, MutationError::BatchPublish { .. }));
+    assert!(!vault.resolve(&path).exists());
+    assert!(!vault.root().join("sentinel.md").exists());
+    assert_eq!(store.read_item(&item_id.to_string()).unwrap(), item);
+    assert!(notifications.lock().is_empty());
+}
 // ---------------------------------------------------------------------------
 // Task 1: Type existence tests
 // ---------------------------------------------------------------------------
@@ -275,6 +1087,9 @@ Another link to [Beta](beta.md).
             }
             BatchPathIntent::Delete { path, expected } => {
                 assert_eq!(expected, fs::read(vault.resolve(&path)).unwrap());
+            }
+            BatchPathIntent::ArchivePage { .. } | BatchPathIntent::RestorePage { .. } => {
+                panic!("move plan unexpectedly contained a rubbish lifecycle intent")
             }
         }
     }

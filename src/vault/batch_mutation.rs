@@ -11,6 +11,7 @@ use uuid::Uuid;
 use super::atomic_file::install_noreplace;
 
 use super::path::VaultPath;
+use super::rubbish::{RubbishItem, RubbishManifest, RubbishStore, RubbishStoreError};
 use super::sync::ChangeEvent;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +35,15 @@ pub enum BatchPathIntent {
     Delete {
         path: VaultPath,
         expected: Vec<u8>,
+    },
+    ArchivePage {
+        path: VaultPath,
+        expected_source: Vec<u8>,
+        manifest: RubbishManifest,
+    },
+    RestorePage {
+        destination: VaultPath,
+        item: RubbishItem,
     },
 }
 
@@ -61,7 +71,9 @@ impl BatchMutationCommand {
         }
         for intent in &self.intents {
             match intent {
-                BatchPathIntent::Write { path, .. } | BatchPathIntent::Delete { path, .. } => {
+                BatchPathIntent::Write { path, .. }
+                | BatchPathIntent::Delete { path, .. }
+                | BatchPathIntent::ArchivePage { path, .. } => {
                     paths.insert(SortedVaultPath(path));
                 }
                 BatchPathIntent::Move {
@@ -72,10 +84,57 @@ impl BatchMutationCommand {
                     paths.insert(SortedVaultPath(source));
                     paths.insert(SortedVaultPath(destination));
                 }
+                BatchPathIntent::RestorePage { destination, .. } => {
+                    paths.insert(SortedVaultPath(destination));
+                }
             }
         }
 
         paths.into_iter().map(|path| path.0.clone()).collect()
+    }
+
+    pub fn affected_rubbish_items(&self) -> Vec<Uuid> {
+        let mut item_ids = BTreeSet::new();
+        for intent in &self.intents {
+            match intent {
+                BatchPathIntent::ArchivePage { manifest, .. } => {
+                    item_ids.insert(manifest.item_id);
+                }
+                BatchPathIntent::RestorePage { item, .. } => {
+                    item_ids.insert(item.manifest.item_id);
+                }
+                BatchPathIntent::Write { .. }
+                | BatchPathIntent::Move { .. }
+                | BatchPathIntent::Delete { .. } => {}
+            }
+        }
+        item_ids.into_iter().collect()
+    }
+
+    pub(crate) fn contains_rubbish_lifecycle(&self) -> bool {
+        self.intents.iter().any(|intent| {
+            matches!(
+                intent,
+                BatchPathIntent::ArchivePage { .. } | BatchPathIntent::RestorePage { .. }
+            )
+        })
+    }
+
+    pub(crate) fn rubbish_catalog_events(&self) -> Vec<RubbishCatalogEvent> {
+        self.intents
+            .iter()
+            .filter_map(|intent| match intent {
+                BatchPathIntent::ArchivePage { manifest, .. } => {
+                    Some(RubbishCatalogEvent::Upsert(manifest.clone()))
+                }
+                BatchPathIntent::RestorePage { item, .. } => {
+                    Some(RubbishCatalogEvent::Remove(item.manifest.item_id))
+                }
+                BatchPathIntent::Write { .. }
+                | BatchPathIntent::Move { .. }
+                | BatchPathIntent::Delete { .. } => None,
+            })
+            .collect()
     }
 }
 
@@ -126,6 +185,22 @@ enum ManifestIntent {
         path: String,
         before_hash: String,
     },
+    ArchivePage {
+        path: String,
+        page_hash: String,
+        manifest: RubbishManifest,
+    },
+    RestorePage {
+        destination: String,
+        page_hash: String,
+        manifest: RubbishManifest,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RubbishCatalogEvent {
+    Upsert(RubbishManifest),
+    Remove(Uuid),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -154,6 +229,8 @@ enum IntentValidationError {
     UnchangedMove(String),
     #[error("conflicting intents for source: {0}")]
     ConflictingSource(String),
+    #[error("invalid rubbish lifecycle intent: {0}")]
+    InvalidLifecycle(String),
 }
 
 fn validate_intents(intents: &[BatchPathIntent]) -> Result<(), IntentValidationError> {
@@ -163,10 +240,12 @@ fn validate_intents(intents: &[BatchPathIntent]) -> Result<(), IntentValidationE
 
     let mut final_destinations = BTreeSet::new();
     let mut sources = BTreeSet::new();
+    let mut final_rubbish_items = BTreeSet::new();
+    let mut source_rubbish_items = BTreeSet::new();
 
     for intent in intents {
         let (source, final_destination) = match intent {
-            BatchPathIntent::Write { path, .. } => (path.as_str(), Some(path.as_str())),
+            BatchPathIntent::Write { path, .. } => (Some(path.as_str()), Some(path.as_str())),
             BatchPathIntent::Move {
                 source,
                 destination,
@@ -177,9 +256,45 @@ fn validate_intents(intents: &[BatchPathIntent]) -> Result<(), IntentValidationE
                         source.as_str().to_owned(),
                     ));
                 }
-                (source.as_str(), Some(destination.as_str()))
+                (Some(source.as_str()), Some(destination.as_str()))
             }
-            BatchPathIntent::Delete { path, .. } => (path.as_str(), None),
+            BatchPathIntent::Delete { path, .. } => (Some(path.as_str()), None),
+            BatchPathIntent::ArchivePage { path, manifest, .. } => {
+                manifest
+                    .validate()
+                    .map_err(|error| IntentValidationError::InvalidLifecycle(error.to_string()))?;
+                if manifest.original_path != path.as_str() {
+                    return Err(IntentValidationError::InvalidLifecycle(format!(
+                        "manifest original path {} does not match {}",
+                        manifest.original_path,
+                        path.as_str()
+                    )));
+                }
+                if !final_rubbish_items.insert(manifest.item_id) {
+                    return Err(IntentValidationError::DuplicateFinalDestination(
+                        manifest.item_id.to_string(),
+                    ));
+                }
+                (Some(path.as_str()), None)
+            }
+            BatchPathIntent::RestorePage { destination, item } => {
+                item.manifest
+                    .validate()
+                    .map_err(|error| IntentValidationError::InvalidLifecycle(error.to_string()))?;
+                if item.manifest.original_path != destination.as_str() {
+                    return Err(IntentValidationError::InvalidLifecycle(format!(
+                        "manifest original path {} does not match {}",
+                        item.manifest.original_path,
+                        destination.as_str()
+                    )));
+                }
+                if !source_rubbish_items.insert(item.manifest.item_id) {
+                    return Err(IntentValidationError::ConflictingSource(
+                        item.manifest.item_id.to_string(),
+                    ));
+                }
+                (None, Some(destination.as_str()))
+            }
         };
 
         if let Some(destination) = final_destination
@@ -190,13 +305,19 @@ fn validate_intents(intents: &[BatchPathIntent]) -> Result<(), IntentValidationE
             ));
         }
 
-        if !sources.insert(source) {
-            return Err(IntentValidationError::ConflictingSource(
-                source.to_owned(),
-            ));
+        if let Some(source) = source
+            && !sources.insert(source)
+        {
+            return Err(IntentValidationError::ConflictingSource(source.to_owned()));
         }
     }
 
+    if let Some(item_id) = final_rubbish_items
+        .intersection(&source_rubbish_items)
+        .next()
+    {
+        return Err(IntentValidationError::ConflictingSource(item_id.to_string()));
+    }
     Ok(())
 }
 
@@ -206,6 +327,19 @@ pub enum BatchMutationError {
     Validation(String),
     #[error("stale batch path: {0}")]
     Stale(String),
+    #[error("active page not found: {0}")]
+    PageNotFound(String),
+    #[error("rubbish item not found: {0}")]
+    RubbishItemNotFound(Uuid),
+    #[error("rubbish lifecycle conflict: {0}")]
+    LifecycleConflict(String),
+    #[error("failed to {operation} rubbish item {item_id}: {source}")]
+    Rubbish {
+        operation: &'static str,
+        item_id: Uuid,
+        #[source]
+        source: RubbishStoreError,
+    },
     #[error("transaction state at {0} conflicts with both the before and after states")]
     RecoveryConflict(String),
     #[error("invalid transaction phase: expected {expected}, found {actual:?}")]
@@ -445,6 +579,7 @@ pub struct RecoveredBatch {
     pub phase: TransactionPhase,
     pub index_events: Vec<ChangeEvent>,
     pub moved_pages: Vec<(VaultPath, VaultPath)>,
+    pub(crate) rubbish_catalog_events: Vec<RubbishCatalogEvent>,
     directory: PathBuf,
 }
 
@@ -536,6 +671,36 @@ pub(crate) fn prepare(
                     ManifestIntent::Delete {
                         path: path.as_str().to_owned(),
                         before_hash: content_hash(expected),
+                    }
+                }
+                BatchPathIntent::ArchivePage {
+                    path,
+                    expected_source,
+                    manifest,
+                } => {
+                    create_synced_directory(&staged_path)?;
+                    write_synced_file(&staged_path.join("page.md"), expected_source)?;
+                    let manifest_bytes = serde_json::to_vec(manifest).map_err(|error| {
+                        BatchMutationError::Validation(format!(
+                            "failed to serialize rubbish manifest {}: {error}",
+                            manifest.item_id
+                        ))
+                    })?;
+                    write_synced_file(&staged_path.join("manifest.json"), &manifest_bytes)?;
+                    sync_directory(&staged_path)?;
+                    write_synced_file(&rollback_path, expected_source)?;
+                    ManifestIntent::ArchivePage {
+                        path: path.as_str().to_owned(),
+                        page_hash: content_hash(expected_source),
+                        manifest: manifest.clone(),
+                    }
+                }
+                BatchPathIntent::RestorePage { destination, item } => {
+                    write_synced_file(&staged_path, &item.bytes)?;
+                    ManifestIntent::RestorePage {
+                        destination: destination.as_str().to_owned(),
+                        page_hash: content_hash(&item.bytes),
+                        manifest: item.manifest.clone(),
                     }
                 }
             };
@@ -663,6 +828,21 @@ pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutation
                             ))
                         })
                         .collect::<Result<_, BatchMutationError>>()?,
+                    rubbish_catalog_events: manifest
+                        .intents
+                        .iter()
+                        .filter_map(|intent| match intent {
+                            ManifestIntent::ArchivePage { manifest, .. } => {
+                                Some(RubbishCatalogEvent::Upsert(manifest.clone()))
+                            }
+                            ManifestIntent::RestorePage { manifest, .. } => {
+                                Some(RubbishCatalogEvent::Remove(manifest.item_id))
+                            }
+                            ManifestIntent::Write { .. }
+                            | ManifestIntent::Move { .. }
+                            | ManifestIntent::Delete { .. } => None,
+                        })
+                        .collect(),
                     directory,
                 });
             }
@@ -731,6 +911,18 @@ fn manifest_path_value(manifest: &Path, path: &str) -> Result<VaultPath, BatchMu
     Ok(validated)
 }
 
+fn rubbish_error(
+    operation: &'static str,
+    item_id: Uuid,
+    source: RubbishStoreError,
+) -> BatchMutationError {
+    BatchMutationError::Rubbish {
+        operation,
+        item_id,
+        source,
+    }
+}
+
 fn validate_observed_state(
     root: &Path,
     intents: &[BatchPathIntent],
@@ -752,6 +944,7 @@ fn validate_observed_state(
             return Err(BatchMutationError::Stale(path.as_str().to_owned()));
         }
     }
+    let rubbish = RubbishStore::for_vault(root);
     for intent in intents {
         match intent {
             BatchPathIntent::Write { path, expected, .. } => {
@@ -783,6 +976,66 @@ fn validate_observed_state(
                 let absolute = root.join(path.as_str());
                 if read_optional(&absolute)?.as_deref() != Some(expected.as_slice()) {
                     return Err(BatchMutationError::Stale(path.as_str().to_owned()));
+                }
+            }
+            BatchPathIntent::ArchivePage {
+                path,
+                expected_source,
+                manifest,
+            } => {
+                let absolute = root.join(path.as_str());
+                match read_optional(&absolute)? {
+                    None => {
+                        return Err(BatchMutationError::PageNotFound(
+                            path.as_str().to_owned(),
+                        ));
+                    }
+                    Some(observed) if observed == *expected_source => {}
+                    Some(_) => {
+                        return Err(BatchMutationError::LifecycleConflict(format!(
+                            "active page bytes changed: {}",
+                            path.as_str()
+                        )));
+                    }
+                }
+                if rubbish
+                    .read_item_if_exists(manifest.item_id)
+                    .map_err(|source| {
+                        rubbish_error("preflight archive", manifest.item_id, source)
+                    })?
+                    .is_some()
+                {
+                    return Err(BatchMutationError::LifecycleConflict(format!(
+                        "rubbish item already exists: {}",
+                        manifest.item_id
+                    )));
+                }
+            }
+            BatchPathIntent::RestorePage { destination, item } => {
+                let absolute = root.join(destination.as_str());
+                if read_optional(&absolute)?.is_some() {
+                    return Err(BatchMutationError::LifecycleConflict(format!(
+                        "restore destination is occupied: {}",
+                        destination.as_str()
+                    )));
+                }
+                match rubbish
+                    .read_item_if_exists(item.manifest.item_id)
+                    .map_err(|source| {
+                        rubbish_error("preflight restore", item.manifest.item_id, source)
+                    })? {
+                    None => {
+                        return Err(BatchMutationError::RubbishItemNotFound(
+                            item.manifest.item_id,
+                        ));
+                    }
+                    Some(observed) if observed == *item => {}
+                    Some(_) => {
+                        return Err(BatchMutationError::LifecycleConflict(format!(
+                            "rubbish item bytes or manifest changed: {}",
+                            item.manifest.item_id
+                        )));
+                    }
                 }
             }
         }
@@ -827,6 +1080,41 @@ fn publish_intent(
         }
         ManifestIntent::Delete { path, before_hash } => {
             remove_if_hash(&root.join(path), before_hash)
+        }
+        ManifestIntent::ArchivePage {
+            path,
+            page_hash,
+            manifest,
+        } => {
+            let bytes = read_verified(&staged_path.join("page.md"), page_hash)?;
+            let item = RubbishItem {
+                manifest: manifest.clone(),
+                bytes,
+            };
+            let rubbish = RubbishStore::for_vault(root);
+            rubbish
+                .publish_transaction_item(&item, &staged_path)
+                .map_err(|source| {
+                    rubbish_error("publish archive", item.manifest.item_id, source)
+                })?;
+            remove_if_hash(&root.join(path), page_hash)
+        }
+        ManifestIntent::RestorePage {
+            destination,
+            page_hash,
+            manifest,
+        } => {
+            let bytes = read_verified(&staged_path, page_hash)?;
+            let item = RubbishItem {
+                manifest: manifest.clone(),
+                bytes: bytes.clone(),
+            };
+            publish_file_state(&root.join(destination), None, page_hash, &bytes)?;
+            RubbishStore::for_vault(root)
+                .withdraw_transaction_item(&item, &directory.join("rollback").join(index.to_string()))
+                .map_err(|source| {
+                    rubbish_error("publish restore", item.manifest.item_id, source)
+                })
         }
     }
 }
@@ -885,6 +1173,48 @@ fn rollback_manifest(
             ManifestIntent::Delete { path, before_hash } => {
                 let content = read_verified(&rollback_path, before_hash)?;
                 restore_missing_file(&root.join(path), before_hash, &content)?;
+            }
+            ManifestIntent::ArchivePage {
+                path,
+                page_hash,
+                manifest,
+            } => {
+                let bytes = read_verified(&rollback_path, page_hash)?;
+                let item = RubbishItem {
+                    manifest: manifest.clone(),
+                    bytes: bytes.clone(),
+                };
+                let active = root.join(path);
+                preflight_restore_missing_file(&active, page_hash)?;
+                RubbishStore::for_vault(root)
+                    .withdraw_transaction_item(
+                        &item,
+                        &directory.join("staged").join(index.to_string()),
+                    )
+                    .map_err(|source| {
+                        rubbish_error("rollback archive", item.manifest.item_id, source)
+                    })?;
+                restore_missing_file(&active, page_hash, &bytes)?;
+            }
+            ManifestIntent::RestorePage {
+                destination,
+                page_hash,
+                manifest,
+            } => {
+                let bytes =
+                    read_verified(&directory.join("staged").join(index.to_string()), page_hash)?;
+                let item = RubbishItem {
+                    manifest: manifest.clone(),
+                    bytes,
+                };
+                let active = root.join(destination);
+                preflight_remove_after_state(&active, page_hash)?;
+                RubbishStore::for_vault(root)
+                    .publish_transaction_item(&item, &rollback_path)
+                    .map_err(|source| {
+                        rubbish_error("rollback restore", item.manifest.item_id, source)
+                    })?;
+                remove_after_state(&active, page_hash)?;
             }
         }
     }
@@ -1174,6 +1504,44 @@ fn validate_manifest_paths(
             } => {
                 manifest_path_value(&path, source)?;
                 manifest_path_value(&path, destination)?;
+            }
+            ManifestIntent::ArchivePage {
+                path: intent_path,
+                manifest,
+                ..
+            } => {
+                let intent_path = manifest_path_value(&path, intent_path)?;
+                manifest.validate().map_err(|error| {
+                    BatchMutationError::InvalidManifest {
+                        path: path.clone(),
+                        message: error.to_string(),
+                    }
+                })?;
+                if manifest.original_path != intent_path.as_str() {
+                    return Err(BatchMutationError::InvalidManifest {
+                        path: path.clone(),
+                        message: "archive manifest original path does not match intent".to_owned(),
+                    });
+                }
+            }
+            ManifestIntent::RestorePage {
+                destination,
+                manifest,
+                ..
+            } => {
+                let destination = manifest_path_value(&path, destination)?;
+                manifest.validate().map_err(|error| {
+                    BatchMutationError::InvalidManifest {
+                        path: path.clone(),
+                        message: error.to_string(),
+                    }
+                })?;
+                if manifest.original_path != destination.as_str() {
+                    return Err(BatchMutationError::InvalidManifest {
+                        path: path.clone(),
+                        message: "restore manifest original path does not match intent".to_owned(),
+                    });
+                }
             }
         }
     }
@@ -1499,6 +1867,102 @@ mod tests {
             expected: ExpectedPathState::Missing,
             content: content.to_vec(),
         }
+    }
+
+    fn rubbish_manifest(item_id: &str, page_id: &str, path: &str) -> RubbishManifest {
+        RubbishManifest::new(
+            Uuid::parse_str(item_id).unwrap(),
+            Uuid::parse_str(page_id).unwrap(),
+            path,
+            "Target",
+            "note",
+            "2026-08-14T12:00:00Z".parse().unwrap(),
+            None,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn rubbish_archive_filesystem_commit_recovers_one_authoritative_item() {
+        let fixture = fixture_with_file("target.md", b"exact bytes");
+        let manifest = rubbish_manifest(
+            "019fd000-0000-7000-8000-000000000181",
+            "019fd000-0000-7000-8000-000000000182",
+            "target.md",
+        );
+        let command = BatchMutationCommand {
+            intents: vec![BatchPathIntent::ArchivePage {
+                path: VaultPath::new("target.md").unwrap(),
+                expected_source: b"exact bytes".to_vec(),
+                manifest: manifest.clone(),
+            }],
+            create_directories: Vec::new(),
+            remove_directories: Vec::new(),
+            index_events: vec![ChangeEvent::Remove(VaultPath::new("target.md").unwrap())],
+            moved_pages: Vec::new(),
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        prepared.publish().unwrap();
+        prepared.mark_filesystem_committed().unwrap();
+        drop(prepared);
+
+        let recovered = recover_pending(fixture.root()).unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert!(!fixture.root().join("target.md").exists());
+        let item = RubbishStore::for_vault(fixture.root())
+            .read_item(&manifest.item_id.to_string())
+            .unwrap();
+        assert_eq!(item.bytes, b"exact bytes");
+        assert_eq!(
+            recovered[0].rubbish_catalog_events,
+            vec![RubbishCatalogEvent::Upsert(manifest)]
+        );
+        recovered.into_iter().next().unwrap().finish().unwrap();
+    }
+
+    #[test]
+    fn rubbish_restore_filesystem_commit_recovers_one_authoritative_active_page() {
+        let fixture = fixture_with_files(&[]);
+        fs::create_dir_all(fixture.root().join(".clepsydra")).unwrap();
+        let manifest = rubbish_manifest(
+            "019fd000-0000-7000-8000-000000000191",
+            "019fd000-0000-7000-8000-000000000192",
+            "target.md",
+        );
+        let store = RubbishStore::for_vault(fixture.root());
+        let mut staged = store
+            .prepare_item(&manifest.item_id.to_string(), &manifest, b"exact bytes")
+            .unwrap();
+        staged.publish().unwrap();
+        let item = store.read_item(&manifest.item_id.to_string()).unwrap();
+        let command = BatchMutationCommand {
+            intents: vec![BatchPathIntent::RestorePage {
+                destination: VaultPath::new("target.md").unwrap(),
+                item,
+            }],
+            create_directories: Vec::new(),
+            remove_directories: Vec::new(),
+            index_events: vec![ChangeEvent::Upsert(VaultPath::new("target.md").unwrap())],
+            moved_pages: Vec::new(),
+        };
+        let mut prepared = prepare(fixture.root(), &command).unwrap();
+        prepared.publish().unwrap();
+        prepared.mark_filesystem_committed().unwrap();
+        drop(prepared);
+
+        let recovered = recover_pending(fixture.root()).unwrap();
+
+        assert_eq!(recovered.len(), 1);
+        assert_eq!(fs::read(fixture.root().join("target.md")).unwrap(), b"exact bytes");
+        assert!(store
+            .read_item(&manifest.item_id.to_string())
+            .is_err());
+        assert_eq!(
+            recovered[0].rubbish_catalog_events,
+            vec![RubbishCatalogEvent::Remove(manifest.item_id)]
+        );
+        recovered.into_iter().next().unwrap().finish().unwrap();
     }
 
     #[test]

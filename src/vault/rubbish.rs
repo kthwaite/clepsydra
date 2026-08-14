@@ -49,7 +49,7 @@ impl RubbishManifest {
         })
     }
 
-    fn validate(&self) -> Result<(), RubbishItemValidationError> {
+    pub(crate) fn validate(&self) -> Result<(), RubbishItemValidationError> {
         if self.version != RUBBISH_MANIFEST_VERSION {
             return Err(RubbishItemValidationError::UnsupportedManifestVersion {
                 version: u64::from(self.version),
@@ -115,6 +115,8 @@ pub enum RubbishStoreError {
         #[source]
         source: serde_json::Error,
     },
+    #[error("rubbish item state conflicts with the expected transaction state: {item_id}")]
+    ItemStateConflict { item_id: Uuid },
     #[error("failed to {operation} {path}: {source}")]
     Filesystem {
         operation: &'static str,
@@ -314,6 +316,105 @@ impl RubbishStore {
         }
         entries.sort_by(compare_list_entries);
         Ok(entries)
+    }
+
+    pub(crate) fn read_item_if_exists(
+        &self,
+        item_id: Uuid,
+    ) -> Result<Option<RubbishItem>, RubbishStoreError> {
+        let item_dir = self.item_dir(item_id);
+        match fs::symlink_metadata(&item_dir) {
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
+            Err(source) => Err(RubbishStoreError::filesystem(
+                "inspect rubbish item directory",
+                &item_dir,
+                source,
+            )),
+            Ok(_) => self.read_item(&item_id.to_string()).map(Some),
+        }
+    }
+
+    pub(crate) fn publish_transaction_item(
+        &self,
+        expected: &RubbishItem,
+        prepared_dir: &Path,
+    ) -> Result<(), RubbishStoreError> {
+        self.ensure_root()?;
+        let item_id = expected.manifest.item_id;
+        let item_dir = self.item_dir(item_id);
+        match fs::symlink_metadata(&item_dir) {
+            Ok(_) => {
+                if prepared_dir.exists()
+                    || self.read_item(&item_id.to_string())? != *expected
+                {
+                    return Err(RubbishStoreError::ItemStateConflict { item_id });
+                }
+                return Ok(());
+            }
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
+            Err(source) => {
+                return Err(RubbishStoreError::filesystem(
+                    "inspect rubbish item directory",
+                    &item_dir,
+                    source,
+                ));
+            }
+        }
+
+        let prepared = read_item_directory(prepared_dir, item_id)?;
+        if prepared != *expected {
+            return Err(RubbishStoreError::ItemStateConflict { item_id });
+        }
+        install_noreplace(prepared_dir, &item_dir).map_err(|source| {
+            if source.kind() == ErrorKind::AlreadyExists {
+                RubbishStoreError::ItemAlreadyExists { item_id }
+            } else {
+                RubbishStoreError::filesystem(
+                    "publish transaction rubbish item",
+                    &item_dir,
+                    source,
+                )
+            }
+        })?;
+        sync_directory(&self.root)?;
+        sync_directory_parent(prepared_dir)
+    }
+
+    pub(crate) fn withdraw_transaction_item(
+        &self,
+        expected: &RubbishItem,
+        transaction_dir: &Path,
+    ) -> Result<(), RubbishStoreError> {
+        let item_id = expected.manifest.item_id;
+        let item_dir = self.item_dir(item_id);
+        let final_item = self.read_item_if_exists(item_id)?;
+        let transaction_item = match fs::symlink_metadata(transaction_dir) {
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(source) => {
+                return Err(RubbishStoreError::filesystem(
+                    "inspect transaction rubbish item",
+                    transaction_dir,
+                    source,
+                ));
+            }
+            Ok(_) => Some(read_item_directory(transaction_dir, item_id)?),
+        };
+
+        match (final_item, transaction_item) {
+            (Some(final_item), None) if final_item == *expected => {
+                fs::rename(&item_dir, transaction_dir).map_err(|source| {
+                    RubbishStoreError::filesystem(
+                        "withdraw transaction rubbish item",
+                        &item_dir,
+                        source,
+                    )
+                })?;
+                sync_directory(&self.root)?;
+                sync_directory_parent(transaction_dir)
+            }
+            (None, Some(transaction_item)) if transaction_item == *expected => Ok(()),
+            _ => Err(RubbishStoreError::ItemStateConflict { item_id }),
+        }
     }
 
     fn ensure_root(&self) -> Result<(), RubbishStoreError> {
@@ -524,6 +625,39 @@ fn read_physical_item_file(
     validate_physical_item_file(path, item_id, description)?;
     fs::read(path)
         .map_err(|source| RubbishStoreError::filesystem("read rubbish item file", path, source))
+}
+
+fn read_item_directory(
+    directory: &Path,
+    expected_item_id: Uuid,
+) -> Result<RubbishItem, RubbishStoreError> {
+    let item_id = expected_item_id.to_string();
+    let metadata = fs::symlink_metadata(directory).map_err(|source| {
+        RubbishStoreError::filesystem("inspect transaction rubbish directory", directory, source)
+    })?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(RubbishStoreError::invalid(
+            &item_id,
+            RubbishItemValidationError::InvalidItemLayout {
+                message: "transaction item path is not a physical directory".to_owned(),
+            },
+        ));
+    }
+    let manifest_bytes =
+        read_physical_item_file(&directory.join("manifest.json"), &item_id, "rubbish manifest")?;
+    let manifest = parse_manifest(&manifest_bytes)
+        .map_err(|error| RubbishStoreError::invalid(&item_id, error))?;
+    if manifest.item_id != expected_item_id {
+        return Err(RubbishStoreError::invalid(
+            &item_id,
+            RubbishItemValidationError::ManifestItemIdMismatch {
+                directory_item_id: expected_item_id,
+                manifest_item_id: manifest.item_id,
+            },
+        ));
+    }
+    let bytes = read_physical_item_file(&directory.join("page.md"), &item_id, "rubbish page")?;
+    Ok(RubbishItem { manifest, bytes })
 }
 
 fn write_synced_file(path: &Path, content: &[u8]) -> Result<(), RubbishStoreError> {
