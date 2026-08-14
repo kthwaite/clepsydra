@@ -52,6 +52,7 @@ pub mod property_value;
 pub mod query;
 pub mod reconcile;
 pub mod relabel;
+pub mod rubbish;
 pub mod rewriter;
 pub mod sync;
 pub mod task_history;
