@@ -181,9 +181,7 @@ pub struct DeleteFolderResult {
 pub enum BatchRecoveryError {
     #[error("index reconciliation failed: {0}")]
     Index(#[source] IndexError),
-    #[error(
-        "index reconciliation failed: {index}; filesystem rollback also failed: {rollback}"
-    )]
+    #[error("index reconciliation failed: {index}; filesystem rollback also failed: {rollback}")]
     IndexRollback {
         #[source]
         index: IndexError,
@@ -1238,9 +1236,7 @@ impl MutationCoordinator {
                 let rollback_directory = directory.clone();
                 let rollback = tokio::task::spawn_blocking(move || {
                     let result = match batch_rollback_failure {
-                        Some(intent_index) => {
-                            prepared.rollback_with_failure_at(intent_index)
-                        }
+                        Some(intent_index) => prepared.rollback_with_failure_at(intent_index),
                         None => prepared.rollback(),
                     };
                     (guard, result)

@@ -577,8 +577,7 @@ async fn failed_purge_after_cas_release_cannot_restore_and_retry_finishes() {
         .await;
     purge_error.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
     assert!(
-        purge_error
-            .json::<Value>()["error"]
+        purge_error.json::<Value>()["error"]
             .as_str()
             .unwrap()
             .contains("rubbish catalog removal failed")
@@ -590,7 +589,14 @@ async fn failed_purge_after_cas_release_cannot_restore_and_retry_finishes() {
             .bytes,
         retained_bytes
     );
-    assert!(!fixture.state.vault.root().join("purge-in-progress.md").exists());
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("purge-in-progress.md")
+            .exists()
+    );
     assert!(
         fixture
             .state
@@ -622,7 +628,14 @@ async fn failed_purge_after_cas_release_cannot_restore_and_retry_finishes() {
             .contains("retry permanent deletion"),
         "actual error: {restore_error}"
     );
-    assert!(!fixture.state.vault.root().join("purge-in-progress.md").exists());
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("purge-in-progress.md")
+            .exists()
+    );
     assert_eq!(
         RubbishStore::for_vault(fixture.state.vault.root())
             .read_item(ITEM_ID_A)
@@ -652,7 +665,14 @@ async fn failed_purge_after_cas_release_cannot_restore_and_retry_finishes() {
         .get(&format!("/api/vault/rubbish/{ITEM_ID_A}"))
         .await
         .assert_status(StatusCode::NOT_FOUND);
-    assert!(!fixture.state.vault.root().join("purge-in-progress.md").exists());
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("purge-in-progress.md")
+            .exists()
+    );
     assert!(
         fixture
             .state
