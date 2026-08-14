@@ -228,7 +228,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/vault/archive/view/{hash}": {
+    "/api/vault/archive/view/{snapshot_hash}": {
         parameters: {
             query?: never;
             header?: never;
@@ -240,7 +240,7 @@ export interface paths {
         post?: never;
         delete?: never;
         options?: never;
-        head?: never;
+        head: operations["head_snapshot"];
         patch?: never;
         trace?: never;
     };
@@ -3692,7 +3692,7 @@ export interface operations {
             header?: never;
             path: {
                 /** @description Archived snapshot blob hash */
-                hash: string;
+                snapshot_hash: string;
             };
             cookie?: never;
         };
@@ -3733,6 +3733,50 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiError"];
                 };
+            };
+        };
+    };
+    head_snapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Archived snapshot blob hash */
+                snapshot_hash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Archived HTML snapshot metadata */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Snapshot blob not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Blob is not an HTML snapshot */
+            415: {
+                headers: {
+                    /** @description Stored snapshot media type */
+                    "X-Clepsydra-Archive-Content-Type"?: string;
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -316,7 +316,10 @@ pub fn router_with_body_limit(
             post(ingest_archive).layer(axum::extract::DefaultBodyLimit::max(max_bytes)),
         )
         .route("/status", get(archive_status))
-        .route("/view/{hash}", get(view_snapshot).head(head_snapshot))
+        .route(
+            "/view/{snapshot_hash}",
+            get(view_snapshot).head(head_snapshot),
+        )
         .layer(Extension(view_config))
 }
 
@@ -870,10 +873,10 @@ fn limited_blob_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
 
 #[utoipa::path(
     get,
-    path = "/archive/view/{hash}",
+    path = "/archive/view/{snapshot_hash}",
     context_path = "/api/vault",
     tag = "Archive",
-    params(("hash" = String, Path, description = "Archived snapshot blob hash")),
+    params(("snapshot_hash" = String, Path, description = "Archived snapshot blob hash")),
     responses(
         (status = 200, description = "Sandboxed archived HTML snapshot", body = String, content_type = "text/html"),
         (status = 404, description = "Snapshot blob not found", body = ApiError),
@@ -927,6 +930,25 @@ where
         .map_err(|error| ApiError::internal(format!("archive HEAD worker failed: {error}")))?
 }
 
+#[utoipa::path(
+    head,
+    path = "/archive/view/{snapshot_hash}",
+    context_path = "/api/vault",
+    tag = "Archive",
+    params(("snapshot_hash" = String, Path, description = "Archived snapshot blob hash")),
+    responses(
+        (status = 200, description = "Archived HTML snapshot metadata"),
+        (status = 404, description = "Snapshot blob not found"),
+        (
+            status = 415,
+            description = "Blob is not an HTML snapshot",
+            headers(
+                ("X-Clepsydra-Archive-Content-Type" = String, description = "Stored snapshot media type")
+            )
+        ),
+        (status = 500, description = "Internal server error")
+    )
+)]
 pub async fn head_snapshot(
     State(state): State<Arc<AppState>>,
     Extension(config): Extension<ArchiveViewConfig>,
