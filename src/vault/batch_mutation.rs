@@ -8,9 +8,9 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use super::atomic_file::install_noreplace;
 #[cfg(test)]
 use super::atomic_file::AtomicPublicationError;
+use super::atomic_file::install_noreplace;
 
 use super::path::VaultPath;
 use super::rubbish::{RubbishItem, RubbishManifest, RubbishStore, RubbishStoreError};
@@ -2364,8 +2364,7 @@ mod tests {
     fn phase_publication_parent_flush_failure_is_uncertain_before_mutation() {
         let fixture = fixture_with_file("a.md", b"before");
         let mut prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
-        let _failure =
-            crate::vault::atomic_file::fail_next_directory_flush(prepared.directory());
+        let _failure = crate::vault::atomic_file::fail_next_directory_flush(prepared.directory());
 
         let error = prepared.publish().unwrap_err();
 

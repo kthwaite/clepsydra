@@ -655,7 +655,6 @@ mod tests {
     }
 }
 
-
 #[cfg(not(any(
     target_os = "linux",
     target_os = "android",

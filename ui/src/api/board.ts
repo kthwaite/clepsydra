@@ -1,11 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
-import {
-  invalidatePageStructure,
-  invalidateRubbish,
-  queryKeys,
-} from "./keys";
+import { invalidatePageStructure, invalidateRubbish, queryKeys } from "./keys";
 import type { ArchivedPage } from "./pages";
 
 export type BoardTask = components["schemas"]["BoardTask"];

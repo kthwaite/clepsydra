@@ -833,8 +833,7 @@ fn sync_directory_parent(path: &Path) -> Result<(), RubbishStoreError> {
 }
 
 #[cfg(test)]
-pub(crate) type TestDirectorySyncFailureGuard =
-    super::atomic_file::TestDirectoryFlushFailureGuard;
+pub(crate) type TestDirectorySyncFailureGuard = super::atomic_file::TestDirectoryFlushFailureGuard;
 
 #[cfg(test)]
 pub(crate) fn fail_next_directory_sync(path: &Path) -> TestDirectorySyncFailureGuard {

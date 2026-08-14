@@ -2120,7 +2120,9 @@ mod tests {
 
         assert!(!path.exists());
         assert!(
-            error.to_string().contains("failed to sync parent directory"),
+            error
+                .to_string()
+                .contains("failed to sync parent directory"),
             "{error}"
         );
     }
