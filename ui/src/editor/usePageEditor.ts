@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Descendant, Editor } from "slate";
 import { usePage, useUpdatePage } from "#/api/pages";
-import type { ApiError } from "#/api/types";
+import type { ApiError, PageMeta } from "#/api/types";
 import {
   decryptMarkdown,
   encryptMarkdown,
@@ -102,6 +102,7 @@ interface PageEditorState {
   reloadAfterConflict: () => Promise<void>;
   createdAt: string | null;
   updatedAt: string | null;
+  archive: NonNullable<PageMeta["archive"]> | null;
   bodyMarkdown: string;
   kind: string | null;
   conversationProvider: string | null;
@@ -766,6 +767,7 @@ export function usePageEditor(
     saveNow: doSave,
     createdAt: page?.meta?.created_at ?? null,
     updatedAt: page?.meta?.updated_at ?? null,
+    archive: page?.meta.archive ?? null,
     bodyMarkdown: plainBody ?? "",
     kind: page?.kind ?? null,
     conversationProvider: page?.conversation?.provider ?? null,

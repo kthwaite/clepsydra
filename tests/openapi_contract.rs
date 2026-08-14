@@ -3,6 +3,8 @@ use utoipa::OpenApi;
 
 const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/archive", "post"),
+    ("/api/vault/archive/view/{snapshot_hash}", "get"),
+    ("/api/vault/archive/view/{snapshot_hash}", "head"),
     ("/api/vault/archive/status", "get"),
     ("/api/vault/cas/{hash}", "get"),
     ("/api/vault/journal/today", "get"),
@@ -53,15 +55,36 @@ fn openapi_documents_every_registered_vault_operation() {
         .iter()
         .filter(|(path, _)| path.starts_with("/api/vault"))
         .map(|(_, item)| {
-            ["get", "post", "put", "patch", "delete"]
+            ["get", "post", "put", "patch", "delete", "head"]
                 .iter()
                 .filter(|method| item.get(**method).is_some())
                 .count()
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 109,
-        "OpenAPI should document all 109 registered /api/vault operations"
+        operation_count, 111,
+        "OpenAPI should document all 111 registered /api/vault operations"
+    );
+}
+
+#[test]
+fn openapi_defines_the_archive_view_head_contract() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let operation = &document["paths"]["/api/vault/archive/view/{snapshot_hash}"]["head"];
+
+    assert!(
+        operation.is_object(),
+        "archive snapshot HEAD is undocumented"
+    );
+    for status in ["200", "404", "415", "500"] {
+        assert!(
+            operation["responses"][status].is_object(),
+            "archive snapshot HEAD response {status} is undocumented"
+        );
+    }
+    assert_eq!(
+        operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]["type"],
+        "string"
     );
 }
 

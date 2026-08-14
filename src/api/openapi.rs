@@ -148,6 +148,8 @@ impl Modify for SchemaOverrides {
         // Archive / CAS
         crate::api::archive::ingest_archive,
         crate::api::archive::archive_status,
+        crate::api::archive::view_snapshot,
+        crate::api::archive::head_snapshot,
         crate::api::archive::serve_blob,
         // Conversations
         crate::api::conversations::capture_conversation,
@@ -264,6 +266,7 @@ impl Modify for SchemaOverrides {
             crate::api::properties::PropertyPatchResponse,
             // Pages
             crate::api::pages::PageSummary,
+            crate::api::pages::ArchiveMetaResponse,
             crate::api::pages::PageMetaResponse,
             crate::api::pages::PageDetailResponse,
             crate::api::pages::PageSummaryListResponse,
@@ -505,6 +508,129 @@ mod tests {
     }
 
     #[test]
+    fn page_meta_archive_is_optional_and_typed() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let page_meta = &json["components"]["schemas"]["PageMetaResponse"];
+        let required = page_meta["required"]
+            .as_array()
+            .expect("PageMetaResponse.required should be an array");
+        assert!(
+            !required.iter().any(|field| field == "archive"),
+            "PageMetaResponse.archive should be optional"
+        );
+
+        let archive_variants = page_meta["properties"]["archive"]["oneOf"]
+            .as_array()
+            .expect("PageMetaResponse.archive should be a nullable schema reference");
+        assert!(
+            archive_variants
+                .iter()
+                .any(|variant| { variant["$ref"] == "#/components/schemas/ArchiveMetaResponse" }),
+            "PageMetaResponse.archive should reference ArchiveMetaResponse"
+        );
+    }
+
+    #[test]
+    fn archive_meta_matches_stored_frontmatter_contract() {
+        let spec = ApiDoc::openapi();
+        let json = serde_json::to_value(&spec).unwrap();
+        let archive = &json["components"]["schemas"]["ArchiveMetaResponse"];
+        let properties = archive["properties"]
+            .as_object()
+            .expect("ArchiveMetaResponse should define properties");
+        let property_names: std::collections::BTreeSet<&str> =
+            properties.keys().map(String::as_str).collect();
+        let expected_property_names: std::collections::BTreeSet<&str> = [
+            "url",
+            "canonical_url",
+            "domain",
+            "captured_at",
+            "content_hash",
+            "source_hash",
+            "snapshot_hash",
+            "resource_count",
+            "description",
+            "byline",
+            "site_name",
+            "published_time",
+            "lang",
+            "excerpt",
+            "blobs",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            property_names, expected_property_names,
+            "ArchiveMetaResponse should mirror every stable stored archive field"
+        );
+
+        let required: std::collections::BTreeSet<&str> = archive["required"]
+            .as_array()
+            .expect("ArchiveMetaResponse.required should be an array")
+            .iter()
+            .filter_map(serde_json::Value::as_str)
+            .collect();
+        let expected_required: std::collections::BTreeSet<&str> = [
+            "url",
+            "domain",
+            "captured_at",
+            "content_hash",
+            "source_hash",
+            "snapshot_hash",
+            "resource_count",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(
+            required, expected_required,
+            "ArchiveMetaResponse required fields should match unconditional frontmatter"
+        );
+
+        for field in [
+            "url",
+            "domain",
+            "captured_at",
+            "content_hash",
+            "source_hash",
+            "snapshot_hash",
+        ] {
+            assert_eq!(
+                properties[field]["type"], "string",
+                "ArchiveMetaResponse.{field} should be a string"
+            );
+        }
+        for field in [
+            "canonical_url",
+            "description",
+            "byline",
+            "site_name",
+            "published_time",
+            "lang",
+            "excerpt",
+        ] {
+            assert_eq!(
+                properties[field]["type"],
+                serde_json::json!(["string", "null"]),
+                "ArchiveMetaResponse.{field} should be an optional nullable string"
+            );
+        }
+        assert_eq!(
+            properties["resource_count"]["type"], "integer",
+            "ArchiveMetaResponse.resource_count should remain numeric"
+        );
+        assert_eq!(
+            properties["blobs"]["type"],
+            serde_json::json!(["array", "null"]),
+            "ArchiveMetaResponse.blobs should be an optional list"
+        );
+        assert_eq!(
+            properties["blobs"]["items"]["type"], "string",
+            "ArchiveMetaResponse.blobs should contain hash strings"
+        );
+    }
+
+    #[test]
     fn page_update_requires_expected_revision_and_documents_conflicts() {
         let spec = ApiDoc::openapi();
         let json = serde_json::to_value(&spec).unwrap();
@@ -576,6 +702,11 @@ mod tests {
         assert!(spec.paths.paths.contains_key("/api/vault/folders/{path}"));
         assert!(spec.paths.paths.contains_key("/api/vault/index/search"));
         assert!(spec.paths.paths.contains_key("/api/vault/academic/works"));
+        assert!(
+            spec.paths
+                .paths
+                .contains_key("/api/vault/archive/view/{snapshot_hash}")
+        );
         assert!(
             spec.paths
                 .paths

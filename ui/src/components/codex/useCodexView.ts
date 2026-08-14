@@ -13,6 +13,7 @@ export type CodexView =
   | "feeds"
   | "docs"
   | "repairs"
+  | "archive"
   | "agenda";
 
 /** Views resolvable from the route alone, plus the "workspace" marker that

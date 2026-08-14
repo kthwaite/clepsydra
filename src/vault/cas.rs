@@ -1,5 +1,6 @@
 //! Content-addressed storage for blobs, with reference counting and garbage collection.
-use std::fs;
+use std::fs::{self, File};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, params};
@@ -9,6 +10,69 @@ use sha2::{Digest, Sha256};
 pub struct StoreResult {
     pub hash: String,
     pub already_existed: bool,
+}
+
+/// Metadata for a CAS blob whose database row and backing file agree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlobMetadata {
+    pub content_type: String,
+    pub size: u64,
+}
+
+#[derive(Debug)]
+pub enum RetrieveLimitedError {
+    TooLarge { size: u64, limit: usize },
+    Store(String),
+}
+
+impl std::fmt::Display for RetrieveLimitedError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TooLarge { size, limit } => {
+                write!(formatter, "CAS blob size {size} exceeds read limit {limit}")
+            }
+            Self::Store(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RetrieveLimitedError {}
+
+#[derive(Debug)]
+pub struct OpenBlob {
+    file: File,
+    content_type: String,
+    expected_size: u64,
+}
+
+impl OpenBlob {
+    pub fn content_type(&self) -> &str {
+        &self.content_type
+    }
+    pub fn read_limited(mut self, limit: usize) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
+        let mut data = Vec::new();
+        data.try_reserve_exact(self.expected_size as usize)
+            .map_err(|_| RetrieveLimitedError::Store("CAS read allocation failed".to_string()))?;
+        self.file
+            .by_ref()
+            .take((limit as u64).saturating_add(1))
+            .read_to_end(&mut data)
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        if data.len() > limit {
+            return Err(RetrieveLimitedError::TooLarge {
+                size: data.len() as u64,
+                limit,
+            });
+        }
+        if data.len() as u64 != self.expected_size {
+            return Err(RetrieveLimitedError::Store(format!(
+                "CAS backing file size changed while reading: expected {}, got {}",
+                self.expected_size,
+                data.len()
+            )));
+        }
+        Ok((data, self.content_type))
+    }
 }
 
 /// Content-addressed blob store.
@@ -131,6 +195,106 @@ impl ContentStore {
         Ok((data, content_type))
     }
 
+    /// Validate metadata and acquire an open backing-file handle without reading
+    /// bytes. Callers may release the CAS lock before `OpenBlob::read_limited`;
+    /// unlinking cannot invalidate an already-open handle.
+    pub fn open_limited(&self, hash: &str, limit: usize) -> Result<OpenBlob, RetrieveLimitedError> {
+        self.open_limited_with(hash, limit, |path| File::open(path))
+    }
+
+    fn open_limited_with(
+        &self,
+        hash: &str,
+        limit: usize,
+        open: impl FnOnce(&Path) -> std::io::Result<File>,
+    ) -> Result<OpenBlob, RetrieveLimitedError> {
+        Self::validate_hash(hash)
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        let (stored_size, content_type): (i64, String) = self
+            .db
+            .query_row(
+                "SELECT size, content_type FROM blobs WHERE hash = ?1",
+                params![hash],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        let expected_size = u64::try_from(stored_size).map_err(|_| {
+            RetrieveLimitedError::Store(format!(
+                "invalid negative CAS size for {hash}: {stored_size}"
+            ))
+        })?;
+        if expected_size > limit as u64 {
+            return Err(RetrieveLimitedError::TooLarge {
+                size: expected_size,
+                limit,
+            });
+        }
+        let path = self
+            .blob_path(hash)
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        let file = open(&path).map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        let file_metadata = file
+            .metadata()
+            .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
+        if !file_metadata.is_file() {
+            return Err(RetrieveLimitedError::Store(format!(
+                "CAS backing path is not a file: {}",
+                path.display()
+            )));
+        }
+        if file_metadata.len() != expected_size {
+            return Err(RetrieveLimitedError::Store(format!(
+                "CAS backing file size mismatch for {hash}: expected {expected_size}, got {}",
+                file_metadata.len()
+            )));
+        }
+        Ok(OpenBlob {
+            file,
+            content_type,
+            expected_size,
+        })
+    }
+
+    pub fn retrieve_limited(
+        &self,
+        hash: &str,
+        limit: usize,
+    ) -> Result<(Vec<u8>, String), RetrieveLimitedError> {
+        self.open_limited(hash, limit)?.read_limited(limit)
+    }
+
+    /// Inspect a blob without reading its contents.
+    ///
+    /// A row alone is not enough: callers use this for metadata-only HTTP
+    /// responses, so a missing, non-file, or length-mismatched backing object is
+    /// reported as corruption rather than as an available blob.
+    pub fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
+        Self::validate_hash(hash)?;
+        let (stored_size, content_type): (i64, String) = self.db.query_row(
+            "SELECT size, content_type FROM blobs WHERE hash = ?1",
+            params![hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let expected_size = u64::try_from(stored_size)
+            .map_err(|_| format!("invalid negative CAS size for {hash}: {stored_size}"))?;
+        let path = self.blob_path(hash)?;
+        let file = fs::metadata(&path)?;
+        if !file.is_file() {
+            return Err(format!("CAS backing path is not a file: {}", path.display()).into());
+        }
+        if file.len() != expected_size {
+            return Err(format!(
+                "CAS backing file size mismatch for {hash}: expected {expected_size}, got {}",
+                file.len()
+            )
+            .into());
+        }
+        Ok(BlobMetadata {
+            content_type,
+            size: expected_size,
+        })
+    }
+
     /// Check whether a blob exists in the store.
     pub fn exists(&self, hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
@@ -242,6 +406,67 @@ mod tests {
         let (retrieved, content_type) = store.retrieve(&result.hash).unwrap();
         assert_eq!(retrieved, data);
         assert_eq!(content_type, "text/plain");
+    }
+
+    #[test]
+    fn inspect_reports_metadata_without_returning_blob_bytes() {
+        let (store, _tmp) = test_store();
+        let result = store.store(b"metadata only", "text/html").unwrap();
+
+        let metadata = store.inspect(&result.hash).unwrap();
+
+        assert_eq!(metadata.content_type, "text/html");
+        assert_eq!(metadata.size, 13);
+    }
+
+    #[test]
+    fn inspect_rejects_a_missing_or_invalid_backing_file() {
+        let (store, _tmp) = test_store();
+        let missing = store.store(b"delete me", "text/html").unwrap();
+        fs::remove_file(store.blob_path(&missing.hash).unwrap()).unwrap();
+        assert!(
+            store.inspect(&missing.hash).is_err(),
+            "database metadata must not hide a missing backing file"
+        );
+
+        let truncated = store.store(b"truncate me", "text/html").unwrap();
+        fs::write(store.blob_path(&truncated.hash).unwrap(), b"short").unwrap();
+        assert!(
+            store.inspect(&truncated.hash).is_err(),
+            "backing-file length must agree with CAS metadata"
+        );
+    }
+
+    #[test]
+    fn retrieve_limited_rejects_known_oversize_before_opening_backing_file() {
+        use std::cell::Cell;
+
+        let (store, _tmp) = test_store();
+        let result = store.store(b"larger than limit", "text/html").unwrap();
+        let opens = Cell::new(0);
+        let error = store
+            .open_limited_with(&result.hash, 4, |path| {
+                opens.set(opens.get() + 1);
+                std::fs::File::open(path)
+            })
+            .unwrap_err();
+
+        assert_eq!(opens.get(), 0, "oversize blob backing file was opened");
+        assert!(matches!(
+            error,
+            RetrieveLimitedError::TooLarge { size: 17, limit: 4 }
+        ));
+    }
+
+    #[test]
+    fn retrieve_limited_accepts_a_blob_exactly_at_the_limit() {
+        let (store, _tmp) = test_store();
+        let result = store.store(b"exact", "text/html").unwrap();
+
+        let (data, content_type) = store.retrieve_limited(&result.hash, 5).unwrap();
+
+        assert_eq!(data, b"exact");
+        assert_eq!(content_type, "text/html");
     }
 
     #[test]

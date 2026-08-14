@@ -1,20 +1,27 @@
 //! API endpoints for ingesting web page archives, including associated blobs stored in
 //! the CAS.
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::body::Body;
+use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use bytes::Bytes;
+use http_body::{Frame, SizeHint};
 use serde::{Deserialize, Serialize};
+use url::{Host, Url};
 use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
+use crate::ServerSettings;
 use crate::vault::archive_snapshot::{self, SnapshotResource};
-use crate::vault::cas::ContentStore;
+use crate::vault::cas::{BlobMetadata, ContentStore, RetrieveLimitedError};
 use crate::vault::index_policy::IndexMutation;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator, MutationGuard};
@@ -226,22 +233,94 @@ pub(crate) fn archive_body_limit_bytes(max_request_size_mb: u64) -> usize {
         .saturating_mul(1024 * 1024);
     budget.saturating_mul(2).saturating_add(1024 * 1024)
 }
+const ARCHIVE_RESOURCE_WORKING_SET_MB: u64 = 256;
+
+/// Maximum bytes admitted for one archived resource. This is the same
+/// configured limit enforced during ingest, so accepted captures remain
+/// renderable.
+pub(crate) fn archive_resource_limit_bytes(max_blob_size_mb: u64) -> usize {
+    usize::try_from(max_blob_size_mb)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(1024 * 1024)
+}
+
+/// Bound parallel resource buffers to approximately 256 MiB while allowing at
+/// most eight concurrent reads for small configured blob limits.
+pub fn archive_resource_concurrency(max_blob_size_mb: u64) -> usize {
+    let per_blob_mb = max_blob_size_mb.max(1);
+    usize::try_from(ARCHIVE_RESOURCE_WORKING_SET_MB / per_blob_mb)
+        .unwrap_or(1)
+        .clamp(1, 8)
+}
+
+/// Immutable response policy for the dedicated archive snapshot view.
+///
+/// The complete CSP value is assembled once from server configuration. Request
+/// headers never participate in the policy.
+#[derive(Clone, Debug)]
+pub struct ArchiveViewConfig {
+    content_security_policy: HeaderValue,
+}
+
+impl ArchiveViewConfig {
+    pub fn from_server_settings(settings: &ServerSettings) -> Result<Self, String> {
+        let raw_host = settings.server_host_for_origin()?;
+        let host = match raw_host {
+            Host::Domain(host) => host,
+            Host::Ipv4(host) => host.to_string(),
+            Host::Ipv6(host) => format!("[{host}]"),
+        };
+        let scheme = if settings.tls.enabled {
+            "https"
+        } else {
+            "http"
+        };
+        let origin = format!("{scheme}://{host}:{}", settings.port);
+        let policy = format!(
+            "sandbox; default-src 'none'; img-src {origin} data:; \
+             media-src {origin} data:; style-src 'unsafe-inline' {origin} data:; \
+             font-src {origin} data:"
+        );
+        let content_security_policy = HeaderValue::from_str(&policy).map_err(|error| {
+            format!("invalid archive view CSP from server configuration: {error}")
+        })?;
+        Ok(Self {
+            content_security_policy,
+        })
+    }
+}
+
+impl Default for ArchiveViewConfig {
+    fn default() -> Self {
+        Self::from_server_settings(&ServerSettings::default())
+            .expect("default server settings must produce a valid archive view origin")
+    }
+}
 
 /// Build the archive router.
 ///
-/// The body limit for the ingest endpoint is set by the caller via
-/// `archive_router_with_limit` to respect the configured `max_request_size_mb`.
-/// This default derives from a 250 MB decoded budget.
+/// The body limit applies only to archive ingest. Snapshot views and status
+/// requests do not consume the ingest budget.
 pub fn router() -> Router<Arc<AppState>> {
-    router_with_body_limit(archive_body_limit_bytes(250))
+    router_with_body_limit(archive_body_limit_bytes(250), ArchiveViewConfig::default())
 }
 
-/// Build the archive router with a specific body size limit (in bytes).
-pub fn router_with_body_limit(max_bytes: usize) -> Router<Arc<AppState>> {
+/// Build the archive router with a specific ingest body size limit (in bytes).
+pub fn router_with_body_limit(
+    max_bytes: usize,
+    view_config: ArchiveViewConfig,
+) -> Router<Arc<AppState>> {
     Router::new()
-        .route("/", post(ingest_archive))
+        .route(
+            "/",
+            post(ingest_archive).layer(axum::extract::DefaultBodyLimit::max(max_bytes)),
+        )
         .route("/status", get(archive_status))
-        .layer(axum::extract::DefaultBodyLimit::max(max_bytes))
+        .route(
+            "/view/{snapshot_hash}",
+            get(view_snapshot).head(head_snapshot),
+        )
+        .layer(Extension(view_config))
 }
 
 pub fn cas_router() -> Router<Arc<AppState>> {
@@ -270,6 +349,273 @@ fn is_active_content(content_type: &str) -> bool {
             | "application/rdf+xml"
             | "text/xsl"
     )
+}
+
+/// Only captured HTML is valid on the dedicated framable route.
+fn framable_content_type(content_type: &str) -> bool {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .eq_ignore_ascii_case("text/html")
+}
+
+fn validate_http_url(field: &str, raw: &str) -> Result<(), ApiError> {
+    let has_http_prefix = raw
+        .get(..7)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("http://"))
+        || raw
+            .get(..8)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case("https://"));
+    let parsed = Url::parse(raw).ok();
+    let valid = has_http_prefix
+        && !raw.chars().any(char::is_whitespace)
+        && parsed.as_ref().is_some_and(|url| {
+            matches!(url.scheme(), "http" | "https") && url.host_str().is_some()
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(ApiError::bad_request(format!(
+            "{field} must be an absolute HTTP(S) URL"
+        )))
+    }
+}
+
+fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html"));
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        config.content_security_policy.clone(),
+    );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers
+}
+
+enum LoadedSnapshot {
+    Body { data: Vec<u8>, content_type: String },
+    Metadata(BlobMetadata),
+}
+
+trait SnapshotStore {
+    fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>>;
+}
+
+impl SnapshotStore for ContentStore {
+    fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
+        ContentStore::inspect(self, hash)
+    }
+}
+
+fn load_snapshot_metadata(
+    store: &impl SnapshotStore,
+    hash: &str,
+) -> Result<LoadedSnapshot, ApiError> {
+    let metadata = store
+        .inspect(hash)
+        .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))?;
+    if metadata.size > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 {
+        return Err(ApiError::internal(format!(
+            "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
+            metadata.size, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES
+        )));
+    }
+    Ok(LoadedSnapshot::Metadata(metadata))
+}
+
+fn without_body(response: Response) -> Response {
+    let (parts, _) = response.into_parts();
+    Response::from_parts(parts, Body::empty())
+}
+
+fn unsupported_snapshot_response(content_type: &str) -> Response {
+    let error = ApiError {
+        status: StatusCode::UNSUPPORTED_MEDIA_TYPE.as_u16(),
+        error: format!("snapshot is not text/html: {content_type}"),
+        detail: None,
+        hint: None,
+    };
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        "x-clepsydra-archive-content-type",
+        HeaderValue::from_str(content_type)
+            .unwrap_or_else(|_| HeaderValue::from_static(OCTET_STREAM)),
+    );
+    (StatusCode::UNSUPPORTED_MEDIA_TYPE, headers, Json(error)).into_response()
+}
+
+struct AdmittedBody {
+    inner: Body,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl http_body::Body for AdmittedBody {
+    type Data = Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        Pin::new(&mut self.inner).poll_frame(context)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+fn admitted_body(data: Vec<u8>, permit: tokio::sync::OwnedSemaphorePermit) -> Body {
+    Body::new(AdmittedBody {
+        inner: Body::from(data),
+        _permit: permit,
+    })
+}
+fn snapshot_response_with(
+    snapshot: LoadedSnapshot,
+    config: &ArchiveViewConfig,
+    transform_body: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, ApiError>,
+    body_permit: Option<tokio::sync::OwnedSemaphorePermit>,
+) -> Result<Response, ApiError> {
+    match snapshot {
+        LoadedSnapshot::Metadata(metadata) => {
+            if !framable_content_type(&metadata.content_type) {
+                return Ok(without_body(unsupported_snapshot_response(
+                    &metadata.content_type,
+                )));
+            }
+            Ok((StatusCode::OK, sandbox_headers(config), Body::empty()).into_response())
+        }
+        LoadedSnapshot::Body { data, content_type } => {
+            if !framable_content_type(&content_type) {
+                return Ok(unsupported_snapshot_response(&content_type));
+            }
+            let data = transform_body(data)?;
+            let body = match body_permit {
+                Some(permit) => admitted_body(data, permit),
+                None => Body::from(data),
+            };
+            Ok((StatusCode::OK, sandbox_headers(config), body).into_response())
+        }
+    }
+}
+
+// Ingest, GET, and HEAD share the 2 MiB stored-snapshot ceiling; the 64 MiB
+// rewrite ceiling covers expansion of validated CAS URLs.
+const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = archive_snapshot::ARCHIVE_VIEW_SNAPSHOT_BYTES;
+
+fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
+    prepare_snapshot_body_with(
+        data,
+        MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES,
+        archive_snapshot::neutralize_navigation_bytes,
+    )
+}
+
+fn validate_snapshot_renderability(snapshot: &str) -> Result<(), ApiError> {
+    prepare_snapshot_body(snapshot.as_bytes().to_vec())
+        .map(drop)
+        .map_err(|error| {
+            let reason = error
+                .error
+                .strip_prefix("archived snapshot is corrupt: ")
+                .unwrap_or(&error.error);
+            ApiError::bad_request(format!(
+                "archived snapshot violates view constraints: {reason}"
+            ))
+        })
+}
+
+fn prepare_snapshot_body_with(
+    data: Vec<u8>,
+    input_limit: usize,
+    neutralize: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, String>,
+) -> Result<Vec<u8>, ApiError> {
+    if data.len() > input_limit {
+        return Err(ApiError::internal(format!(
+            "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
+            data.len(),
+            input_limit
+        )));
+    }
+    let data = rewrite_cas_urls(data);
+    if data.len() > archive_snapshot::DEFAULT_REWRITTEN_SNAPSHOT_BYTES {
+        return Err(ApiError::internal(format!(
+            "archived snapshot is corrupt: CAS rewrite size {} exceeds rewrite input limit {}",
+            data.len(),
+            archive_snapshot::DEFAULT_REWRITTEN_SNAPSHOT_BYTES
+        )));
+    }
+    neutralize(data)
+        .map_err(|error| ApiError::internal(format!("archived snapshot is corrupt: {error}")))
+}
+fn cas_url_boundary(byte: u8) -> bool {
+    byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b')' | b'>' | b'#')
+}
+
+const STORED_CAS_URL_PREFIX: &[u8] = b"cas:sha256:";
+const SERVED_CAS_URL_PREFIX: &[u8] = b"/api/vault/cas/";
+const SHA256_HEX_LEN: usize = 64;
+
+fn cas_url_start_boundary(data: &[u8], start: usize) -> bool {
+    start == 0
+        || data[start - 1].is_ascii_whitespace()
+        || matches!(data[start - 1], b'"' | b'\'' | b'(' | b'=' | b',')
+}
+
+fn find_cas_url(data: &[u8], from: usize) -> Option<(usize, usize)> {
+    let mut search_start = from;
+    while let Some(offset) = data[search_start..]
+        .windows(STORED_CAS_URL_PREFIX.len())
+        .position(|window| window == STORED_CAS_URL_PREFIX)
+    {
+        let start = search_start + offset;
+        let hash_start = start + STORED_CAS_URL_PREFIX.len();
+        let end = hash_start + SHA256_HEX_LEN;
+        let canonical_hash = end <= data.len()
+            && data[hash_start..end]
+                .iter()
+                .all(|byte| byte.is_ascii_digit() || matches!(byte, b'a'..=b'f'));
+        let bounded = canonical_hash
+            && cas_url_start_boundary(data, start)
+            && (end == data.len() || cas_url_boundary(data[end]));
+        if bounded {
+            return Some((start, end));
+        }
+        search_start = start + 1;
+    }
+    None
+}
+
+/// Resolve canonical, origin-independent stored CAS URLs for the browser.
+fn rewrite_cas_urls(data: Vec<u8>) -> Vec<u8> {
+    let mut occurrences = 0usize;
+    let mut search_start = 0;
+    while let Some((_, end)) = find_cas_url(&data, search_start) {
+        occurrences += 1;
+        search_start = end;
+    }
+    if occurrences == 0 {
+        return data;
+    }
+
+    let extra_bytes = occurrences.saturating_mul(SERVED_CAS_URL_PREFIX.len() - b"cas:".len());
+    let mut rewritten = Vec::with_capacity(data.len().saturating_add(extra_bytes));
+    let mut copied_through = 0;
+    search_start = 0;
+    while let Some((start, end)) = find_cas_url(&data, search_start) {
+        rewritten.extend_from_slice(&data[copied_through..start]);
+        rewritten.extend_from_slice(SERVED_CAS_URL_PREFIX);
+        copied_through = start + b"cas:".len();
+        search_start = end;
+    }
+    rewritten.extend_from_slice(&data[copied_through..]);
+    rewritten
 }
 
 /// Convert a title to a URL-safe slug, truncated to `max_len` characters.
@@ -312,6 +658,11 @@ fn validate_resource_sizes(
     max_blob_size_mb: u64,
     max_request_size_mb: u64,
 ) -> Result<(), ApiError> {
+    if snapshot_len > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES {
+        return Err(ApiError::bad_request(format!(
+            "archived snapshot is {snapshot_len} bytes, over shared snapshot view limit ({MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES} bytes)"
+        )));
+    }
     let max_blob_bytes = max_blob_size_mb.saturating_mul(1024 * 1024);
     let max_request_bytes = max_request_size_mb.saturating_mul(1024 * 1024);
     let request_size_overflow = || {
@@ -335,6 +686,8 @@ fn validate_resource_sizes(
                 resource.hash, size, max_blob_size_mb
             )));
         }
+        // The same configured per-blob limit is applied when the CAS resource
+        // is served, so every accepted resource remains renderable.
         total = total.checked_add(size).ok_or_else(&request_size_overflow)?;
     }
     if total > max_request_bytes {
@@ -489,6 +842,132 @@ fn store_decoded_blobs(
     })
 }
 
+async fn acquire_archive_view_permit(
+    semaphore: Arc<tokio::sync::Semaphore>,
+) -> Result<tokio::sync::OwnedSemaphorePermit, ApiError> {
+    semaphore
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal("archive snapshot viewer is unavailable"))
+}
+
+fn limited_snapshot_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
+    match error {
+        RetrieveLimitedError::TooLarge { size, limit } => ApiError::internal(format!(
+            "archived snapshot is corrupt: snapshot size {size} exceeds view input limit {limit}"
+        )),
+        RetrieveLimitedError::Store(_) => {
+            ApiError::not_found(format!("snapshot not found: {hash}"))
+        }
+    }
+}
+
+fn limited_blob_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
+    match error {
+        RetrieveLimitedError::TooLarge { size, limit } => ApiError::internal(format!(
+            "archived resource is corrupt: blob size {size} exceeds resource limit {limit}"
+        )),
+        RetrieveLimitedError::Store(_) => ApiError::not_found(format!("blob not found: {hash}")),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/archive/view/{snapshot_hash}",
+    context_path = "/api/vault",
+    tag = "Archive",
+    params(("snapshot_hash" = String, Path, description = "Archived snapshot blob hash")),
+    responses(
+        (status = 200, description = "Sandboxed archived HTML snapshot", body = String, content_type = "text/html"),
+        (status = 404, description = "Snapshot blob not found", body = ApiError),
+        (status = 415, description = "Blob is not an HTML snapshot", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn view_snapshot(
+    State(state): State<Arc<AppState>>,
+    Extension(config): Extension<ArchiveViewConfig>,
+    Path(hash): Path<String>,
+) -> Result<Response, ApiError> {
+    let permit = acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await?;
+    let cas = Arc::clone(&state.cas);
+    let worker_hash = hash.clone();
+    let (snapshot, permit) = tokio::task::spawn_blocking(move || {
+        let opened = {
+            let cas = cas.lock();
+            cas.open_limited(&worker_hash, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
+                .map_err(|error| limited_snapshot_error(&worker_hash, error))?
+        };
+        let content_type = opened.content_type().to_string();
+        if !framable_content_type(&content_type) {
+            return Ok((
+                LoadedSnapshot::Body {
+                    data: Vec::new(),
+                    content_type,
+                },
+                permit,
+            ));
+        }
+        let (data, content_type) = opened
+            .read_limited(MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
+            .map_err(|error| limited_snapshot_error(&worker_hash, error))?;
+        let data = prepare_snapshot_body(data)?;
+        Ok::<_, ApiError>((LoadedSnapshot::Body { data, content_type }, permit))
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("archive snapshot worker failed: {error}")))??;
+
+    snapshot_response_with(snapshot, &config, Ok, Some(permit))
+}
+
+async fn run_head_inspection<T, F>(inspection: F) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(inspection)
+        .await
+        .map_err(|error| ApiError::internal(format!("archive HEAD worker failed: {error}")))?
+}
+
+#[utoipa::path(
+    head,
+    path = "/archive/view/{snapshot_hash}",
+    context_path = "/api/vault",
+    tag = "Archive",
+    params(("snapshot_hash" = String, Path, description = "Archived snapshot blob hash")),
+    responses(
+        (status = 200, description = "Archived HTML snapshot metadata"),
+        (status = 404, description = "Snapshot blob not found"),
+        (
+            status = 415,
+            description = "Blob is not an HTML snapshot",
+            headers(
+                ("X-Clepsydra-Archive-Content-Type" = String, description = "Stored snapshot media type")
+            )
+        ),
+        (status = 500, description = "Internal server error")
+    )
+)]
+pub async fn head_snapshot(
+    State(state): State<Arc<AppState>>,
+    Extension(config): Extension<ArchiveViewConfig>,
+    Path(hash): Path<String>,
+) -> Response {
+    let cas = Arc::clone(&state.cas);
+    let worker_hash = hash.clone();
+    let snapshot = run_head_inspection(move || {
+        let cas = cas.lock();
+        load_snapshot_metadata(&*cas, &worker_hash)
+    })
+    .await;
+    without_body(match snapshot {
+        Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body, None)
+            .unwrap_or_else(IntoResponse::into_response),
+        Err(error) => error.into_response(),
+    })
+}
+
 #[utoipa::path(
     get,
     path = "/cas/{hash}",
@@ -501,14 +980,32 @@ fn store_decoded_blobs(
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
+
 pub async fn serve_blob(
     State(state): State<Arc<AppState>>,
     Path(hash): Path<String>,
 ) -> Result<Response, ApiError> {
-    let cas = state.cas.lock();
-    let (data, content_type) = cas
-        .retrieve(&hash)
-        .map_err(|_| ApiError::not_found(format!("blob not found: {hash}")))?;
+    let resource_limit =
+        archive_resource_limit_bytes(state.vault.config().archive.max_blob_size_mb);
+    let permit = Arc::clone(&state.archive_resource_semaphore)
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal("archive resource service is unavailable"))?;
+    let cas = Arc::clone(&state.cas);
+    let worker_hash = hash.clone();
+    let (data, content_type, permit) = tokio::task::spawn_blocking(move || {
+        let opened = {
+            let cas = cas.lock();
+            cas.open_limited(&worker_hash, resource_limit)
+                .map_err(|error| limited_blob_error(&worker_hash, error))?
+        };
+        let (data, content_type) = opened
+            .read_limited(resource_limit)
+            .map_err(|error| limited_blob_error(&worker_hash, error))?;
+        Ok::<_, ApiError>((data, content_type, permit))
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("archive resource worker failed: {error}")))??;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -516,9 +1013,6 @@ pub async fn serve_blob(
         HeaderValue::from_str(&content_type)
             .unwrap_or_else(|_| HeaderValue::from_static(OCTET_STREAM)),
     );
-    // Blob bytes are authored by whatever page was archived. They are served
-    // from the vault's own origin, alongside an unauthenticated API, so they
-    // must never be treated as trusted same-origin content.
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static("sandbox; default-src 'none'"),
@@ -534,7 +1028,7 @@ pub async fn serve_blob(
         );
     }
 
-    Ok((StatusCode::OK, headers, data).into_response())
+    Ok((StatusCode::OK, headers, admitted_body(data, permit)).into_response())
 }
 
 #[utoipa::path(
@@ -587,6 +1081,11 @@ pub async fn ingest_archive(
         return Err(ApiError::forbidden(
             "archiving is disabled in server configuration".to_string(),
         ));
+    }
+
+    validate_http_url("url", &req.url)?;
+    if let Some(canonical_url) = req.canonical_url.as_deref() {
+        validate_http_url("canonical_url", canonical_url)?;
     }
 
     // Verify content_hash matches markdown_body (don't trust client-provided hash)
@@ -665,6 +1164,11 @@ pub async fn ingest_archive(
         max_blob_size_mb,
         max_request_size_mb,
     )?;
+
+    // Run the exact bounded GET transformation before any derived hashes, CAS
+    // references, or page/index mutations. Its output is deliberately dropped:
+    // the immutable deconstructed snapshot remains the stored source artifact.
+    validate_snapshot_renderability(&deconstructed.html)?;
 
     // The map is built from the rewritten snapshot, because it pairs each
     // `data-sf-original-src` with the `cas:` reference that just replaced that
@@ -809,6 +1313,209 @@ pub async fn ingest_archive(
 mod tests {
     use super::*;
 
+    #[test]
+    fn configured_hosts_and_ports_are_formatted_as_concrete_csp_origins() {
+        let explicit = |host: &str, port: u16, tls_enabled: bool| ServerSettings {
+            host: host.to_string(),
+            port,
+            dev_mode: false,
+            tls: crate::TlsSettings {
+                enabled: tls_enabled,
+                cert_path: None,
+                key_path: None,
+            },
+        };
+        let cases = [
+            (ServerSettings::default(), "http://localhost:16667"),
+            (
+                explicit("vault.example", 7443, true),
+                "https://vault.example:7443",
+            ),
+            (explicit("127.0.0.1", 3000, false), "http://127.0.0.1:3000"),
+            (explicit("[::1]", 7443, true), "https://[::1]:7443"),
+            (explicit("::1", 8080, false), "http://[::1]:8080"),
+        ];
+
+        for (settings, expected_origin) in cases {
+            let config = ArchiveViewConfig::from_server_settings(&settings).unwrap();
+            let policy = config.content_security_policy.to_str().unwrap();
+
+            assert_eq!(
+                policy.matches(expected_origin).count(),
+                4,
+                "CSP did not use {expected_origin:?} in every resource directive: {policy}"
+            );
+        }
+    }
+    #[tokio::test]
+    async fn archive_view_permit_stays_with_blocking_worker() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = acquire_archive_view_permit(Arc::clone(&semaphore))
+            .await
+            .unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let worker = tokio::task::spawn_blocking(move || {
+            let _permit = permit;
+            started_tx.send(()).unwrap();
+            release_rx.recv().unwrap();
+        });
+        started_rx.recv().unwrap();
+
+        let blocked = tokio::time::timeout(
+            std::time::Duration::from_millis(20),
+            acquire_archive_view_permit(Arc::clone(&semaphore)),
+        )
+        .await;
+        assert!(
+            blocked.is_err(),
+            "a concurrent working set acquired a permit"
+        );
+
+        release_tx.send(()).unwrap();
+        worker.await.unwrap();
+        let _permit = acquire_archive_view_permit(semaphore).await.unwrap();
+    }
+    #[tokio::test]
+    async fn admitted_body_holds_permit_until_body_drop() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&semaphore).acquire_owned().await.unwrap();
+        let body = admitted_body(vec![1, 2, 3], permit);
+        assert_eq!(semaphore.available_permits(), 0);
+        drop(body);
+        assert_eq!(semaphore.available_permits(), 1);
+    }
+    #[tokio::test(flavor = "current_thread")]
+    async fn head_metadata_inspection_runs_off_runtime_worker() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let worker_timed_out = Arc::clone(&timed_out);
+        let inspection = tokio::spawn(run_head_inspection(move || {
+            started_tx.send(()).unwrap();
+            if release_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .is_err()
+            {
+                worker_timed_out.store(true, Ordering::SeqCst);
+            }
+            Ok::<_, ApiError>(())
+        }));
+
+        started_rx.await.unwrap();
+        assert!(
+            !timed_out.load(Ordering::SeqCst),
+            "blocking inspection parked the current-thread runtime"
+        );
+        release_tx.send(()).unwrap();
+        inspection.await.unwrap().unwrap();
+    }
+
+    #[test]
+    fn head_snapshot_uses_metadata_without_retrieving_or_rewriting_bytes() {
+        use std::cell::Cell;
+
+        struct ProbeStore {
+            inspections: Cell<usize>,
+        }
+
+        impl SnapshotStore for ProbeStore {
+            fn inspect(
+                &self,
+                _hash: &str,
+            ) -> Result<crate::vault::cas::BlobMetadata, Box<dyn std::error::Error>> {
+                self.inspections.set(self.inspections.get() + 1);
+                Ok(crate::vault::cas::BlobMetadata {
+                    content_type: "text/html".to_string(),
+                    size: 1024,
+                })
+            }
+        }
+
+        let store = ProbeStore {
+            inspections: Cell::new(0),
+        };
+
+        let snapshot = load_snapshot_metadata(&store, "sha256:test").unwrap();
+        assert_eq!(store.inspections.get(), 1);
+
+        let rewrites = Cell::new(0);
+        let response = snapshot_response_with(
+            snapshot,
+            &ArchiveViewConfig::default(),
+            |data| {
+                rewrites.set(rewrites.get() + 1);
+                Ok(data)
+            },
+            None,
+        )
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(rewrites.get(), 0);
+    }
+
+    #[test]
+    fn head_snapshot_rejects_oversize_metadata_without_retrieving_bytes() {
+        struct OversizeStore;
+
+        impl SnapshotStore for OversizeStore {
+            fn inspect(&self, _hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
+                Ok(BlobMetadata {
+                    content_type: "text/html".to_string(),
+                    size: MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 + 1,
+                })
+            }
+        }
+
+        let store = OversizeStore;
+        let error = match load_snapshot_metadata(&store, "sha256:test") {
+            Ok(_) => panic!("oversize HEAD metadata was accepted"),
+            Err(error) => error,
+        };
+        assert_eq!(error.status, 500);
+        assert!(error.error.contains("view input limit"), "{}", error.error);
+    }
+
+    #[test]
+    fn shared_two_mib_snapshot_cap_is_exact_at_ingest_and_view_boundaries() {
+        use std::cell::Cell;
+
+        let rewrites = Cell::new(0);
+        let input_limit = MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES;
+        assert_eq!(input_limit, 2 * 1024 * 1024);
+        validate_resource_sizes(&[], input_limit, 0, 100, 250)
+            .expect("an exactly 2 MiB snapshot must be accepted at ingest");
+        let ingest_error = validate_resource_sizes(&[], input_limit + 1, 0, 100, 250)
+            .expect_err("an over-limit snapshot must be rejected at ingest");
+        assert!(ingest_error.error.contains("shared snapshot view limit"));
+        let at_limit = vec![b' '; input_limit];
+        let result = prepare_snapshot_body_with(at_limit, input_limit, |html| {
+            rewrites.set(rewrites.get() + 1);
+            assert_eq!(html.len(), input_limit);
+            Ok(html)
+        });
+        assert!(result.is_ok());
+        assert_eq!(rewrites.get(), 1);
+
+        let over_limit = vec![b' '; input_limit + 1];
+        let error = prepare_snapshot_body_with(over_limit, input_limit, |_| {
+            rewrites.set(rewrites.get() + 1);
+            Ok(Vec::new())
+        })
+        .unwrap_err();
+        assert_eq!(
+            rewrites.get(),
+            1,
+            "over-limit input reached the rewriter seam"
+        );
+        assert_eq!(error.status, 500);
+        assert!(error.error.contains("archived snapshot is corrupt"));
+        assert!(error.error.contains("view input limit"));
+        assert!(error.error.contains(&input_limit.to_string()));
+    }
+
     // ---------------------------------------------------------------------------
     // archive_body_limit_bytes tests
     // ---------------------------------------------------------------------------
@@ -833,6 +1540,20 @@ mod tests {
     fn semantic_limits_saturate_for_unrepresentable_budgets() {
         validate_resource_sizes(&[], 1, 1, u64::MAX, u64::MAX)
             .expect("unrepresentable MiB ceilings should behave as unbounded byte ceilings");
+    }
+
+    #[test]
+    fn configured_blob_limit_is_the_resource_serving_limit() {
+        let fifty_mib = 50 * 1024 * 1024;
+        let resources = vec![SnapshotResource {
+            hash: "sha256:test".to_string(),
+            bytes: vec![0; fifty_mib],
+            content_type: "video/mp4".to_string(),
+        }];
+        validate_resource_sizes(&resources, 1, 1, 100, 250)
+            .expect("a 50 MiB resource is valid under the default 100 MiB blob limit");
+        assert_eq!(archive_resource_limit_bytes(100), 100 * 1024 * 1024);
+        assert_eq!(archive_resource_concurrency(100), 2);
     }
 
     #[test]

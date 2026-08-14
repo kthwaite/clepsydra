@@ -130,6 +130,61 @@ impl Default for ServerSettings {
     }
 }
 
+impl ServerSettings {
+    /// Parse the configured host as a single CSP-safe URL host.
+    pub(crate) fn server_host_for_origin(&self) -> Result<url::Host<String>, String> {
+        let raw = self.host.as_str();
+        if raw.is_empty() {
+            return Err("server.host must not be empty".to_string());
+        }
+        if raw.contains('*') {
+            return Err(format!("server.host must not contain a wildcard: {raw}"));
+        }
+
+        let parsed_host = if let Some(inner) = raw
+            .strip_prefix('[')
+            .and_then(|host| host.strip_suffix(']'))
+        {
+            let address = inner.parse::<std::net::Ipv6Addr>().map_err(|error| {
+                format!("server.host must contain a valid host name or IP address: {raw}: {error}")
+            })?;
+            url::Host::Ipv6(address)
+        } else if raw.contains(':') {
+            let address = raw.parse::<std::net::Ipv6Addr>().map_err(|error| {
+                format!("server.host must contain a valid host name or IP address: {raw}: {error}")
+            })?;
+            url::Host::Ipv6(address)
+        } else {
+            url::Host::parse(raw).map_err(|error| {
+                format!("server.host must contain a valid host name or IP address: {raw}: {error}")
+            })?
+        };
+
+        if matches!(
+            &parsed_host,
+            url::Host::Domain(domain) if domain.contains('*')
+        ) {
+            return Err(format!(
+                "server.host must not decode to a wildcard domain: {raw}"
+            ));
+        }
+
+        if matches!(
+            &parsed_host,
+            url::Host::Ipv4(address) if address.is_unspecified()
+        ) || matches!(
+            &parsed_host,
+            url::Host::Ipv6(address) if address.is_unspecified()
+        ) {
+            return Err(format!(
+                "server.host must name a concrete browser origin, not an unspecified bind address: {raw}"
+            ));
+        }
+
+        Ok(parsed_host)
+    }
+}
+
 #[derive(Debug, Deserialize, Default)]
 pub struct TlsSettings {
     /// When true, the server will serve over HTTPS using the provided cert/key or auto-generated
@@ -486,12 +541,13 @@ async fn resolve_bind_addr(
 pub(crate) fn build_router(
     state: Arc<AppState>,
     archive_body_limit: usize,
+    archive_view_config: api::archive::ArchiveViewConfig,
     dev_mode: bool,
 ) -> Router {
     let mut app = Router::new()
         .nest(
             "/api/vault",
-            api::api_router_with_archive_limit(archive_body_limit),
+            api::api_router_with_archive_limit(archive_body_limit, archive_view_config),
         )
         .merge(api::openapi::router())
         .merge(api::deeplink::root_router());
@@ -627,6 +683,8 @@ pub async fn build_app_state_with_feeds(
     let bcl = vault::bcl::load_or_seed(vault.root());
     let location = vault::location::load_or_seed(vault.root());
 
+    let archive_resource_concurrency =
+        api::archive::archive_resource_concurrency(vault.config().archive.max_blob_size_mb);
     Ok(Arc::new(AppState {
         started_at: std::time::Instant::now(),
         clock: Arc::new(crate::api::SystemClock),
@@ -654,6 +712,10 @@ pub async fn build_app_state_with_feeds(
         feed_before_opml_parse_hook: parking_lot::Mutex::new(None),
         feed_settings: feed_settings.clone(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(
+            archive_resource_concurrency,
+        )),
         bcl,
         location: parking_lot::RwLock::new(location),
     }))
@@ -941,6 +1003,9 @@ async fn serve_with_feed_scheduler(
 pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let (state, settings) = build_server_state(overrides).await?;
+    let archive_view_config =
+        api::archive::ArchiveViewConfig::from_server_settings(&settings.server)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
     run_startup_reconcile(&state).await;
     let _watcher = spawn_sync_watcher(&state)?;
     // `max_request_size_mb` budgets DECODED resource bytes, but the request
@@ -949,7 +1014,12 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     // nothing, instead of the 400 that names the limit it exceeded.
     let archive_body_limit =
         api::archive::archive_body_limit_bytes(state.vault.config().archive.max_request_size_mb);
-    let app = build_router(state.clone(), archive_body_limit, settings.server.dev_mode);
+    let app = build_router(
+        state.clone(),
+        archive_body_limit,
+        archive_view_config,
+        settings.server.dev_mode,
+    );
     serve_with_feed_scheduler(Arc::clone(&state), serve(app, &settings)).await
 }
 
@@ -1133,13 +1203,23 @@ mod router_tests {
     #[tokio::test]
     async fn build_router_dev_mode_does_not_panic() {
         let (state, _tmp) = make_state().await;
-        let _router = build_router(state, 1024, true);
+        let _router = build_router(
+            state,
+            1024,
+            api::archive::ArchiveViewConfig::default(),
+            true,
+        );
     }
 
     #[tokio::test]
     async fn build_router_prod_mode_does_not_panic() {
         let (state, _tmp) = make_state().await;
-        let _router = build_router(state, 1024, false);
+        let _router = build_router(
+            state,
+            1024,
+            api::archive::ArchiveViewConfig::default(),
+            false,
+        );
     }
 }
 

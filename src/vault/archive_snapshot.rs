@@ -6,11 +6,14 @@
 //! seeing anything. We pull those resources back out into the CAS and leave
 //! `cas:<hash>` references behind.
 //!
-//! Everything here operates on attacker-authored markup. It executes nothing and
-//! constructs no DOM — local scanners identify the source bytes to rewrite.
+//! Everything here operates on attacker-authored markup. Resource extraction
+//! uses bounded local scans; the view security boundary uses lol_html's
+//! browser-compatible streaming tokenizer and rewriter.
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use lol_html::html_content::Element;
+use lol_html::{HtmlRewriter, MemorySettings, Settings, element};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use regex::Regex;
 use std::collections::BTreeMap;
@@ -109,22 +112,50 @@ fn content_type_of(media_type: &str) -> String {
     }
 }
 
-/// Find the end of an HTML tag, ignoring `>` inside quoted attribute values.
+/// Find the end of an HTML tag with browser-like attribute-state recovery.
+///
+/// Quotes begin values only from the before-attribute-value state. In tag
+/// names, attribute names, and unquoted values they are parse-error characters,
+/// so malformed quotes cannot swallow a following tag.
 fn html_tag_end(html: &str, start: usize) -> Option<usize> {
-    let mut quote = None;
+    #[derive(Clone, Copy)]
+    enum State {
+        AttributeName,
+        AfterAttributeName,
+        BeforeAttributeValue,
+        SingleQuotedValue,
+        DoubleQuotedValue,
+        UnquotedValue,
+    }
+
+    let mut state = State::AttributeName;
     for (offset, byte) in html.as_bytes()[start..].iter().copied().enumerate() {
-        match (quote, byte) {
-            (Some(active), current) if current == active => quote = None,
-            (None, b'\'' | b'"') => quote = Some(byte),
-            (None, b'>') => return Some(start + offset),
-            _ => {}
-        }
+        state = match (state, byte) {
+            (State::SingleQuotedValue, b'\'') | (State::DoubleQuotedValue, b'"') => {
+                State::AfterAttributeName
+            }
+            (State::SingleQuotedValue | State::DoubleQuotedValue, _) => state,
+            (_, b'>') => return Some(start + offset),
+            (State::BeforeAttributeValue, byte) if byte.is_ascii_whitespace() => state,
+            (State::BeforeAttributeValue, b'\'') => State::SingleQuotedValue,
+            (State::BeforeAttributeValue, b'"') => State::DoubleQuotedValue,
+            (State::BeforeAttributeValue, _) => State::UnquotedValue,
+            (State::AttributeName, b'=') | (State::AfterAttributeName, b'=') => {
+                State::BeforeAttributeValue
+            }
+            (State::AttributeName, byte) if byte.is_ascii_whitespace() => State::AfterAttributeName,
+            (State::AfterAttributeName, byte) if byte.is_ascii_whitespace() => state,
+            (State::AfterAttributeName, _) => State::AttributeName,
+            (State::UnquotedValue, byte) if byte.is_ascii_whitespace() => State::AttributeName,
+            _ => state,
+        };
     }
     None
 }
 
-/// Return whether a tag is closing and its ASCII-insensitive element name.
-fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
+/// Return whether a tag is closing, its ASCII-insensitive element name, and
+/// the byte where attribute recovery begins.
+fn html_tag_name(tag: &str) -> Option<(bool, &str, usize)> {
     let bytes = tag.as_bytes();
     let mut cursor = 0;
     while cursor < bytes.len() && bytes[cursor].is_ascii_whitespace() {
@@ -142,7 +173,7 @@ fn html_tag_name(tag: &str) -> Option<(bool, &str)> {
     while cursor < bytes.len() && !bytes[cursor].is_ascii_whitespace() && bytes[cursor] != b'/' {
         cursor += 1;
     }
-    (cursor > start).then_some((closing, &tag[start..cursor]))
+    (cursor > start).then_some((closing, &tag[start..cursor], cursor))
 }
 
 #[derive(Clone, Copy)]
@@ -275,12 +306,245 @@ fn resource_attributes(tag: &str) -> (Option<&str>, Option<&str>) {
     (original, hash)
 }
 
+const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
+const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
+const MATHML_NAMESPACE: &str = "http://www.w3.org/1998/Math/MathML";
+/// Deconstructed snapshots contain markup only; resource bytes have already
+/// moved to CAS. At 2 MiB, the densest selected start tag can contain at most
+/// about 1,048,573 minimal attributes. The conservative worst case is each
+/// attribute retaining lol_html's three `usize` ranges (48 bytes) and also
+/// materializing as an `Attribute` (88 bytes): about 136 MiB. Adding the
+/// 16 MiB parser arena, 2 MiB input, and at most 64 MiB rewritten output keeps
+/// the single permitted rewrite below the existing ~256 MiB admission
+/// envelope. Passes run sequentially and drop their parser state before the
+/// next pass.
+pub const ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
+const DEFAULT_REWRITER_MEMORY_BYTES: usize = 16 * 1024 * 1024;
+pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
+const MAX_NOSCRIPT_DEPTH: usize = 16;
+const REWRITER_CHUNK_BYTES: usize = 16 * 1024;
+
+fn restore_noscript(element: &mut Element<'_, '_>) -> Result<(), String> {
+    if element.namespace_uri() == HTML_NAMESPACE && element.tag_name() == "clepsydra-noscript" {
+        element
+            .set_tag_name("noscript")
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn remove_refresh_meta(element: &mut Element<'_, '_>) {
+    if element.namespace_uri() == HTML_NAMESPACE
+        && element.tag_name() == "meta"
+        && element.get_attribute("http-equiv").is_some_and(|value| {
+            decode_html_entities(&value)
+                .trim()
+                .eq_ignore_ascii_case("refresh")
+        })
+    {
+        element.remove();
+    }
+}
+
+fn remove_svg_smil(element: &mut Element<'_, '_>) {
+    if element.namespace_uri() == SVG_NAMESPACE
+        && matches!(
+            element.tag_name().as_str(),
+            "animate" | "animatecolor" | "animatemotion" | "animatetransform" | "set"
+        )
+    {
+        element.remove();
+    }
+}
+
+fn remove_link_hrefs(element: &mut Element<'_, '_>) {
+    let namespace = element.namespace_uri();
+    let tag = element.tag_name();
+    if (matches!(namespace, HTML_NAMESPACE | SVG_NAMESPACE | MATHML_NAMESPACE)
+        && matches!(tag.as_str(), "a" | "area"))
+        || tag.ends_with(":a")
+    {
+        element.remove_attribute("href");
+        element.remove_attribute("xlink:href");
+        let prefixed_hrefs = element
+            .attributes()
+            .iter()
+            .map(|attribute| attribute.name())
+            .filter(|attribute| attribute.ends_with(":href"))
+            .collect::<Vec<_>>();
+        for attribute in prefixed_hrefs {
+            element.remove_attribute(&attribute);
+        }
+    }
+}
+
+fn rewriting_error(error: impl std::fmt::Display) -> String {
+    let message = error.to_string();
+    if message.to_ascii_lowercase().contains("memory") {
+        format!("archived snapshot rewrite memory limit exceeded: {message}")
+    } else {
+        format!("archived snapshot rewrite failed: {message}")
+    }
+}
+
+pub fn neutralize_navigation_bytes(html: Vec<u8>) -> Result<Vec<u8>, String> {
+    neutralize_navigation_bytes_with_limits(
+        html,
+        DEFAULT_REWRITER_MEMORY_BYTES,
+        DEFAULT_REWRITTEN_SNAPSHOT_BYTES,
+    )
+}
+
+fn rewrite_pass(
+    html: Vec<u8>,
+    max_memory_bytes: usize,
+    max_output_bytes: usize,
+    expose_noscript: bool,
+) -> Result<(Vec<u8>, usize, usize), String> {
+    use std::cell::{Cell, RefCell};
+
+    let renamed = Cell::new(0usize);
+    let handler_calls = Cell::new(0usize);
+    let output = RefCell::new(Vec::new());
+    let output_bytes = Cell::new(0usize);
+    let sink_error = RefCell::new(None::<String>);
+    {
+        let mut settings = Settings::new()
+            .with_memory_settings(
+                MemorySettings::new()
+                    .with_preallocated_parsing_buffer_size(0)
+                    .with_max_allowed_memory_usage(max_memory_bytes),
+            )
+            .with_strict(false)
+            .with_adjust_charset_on_meta_tag(false);
+        // Keep attribute-mutating handlers narrowly selected. Calling
+        // `remove_attribute` from a universal handler materializes every
+        // attribute on benign elements and defeats the fixed input bound.
+        if expose_noscript {
+            settings = settings.append_element_content_handler(element!("noscript", |element| {
+                handler_calls.set(handler_calls.get() + 1);
+                if element.namespace_uri() == HTML_NAMESPACE {
+                    element.set_tag_name("clepsydra-noscript")?;
+                    renamed.set(renamed.get() + 1);
+                }
+                Ok(())
+            }));
+        } else {
+            settings = settings
+                .append_element_content_handler(element!("clepsydra-noscript", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    restore_noscript(element).map_err(std::io::Error::other)?;
+                    Ok(())
+                }))
+                .append_element_content_handler(element!("meta[http-equiv]", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    remove_refresh_meta(element);
+                    Ok(())
+                }))
+                .append_element_content_handler(element!(
+                    "animate, animatecolor, animatemotion, animatetransform, set",
+                    |element| {
+                        handler_calls.set(handler_calls.get() + 1);
+                        remove_svg_smil(element);
+                        Ok(())
+                    }
+                ))
+                .append_element_content_handler(element!(
+                    r#"a, area, [href], [xlink\:href]"#,
+                    |element| {
+                        handler_calls.set(handler_calls.get() + 1);
+                        remove_link_hrefs(element);
+                        Ok(())
+                    }
+                ))
+                .append_element_content_handler(element!("base", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    if element.namespace_uri() == HTML_NAMESPACE {
+                        element.remove_attribute("href");
+                        element.remove_attribute("target");
+                    }
+                    Ok(())
+                }))
+                .append_element_content_handler(element!("form[action]", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    if element.namespace_uri() == HTML_NAMESPACE {
+                        element.remove_attribute("action");
+                    }
+                    Ok(())
+                }))
+                .append_element_content_handler(element!("[formaction]", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    if element.namespace_uri() == HTML_NAMESPACE {
+                        element.remove_attribute("formaction");
+                    }
+                    Ok(())
+                }));
+        }
+        let mut rewriter = HtmlRewriter::new(settings, |chunk: &[u8]| {
+            if sink_error.borrow().is_some() {
+                return;
+            }
+            let Some(next) = output_bytes.get().checked_add(chunk.len()) else {
+                *sink_error.borrow_mut() =
+                    Some("archived snapshot rewrite output size overflow".to_string());
+                return;
+            };
+            if next > max_output_bytes {
+                *sink_error.borrow_mut() = Some(format!(
+                    "archived snapshot rewrite output limit exceeded: maximum {max_output_bytes} bytes"
+                ));
+                return;
+            }
+            let mut output = output.borrow_mut();
+            if output.try_reserve_exact(chunk.len()).is_err() {
+                *sink_error.borrow_mut() =
+                    Some("archived snapshot rewrite output allocation failed".to_string());
+                return;
+            }
+            output.extend_from_slice(chunk);
+            output_bytes.set(next);
+        });
+        for chunk in html.chunks(REWRITER_CHUNK_BYTES) {
+            rewriter.write(chunk).map_err(rewriting_error)?;
+        }
+        rewriter.end().map_err(rewriting_error)?;
+    }
+    if let Some(error) = sink_error.into_inner() {
+        return Err(error);
+    }
+    Ok((output.into_inner(), renamed.get(), handler_calls.get()))
+}
+
+fn neutralize_navigation_bytes_with_limits(
+    mut html: Vec<u8>,
+    max_memory_bytes: usize,
+    max_output_bytes: usize,
+) -> Result<Vec<u8>, String> {
+    for depth in 0..=MAX_NOSCRIPT_DEPTH {
+        let (exposed, renamed, _) = rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
+        html = exposed;
+        if renamed == 0 {
+            let (neutralized, _, _) =
+                rewrite_pass(html, max_memory_bytes, max_output_bytes, false)?;
+            return Ok(neutralized);
+        }
+        if depth == MAX_NOSCRIPT_DEPTH {
+            return Err(format!(
+                "archived snapshot noscript depth limit exceeded: maximum {MAX_NOSCRIPT_DEPTH}"
+            ));
+        }
+    }
+    unreachable!("bounded noscript exposure loop always returns")
+}
+
+pub fn neutralize_navigation(html: &str) -> Result<String, String> {
+    neutralize_navigation_bytes(html.as_bytes().to_vec())
+        .and_then(|output| String::from_utf8(output).map_err(|error| error.to_string()))
+}
 /// Absolute original URL → the hash of the blob that replaced it.
 ///
-/// Call this on the **deconstructed** snapshot: it pairs the
-/// `data-sf-original-src` SingleFile recorded with the `cas:` reference
-/// `deconstruct` left in that element's `src`. That pairing is the only link
-/// between the markdown — which still carries live URLs — and the blobs.
+/// Call this on the **deconstructed** snapshot: it pairs each original source
+/// URL with the `cas:` reference left in the same element.
 pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> {
     let mut map = BTreeMap::new();
     let mut cursor = 0;
@@ -304,7 +568,7 @@ pub fn original_url_map(html: &str, base_url: &str) -> BTreeMap<String, String> 
         }
 
         let tag = &html[open + 1..close];
-        if let Some((false, name)) = html_tag_name(tag)
+        if let Some((false, name, _)) = html_tag_name(tag)
             && let Some(inert) = inert_html_content(name)
         {
             cursor = match inert {
@@ -404,11 +668,20 @@ fn match_entity(s: &str) -> Option<(char, usize)> {
         Some(hex) => (true, hex),
         None => (false, digits_start),
     };
-    let end = digits_part.find(';')?;
-    let digits = &digits_part[..end];
-    if digits.is_empty() {
+    let digits_len = digits_part
+        .bytes()
+        .take_while(|byte| {
+            if is_hex {
+                byte.is_ascii_hexdigit()
+            } else {
+                byte.is_ascii_digit()
+            }
+        })
+        .count();
+    if digits_len == 0 {
         return None;
     }
+    let digits = &digits_part[..digits_len];
     let value = if is_hex {
         u32::from_str_radix(digits, 16).ok()?
     } else {
@@ -416,7 +689,8 @@ fn match_entity(s: &str) -> Option<(char, usize)> {
     };
     let ch = char::from_u32(value)?;
     let prefix_len = 2 + usize::from(is_hex);
-    Some((ch, prefix_len + digits.len() + 1))
+    let semicolon_len = usize::from(digits_part.as_bytes().get(digits_len) == Some(&b';'));
+    Some((ch, prefix_len + digits_len + semicolon_len))
 }
 
 /// Point every archived image in `markdown` at its blob.
@@ -1150,6 +1424,26 @@ mod tests {
     }
 
     #[test]
+    fn standards_parser_recovers_latest_malformed_attribute_bypass() {
+        let html = concat!(
+            r#"<div x=""='>"#,
+            r#"<meta http-equiv=refresh content="0;url=https://meta.example">"#,
+            r#"<img src=cas:sha256:image alt=kept>"#
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        assert!(!neutralized.contains("meta.example"), "{neutralized}");
+        assert!(
+            neutralized.contains("cas:sha256:image"),
+            "resource URL was lost: {neutralized}"
+        );
+        assert!(
+            neutralized.contains("alt=kept"),
+            "resource presentation was lost: {neutralized}"
+        );
+    }
+
+    #[test]
     fn leaves_ordinary_links_alone() {
         // A link should still point at the live web; only images become blobs.
         let map = one_entry("https://cdn.example.com/a.png", "sha256:aa");
@@ -1207,6 +1501,190 @@ mod tests {
         let out = rewrite_markdown_images(markdown, &map, "http://localhost:34989/article");
 
         assert_eq!(out, "![large relay bitmap](cas:sha256:relay)");
+    }
+
+    #[test]
+    fn neutralization_preserves_raw_content_comments_and_resources() {
+        let html = concat!(
+            r#"<style>.example::after { content: "<a href=https://live.example>"; }</style>"#,
+            r#"<textarea><form action=https://live.example></textarea>"#,
+            r#"<!-- <meta http-equiv=refresh content="0; url=https://live.example"> -->"#,
+            r#"<a href=https://remove.example>Visible</a>"#,
+            r#"<link rel=stylesheet href=cas:sha256:style>"#,
+            r#"<img src=cas:sha256:image alt=kept>"#
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        assert!(
+            neutralized
+                .contains(r#".example::after { content: "<a href=https://live.example>"; }"#)
+        );
+        assert!(neutralized.contains("<textarea>"));
+        assert!(neutralized.contains("<form action=https://live.example>"));
+        assert!(neutralized.contains("<!-- <meta http-equiv=refresh"));
+        assert!(neutralized.contains("<a>Visible</a>"));
+        assert!(neutralized.contains("href=cas:sha256:style"));
+        assert!(neutralized.contains("src=cas:sha256:image"));
+        assert!(neutralized.contains("alt=kept"));
+    }
+
+    #[test]
+    fn standards_parser_recovers_all_malformed_navigation_vectors() {
+        let malformed = [
+            r#"<meta/http-equiv=refresh content="0;url=https://solidus-meta.example">"#,
+            r#"<a/href=https://solidus-anchor.example data-label=kept>Visible solidus</a>"#,
+            r#"<!--><a href=https://empty-comment.example>Visible comment</a>"#,
+            r#"<!---><meta http-equiv=refresh content="0;url=https://abrupt-comment.example">"#,
+            r#"<!-- --!><meta http-equiv=refresh content="0;url=https://bang-comment.example">"#,
+            r#"<div a'><meta http-equiv=refresh content="0;url=https://single-quote.example">"#,
+            r#"<div a"><meta http-equiv=refresh content="0;url=https://double-quote.example">"#,
+            r#"<div x=""='><meta http-equiv=refresh content="0;url=https://latest.example">"#,
+            r#"<meta http-equiv="&#114efresh" content="0;url=https://numeric.example">"#,
+            r#"<img/src=cas:sha256:image alt=kept>"#,
+        ]
+        .join("");
+
+        let neutralized = neutralize_navigation(&malformed).unwrap();
+        for forbidden in [
+            "solidus-meta.example",
+            "solidus-anchor.example",
+            "empty-comment.example",
+            "abrupt-comment.example",
+            "bang-comment.example",
+            "single-quote.example",
+            "double-quote.example",
+            "latest.example",
+            "numeric.example",
+        ] {
+            assert!(
+                !neutralized.contains(forbidden),
+                "{forbidden:?} survived: {neutralized}"
+            );
+        }
+        assert!(neutralized.contains("Visible solidus"));
+        assert!(neutralized.contains("Visible comment"));
+        assert!(neutralized.contains("cas:sha256:image"));
+        assert!(neutralized.contains("alt=kept"));
+    }
+
+    #[test]
+    fn neutralization_matches_script_disabled_noscript_rendering() {
+        let html = concat!(
+            r#"<noscript><a href=https://noscript.example><img src=cas:sha256:noscript alt="Fallback">Fallback text</a>"#,
+            r#"<meta http-equiv=refresh content="0;url=https://refresh.example"></noscript>"#
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        assert!(!neutralized.contains("noscript.example"), "{neutralized}");
+        assert!(!neutralized.contains("refresh.example"), "{neutralized}");
+        assert!(neutralized.contains("Fallback text"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:noscript"), "{neutralized}");
+        assert!(neutralized.contains("alt=\"Fallback\""), "{neutralized}");
+    }
+
+    #[test]
+    fn neutralization_preserves_and_secures_template_contents() {
+        let html = concat!(
+            r#"<template id=captured><style>.captured { color: red }</style>"#,
+            r#"<a href=https://template.example>Template text</a>"#,
+            r#"<meta http-equiv=refresh content="0;url=https://refresh.example">"#,
+            r#"<img src=cas:sha256:template alt="Template image"></template>"#
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        assert!(!neutralized.contains("template.example"), "{neutralized}");
+        assert!(!neutralized.contains("refresh.example"), "{neutralized}");
+        assert!(neutralized.contains("<template"), "{neutralized}");
+        assert!(
+            neutralized.contains(".captured { color: red }"),
+            "{neutralized}"
+        );
+        assert!(neutralized.contains("Template text"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:template"), "{neutralized}");
+        assert!(
+            neutralized.contains("alt=\"Template image\""),
+            "{neutralized}"
+        );
+    }
+
+    #[test]
+    fn neutralization_removes_svg_smil_navigation_synthesis() {
+        let html = concat!(
+            r#"<svg><a id=target><text>Visible SVG link</text>"#,
+            r#"<animate attributeName=href values="https://one.example;https://two.example">"#,
+            r#"<set attributeName="xlink:href" to="https://set.example">"#,
+            r#"<animateTransform attributeName=href from="https://from.example" to="https://to.example">"#,
+            r#"</a><image href=cas:sha256:image></svg>"#
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        for forbidden in [
+            "<animate",
+            "<set",
+            "one.example",
+            "two.example",
+            "set.example",
+            "from.example",
+            "to.example",
+        ] {
+            assert!(!neutralized.contains(forbidden), "{neutralized}");
+        }
+        assert!(neutralized.contains("Visible SVG link"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:image"), "{neutralized}");
+    }
+
+    #[test]
+    fn benign_dense_attributes_do_not_enter_navigation_handlers() {
+        let html = format!("<div {}>Visible</div>", "data-x=x ".repeat(4096)).into_bytes();
+        let (_, renamed, handler_calls) =
+            rewrite_pass(html, 16 * 1024 * 1024, 64 * 1024 * 1024, false).unwrap();
+        assert_eq!(renamed, 0);
+        assert_eq!(handler_calls, 0);
+    }
+
+    #[test]
+    fn streaming_neutralizer_names_memory_and_output_limit_failures() {
+        let memory_error =
+            neutralize_navigation_bytes_with_limits(b"<div>visible</div>".to_vec(), 1, 1024)
+                .unwrap_err();
+        assert!(memory_error.contains("memory limit"), "{memory_error}");
+
+        let output_error =
+            neutralize_navigation_bytes_with_limits(b"<div>visible</div>".to_vec(), 1024 * 1024, 4)
+                .unwrap_err();
+        assert!(output_error.contains("output limit"), "{output_error}");
+    }
+
+    #[test]
+    fn nested_noscript_layers_are_exposed_and_neutralized() {
+        let html = concat!(
+            "<template><noscript><noscript>",
+            "<a href=https://nested.example>Nested visible</a>",
+            "<meta http-equiv=refresh content='0;url=https://refresh.example'>",
+            "<img src=cas:sha256:nested alt=Nested>",
+            "</noscript></noscript></template>"
+        );
+
+        let neutralized = neutralize_navigation(html).unwrap();
+        assert!(!neutralized.contains("nested.example"), "{neutralized}");
+        assert!(!neutralized.contains("refresh.example"), "{neutralized}");
+        assert!(neutralized.contains("Nested visible"), "{neutralized}");
+        assert!(neutralized.contains("cas:sha256:nested"), "{neutralized}");
+        assert_eq!(neutralized.matches("<noscript").count(), 2, "{neutralized}");
+    }
+
+    #[test]
+    fn nested_noscript_depth_is_bounded_before_rewrite() {
+        let too_deep = format!(
+            "{}<a href=https://deep.example>visible</a>{}",
+            "<noscript>".repeat(MAX_NOSCRIPT_DEPTH + 1),
+            "</noscript>".repeat(MAX_NOSCRIPT_DEPTH + 1)
+        );
+        let depth_error = neutralize_navigation(&too_deep).unwrap_err();
+        assert!(
+            depth_error.contains("noscript depth limit"),
+            "{depth_error}"
+        );
     }
 
     // -------------------------------------------------------------------

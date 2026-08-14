@@ -46,9 +46,7 @@ fn seed_write_transaction_at(
     phase: &str,
     files: &[(&str, &[u8], &[u8], bool)],
 ) -> PathBuf {
-    let directory = root
-        .join(".clepsydra/transactions")
-        .join(transaction_id);
+    let directory = root.join(".clepsydra/transactions").join(transaction_id);
     fs::create_dir_all(directory.join("staged")).unwrap();
     fs::create_dir_all(directory.join("rollback")).unwrap();
     fs::create_dir_all(directory.join("created")).unwrap();
@@ -58,11 +56,7 @@ fn seed_write_transaction_at(
     for (index, (path, before, after, published)) in files.iter().enumerate() {
         fs::write(root.join(path), if *published { after } else { before }).unwrap();
         fs::write(directory.join("staged").join(index.to_string()), after).unwrap();
-        fs::write(
-            directory.join("rollback").join(index.to_string()),
-            before,
-        )
-        .unwrap();
+        fs::write(directory.join("rollback").join(index.to_string()), before).unwrap();
         intents.push(serde_json::json!({
             "kind": "write",
             "path": path,
@@ -112,6 +106,9 @@ fn setup_server() -> (TestServer, TempDir) {
     init_vault(&root).unwrap();
 
     let vault = Vault::open(&root).unwrap();
+    let archive_resource_concurrency = clepsydra::api::archive::archive_resource_concurrency(
+        vault.config().archive.max_blob_size_mb,
+    );
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
     index.build(&vault).unwrap();
@@ -150,6 +147,10 @@ fn setup_server() -> (TestServer, TempDir) {
         feed_manifest_lock: tokio::sync::Mutex::new(()),
         feed_settings,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
+        archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(
+            archive_resource_concurrency,
+        )),
         bcl: None,
         location: parking_lot::RwLock::new(None),
     });
@@ -304,10 +305,18 @@ async fn transaction_recovery_restores_partially_committed_files_before_startup_
 
     let alpha_bytes = fs::read(root.join("alpha.md")).unwrap();
     assert!(alpha_bytes.ends_with(before_alpha));
-    assert!(!alpha_bytes.windows(after_alpha.len()).any(|bytes| bytes == after_alpha));
+    assert!(
+        !alpha_bytes
+            .windows(after_alpha.len())
+            .any(|bytes| bytes == after_alpha)
+    );
     let beta_bytes = fs::read(root.join("beta.md")).unwrap();
     assert!(beta_bytes.ends_with(before_beta));
-    assert!(!beta_bytes.windows(after_beta.len()).any(|bytes| bytes == after_beta));
+    assert!(
+        !beta_bytes
+            .windows(after_beta.len())
+            .any(|bytes| bytes == after_beta)
+    );
     assert!(!directory.exists());
 
     let server = server_for_state(state);
@@ -436,11 +445,8 @@ async fn transaction_recovery_failure_blocks_startup_and_reports_retained_worksp
     let root = init_production_vault(&tmp);
     let before = b"# Delta\nrollbackdelta\n";
     let after = b"# Delta\ncommitteddelta\n";
-    let directory = seed_write_transaction(
-        &root,
-        "committing",
-        &[("delta.md", before, after, true)],
-    );
+    let directory =
+        seed_write_transaction(&root, "committing", &[("delta.md", before, after, true)]);
     let external = b"# Delta\nexternaldelta\n";
     fs::write(root.join("delta.md"), external).unwrap();
 

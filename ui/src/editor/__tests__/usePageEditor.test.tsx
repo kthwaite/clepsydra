@@ -60,6 +60,24 @@ function makePage(body: string) {
   };
 }
 
+const ARCHIVE_META = {
+  blobs: [],
+  byline: "A. Writer",
+  canonical_url: "https://example.com/an-article",
+  captured_at: "2026-08-13T12:00:00Z",
+  content_hash: "content-hash",
+  description: "An archived article.",
+  domain: "example.com",
+  excerpt: "A short excerpt.",
+  lang: "en",
+  published_time: "2026-08-12T09:00:00Z",
+  resource_count: 0,
+  site_name: "Example",
+  snapshot_hash: "snapshot-hash",
+  source_hash: "source-hash",
+  url: "https://example.com/an-article",
+};
+
 function revisionConflict(currentRevision = "rev-b") {
   return {
     status: 409,
@@ -88,6 +106,26 @@ describe("usePageEditor save sequencing", () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it("exposes archive metadata from the existing page query", () => {
+    const page = makePage("A");
+    usePageMock.mockReturnValue({
+      data: {
+        ...page,
+        meta: { ...page.meta, archive: ARCHIVE_META },
+      },
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    });
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+
+    const { result } = renderHook(() =>
+      usePageEditor("archive/example.com/an-article.md"),
+    );
+
+    expect(result.current.archive).toEqual(ARCHIVE_META);
   });
 
   it("serializes overlapping saves and advances the expected revision", async () => {

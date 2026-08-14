@@ -58,6 +58,11 @@ vi.mock("@tanstack/react-router", () => ({
   }),
   useNavigate: () => routeMocks.navigate,
   useLocation: () => ({ pathname: "/feeds" }),
+  useRouterState: ({
+    select,
+  }: {
+    select: (state: { matches: unknown[] }) => unknown;
+  }) => select({ matches: [{ staticData: { codexView: "feeds" } }] }),
 }));
 
 vi.mock("#/hooks/useMobileLayout", () => ({

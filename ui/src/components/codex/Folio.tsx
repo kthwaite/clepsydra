@@ -1,4 +1,9 @@
-import { useBlocker, useNavigate, useRouter } from "@tanstack/react-router";
+import {
+  Link,
+  useBlocker,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router";
 import {
   lazy,
   Suspense,
@@ -24,6 +29,7 @@ import {
   useSimilar,
   useTagSuggestions,
 } from "#/api/index";
+import type { PageMeta } from "#/api/types";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { useAssignPage } from "#/api/pages";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
@@ -953,6 +959,7 @@ export function Folio({ tabId, path }: FolioProps) {
           tags={effectiveTags}
           aliases={editor.aliases}
           encrypted={encrypted}
+          archive={bodyProtected ? editor.archive : null}
         />
       ) : (
         <div className="mt-4">
@@ -1621,12 +1628,14 @@ function ReadOnlyPageHeader({
   title,
   tags,
   aliases,
+  archive,
   encrypted,
 }: {
   path: string;
   title: string;
   tags: string[];
   aliases: string[];
+  archive: NonNullable<PageMeta["archive"]> | null;
   encrypted: boolean;
 }) {
   const displayTitle = title || path.split("/").pop() || path;
@@ -1641,6 +1650,15 @@ function ReadOnlyPageHeader({
         </span>
       ) : null}
       <h1 className="w-full font-heading text-2xl font-bold">{displayTitle}</h1>
+      {archive?.snapshot_hash ? (
+        <Link
+          to="/archive/$"
+          params={{ _splat: path }}
+          className="cl-mono mt-2 inline-block text-[10px] uppercase tracking-[0.14em] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+        >
+          View archived snapshot
+        </Link>
+      ) : null}
       <dl className="cl-mono mt-2 grid gap-2 text-[10px]">
         <div className="flex flex-wrap items-baseline gap-2">
           <dt className="uppercase tracking-[0.12em] text-ink-mute">Tags</dt>
