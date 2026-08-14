@@ -31,10 +31,11 @@ import type {
 	ExtensionSettings,
 } from "#/lib/types";
 import { DEFAULT_SETTINGS } from "#/lib/types";
+import { webext } from "#/lib/webext";
 
 /** Load settings from browser.storage.sync */
 async function loadSettings(): Promise<ExtensionSettings> {
-	const stored = await chrome.storage.sync.get("settings");
+	const stored = await webext.storage.sync.get("settings");
 	return { ...DEFAULT_SETTINGS, ...stored.settings };
 }
 
@@ -171,7 +172,7 @@ function describeConflict(title: string, err: ArchiveConflictError): string {
 }
 
 function showNotification(title: string, message: string): void {
-	const notifications = chrome.notifications;
+	const notifications = webext.notifications;
 	if (!notifications?.create) return;
 
 	try {
@@ -181,7 +182,7 @@ function showNotification(title: string, message: string): void {
 		void Promise.resolve(
 			notifications.create({
 				type: "basic",
-				iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+				iconUrl: webext.runtime.getURL("icons/icon-128.png"),
 				title,
 				message,
 			}),
@@ -193,7 +194,7 @@ function showNotification(title: string, message: string): void {
 	}
 }
 
-const legacyChrome = chrome as typeof chrome & {
+const legacyWebext = webext as typeof chrome & {
 	browserAction?: LegacyToolbarActionApi;
 };
 
@@ -207,7 +208,7 @@ interface ToolbarBadgeApi {
 }
 
 function badgeApi(): ToolbarBadgeApi | undefined {
-	const api = chrome.action ?? legacyChrome.browserAction;
+	const api = webext.action ?? legacyWebext.browserAction;
 	return api as unknown as ToolbarBadgeApi | undefined;
 }
 
@@ -244,7 +245,7 @@ interface AttemptClaim {
 const statuses = new Map<number, CaptureStatus>();
 const captureAttempts = new Map<string, CaptureAttempt>();
 const recentAborts = new Map<number, RecentAbort>();
-const sessionStatusStorage = chrome.storage.session as unknown as
+const sessionStatusStorage = webext.storage.session as unknown as
 	| SessionStatusStorage
 	| undefined;
 let persistenceTail: Promise<void> = Promise.resolve();
@@ -517,7 +518,7 @@ function bindCaptureToCurrentAttempt(
  */
 function keepServiceWorkerAlive(): void {
 	try {
-		void Promise.resolve(chrome.runtime.getPlatformInfo()).catch(() => {});
+		void Promise.resolve(webext.runtime.getPlatformInfo()).catch(() => {});
 	} catch {
 		// ignored
 	}
@@ -547,7 +548,7 @@ const pendingTransfers = new PendingTransferCoordinator<CaptureMetadata>({
 });
 
 const singleFileRuntime = new SingleFileRuntime((tabId, message, options) =>
-	chrome.tabs.sendMessage(tabId, message, options),
+	webext.tabs.sendMessage(tabId, message, options),
 );
 
 type WorkerMessage =
@@ -580,7 +581,7 @@ async function fetchTabAndInject(
 	attemptId: string,
 ): Promise<void> {
 	try {
-		const tab = await chrome.tabs.get(tabId);
+		const tab = await webext.tabs.get(tabId);
 		await injectClaimedCapture(tab, attemptId);
 	} catch (err) {
 		const reason = err instanceof Error ? err.message : String(err);
@@ -723,13 +724,13 @@ function respondWhenReady(
 	return true;
 }
 
-chrome.runtime.onConnect.addListener((port) => {
+webext.runtime.onConnect.addListener((port) => {
 	if (port.name === RELAY_PORT_NAME) {
 		handleRelayFetchPort(port);
 	}
 });
 
-chrome.runtime.onMessage.addListener(
+webext.runtime.onMessage.addListener(
 	(
 		message: unknown,
 		sender: chrome.runtime.MessageSender,
@@ -755,7 +756,7 @@ chrome.runtime.onMessage.addListener(
 	},
 );
 
-chrome.tabs.onRemoved?.addListener((tabId) => {
+webext.tabs.onRemoved?.addListener((tabId) => {
 	pendingTransfers.removeTab(tabId);
 	singleFileRuntime.removeTab(tabId);
 	recentAborts.delete(tabId);
@@ -768,18 +769,20 @@ chrome.tabs.onRemoved?.addListener((tabId) => {
 	});
 });
 
-const toolbarAction = chrome.action ?? legacyChrome.browserAction;
+const toolbarAction = webext.action ?? legacyWebext.browserAction;
 if (toolbarAction?.onClicked) {
 	toolbarAction.onClicked.addListener((tab) => {
 		void beginCaptureForTab(tab);
 	});
 }
 
-chrome.commands.onCommand.addListener((command) => {
+webext.commands.onCommand.addListener((command) => {
 	if (command === "capture-page") {
-		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-			const tab = tabs[0];
-			if (tab) void beginCaptureForTab(tab);
-		});
+		void webext.tabs
+			.query({ active: true, currentWindow: true })
+			.then((tabs) => {
+				const tab = tabs[0];
+				if (tab) void beginCaptureForTab(tab);
+			});
 	}
 });

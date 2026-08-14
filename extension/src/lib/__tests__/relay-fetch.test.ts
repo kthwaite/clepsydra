@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import {
-	type RelayPort,
-	createRelayFetch,
-	handleRelayFetchPort,
+import type {
+	RelayPort,
+	createRelayFetch as CreateRelayFetchValue,
+	handleRelayFetchPort as HandleRelayFetchPortValue,
 } from "#/lib/relay-fetch";
+
+type CreateRelayFetch = typeof CreateRelayFetchValue;
+type HandleRelayFetchPort = typeof HandleRelayFetchPortValue;
+
+let createRelayFetch: CreateRelayFetch;
+let handleRelayFetchPort: HandleRelayFetchPort;
 
 class FakeEvent<TArgs extends unknown[]> {
 	private readonly listeners = new Set<(...args: TArgs) => void>();
@@ -134,12 +140,46 @@ async function expectPortsReleased(
 }
 
 describe("createRelayFetch", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
+		vi.resetModules();
 		vi.unstubAllGlobals();
+		vi.stubGlobal("chrome", { runtime: {} });
+		vi.stubGlobal("browser", undefined);
+		// The boundary is intentionally reloaded after its namespace global is set.
+		const relay = await import("#/lib/relay-fetch");
+		createRelayFetch = relay.createRelayFetch;
+		handleRelayFetchPort = relay.handleRelayFetchPort;
 	});
 
 	afterEach(() => {
 		vi.useRealTimers();
+	});
+
+	it("uses browser runtime.connect when chrome is absent", async () => {
+		vi.resetModules();
+		vi.unstubAllGlobals();
+		const ports = pairedPorts();
+		let browserHandleRelayFetchPort: HandleRelayFetchPort;
+		const workerFetch = vi
+			.fn()
+			.mockResolvedValue(response(new Uint8Array([7, 8])));
+		const connect = vi.fn(() => {
+			browserHandleRelayFetchPort(ports.worker, workerFetch);
+			return ports.content;
+		});
+		vi.stubGlobal("browser", { runtime: { connect } });
+		vi.stubGlobal("chrome", undefined);
+		// The boundary is intentionally reloaded after its namespace global is set.
+		const relay = await import("#/lib/relay-fetch");
+		browserHandleRelayFetchPort = relay.handleRelayFetchPort;
+		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("CORS")));
+
+		const result = await relay.createRelayFetch()("https://cdn.example.com/a.png");
+
+		expect(new Uint8Array(await result.arrayBuffer())).toEqual(
+			new Uint8Array([7, 8]),
+		);
+		expect(connect).toHaveBeenCalledWith({ name: "singlefile-relay" });
 	});
 
 	it("uses the page fetch first with its existing options", async () => {

@@ -11,6 +11,7 @@
  * capture happens in the browser at all.
  */
 
+import { webext } from "#/lib/webext";
 import { SNAPSHOT_NETWORK_TIMEOUT_MS } from "#/lib/singlefile";
 
 export const RELAY_PORT_NAME = "singlefile-relay";
@@ -264,7 +265,7 @@ export function createRelayFetch(
 
 		const port = connect
 			? connect({ name: RELAY_PORT_NAME })
-			: (chrome.runtime.connect as unknown as RelayConnect)({
+			: (webext.runtime.connect as unknown as RelayConnect)({
 					name: RELAY_PORT_NAME,
 				});
 

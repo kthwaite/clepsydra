@@ -57,6 +57,7 @@ interface WorkerOptions {
 	settings?: Partial<ExtensionSettings>;
 	tabsGet?: Mock;
 	notifications?: NotificationBehavior;
+	namespace?: "browser" | "chrome";
 }
 
 const metadata = {
@@ -127,7 +128,7 @@ async function loadWorker(
 		},
 	);
 
-	vi.stubGlobal("chrome", {
+	const api = {
 		runtime: {
 			onMessage: {
 				addListener: (next: WorkerListener) => {
@@ -163,7 +164,10 @@ async function loadWorker(
 			onClicked: { addListener: vi.fn() },
 		},
 		commands: { onCommand: { addListener: vi.fn() } },
-	});
+	};
+	const namespace = options.namespace ?? "chrome";
+	vi.stubGlobal(namespace, api);
+	vi.stubGlobal(namespace === "chrome" ? "browser" : "chrome", undefined);
 
 	await import("./service-worker");
 	if (!listener) throw new Error("service worker did not register a listener");
@@ -256,6 +260,10 @@ afterEach(() => {
 });
 
 describe("service-worker capture feedback", () => {
+	it("loads with only the browser namespace", async () => {
+		await expect(loadWorker({ namespace: "browser" })).resolves.toBeDefined();
+	});
+
 	it("claims capturing before injection and returns the structured attempt", async () => {
 		const injection = deferred<void>();
 		dependencies.executeCaptureScript.mockReturnValueOnce(injection.promise);

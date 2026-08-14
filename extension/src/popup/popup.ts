@@ -6,6 +6,7 @@ import {
 } from "#/lib/badge";
 import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
 import { DEFAULT_SETTINGS } from "#/lib/types";
+import { webext } from "#/lib/webext";
 
 const POLL_INTERVAL_MS = 250;
 const STATUS_TRANSPORT_ERROR =
@@ -15,12 +16,9 @@ interface CaptureStatusResponse {
 	status: CaptureStatus | null;
 }
 
-function activeTab(): Promise<chrome.tabs.Tab | undefined> {
-	return new Promise((resolve) => {
-		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-			resolve(tabs[0]);
-		});
-	});
+async function activeTab(): Promise<chrome.tabs.Tab | undefined> {
+	const tabs = await webext.tabs.query({ active: true, currentWindow: true });
+	return tabs[0];
 }
 
 function isStatusResponse(value: unknown): value is CaptureStatusResponse {
@@ -30,7 +28,7 @@ function isStatusResponse(value: unknown): value is CaptureStatusResponse {
 async function requestCaptureStatus(
 	tabId: number,
 ): Promise<CaptureStatus | null> {
-	const response: unknown = await chrome.runtime.sendMessage({
+	const response: unknown = await webext.runtime.sendMessage({
 		type: "capture_status",
 		tabId,
 	});
@@ -41,7 +39,7 @@ async function requestCaptureStatus(
 }
 
 async function requestCaptureStart(tabId: number): Promise<CaptureStatus> {
-	const response: unknown = await chrome.runtime.sendMessage({
+	const response: unknown = await webext.runtime.sendMessage({
 		type: "capture_start",
 		tabId,
 	});
@@ -178,12 +176,12 @@ function init(): void {
 	});
 	optionsLink.addEventListener("click", (event) => {
 		event?.preventDefault();
-		chrome.runtime.openOptionsPage();
+		webext.runtime.openOptionsPage();
 	});
 
 	void (async () => {
 		const openingGeneration = captureUiGeneration;
-		const stored = await chrome.storage.sync.get("settings");
+		const stored = await webext.storage.sync.get("settings");
 		if (stopped) return;
 		const settings = { ...DEFAULT_SETTINGS, ...stored.settings };
 		const client = new ClepsydraClient(settings.server_url);

@@ -54,6 +54,7 @@ interface PopupOptions {
 	starts?: StartOutcome[];
 	tabs?: TabOutcome[];
 	storage?: Promise<Record<string, unknown>>;
+	namespace?: "browser" | "chrome";
 }
 
 interface PopupHarness {
@@ -137,15 +138,16 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 			if (type === "unload") unload = listener;
 		},
 	});
-	vi.stubGlobal("chrome", {
+	const api = {
 		storage: {
 			sync: { get: vi.fn(() => options.storage ?? Promise.resolve({})) },
 		},
 		tabs: {
-			query: vi.fn((_query: unknown, callback: (tabs: TestTab[]) => void) => {
-				const outcome = tabOutcomes[Math.min(tabQuery, tabOutcomes.length - 1)];
+			query: vi.fn(async () => {
+				const outcome =
+					tabOutcomes[Math.min(tabQuery, tabOutcomes.length - 1)];
 				tabQuery += 1;
-				void Promise.resolve(outcome).then(callback);
+				return outcome;
 			}),
 		},
 		runtime: {
@@ -153,7 +155,10 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 			openOptionsPage: vi.fn(),
 		},
 		scripting: { executeScript: scripting },
-	});
+	};
+	const namespace = options.namespace ?? "chrome";
+	vi.stubGlobal(namespace, api);
+	vi.stubGlobal(namespace === "chrome" ? "browser" : "chrome", undefined);
 
 	// Opening a popup is the module boundary; a static import cannot reload it.
 	await import("./popup");
@@ -173,6 +178,12 @@ afterEach(() => {
 });
 
 describe("popup capture feedback", () => {
+	it("loads and queries the active tab with only the browser namespace", async () => {
+		const popup = await openPopup({ namespace: "browser" });
+
+		expect(popup.messages).toContainEqual({ type: "capture_status", tabId: 7 });
+	});
+
 	it("binds capture before an unresolved connectivity probe completes", async () => {
 		let resolveReachability!: (reachable: boolean) => void;
 		client.isReachable.mockReturnValueOnce(

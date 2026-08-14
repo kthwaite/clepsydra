@@ -18,27 +18,44 @@ const distDir = resolve(process.argv[2] ?? "dist");
 const workerPath = resolve(distDir, "background/service-worker.js");
 
 const failures = [];
-const listeners = [];
+const namespaceResults = [];
+const expectedListeners = [
+	"runtime.onMessage",
+	"runtime.onConnect",
+	"action.onClicked",
+	"commands.onCommand",
+	"tabs.onRemoved",
+];
 
-function listenerStub(name) {
+function listenerStub(name, listeners) {
 	return { addListener: (fn) => listeners.push({ name, fn }) };
 }
 
-globalThis.chrome = {
-	runtime: {
-		onMessage: listenerStub("runtime.onMessage"),
-		onConnect: listenerStub("runtime.onConnect"),
-		getPlatformInfo: async () => ({ os: "mac" }),
-		openOptionsPage: () => {},
-		lastError: undefined,
-	},
-	action: { onClicked: listenerStub("action.onClicked") },
-	commands: { onCommand: listenerStub("commands.onCommand") },
-	tabs: { query: () => {}, onRemoved: listenerStub("tabs.onRemoved") },
-	scripting: { executeScript: async () => [] },
-	storage: { sync: { get: async () => ({}), set: async () => {} } },
-	notifications: { create: () => {} },
-};
+function createApi(listeners) {
+	return {
+		runtime: {
+			onMessage: listenerStub("runtime.onMessage", listeners),
+			onConnect: listenerStub("runtime.onConnect", listeners),
+			getPlatformInfo: async () => ({ os: "mac" }),
+			openOptionsPage: () => {},
+			lastError: undefined,
+		},
+		action: { onClicked: listenerStub("action.onClicked", listeners) },
+		commands: { onCommand: listenerStub("commands.onCommand", listeners) },
+		tabs: {
+			query: () => {},
+			onRemoved: listenerStub("tabs.onRemoved", listeners),
+		},
+		scripting: { executeScript: async () => [] },
+		storage: { sync: { get: async () => ({}), set: async () => {} } },
+		notifications: { create: () => {} },
+	};
+}
+
+const namespaceCases = [
+	{ name: "chrome-only", install: (api) => ({ chrome: api }) },
+	{ name: "browser-only", install: (api) => ({ browser: api }) },
+];
 
 // A service worker has none of these. Fail loudly if the bundle needs them.
 for (const name of ["document", "DOMParser", "window", "require"]) {
@@ -57,16 +74,31 @@ if (/\brequire\s*\(/.test(source)) {
 	);
 }
 
-try {
-	await import(pathToFileURL(workerPath).href);
-} catch (error) {
-	failures.push(`worker failed to load: ${error}`);
-}
+for (const namespaceCase of namespaceCases) {
+	const listeners = [];
+	Reflect.deleteProperty(globalThis, "browser");
+	Reflect.deleteProperty(globalThis, "chrome");
+	Object.assign(globalThis, namespaceCase.install(createApi(listeners)));
+	try {
+		const workerUrl = pathToFileURL(workerPath);
+		workerUrl.searchParams.set("namespace", namespaceCase.name);
+		await import(workerUrl.href);
+	} catch (error) {
+		failures.push(`${namespaceCase.name}: worker failed to load: ${error}`);
+	}
 
-if (listeners.length === 0 && failures.length === 0) {
-	failures.push(
-		"worker loaded but registered no listeners — module init did not complete",
-	);
+	const listenerNames = listeners.map((listener) => listener.name);
+	if (
+		listenerNames.length !== expectedListeners.length ||
+		expectedListeners.some((name) => !listenerNames.includes(name))
+	) {
+		failures.push(
+			`${namespaceCase.name}: expected exactly five worker listeners ` +
+				`(${expectedListeners.join(", ")}), got ${listenerNames.length} ` +
+				`(${listenerNames.join(", ")})`,
+		);
+	}
+	namespaceResults.push({ name: namespaceCase.name, listeners });
 }
 
 // The content script is an IIFE for a page context, so it cannot be imported
@@ -161,7 +193,10 @@ if (failures.length > 0) {
 	process.exit(1);
 }
 
-console.log(
-	`✓ ${workerPath} loads with no DOM; registered ${listeners.length} listeners ` +
-		`(${listeners.map((l) => l.name).join(", ")})`,
-);
+for (const result of namespaceResults) {
+	console.log(
+		`✓ ${workerPath} loads with no DOM in ${result.name}; registered ` +
+			`${result.listeners.length} listeners ` +
+			`(${result.listeners.map((listener) => listener.name).join(", ")})`,
+	);
+}
