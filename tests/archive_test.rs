@@ -1,5 +1,6 @@
 mod support;
 
+use std::fs;
 use std::sync::Arc;
 
 use axum::Router;
@@ -15,6 +16,8 @@ use clepsydra::api::events::SyncNotification;
 use clepsydra::api::{AppState, api_router_with_archive_limit};
 use clepsydra::vault::archive_hook::ArchiveDeleteHook;
 use clepsydra::vault::hooks::PostDeleteHook;
+use clepsydra::vault::index::ArchiveUrlOwner;
+use clepsydra::vault::rubbish::{RubbishManifest, RubbishStore};
 use clepsydra::{ServerSettings, TlsSettings};
 use tempfile::TempDir;
 
@@ -226,6 +229,32 @@ fn archive_url_payload(url: &str, canonical_url: Option<&str>) -> serde_json::Va
         "markdown_body": body,
         "tags": ["archive"],
     })
+}
+
+fn publish_rubbish_archive(
+    root: &std::path::Path,
+    item_id: &str,
+    page_id: &str,
+    original_path: &str,
+    url: &str,
+) {
+    let store = RubbishStore::new(root.join(".clepsydra/rubbish"));
+    let manifest = RubbishManifest::new(
+        uuid::Uuid::parse_str(item_id).unwrap(),
+        uuid::Uuid::parse_str(page_id).unwrap(),
+        original_path,
+        "Binned Archive",
+        "ARCHIVE",
+        "2026-08-13T12:00:00Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap(),
+        Some(url.to_owned()),
+    )
+    .unwrap();
+    let mut prepared = store
+        .prepare_item(item_id, &manifest, b"stored rubbish archive bytes")
+        .unwrap();
+    prepared.publish().unwrap();
 }
 
 fn nested_noscript_payload(url: &str, title: &str, depth: usize) -> serde_json::Value {
@@ -529,6 +558,98 @@ async fn archive_duplicate_url_different_content_returns_409() {
 
     let res2 = server.post("/api/vault/archive").json(&payload2).await;
     assert_eq!(res2.status_code(), StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn archive_url_rubbish_catalog_startup_reserves_without_request_time_manifest_scan() {
+    const ITEM_ID: &str = "00000000-0000-4000-8000-000000000041";
+    const PAGE_ID: &str = "10000000-0000-4000-8000-000000000041";
+    const ORIGINAL_PATH: &str = "archive/example.com/binned.md";
+    const URL: &str = "https://example.com/binned";
+
+    let (server, tmp, state) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            publish_rubbish_archive(root, ITEM_ID, PAGE_ID, ORIGINAL_PATH, URL);
+        })
+        .build()
+        .into_parts();
+    let owner = state
+        .index
+        .with_index(|index, _vault| index.find_by_archive_url(URL))
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        owner,
+        ArchiveUrlOwner::Rubbish {
+            item_id: ITEM_ID.to_owned(),
+            page_id: PAGE_ID.to_owned(),
+            original_path: ORIGINAL_PATH.to_owned(),
+        }
+    );
+
+    fs::remove_dir_all(tmp.path().join("vault/.clepsydra/rubbish")).unwrap();
+    let before = state.cas.lock().stats().unwrap();
+    let response = server
+        .post("/api/vault/archive")
+        .json(&archive_url_payload(URL, None))
+        .await;
+
+    response.assert_status(StatusCode::OK);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], "already_exists");
+    assert_eq!(body["page_id"], PAGE_ID);
+    assert_eq!(body["vault_path"], ORIGINAL_PATH);
+    assert_eq!(body["rubbish_item_id"], ITEM_ID);
+    let after = state.cas.lock().stats().unwrap();
+    assert_eq!(after.blob_count, before.blob_count);
+    assert_eq!(after.total_size_bytes, before.total_size_bytes);
+}
+
+#[tokio::test]
+async fn archive_url_rubbish_catalog_explicit_index_rebuild_reconciles_new_items() {
+    const ITEM_ID: &str = "00000000-0000-4000-8000-000000000042";
+    const PAGE_ID: &str = "10000000-0000-4000-8000-000000000042";
+    const ORIGINAL_PATH: &str = "archive/example.com/rebuild.md";
+    const URL: &str = "https://example.com/rebuild";
+
+    let (server, tmp, state) = ApiFixture::builder().build().into_parts();
+    publish_rubbish_archive(
+        &tmp.path().join("vault"),
+        ITEM_ID,
+        PAGE_ID,
+        ORIGINAL_PATH,
+        URL,
+    );
+    assert!(
+        state
+            .index
+            .with_index(|index, _vault| index.find_by_archive_url(URL))
+            .await
+            .unwrap()
+            .unwrap()
+            .is_none()
+    );
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status(StatusCode::OK);
+    let owner = state
+        .index
+        .with_index(|index, _vault| index.find_by_archive_url(URL))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        owner,
+        Some(ArchiveUrlOwner::Rubbish {
+            item_id: ITEM_ID.to_owned(),
+            page_id: PAGE_ID.to_owned(),
+            original_path: ORIGINAL_PATH.to_owned(),
+        })
+    );
 }
 
 #[tokio::test]

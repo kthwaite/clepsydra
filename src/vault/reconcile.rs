@@ -1,6 +1,6 @@
-//! Reconcile: move drifted pages to their projected folder via the MovePage
-//! planner. Idempotent and conservative (see projection.rs). Never called from
-//! the read-only index build — only from serve startup, LSP save, and assign.
+//! Reconciliation boundaries for projected page locations and the rebuildable
+//! rubbish catalog. Page relocation remains serve/LSP/assign-only; catalog
+//! reconciliation reads lifecycle manifests during index builds.
 
 use super::Vault;
 use super::hooks::PostMoveHook;
@@ -10,6 +10,17 @@ use super::mutation_coordinator::MutationCoordinator;
 use super::page::Page;
 use super::path::VaultPath;
 use super::projection::project_path;
+use super::rubbish::RubbishStore;
+
+/// Rebuild the SQLite rubbish catalog from the authoritative store without
+/// constructing or reading any internal item path directly.
+pub fn reconcile_rubbish_catalog(
+    vault: &Vault,
+    index: &mut VaultIndex,
+) -> Result<(), IndexError> {
+    let store = RubbishStore::for_vault(vault.root());
+    index.reconcile_rubbish_catalog(&store)
+}
 
 /// Reconcile a single page. Returns `Some(new_path)` if it was moved, else
 /// `None`. Reads declared kind/project from the file's frontmatter. `hooks`

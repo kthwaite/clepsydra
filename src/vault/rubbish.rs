@@ -153,6 +153,11 @@ impl RubbishStore {
         }
     }
 
+    /// Open the authoritative rubbish store beneath a vault root.
+    pub fn for_vault(vault_root: impl AsRef<Path>) -> Self {
+        Self::new(vault_root.as_ref().join(".clepsydra/rubbish"))
+    }
+
     pub fn prepare_item(
         &self,
         item_id: &str,
@@ -210,7 +215,9 @@ impl RubbishStore {
         })
     }
 
-    pub fn read_item(&self, item_id: &str) -> Result<RubbishItem, RubbishStoreError> {
+    /// Read and validate one item's manifest and physical layout without
+    /// loading its page payload.
+    pub fn read_manifest(&self, item_id: &str) -> Result<RubbishManifest, RubbishStoreError> {
         let parsed_item_id =
             parse_item_id(item_id).map_err(|error| RubbishStoreError::invalid(item_id, error))?;
         self.validate_root_if_present()?;
@@ -244,9 +251,14 @@ impl RubbishStore {
                 },
             ));
         }
+        validate_physical_item_file(&self.page_path(parsed_item_id), item_id, "rubbish page")?;
+        Ok(manifest)
+    }
 
+    pub fn read_item(&self, item_id: &str) -> Result<RubbishItem, RubbishStoreError> {
+        let manifest = self.read_manifest(item_id)?;
         let bytes =
-            read_physical_item_file(&self.page_path(parsed_item_id), item_id, "rubbish page")?;
+            read_physical_item_file(&self.page_path(manifest.item_id), item_id, "rubbish page")?;
         Ok(RubbishItem { manifest, bytes })
     }
 
@@ -292,8 +304,8 @@ impl RubbishStore {
                 });
                 continue;
             }
-            match self.read_item(&item_id) {
-                Ok(item) => entries.push(RubbishListEntry::Valid(item.manifest)),
+            match self.read_manifest(&item_id) {
+                Ok(manifest) => entries.push(RubbishListEntry::Valid(manifest)),
                 Err(error) => entries.push(RubbishListEntry::Invalid {
                     item_id,
                     error: error.to_string(),
@@ -485,11 +497,11 @@ fn compare_list_entries(left: &RubbishListEntry, right: &RubbishListEntry) -> Or
         ) => left.cmp(right),
     }
 }
-fn read_physical_item_file(
+fn validate_physical_item_file(
     path: &Path,
     item_id: &str,
     description: &'static str,
-) -> Result<Vec<u8>, RubbishStoreError> {
+) -> Result<(), RubbishStoreError> {
     let metadata = fs::symlink_metadata(path).map_err(|source| {
         RubbishStoreError::filesystem("inspect rubbish item file", path, source)
     })?;
@@ -501,6 +513,15 @@ fn read_physical_item_file(
             },
         ));
     }
+    Ok(())
+}
+
+fn read_physical_item_file(
+    path: &Path,
+    item_id: &str,
+    description: &'static str,
+) -> Result<Vec<u8>, RubbishStoreError> {
+    validate_physical_item_file(path, item_id, description)?;
     fs::read(path)
         .map_err(|source| RubbishStoreError::filesystem("read rubbish item file", path, source))
 }
@@ -917,6 +938,30 @@ mod tests {
             RubbishListEntry::Invalid { item_id, error }
                 if item_id == "broken-entry" && error.contains("invalid rubbish item ID")
         ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rubbish_catalog_enumeration_does_not_read_page_payloads() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("rubbish");
+        let store = RubbishStore::new(&root);
+        let item_id = uuid("00000000-0000-4000-8000-000000000001");
+        let item_id_string = item_id.to_string();
+        let expected = manifest(item_id, timestamp("2026-08-13T00:00:00Z"));
+        let mut prepared = store
+            .prepare_item(&item_id_string, &expected, b"catalog must not read this")
+            .unwrap();
+        prepared.publish().unwrap();
+        let page_path = root.join(&item_id_string).join("page.md");
+        fs::set_permissions(&page_path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        assert_eq!(
+            store.list_entries().unwrap(),
+            vec![RubbishListEntry::Valid(expected)]
+        );
     }
 
     #[test]

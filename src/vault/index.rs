@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use chrono::Utc;
+use chrono::{SecondsFormat, Utc};
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use thiserror::Error;
 use uuid::Uuid;
@@ -23,6 +23,7 @@ use super::link::{Link, extract_links, extract_property_refs};
 use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
 use super::reference_issues::{ReferenceIssueFilter, ReferenceIssuePage};
+use super::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 
 // ---------------------------------------------------------------------------
 // IndexError
@@ -122,6 +123,21 @@ pub struct SearchResult {
     pub rank: f64,
 }
 
+/// Lifecycle location that currently reserves a captured-archive URL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ArchiveUrlOwner {
+    Active {
+        page_id: String,
+        path: String,
+        source_hash: String,
+    },
+    Rubbish {
+        item_id: String,
+        page_id: String,
+        original_path: String,
+    },
+}
+
 // ---------------------------------------------------------------------------
 // BuildStats
 // ---------------------------------------------------------------------------
@@ -158,6 +174,39 @@ CREATE TABLE IF NOT EXISTS pages (
     encrypted       INTEGER NOT NULL DEFAULT 0,
     word_count      INTEGER
 );
+
+CREATE TABLE IF NOT EXISTS rubbish_items (
+    item_id         TEXT PRIMARY KEY,
+    page_id         TEXT,
+    original_path   TEXT,
+    title           TEXT,
+    kind            TEXT,
+    deleted_at      TEXT,
+    archive_url     TEXT,
+    valid           INTEGER NOT NULL CHECK (valid IN (0, 1)),
+    diagnostic      TEXT,
+    CHECK (
+        (valid = 1
+            AND page_id IS NOT NULL
+            AND original_path IS NOT NULL
+            AND title IS NOT NULL
+            AND kind IS NOT NULL
+            AND deleted_at IS NOT NULL
+            AND diagnostic IS NULL)
+        OR
+        (valid = 0
+            AND page_id IS NULL
+            AND original_path IS NULL
+            AND title IS NULL
+            AND kind IS NULL
+            AND deleted_at IS NULL
+            AND archive_url IS NULL
+            AND diagnostic IS NOT NULL)
+    )
+);
+
+CREATE INDEX IF NOT EXISTS idx_rubbish_items_archive_url
+ON rubbish_items(archive_url) WHERE valid = 1 AND archive_url IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS canonical_names (
     canonical_name  TEXT NOT NULL,
@@ -298,6 +347,111 @@ pub fn reserve_code_number(
     Ok(reserved)
 }
 
+const RUBBISH_UPSERT: &str = "
+    INSERT INTO rubbish_items
+        (item_id, page_id, original_path, title, kind, deleted_at,
+         archive_url, valid, diagnostic)
+    VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+    ON CONFLICT(item_id) DO UPDATE SET
+        page_id = excluded.page_id,
+        original_path = excluded.original_path,
+        title = excluded.title,
+        kind = excluded.kind,
+        deleted_at = excluded.deleted_at,
+        archive_url = excluded.archive_url,
+        valid = excluded.valid,
+        diagnostic = excluded.diagnostic";
+
+fn upsert_rubbish_entry_in(
+    conn: &Connection,
+    entry: &RubbishListEntry,
+) -> rusqlite::Result<()> {
+    match entry {
+        RubbishListEntry::Valid(manifest) => {
+            let item_id = manifest.item_id.to_string();
+            let page_id = manifest.page_id.to_string();
+            let deleted_at = manifest
+                .deleted_at
+                .to_rfc3339_opts(SecondsFormat::Nanos, true);
+            conn.execute(
+                RUBBISH_UPSERT,
+                params![
+                    item_id,
+                    page_id,
+                    manifest.original_path,
+                    manifest.title,
+                    manifest.kind,
+                    deleted_at,
+                    manifest.archive_url,
+                    1_i64,
+                    Option::<String>::None,
+                ],
+            )?;
+        }
+        RubbishListEntry::Invalid { item_id, error } => {
+            conn.execute(
+                RUBBISH_UPSERT,
+                params![
+                    item_id,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    Option::<String>::None,
+                    0_i64,
+                    error,
+                ],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn rubbish_entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RubbishListEntry> {
+    use rusqlite::types::Type;
+
+    let item_id: String = row.get(0)?;
+    let valid: i64 = row.get(7)?;
+    if valid == 0 {
+        return Ok(RubbishListEntry::Invalid {
+            item_id,
+            error: row.get(8)?,
+        });
+    }
+    if valid != 1 {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            7,
+            Type::Integer,
+            Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid rubbish catalog validity flag {valid}"),
+            )),
+        ));
+    }
+
+    let parsed_item_id = Uuid::parse_str(&item_id)
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error)))?;
+    let page_id_raw: String = row.get(1)?;
+    let page_id = Uuid::parse_str(&page_id_raw)
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(error)))?;
+    let deleted_at_raw: String = row.get(5)?;
+    let deleted_at = chrono::DateTime::parse_from_rfc3339(&deleted_at_raw)
+        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(5, Type::Text, Box::new(error)))?
+        .with_timezone(&Utc);
+    let manifest = RubbishManifest::new(
+        parsed_item_id,
+        page_id,
+        &row.get::<_, String>(2)?,
+        row.get::<_, String>(3)?,
+        row.get::<_, String>(4)?,
+        deleted_at,
+        row.get(6)?,
+    )
+    .map_err(|error| rusqlite::Error::FromSqlConversionFailure(2, Type::Text, Box::new(error)))?;
+    Ok(RubbishListEntry::Valid(manifest))
+}
+
 // ---------------------------------------------------------------------------
 // VaultIndex
 // ---------------------------------------------------------------------------
@@ -423,6 +577,74 @@ impl VaultIndex {
         &mut self.conn
     }
 
+    /// Insert or replace one rebuildable rubbish catalog row.
+    pub fn upsert_rubbish_entry(
+        &self,
+        entry: &RubbishListEntry,
+    ) -> Result<(), IndexError> {
+        upsert_rubbish_entry_in(&self.conn, entry)?;
+        Ok(())
+    }
+
+    /// Remove one rubbish catalog row, returning whether it existed.
+    pub fn remove_rubbish_entry(&self, item_id: &str) -> Result<bool, IndexError> {
+        Ok(self.conn.execute(
+            "DELETE FROM rubbish_items WHERE item_id = ?1",
+            params![item_id],
+        )? != 0)
+    }
+
+    /// List catalog rows deterministically: valid newest-first, then invalid
+    /// identities in ascending order.
+    pub fn rubbish_entries(&self) -> Result<Vec<RubbishListEntry>, IndexError> {
+        let mut statement = self.conn.prepare(
+            "SELECT item_id, page_id, original_path, title, kind, deleted_at,
+                    archive_url, valid, diagnostic
+             FROM rubbish_items
+             ORDER BY valid DESC, deleted_at DESC, item_id ASC",
+        )?;
+        let entries = statement
+            .query_map([], rubbish_entry_from_row)?
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(entries)
+    }
+
+    /// Read one rubbish catalog row by its opaque item identity.
+    pub fn rubbish_entry(
+        &self,
+        item_id: &str,
+    ) -> Result<Option<RubbishListEntry>, IndexError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT item_id, page_id, original_path, title, kind, deleted_at,
+                        archive_url, valid, diagnostic
+                 FROM rubbish_items
+                 WHERE item_id = ?1",
+                params![item_id],
+                rubbish_entry_from_row,
+            )
+            .optional()?)
+    }
+
+    /// Replace the rebuildable catalog with the store's authoritative,
+    /// validated manifest enumeration.
+    pub fn reconcile_rubbish_catalog(
+        &mut self,
+        store: &RubbishStore,
+    ) -> Result<(), IndexError> {
+        let entries = store.list_entries().map_err(|source| {
+            IndexError::Other(format!("failed to enumerate rubbish catalog: {source}"))
+        })?;
+        let transaction = self.conn.transaction()?;
+        transaction.execute("DELETE FROM rubbish_items", [])?;
+        for entry in &entries {
+            upsert_rubbish_entry_in(&transaction, entry)?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub(crate) fn begin_created_mutation(&mut self) -> Result<(), IndexError> {
         self.conn.execute_batch("SAVEPOINT created_page_mutation")?;
         Ok(())
@@ -523,6 +745,7 @@ impl VaultIndex {
             params![TAG_DERIVATION_VERSION],
         )?;
         tx.commit()?;
+        super::reconcile::reconcile_rubbish_catalog(vault, self)?;
         Ok(stats)
     }
 
@@ -1399,35 +1622,57 @@ impl VaultIndex {
         Ok(rows)
     }
 
-    /// Find an existing archive page by its original URL.
+    /// Find the lifecycle location currently reserving an archive's original
+    /// URL. Active pages take precedence if recovery has not yet restored the
+    /// normal single-location invariant.
     ///
-    /// Returns `Some((page_id, vault_path, source_hash))` if found. It is
-    /// `source_hash` — the hash of the markdown as captured, before image
-    /// rewriting — and not `content_hash`, because duplicate detection must
-    /// compare what was submitted, not what happened to be stored.
+    /// Active `source_hash` is the hash of the markdown as captured, before
+    /// image rewriting. Rubbish ownership is resolved only from SQLite; this
+    /// request-time lookup never enumerates item manifests.
     pub fn find_by_archive_url(
         &self,
         url: &str,
-    ) -> Result<Option<(String, String, String)>, IndexError> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, path, json_extract(meta_json, '$.archive.source_hash')
-             FROM pages
-             WHERE json_extract(meta_json, '$.archive.url') = ?1",
-        )?;
-
-        let mut rows = stmt.query_map(params![url], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?.unwrap_or_default(),
-            ))
-        })?;
-
-        if let Some(result) = rows.next() {
-            Ok(Some(result?))
-        } else {
-            Ok(None)
+    ) -> Result<Option<ArchiveUrlOwner>, IndexError> {
+        let active = self
+            .conn
+            .query_row(
+                "SELECT id, path, json_extract(meta_json, '$.archive.source_hash')
+                 FROM pages
+                 WHERE json_extract(meta_json, '$.archive.url') = ?1
+                 ORDER BY path ASC
+                 LIMIT 1",
+                params![url],
+                |row| {
+                    Ok(ArchiveUrlOwner::Active {
+                        page_id: row.get(0)?,
+                        path: row.get(1)?,
+                        source_hash: row.get::<_, Option<String>>(2)?.unwrap_or_default(),
+                    })
+                },
+            )
+            .optional()?;
+        if active.is_some() {
+            return Ok(active);
         }
+
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT item_id, page_id, original_path
+                 FROM rubbish_items
+                 WHERE valid = 1 AND archive_url = ?1
+                 ORDER BY deleted_at DESC, item_id ASC
+                 LIMIT 1",
+                params![url],
+                |row| {
+                    Ok(ArchiveUrlOwner::Rubbish {
+                        item_id: row.get(0)?,
+                        page_id: row.get(1)?,
+                        original_path: row.get(2)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 }
 
@@ -2341,6 +2586,197 @@ mod schema_tests {
             .unwrap();
 
         assert_eq!(body, "legacy body");
+    }
+}
+
+#[cfg(test)]
+mod rubbish_catalog_tests {
+    use super::*;
+    use crate::vault::rubbish::{RubbishListEntry, RubbishManifest};
+    use chrono::{DateTime, Utc};
+
+    fn manifest(
+        item_id: &str,
+        page_id: &str,
+        deleted_at: &str,
+        archive_url: Option<&str>,
+    ) -> RubbishManifest {
+        RubbishManifest::new(
+            Uuid::parse_str(item_id).unwrap(),
+            Uuid::parse_str(page_id).unwrap(),
+            "archive/example.md",
+            format!("Item {item_id}"),
+            "ARCHIVE",
+            deleted_at.parse::<DateTime<Utc>>().unwrap(),
+            archive_url.map(str::to_owned),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn rubbish_catalog_schema_migrates_fresh_and_existing_databases_separately_from_pages() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("existing.db");
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch("CREATE TABLE legacy_marker (value TEXT);")
+                .unwrap();
+        }
+
+        for _ in 0..2 {
+            let index = VaultIndex::open_bare(&db_path).unwrap();
+            let columns = index
+                .connection()
+                .prepare("SELECT name FROM pragma_table_info('rubbish_items') ORDER BY cid")
+                .unwrap()
+                .query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                columns,
+                vec![
+                    "item_id",
+                    "page_id",
+                    "original_path",
+                    "title",
+                    "kind",
+                    "deleted_at",
+                    "archive_url",
+                    "valid",
+                    "diagnostic",
+                ]
+            );
+            let foreign_keys: i64 = index
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM pragma_foreign_key_list('rubbish_items')",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(foreign_keys, 0, "rubbish catalog must not join to pages");
+            let legacy_marker: i64 = index
+                .connection()
+                .query_row(
+                    "SELECT count(*) FROM sqlite_master WHERE name = 'legacy_marker'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(legacy_marker, 1);
+        }
+    }
+
+    #[test]
+    fn rubbish_catalog_crud_is_deterministic_and_valid_entries_are_newest_first() {
+        let index = VaultIndex::open_in_memory().unwrap();
+        let first = RubbishListEntry::Valid(manifest(
+            "00000000-0000-4000-8000-000000000001",
+            "10000000-0000-4000-8000-000000000001",
+            "2026-08-13T12:00:00Z",
+            Some("https://example.com/first"),
+        ));
+        let second = RubbishListEntry::Valid(manifest(
+            "00000000-0000-4000-8000-000000000002",
+            "10000000-0000-4000-8000-000000000002",
+            "2026-08-13T12:00:00Z",
+            None,
+        ));
+        let older = RubbishListEntry::Valid(manifest(
+            "00000000-0000-4000-8000-000000000003",
+            "10000000-0000-4000-8000-000000000003",
+            "2026-08-12T12:00:00Z",
+            None,
+        ));
+        let invalid_b = RubbishListEntry::Invalid {
+            item_id: "broken-b".to_owned(),
+            error: "diagnostic b".to_owned(),
+        };
+        let invalid_a = RubbishListEntry::Invalid {
+            item_id: "broken-a".to_owned(),
+            error: "diagnostic a".to_owned(),
+        };
+
+        for entry in [&older, &invalid_b, &second, &invalid_a, &first] {
+            index.upsert_rubbish_entry(entry).unwrap();
+        }
+
+        assert_eq!(
+            index.rubbish_entries().unwrap(),
+            vec![
+                first.clone(),
+                second.clone(),
+                older.clone(),
+                invalid_a.clone(),
+                invalid_b.clone(),
+            ]
+        );
+        assert_eq!(
+            index
+                .rubbish_entry("00000000-0000-4000-8000-000000000001")
+                .unwrap(),
+            Some(first.clone())
+        );
+        assert_eq!(
+            index.rubbish_entry("missing").unwrap(),
+            None,
+            "missing catalog identities are not errors"
+        );
+        assert!(index.remove_rubbish_entry("broken-a").unwrap());
+        assert!(!index.remove_rubbish_entry("broken-a").unwrap());
+        assert_eq!(
+            index.rubbish_entries().unwrap(),
+            vec![first, second, older, invalid_b]
+        );
+    }
+
+    #[test]
+    fn rubbish_catalog_archive_url_lookup_identifies_active_and_rubbish_owners() {
+        let index = VaultIndex::open_in_memory().unwrap();
+        index
+            .connection()
+            .execute(
+                "INSERT INTO pages
+                 (id, path, canonical_name, meta_json, content_hash)
+                 VALUES (?1, ?2, ?3, ?4, ?5)",
+                params![
+                    "10000000-0000-4000-8000-000000000001",
+                    "archive/active.md",
+                    "active",
+                    r#"{"archive":{"url":"https://example.com/active","source_hash":"sha256:active"}}"#,
+                    "content"
+                ],
+            )
+            .unwrap();
+        let rubbish = RubbishListEntry::Valid(manifest(
+            "00000000-0000-4000-8000-000000000001",
+            "10000000-0000-4000-8000-000000000002",
+            "2026-08-13T12:00:00Z",
+            Some("https://example.com/rubbish"),
+        ));
+        index.upsert_rubbish_entry(&rubbish).unwrap();
+
+        assert_eq!(
+            index
+                .find_by_archive_url("https://example.com/active")
+                .unwrap(),
+            Some(ArchiveUrlOwner::Active {
+                page_id: "10000000-0000-4000-8000-000000000001".to_owned(),
+                path: "archive/active.md".to_owned(),
+                source_hash: "sha256:active".to_owned(),
+            })
+        );
+        assert_eq!(
+            index
+                .find_by_archive_url("https://example.com/rubbish")
+                .unwrap(),
+            Some(ArchiveUrlOwner::Rubbish {
+                item_id: "00000000-0000-4000-8000-000000000001".to_owned(),
+                page_id: "10000000-0000-4000-8000-000000000002".to_owned(),
+                original_path: "archive/example.md".to_owned(),
+            })
+        );
     }
 }
 
