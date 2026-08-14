@@ -2,7 +2,7 @@
 
 ## Result
 
-Implemented crash-resumable permanent removal for Rubbish Bin items in commits `14fd5b30` (`fix(rubbish): make purge removal crash-resumable`) and `4d189337` (`fix(rubbish): flush purge directories on Windows`).
+Implemented crash-resumable permanent removal for Rubbish Bin items in commits `14fd5b30` (`fix(rubbish): make purge removal crash-resumable`), `4d189337` (`fix(rubbish): flush purge directories on Windows`), and `7e6c2715` (`fix(rubbish): preserve occupied purge tombstones on Windows`).
 
 No UI query-invalidation files were touched.
 
@@ -82,11 +82,28 @@ Per assignment constraints, formatters, linters, builds, and project-wide test s
 - Confirmed the normal purge result and existing typed errors remain unchanged.
 - Confirmed startup cleanup precedes authoritative catalog reconciliation.
 - Confirmed ordinary purge, restore, failed-post-ledger restore lockout, cleanup retry, Empty Bin ordering, and unique CAS release tests remain green.
-- Confirmed the implementation commits touch only `src/vault/rubbish.rs`, `src/vault/mutation_coordinator.rs`, and `src/lib.rs`.
+- Confirmed the implementation commits touch only `src/vault/atomic_file.rs`, `src/vault/rubbish.rs`, `src/vault/mutation_coordinator.rs`, and `src/lib.rs`.
 
 ## Independent review
 
 The first independent review found one Important issue and no Critical issues: Windows returned success from `sync_directory` without a durability operation. Commit `4d189337` addresses the finding with a backup-semantics writable directory handle and `sync_all`, and enables the four deterministic directory-sync failure tests on Windows. Follow-up review found no Critical or Important implementation defects and marked the implementation ready; its sole report-accuracy finding was corrected above by distinguishing a returned post-removal sync error from process-loss recovery.
+
+### Windows no-replace follow-up
+
+A later scoped review found that the prior Windows `install_noreplace` delegated to `std::fs::rename`, whose replacement behavior did not uphold the tombstone collision contract. Commit `7e6c2715` now calls `MoveFileExW` with flags `0`: replacement and copy/delete fallback are both opt-in Win32 flags, so this is one same-volume, fail-if-destination-exists directory move. Win32 collision codes 80 and 183, plus an observed occupied destination after another failure code, normalize to `io::ErrorKind::AlreadyExists`.
+
+Tests added:
+
+- Windows-gated low-level source/destination sentinel test: an occupied empty destination returns `AlreadyExists`, the source sentinel remains byte-identical, and the destination remains empty.
+- Portable Rubbish store test: an occupied empty `.purge-<uuid>` makes purge fail while the visible UUID item remains complete and readable.
+
+Focused GREEN on this workstation:
+
+- `cargo test purge_refuses_an_occupied_empty_tombstone_and_keeps_uuid_item_actionable --lib`: 1 passed, 0 failed.
+- `cargo test vault::rubbish::tests --lib`: 19 passed, 0 failed.
+- `cargo test purge_rubbish_ --lib`: 3 passed, 0 failed.
+
+The Windows sentinel is RED against the replaced `std::fs::rename` implementation by contract but could not be executed locally because no Windows target is installed. Independent source review checked Microsoft `MoveFileExW`, Rust `last_os_error`, the resolved `windows-sys` 0.61.2 bindings/features, error normalization, path lifetime/encoding, cfg isolation, and both tests; it reported no Critical or Important findings and marked the change ready.
 
 ## Concerns
 
