@@ -470,6 +470,9 @@ name = "All"
         .unwrap();
 
         let vault = Vault::open(&root).unwrap();
+        let archive_resource_concurrency = super::archive::archive_resource_concurrency(
+            vault.config().archive.max_blob_size_mb,
+        );
         let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
         index.build(&vault).unwrap();
         index.resolve_links().unwrap();
@@ -513,7 +516,9 @@ name = "All"
             feed_settings,
             archive_ingest_lock: tokio::sync::Mutex::new(()),
             archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-            archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
+            archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(
+                archive_resource_concurrency,
+            )),
             bcl: None,
             location: parking_lot::RwLock::new(None),
         });

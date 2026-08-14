@@ -32,6 +32,9 @@ fn setup_server() -> (TestServer, TempDir) {
     init_vault(&root).unwrap();
 
     let vault = Vault::open(&root).unwrap();
+    let archive_resource_concurrency = clepsydra::api::archive::archive_resource_concurrency(
+        vault.config().archive.max_blob_size_mb,
+    );
     let db_path = vault.root().join(".clepsydra/cache.db");
     let mut index = VaultIndex::open(&db_path).unwrap();
     index.build(&vault).unwrap();
@@ -71,7 +74,9 @@ fn setup_server() -> (TestServer, TempDir) {
         feed_settings,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
+        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(
+            archive_resource_concurrency,
+        )),
         bcl: None,
         location: parking_lot::RwLock::new(None),
     });

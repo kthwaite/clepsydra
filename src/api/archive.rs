@@ -246,7 +246,7 @@ pub(crate) fn archive_resource_limit_bytes(max_blob_size_mb: u64) -> usize {
 
 /// Bound parallel resource buffers to approximately 256 MiB while allowing at
 /// most eight concurrent reads for small configured blob limits.
-pub(crate) fn archive_resource_concurrency(max_blob_size_mb: u64) -> usize {
+pub fn archive_resource_concurrency(max_blob_size_mb: u64) -> usize {
     let per_blob_mb = max_blob_size_mb.max(1);
     usize::try_from(ARCHIVE_RESOURCE_WORKING_SET_MB / per_blob_mb)
         .unwrap_or(1)
