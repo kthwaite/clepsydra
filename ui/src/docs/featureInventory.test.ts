@@ -204,6 +204,12 @@ describe("feature documentation inventory", () => {
       "Gazetteer",
     ],
     [
+      "/stats",
+      "tasks-agenda-journals-and-board",
+      "### Review the Atrium summary",
+      "agenda",
+    ],
+    [
       "app.shortcutHelp",
       "getting-started",
       "## Keyboard shortcut help",

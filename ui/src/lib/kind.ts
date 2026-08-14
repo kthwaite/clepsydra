@@ -14,7 +14,7 @@ import type { components } from "#/api/schema";
  * adding/removing a variant there changes this union on regeneration. */
 export type Kind = components["schemas"]["Kind"];
 
-/** Runtime list of kinds, in display order for kind pickers. `satisfies`
+/** Runtime list of every backend-compatible kind, in display order. `satisfies`
  * rejects tokens the backend doesn't know; the `Exclude` assertion below fails
  * typecheck if a backend kind is missing here, so the two cannot drift. */
 export const KINDS = [
@@ -39,6 +39,10 @@ const _kindsAreExhaustive: [MissingFromKinds] extends [never]
   ? true
   : MissingFromKinds = true;
 void _kindsAreExhaustive;
+
+export const ASSIGNABLE_KINDS = KINDS.filter(
+  (kind): kind is Exclude<Kind, "QUOTE"> => kind !== "QUOTE",
+);
 
 const KIND_SET = new Set<string>(KINDS);
 

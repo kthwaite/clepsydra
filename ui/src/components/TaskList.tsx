@@ -8,7 +8,7 @@ import {
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 
-function priorityLabel(p: string): string {
+export function priorityLabel(p: string): string {
   switch (p) {
     case "A":
       return "HIGH";

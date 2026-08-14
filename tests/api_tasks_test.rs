@@ -530,6 +530,100 @@ async fn filter_tasks_by_priority() {
 }
 
 #[tokio::test]
+async fn sort_tasks_for_atrium_agenda() {
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/z-agenda-ties.md")
+        .json(&serde_json::json!({
+            "title": "Z Agenda Ties",
+            "body": "- [ ] Same-date B in z [due:: 2026-09-01] [priority:: B]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/a-agenda-ties.md")
+        .json(&serde_json::json!({
+            "title": "A Agenda Ties",
+            "body": "\
+- [ ] Same-date B first in a [due:: 2026-09-01] [priority:: B]\n\
+- [ ] Same-date B second in a [due:: 2026-09-01] [priority:: B]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/atrium-agenda.md")
+        .json(&serde_json::json!({
+            "title": "Atrium Agenda",
+            "body": "\
+- [ ] Same-date C [due:: 2026-09-01] [priority:: C]\n\
+- [ ] Overdue A later [due:: 2025-01-02] [priority:: A]\n\
+- [x] Completed earliest [due:: 2024-01-01] [priority:: A]\n\
+- [ ] Undated C [priority:: C]\n\
+- [ ] Overdue B earlier [due:: 2025-01-01] [priority:: B]\n\
+- [ ] Undated A [priority:: A]\n\
+- [ ] Same-date unknown [due:: 2026-09-01] [priority:: Z]\n\
+- [ ] Same-date A [due:: 2026-09-01] [priority:: A]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let res = server
+        .get("/api/vault/tasks?status=todo&sort=agenda&limit=8")
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let tasks = body["tasks"].as_array().unwrap();
+    let ordered_tasks: Vec<(&str, &str)> = tasks
+        .iter()
+        .map(|task| {
+            (
+                task["page_path"].as_str().unwrap(),
+                task["content"].as_str().unwrap(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        ordered_tasks,
+        vec![
+            ("atrium-agenda.md", "Overdue B earlier"),
+            ("atrium-agenda.md", "Overdue A later"),
+            ("atrium-agenda.md", "Same-date A"),
+            ("a-agenda-ties.md", "Same-date B first in a"),
+            ("a-agenda-ties.md", "Same-date B second in a"),
+            ("z-agenda-ties.md", "Same-date B in z"),
+            ("atrium-agenda.md", "Same-date C"),
+            ("atrium-agenda.md", "Same-date unknown"),
+        ]
+    );
+    assert_eq!(tasks.len(), 8);
+    assert_eq!(body["total"], 10);
+    assert!(
+        tasks
+            .iter()
+            .all(|task| task["content"] != "Completed earliest"),
+        "completed tasks must be excluded from the Atrium agenda"
+    );
+
+    let undated_res = server
+        .get("/api/vault/tasks?status=todo&sort=agenda&offset=8&limit=8")
+        .await;
+    undated_res.assert_status_ok();
+    let undated_body: serde_json::Value = undated_res.json();
+    let undated_contents: Vec<&str> = undated_body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["content"].as_str().unwrap())
+        .collect();
+    assert_eq!(undated_contents, vec!["Undated A", "Undated C"]);
+    assert_eq!(undated_body["total"], 10);
+}
+
+#[tokio::test]
 async fn tasks_include_properties() {
     let (server, _tmp) = setup_server();
 

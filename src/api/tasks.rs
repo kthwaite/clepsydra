@@ -310,6 +310,34 @@ pub async fn list_tasks(
 
             // Sort clause
             let order_clause = match params.sort.as_deref() {
+                Some("agenda") => {
+                    "ORDER BY \
+                     CASE WHEN EXISTS ( \
+                       SELECT 1 FROM block_properties bp_due \
+                       WHERE bp_due.page_id = b.page_id \
+                         AND bp_due.span_start = b.span_start \
+                         AND bp_due.key = 'due' \
+                     ) THEN 0 ELSE 1 END, \
+                     COALESCE(( \
+                       SELECT bp_due.value FROM block_properties bp_due \
+                       WHERE bp_due.page_id = b.page_id \
+                         AND bp_due.span_start = b.span_start \
+                         AND bp_due.key = 'due' \
+                     ), '') ASC, \
+                     CASE COALESCE(( \
+                       SELECT bp_pri.value FROM block_properties bp_pri \
+                       WHERE bp_pri.page_id = b.page_id \
+                         AND bp_pri.span_start = b.span_start \
+                         AND bp_pri.key = 'priority' \
+                     ), '') \
+                       WHEN 'A' THEN 0 \
+                       WHEN 'B' THEN 1 \
+                       WHEN 'C' THEN 2 \
+                       ELSE 3 \
+                     END, \
+                     p.path ASC, \
+                     b.span_start ASC"
+                }
                 Some("due") => {
                     "ORDER BY COALESCE((SELECT bp_s.value FROM block_properties bp_s WHERE bp_s.page_id = b.page_id AND bp_s.span_start = b.span_start AND bp_s.key = 'due'), 'zzzz') ASC, p.path ASC"
                 }

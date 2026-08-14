@@ -21,6 +21,23 @@ it("retains a local-midnight date for day-derived display values", () => {
 
   expect(result.current.date).toEqual(new Date(2026, 7, 8));
 });
+
+it("exposes the compact calendar fields without a Julian day", () => {
+  const now = new Date(2026, 7, 9, 12, 0, 0);
+  const { result } = renderHook(() => useAtriumCalendar(now));
+
+  expect(result.current).toMatchObject({
+    date: new Date(2026, 7, 9),
+    dayKey: "2026-7-9",
+    dotDate: "2026.08.09",
+    doy: 221,
+    todayLabel: "2026.08.09 (SUN)",
+    week: 32,
+    yearDays: 365,
+  });
+  expect(result.current).not.toHaveProperty("julian");
+});
+
 it("retains the actual UTC day key in positive-offset zones", () => {
   const previousTz = process.env.TZ;
   process.env.TZ = "Pacific/Kiritimati";

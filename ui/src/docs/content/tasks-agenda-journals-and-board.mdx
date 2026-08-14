@@ -43,6 +43,17 @@ status.
 Tasks inside protected pages are visible only according to the protected-page
 index boundary and cannot be changed through the task-status endpoint.
 
+### Review the Atrium summary
+
+The Atrium's **Outstanding agenda** shows at most eight `todo` tasks. Dated
+tasks come before undated tasks; dated tasks are ordered by ascending `due`,
+then by inline priority with `A` before `B` before `C`. Its count is the
+authoritative total returned by the task query, not merely the number of rows
+shown. Choose **Agenda →** or open `/agenda` for the full agenda surface.
+
+Choose **Stats →** in the Atrium to open `/stats`, which contains the vault
+inventory and subjects ranked by frequency.
+
 ### Use Today, Upcoming, and Inbox
 
 Open `/agenda`:

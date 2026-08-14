@@ -478,6 +478,21 @@ describe("Gazetteer controller", () => {
     );
     expect(screen.getByText("#legacy-url-tag")).toBeVisible();
   });
+
+  it("excludes quotation from bulk kind assignment", async () => {
+    const user = userEvent.setup();
+    layoutState.mobile = false;
+    render(createElement(Gazetteer));
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
+    await user.click(
+      screen.getByRole("button", { name: "Set kind for selection" }),
+    );
+
+    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
+    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+  });
+
   it("accepts an atomic moved-and-unchanged bulk response and clears the selection", async () => {
     layoutState.mobile = false;
     bulkMutateMock.mockImplementation(

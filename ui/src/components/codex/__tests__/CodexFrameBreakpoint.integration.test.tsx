@@ -290,7 +290,10 @@ describe("CodexFrame real breakpoint transitions", () => {
         name: "Primary navigation",
       });
       expect(
-        within(primary).getByRole("button", { name: /07.*feeds/i }),
+        within(primary).getByRole("button", { name: /03.*stats/i }),
+      ).toBeVisible();
+      expect(
+        within(primary).getByRole("button", { name: /08.*feeds/i }),
       ).toBeVisible();
       expect(
         screen.queryByRole("navigation", { name: "Mobile roots" }),

@@ -133,6 +133,20 @@ describe("Gazetteer route filters", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Unknown Kind: RECIPE");
   });
 
+  it("keeps quotation available as a backend-facing kind filter", () => {
+
+    routeMocks.search.kind = "QUOTE";
+    render(<GazetteerPage />);
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
+      q: "atlas",
+      tags: ["research"],
+      kind: "QUOTE",
+      project: "clepsydra",
+      limit: 20,
+      offset: 20,
+    });
+  });
+
   it("combines route filters in the authoritative paged query and follows history changes", () => {
     const view = render(<GazetteerPage />);
 

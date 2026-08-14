@@ -18,6 +18,7 @@ import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import {
+  ASSIGNABLE_KINDS,
   KINDS,
   type Kind,
   kindColorVar,
@@ -374,7 +375,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
             </SelectButton>
             <Popover className="border border-rule bg-paper outline-none">
               <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
-                {KINDS.map((k) => (
+                {ASSIGNABLE_KINDS.map((k) => (
                   <ListBoxItem
                     key={k}
                     id={k}

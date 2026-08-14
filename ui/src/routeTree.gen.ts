@@ -18,6 +18,7 @@ import { Route as GazetteerRouteImport } from './routes/gazetteer'
 import { Route as GraphRouteImport } from './routes/graph'
 import { Route as RepairsRouteImport } from './routes/repairs'
 import { Route as RubbishRouteImport } from './routes/rubbish'
+import { Route as StatsRouteImport } from './routes/stats'
 import { Route as TaskingRouteImport } from './routes/tasking'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as ArchiveSplatRouteImport } from './routes/archive.$'
@@ -72,6 +73,11 @@ const RubbishRoute = RubbishRouteImport.update({
   path: '/rubbish',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StatsRoute = StatsRouteImport.update({
+  id: '/stats',
+  path: '/stats',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TaskingRoute = TaskingRouteImport.update({
   id: '/tasking',
   path: '/tasking',
@@ -123,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/graph': typeof GraphRoute
   '/repairs': typeof RepairsRoute
   '/rubbish': typeof RubbishRoute
+  '/stats': typeof StatsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/archive/$': typeof ArchiveSplatRoute
@@ -142,6 +149,7 @@ export interface FileRoutesByTo {
   '/graph': typeof GraphRoute
   '/repairs': typeof RepairsRoute
   '/rubbish': typeof RubbishRoute
+  '/stats': typeof StatsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/archive/$': typeof ArchiveSplatRoute
@@ -162,6 +170,7 @@ export interface FileRoutesById {
   '/graph': typeof GraphRoute
   '/repairs': typeof RepairsRoute
   '/rubbish': typeof RubbishRoute
+  '/stats': typeof StatsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/archive/$': typeof ArchiveSplatRoute
@@ -183,6 +192,7 @@ export interface FileRouteTypes {
     | '/graph'
     | '/repairs'
     | '/rubbish'
+    | '/stats'
     | '/tasking'
     | '/workspace'
     | '/archive/$'
@@ -202,6 +212,7 @@ export interface FileRouteTypes {
     | '/graph'
     | '/repairs'
     | '/rubbish'
+    | '/stats'
     | '/tasking'
     | '/workspace'
     | '/archive/$'
@@ -221,6 +232,7 @@ export interface FileRouteTypes {
     | '/graph'
     | '/repairs'
     | '/rubbish'
+    | '/stats'
     | '/tasking'
     | '/workspace'
     | '/archive/$'
@@ -241,6 +253,7 @@ export interface RootRouteChildren {
   GraphRoute: typeof GraphRoute
   RepairsRoute: typeof RepairsRoute
   RubbishRoute: typeof RubbishRoute
+  StatsRoute: typeof StatsRoute
   TaskingRoute: typeof TaskingRoute
   WorkspaceRoute: typeof WorkspaceRoute
   ArchiveSplatRoute: typeof ArchiveSplatRoute
@@ -312,6 +325,13 @@ declare module '@tanstack/react-router' {
       path: '/rubbish'
       fullPath: '/rubbish'
       preLoaderRoute: typeof RubbishRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stats': {
+      id: '/stats'
+      path: '/stats'
+      fullPath: '/stats'
+      preLoaderRoute: typeof StatsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/tasking': {
@@ -405,6 +425,7 @@ const rootRouteChildren: RootRouteChildren = {
   GraphRoute: GraphRoute,
   RepairsRoute: RepairsRoute,
   RubbishRoute: RubbishRoute,
+  StatsRoute: StatsRoute,
   TaskingRoute: TaskingRoute,
   WorkspaceRoute: WorkspaceRoute,
   ArchiveSplatRoute: ArchiveSplatRoute,

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -98,6 +98,7 @@ vi.mock("#/components/codex/SkyCard", () => ({
 }));
 
 import { Atrium } from "#/components/codex/Atrium";
+import { Stats } from "#/components/codex/Stats";
 import { RepairWorkspace } from "#/components/repairs/RepairWorkspace";
 import { queryClient as appQueryClient } from "#/lib/queryClient";
 
@@ -154,7 +155,7 @@ afterEach(() => {
 });
 
 describe("reference issue query production error policy", () => {
-  it("keeps repairs and Atrium usable when the issues GET fails", async () => {
+  it("contains repair and Stats failures while keeping Atrium independent", async () => {
     const user = userEvent.setup();
     const repairs = renderWithProductionPolicy(<RepairWorkspace />);
 
@@ -166,13 +167,31 @@ describe("reference issue query production error policy", () => {
     ).not.toBeInTheDocument();
 
     repairs.unmount();
-    renderWithProductionPolicy(<Atrium />);
+    mocks.get.mockClear();
 
-    const fallback = await screen.findByRole("button", {
+    const atrium = renderWithProductionPolicy(<Atrium />);
+
+    expect(screen.getByTestId("activity-heatmap")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Open Reference Repairs" }),
+    ).not.toBeInTheDocument();
+    expect(mocks.get).not.toHaveBeenCalledWith(
+      "/api/vault/index/issues",
+      expect.anything(),
+    );
+    expect(
+      screen.queryByText("Application boundary rendered."),
+    ).not.toBeInTheDocument();
+
+    atrium.unmount();
+    mocks.get.mockClear();
+    renderWithProductionPolicy(<Stats />);
+
+    await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(1));
+    const fallback = screen.getByRole("button", {
       name: "Open Reference Repairs",
     });
     expect(fallback).toHaveTextContent("Repairs");
-    expect(screen.getByTestId("activity-heatmap")).toBeInTheDocument();
     expect(
       screen.queryByText("Application boundary rendered."),
     ).not.toBeInTheDocument();

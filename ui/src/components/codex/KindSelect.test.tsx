@@ -4,15 +4,16 @@ import { describe, expect, it, vi } from "vitest";
 import { KindSelect } from "#/components/codex/KindSelect";
 
 describe("KindSelect", () => {
-  it("renders the current kind label", () => {
+  it("renders an existing quotation kind without offering it for assignment", async () => {
+    const user = userEvent.setup();
     render(<KindSelect value="QUOTE" inferred={false} onAssign={() => {}} />);
-    // The Select trigger carries aria-label="Kind"; its visible label renders
-    // as the button's text content. Scope to that trigger so the assertion
-    // targets only the visible control, not react-aria's hidden autofill
-    // <option> (which also reads "QUOTE").
-    expect(screen.getByRole("button", { name: "Kind" })).toHaveTextContent(
-      "QUOTE",
-    );
+
+    const trigger = screen.getByRole("button", { name: "Kind" });
+    expect(trigger).toHaveTextContent("QUOTE");
+
+    await user.click(trigger);
+    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
+    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
   });
 
   it("renders an immutable kind without opening or assigning", async () => {
@@ -44,7 +45,7 @@ describe("KindSelect", () => {
     const onAssign = vi.fn();
     render(<KindSelect value="NOTE" inferred={false} onAssign={onAssign} />);
     await user.click(screen.getByRole("button", { name: "Kind" }));
-    await user.click(screen.getByRole("option", { name: "QUOTE" }));
-    expect(onAssign).toHaveBeenCalledWith("QUOTE");
+    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    expect(onAssign).toHaveBeenCalledWith("BOOK");
   });
 });

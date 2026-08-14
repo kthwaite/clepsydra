@@ -1157,6 +1157,29 @@ describe("Folio kind assignment", () => {
       "Journal kind cannot be changed.",
     );
   });
+
+  it("displays an existing quotation kind without offering it for reassignment", async () => {
+    const user = userEvent.setup();
+    mobileLayoutState.matches = false;
+    usePageEditorMock.mockReturnValue({
+      ...editableEditor(),
+      kind: "QUOTE",
+    });
+    useWorkspaceStore.setState({
+      tabs: [
+        { id: "t1", type: "page", path: "quotes/example.md", label: "Example" },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path="quotes/example.md" />);
+
+    const kind = screen.getByRole("button", { name: "Kind" });
+    expect(kind).toHaveTextContent("QUOTE");
+    await user.click(kind);
+    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
+    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+  });
 });
 
 

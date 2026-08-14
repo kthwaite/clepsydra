@@ -15,14 +15,15 @@ type AnyRoute = {
 
 // Keyed by route `id` rather than `fullPath`: the root route and the index
 // route ("/") share the fullPath "/", so `id` ("__root__" vs "/") is the
-// only unambiguous key. Every one of the 15 `staticData` declarations added
-// in this task is asserted here directly — no inheritance involved. Routes
-// not listed (e.g. "/docs/$slug") are expected to inherit rather than
+// only unambiguous key. Every one of the 16 `staticData` declarations added
+// across these view tasks is asserted here directly — no inheritance involved.
+// Routes not listed (e.g. "/docs/$slug") are expected to inherit rather than
 // declare their own codexView.
 const OWN_CODEX_VIEW_BY_ROUTE_ID: Record<string, string> = {
   __root__: "atrium",
   "/": "atrium",
   "/gazetteer": "gazetteer",
+  "/stats": "stats",
   "/tasking": "tasking",
   "/academic": "academic",
   "/agenda": "agenda",

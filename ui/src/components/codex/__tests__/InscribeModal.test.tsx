@@ -45,6 +45,15 @@ describe("InscribeModal", () => {
     expect(screen.queryByPlaceholderText("ideas/new-page")).toBeNull();
   });
 
+  it("does not offer quotation as a creation kind", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+
+    await user.click(screen.getByRole("button", { name: "Kind" }));
+    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
+    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+  });
+
   it("dismisses on Escape", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);

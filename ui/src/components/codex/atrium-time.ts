@@ -1,10 +1,9 @@
 import { useMemo } from "react";
 import {
-  aphorismForDay,
   daystampLabel,
   formatDotDate,
 } from "#/components/codex/atrium-data";
-import { dayOfYear, isLeapYear, julianDay } from "#/lib/time";
+import { dayOfYear, isLeapYear } from "#/lib/time";
 
 export function useAtriumCalendar(now: Date) {
   const year = now.getFullYear();
@@ -19,12 +18,10 @@ export function useAtriumCalendar(now: Date) {
     const utcDate = new Date(Date.UTC(utcYear, utcMonth, utcDay));
     const doy = dayOfYear(day);
     return {
-      aphorism: aphorismForDay(day),
       date: day,
       dayKey,
       dotDate: formatDotDate(day),
       doy,
-      julian: julianDay(day),
       todayLabel: daystampLabel(day),
       utcDate,
       week: Math.ceil(doy / 7),

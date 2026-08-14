@@ -7,7 +7,7 @@ import {
   Select,
 } from "react-aria-components";
 import { cn } from "#/lib/cn";
-import { KINDS, type Kind, kindLabel } from "#/lib/kind";
+import { ASSIGNABLE_KINDS, type Kind, kindLabel } from "#/lib/kind";
 
 export interface KindSelectProps {
   value: Kind;
@@ -71,7 +71,7 @@ export function KindSelect({
       )}
       <Popover className="border border-rule bg-paper outline-none">
         <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
-          {KINDS.map((k) => (
+          {ASSIGNABLE_KINDS.map((k) => (
             <ListBoxItem
               key={k}
               id={k}

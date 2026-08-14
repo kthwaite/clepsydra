@@ -111,6 +111,17 @@ describe("BaseMemberDraft", () => {
     });
   });
 
+  it("does not offer quotation when choosing a new member kind", async () => {
+    const user = userEvent.setup();
+    render(draftElement());
+
+    await user.click(
+      screen.getByRole("button", { name: "New member — Kind" }),
+    );
+    expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
+    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+  });
+
   it("renders and submits canonical keys for simultaneous system and shadow properties", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
