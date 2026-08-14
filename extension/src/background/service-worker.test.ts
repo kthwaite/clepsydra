@@ -50,10 +50,13 @@ interface SessionArea {
 	remove: Mock;
 }
 
+type NotificationBehavior = "absent" | "throws" | "rejects";
+
 interface WorkerOptions {
 	session?: SessionArea;
 	settings?: Partial<ExtensionSettings>;
 	tabsGet?: Mock;
+	notifications?: NotificationBehavior;
 }
 
 const metadata = {
@@ -111,6 +114,18 @@ async function loadWorker(
 		max_request_size_mb: 250,
 		...options.settings,
 	};
+	const createNotification = vi.fn(
+		(notification: { title: string; message: string }) => {
+			notifications.push(notification);
+			if (options.notifications === "throws") {
+				throw new Error("notification create threw");
+			}
+			if (options.notifications === "rejects") {
+				return Promise.reject(new Error("notification create rejected"));
+			}
+			return Promise.resolve();
+		},
+	);
 
 	vi.stubGlobal("chrome", {
 		runtime: {
@@ -128,13 +143,9 @@ async function loadWorker(
 			sync: { get: vi.fn(async () => ({ settings })) },
 			session,
 		},
-		notifications: {
-			create: vi.fn(
-				async (notification: { title: string; message: string }) => {
-					notifications.push(notification);
-				},
-			),
-		},
+		...(options.notifications === "absent"
+			? {}
+			: { notifications: { create: createNotification } }),
 		tabs: {
 			get: tabsGet,
 			query: vi.fn(),
@@ -764,6 +775,41 @@ describe("service-worker capture feedback", () => {
 		expect(worker.badgeText).toHaveBeenLastCalledWith({ text: "…", tabId: 7 });
 		expect((await currentStatus(worker))?.phase).toBe("capturing");
 	});
+
+	it.each([
+		{ name: "absent", notifications: "absent" },
+		{ name: "synchronously throws", notifications: "throws" },
+		{ name: "asynchronously rejects", notifications: "rejects" },
+	] as const)(
+		"keeps successful ingest done when the notification API is $name",
+		async ({ notifications }) => {
+			dependencies.ingestArchive.mockResolvedValueOnce({
+				status: "created",
+				vault_path: "archives/example/article.md",
+				page_id: "page-1",
+				blobs_stored: 1,
+				blobs_deduped: 0,
+			});
+			const worker = await loadWorker({ notifications });
+
+			await startTransfer(worker);
+			await vi.waitFor(async () => {
+				expect(["done", "error"]).toContain(
+					(await currentStatus(worker))?.phase,
+				);
+			});
+
+			expect(await currentStatus(worker)).toEqual(
+				statusMatching(
+					"done",
+					"A useful page was archived to archives/example/article.md.",
+				),
+			);
+			expect(worker.notifications).not.toContainEqual(
+				expect.objectContaining({ title: "Archive Failed" }),
+			);
+		},
+	);
 
 	it.each([
 		{
