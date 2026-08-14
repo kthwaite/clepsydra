@@ -314,15 +314,15 @@ const HTML_NAMESPACE: &str = "http://www.w3.org/1999/xhtml";
 const SVG_NAMESPACE: &str = "http://www.w3.org/2000/svg";
 const MATHML_NAMESPACE: &str = "http://www.w3.org/1998/Math/MathML";
 /// Deconstructed snapshots contain markup only; resource bytes have already
-/// moved to CAS. At 8 MiB, the densest two-byte attribute spelling can create
-/// at most 4 Mi attribute outlines. lol_html 3.0.1 stores three usize ranges
-/// per outline (48 bytes), a 192 MiB peak. With the 8 MiB input, 16 MiB parser
-/// arena, and roughly input-sized output for that compact case, the working set
-/// remains below the existing ~256 MiB single-request admission envelope.
-/// CAS-URL expansion has far lower outline density and remains independently
-/// bounded by the 64 MiB output ceiling. Passes run sequentially and drop their
-/// parser state before the next pass.
-pub const ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 8 * 1024 * 1024;
+/// moved to CAS. At 2 MiB, the densest selected start tag can contain at most
+/// about 1,048,573 minimal attributes. The conservative worst case is each
+/// attribute retaining lol_html's three `usize` ranges (48 bytes) and also
+/// materializing as an `Attribute` (88 bytes): about 136 MiB. Adding the
+/// 16 MiB parser arena, 2 MiB input, and at most 64 MiB rewritten output keeps
+/// the single permitted rewrite below the existing ~256 MiB admission
+/// envelope. Passes run sequentially and drop their parser state before the
+/// next pass.
+pub const ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 2 * 1024 * 1024;
 const DEFAULT_REWRITER_MEMORY_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_NOSCRIPT_DEPTH: usize = 16;

@@ -508,7 +508,7 @@ fn snapshot_response_with(
     }
 }
 
-// Ingest, GET, and HEAD share the 8 MiB stored-snapshot ceiling; the 64 MiB
+// Ingest, GET, and HEAD share the 2 MiB stored-snapshot ceiling; the 64 MiB
 // rewrite ceiling covers expansion of validated CAS URLs.
 const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize =
     archive_snapshot::ARCHIVE_VIEW_SNAPSHOT_BYTES;
@@ -1453,14 +1453,14 @@ mod tests {
     }
 
     #[test]
-    fn shared_eight_mib_snapshot_cap_is_exact_at_ingest_and_view_boundaries() {
+    fn shared_two_mib_snapshot_cap_is_exact_at_ingest_and_view_boundaries() {
         use std::cell::Cell;
 
         let rewrites = Cell::new(0);
         let input_limit = MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES;
-        assert_eq!(input_limit, 8 * 1024 * 1024);
+        assert_eq!(input_limit, 2 * 1024 * 1024);
         validate_resource_sizes(&[], input_limit, 0, 100, 250)
-            .expect("an exactly 8 MiB snapshot must be accepted at ingest");
+            .expect("an exactly 2 MiB snapshot must be accepted at ingest");
         let ingest_error = validate_resource_sizes(&[], input_limit + 1, 0, 100, 250)
             .expect_err("an over-limit snapshot must be rejected at ingest");
         assert!(ingest_error.error.contains("shared snapshot view limit"));
