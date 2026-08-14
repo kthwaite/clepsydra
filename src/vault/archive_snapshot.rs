@@ -561,6 +561,13 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
             }
             return;
         }
+        if !self_closing
+            && ((current == Namespace::Svg && named_tag_at(html, name_start, b"svg"))
+                || (current == Namespace::MathMl && named_tag_at(html, name_start, b"math")))
+        {
+            namespaces.push(current);
+            return;
+        }
         if tag_is_one_of(
             html,
             name_start,
@@ -2069,6 +2076,19 @@ mod tests {
         );
         let error = neutralize_navigation(&nested_foreign_math).unwrap_err();
         assert!(error.contains("attribute limit"), "{error}");
+        for same_namespace in [
+            format!(
+                "<svg><svg></svg><style><a {}></a></style></svg>",
+                "a=x ".repeat(4097)
+            ),
+            format!(
+                "<math><math></math><style><a {}></a></style></math>",
+                "a=x ".repeat(4097)
+            ),
+        ] {
+            let error = neutralize_navigation(&same_namespace).unwrap_err();
+            assert!(error.contains("attribute limit"), "{error}");
+        }
         for integrated in [
             "<svg><foreignObject><style>.x{content:\"<a '>\"}</style></foreignObject></svg>",
             "<svg><title>&lt;a '&gt;</title></svg>",
