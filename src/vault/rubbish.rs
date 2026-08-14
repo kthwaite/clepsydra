@@ -833,71 +833,16 @@ fn sync_directory_parent(path: &Path) -> Result<(), RubbishStoreError> {
 }
 
 #[cfg(test)]
-static FAIL_DIRECTORY_SYNCS: parking_lot::Mutex<Vec<PathBuf>> = parking_lot::Mutex::new(Vec::new());
-
-#[cfg(test)]
-pub(crate) struct TestDirectorySyncFailureGuard {
-    path: PathBuf,
-}
-
-#[cfg(test)]
-impl Drop for TestDirectorySyncFailureGuard {
-    fn drop(&mut self) {
-        FAIL_DIRECTORY_SYNCS
-            .lock()
-            .retain(|target| target != &self.path);
-    }
-}
+pub(crate) type TestDirectorySyncFailureGuard =
+    super::atomic_file::TestDirectoryFlushFailureGuard;
 
 #[cfg(test)]
 pub(crate) fn fail_next_directory_sync(path: &Path) -> TestDirectorySyncFailureGuard {
-    let path = path.to_path_buf();
-    let mut targets = FAIL_DIRECTORY_SYNCS.lock();
-    assert!(
-        !targets.contains(&path),
-        "directory sync failpoint already armed for {}",
-        path.display()
-    );
-    targets.push(path.clone());
-    TestDirectorySyncFailureGuard { path }
+    super::atomic_file::fail_next_directory_flush(path)
 }
 
-#[cfg(test)]
-fn hit_test_directory_sync_failure(path: &Path) -> Result<(), RubbishStoreError> {
-    let mut targets = FAIL_DIRECTORY_SYNCS.lock();
-    if let Some(index) = targets.iter().position(|target| target == path) {
-        targets.swap_remove(index);
-        return Err(RubbishStoreError::filesystem(
-            "execute deterministic directory sync failpoint",
-            path,
-            io::Error::other("DirectorySync"),
-        ));
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
 fn sync_directory(path: &Path) -> Result<(), RubbishStoreError> {
-    #[cfg(test)]
-    hit_test_directory_sync_failure(path)?;
-    fs::File::open(path)
-        .and_then(|directory| directory.sync_all())
-        .map_err(|source| RubbishStoreError::filesystem("sync directory", path, source))
-}
-
-#[cfg(windows)]
-fn sync_directory(path: &Path) -> Result<(), RubbishStoreError> {
-    use std::os::windows::fs::OpenOptionsExt as _;
-
-    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
-
-    #[cfg(test)]
-    hit_test_directory_sync_failure(path)?;
-    OpenOptions::new()
-        .write(true)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-        .open(path)
-        .and_then(|directory| directory.sync_all())
+    super::atomic_file::flush_directory(path)
         .map_err(|source| RubbishStoreError::filesystem("sync directory", path, source))
 }
 

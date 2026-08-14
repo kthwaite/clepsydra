@@ -9,6 +9,8 @@ use thiserror::Error;
 use uuid::Uuid;
 
 use super::atomic_file::install_noreplace;
+#[cfg(test)]
+use super::atomic_file::AtomicPublicationError;
 
 use super::path::VaultPath;
 use super::rubbish::{RubbishItem, RubbishManifest, RubbishStore, RubbishStoreError};
@@ -1639,16 +1641,9 @@ fn sync_directory_parent(path: &Path) -> Result<(), BatchMutationError> {
     Ok(())
 }
 
-#[cfg(not(windows))]
 fn sync_directory(path: &Path) -> Result<(), BatchMutationError> {
-    fs::File::open(path)
-        .and_then(|directory| directory.sync_all())
+    super::atomic_file::flush_directory(path)
         .map_err(|source| BatchMutationError::filesystem("sync directory", path, source))
-}
-
-#[cfg(windows)]
-fn sync_directory(_path: &Path) -> Result<(), BatchMutationError> {
-    Ok(())
 }
 
 fn sync_transaction_directory(path: &Path) -> Result<(), BatchMutationError> {
@@ -2359,6 +2354,32 @@ mod tests {
 
         assert!(prepared.publish().is_err());
         assert!(prepared.publish().is_err());
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
+        drop(prepared);
+        recover_pending(fixture.root()).unwrap();
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
+    }
+
+    #[test]
+    fn phase_publication_parent_flush_failure_is_uncertain_before_mutation() {
+        let fixture = fixture_with_file("a.md", b"before");
+        let mut prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let _failure =
+            crate::vault::atomic_file::fail_next_directory_flush(prepared.directory());
+
+        let error = prepared.publish().unwrap_err();
+
+        assert!(matches!(
+            error,
+            BatchMutationError::Publication {
+                source: AtomicPublicationError::PublishedButNotDurable(_),
+                ..
+            }
+        ));
+        assert!(matches!(
+            prepared.publish(),
+            Err(BatchMutationError::UncertainPhase(_))
+        ));
         assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
         drop(prepared);
         recover_pending(fixture.root()).unwrap();

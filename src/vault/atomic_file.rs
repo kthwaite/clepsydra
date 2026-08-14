@@ -7,6 +7,48 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
+#[cfg(test)]
+static FAIL_DIRECTORY_FLUSHES: std::sync::LazyLock<parking_lot::Mutex<Vec<PathBuf>>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(Vec::new()));
+
+#[cfg(test)]
+pub(crate) struct TestDirectoryFlushFailureGuard {
+    path: PathBuf,
+}
+
+#[cfg(test)]
+impl Drop for TestDirectoryFlushFailureGuard {
+    fn drop(&mut self) {
+        let mut targets = FAIL_DIRECTORY_FLUSHES.lock();
+        if let Some(index) = targets.iter().position(|target| target == &self.path) {
+            targets.swap_remove(index);
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn fail_next_directory_flush(path: &Path) -> TestDirectoryFlushFailureGuard {
+    let path = path.to_path_buf();
+    let mut targets = FAIL_DIRECTORY_FLUSHES.lock();
+    assert!(
+        !targets.contains(&path),
+        "directory flush failpoint already armed for {}",
+        path.display()
+    );
+    targets.push(path.clone());
+    TestDirectoryFlushFailureGuard { path }
+}
+
+#[cfg(test)]
+fn hit_test_directory_flush_failure(path: &Path) -> io::Result<()> {
+    let mut targets = FAIL_DIRECTORY_FLUSHES.lock();
+    if let Some(index) = targets.iter().position(|target| target == path) {
+        targets.swap_remove(index);
+        return Err(io::Error::other("DirectoryFlush"));
+    }
+    Ok(())
+}
+
 /// Failure phase for an atomic publication attempt.
 ///
 /// Callers must compensate or reconcile `PublishedButNotDurable`: the
@@ -428,22 +470,37 @@ where
     })
 }
 
-#[cfg(not(windows))]
 fn sync_parent(parent: &Path) -> io::Result<()> {
-    fs::File::open(parent)?.sync_all()
+    flush_directory(parent)
 }
 
-/// Windows' standard filesystem API opens files without the directory-only
-/// `FILE_FLAG_BACKUP_SEMANTICS` flag, so `File::open(parent)` always fails.
-/// The crate has no dependency that exposes a verified directory handle and
-/// flush operation. Publication is already complete at this point; until such
-/// an implementation is available, parent synchronization is deliberately a
-/// successful no-op rather than reporting that every successful publication
-/// failed.
+/// Durably flush a directory entry update.
+///
+/// Windows requires `FILE_FLAG_BACKUP_SEMANTICS` to obtain a directory
+/// handle. `File::sync_all` then delegates to `FlushFileBuffers`, matching the
+/// durability boundary used by ordinary `File` synchronization.
+pub(crate) fn flush_directory(path: &Path) -> io::Result<()> {
+    #[cfg(test)]
+    hit_test_directory_flush_failure(path)?;
+    flush_directory_platform(path)
+}
+
+#[cfg(not(windows))]
+fn flush_directory_platform(path: &Path) -> io::Result<()> {
+    fs::File::open(path)?.sync_all()
+}
+
 #[cfg(windows)]
-#[allow(clippy::unnecessary_wraps)]
-fn sync_parent(_parent: &Path) -> io::Result<()> {
-    Ok(())
+fn flush_directory_platform(path: &Path) -> io::Result<()> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+
+    OpenOptions::new()
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)?
+        .sync_all()
 }
 
 #[cfg(not(windows))]
@@ -578,6 +635,26 @@ pub fn install_noreplace(source: &Path, destination: &Path) -> io::Result<()> {
         Err(error)
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atomic_create_parent_flush_failure_is_post_publication_uncertainty() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("page.md");
+        let _failure = fail_next_directory_flush(temp.path());
+
+        let error = atomic_create(&path, b"content").unwrap_err();
+
+        assert!(matches!(
+            error,
+            AtomicPublicationError::PublishedButNotDurable(_)
+        ));
+        assert_eq!(fs::read(path).unwrap(), b"content");
+    }
+}
+
 
 #[cfg(not(any(
     target_os = "linux",

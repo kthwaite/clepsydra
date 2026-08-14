@@ -637,14 +637,8 @@ fn rollback_created_publication(
     })
 }
 
-#[cfg(not(windows))]
 fn sync_rollback_parent(parent: &Path) -> io::Result<()> {
-    fs::File::open(parent)?.sync_all()
-}
-
-#[cfg(windows)]
-fn sync_rollback_parent(_parent: &Path) -> io::Result<()> {
-    Ok(())
+    super::atomic_file::flush_directory(parent)
 }
 
 struct RubbishPurgeContext {
@@ -2093,6 +2087,22 @@ mod tests {
                 .unwrap()
                 .unwrap()
         }
+    }
+
+    #[test]
+    fn created_page_rollback_parent_flush_failure_reports_removed_but_not_durable() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("page.md");
+        fs::write(&path, b"content").unwrap();
+        let _failure = crate::vault::atomic_file::fail_next_directory_flush(temp.path());
+
+        let error = rollback_created_publication(&path, None).unwrap_err();
+
+        assert!(!path.exists());
+        assert!(
+            error.to_string().contains("failed to sync parent directory"),
+            "{error}"
+        );
     }
 
     #[tokio::test]
