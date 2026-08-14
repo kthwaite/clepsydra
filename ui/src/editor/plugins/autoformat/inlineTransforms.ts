@@ -1,5 +1,6 @@
 import {
   Editor,
+  Node,
   Path,
   type Point,
   Element as SlateElement,
@@ -7,6 +8,7 @@ import {
   Transforms,
 } from "slate";
 import { HistoryEditor } from "slate-history";
+import { matchTrailingInlineProperty } from "#/editor/properties";
 import { makeFootnoteDef } from "#/editor/schema/elements/footnoteDef";
 import { makeFootnoteRef } from "#/editor/schema/elements/footnoteRef";
 import { makeWikilink } from "#/editor/schema/elements/wikilink";
@@ -46,7 +48,11 @@ export function tryInlineTransform(
   if (isInCodeContext(editor)) return false;
 
   // Link transforms: ] continues [text, ) closes [text](url)
-  if (typed === "]") return tryBracketTransform(editor, closerConsumed);
+  // A completed [key:: value] pair claims the ] before the link scaffold does.
+  if (typed === "]") {
+    if (tryInlinePropertyTransform(editor, closerConsumed)) return true;
+    return tryBracketTransform(editor, closerConsumed);
+  }
   if (typed === ")") return tryLinkTransform(editor, closerConsumed);
 
   // Mark transforms: *, _, ~, `
@@ -257,6 +263,102 @@ function tryWikilinkTransform(
       if (wikilinkPath) selectTextAfterInline(editor, wikilinkPath);
     });
   });
+  return true;
+}
+
+type PropertyBearingElement = CustomElement & {
+  properties?: Record<string, string>;
+};
+
+/**
+ * The block a typed property belongs to. The loader records a list item's
+ * metadata on the item rather than on its paragraph (`mdast-to-slate` converts
+ * item children with extraction disabled), so a property typed inside a task
+ * item has to land there too — otherwise the item's chips and the save/reload
+ * round-trip would disagree about where the property lives.
+ */
+function propertyOwnerEntry(
+  editor: Editor,
+): [PropertyBearingElement, Path] | null {
+  const { selection } = editor;
+  if (!selection) return null;
+
+  const blockEntry = Editor.above(editor, {
+    at: selection.anchor,
+    match: (node) =>
+      SlateElement.isElement(node) &&
+      !Editor.isEditor(node) &&
+      Editor.isBlock(editor, node),
+  });
+  if (!blockEntry) return null;
+
+  const [block, blockPath] = blockEntry as [PropertyBearingElement, Path];
+  if (block.type === "paragraph" && blockPath.length > 1) {
+    const parentPath = Path.parent(blockPath);
+    const parent = Node.get(editor, parentPath);
+    if (
+      SlateElement.isElement(parent) &&
+      (parent as CustomElement).type === "list-item"
+    ) {
+      return [parent as PropertyBearingElement, parentPath];
+    }
+  }
+  return [block, blockPath];
+}
+
+/**
+ * `[key:: value]` typed in the editor becomes a block property instead of
+ * literal text, mirroring how the same syntax is read out of a saved file.
+ * Runs ahead of the link scaffold, which would otherwise turn the pair into
+ * `[key:: value]()`.
+ */
+function tryInlinePropertyTransform(
+  editor: Editor,
+  closerConsumed: boolean,
+): boolean {
+  const info = getTextBefore(editor);
+  if (!info) return false;
+
+  const { text: textBefore, path } = info;
+  if (closerConsumed && !textBefore.endsWith("]")) return false;
+  // Unless overtype already consumed it, the typed ] is not in the text yet.
+  const candidate = closerConsumed ? textBefore : `${textBefore}]`;
+  const match = matchTrailingInlineProperty(candidate);
+  if (!match) return false;
+
+  const owner = propertyOwnerEntry(editor);
+  if (!owner) return false;
+  const [block, blockPath] = owner;
+
+  // Swallow the whitespace separating the pair from the text it annotates;
+  // serialization re-inserts it, so keeping it would grow the line on each
+  // save/reload cycle.
+  let deleteStart = match.index;
+  while (
+    deleteStart > 0 &&
+    (textBefore[deleteStart - 1] === " " ||
+      textBefore[deleteStart - 1] === "\t")
+  ) {
+    deleteStart--;
+  }
+
+  const properties = { ...block.properties, [match.key]: match.value };
+
+  HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+    Editor.withoutNormalizing(editor, () => {
+      Transforms.select(editor, {
+        anchor: { path, offset: deleteStart },
+        focus: { path, offset: textBefore.length },
+      });
+      Transforms.delete(editor);
+      Transforms.setNodes<PropertyBearingElement>(
+        editor,
+        { properties },
+        { at: blockPath },
+      );
+    });
+  });
+
   return true;
 }
 
