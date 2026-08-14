@@ -74,6 +74,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
+    id: "/stats",
+    label: "Vault statistics",
+    surface: "route",
+    disposition: { kind: "guide", slug: "tasks-agenda-journals-and-board" },
+  },
+  {
     id: "/tasking",
     label: "Tasking workspace",
     surface: "route",

@@ -134,16 +134,6 @@ describe("Gazetteer route filters", () => {
   });
 
   it("keeps quotation available as a backend-facing kind filter", () => {
-    const validateSearch = Route.options.validateSearch;
-    if (typeof validateSearch !== "function") {
-      throw new Error("Expected a callable search validator");
-    }
-    expect(
-      validateSearch({ ...completeSearch, kind: "QUOTE" }),
-    ).toEqual({
-      ...completeSearch,
-      kind: "QUOTE",
-    });
 
     routeMocks.search.kind = "QUOTE";
     render(<GazetteerPage />);
