@@ -127,7 +127,6 @@ async function loadWorker(
 		},
 	);
 
-
 	vi.stubGlobal("chrome", {
 		runtime: {
 			onMessage: {
