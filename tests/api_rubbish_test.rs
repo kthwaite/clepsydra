@@ -525,6 +525,145 @@ async fn rubbish_item_delete_purges_exact_item() {
 }
 
 #[tokio::test]
+async fn failed_purge_after_cas_release_cannot_restore_and_retry_finishes() {
+    let fixture = fixture_at(ARCHIVE_TIME);
+    let item_id = Uuid::parse_str(ITEM_ID_A).unwrap();
+    let snapshot = b"captured snapshot owned only by the rubbish item";
+    let snapshot_hash = fixture
+        .state
+        .cas
+        .lock()
+        .store(snapshot, "text/html")
+        .unwrap()
+        .hash;
+    let retained_bytes = stored_page(
+        PAGE_ID_A,
+        "Purge in progress",
+        &format!("[archive]\nsnapshot_hash = \"{snapshot_hash}\"\n"),
+        "Retained page bytes.",
+    );
+    publish_item(
+        &fixture,
+        manifest(
+            ITEM_ID_A,
+            PAGE_ID_A,
+            "purge-in-progress.md",
+            "Purge in progress",
+            ARCHIVE_TIME,
+        ),
+        retained_bytes.clone(),
+    )
+    .await;
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index.connection().execute_batch(&format!(
+                "CREATE TRIGGER fail_rubbish_purge_catalog
+                 BEFORE DELETE ON rubbish_items
+                 WHEN OLD.item_id = '{ITEM_ID_A}'
+                 BEGIN
+                     SELECT RAISE(FAIL, 'injected rubbish catalog deletion failure');
+                 END;"
+            ))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let purge_error = fixture
+        .server
+        .delete(&format!("/api/vault/rubbish/{ITEM_ID_A}"))
+        .await;
+    purge_error.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        purge_error
+            .json::<Value>()["error"]
+            .as_str()
+            .unwrap()
+            .contains("rubbish catalog removal failed")
+    );
+    assert_eq!(
+        RubbishStore::for_vault(fixture.state.vault.root())
+            .read_item(ITEM_ID_A)
+            .unwrap()
+            .bytes,
+        retained_bytes
+    );
+    assert!(!fixture.state.vault.root().join("purge-in-progress.md").exists());
+    assert!(
+        fixture
+            .state
+            .cas
+            .lock()
+            .rubbish_archive_refs_released(item_id)
+            .unwrap()
+    );
+    assert_eq!(
+        fixture
+            .state
+            .cas
+            .lock()
+            .gc(std::time::Duration::ZERO)
+            .unwrap(),
+        1
+    );
+
+    let restore = fixture
+        .server
+        .post(&format!("/api/vault/rubbish/{ITEM_ID_A}/restore"))
+        .await;
+    restore.assert_status(StatusCode::CONFLICT);
+    let restore_error = restore.json::<Value>();
+    assert!(
+        restore_error["error"]
+            .as_str()
+            .unwrap()
+            .contains("retry permanent deletion"),
+        "actual error: {restore_error}"
+    );
+    assert!(!fixture.state.vault.root().join("purge-in-progress.md").exists());
+    assert_eq!(
+        RubbishStore::for_vault(fixture.state.vault.root())
+            .read_item(ITEM_ID_A)
+            .unwrap()
+            .bytes,
+        retained_bytes
+    );
+
+    fixture
+        .state
+        .index
+        .with_index(|index, _| {
+            index
+                .connection()
+                .execute_batch("DROP TRIGGER fail_rubbish_purge_catalog")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    fixture
+        .server
+        .delete(&format!("/api/vault/rubbish/{ITEM_ID_A}"))
+        .await
+        .assert_status_ok();
+    fixture
+        .server
+        .get(&format!("/api/vault/rubbish/{ITEM_ID_A}"))
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+    assert!(!fixture.state.vault.root().join("purge-in-progress.md").exists());
+    assert!(
+        fixture
+            .state
+            .cas
+            .lock()
+            .rubbish_archive_refs_released(item_id)
+            .unwrap()
+    );
+}
+
+#[tokio::test]
 async fn empty_rubbish_returns_ordered_partial_outcomes_and_retains_failures() {
     let fixture = fixture_at(ARCHIVE_TIME);
     let missing_blob = ContentStore::hash_bytes(b"blob absent from fixture CAS");

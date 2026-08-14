@@ -269,9 +269,10 @@ pub async fn restore_rubbish_item(
         .map_err(|error| ApiError::internal(format!("restore planning failed: {error}")))?;
     state
         .mutation_coordinator
-        .execute_batch(
+        .restore_rubbish(
             &state.vault,
             &state.index,
+            Arc::clone(&state.cas),
             Arc::clone(&state.hooks),
             command,
             super::mutation_notifier(&state),

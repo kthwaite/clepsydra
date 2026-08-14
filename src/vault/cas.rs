@@ -174,6 +174,12 @@ impl ContentStore {
         .map(|row| row.is_some())
     }
 
+    /// Return whether this rubbish item's captured-archive references have
+    /// already been durably released for permanent deletion.
+    pub fn rubbish_archive_refs_released(&self, item_id: Uuid) -> Result<bool, CasError> {
+        Self::rubbish_release_completed(&self.db, &item_id.to_string()).map_err(Into::into)
+    }
+
     fn prevalidate_rubbish_archive_ref(&self, hash: &str) -> Result<(), CasError> {
         let hex = Self::validate_hash(hash).map_err(|error| CasError::InvalidHash {
             hash: hash.to_string(),

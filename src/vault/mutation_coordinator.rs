@@ -1079,6 +1079,54 @@ impl MutationCoordinator {
             .await
     }
 
+    /// Restore one retained rubbish item unless its permanent-deletion CAS
+    /// release has already committed.
+    pub async fn restore_rubbish(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
+        command: BatchMutationCommand,
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
+    ) -> Result<MutationNotification, MutationError> {
+        let affected_paths = command.affected_paths();
+        let affected_rubbish_items = command.affected_rubbish_items();
+        let item_id = match affected_rubbish_items.as_slice() {
+            [item_id] => *item_id,
+            _ => {
+                return Err(MutationError::InvalidInput(
+                    "rubbish restore must affect exactly one retained item".to_string(),
+                ));
+            }
+        };
+        #[cfg(test)]
+        if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
+            hook(&affected_paths);
+        }
+        let guard = self
+            .lock_resources(&affected_paths, &affected_rubbish_items)
+            .await;
+        let root = vault.root().to_path_buf();
+        let (guard, ()) = run_blocking_fs(root, guard, move || {
+            if cas
+                .lock()
+                .rubbish_archive_refs_released(item_id)
+                .map_err(|source| MutationError::RubbishCleanup { item_id, source })?
+            {
+                return Err(MutationError::Conflict(format!(
+                    "permanent deletion is already in progress for rubbish item {item_id}; \
+                     its captured-archive references have been released, so it cannot be \
+                     restored; retry permanent deletion"
+                )));
+            }
+            Ok(())
+        })
+        .await?;
+        self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
+            .await
+    }
+
     pub async fn execute_batch_excluded(
         &self,
         exclusion: MutationExclusionGuard,
