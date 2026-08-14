@@ -408,6 +408,61 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
         MathMl,
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum IntegrationTag {
+        Desc,
+        Title,
+        ForeignObject,
+        Mi,
+        Mo,
+        Mn,
+        Ms,
+        Mtext,
+        AnnotationXml,
+    }
+
+    impl IntegrationTag {
+        fn matches(self, html: &[u8], start: usize) -> bool {
+            let name: &[u8] = match self {
+                Self::Desc => b"desc",
+                Self::Title => b"title",
+                Self::ForeignObject => b"foreignobject",
+                Self::Mi => b"mi",
+                Self::Mo => b"mo",
+                Self::Mn => b"mn",
+                Self::Ms => b"ms",
+                Self::Mtext => b"mtext",
+                Self::AnnotationXml => b"annotation-xml",
+            };
+            named_tag_at(html, start, name)
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct NamespaceFrame {
+        namespace: Namespace,
+        integration: Option<IntegrationTag>,
+        html_depth: usize,
+    }
+
+    impl NamespaceFrame {
+        fn plain(namespace: Namespace) -> Self {
+            Self {
+                namespace,
+                integration: None,
+                html_depth: 0,
+            }
+        }
+
+        fn integration(opener: IntegrationTag) -> Self {
+            Self {
+                namespace: Namespace::Html,
+                integration: Some(opener),
+                html_depth: 0,
+            }
+        }
+    }
+
     fn inert_name_at(html: &[u8], start: usize) -> Option<(&'static [u8], bool)> {
         for (name, plaintext) in [
             (b"style".as_slice(), false),
@@ -544,20 +599,47 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
         (font_exit, annotation_html)
     }
 
+    fn is_html_void_element(html: &[u8], name_start: usize) -> bool {
+        tag_is_one_of(
+            html,
+            name_start,
+            &[
+                b"area", b"base", b"br", b"col", b"embed", b"hr", b"img", b"input", b"link",
+                b"meta", b"param", b"source", b"track", b"wbr",
+            ],
+        )
+    }
+
+    fn unwind_foreign(frames: &mut Vec<NamespaceFrame>) {
+        while frames
+            .last()
+            .is_some_and(|frame| frame.namespace != Namespace::Html)
+        {
+            frames.pop();
+        }
+    }
+
     fn transition_start(
-        namespaces: &mut Vec<Namespace>,
+        frames: &mut Vec<NamespaceFrame>,
         html: &[u8],
         name_start: usize,
         attributes_start: usize,
         tag_end: usize,
         self_closing: bool,
     ) {
-        let current = *namespaces.last().unwrap_or(&Namespace::Html);
+        let current = frames
+            .last()
+            .map_or(Namespace::Html, |frame| frame.namespace);
         if current == Namespace::Html {
-            if named_tag_at(html, name_start, b"svg") {
-                namespaces.push(Namespace::Svg);
-            } else if named_tag_at(html, name_start, b"math") {
-                namespaces.push(Namespace::MathMl);
+            if !self_closing && named_tag_at(html, name_start, b"svg") {
+                frames.push(NamespaceFrame::plain(Namespace::Svg));
+            } else if !self_closing && named_tag_at(html, name_start, b"math") {
+                frames.push(NamespaceFrame::plain(Namespace::MathMl));
+            } else if !self_closing
+                && !is_html_void_element(html, name_start)
+                && frames.last().is_some_and(|frame| frame.integration.is_some())
+            {
+                frames.last_mut().expect("integration frame").html_depth += 1;
             }
             return;
         }
@@ -565,7 +647,7 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
             && ((current == Namespace::Svg && named_tag_at(html, name_start, b"svg"))
                 || (current == Namespace::MathMl && named_tag_at(html, name_start, b"math")))
         {
-            namespaces.push(current);
+            frames.push(NamespaceFrame::plain(current));
             return;
         }
         if tag_is_one_of(
@@ -579,81 +661,89 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
                 b"strike", b"sub", b"sup", b"table", b"tt", b"u", b"ul", b"var",
             ],
         ) {
-            while namespaces.last().is_some_and(|namespace| *namespace != Namespace::Html) {
-                namespaces.pop();
-            }
+            unwind_foreign(frames);
             return;
         }
         let (font_exit, annotation_html) =
             foreign_transition_attributes(html, attributes_start, tag_end);
         if named_tag_at(html, name_start, b"font") && font_exit {
-            while namespaces.last().is_some_and(|namespace| *namespace != Namespace::Html) {
-                namespaces.pop();
-            }
-            return;
-        }
-        if current == Namespace::MathMl
-            && named_tag_at(html, name_start, b"annotation-xml")
-            && annotation_html
-            && !self_closing
-        {
-            namespaces.push(Namespace::Html);
+            unwind_foreign(frames);
             return;
         }
         let integration = match current {
-            Namespace::Svg => {
-                tag_is_one_of(html, name_start, &[b"desc", b"title", b"foreignobject"])
+            Namespace::Svg if named_tag_at(html, name_start, b"desc") => {
+                Some(IntegrationTag::Desc)
             }
-            Namespace::MathMl => {
-                tag_is_one_of(html, name_start, &[b"mi", b"mo", b"mn", b"ms", b"mtext"])
+            Namespace::Svg if named_tag_at(html, name_start, b"title") => {
+                Some(IntegrationTag::Title)
             }
-            Namespace::Html => false,
+            Namespace::Svg if named_tag_at(html, name_start, b"foreignobject") => {
+                Some(IntegrationTag::ForeignObject)
+            }
+            Namespace::MathMl if named_tag_at(html, name_start, b"mi") => {
+                Some(IntegrationTag::Mi)
+            }
+            Namespace::MathMl if named_tag_at(html, name_start, b"mo") => {
+                Some(IntegrationTag::Mo)
+            }
+            Namespace::MathMl if named_tag_at(html, name_start, b"mn") => {
+                Some(IntegrationTag::Mn)
+            }
+            Namespace::MathMl if named_tag_at(html, name_start, b"ms") => {
+                Some(IntegrationTag::Ms)
+            }
+            Namespace::MathMl if named_tag_at(html, name_start, b"mtext") => {
+                Some(IntegrationTag::Mtext)
+            }
+            Namespace::MathMl
+                if annotation_html && named_tag_at(html, name_start, b"annotation-xml") =>
+            {
+                Some(IntegrationTag::AnnotationXml)
+            }
+            _ => None,
         };
-        if integration && !self_closing {
-            namespaces.push(Namespace::Html);
+        if let Some(opener) = integration.filter(|_| !self_closing) {
+            frames.push(NamespaceFrame::integration(opener));
         }
     }
 
-    fn transition_end(namespaces: &mut Vec<Namespace>, html: &[u8], name_start: usize) {
-        let current = *namespaces.last().unwrap_or(&Namespace::Html);
+    fn transition_end(frames: &mut Vec<NamespaceFrame>, html: &[u8], name_start: usize) {
+        let current = frames
+            .last()
+            .map_or(Namespace::Html, |frame| frame.namespace);
         match current {
             Namespace::Html => {
-                let Some(previous) = namespaces.get(namespaces.len().saturating_sub(2)).copied()
-                else {
+                let Some(frame) = frames.last_mut() else {
                     return;
                 };
-                let closes_integration = match previous {
-                    Namespace::Svg => tag_is_one_of(
-                        html,
-                        name_start,
-                        &[b"desc", b"title", b"foreignobject"],
-                    ),
-                    Namespace::MathMl => tag_is_one_of(
-                        html,
-                        name_start,
-                        &[b"mi", b"mo", b"mn", b"ms", b"mtext", b"annotation-xml"],
-                    ),
-                    Namespace::Html => false,
+                let Some(opener) = frame.integration else {
+                    return;
                 };
-                if closes_integration {
-                    namespaces.pop();
+                if frame.html_depth > 0 {
+                    frame.html_depth -= 1;
+                } else if opener.matches(html, name_start) {
+                    frames.pop();
                 }
             }
             Namespace::Svg => {
-                if tag_is_one_of(html, name_start, &[b"svg", b"p", b"br"]) {
-                    namespaces.pop();
+                if tag_is_one_of(html, name_start, &[b"p", b"br"]) {
+                    unwind_foreign(frames);
+                } else if named_tag_at(html, name_start, b"svg") {
+                    frames.pop();
                 }
             }
             Namespace::MathMl => {
-                if tag_is_one_of(html, name_start, &[b"math", b"p", b"br"]) {
-                    namespaces.pop();
+                if tag_is_one_of(html, name_start, &[b"p", b"br"]) {
+                    unwind_foreign(frames);
+                } else if named_tag_at(html, name_start, b"math") {
+                    frames.pop();
                 }
             }
         }
     }
 
     let mut cursor = 0usize;
-    let mut namespaces = vec![Namespace::Html];
+    let mut frames = vec![NamespaceFrame::plain(Namespace::Html)];
     while let Some(relative) = html[cursor..].iter().position(|byte| *byte == b'<') {
         let start = cursor + relative;
         if html.get(start..).is_some_and(|tail| tail.starts_with(b"<!--")) {
@@ -664,7 +754,7 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
             break;
         };
         if first == b'/' {
-            transition_end(&mut namespaces, html, start + 2);
+            transition_end(&mut frames, html, start + 2);
             cursor = start + 2;
             continue;
         }
@@ -678,7 +768,7 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
         }) {
             index += 1;
         }
-        let inert = if namespaces.last() == Some(&Namespace::Html) {
+        let inert = if frames.last().is_some_and(|frame| frame.namespace == Namespace::Html) {
             inert_name_at(html, start + 1)
         } else {
             None
@@ -694,7 +784,7 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
                     .map_or(html.len(), |offset| cursor + offset);
             } else {
                 transition_start(
-                    &mut namespaces,
+                    &mut frames,
                     html,
                     start + 1,
                     attributes_start,
@@ -821,7 +911,7 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
         }
         let self_closing = html.get(cursor.saturating_sub(2)..cursor) == Some(b"/>");
         transition_start(
-            &mut namespaces,
+            &mut frames,
             html,
             start + 1,
             attributes_start,
@@ -2128,6 +2218,65 @@ mod tests {
         ] {
             let result = neutralize_navigation(&integrated);
             assert!(result.is_ok(), "{}: {}", result.unwrap_err(), integrated);
+        }
+
+        let apparent_over_bound_tag = (0..=MAX_ATTRIBUTES_PER_TAG)
+            .map(|index| format!("a{index}=x "))
+            .collect::<String>();
+        for self_closing_root in [
+            format!("<svg/><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style>"),
+            format!("<math/><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style>"),
+            format!(
+                "<svg><foreignObject><svg/><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style></foreignObject></svg>"
+            ),
+        ] {
+            assert!(
+                neutralize_navigation(&self_closing_root).is_ok(),
+                "self-closing foreign root leaked a namespace frame"
+            );
+        }
+        for breakout_end in [
+            format!(
+                "<svg><svg></p><math></svg><style><a {apparent_over_bound_tag}></a></style></math>"
+            ),
+            format!(
+                "<math><math></br><svg></math><style><a {apparent_over_bound_tag}></a></style></svg>"
+            ),
+        ] {
+            let error = neutralize_navigation(&breakout_end).unwrap_err();
+            assert!(error.contains("attribute limit"), "{error}");
+        }
+        for balanced in [
+            format!(
+                "<svg><svg></svg></svg><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style>"
+            ),
+            format!(
+                "<svg><svg><br><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style>"
+            ),
+            format!(
+                "<math><mtext><span>x</span><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style></mtext></math>"
+            ),
+        ] {
+            assert!(
+                neutralize_navigation(&balanced).is_ok(),
+                "balanced namespace trace rejected legitimate HTML raw text"
+            );
+        }
+        for descendant_close in [
+            format!(
+                "<svg><foreignObject><title>t</title><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style></foreignObject></svg>"
+            ),
+            format!(
+                "<svg><foreignObject><foreignObject>x</foreignObject><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style></foreignObject></svg>"
+            ),
+            format!(
+                "<math><mtext><mtext>x</mtext><style>.x{{content:\"<a {apparent_over_bound_tag}>\"}}</style></mtext></math>"
+            ),
+        ] {
+            assert!(
+                neutralize_navigation(&descendant_close).is_ok(),
+                "descendant close popped an outer integration frame"
+            );
         }
     }
 
