@@ -8,7 +8,7 @@ import { PageActionsMenu } from "#/components/page-tree/PageActionsMenu";
 const mocks = vi.hoisted(() => ({
   createFolder: vi.fn(),
   deleteFolder: vi.fn(),
-  deletePage: vi.fn(),
+  archivePage: vi.fn(),
   moveFolder: vi.fn(),
   movePage: vi.fn(),
   preview: vi.fn(),
@@ -29,8 +29,8 @@ vi.mock("#/api/pages", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#/api/pages")>();
   return {
     ...actual,
-    useDeletePage: () => ({
-      mutateAsync: mocks.deletePage,
+    useArchivePage: () => ({
+      mutateAsync: mocks.archivePage,
       isPending: false,
     }),
     useMovePage: () => ({
@@ -98,7 +98,7 @@ beforeEach(() => {
   mocks.moveFolder.mockResolvedValue(undefined);
   mocks.createFolder.mockResolvedValue(undefined);
   mocks.deleteFolder.mockResolvedValue(undefined);
-  mocks.deletePage.mockResolvedValue(undefined);
+  mocks.archivePage.mockResolvedValue(undefined);
 });
 
 describe("MutationPreviewDialog", () => {
@@ -152,7 +152,7 @@ describe("PageActionsMenu", () => {
         path="notes/old.md"
         beforeMutation={beforeMutation}
         onMoved={onMoved}
-        onDeleted={vi.fn()}
+        onArchived={vi.fn()}
       />,
     );
 
@@ -182,40 +182,6 @@ describe("PageActionsMenu", () => {
     expect(events).toEqual(["save", "preview", "move"]);
   });
 
-  it("previews the selected rewrite policy before deleting a page", async () => {
-    const user = userEvent.setup();
-    const onDeleted = vi.fn();
-    render(
-      <PageActionsMenu
-        path="notes/old.md"
-        onMoved={vi.fn()}
-        onDeleted={onDeleted}
-      />,
-    );
-
-    await user.click(screen.getByRole("button", { name: /^delete page$/i }));
-    await chooseOption(
-      user,
-      screen.getByRole("dialog"),
-      "Inbound links",
-      "Remove link markup",
-    );
-    await user.click(screen.getByRole("button", { name: /preview deletion/i }));
-
-    expect(mocks.preview).toHaveBeenCalledWith({
-      operation: "delete_page",
-      source: "notes/old.md",
-      rewrite: "unlink",
-    });
-    await user.click(screen.getByRole("button", { name: /confirm delete/i }));
-    expect(mocks.deletePage).toHaveBeenCalledWith({
-      params: {
-        path: { path: "notes/old.md" },
-        query: { force: true, rewrite: "unlink" },
-      },
-    });
-    expect(onDeleted).toHaveBeenCalledOnce();
-  });
 
   it("discards a preview when the user returns to change the destination", async () => {
     const user = userEvent.setup();
@@ -224,7 +190,7 @@ describe("PageActionsMenu", () => {
       <PageActionsMenu
         path="notes/old.md"
         onMoved={vi.fn()}
-        onDeleted={vi.fn()}
+        onArchived={vi.fn()}
       />,
     );
 
@@ -319,8 +285,14 @@ describe("FolderActionsMenu", () => {
     expect(
       screen.getByText(/backend cannot preview folder deletion/i),
     ).toBeVisible();
+    expect(
+      screen.getByRole("dialog", { name: "Delete folder permanently" }),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/pages.*do not enter the Rubbish Bin/i),
+    ).toBeVisible();
     const confirmDeletion = screen.getByRole("button", {
-      name: /confirm folder deletion/i,
+      name: "Delete folder permanently",
     });
     expect(confirmDeletion).toBeDisabled();
     const confirm = screen.getByRole("textbox", {

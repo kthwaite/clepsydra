@@ -149,6 +149,7 @@ interface WorkspaceActions {
   addTab: (tab: TabDescriptor) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
+  closeArchivedPageTabs: (pageId: string, path: string) => void;
   activateTab: (tabId: string) => void;
   /** Apply a router-approved history destination without re-entering guards. */
   activateTabFromHistory: (tabId: string) => void;
@@ -412,6 +413,51 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             state.quires,
             { activeTabId: tabId },
           ),
+        );
+      },
+
+      closeArchivedPageTabs(pageId, path) {
+        const state = get();
+        const removedTabs = state.tabs.filter(
+          (tab) =>
+            tab.type === "page" && (tab.id === pageId || tab.path === path),
+        );
+        if (removedTabs.length === 0) return;
+
+        const removedIds = new Set(removedTabs.map((tab) => tab.id));
+        const removedPaths = new Set(
+          removedTabs
+            .map((tab) => tab.path)
+            .filter((tabPath): tabPath is string => tabPath !== undefined),
+        );
+        removedPaths.add(path);
+        for (const tab of removedTabs) {
+          clearFolioRestoration(tab.id);
+          clearFolioHistoryForTab(tab.id);
+        }
+
+        const firstRemovedIndex = state.tabs.findIndex((tab) =>
+          removedIds.has(tab.id),
+        );
+        const nextTabs = state.tabs.filter((tab) => !removedIds.has(tab.id));
+        const activeTabId =
+          state.activeTabId && removedIds.has(state.activeTabId)
+            ? nextTabs.length === 0
+              ? null
+              : nearestVisibleTabId(
+                  nextTabs,
+                  state.quires,
+                  Math.min(firstRemovedIndex, nextTabs.length - 1),
+                )
+            : state.activeTabId;
+
+        set(
+          normalized(nextTabs, state.quires, {
+            activeTabId,
+            openHistory: state.openHistory.filter(
+              (entry) => !removedPaths.has(entry.path),
+            ),
+          }),
         );
       },
 

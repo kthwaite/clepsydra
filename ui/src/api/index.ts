@@ -51,14 +51,12 @@ export interface ReferenceIssueFilters {
   offset?: number;
 }
 
-export type MutationOperation = "move_page" | "delete_page" | "move_folder";
-export type MutationRewrite = "plain_text" | "unlink" | "none";
+export type MutationOperation = "move_page" | "move_folder";
 
 export interface MutationPreviewRequest {
   operation: MutationOperation;
   source: string;
-  destination?: string;
-  rewrite?: MutationRewrite;
+  destination: string;
 }
 
 export interface PlannedFileOperation {

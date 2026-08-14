@@ -195,9 +195,24 @@ vi.mock("#/components/ThemeProvider", () => ({
   }),
 }));
 vi.mock("#/components/page-tree/PageActionsMenu", () => ({
-  PageActionsMenu: ({ onDeleted }: { onDeleted: () => void }) => (
-    <button type="button" onClick={onDeleted}>
-      Complete page deletion
+  PageActionsMenu: ({
+    onArchived,
+  }: {
+    onArchived: (archived: {
+      page_id: string;
+      original_path: string;
+    }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onArchived({
+          page_id: "page",
+          original_path: "notes/alpha.md",
+        })
+      }
+    >
+      Complete page archival
     </button>
   ),
 }));
@@ -1075,7 +1090,7 @@ describe("mobile Folio Back", () => {
     );
   });
 
-  it("keeps mobile deletion and router navigation in one raw-draft confirmation", async () => {
+  it("routes mobile home after archival closes the active page", async () => {
     const user = userEvent.setup();
     useWorkspaceStore.setState({
       tabs: [
@@ -1089,42 +1104,15 @@ describe("mobile Folio Back", () => {
       activeTabId: "page",
     });
     const router = renderNavigation("/workspace");
-    await screen.findByRole("button", { name: "Raw Markdown" });
+    await screen.findByRole("textbox", { name: "Page body" });
     const navigateSpy = vi.spyOn(router, "navigate");
     navigateSpy.mockClear();
 
-    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
-      target: { value: "Deletion must not discard this draft  \n" },
-    });
     await user.click(screen.getByRole("button", { name: "Document details" }));
     await user.click(screen.getByRole("button", { name: "Manage paths" }));
     await user.click(
-      await screen.findByRole("button", { name: "Complete page deletion" }),
+      await screen.findByRole("button", { name: "Complete page archival" }),
     );
-
-    expect(pageTabStillExists()).toBe(true);
-    expect(router.state.location.pathname).toBe("/workspace");
-    expect(navigateSpy).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
-    ).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Stay" }));
-    expect(pageTabStillExists()).toBe(true);
-    expect(navigateSpy).not.toHaveBeenCalled();
-    await user.click(
-      screen.getByRole("button", { name: "Close document details" }),
-    );
-    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
-      "Deletion must not discard this draft  \n",
-    );
-    await user.click(screen.getByRole("button", { name: "Document details" }));
-
-    await user.click(
-      screen.getByRole("button", { name: "Complete page deletion" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Leave" }));
 
     await waitFor(() => {
       expect(pageTabStillExists()).toBe(false);

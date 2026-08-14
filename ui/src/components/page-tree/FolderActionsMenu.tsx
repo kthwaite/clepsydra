@@ -351,7 +351,7 @@ export function FolderActionsMenu({
           if (!open && !deleteFolder.isPending)
             setDeleteConfirmationOpen(false);
         }}
-        title="Confirm folder deletion"
+        title="Delete folder permanently"
         description={`Folder: ${deleteSource}`}
         isDismissable={!deleteFolder.isPending}
         footer={
@@ -370,15 +370,18 @@ export function FolderActionsMenu({
                 deleteFolder.isPending || deleteConfirmation !== deleteSource
               }
             >
-              {deleteFolder.isPending ? "Deleting…" : "Confirm folder deletion"}
+              {deleteFolder.isPending
+                ? "Deleting permanently…"
+                : "Delete folder permanently"}
             </Button>
           </>
         }
       >
         <div className="space-y-4">
           <p className="text-sm text-destructive">
-            The backend cannot preview folder deletion. Verify the exact folder
-            name before continuing.
+            Folder deletion is permanent: its pages do not enter the Rubbish
+            Bin. The backend cannot preview folder deletion, so verify the
+            exact folder name before continuing.
           </p>
           <TextField
             label={`Type ${deleteSource} to confirm`}

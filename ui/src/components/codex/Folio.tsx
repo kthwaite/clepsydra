@@ -31,7 +31,7 @@ import {
 } from "#/api/index";
 import type { PageMeta } from "#/api/types";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
-import { useAssignPage } from "#/api/pages";
+import { type ArchivedPage, useAssignPage } from "#/api/pages";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import {
@@ -280,6 +280,16 @@ export function Folio({ tabId, path }: FolioProps) {
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const closeArchivedPageTabs = useWorkspaceStore(
+    (state) => state.closeArchivedPageTabs,
+  );
+  const handleArchived = useCallback(
+    (archived: ArchivedPage) => {
+      closeArchivedPageTabs(archived.page_id, archived.original_path);
+      if (mobile) void navigate({ to: "/" });
+    },
+    [closeArchivedPageTabs, mobile, navigate],
+  );
   const focusRequestId = useWorkspaceStore(
     (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
   );
@@ -882,6 +892,16 @@ export function Folio({ tabId, path }: FolioProps) {
     editor.editorRevision,
     mobile,
   );
+  const pageActions = editor.isDraft ? null : (
+    <Suspense fallback={<p className="cl-marg mb-0">Loading page actions…</p>}>
+      <PageActionsMenu
+        path={path}
+        beforeMutation={editor.saveNow}
+        onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
+        onArchived={handleArchived}
+      />
+    </Suspense>
+  );
 
   if (
     !rawMarkdownSession &&
@@ -917,6 +937,7 @@ export function Folio({ tabId, path }: FolioProps) {
         derivedTags={computedTags}
         state={encryptionState}
         properties={folioProperties}
+        pageActions={pageActions}
       />
     );
   }
@@ -1271,8 +1292,17 @@ export function Folio({ tabId, path }: FolioProps) {
       </Block>
 
       <Block label="Organization">
-        {folioReadOnly ? (
-          <p className="cl-marg m-0">Switch to Edit to manage paths.</p>
+        {editor.isDraft ? (
+          <p className="cl-marg m-0">
+            Save this page before moving or archiving it.
+          </p>
+        ) : folioReadOnly ? (
+          <div className="grid gap-2">
+            <p className="cl-marg m-0">
+              Switch to Edit to move this page. Archiving remains available.
+            </p>
+            {pageActions}
+          </div>
         ) : (
           <>
             <button
@@ -1291,23 +1321,7 @@ export function Folio({ tabId, path }: FolioProps) {
                 }
               >
                 <div className="mt-2 grid gap-2">
-                  {editor.isDraft ? (
-                    <p className="cl-marg mb-0">
-                      Save this page before moving or deleting it.
-                    </p>
-                  ) : (
-                    <PageActionsMenu
-                      path={path}
-                      beforeMutation={editor.saveNow}
-                      onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
-                      onDeleted={() => {
-                        runWorkspaceTransition(() => {
-                          closeTab(tabId);
-                          if (mobile) void navigate({ to: "/" });
-                        });
-                      }}
-                    />
-                  )}
+                  {pageActions}
                   <FolderActionsMenu
                     beforeMutation={editor.saveNow}
                     onMoved={(source, destination) => {

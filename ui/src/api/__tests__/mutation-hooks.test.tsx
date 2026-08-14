@@ -18,7 +18,7 @@ vi.mock("#/api/client", () => ({
 
 import { useCreateFolder, useDeleteFolder, useMoveFolder } from "#/api/folders";
 import { usePreviewMutation } from "#/api/index";
-import { useDeletePage, useMovePage } from "#/api/pages";
+import { useArchivePage, useMovePage } from "#/api/pages";
 
 function harness() {
   const client = new QueryClient({
@@ -48,7 +48,7 @@ describe("page and folder mutation hooks", () => {
     renderHook(
       () => {
         useMovePage();
-        useDeletePage();
+        useArchivePage();
         useCreateFolder();
         useMoveFolder();
         useDeleteFolder();
@@ -130,8 +130,9 @@ describe("page and folder mutation hooks", () => {
 
     await expect(
       result.current.mutateAsync({
-        operation: "delete_page",
+        operation: "move_page",
         source: "notes/a.md",
+        destination: "notes/b.md",
       }),
     ).rejects.toThrow("invalid response");
   });

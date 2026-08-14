@@ -834,6 +834,60 @@ describe("workspace Folio history lifecycle", () => {
     ).not.toBeNull();
   });
 
+  it("atomically removes every archived page identity and its Folio state", () => {
+    clearFolioHistoryState();
+    resetStore();
+    const archivedPath = "notes/alpha.md";
+    const archivedTabIds = ["page-alpha", "tab-alpha", "duplicate-alpha"];
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          ...pageTab("page-alpha", "q1"),
+          path: "notes/legacy-alpha.md",
+        },
+        { ...pageTab("tab-alpha", "q1"), path: archivedPath },
+        { ...pageTab("duplicate-alpha", "q1"), path: archivedPath },
+        pageTab("other"),
+      ],
+      activeTabId: "tab-alpha",
+      openHistory: [
+        { path: archivedPath, openedAt: 2 },
+        { path: "other.md", openedAt: 1 },
+      ],
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+    for (const tabId of [...archivedTabIds, "other"]) {
+      const recordPath =
+        tabId === "page-alpha" ? "notes/legacy-alpha.md" : archivedPath;
+      seedRecord(tabId, tabId === "other" ? "other.md" : recordPath);
+    }
+    request("duplicate-alpha", archivedPath);
+
+    useWorkspaceStore
+      .getState()
+      .closeArchivedPageTabs("page-alpha", archivedPath);
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual(["other"]);
+    expect(state.activeTabId).toBe("other");
+    expect(state.openHistory).toEqual([{ path: "other.md", openedAt: 1 }]);
+    expect(state.quires).toEqual({});
+    for (const tabId of archivedTabIds) {
+      const recordPath =
+        tabId === "page-alpha" ? "notes/legacy-alpha.md" : archivedPath;
+      expect(readFolioRestoration(tabId, recordPath)).toBeNull();
+      expect(
+        readFolioHistoryLocation(`visit-${tabId}`, tabId, recordPath),
+      ).toBeNull();
+    }
+    expect(
+      readFolioHistoryRestorationRequest("duplicate-alpha", archivedPath),
+    ).toBeNull();
+    expect(readFolioRestoration("other", "other.md")).not.toBeNull();
+  });
+
   it("clears all Folio history during workspace teardown", () => {
     clearFolioHistoryState();
     resetStore();

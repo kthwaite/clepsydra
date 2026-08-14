@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useLayoutEffect, useMemo } from "react";
+import { useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
 import {
   createEditor,
   type Descendant,
@@ -33,6 +33,7 @@ const {
   attachmentUploadMock,
   mobileLayoutState,
   mountedSlateEditors,
+  pageActionsMock,
   folioPropertiesMock,
   folioPropertiesState,
   navigateMock,
@@ -63,6 +64,7 @@ const {
   outlinksState: { data: undefined as OutlinkEntry[] | undefined },
   mobileLayoutState: { matches: false },
   mountedSlateEditors: [] as Editor[],
+  pageActionsMock: vi.fn(),
   folioPropertiesMock: vi.fn(),
   folioPropertiesState: { failed: false },
   attachmentRemoveMock: vi.fn(),
@@ -102,6 +104,7 @@ const {
   })),
 }));
 vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children }: { children: ReactNode }) => <a href="/archive">{children}</a>,
   useBlocker: (options: unknown) => {
     useBlockerMock(options);
     return blockerState.current;
@@ -153,6 +156,33 @@ vi.mock("#/api/attachments", async (importOriginal) => {
 });
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
+}));
+vi.mock("#/components/page-tree/PageActionsMenu", () => ({
+  PageActionsMenu: (props: {
+    path: string;
+    onArchived: (archived: {
+      page_id: string;
+      original_path: string;
+    }) => void;
+  }) => {
+    pageActionsMock(props);
+    return (
+      <button
+        type="button"
+        onClick={() =>
+          props.onArchived({
+            page_id: "page-alpha",
+            original_path: props.path,
+          })
+        }
+      >
+        Archive Page
+      </button>
+    );
+  },
+}));
+vi.mock("#/components/page-tree/FolderActionsMenu", () => ({
+  FolderActionsMenu: () => null,
 }));
 vi.mock("#/api/encryption", () => ({
   useEncryptionConfig: () => ({
@@ -284,6 +314,7 @@ beforeEach(() => {
   folioPropertiesMock.mockClear();
   folioPropertiesState.failed = false;
   mountedSlateEditors.length = 0;
+  pageActionsMock.mockClear();
   restorationFrames.length = 0;
   useTagSuggestionsMock.mockImplementation((query: string) => ({
     data: query.startsWith("clep")
@@ -1294,6 +1325,124 @@ describe("Folio attachment protection plumbing", () => {
     expect(attachmentRemoveMock).not.toHaveBeenCalled();
   });
 });
+
+describe("Folio page archival wiring", () => {
+  beforeEach(() => {
+    mobileLayoutState.matches = false;
+    navigateMock.mockClear();
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "tab-alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+      ],
+      activeTabId: "tab-alpha",
+      navigationMode: "smart",
+      openHistory: [],
+      quires: {},
+    });
+  });
+
+  it.each([
+    [
+      "read-only captured",
+      {
+        readonly: true,
+        archive: { snapshot_hash: "sha256:captured" },
+      },
+    ],
+    [
+      "locked encrypted",
+      {
+        encrypted: true,
+        encryptionState: { status: "locked" as const },
+      },
+    ],
+  ])(
+    "keeps persisted %s pages archivable without changing their state",
+    async (_label, editorOverrides) => {
+      const editor = { ...editableEditor(), ...editorOverrides };
+      usePageEditorMock.mockReturnValue(editor);
+
+      render(<Folio tabId="tab-alpha" path="notes/alpha.md" />);
+
+      expect(
+        await screen.findByRole("button", { name: "Archive Page" }),
+      ).toBeVisible();
+    },
+  );
+
+  it("closes every matching tab and lands desktop on the workspace launcher", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "tab-alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha",
+        },
+        {
+          id: "page-alpha",
+          type: "page",
+          path: "notes/legacy-alpha.md",
+          label: "Legacy Alpha",
+        },
+        {
+          id: "duplicate-alpha",
+          type: "page",
+          path: "notes/alpha.md",
+          label: "Alpha duplicate",
+        },
+      ],
+      activeTabId: "tab-alpha",
+      openHistory: [{ path: "notes/alpha.md", openedAt: 1 }],
+    });
+
+    render(<TabContent />);
+    await user.click(screen.getByRole("button", { name: "Manage paths" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Archive Page" }),
+    );
+
+    await waitFor(() => expect(useWorkspaceStore.getState().tabs).toEqual([]));
+    expect(useWorkspaceStore.getState().activeTabId).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /^Open console/ }),
+    ).toBeVisible();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("returns mobile home after successful archival", async () => {
+    const user = userEvent.setup();
+    mobileLayoutState.matches = true;
+    usePageEditorMock.mockReturnValue(editableEditor());
+
+    render(<TabContent />);
+    await user.click(screen.getByRole("button", { name: "Document details" }));
+    const detailsDialog = screen.getByRole("dialog", {
+      name: "Document details",
+    });
+    await user.click(
+      within(detailsDialog).getByRole("button", { name: "Manage paths" }),
+    );
+    await user.click(
+      await within(detailsDialog).findByRole("button", {
+        name: "Archive Page",
+      }),
+    );
+
+    await waitFor(() =>
+      expect(navigateMock).toHaveBeenCalledWith({ to: "/" }),
+    );
+    expect(useWorkspaceStore.getState().tabs).toEqual([]);
+  });
+});
+
 describe("Folio mobile presentation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
