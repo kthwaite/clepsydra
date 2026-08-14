@@ -1,5 +1,9 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+} from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -81,7 +85,7 @@ describe("page and folder mutation hooks", () => {
     expect(invalidate).toHaveBeenCalled();
   });
 
-  it("invalidates the full rubbish query prefix after a page archive succeeds", () => {
+  it("refetches the active rubbish list once and stales cached detail after archive", async () => {
     const { client, wrapper } = harness();
     const listKey = queryKeys.rubbish.all;
     const detailKey = [
@@ -89,9 +93,22 @@ describe("page and folder mutation hooks", () => {
       "/api/vault/rubbish/{item_id}",
       { params: { path: { item_id: "item-1" } } },
     ] as const;
+    const adjacentKey = ["get", "/api/vault/rubbish-bin"] as const;
     const unrelatedKey = ["get", "/api/vault/feeds"] as const;
-    client.setQueryData(listKey, { items: [] });
-    client.setQueryData(detailKey, { item_id: "item-1" });
+    const fetchList = vi.fn(async () => ({ items: [] }));
+    const fetchDetail = vi.fn(async () => ({ item_id: "item-1" }));
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: fetchList,
+    });
+    const unsubscribe = listObserver.subscribe(() => undefined);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(1);
+    await client.fetchQuery({ queryKey: detailKey, queryFn: fetchDetail });
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    client.setQueryData(adjacentKey, { items: [] });
     client.setQueryData(unrelatedKey, { items: [] });
 
     renderHook(() => useArchivePage(), { wrapper });
@@ -103,9 +120,15 @@ describe("page and folder mutation hooks", () => {
 
     options.onSuccess();
 
-    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isFetching).toBe(false),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(2);
     expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(client.getQueryState(adjacentKey)?.isInvalidated).toBe(false);
     expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
+    unsubscribe();
   });
 
   it("parses the server mutation preview through the typed hook", async () => {

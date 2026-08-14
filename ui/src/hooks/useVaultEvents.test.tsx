@@ -61,17 +61,32 @@ describe("useVaultEvents", () => {
     unmount();
   });
 
-  it("invalidates cached rubbish list and detail queries on index_changed", () => {
-    const client = new QueryClient();
+  it("refetches the active rubbish list once and stales cached detail on index_changed", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
     const listKey = queryKeys.rubbish.all;
     const detailKey = [
       "get",
       "/api/vault/rubbish/{item_id}",
       { params: { path: { item_id: "item-1" } } },
     ] as const;
+    const adjacentKey = ["get", "/api/vault/rubbish-bin"] as const;
     const unrelatedKey = ["get", "/api/vault/feeds"] as const;
-    client.setQueryData(listKey, { items: [] });
-    client.setQueryData(detailKey, { item_id: "item-1" });
+    const fetchList = vi.fn(async () => ({ items: [] }));
+    const fetchDetail = vi.fn(async () => ({ item_id: "item-1" }));
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: fetchList,
+    });
+    const unsubscribe = listObserver.subscribe(() => undefined);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(1);
+    await client.fetchQuery({ queryKey: detailKey, queryFn: fetchDetail });
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    client.setQueryData(adjacentKey, { items: [] });
     client.setQueryData(unrelatedKey, { items: [] });
 
     const { unmount } = renderHook(() => useVaultEvents(), {
@@ -91,9 +106,15 @@ describe("useVaultEvents", () => {
       } as MessageEvent<string>);
     });
 
-    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isFetching).toBe(false),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(2);
     expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(client.getQueryState(adjacentKey)?.isInvalidated).toBe(false);
     expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
+    unsubscribe();
     unmount();
   });
 

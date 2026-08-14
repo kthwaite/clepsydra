@@ -37,10 +37,37 @@ Task commit subject: `fix(ui): invalidate rubbish cache on archive lifecycle`.
 - Centralized the pre-existing Rubbish invalidation sequence in `api/keys.ts`; page mutations, Rubbish mutations, and SSE handling do not introduce competing predicates or query-key shapes.
 - Archive invalidation remains inside `onSuccess`, so failed archives do not make Rubbish queries stale.
 - SSE invalidation is limited to `index_changed`; `base_registry_changed` and `feed_changed` retain their existing branches.
-- The helper retains the established exact list invalidation and full `/api/vault/rubbish` path-prefix invalidation, covering list and detail queries.
+- The helper uses one boundary-aware `/api/vault/rubbish` path-family predicate, covering the exact list and slash-delimited detail paths without matching adjacent path names.
 - Existing restore still invalidates normal page-derived structures in addition to Rubbish data. Purge and Empty Bin still invalidate only Rubbish data and never derive a page path from an item ID.
 - No Rust files or lifecycle behavior were touched.
 
 ## Concerns
 
 No concerns within the assigned cache-invalidation path. The pre-existing Vite configuration warning noted above remains outside this task.
+
+## Review correction: single-pass active refetch
+
+### Changes
+
+- Replaced the separate exact-list and prefix invalidations with one query-cache pass.
+- The predicate matches only the exact `/api/vault/rubbish` path or a slash-delimited descendant, so `/api/vault/rubbish-bin` remains untouched.
+- Added active `QueryObserver` coverage for both page archive success and cross-client `index_changed`: each lifecycle action causes exactly one additional list fetch.
+- The same tests keep an inactive item-detail query cached and prove it becomes stale without fetching.
+- Updated restore, purge, and Empty Bin tests to assert list/detail cache behavior rather than the removed exact-list filter call.
+
+### TDD evidence
+
+- RED: `bun run test -- src/api/__tests__/mutation-hooks.test.tsx src/hooks/useVaultEvents.test.tsx` — exit 1: 2 failed, 8 passed. Both new active-list regressions expected two total fetches (initial plus one lifecycle refetch) but observed three, proving the duplicate exact-list/prefix invalidations cancelled and restarted the first refetch.
+- Intermediate GREEN: the same command — exit 0: 2 files passed, 10 tests passed after changing the helper to one boundary-aware predicate.
+- Existing-hook check initially exposed two implementation-coupled assertions in `src/api/rubbish.test.tsx` that still expected the removed exact-list filter. They were replaced with cache-state assertions for the list, detail, and unaffected page keys.
+- Final focused verification: `bun run test -- src/api/__tests__/mutation-hooks.test.tsx src/api/rubbish.test.tsx src/hooks/useVaultEvents.test.tsx src/hooks/useVaultEvents.integration.test.tsx` — exit 0: 4 files passed, 14 tests passed.
+
+### Commit and self-review
+
+Follow-up commit subject: `fix(ui): avoid duplicate rubbish list refetch`.
+
+Self-review confirmed one `invalidateQueries` call per Rubbish lifecycle invalidation, boundary-safe path matching, one active list refetch for both archive and SSE flows, stale inactive details, feed-event isolation, and unchanged restore/purge/Empty Bin transport behavior. No Rust files changed.
+
+### Concerns
+
+No scoped concerns. The focused runs continue to emit only the pre-existing Vite native-config compatibility warning documented above.

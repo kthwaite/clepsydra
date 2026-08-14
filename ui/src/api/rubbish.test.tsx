@@ -74,6 +74,14 @@ describe("rubbish API hooks", () => {
     const restored = { item_id: "item-1", page_id: "page-1", path: "notes/a.md" };
     transport.post.mockResolvedValue({ data: restored, error: undefined });
     const { client, wrapper } = harness();
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    client.setQueryData(listKey, { items: [] });
+    client.setQueryData(detailKey, { item_id: "item-1" });
     const invalidate = vi.spyOn(client, "invalidateQueries");
     const { result } = renderHook(() => useRestoreRubbishItem(), { wrapper });
 
@@ -85,7 +93,8 @@ describe("rubbish API hooks", () => {
       "/api/vault/rubbish/{item_id}/restore",
       { params: { path: { item_id: "item-1" } } },
     );
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.rubbish.all });
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
     for (const prefix of [
       queryKeys.pages.pathPrefix,
       queryKeys.index.pathPrefix,
@@ -106,14 +115,34 @@ describe("rubbish API hooks", () => {
       error: undefined,
     });
     const { client, wrapper } = harness();
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    const pageKey = ["get", "/api/vault/pages"] as const;
+    client.setQueryData(listKey, { items: [] });
+    client.setQueryData(detailKey, { item_id: "item-1" });
+    client.setQueryData(pageKey, { items: [] });
     const purge = renderHook(() => usePurgeRubbishItem(), { wrapper });
     const empty = renderHook(() => useEmptyRubbish(), { wrapper });
 
     await act(async () => {
       await purge.result.current.mutateAsync("item-1");
+    });
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(pageKey)?.isInvalidated).toBe(false);
+
+    client.setQueryData(listKey, { items: [] });
+    client.setQueryData(detailKey, { item_id: "item-1" });
+    await act(async () => {
       await empty.result.current.mutateAsync();
     });
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(pageKey)?.isInvalidated).toBe(false);
 
     expect(transport.delete).toHaveBeenNthCalledWith(
       1,
@@ -124,10 +153,5 @@ describe("rubbish API hooks", () => {
       2,
       "/api/vault/rubbish",
     );
-    expect(invalidate).toHaveBeenCalledWith({ queryKey: queryKeys.rubbish.all });
-    expect(invalidate.mock.calls.some(([filters]) => {
-      const key = (filters as { queryKey?: readonly unknown[] }).queryKey;
-      return key?.includes("item-1");
-    })).toBe(false);
   });
 });

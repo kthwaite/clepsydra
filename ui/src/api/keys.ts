@@ -95,8 +95,16 @@ export function invalidateByPath(qc: QueryClient, prefix: string) {
 
 /** Invalidate the Rubbish Bin list and every item-detail query. */
 export function invalidateRubbish(qc: QueryClient) {
-  qc.invalidateQueries({ queryKey: queryKeys.rubbish.all });
-  return invalidateByPath(qc, queryKeys.rubbish.pathPrefix);
+  const prefix = queryKeys.rubbish.pathPrefix;
+  return qc.invalidateQueries({
+    predicate: (query) => {
+      const path = query.queryKey[1];
+      return (
+        typeof path === "string" &&
+        (path === prefix || path.startsWith(`${prefix}/`))
+      );
+    },
+  });
 }
 
 /** Pull the actual `path` param out of a `usePage` openapi-react-query key. */
