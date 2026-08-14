@@ -912,15 +912,28 @@ pub async fn view_snapshot(
     snapshot_response_with(snapshot, &config, Ok, Some(permit))
 }
 
+async fn run_head_inspection<T, F>(inspection: F) -> Result<T, ApiError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(inspection)
+        .await
+        .map_err(|error| ApiError::internal(format!("archive HEAD worker failed: {error}")))?
+}
+
 pub async fn head_snapshot(
     State(state): State<Arc<AppState>>,
     Extension(config): Extension<ArchiveViewConfig>,
     Path(hash): Path<String>,
 ) -> Response {
-    let snapshot = {
-        let cas = state.cas.lock();
-        load_snapshot_metadata(&*cas, &hash)
-    };
+    let cas = Arc::clone(&state.cas);
+    let worker_hash = hash.clone();
+    let snapshot = run_head_inspection(move || {
+        let cas = cas.lock();
+        load_snapshot_metadata(&*cas, &worker_hash)
+    })
+    .await;
     without_body(match snapshot {
         Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body, None)
             .unwrap_or_else(IntoResponse::into_response),
@@ -1341,6 +1354,34 @@ mod tests {
         drop(body);
         assert_eq!(semaphore.available_permits(), 1);
     }
+    #[tokio::test(flavor = "current_thread")]
+    async fn head_metadata_inspection_runs_off_runtime_worker() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let timed_out = Arc::new(AtomicBool::new(false));
+        let worker_timed_out = Arc::clone(&timed_out);
+        let inspection = tokio::spawn(run_head_inspection(move || {
+            started_tx.send(()).unwrap();
+            if release_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .is_err()
+            {
+                worker_timed_out.store(true, Ordering::SeqCst);
+            }
+            Ok::<_, ApiError>(())
+        }));
+
+        started_rx.await.unwrap();
+        assert!(
+            !timed_out.load(Ordering::SeqCst),
+            "blocking inspection parked the current-thread runtime"
+        );
+        release_tx.send(()).unwrap();
+        inspection.await.unwrap().unwrap();
+    }
+
 
 
     #[test]
