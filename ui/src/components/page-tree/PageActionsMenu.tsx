@@ -14,11 +14,14 @@ import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
 
-type PageAction = "move" | "archive";
-
 interface FrozenMovePreview {
   request: MutationPreviewRequest;
   preview: MutationPreview;
+}
+
+interface PageMutationProps {
+  path: string;
+  beforeMutation?: () => Promise<void>;
 }
 
 function mutationError(error: unknown): string {
@@ -39,48 +42,66 @@ export function PageActionsMenu({
   beforeMutation,
   onMoved,
   onArchived,
-}: {
-  path: string;
-  beforeMutation?: () => Promise<void>;
+  archiveOnly = false,
+}: PageMutationProps & {
   onMoved: (path: string) => void;
   onArchived: (archived: ArchivedPage) => void;
+  archiveOnly?: boolean;
 }) {
+  return (
+    <div className="grid gap-1">
+      {archiveOnly ? null : (
+        <MovePageAction
+          path={path}
+          beforeMutation={beforeMutation}
+          onMoved={onMoved}
+        />
+      )}
+      <ArchivePageAction
+        path={path}
+        beforeMutation={beforeMutation}
+        onArchived={onArchived}
+      />
+    </div>
+  );
+}
+
+function MovePageAction({
+  path,
+  beforeMutation,
+  onMoved,
+}: PageMutationProps & { onMoved: (path: string) => void }) {
   const previewMutation = usePreviewMutation();
   const movePage = useMovePage();
-  const archivePage = useArchivePage();
-  const [action, setAction] = useState<PageAction | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
   const [destination, setDestination] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [frozenMove, setFrozenMove] = useState<FrozenMovePreview | null>(null);
 
-  const isExecuting = movePage.isPending || archivePage.isPending;
-
-  function openAction(next: PageAction) {
-    setAction(next);
+  function openMove() {
     setDestination("");
     setError(null);
     setFrozenMove(null);
+    setIsOpen(true);
   }
 
-  function closeAction() {
-    if (previewMutation.isPending || isExecuting) return;
-    resetAction();
-  }
-
-  function resetAction() {
-    setAction(null);
+  function resetMove() {
+    setIsOpen(false);
     setError(null);
     setFrozenMove(null);
   }
 
+  function closeMove() {
+    if (previewMutation.isPending || movePage.isPending) return;
+    resetMove();
+  }
+
   async function requestMovePreview() {
-    if (action !== "move") return;
     const request: MutationPreviewRequest = {
       operation: "move_page",
       source: path,
       destination: destination.trim(),
     };
-
     if (!request.destination) {
       setError("Destination path is required.");
       return;
@@ -99,7 +120,6 @@ export function PageActionsMenu({
   async function executeMove() {
     if (!frozenMove) return;
     const destination = frozenMove.request.destination;
-    if (!destination) return;
 
     setError(null);
     try {
@@ -107,115 +127,64 @@ export function PageActionsMenu({
         params: { path: { path: frozenMove.request.source } },
         body: { destination },
       });
-      resetAction();
+      resetMove();
       onMoved(moved.path ?? destination);
     } catch (mutationFailure) {
       setError(mutationError(mutationFailure));
     }
   }
 
-  async function executeArchive() {
-    if (action !== "archive") return;
-
-    setError(null);
-    try {
-      await beforeMutation?.();
-      const archived = await archivePage.mutateAsync({
-        params: { path: { path } },
-      });
-      resetAction();
-      onArchived(archived);
-    } catch (archiveFailure) {
-      setError(mutationError(archiveFailure));
-    }
-  }
-
   return (
     <>
-      <div className="grid gap-1">
-        <button
-          type="button"
-          className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
-          onClick={() => openAction("move")}
-        >
-          Move or rename page
-        </button>
-        <button
-          type="button"
-          className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-destructive hover:underline"
-          onClick={() => openAction("archive")}
-        >
-          Archive Page
-        </button>
-      </div>
+      <button
+        type="button"
+        className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+        onClick={openMove}
+      >
+        Move or rename page
+      </button>
 
       <Dialog
-        isOpen={action !== null && frozenMove === null}
+        isOpen={isOpen && frozenMove === null}
         onOpenChange={(open) => {
-          if (!open) closeAction();
+          if (!open) closeMove();
         }}
-        title={action === "move" ? "Move or rename page" : "Archive Page"}
+        title="Move or rename page"
         description={`Current path: ${path}`}
-        isDismissable={!previewMutation.isPending && !isExecuting}
+        isDismissable={!previewMutation.isPending && !movePage.isPending}
         footer={
           <>
             <Button
               variant="secondary"
-              onPress={closeAction}
-              isDisabled={previewMutation.isPending || isExecuting}
+              onPress={closeMove}
+              isDisabled={previewMutation.isPending || movePage.isPending}
             >
               Cancel
             </Button>
             <Button
-              variant={action === "archive" ? "danger" : "primary"}
-              onPress={() =>
-                void (action === "move"
-                  ? requestMovePreview()
-                  : executeArchive())
-              }
-              isDisabled={previewMutation.isPending || isExecuting}
+              variant="primary"
+              onPress={() => void requestMovePreview()}
+              isDisabled={previewMutation.isPending || movePage.isPending}
             >
-              {action === "move"
-                ? previewMutation.isPending
-                  ? "Preparing preview…"
-                  : "Preview move"
-                : archivePage.isPending
-                  ? "Archiving…"
-                  : "Confirm archive"}
+              {previewMutation.isPending ? "Preparing preview…" : "Preview move"}
             </Button>
           </>
         }
       >
-        {action === "move" ? (
-          <TextField
-            label="Destination path"
-            value={destination}
-            onChange={(value) => {
-              setDestination(value);
-              setError(null);
-            }}
-            placeholder="archive/new-name.md"
-            description="Enter the complete vault-relative path, including .md."
-            isDisabled={previewMutation.isPending}
-            isInvalid={!!error}
-            errorMessage={error ?? undefined}
-            autoFocus
-          />
-        ) : (
-          <div className="space-y-2 text-sm">
-            <p>This page will be removed from normal views.</p>
-            <p>
-              Inbound links remain byte-identical and become unresolved after
-              archival.
-            </p>
-            <p>You can restore this page from the Rubbish Bin.</p>
-            {error ? (
-              <p className="text-xs text-destructive" role="alert">
-                {error}
-              </p>
-            ) : null}
-          </div>
-        )}
+        <TextField
+          label="Destination path"
+          value={destination}
+          onChange={(value) => {
+            setDestination(value);
+            setError(null);
+          }}
+          placeholder="archive/new-name.md"
+          description="Enter the complete vault-relative path, including .md."
+          isDisabled={previewMutation.isPending}
+          isInvalid={!!error}
+          errorMessage={error ?? undefined}
+          autoFocus
+        />
       </Dialog>
 
       {frozenMove ? (
@@ -232,6 +201,97 @@ export function PageActionsMenu({
           }}
         />
       ) : null}
+    </>
+  );
+}
+
+function ArchivePageAction({
+  path,
+  beforeMutation,
+  onArchived,
+}: PageMutationProps & {
+  onArchived: (archived: ArchivedPage) => void;
+}) {
+  const archivePage = useArchivePage();
+  const [isOpen, setIsOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function openArchive() {
+    setError(null);
+    setIsOpen(true);
+  }
+
+  function closeArchive() {
+    if (archivePage.isPending) return;
+    setIsOpen(false);
+    setError(null);
+  }
+
+  async function executeArchive() {
+    setError(null);
+    try {
+      await beforeMutation?.();
+      const archived = await archivePage.mutateAsync({
+        params: { path: { path } },
+      });
+      setIsOpen(false);
+      onArchived(archived);
+    } catch (archiveFailure) {
+      setError(mutationError(archiveFailure));
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-destructive hover:underline"
+        onClick={openArchive}
+      >
+        Archive Page
+      </button>
+
+      <Dialog
+        isOpen={isOpen}
+        onOpenChange={(open) => {
+          if (!open) closeArchive();
+        }}
+        title="Archive Page"
+        description={`Current path: ${path}`}
+        isDismissable={!archivePage.isPending}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onPress={closeArchive}
+              isDisabled={archivePage.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onPress={() => void executeArchive()}
+              isDisabled={archivePage.isPending}
+            >
+              {archivePage.isPending ? "Archiving…" : "Confirm archive"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <p>This page will be removed from normal views.</p>
+          <p>
+            Inbound links remain byte-identical and become unresolved after
+            archival.
+          </p>
+          <p>You can restore this page from the Rubbish Bin.</p>
+          {error ? (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </Dialog>
     </>
   );
 }

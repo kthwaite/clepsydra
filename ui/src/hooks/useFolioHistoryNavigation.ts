@@ -1,4 +1,4 @@
-import type { HistoryState } from "@tanstack/history";
+import type { HistoryState, RouterHistory } from "@tanstack/history";
 import {
   useNavigate,
   useRouter,
@@ -119,6 +119,22 @@ function activeDestinationState(
     folioLocationId: null,
     folioOriginTabId,
   };
+}
+
+/** Replace an archived Folio's current browser-history tuple with the single
+ * survivor selected by the atomic workspace cleanup, or a launcher tuple. */
+export function replaceFolioHistoryAfterArchive(
+  history: RouterHistory,
+): void {
+  const nextState = activeDestinationState(null);
+  capturedDepartureLocationId = null;
+  trackedHistoryDestination = readFolioHistoryDestination(nextState);
+  trackedHistoryOriginTabId = null;
+  history.replace(
+    history.location.href,
+    { ...history.location.state, ...nextState },
+    { ignoreBlocker: true },
+  );
 }
 
 

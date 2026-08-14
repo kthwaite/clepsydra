@@ -101,6 +101,25 @@ describe("PageActionsMenu page archival", () => {
     expect(within(dialog).queryByLabelText(/inbound links/i)).toBeNull();
   });
 
+  it("renders archive-only pages without offering move", () => {
+    render(
+      <PageActionsMenu
+        path="notes/alpha.md"
+        beforeMutation={vi.fn().mockResolvedValue(undefined)}
+        onMoved={vi.fn()}
+        onArchived={vi.fn()}
+        archiveOnly
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "Archive Page" }),
+    ).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: /move or rename page/i }),
+    ).not.toBeInTheDocument();
+  });
+
   it("finishes the pending save before sending the archive request", async () => {
     const user = userEvent.setup();
     const events: string[] = [];

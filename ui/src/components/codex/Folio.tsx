@@ -71,6 +71,7 @@ import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
 import {
   registerFolioHistoryTraversalGuard,
+  replaceFolioHistoryAfterArchive,
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
@@ -279,6 +280,7 @@ export function Folio({ tabId, path }: FolioProps) {
   );
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
+  const setTabPageId = useWorkspaceStore((state) => state.setTabPageId);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
   const closeArchivedPageTabs = useWorkspaceStore(
     (state) => state.closeArchivedPageTabs,
@@ -286,9 +288,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const handleArchived = useCallback(
     (archived: ArchivedPage) => {
       closeArchivedPageTabs(archived.page_id, archived.original_path);
+      replaceFolioHistoryAfterArchive(router.history);
       if (mobile) void navigate({ to: "/" });
     },
-    [closeArchivedPageTabs, mobile, navigate],
+    [closeArchivedPageTabs, mobile, navigate, router.history],
   );
   const focusRequestId = useWorkspaceStore(
     (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
@@ -298,6 +301,9 @@ export function Folio({ tabId, path }: FolioProps) {
     subscribeFolioHistoryRestorationRequests,
     () => readFolioHistoryRestorationRequestId(tabId, path),
   );
+  useEffect(() => {
+    if (editor.pageId) setTabPageId(tabId, editor.pageId);
+  }, [editor.pageId, setTabPageId, tabId]);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       leaveFolioWorkspace(() => {
@@ -899,6 +905,10 @@ export function Folio({ tabId, path }: FolioProps) {
         beforeMutation={editor.saveNow}
         onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
         onArchived={handleArchived}
+        archiveOnly={
+          folioReadOnly ||
+          (encrypted && encryptionState.status !== "plain")
+        }
       />
     </Suspense>
   );

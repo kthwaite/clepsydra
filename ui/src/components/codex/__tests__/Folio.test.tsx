@@ -73,8 +73,12 @@ const {
   restorationFrames: [] as FrameRequestCallback[],
   routerHistory: {
     back: vi.fn(),
+    replace: vi.fn(),
     canGoBack: vi.fn(() => false),
-    location: { state: { __TSR_index: 0 } as Record<string, unknown> },
+    location: {
+      href: "/workspace",
+      state: { __TSR_index: 0 } as Record<string, unknown>,
+    },
   },
   useCollapsibleRailMock: vi.fn(() => ({
     collapsed: false,
@@ -160,6 +164,7 @@ vi.mock("#/api/pages", () => ({
 vi.mock("#/components/page-tree/PageActionsMenu", () => ({
   PageActionsMenu: (props: {
     path: string;
+    archiveOnly?: boolean;
     onArchived: (archived: {
       page_id: string;
       original_path: string;
@@ -167,17 +172,22 @@ vi.mock("#/components/page-tree/PageActionsMenu", () => ({
   }) => {
     pageActionsMock(props);
     return (
-      <button
-        type="button"
-        onClick={() =>
-          props.onArchived({
-            page_id: "page-alpha",
-            original_path: props.path,
-          })
-        }
-      >
-        Archive Page
-      </button>
+      <>
+        {props.archiveOnly ? null : (
+          <button type="button">Move or rename page</button>
+        )}
+        <button
+          type="button"
+          onClick={() =>
+            props.onArchived({
+              page_id: "page-alpha",
+              original_path: props.path,
+            })
+          }
+        >
+          Archive Page
+        </button>
+      </>
     );
   },
 }));
@@ -306,6 +316,7 @@ import { Folio } from "../Folio";
 beforeEach(() => {
   blockerState.current = { status: "idle" };
   useBlockerMock.mockClear();
+  routerHistory.replace.mockClear();
   journalTodayState.data = null;
   journalTodayState.isLoading = false;
   outlinksState.data = undefined;
@@ -1346,6 +1357,19 @@ describe("Folio page archival wiring", () => {
     });
   });
 
+  it("stores the loaded page UUID separately from the random tab ID", async () => {
+    usePageEditorMock.mockReturnValue(editableEditor());
+
+    render(<Folio tabId="tab-alpha" path="notes/alpha.md" />);
+
+    await waitFor(() =>
+      expect(useWorkspaceStore.getState().tabs[0]).toMatchObject({
+        id: "tab-alpha",
+        pageId: "page-alpha",
+      }),
+    );
+  });
+
   it.each([
     [
       "read-only captured",
@@ -1372,6 +1396,9 @@ describe("Folio page archival wiring", () => {
       expect(
         await screen.findByRole("button", { name: "Archive Page" }),
       ).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: /move or rename page/i }),
+      ).not.toBeInTheDocument();
     },
   );
 
@@ -1387,7 +1414,8 @@ describe("Folio page archival wiring", () => {
           label: "Alpha",
         },
         {
-          id: "page-alpha",
+          id: "tab-legacy-alpha",
+          pageId: "page-alpha",
           type: "page",
           path: "notes/legacy-alpha.md",
           label: "Legacy Alpha",

@@ -196,8 +196,10 @@ vi.mock("#/components/ThemeProvider", () => ({
 }));
 vi.mock("#/components/page-tree/PageActionsMenu", () => ({
   PageActionsMenu: ({
+    path,
     onArchived,
   }: {
+    path: string;
     onArchived: (archived: {
       page_id: string;
       original_path: string;
@@ -207,8 +209,8 @@ vi.mock("#/components/page-tree/PageActionsMenu", () => ({
       type="button"
       onClick={() =>
         onArchived({
-          page_id: "page",
-          original_path: "notes/alpha.md",
+          page_id: `page:${path}`,
+          original_path: path,
         })
       }
     >
@@ -1147,6 +1149,59 @@ describe("mobile Folio Back", () => {
       act(() => router.history.forward());
       await expectFolioPosition("notes/beta.md", 222, 2);
       expect(router.state.location.pathname).toBe("/workspace");
+    });
+
+    it("replaces the archived desktop destination before Back and Forward", async () => {
+      const user = userEvent.setup();
+      mobileLayout.current = false;
+      seedHistoryTabs();
+      useWorkspaceStore.setState((state) => ({
+        tabs: state.tabs.filter((tab) => tab.type === "page"),
+      }));
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Visit Beta" }));
+      await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/beta.md" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Manage paths" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Complete page archival" }),
+      );
+
+      await waitFor(() => expect(activePagePath()).toBe("notes/alpha.md"));
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+
+      act(() => router.history.back());
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+      act(() => router.history.forward());
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+      expect(
+        useWorkspaceStore
+          .getState()
+          .tabs.some((tab) => tab.path === "notes/beta.md"),
+      ).toBe(false);
     });
 
     it("keeps distinct restoration locations for repeated visits to A", async () => {

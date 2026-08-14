@@ -397,6 +397,7 @@ describe("migrateWorkspace", () => {
         tabs: [
           {
             ...pageTab("old", "q1"),
+            pageId: "page-old",
             lastActiveAt: 42,
             focusBlockId: "abc123DEF0",
             focusRequestId: "request-1",
@@ -415,6 +416,7 @@ describe("migrateWorkspace", () => {
     expect(migrated.tabs).toStrictEqual([
       {
         id: "old",
+        pageId: "page-old",
         type: "page",
         path: "old.md",
         label: "old",
@@ -834,58 +836,77 @@ describe("workspace Folio history lifecycle", () => {
     ).not.toBeNull();
   });
 
-  it("atomically removes every archived page identity and its Folio state", () => {
+  it("atomically removes archived page UUID/path tabs and their Folio state", () => {
     clearFolioHistoryState();
     resetStore();
+    const archivedPageId = "page-alpha";
     const archivedPath = "notes/alpha.md";
-    const archivedTabIds = ["page-alpha", "tab-alpha", "duplicate-alpha"];
+    const archivedTabIds = ["tab-stale", "tab-current", "tab-path-copy"];
     useWorkspaceStore.setState({
       tabs: [
         {
-          ...pageTab("page-alpha", "q1"),
+          ...pageTab("tab-stale", "q1"),
+          pageId: archivedPageId,
           path: "notes/legacy-alpha.md",
         },
-        { ...pageTab("tab-alpha", "q1"), path: archivedPath },
-        { ...pageTab("duplicate-alpha", "q1"), path: archivedPath },
-        pageTab("other"),
+        {
+          ...pageTab("tab-current", "q1"),
+          pageId: archivedPageId,
+          path: archivedPath,
+        },
+        {
+          ...pageTab("tab-path-copy", "q1"),
+          pageId: "page-path-copy",
+          path: archivedPath,
+        },
+        {
+          ...pageTab(archivedPageId),
+          pageId: "page-survivor",
+          path: "other.md",
+        },
       ],
-      activeTabId: "tab-alpha",
+      activeTabId: "tab-current",
       openHistory: [
-        { path: archivedPath, openedAt: 2 },
+        { path: archivedPath, openedAt: 3 },
+        { path: "notes/legacy-alpha.md", openedAt: 2 },
         { path: "other.md", openedAt: 1 },
       ],
       quires: {
         q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
       },
     });
-    for (const tabId of [...archivedTabIds, "other"]) {
-      const recordPath =
-        tabId === "page-alpha" ? "notes/legacy-alpha.md" : archivedPath;
-      seedRecord(tabId, tabId === "other" ? "other.md" : recordPath);
+    const pathByTabId = {
+      "tab-stale": "notes/legacy-alpha.md",
+      "tab-current": archivedPath,
+      "tab-path-copy": archivedPath,
+      [archivedPageId]: "other.md",
+    };
+    for (const [tabId, recordPath] of Object.entries(pathByTabId)) {
+      seedRecord(tabId, recordPath);
     }
-    request("duplicate-alpha", archivedPath);
+    request("tab-path-copy", archivedPath);
 
     useWorkspaceStore
       .getState()
-      .closeArchivedPageTabs("page-alpha", archivedPath);
+      .closeArchivedPageTabs(archivedPageId, archivedPath);
 
     const state = useWorkspaceStore.getState();
-    expect(state.tabs.map((tab) => tab.id)).toEqual(["other"]);
-    expect(state.activeTabId).toBe("other");
+    expect(state.tabs.map((tab) => tab.id)).toEqual([archivedPageId]);
+    expect(state.tabs[0].pageId).toBe("page-survivor");
+    expect(state.activeTabId).toBe(archivedPageId);
     expect(state.openHistory).toEqual([{ path: "other.md", openedAt: 1 }]);
     expect(state.quires).toEqual({});
     for (const tabId of archivedTabIds) {
-      const recordPath =
-        tabId === "page-alpha" ? "notes/legacy-alpha.md" : archivedPath;
+      const recordPath = pathByTabId[tabId as keyof typeof pathByTabId];
       expect(readFolioRestoration(tabId, recordPath)).toBeNull();
       expect(
         readFolioHistoryLocation(`visit-${tabId}`, tabId, recordPath),
       ).toBeNull();
     }
     expect(
-      readFolioHistoryRestorationRequest("duplicate-alpha", archivedPath),
+      readFolioHistoryRestorationRequest("tab-path-copy", archivedPath),
     ).toBeNull();
-    expect(readFolioRestoration("other", "other.md")).not.toBeNull();
+    expect(readFolioRestoration(archivedPageId, "other.md")).not.toBeNull();
   });
 
   it("clears all Folio history during workspace teardown", () => {
