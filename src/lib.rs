@@ -674,6 +674,7 @@ pub async fn build_app_state_with_feeds(
         tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
 
     let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
+    let rubbish = vault::rubbish::RubbishStore::for_vault(vault.root());
 
     let delete_hooks: Arc<Vec<Box<dyn vault::hooks::PostDeleteHook>>> =
         Arc::new(vec![Box::new(vault::archive_hook::ArchiveDeleteHook {
@@ -691,6 +692,7 @@ pub async fn build_app_state_with_feeds(
         vault,
         index: index_handle,
         cas: cas_arc,
+        rubbish,
         warnings: parking_lot::Mutex::new(stats.warnings),
         change_tx: change_broadcast_tx,
         hooks,

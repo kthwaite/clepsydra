@@ -1176,22 +1176,32 @@ async fn get_nonexistent_returns_404() {
 }
 
 #[tokio::test]
-async fn delete_page_no_backlinks() {
+async fn delete_page_archives_without_backlinks() {
     let (server, _tmp) = setup_server();
 
-    // Create and then delete
     server
         .post("/api/vault/pages/ephemeral.md")
         .json(&serde_json::json!({ "title": "Ephemeral" }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);
 
-    let res = server.delete("/api/vault/pages/ephemeral.md").await;
-    res.assert_status(axum::http::StatusCode::NO_CONTENT);
+    let archived = server.delete("/api/vault/pages/ephemeral.md").await;
+    archived.assert_status(axum::http::StatusCode::CREATED);
+    let archived: serde_json::Value = archived.json();
+    assert_eq!(archived["original_path"], "ephemeral.md");
+    assert!(archived["item_id"].as_str().is_some());
 
-    // Confirm it's gone
-    let res = server.get("/api/vault/pages/ephemeral.md").await;
-    res.assert_status(axum::http::StatusCode::NOT_FOUND);
+    server
+        .get("/api/vault/pages/ephemeral.md")
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+    server
+        .get(&format!(
+            "/api/vault/rubbish/{}",
+            archived["item_id"].as_str().unwrap()
+        ))
+        .await
+        .assert_status_ok();
 }
 
 #[tokio::test]
@@ -1738,7 +1748,7 @@ async fn page_move_commits_primary_and_backlink_rewrite_before_one_notification(
 }
 
 #[tokio::test]
-async fn page_delete_commits_primary_and_backlink_rewrite_before_one_notification() {
+async fn delete_page_archives_primary_without_backlink_rewrite_before_one_notification() {
     let fixture = ApiFixture::builder().build();
     let vault_root = fixture.temp_dir.path().join("vault");
     fixture
@@ -1758,28 +1768,30 @@ async fn page_delete_commits_primary_and_backlink_rewrite_before_one_notificatio
         .post("/api/vault/index/rebuild")
         .await
         .assert_status_ok();
+    let backlink_before = fs::read(vault_root.join("linker.md")).unwrap();
     let mut notifications = fixture.state.change_tx.subscribe();
 
     fixture
         .server
-        .delete("/api/vault/pages/target.md?force=true&rewrite=plain_text")
+        .delete("/api/vault/pages/target.md")
         .await
-        .assert_status(StatusCode::NO_CONTENT);
+        .assert_status(StatusCode::CREATED);
 
     assert!(!vault_root.join("target.md").exists());
-    let backlink = fs::read_to_string(vault_root.join("linker.md")).unwrap();
-    assert!(!backlink.contains("[[Target]]"));
-    assert!(backlink.contains("See Target here."));
-    match notifications.try_recv().expect("delete notification") {
+    assert_eq!(
+        fs::read(vault_root.join("linker.md")).unwrap(),
+        backlink_before
+    );
+    match notifications.try_recv().expect("archive notification") {
         SyncNotification::IndexChanged { upserted, removed } => {
-            assert_eq!(upserted, vec!["linker.md"]);
+            assert!(upserted.is_empty());
             assert_eq!(removed, vec!["target.md"]);
         }
-        notification => panic!("unexpected delete notification: {notification:?}"),
+        notification => panic!("unexpected archive notification: {notification:?}"),
     }
     assert!(
         notifications.try_recv().is_err(),
-        "page delete must publish exactly one notification"
+        "page archive must publish exactly one notification"
     );
 }
 
@@ -1816,133 +1828,6 @@ async fn move_page_destination_exists_returns_409() {
         .json(&serde_json::json!({"destination": "b.md"}))
         .await;
     assert_eq!(res.status_code(), StatusCode::CONFLICT);
-}
-
-// ---------------------------------------------------------------------------
-// Delete with backlinks tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn delete_with_backlinks_returns_409() {
-    let (server, _tmp) = setup_server();
-
-    // Create target page
-    server
-        .post("/api/vault/pages/target.md")
-        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Create linker page that links to target
-    server
-        .post("/api/vault/pages/linker.md")
-        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild index to register links
-    server.post("/api/vault/index/rebuild").await;
-
-    // DELETE target without force -> 409 with backlinks list
-    let res = server.delete("/api/vault/pages/target.md").await;
-    assert_eq!(res.status_code(), StatusCode::CONFLICT);
-
-    let body: serde_json::Value = res.json();
-    assert!(
-        body["detail"]["backlinks"].is_array(),
-        "expected backlinks in error detail, got: {body}"
-    );
-}
-
-#[tokio::test]
-async fn delete_force_plain_text_rewrites() {
-    let (server, tmp) = setup_server();
-    let vault_root = tmp.path().join("vault");
-
-    // Create target page
-    server
-        .post("/api/vault/pages/target.md")
-        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Create linker page that links to target
-    server
-        .post("/api/vault/pages/linker.md")
-        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild index to register links
-    server.post("/api/vault/index/rebuild").await;
-
-    // DELETE target?force=true&rewrite=plain_text -> 204
-    let res = server
-        .delete("/api/vault/pages/target.md?force=true&rewrite=plain_text")
-        .await;
-    assert_eq!(res.status_code(), StatusCode::NO_CONTENT);
-
-    // Verify target is deleted
-    assert!(!vault_root.join("target.md").exists());
-
-    // Verify linker.md has plain text instead of [[Target]]
-    let content = fs::read_to_string(vault_root.join("linker.md")).unwrap();
-    assert!(
-        !content.contains("[[Target]]"),
-        "old link should be rewritten, but found: {content}"
-    );
-    assert!(
-        content.contains("Target"),
-        "display text should remain as plain text, but found: {content}"
-    );
-    // Should NOT have wikilink brackets
-    assert!(
-        !content.contains("[["),
-        "should not have wikilink brackets, but found: {content}"
-    );
-}
-
-#[tokio::test]
-async fn delete_force_unlink_rewrites() {
-    let (server, tmp) = setup_server();
-    let vault_root = tmp.path().join("vault");
-
-    // Create target page
-    server
-        .post("/api/vault/pages/target.md")
-        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Create linker page that links to target
-    server
-        .post("/api/vault/pages/linker.md")
-        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild index to register links
-    server.post("/api/vault/index/rebuild").await;
-
-    // DELETE target?force=true&rewrite=unlink -> 204
-    let res = server
-        .delete("/api/vault/pages/target.md?force=true&rewrite=unlink")
-        .await;
-    assert_eq!(res.status_code(), StatusCode::NO_CONTENT);
-
-    // Verify target is deleted
-    assert!(!vault_root.join("target.md").exists());
-
-    // Verify linker.md has strikethrough text instead of [[Target]]
-    let content = fs::read_to_string(vault_root.join("linker.md")).unwrap();
-    assert!(
-        !content.contains("[[Target]]"),
-        "old link should be rewritten, but found: {content}"
-    );
-    assert!(
-        content.contains("~~Target~~"),
-        "expected strikethrough ~~Target~~, but found: {content}"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -4744,12 +4629,11 @@ async fn content_index_groups_tags_and_links_per_page() {
 }
 
 // ---------------------------------------------------------------------------
-// delete_folder re-resolves affected links
+// Page archive and folder delete link-resolution behavior
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn delete_blocked_by_unresolved_backlinks() {
-    // Set up pages so that [[Target]] is ambiguous (unresolved)
+async fn delete_page_archives_despite_unresolved_backlinks_without_rewriting_them() {
     let target_a = "\
 ---
 id: 00000000-0000-0000-0000-000000000180
@@ -4772,16 +4656,21 @@ title: Source
 See [[Target]].
 ";
 
-    let (server, _tmp) = setup_server_with_files(&[
+    let (server, tmp) = setup_server_with_files(&[
         ("target.md", target_a),
         ("sub/target.md", target_b),
         ("source.md", source),
     ]);
+    let source_before = fs::read(tmp.path().join("vault/source.md")).unwrap();
 
-    // Try to delete target.md without force — should be blocked
-    // even though the link is unresolved (target_id is NULL due to ambiguity)
-    let res = server.delete("/api/vault/pages/target.md").await;
-    res.assert_status(StatusCode::CONFLICT);
+    server
+        .delete("/api/vault/pages/target.md")
+        .await
+        .assert_status(StatusCode::CREATED);
+    assert_eq!(
+        fs::read(tmp.path().join("vault/source.md")).unwrap(),
+        source_before
+    );
 }
 
 #[tokio::test]

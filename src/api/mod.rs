@@ -23,6 +23,7 @@ pub mod pages;
 pub mod pagination;
 pub mod properties;
 pub mod query;
+pub mod rubbish;
 pub mod tasks;
 pub mod uptime;
 
@@ -35,6 +36,7 @@ use crate::api::events::SyncNotification;
 use crate::vault::Vault;
 use crate::vault::cas::ContentStore;
 use crate::vault::index_handle::IndexHandle;
+use crate::vault::rubbish::RubbishStore;
 
 /// Time source for date-sensitive API behavior.
 pub trait Clock: Send + Sync {
@@ -65,6 +67,8 @@ pub struct AppState {
     pub index: IndexHandle,
     /// Content-addressable storage (CAS) instance, shared across all API handlers.
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,
+    /// Authoritative reversible page-lifecycle store beneath the vault root.
+    pub rubbish: RubbishStore,
     /// Broadcast channel for notifying API clients of vault changes.
     pub warnings: parking_lot::Mutex<Vec<String>>,
     /// Broadcast channel for notifying API clients of vault changes.
@@ -195,6 +199,7 @@ pub fn api_router_with_archive_limit(
         .nest("/pages", pages::router())
         .nest("/pages-move", pages::move_router())
         .nest("/pages-assign", pages::assign_router())
+        .nest("/rubbish", rubbish::router())
         .route(
             "/pages-assign-bulk",
             axum::routing::post(pages::assign_bulk),
