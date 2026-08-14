@@ -1,34 +1,40 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <style>
     body { width: 280px; padding: 12px; font-family: system-ui, sans-serif; font-size: 13px; }
     .status { display: flex; align-items: center; gap: 6px; margin-bottom: 12px; }
-    .dot { width: 8px; height: 8px; border-radius: 50%; }
+    .dot { flex: none; width: 8px; height: 8px; border-radius: 50%; }
     .dot.connected { background: #22c55e; }
     .dot.disconnected { background: #ef4444; }
+    #status-text { min-width: 0; overflow-wrap: anywhere; }
     button { width: 100%; padding: 8px; border: 2px solid #000; background: #fff;
              font-size: 13px; cursor: pointer; }
     button:hover:not(:disabled) { background: #f0f0f0; }
     button:disabled { opacity: 0.5; cursor: not-allowed; }
-    .error { display: none; margin-top: 10px; padding: 8px; border: 1px solid #ef4444;
-             color: #b91c1c; font-size: 12px; line-height: 1.4; }
-    .progress { display: none; margin-top: 10px; padding: 8px; border: 1px solid #7c3aed;
-                color: #5b21b6; font-size: 12px; line-height: 1.4; }
+    .error { display: none; margin-top: 10px; padding: 8px; border: 1px solid #dc2626;
+             color: #b91c1c; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .capture-status { display: none; margin-top: 10px; padding: 8px; border: 1px solid currentColor;
+                      font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }
+    .capture-status[data-tone="reading"] { color: #1d4ed8; }
+    .capture-status[data-tone="processing"] { color: #6d28d9; }
+    .capture-status[data-tone="success"] { color: #15803d; }
+    .capture-status[data-tone="conflict"] { color: #b45309; }
+    .capture-status[data-tone="error"] { color: #b91c1c; }
     .footer { margin-top: 12px; font-size: 11px; color: #666; }
-    a { color: #666; }
+    .settings-link { display: inline-flex; min-height: 24px; align-items: center; color: #666; }
   </style>
 </head>
 <body>
   <div class="status">
     <div class="dot" id="status-dot"></div>
-    <span id="status-text">Checking...</span>
+    <span id="status-text" role="status" aria-live="polite" aria-atomic="true">Checking…</span>
   </div>
   <button id="capture-btn">Capture This Page</button>
-  <div class="progress" id="progress" role="status" aria-live="polite"></div>
+  <div class="capture-status" id="capture-status" role="status" aria-live="polite" aria-atomic="true"></div>
   <div class="error" id="error-msg" role="alert"></div>
   <div class="footer">
-    <a href="#" id="options-link">Settings</a>
+    <a class="settings-link" href="#" id="options-link">Settings</a>
   </div>
   <script src="popup.js" type="module"></script>
 </body>

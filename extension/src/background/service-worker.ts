@@ -1,6 +1,12 @@
 import type { CaptureMetaMessage, CaptureMetadata } from "#/content/capture";
 import { ArchiveConflictError, ClepsydraClient } from "#/lib/api-client";
-import { type CapturePhase, badgeFor, isTerminal } from "#/lib/badge";
+import {
+	type CapturePhase,
+	type CaptureStatus,
+	badgeFor,
+	describePhase,
+	isTerminal,
+} from "#/lib/badge";
 import { CaptureQueue } from "#/lib/capture-queue";
 import {
 	CAPTURE_ABORT,
@@ -71,13 +77,14 @@ async function processCapture(
 	metadata: CaptureMetadata,
 	snapshotHtml: string,
 	tabId: number | undefined,
+	attemptId: string,
 ): Promise<void> {
 	const settings = await loadSettings();
+	if (!(await reportPhase(tabId, attemptId, "uploading"))) return;
+
 	const client = new ClepsydraClient(settings.server_url);
 	const capturedAt = new Date().toISOString();
 	const domain = extractDomain(metadata.url);
-
-	reportPhase(tabId, "uploading");
 
 	// Image URLs stay as Readability resolved them. The server rewrites them to
 	// cas: references by joining on the original URLs SingleFile recorded in the
@@ -109,16 +116,26 @@ async function processCapture(
 		const response = await client.ingestArchive(manifest);
 
 		if (response.status === "already_exists") {
-			reportPhase(tabId, "duplicate");
-			if (settings.notify_on_duplicate) {
+			const applied = await reportPhase(
+				tabId,
+				attemptId,
+				"duplicate",
+				`${metadata.title} was already archived.`,
+			);
+			if (applied && settings.notify_on_duplicate) {
 				showNotification(
 					"Already Archived",
 					`${metadata.title} was already saved.`,
 				);
 			}
 		} else {
-			reportPhase(tabId, "done");
-			if (settings.notify_on_success) {
+			const applied = await reportPhase(
+				tabId,
+				attemptId,
+				"done",
+				`${metadata.title} was archived to ${response.vault_path}.`,
+			);
+			if (applied && settings.notify_on_success) {
 				showNotification(
 					"Page Archived",
 					`${metadata.title} → ${response.vault_path}`,
@@ -127,14 +144,16 @@ async function processCapture(
 		}
 	} catch (err) {
 		if (err instanceof ArchiveConflictError) {
-			reportPhase(tabId, "conflict");
-			showNotification(
-				"Content Changed",
-				describeConflict(metadata.title, err),
-			);
+			const detail = describeConflict(metadata.title, err);
+			if (await reportPhase(tabId, attemptId, "conflict", detail)) {
+				showNotification("Content Changed", detail);
+			}
 		} else {
-			reportPhase(tabId, "error");
-			showNotification("Archive Failed", String(err));
+			const detail = String(err);
+			if (await reportPhase(tabId, attemptId, "error", detail)) {
+				// Error notifications are deliberately unconditional.
+				showNotification("Archive Failed", detail);
+			}
 		}
 	}
 }
@@ -185,20 +204,140 @@ function badgeApi(): ToolbarBadgeApi | undefined {
 	return api as unknown as ToolbarBadgeApi | undefined;
 }
 
-/** Where each tab is in its capture, so the popup can report it. */
-const phases = new Map<number, CapturePhase>();
+const STATUS_STORAGE_KEY = "captureStatuses";
+const CAPTURING_RECOVERY_MS = 120_000;
+const INTERRUPTED_CAPTURE_DETAIL =
+	"Capture was interrupted when the extension worker restarted. Try again.";
+const CAPTURING_RECOVERY_DETAIL =
+	"Capture did not resume after the extension worker restarted. Try again.";
+const ABORT_ERROR_DEDUPLICATION_MS = 5_000;
 
-/**
- * Drive the toolbar badge. This is the primary progress signal: notifications
- * only fire at the end, and can be suppressed by the OS entirely.
- */
-function reportPhase(tabId: number | undefined, phase: CapturePhase): void {
-	if (tabId === undefined) return;
-	phases.set(tabId, phase);
+interface SessionStatusStorage {
+	get(key: string): Promise<Record<string, unknown>>;
+	set(items: Record<string, unknown>): Promise<void>;
+}
 
+interface CaptureAttempt {
+	tabId: number;
+	attemptId: string;
+}
+
+interface RecentAbort {
+	error: string;
+	expiresAt: number;
+}
+
+interface AttemptClaim {
+	status: CaptureStatus;
+	started: boolean;
+	persisted: Promise<void>;
+}
+
+/** Latest per-tab status plus capture IDs bound to the attempt that created them. */
+const statuses = new Map<number, CaptureStatus>();
+const captureAttempts = new Map<string, CaptureAttempt>();
+const recentAborts = new Map<number, RecentAbort>();
+const sessionStatusStorage = chrome.storage.session as unknown as
+	| SessionStatusStorage
+	| undefined;
+let persistenceTail: Promise<void> = Promise.resolve();
+let attemptSequence = 0;
+
+function isCapturePhase(value: unknown): value is CapturePhase {
+	switch (value) {
+		case "capturing":
+		case "processing":
+		case "uploading":
+		case "done":
+		case "duplicate":
+		case "conflict":
+		case "error":
+			return true;
+		default:
+			return false;
+	}
+}
+
+function isCaptureStatus(value: unknown): value is CaptureStatus {
+	if (!value || typeof value !== "object") return false;
+	if (!("phase" in value) || !isCapturePhase(value.phase)) return false;
+	return (
+		"detail" in value &&
+		typeof value.detail === "string" &&
+		"attemptId" in value &&
+		typeof value.attemptId === "string" &&
+		value.attemptId.length > 0 &&
+		"startedAt" in value &&
+		typeof value.startedAt === "number" &&
+		Number.isFinite(value.startedAt) &&
+		"updatedAt" in value &&
+		typeof value.updatedAt === "number" &&
+		Number.isFinite(value.updatedAt)
+	);
+}
+
+async function rehydrateStatuses(): Promise<void> {
+	if (!sessionStatusStorage) return;
+	const stored = await sessionStatusStorage.get(STATUS_STORAGE_KEY);
+	const rawStatuses = stored[STATUS_STORAGE_KEY];
+	if (!rawStatuses || typeof rawStatuses !== "object") return;
+
+	let repaired = false;
+	for (const [rawTabId, rawStatus] of Object.entries(rawStatuses)) {
+		const tabId = Number(rawTabId);
+		if (!Number.isSafeInteger(tabId) || !isCaptureStatus(rawStatus)) continue;
+
+		let status = rawStatus;
+		if (status.phase === "processing" || status.phase === "uploading") {
+			status = {
+				...status,
+				phase: "error",
+				detail: INTERRUPTED_CAPTURE_DETAIL,
+				updatedAt: Math.max(Date.now(), status.updatedAt + 1),
+			};
+			repaired = true;
+		}
+		statuses.set(tabId, status);
+	}
+	if (repaired) await persistStatuses();
+}
+
+const statusReady = rehydrateStatuses().catch(() => {
+	// Session storage is an MV3 durability improvement, not a capture dependency.
+});
+
+function persistStatuses(): Promise<void> {
+	if (!sessionStatusStorage) return Promise.resolve();
+	const snapshot = Object.fromEntries(
+		Array.from(statuses, ([tabId, status]) => [String(tabId), { ...status }]),
+	);
+	const write = persistenceTail.then(
+		() => sessionStatusStorage.set({ [STATUS_STORAGE_KEY]: snapshot }),
+		() => sessionStatusStorage.set({ [STATUS_STORAGE_KEY]: snapshot }),
+	);
+	persistenceTail = write.catch(() => {
+		// Keep later revisions writable after one transient storage failure.
+	});
+	return write.catch(() => {
+		// Capture remains functional in memory if session storage is unavailable.
+	});
+}
+
+function nextAttemptId(): string {
+	attemptSequence += 1;
+	return `${Date.now().toString(36)}-${attemptSequence.toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function nextStatusTimestamp(previous?: CaptureStatus): number {
+	const now = Date.now();
+	return previous ? Math.max(now, previous.updatedAt + 1) : now;
+}
+
+/** Drive the toolbar badge without changing the retained status revision. */
+function applyBadge(tabId: number, status: CaptureStatus): void {
 	const api = badgeApi();
 	if (!api) return;
-	const badge = badgeFor(phase);
+	const badge = badgeFor(status.phase);
 	try {
 		api.setBadgeText({ text: badge.text, tabId });
 		api.setBadgeBackgroundColor({ color: badge.color, tabId });
@@ -208,18 +347,161 @@ function reportPhase(tabId: number | undefined, phase: CapturePhase): void {
 		return;
 	}
 
-	if (isTerminal(phase) && badge.clearAfterMs !== null) {
-		setTimeout(() => {
-			if (phases.get(tabId) !== phase) return;
-			phases.delete(tabId);
+	if (!isTerminal(status.phase) || badge.clearAfterMs === null) return;
+	const clearAt = status.updatedAt + badge.clearAfterMs;
+	setTimeout(
+		() => {
+			const current = statuses.get(tabId);
+			if (
+				current?.attemptId !== status.attemptId ||
+				current.updatedAt !== status.updatedAt
+			) {
+				return;
+			}
 			try {
 				api.setBadgeText({ text: "", tabId });
 				api.setTitle({ title: "", tabId });
 			} catch {
 				// ignored
 			}
-		}, badge.clearAfterMs);
+		},
+		Math.max(0, clearAt - Date.now()),
+	);
+}
+
+function scheduleCapturingRecovery(tabId: number, status: CaptureStatus): void {
+	if (status.phase !== "capturing") return;
+	setTimeout(() => {
+		const current = statuses.get(tabId);
+		if (
+			current?.attemptId !== status.attemptId ||
+			current.updatedAt !== status.updatedAt ||
+			current.phase !== "capturing"
+		) {
+			return;
+		}
+		void reportPhase(
+			tabId,
+			status.attemptId,
+			"error",
+			CAPTURING_RECOVERY_DETAIL,
+		).then((applied) => {
+			if (applied) {
+				showNotification("Capture Failed", CAPTURING_RECOVERY_DETAIL);
+			}
+		});
+	}, CAPTURING_RECOVERY_MS);
+}
+
+void statusReady.then(() => {
+	for (const [tabId, status] of statuses) {
+		applyBadge(tabId, status);
+		scheduleCapturingRecovery(tabId, status);
 	}
+});
+
+function claimAttempt(tabId: number): AttemptClaim {
+	const current = statuses.get(tabId);
+	if (current && !isTerminal(current.phase)) {
+		return { status: current, started: false, persisted: Promise.resolve() };
+	}
+
+	const startedAt = Date.now();
+	const status: CaptureStatus = {
+		phase: "capturing",
+		detail: describePhase("capturing"),
+		attemptId: nextAttemptId(),
+		startedAt,
+		updatedAt: startedAt,
+	};
+	statuses.set(tabId, status);
+	applyBadge(tabId, status);
+	return { status, started: true, persisted: persistStatuses() };
+}
+
+async function reportPhase(
+	tabId: number | undefined,
+	attemptId: string,
+	phase: CapturePhase,
+	detail: string = describePhase(phase),
+): Promise<boolean> {
+	if (tabId === undefined) return false;
+	const current = statuses.get(tabId);
+	if (!current || current.attemptId !== attemptId) return false;
+
+	const status: CaptureStatus = {
+		...current,
+		phase,
+		detail,
+		updatedAt: nextStatusTimestamp(current),
+	};
+	statuses.set(tabId, status);
+	applyBadge(tabId, status);
+	await persistStatuses();
+	const latest = statuses.get(tabId);
+	return (
+		latest?.attemptId === status.attemptId &&
+		latest.updatedAt === status.updatedAt
+	);
+}
+
+async function reportUnconditionalError(
+	tabId: number | undefined,
+	detail: string,
+): Promise<boolean> {
+	if (tabId === undefined) return false;
+	const current = statuses.get(tabId);
+	if (current?.phase === "error" && current.detail === detail) return false;
+	const claim = current ? null : claimAttempt(tabId);
+	if (claim) await claim.persisted;
+	const attemptId = statuses.get(tabId)?.attemptId;
+	return attemptId ? reportPhase(tabId, attemptId, "error", detail) : false;
+}
+
+function rememberAbortError(tabId: number, error: string): void {
+	const marker = {
+		error,
+		expiresAt: Date.now() + ABORT_ERROR_DEDUPLICATION_MS,
+	};
+	recentAborts.set(tabId, marker);
+	setTimeout(() => {
+		if (recentAborts.get(tabId) === marker) recentAborts.delete(tabId);
+	}, ABORT_ERROR_DEDUPLICATION_MS);
+}
+
+function consumeMatchingAbortError(
+	tabId: number | undefined,
+	error: string,
+): boolean {
+	if (tabId === undefined) return false;
+	const marker = recentAborts.get(tabId);
+	if (!marker) return false;
+	if (marker.expiresAt < Date.now()) {
+		recentAborts.delete(tabId);
+		return false;
+	}
+	if (marker.error !== error) return false;
+	recentAborts.delete(tabId);
+	return true;
+}
+
+function bindCaptureToCurrentAttempt(
+	tabId: number | undefined,
+	captureId: string,
+): string | null {
+	if (tabId === undefined) return null;
+	const current = statuses.get(tabId);
+	const existing = captureAttempts.get(captureId);
+	if (existing) {
+		return existing.tabId === tabId &&
+			current?.attemptId === existing.attemptId &&
+			!isTerminal(current.phase)
+			? existing.attemptId
+			: null;
+	}
+	if (!current || isTerminal(current.phase)) return null;
+	captureAttempts.set(captureId, { tabId, attemptId: current.attemptId });
+	return current.attemptId;
 }
 
 /**
@@ -235,8 +517,8 @@ function keepServiceWorkerAlive(): void {
 }
 
 /**
- * Guards every capture: suppresses duplicates for a URL already being captured,
- * and keeps the service worker alive while asynchronous work is outstanding.
+ * URL-level suppression remains useful across tabs after the per-tab attempt
+ * has already prevented reinjection.
  */
 const captureQueue = new CaptureQueue({
 	keepAlive: keepServiceWorkerAlive,
@@ -246,10 +528,13 @@ const captureQueue = new CaptureQueue({
 const pendingTransfers = new PendingTransferCoordinator<CaptureMetadata>({
 	keepAlive: keepServiceWorkerAlive,
 	onExpire: (captureId, tabId) => {
-		reportPhase(tabId, "error");
-		showNotification(
-			"Capture Failed",
-			`Snapshot transfer ${captureId} expired after ${CAPTURE_INACTIVITY_TIMEOUT_MS / 1_000} seconds of inactivity.`,
+		const captureAttempt = captureAttempts.get(captureId);
+		if (!captureAttempt || captureAttempt.tabId !== tabId) return;
+		const detail = `Snapshot transfer ${captureId} expired after ${CAPTURE_INACTIVITY_TIMEOUT_MS / 1_000} seconds of inactivity.`;
+		void reportPhase(tabId, captureAttempt.attemptId, "error", detail).then(
+			(applied) => {
+				if (applied) showNotification("Capture Failed", detail);
+			},
 		);
 	},
 });
@@ -263,7 +548,173 @@ type WorkerMessage =
 	| CaptureChunk
 	| CaptureAbort
 	| { type: "capture_error"; error: string }
+	| { type: "capture_start"; tabId: number }
 	| { type: "capture_status"; tabId: number };
+
+async function injectClaimedCapture(
+	tab: chrome.tabs.Tab,
+	attemptId: string,
+): Promise<void> {
+	if (tab.id === undefined || statuses.get(tab.id)?.attemptId !== attemptId) {
+		return;
+	}
+	try {
+		await executeCaptureScript(tab.id);
+	} catch (err) {
+		const detail = describeInjectionFailure(tab.url, err);
+		if (await reportPhase(tab.id, attemptId, "error", detail)) {
+			showNotification("Capture Failed", detail);
+		}
+	}
+}
+
+async function fetchTabAndInject(
+	tabId: number,
+	attemptId: string,
+): Promise<void> {
+	try {
+		const tab = await chrome.tabs.get(tabId);
+		await injectClaimedCapture(tab, attemptId);
+	} catch (err) {
+		const reason = err instanceof Error ? err.message : String(err);
+		const detail = `Capture could not start: ${reason}`;
+		if (await reportPhase(tabId, attemptId, "error", detail)) {
+			showNotification("Capture Failed", detail);
+		}
+	}
+}
+
+async function beginCaptureForTabId(tabId: number): Promise<CaptureStatus> {
+	await statusReady;
+	const claim = claimAttempt(tabId);
+	if (claim.started) void fetchTabAndInject(tabId, claim.status.attemptId);
+	await claim.persisted;
+	return statuses.get(tabId) ?? claim.status;
+}
+
+async function beginCaptureForTab(tab: chrome.tabs.Tab): Promise<void> {
+	await statusReady;
+	if (tab.id === undefined) return;
+	const claim = claimAttempt(tab.id);
+	if (claim.started) void injectClaimedCapture(tab, claim.status.attemptId);
+	await claim.persisted;
+}
+
+async function handleWorkerMessage(
+	workerMessage: WorkerMessage,
+	sender: chrome.runtime.MessageSender,
+): Promise<unknown> {
+	await statusReady;
+
+	if (workerMessage.type === "capture_status") {
+		return { status: statuses.get(workerMessage.tabId) ?? null };
+	}
+
+	if (workerMessage.type === "capture_start") {
+		return { status: await beginCaptureForTabId(workerMessage.tabId) };
+	}
+
+	const tabId = sender.tab?.id;
+
+	if (workerMessage.type === "capture_meta") {
+		const attemptId = bindCaptureToCurrentAttempt(
+			tabId,
+			workerMessage.captureId,
+		);
+		if (!attemptId) return undefined;
+		if (!(await reportPhase(tabId, attemptId, "processing"))) return undefined;
+		pendingTransfers.acceptMetadata(
+			workerMessage.captureId,
+			workerMessage.metadata,
+			tabId,
+		);
+		return undefined;
+	}
+
+	if (workerMessage.type === CAPTURE_CHUNK) {
+		const attemptId = bindCaptureToCurrentAttempt(
+			tabId,
+			workerMessage.captureId,
+		);
+		if (!attemptId) return undefined;
+		let completed: CompletedTransfer<CaptureMetadata> | null;
+		try {
+			completed = pendingTransfers.acceptChunk(workerMessage, tabId);
+		} catch (error) {
+			const detail = `Malformed snapshot transfer: ${String(error)}`;
+			if (await reportPhase(tabId, attemptId, "error", detail)) {
+				showNotification("Capture Failed", detail);
+			}
+			return undefined;
+		}
+		if (
+			completed === null ||
+			statuses.get(tabId ?? -1)?.attemptId !== attemptId
+		) {
+			return undefined;
+		}
+
+		const { metadata, snapshotHtml, tabId: completedTabId } = completed;
+		if (!metadata) {
+			const detail = "Capture metadata was lost in transit.";
+			if (await reportPhase(completedTabId, attemptId, "error", detail)) {
+				showNotification("Archive Failed", detail);
+			}
+			return undefined;
+		}
+
+		const started = captureQueue.run(metadata.url, () =>
+			processCapture(metadata, snapshotHtml, completedTabId, attemptId).catch(
+				async (err) => {
+					const detail = String(err);
+					if (await reportPhase(completedTabId, attemptId, "error", detail)) {
+						showNotification("Archive Failed", detail);
+					}
+				},
+			),
+		);
+		if (!started) {
+			const detail = `${metadata.title} is already being archived.`;
+			if (await reportPhase(completedTabId, attemptId, "duplicate", detail)) {
+				showNotification("Capture In Progress", detail);
+			}
+		}
+		return undefined;
+	}
+
+	if (workerMessage.type === CAPTURE_ABORT) {
+		const attemptId = bindCaptureToCurrentAttempt(
+			tabId,
+			workerMessage.captureId,
+		);
+		pendingTransfers.abort(workerMessage.captureId);
+		if (!attemptId || tabId === undefined) return undefined;
+		rememberAbortError(tabId, workerMessage.error);
+		const detail = `Snapshot transfer ${workerMessage.captureId}: ${workerMessage.error}`;
+		if (await reportPhase(tabId, attemptId, "error", detail)) {
+			showNotification("Capture Failed", detail);
+		}
+		return undefined;
+	}
+
+	if (workerMessage.type === "capture_error") {
+		if (consumeMatchingAbortError(tabId, workerMessage.error)) return undefined;
+		if (await reportUnconditionalError(tabId, workerMessage.error)) {
+			showNotification("Capture Failed", workerMessage.error);
+		}
+	}
+	return undefined;
+}
+
+function respondWhenReady(
+	response: Promise<unknown>,
+	sendResponse: (response?: unknown) => void,
+): true {
+	void response.then(sendResponse, (error) => {
+		sendResponse({ error: String(error) });
+	});
+	return true;
+}
 
 chrome.runtime.onConnect.addListener((port) => {
 	if (port.name === RELAY_PORT_NAME) {
@@ -276,119 +727,52 @@ chrome.runtime.onMessage.addListener(
 		message: unknown,
 		sender: chrome.runtime.MessageSender,
 		sendResponse: (response?: unknown) => void,
-	): boolean | undefined | Promise<Record<string, never>> => {
+	): boolean | undefined | Promise<unknown> => {
 		const singleFileResponse = singleFileRuntime.handleMessage(message, sender);
 		if (singleFileResponse) return singleFileResponse;
 		const workerMessage = message as WorkerMessage;
-
-		if (workerMessage.type === "capture_status") {
-			// Answered synchronously, so no need to hold the channel open.
-			sendResponse({ phase: phases.get(workerMessage.tabId) ?? null });
-			return undefined;
-		}
-
-		const tabId = sender.tab?.id;
-
-		if (workerMessage.type === "capture_meta") {
-			reportPhase(tabId, "processing");
-			pendingTransfers.acceptMetadata(
-				workerMessage.captureId,
-				workerMessage.metadata,
-				tabId,
-			);
-			return undefined;
-		}
-
-		if (workerMessage.type === CAPTURE_CHUNK) {
-			let completed: CompletedTransfer<CaptureMetadata> | null;
-			try {
-				completed = pendingTransfers.acceptChunk(workerMessage, tabId);
-			} catch (error) {
-				reportPhase(tabId, "error");
-				showNotification(
-					"Capture Failed",
-					`Malformed snapshot transfer: ${String(error)}`,
+		switch (workerMessage.type) {
+			case "capture_status":
+			case "capture_start":
+			case "capture_meta":
+			case CAPTURE_CHUNK:
+			case CAPTURE_ABORT:
+			case "capture_error":
+				return respondWhenReady(
+					handleWorkerMessage(workerMessage, sender),
+					sendResponse,
 				);
+			default:
 				return undefined;
-			}
-			if (completed === null) return undefined;
-
-			const { metadata, snapshotHtml, tabId: completedTabId } = completed;
-			if (!metadata) {
-				reportPhase(completedTabId, "error");
-				showNotification(
-					"Archive Failed",
-					"Capture metadata was lost in transit.",
-				);
-				return undefined;
-			}
-
-			const started = captureQueue.run(metadata.url, () =>
-				processCapture(metadata, snapshotHtml, completedTabId).catch((err) => {
-					reportPhase(completedTabId, "error");
-					showNotification("Archive Failed", String(err));
-				}),
-			);
-			if (!started) {
-				// Without this the tab keeps the non-clearing `processing` badge
-				// forever: the capture that owns the terminal phase is running for
-				// a different tab.
-				reportPhase(completedTabId, "duplicate");
-				showNotification(
-					"Capture In Progress",
-					`${metadata.title} is already being archived.`,
-				);
-			}
-			return undefined;
 		}
-
-		if (workerMessage.type === CAPTURE_ABORT) {
-			pendingTransfers.abort(workerMessage.captureId);
-			return undefined;
-		}
-
-		if (workerMessage.type === "capture_error") {
-			reportPhase(tabId, "error");
-			showNotification("Capture Failed", workerMessage.error);
-		}
-		return undefined;
 	},
 );
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
-	phases.delete(tabId);
 	pendingTransfers.removeTab(tabId);
 	singleFileRuntime.removeTab(tabId);
+	recentAborts.delete(tabId);
+	void statusReady.then(async () => {
+		statuses.delete(tabId);
+		for (const [captureId, captureAttempt] of captureAttempts) {
+			if (captureAttempt.tabId === tabId) captureAttempts.delete(captureId);
+		}
+		await persistStatuses();
+	});
 });
 
-/** Inject the capture script, reporting why if the page forbids it. */
-async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
-	if (!tab.id) return;
-	reportPhase(tab.id, "capturing");
-	try {
-		await executeCaptureScript(tab.id);
-	} catch (err) {
-		reportPhase(tab.id, "error");
-		showNotification("Capture Failed", describeInjectionFailure(tab.url, err));
-	}
-}
-
-// Handle toolbar button click
-// Note: onClicked only fires when there is NO default_popup set in the manifest.
-// Our manifest has a default_popup, so this is a no-op fallback for API completeness.
 const toolbarAction = chrome.action ?? legacyChrome.browserAction;
 if (toolbarAction?.onClicked) {
 	toolbarAction.onClicked.addListener((tab) => {
-		void startCapture(tab);
+		void beginCaptureForTab(tab);
 	});
 }
 
-// Handle keyboard shortcut
 chrome.commands.onCommand.addListener((command) => {
 	if (command === "capture-page") {
 		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
 			const tab = tabs[0];
-			if (tab) void startCapture(tab);
+			if (tab) void beginCaptureForTab(tab);
 		});
 	}
 });
