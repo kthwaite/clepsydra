@@ -1,6 +1,10 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { $api } from "./client";
-import { invalidatePageContent, invalidatePageStructure } from "./keys";
+import {
+  invalidatePageContent,
+  invalidatePageStructure,
+  invalidateRubbish,
+} from "./keys";
 import type { components } from "./schema";
 
 export type ArchivedPage = components["schemas"]["RubbishItemSummary"];
@@ -56,7 +60,10 @@ export function useMovePage() {
 export function useArchivePage() {
   const qc = useQueryClient();
   return $api.useMutation("delete", "/api/vault/pages/{path}", {
-    onSuccess: () => invalidatePageStructure(qc),
+    onSuccess: () => {
+      invalidatePageStructure(qc);
+      invalidateRubbish(qc);
+    },
   });
 }
 

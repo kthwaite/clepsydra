@@ -47,9 +47,18 @@ it("invalidates the full feeds path prefix when persisted feed data changes", ()
     ],
     ["get", "/api/vault/feeds/{id}", { params: { path: { id: 7 } } }],
   ];
+  const rubbishKeys: readonly (readonly unknown[])[] = [
+    ["get", "/api/vault/rubbish"],
+    [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ],
+  ];
   const unrelatedKey = ["get", "/api/vault/pages"] as const;
   for (const key of feedKeys) client.setQueryData(key, { cached: true });
   client.setQueryData(unrelatedKey, { cached: true });
+  for (const key of rubbishKeys) client.setQueryData(key, { cached: true });
 
   const { result } = renderHook(() => useVaultEvents(), {
     wrapper: ({ children }: { children: ReactNode }) => (
@@ -67,4 +76,7 @@ it("invalidates the full feeds path prefix when persisted feed data changes", ()
     expect(client.getQueryState(key)?.isInvalidated).toBe(true);
   }
   expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
+  for (const key of rubbishKeys) {
+    expect(client.getQueryState(key)?.isInvalidated).toBe(false);
+  }
 });

@@ -18,6 +18,7 @@ vi.mock("#/api/client", () => ({
 
 import { useCreateFolder, useDeleteFolder, useMoveFolder } from "#/api/folders";
 import { usePreviewMutation } from "#/api/index";
+import { queryKeys } from "#/api/keys";
 import { useArchivePage, useMovePage } from "#/api/pages";
 
 function harness() {
@@ -78,6 +79,33 @@ describe("page and folder mutation hooks", () => {
     }
 
     expect(invalidate).toHaveBeenCalled();
+  });
+
+  it("invalidates the full rubbish query prefix after a page archive succeeds", () => {
+    const { client, wrapper } = harness();
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    const unrelatedKey = ["get", "/api/vault/feeds"] as const;
+    client.setQueryData(listKey, { items: [] });
+    client.setQueryData(detailKey, { item_id: "item-1" });
+    client.setQueryData(unrelatedKey, { items: [] });
+
+    renderHook(() => useArchivePage(), { wrapper });
+    const archiveCall = mocks.generatedMutation.mock.calls.find(
+      ([method, route]) =>
+        method === "delete" && route === "/api/vault/pages/{path}",
+    );
+    const options = archiveCall?.[2] as { onSuccess: () => void };
+
+    options.onSuccess();
+
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
   });
 
   it("parses the server mutation preview through the typed hook", async () => {

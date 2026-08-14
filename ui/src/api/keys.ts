@@ -93,6 +93,12 @@ export function invalidateByPath(qc: QueryClient, prefix: string) {
   });
 }
 
+/** Invalidate the Rubbish Bin list and every item-detail query. */
+export function invalidateRubbish(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: queryKeys.rubbish.all });
+  return invalidateByPath(qc, queryKeys.rubbish.pathPrefix);
+}
+
 /** Pull the actual `path` param out of a `usePage` openapi-react-query key. */
 function pageDetailKeyPath(queryKey: readonly unknown[]): string | undefined {
   const params = queryKey[2] as

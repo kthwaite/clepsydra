@@ -61,6 +61,42 @@ describe("useVaultEvents", () => {
     unmount();
   });
 
+  it("invalidates cached rubbish list and detail queries on index_changed", () => {
+    const client = new QueryClient();
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    const unrelatedKey = ["get", "/api/vault/feeds"] as const;
+    client.setQueryData(listKey, { items: [] });
+    client.setQueryData(detailKey, { item_id: "item-1" });
+    client.setQueryData(unrelatedKey, { items: [] });
+
+    const { unmount } = renderHook(() => useVaultEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source?.onmessage?.({
+        data: JSON.stringify({
+          type: "index_changed",
+          upserted: [],
+          removed: ["notes/archived.md"],
+        }),
+      } as MessageEvent<string>);
+    });
+
+    expect(client.getQueryState(listKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
+    unmount();
+  });
+
   it("invalidates the board query on index_changed", async () => {
     const client = new QueryClient();
     const boardKey = queryKeys.board.all;

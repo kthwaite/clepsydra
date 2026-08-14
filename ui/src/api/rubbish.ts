@@ -1,7 +1,10 @@
-import { type QueryClient, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "#/api/schema";
 import { $api, fetchClient } from "./client";
-import { invalidateByPath, invalidatePageStructure, queryKeys } from "./keys";
+import {
+  invalidatePageStructure,
+  invalidateRubbish,
+} from "./keys";
 
 export type RubbishListEntry = components["schemas"]["RubbishListEntryDto"];
 export type RubbishItemSummary = components["schemas"]["RubbishItemSummary"];
@@ -12,11 +15,6 @@ export type RubbishPurgeResponse =
   components["schemas"]["RubbishPurgeResponse"];
 export type EmptyRubbishResponse =
   components["schemas"]["EmptyRubbishResponse"];
-
-function invalidateRubbish(queryClient: QueryClient) {
-  queryClient.invalidateQueries({ queryKey: queryKeys.rubbish.all });
-  return invalidateByPath(queryClient, queryKeys.rubbish.pathPrefix);
-}
 
 function requiredResponse<T>(data: T | undefined, error: unknown, fallback: string): T {
   if (error !== undefined) throw error;
