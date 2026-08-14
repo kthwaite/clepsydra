@@ -90,17 +90,11 @@ pub(crate) fn api_error_message(status: u16, body: &str) -> String {
         message.push_str(&format!(" — detail: {detail}"));
     }
     match status {
-        404 => message.push_str(
+        404 if error.starts_with("page not found:") => message.push_str(
             " — the page may have been moved by a kind/project assignment; \
              locate it with vault_search",
         ),
-        // A backlink conflict is a deliberate guard, not a lost race: the
-        // caller must confirm before forcing. Everything else on 409 is
-        // optimistic concurrency.
-        409 if message.contains("backlink") => message.push_str(
-            " — review the listed backlinks with the user, then re-run with force: true \
-             to delete and rewrite them",
-        ),
+        409 if error.contains("restore destination is occupied:") => {}
         409 => message
             .push_str(" — the page changed concurrently; re-read it with vault_get_page and retry"),
         _ => {}
@@ -327,14 +321,23 @@ mod tests {
     }
 
     #[test]
-    fn api_error_message_backlink_conflict_guides_toward_force() {
+    fn mcp_rubbish_not_found_error_does_not_add_page_search_advice() {
+        let msg = api_error_message(
+            404,
+            r#"{"status":404,"error":"rubbish item not found: 0190f8a0-0000-7000-8000-0000000000ff"}"#,
+        );
+        assert!(msg.contains("rubbish item not found"), "{msg}");
+        assert!(!msg.contains("vault_search"), "{msg}");
+    }
+
+    #[test]
+    fn mcp_rubbish_restore_conflict_does_not_claim_concurrent_page_change() {
         let msg = api_error_message(
             409,
-            r#"{"status":409,"error":"page has 2 backlink(s); use force=true to delete","detail":{"backlinks":["notes/a.md","notes/b.md"]}}"#,
+            r#"{"status":409,"error":"rubbish lifecycle conflict: restore destination is occupied: notes/beta.md"}"#,
         );
-        assert!(msg.contains("notes/a.md"), "detail missing: {msg}");
-        assert!(msg.contains("force: true"), "{msg}");
-        assert!(!msg.contains("re-read"), "wrong 409 hint: {msg}");
+        assert!(msg.contains("restore destination is occupied"), "{msg}");
+        assert!(!msg.contains("changed concurrently"), "{msg}");
     }
 
     #[test]

@@ -1,9 +1,10 @@
 //! The MCP tool surface over the vault API.
 //!
-//! Read tools (M1): search, page reads, listing, tree, link graph, tags.
-//! Write tools (M2): create, update, surgical edit, append, journal capture.
-//! Organise tools (M3): assign, move, folders, delete (force two-step), and
-//! mutation preview.
+//! Read tools (M1): search, page reads, listing, tree, link graph, tags,
+//! and Rubbish Bin inspection.
+//! Write tools (M2): create, update, surgical edit, append, journal capture,
+//! and the archive/restore/purge lifecycle.
+//! Organise tools (M3): assign, move, folders, and mutation preview.
 //! Every tool proxies the running HTTP server via [`ApiClient`] and returns
 //! the API's JSON as text content; failures come back as tool errors carrying
 //! the actionable messages built in `client.rs`.
@@ -167,15 +168,19 @@ merely for an edit, a journal capture, or a conversation capture. Declare the pa
 and project; use vault_assign to refile existing pages rather than inventing folders. Substantial \
 project documentation must wikilink its project or hub page. Use vault_journal_capture and \
 vault_capture_conversation for those dedicated intents instead of vault_create_page. Make \
-targeted edits with vault_edit_page or vault_append_page. The vault relocates pages filed by \
-kind/project itself; vault_preview_mutation dry-runs moves and deletes before they touch linked \
-pages. Orient on the TASKING board with vault_board; it lists task TSK codes and cycle S codes. \
+targeted edits with vault_edit_page or vault_append_page. Archive active pages with \
+vault_archive_page; their normal links remain unresolved while binned, and restore is \
+original-path-only. The vault relocates pages filed by kind/project itself; \
+vault_preview_mutation dry-runs moves. Orient on the TASKING board with vault_board; it lists \
+task TSK codes and cycle S codes. \
 Create board tasks with vault_task_create rather than vault_create_page so they receive TSK \
 codes; the `ai-generated` tag policy applies to LLM-authored tasks. Move tasks through INTAKE → \
 TRIAGE → FIELD → REVIEW → SEALED with vault_task_update, addressing them by code, path, or id. \
 Seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks. Page \
 paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical top-level \
-folders. On a conflict error, re-read the page and re-apply the change.";
+folders. A restore conflict means the original path is occupied and the item remains binned; \
+resolve that path before retrying. On a page revision conflict, re-read the page and re-apply \
+the change.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -294,37 +299,15 @@ pub struct FolderParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RewriteMode {
-    /// Replace inbound wikilinks with the page's plain-text name.
-    PlainText,
-    /// Keep the link text but strip the wikilink brackets.
-    Unlink,
-    /// Leave inbound wikilinks untouched (they become unresolved).
-    None,
-}
-
-impl RewriteMode {
-    fn as_str(&self) -> &'static str {
-        match self {
-            RewriteMode::PlainText => "plain_text",
-            RewriteMode::Unlink => "unlink",
-            RewriteMode::None => "none",
-        }
-    }
+pub struct ArchivePageParams {
+    /// Vault-relative path of the active page to archive.
+    pub path: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
-pub struct DeletePageParams {
-    /// Vault-relative page path.
-    pub path: String,
-    /// Delete even when other pages link here, rewriting those links per
-    /// 'rewrite'. Without it, a page with backlinks refuses to delete and
-    /// returns the backlink list for review.
-    pub force: Option<bool>,
-    /// How inbound wikilinks are rewritten on a forced delete
-    /// (default plain_text).
-    pub rewrite: Option<RewriteMode>,
+pub struct RubbishItemParams {
+    /// Opaque rubbish lifecycle UUID returned by archive or list.
+    pub item_id: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -332,8 +315,6 @@ pub struct DeletePageParams {
 pub enum PreviewOperation {
     /// Preview moving a page to 'destination'.
     MovePage,
-    /// Preview deleting a page (honors 'rewrite').
-    DeletePage,
     /// Preview moving a folder to 'destination'.
     MoveFolder,
 }
@@ -342,7 +323,6 @@ impl PreviewOperation {
     fn as_str(&self) -> &'static str {
         match self {
             PreviewOperation::MovePage => "move_page",
-            PreviewOperation::DeletePage => "delete_page",
             PreviewOperation::MoveFolder => "move_folder",
         }
     }
@@ -350,14 +330,12 @@ impl PreviewOperation {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct PreviewMutationParams {
-    /// The mutation to preview.
+    /// Move operation to preview.
     pub operation: PreviewOperation,
     /// Source page or folder path.
     pub source: String,
-    /// Destination path (moves only).
+    /// Destination page or folder path.
     pub destination: Option<String>,
-    /// Link rewrite mode (delete_page only; default plain_text).
-    pub rewrite: Option<RewriteMode>,
 }
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
@@ -1074,51 +1052,144 @@ impl VaultMcpServer {
     }
 
     #[tool(
-        name = "vault_delete_page",
-        description = "Delete a page. Without force, a page that other pages link to refuses to delete and returns its backlinks — review them (with the user for anything load-bearing) before re-running with force: true, which rewrites those links per 'rewrite'. vault_preview_mutation shows the exact impact first.",
+        name = "vault_archive_page",
+        description = "Archive an active page to the Rubbish Bin by vault-relative path. Normal wikilinks to the page are left unchanged and become unresolved while it is binned; restore remains available.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_archive_page(
+        &self,
+        Parameters(params): Parameters<ArchivePageParams>,
+    ) -> Result<String, String> {
+        let value = self
+            .client
+            .delete_json(&pages_url(&params.path), &[])
+            .await
+            .map_err(|error| error.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_list_rubbish",
+        description = "List binned pages newest first, including truthful diagnostic rows for invalid items. Normal links to binned pages remain unresolved until those pages are restored.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_list_rubbish(&self) -> Result<String, String> {
+        let value = self
+            .client
+            .get_json("/api/vault/rubbish", &[])
+            .await
+            .map_err(|error| error.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_get_rubbish_item",
+        description = "Read one binned item by its opaque item UUID: lifecycle metadata plus a bounded read-only page preview. The item's original-path links remain unresolved while it is binned.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
+    )]
+    pub async fn vault_get_rubbish_item(
+        &self,
+        Parameters(params): Parameters<RubbishItemParams>,
+    ) -> Result<String, String> {
+        let value = self
+            .client
+            .get_json(&format!("/api/vault/rubbish/{}", params.item_id), &[])
+            .await
+            .map_err(|error| error.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_restore_page",
+        description = "Restore one binned page by item UUID to its original path only. If that path is occupied, the restore conflicts and the rubbish item is retained.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_restore_page(
+        &self,
+        Parameters(params): Parameters<RubbishItemParams>,
+    ) -> Result<String, String> {
+        let value = self
+            .client
+            .post_json(
+                &format!("/api/vault/rubbish/{}/restore", params.item_id),
+                &serde_json::json!({}),
+            )
+            .await
+            .map_err(|error| error.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_purge_page",
+        description = "Permanently purge one binned page by item UUID, including its captured-archive references. This cannot be restored.",
         annotations(
             read_only_hint = false,
             destructive_hint = true,
             idempotent_hint = false
         )
     )]
-    pub async fn vault_delete_page(
+    pub async fn vault_purge_page(
         &self,
-        Parameters(params): Parameters<DeletePageParams>,
+        Parameters(params): Parameters<RubbishItemParams>,
     ) -> Result<String, String> {
-        let rewrite = params.rewrite.unwrap_or(RewriteMode::PlainText);
-        self.client
-            .delete_json(
-                &pages_url(&params.path),
-                &[
-                    ("force", params.force.unwrap_or(false).to_string()),
-                    ("rewrite", rewrite.as_str().to_string()),
-                ],
-            )
+        let value = self
+            .client
+            .delete_json(&format!("/api/vault/rubbish/{}", params.item_id), &[])
             .await
-            .map_err(|e| e.to_string())?;
-        render(&serde_json::json!({
-            "deleted": params.path,
-            "rewrite": rewrite.as_str(),
-        }))
+            .map_err(|error| error.to_string())?;
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_empty_rubbish",
+        description = "Permanently purge every valid item in the current Rubbish Bin snapshot. Purged pages cannot be restored; the result preserves ordered per-item successes and failures, and failed items remain binned.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = true,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_empty_rubbish(&self) -> Result<String, String> {
+        let value = self
+            .client
+            .delete_json("/api/vault/rubbish", &[])
+            .await
+            .map_err(|error| error.to_string())?;
+        render(&value)
     }
 
     #[tool(
         name = "vault_preview_mutation",
-        description = "Dry-run a move or delete: returns the mutation plan — file operations and every wikilink rewrite it would perform — without changing anything. Use before bulk reorganisation, deletes of linked pages, or folder moves.",
-        annotations(read_only_hint = true, idempotent_hint = true)
+        description = "Dry-run a page or folder move: returns the mutation plan — file operations and wikilink rewrites — without changing anything.",
+        annotations(
+            read_only_hint = true,
+            destructive_hint = false,
+            idempotent_hint = true
+        )
     )]
     pub async fn vault_preview_mutation(
         &self,
         Parameters(params): Parameters<PreviewMutationParams>,
     ) -> Result<String, String> {
-        if matches!(
-            params.operation,
-            PreviewOperation::MovePage | PreviewOperation::MoveFolder
-        ) && params.destination.is_none()
-        {
-            return Err("this operation needs a 'destination'".to_string());
-        }
+        let destination = params
+            .destination
+            .ok_or_else(|| "this operation needs a 'destination'".to_string())?;
         let value = self
             .client
             .post_json(
@@ -1126,15 +1197,11 @@ impl VaultMcpServer {
                 &serde_json::json!({
                     "operation": params.operation.as_str(),
                     "source": params.source,
-                    "destination": params.destination.unwrap_or_default(),
-                    "rewrite": params
-                        .rewrite
-                        .unwrap_or(RewriteMode::PlainText)
-                        .as_str(),
+                    "destination": destination,
                 }),
             )
             .await
-            .map_err(|e| e.to_string())?;
+            .map_err(|error| error.to_string())?;
         render(&value)
     }
 
@@ -1399,6 +1466,7 @@ impl ServerHandler for VaultMcpServer {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::net::SocketAddr;
 
     use serde_json::json;
@@ -1519,7 +1587,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_router_exposes_the_read_and_write_surface() {
+    fn mcp_tool_inventory_exposes_the_archive_rubbish_lifecycle() {
         let router = VaultMcpServer::tool_router();
         let mut names: Vec<String> = router
             .list_all()
@@ -1531,21 +1599,26 @@ mod tests {
             names,
             [
                 "vault_append_page",
+                "vault_archive_page",
                 "vault_assign",
                 "vault_board",
                 "vault_capture_conversation",
                 "vault_create_page",
                 "vault_cycle_create",
                 "vault_cycle_update",
-                "vault_delete_page",
                 "vault_edit_page",
+                "vault_empty_rubbish",
                 "vault_folder",
                 "vault_get_page",
+                "vault_get_rubbish_item",
                 "vault_journal_capture",
                 "vault_links",
                 "vault_list_pages",
+                "vault_list_rubbish",
                 "vault_move_page",
                 "vault_preview_mutation",
+                "vault_purge_page",
+                "vault_restore_page",
                 "vault_search",
                 "vault_tags",
                 "vault_task_create",
@@ -1553,6 +1626,129 @@ mod tests {
                 "vault_tree",
                 "vault_update_page",
             ]
+        );
+    }
+
+    #[test]
+    fn mcp_rubbish_contract_has_narrow_schemas_truthful_descriptions_and_exact_annotations() {
+        let tools = VaultMcpServer::tool_router().list_all();
+        let tool = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("{name} should be registered"))
+        };
+
+        for (name, read_only, destructive, idempotent) in [
+            ("vault_archive_page", false, false, false),
+            ("vault_list_rubbish", true, false, true),
+            ("vault_get_rubbish_item", true, false, true),
+            ("vault_restore_page", false, false, false),
+            ("vault_purge_page", false, true, false),
+            ("vault_empty_rubbish", false, true, false),
+        ] {
+            let annotations = tool(name)
+                .annotations
+                .as_ref()
+                .unwrap_or_else(|| panic!("{name} should advertise annotations"));
+            assert_eq!(
+                annotations.read_only_hint,
+                Some(read_only),
+                "{name} read-only annotation"
+            );
+            assert_eq!(
+                annotations.destructive_hint,
+                Some(destructive),
+                "{name} destructive annotation"
+            );
+            assert_eq!(
+                annotations.idempotent_hint,
+                Some(idempotent),
+                "{name} idempotence annotation"
+            );
+        }
+
+        let description = |name: &str| {
+            tool(name)
+                .description
+                .as_deref()
+                .unwrap_or_else(|| panic!("{name} should have a description"))
+                .to_lowercase()
+        };
+        let archive_description = description("vault_archive_page");
+        assert!(archive_description.contains("links"));
+        assert!(archive_description.contains("unresolved"));
+        assert!(archive_description.contains("restore"));
+        let restore_description = description("vault_restore_page");
+        assert!(restore_description.contains("original path"));
+        assert!(restore_description.contains("only"));
+        for name in ["vault_purge_page", "vault_empty_rubbish"] {
+            let description = description(name);
+            assert!(
+                description.contains("permanent") && description.contains("cannot be restored"),
+                "{name} must state its irreversible effect: {description}"
+            );
+        }
+
+        for (name, expected_properties) in [
+            ("vault_archive_page", BTreeSet::from(["path"])),
+            (
+                "vault_get_rubbish_item",
+                BTreeSet::from(["item_id"]),
+            ),
+            ("vault_restore_page", BTreeSet::from(["item_id"])),
+            ("vault_purge_page", BTreeSet::from(["item_id"])),
+        ] {
+            let schema = &*tool(name).input_schema;
+            let properties = schema["properties"]
+                .as_object()
+                .expect("tool schema properties")
+                .keys()
+                .map(String::as_str)
+                .collect::<BTreeSet<_>>();
+            assert_eq!(properties, expected_properties, "{name} request schema");
+        }
+        for name in ["vault_list_rubbish", "vault_empty_rubbish"] {
+            let schema = &*tool(name).input_schema;
+            assert!(
+                schema["properties"]
+                    .as_object()
+                    .is_none_or(serde_json::Map::is_empty),
+                "{name} should take no request fields: {schema:?}"
+            );
+        }
+
+        let preview = tool("vault_preview_mutation");
+        let preview_schema = &*preview.input_schema;
+        assert!(
+            preview_schema["properties"].get("rewrite").is_none(),
+            "delete-only rewrite must not remain: {preview_schema:?}"
+        );
+        let operation_values = preview_schema["$defs"]["PreviewOperation"]["oneOf"]
+            .as_array()
+            .expect("preview operation alternatives")
+            .iter()
+            .map(|alternative| alternative["const"].as_str().expect("operation token"))
+            .collect::<Vec<_>>();
+        assert_eq!(operation_values, ["move_page", "move_folder"]);
+        assert!(
+            tools.iter().all(|tool| tool.name != "vault_delete_page"),
+            "permanent page deletion tool must not be advertised"
+        );
+        let client = ApiClient::new("http://127.0.0.1:1".to_string(), None).unwrap();
+        let instructions = VaultMcpServer::new(Arc::new(client))
+            .get_info()
+            .instructions
+            .expect("server instructions")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .to_lowercase();
+        assert!(
+            instructions.contains(
+                "a restore conflict means the original path is occupied and the item remains binned"
+            ),
+            "server instructions must distinguish retained restore conflicts: {instructions}"
         );
     }
 
@@ -2536,71 +2732,259 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_page_with_backlinks_returns_them_and_asks_for_force() {
+    async fn mcp_rubbish_archive_list_detail_restore_and_purge_succeed() {
         let (server, _tmp) = serve_seeded_vault().await;
-        // alpha links to Beta, so beta has a backlink.
-        let err = server
-            .vault_delete_page(Parameters(DeletePageParams {
-                path: "notes/beta.md".to_string(),
-                force: None,
-                rewrite: None,
-            }))
-            .await
-            .expect_err("backlinked page should refuse deletion");
-        assert!(err.contains("backlink"), "{err}");
-        assert!(err.contains("notes/alpha.md"), "should list sources: {err}");
-        assert!(err.contains("force: true"), "{err}");
-
-        // Forced delete succeeds and the page is gone.
-        let value = parse(
+        let archived = parse(
             server
-                .vault_delete_page(Parameters(DeletePageParams {
-                    path: "notes/beta.md".to_string(),
-                    force: Some(true),
-                    rewrite: None,
-                }))
-                .await,
-        );
-        assert_eq!(value["deleted"], "notes/beta.md");
-        let err = server
-            .vault_get_page(Parameters(GetPageParams {
-                path: Some("notes/beta.md".to_string()),
-                id: None,
-            }))
-            .await
-            .expect_err("deleted page should 404");
-        assert!(err.contains("404"), "{err}");
-    }
-
-    #[tokio::test]
-    async fn delete_page_without_backlinks_needs_no_force() {
-        let (server, _tmp) = serve_seeded_vault().await;
-        let value = parse(
-            server
-                .vault_delete_page(Parameters(DeletePageParams {
+                .vault_archive_page(Parameters(ArchivePageParams {
                     path: "notes/alpha.md".to_string(),
-                    force: None,
-                    rewrite: None,
                 }))
                 .await,
         );
-        assert_eq!(value["deleted"], "notes/alpha.md");
+        let item_id = archived["item_id"].as_str().unwrap();
+        assert_eq!(archived["original_path"], "notes/alpha.md");
+        assert_eq!(
+            archived["page_id"],
+            "0190f8a0-0000-7000-8000-0000000000a1"
+        );
+
+        let listed = parse(server.vault_list_rubbish().await);
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed[0]["status"], "valid");
+        assert_eq!(listed[0]["item"]["item_id"], item_id);
+
+        let detail = parse(
+            server
+                .vault_get_rubbish_item(Parameters(RubbishItemParams {
+                    item_id: item_id.to_string(),
+                }))
+                .await,
+        );
+        assert_eq!(detail["item"]["original_path"], "notes/alpha.md");
+        assert_eq!(detail["preview"]["read_only"], true);
+        assert!(
+            detail["preview"]["body"]
+                .as_str()
+                .unwrap()
+                .contains("zanzibar content")
+        );
+
+        let restored = parse(
+            server
+                .vault_restore_page(Parameters(RubbishItemParams {
+                    item_id: item_id.to_string(),
+                }))
+                .await,
+        );
+        assert_eq!(restored["path"], "notes/alpha.md");
+        assert!(parse(server.vault_list_rubbish().await)
+            .as_array()
+            .unwrap()
+            .is_empty());
+
+        let archived_again = parse(
+            server
+                .vault_archive_page(Parameters(ArchivePageParams {
+                    path: "notes/alpha.md".to_string(),
+                }))
+                .await,
+        );
+        let purge_id = archived_again["item_id"].as_str().unwrap();
+        let purged = parse(
+            server
+                .vault_purge_page(Parameters(RubbishItemParams {
+                    item_id: purge_id.to_string(),
+                }))
+                .await,
+        );
+        assert_eq!(purged["item_id"], purge_id);
+        assert_eq!(purged["original_path"], "notes/alpha.md");
+        let error = server
+            .vault_get_rubbish_item(Parameters(RubbishItemParams {
+                item_id: purge_id.to_string(),
+            }))
+            .await
+            .expect_err("purged item must be permanently unavailable");
+        assert!(error.contains("rubbish item not found"), "{error}");
+        assert!(
+            !error.contains("vault_search"),
+            "rubbish errors must not carry page lookup advice: {error}"
+        );
     }
 
     #[tokio::test]
-    async fn preview_mutation_reports_a_plan_without_mutating() {
+    async fn mcp_rubbish_errors_preserve_archive_and_item_identity_failures() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let archive_error = server
+            .vault_archive_page(Parameters(ArchivePageParams {
+                path: "notes/missing.md".to_string(),
+            }))
+            .await
+            .expect_err("missing active page should not archive");
+        assert!(archive_error.contains("page not found: notes/missing.md"));
+
+        let malformed_error = server
+            .vault_get_rubbish_item(Parameters(RubbishItemParams {
+                item_id: "not-a-uuid".to_string(),
+            }))
+            .await
+            .expect_err("malformed item UUID should be rejected");
+        assert!(malformed_error.contains("invalid rubbish item ID"));
+
+        let missing_item = "0190f8a0-0000-7000-8000-0000000000ff";
+        for error in [
+            server
+                .vault_restore_page(Parameters(RubbishItemParams {
+                    item_id: missing_item.to_string(),
+                }))
+                .await
+                .expect_err("missing item should not restore"),
+            server
+                .vault_purge_page(Parameters(RubbishItemParams {
+                    item_id: missing_item.to_string(),
+                }))
+                .await
+                .expect_err("missing item should not purge"),
+        ] {
+            assert!(error.contains("rubbish item not found"), "{error}");
+            assert!(!error.contains("vault_search"), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_rubbish_restore_conflict_retains_the_item_at_its_original_path_only() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let archived = parse(
+            server
+                .vault_archive_page(Parameters(ArchivePageParams {
+                    path: "notes/beta.md".to_string(),
+                }))
+                .await,
+        );
+        let item_id = archived["item_id"].as_str().unwrap();
+        server
+            .client
+            .post_json(
+                "/api/vault/pages/notes/beta.md",
+                &json!({"title": "Occupying page", "body": "Do not overwrite."}),
+            )
+            .await
+            .unwrap();
+
+        let error = server
+            .vault_restore_page(Parameters(RubbishItemParams {
+                item_id: item_id.to_string(),
+            }))
+            .await
+            .expect_err("occupied original path should conflict");
+        assert!(error.contains("409"), "{error}");
+        assert!(error.contains("occupied"), "{error}");
+        assert!(
+            !error.contains("changed concurrently"),
+            "restore conflict advice must remain truthful: {error}"
+        );
+        let retained = parse(
+            server
+                .vault_get_rubbish_item(Parameters(RubbishItemParams {
+                    item_id: item_id.to_string(),
+                }))
+                .await,
+        );
+        assert_eq!(retained["item"]["original_path"], "notes/beta.md");
+    }
+
+    #[tokio::test]
+    async fn mcp_rubbish_empty_reports_partial_failures_and_retains_failed_items() {
+        let (server, tmp) = serve_seeded_vault().await;
+        let success_page = parse(
+            server
+                .vault_create_page(Parameters(CreatePageParams {
+                    body: Some("Purge succeeds.".to_string()),
+                    ..create_params("Rubbish purge success")
+                }))
+                .await,
+        );
+        let success_path = success_page["path"].as_str().unwrap();
+        let success_item = parse(
+            server
+                .vault_archive_page(Parameters(ArchivePageParams {
+                    path: success_path.to_string(),
+                }))
+                .await,
+        );
+        let success_item_id = success_item["item_id"].as_str().unwrap();
+
+        let failed_page = parse(
+            server
+                .vault_create_page(Parameters(CreatePageParams {
+                    body: Some("Purge fails truthfully.".to_string()),
+                    ..create_params("Rubbish purge failure")
+                }))
+                .await,
+        );
+        let failed_path = failed_page["path"].as_str().unwrap();
+        let failed_page_id = failed_page["meta"]["id"].as_str().unwrap();
+        let missing_hash = "0".repeat(64);
+        std::fs::write(
+            tmp.path().join("vault").join(failed_path),
+            format!(
+                "---\nid: {failed_page_id}\ntitle: Rubbish purge failure\n\
+                 archive:\n  snapshot_hash: \"{missing_hash}\"\n---\n\nPurge fails truthfully.\n"
+            ),
+        )
+        .unwrap();
+        let failed_item = parse(
+            server
+                .vault_archive_page(Parameters(ArchivePageParams {
+                    path: failed_path.to_string(),
+                }))
+                .await,
+        );
+        let failed_item_id = failed_item["item_id"].as_str().unwrap();
+
+        let emptied = parse(server.vault_empty_rubbish().await);
+        let outcomes = emptied["outcomes"].as_array().unwrap();
+        assert_eq!(outcomes.len(), 2);
+        let failure = outcomes
+            .iter()
+            .find(|outcome| outcome["item_id"] == failed_item_id)
+            .expect("failed outcome should preserve the item ID");
+        assert_eq!(failure["status"], "failed");
+        assert!(failure["error"].as_str().unwrap().contains(&missing_hash));
+        let success = outcomes
+            .iter()
+            .find(|outcome| outcome["item"]["item_id"] == success_item_id)
+            .expect("successful outcome should identify the purged item");
+        assert_eq!(success["status"], "purged");
+
+        let retained = parse(
+            server
+                .vault_get_rubbish_item(Parameters(RubbishItemParams {
+                    item_id: failed_item_id.to_string(),
+                }))
+                .await,
+        );
+        assert_eq!(retained["item"]["item_id"], failed_item_id);
+        let purged_error = server
+            .vault_get_rubbish_item(Parameters(RubbishItemParams {
+                item_id: success_item_id.to_string(),
+            }))
+            .await
+            .expect_err("successful empty outcome should be permanent");
+        assert!(purged_error.contains("rubbish item not found"));
+    }
+
+    #[tokio::test]
+    async fn mcp_rubbish_preview_supports_moves_only_without_mutating() {
         let (server, _tmp) = serve_seeded_vault().await;
         let result = server
             .vault_preview_mutation(Parameters(PreviewMutationParams {
-                operation: PreviewOperation::DeletePage,
+                operation: PreviewOperation::MovePage,
                 source: "notes/beta.md".to_string(),
-                destination: None,
-                rewrite: None,
+                destination: Some("notes/beta-moved.md".to_string()),
             }))
             .await;
         assert!(result.is_ok(), "preview failed: {result:?}");
-
-        // The preview must not have deleted anything.
         let read = server
             .vault_get_page(Parameters(GetPageParams {
                 path: Some("notes/beta.md".to_string()),
@@ -2611,14 +2995,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn preview_move_requires_a_destination() {
+    async fn mcp_rubbish_preview_move_requires_a_destination() {
         let (server, _tmp) = serve_seeded_vault().await;
         let err = server
             .vault_preview_mutation(Parameters(PreviewMutationParams {
                 operation: PreviewOperation::MovePage,
                 source: "notes/beta.md".to_string(),
                 destination: None,
-                rewrite: None,
             }))
             .await
             .expect_err("move preview without destination should be rejected");
