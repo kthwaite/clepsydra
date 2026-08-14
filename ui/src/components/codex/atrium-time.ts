@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import {
-  aphorismForDay,
   daystampLabel,
   formatDotDate,
 } from "#/components/codex/atrium-data";
@@ -19,7 +18,6 @@ export function useAtriumCalendar(now: Date) {
     const utcDate = new Date(Date.UTC(utcYear, utcMonth, utcDay));
     const doy = dayOfYear(day);
     return {
-      aphorism: aphorismForDay(day),
       date: day,
       dayKey,
       dotDate: formatDotDate(day),

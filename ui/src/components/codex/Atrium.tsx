@@ -85,8 +85,6 @@ export function Atrium() {
   const sky = useMemo(() => deriveSky(skyNow, location), [location, skyNow]);
   const located = hasCoords(location);
 
-  const aphorism = calendar.aphorism;
-
   return (
     <div className="mx-auto grid max-w-[1600px] auto-rows-min grid-cols-12 gap-3.5 px-2 py-2 md:px-4 md:py-4">
       {/* HERO — col-12 */}
@@ -151,21 +149,8 @@ export function Atrium() {
         </div>
       </section>
 
-      {/* APHORISM + BCL (stacked, col-7) + SKY (col-5) */}
+      {/* BCL (col-7) + SKY (col-5) */}
       <div className="col-span-12 flex flex-col gap-3.5 lg:col-span-7">
-        <Card
-          className="flex-1 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
-          label="Aphorism"
-          pip="dim"
-          caption="FIG. II"
-        >
-          <blockquote className="m-0 font-sans text-[18px] italic leading-[1.4] text-ink-2">
-            “{aphorism.text}”
-          </blockquote>
-          <div className="cl-mono mt-2 text-[10px] uppercase tracking-[0.16em] text-ink-mute">
-            — {aphorism.who}
-          </div>
-        </Card>
         {bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null && (
           <Card
             className="flex-1 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"

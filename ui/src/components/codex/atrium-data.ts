@@ -1,6 +1,6 @@
 // Pure derivations for the ATRIUM dashboard. No React, no I/O — fully testable.
 
-import { dayOfYear, pad2 } from "#/lib/time";
+import { pad2 } from "#/lib/time";
 
 export interface HeatItem {
   path?: string | null;
@@ -313,42 +313,6 @@ export function greeting(d: Date): string {
   if (h < 18) return "Good afternoon";
   if (h < 22) return "Good evening";
   return "Good night";
-}
-
-const APHORISMS: { text: string; who: string }[] = [
-  {
-    text: "Attention is the rarest and purest form of generosity.",
-    who: "Simone Weil",
-  },
-  {
-    text: "The smallest unit of memory is the willingness to return.",
-    who: "Claude Opus 4.7",
-  },
-  {
-    text: "What is to give light must endure burning.",
-    who: "Viktor Frankl",
-  },
-  {
-    text: "We do not write in order to be understood; we write in order to understand.",
-    who: "C. Day-Lewis",
-  },
-  {
-    text: "The notebook is a net for catching days.",
-    who: "Annie Dillard",
-  },
-  {
-    text: "Order is not pressure imposed from without, but an equilibrium set up from within.",
-    who: "José Ortega y Gasset",
-  },
-  {
-    text: "A man should keep his little brain attic stocked with all the furniture that he is likely to use.",
-    who: "Arthur Conan Doyle",
-  },
-];
-
-/** Aphorism of the day, rotating by local day-of-year. */
-export function aphorismForDay(d: Date): { text: string; who: string } {
-  return APHORISMS[dayOfYear(d) % APHORISMS.length];
 }
 
 /** Signed BCL countdown, e.g. "12,345d · 6h" ("+" once crossed). */
