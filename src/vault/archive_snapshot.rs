@@ -324,6 +324,14 @@ pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_NOSCRIPT_DEPTH: usize = 16;
 const REWRITER_CHUNK_BYTES: usize = 16 * 1024;
 
+/// Navigation-neutralized HTML plus diagnostics derived by the same bounded
+/// parser pass.
+#[derive(Debug, PartialEq, Eq)]
+pub struct NeutralizedSnapshot {
+    pub html: Vec<u8>,
+    pub uncaptured_resource_count: usize,
+}
+
 fn restore_noscript(element: &mut Element<'_, '_>) -> Result<(), String> {
     if element.namespace_uri() == HTML_NAMESPACE && element.tag_name() == "clepsydra-noscript" {
         element
@@ -388,6 +396,14 @@ fn rewriting_error(error: impl std::fmt::Display) -> String {
 }
 
 pub fn neutralize_navigation_bytes(html: Vec<u8>) -> Result<Vec<u8>, String> {
+    neutralize_navigation_bytes_with_diagnostics(html).map(|snapshot| snapshot.html)
+}
+
+/// Neutralize navigation and count visual-resource references that still point
+/// outside the captured `data:`, `cas:`, and served CAS namespaces.
+pub fn neutralize_navigation_bytes_with_diagnostics(
+    html: Vec<u8>,
+) -> Result<NeutralizedSnapshot, String> {
     neutralize_navigation_bytes_with_limits(
         html,
         DEFAULT_REWRITER_MEMORY_BYTES,
@@ -395,16 +411,124 @@ pub fn neutralize_navigation_bytes(html: Vec<u8>) -> Result<Vec<u8>, String> {
     )
 }
 
+fn has_ascii_case_insensitive_prefix(value: &str, prefix: &str) -> bool {
+    value
+        .get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+}
+
+fn is_uncaptured_resource_reference(value: &str) -> bool {
+    let value = value.trim();
+    !value.is_empty()
+        && !has_ascii_case_insensitive_prefix(value, "data:")
+        && !has_ascii_case_insensitive_prefix(value, "cas:")
+        && !value.starts_with("/api/vault/cas/")
+}
+
+fn is_html_space(byte: u8) -> bool {
+    matches!(byte, b'\t' | b'\n' | b'\x0c' | b'\r' | b' ')
+}
+
+fn uncaptured_srcset_resource_count(srcset: &str) -> usize {
+    let bytes = srcset.as_bytes();
+    let mut position = 0usize;
+    let mut uncaptured = 0usize;
+    while position < bytes.len() {
+        while position < bytes.len() && (is_html_space(bytes[position]) || bytes[position] == b',')
+        {
+            position += 1;
+        }
+        if position == bytes.len() {
+            break;
+        }
+
+        let url_start = position;
+        while position < bytes.len() && !is_html_space(bytes[position]) {
+            position += 1;
+        }
+        let mut url_end = position;
+        while url_end > url_start && bytes[url_end - 1] == b',' {
+            url_end -= 1;
+        }
+        if url_end > url_start && is_uncaptured_resource_reference(&srcset[url_start..url_end]) {
+            uncaptured += 1;
+        }
+        if url_end != position {
+            continue;
+        }
+
+        let mut parentheses = 0usize;
+        while position < bytes.len() {
+            match bytes[position] {
+                b'(' => parentheses += 1,
+                b')' => parentheses = parentheses.saturating_sub(1),
+                b',' if parentheses == 0 => {
+                    position += 1;
+                    break;
+                }
+                _ => {}
+            }
+            position += 1;
+        }
+    }
+    uncaptured
+}
+
+fn uncaptured_visual_resource_count(element: &Element<'_, '_>) -> usize {
+    let uncaptured = |attribute: &str| {
+        usize::from(
+            element
+                .get_attribute(attribute)
+                .is_some_and(|value| is_uncaptured_resource_reference(&value)),
+        )
+    };
+    let uncaptured_srcset = || {
+        element
+            .get_attribute("srcset")
+            .map_or(0, |value| uncaptured_srcset_resource_count(&value))
+    };
+    let namespace = element.namespace_uri();
+    let tag = element.tag_name();
+    if namespace == HTML_NAMESPACE {
+        match tag.as_str() {
+            "link"
+                if element.get_attribute("rel").is_some_and(|rel| {
+                    rel.split_ascii_whitespace()
+                        .any(|token| token.eq_ignore_ascii_case("stylesheet"))
+                }) =>
+            {
+                uncaptured("href")
+            }
+            "img" => uncaptured("src") + uncaptured_srcset(),
+            "input"
+                if element
+                    .get_attribute("type")
+                    .is_some_and(|kind| kind.eq_ignore_ascii_case("image")) =>
+            {
+                uncaptured("src")
+            }
+            "video" => uncaptured("src") + uncaptured("poster"),
+            "audio" | "track" => uncaptured("src"),
+            "source" => uncaptured("src") + uncaptured_srcset(),
+            _ => 0,
+        }
+    } else if namespace == SVG_NAMESPACE && tag == "image" {
+        uncaptured("href") + uncaptured("xlink:href")
+    } else {
+        0
+    }
+}
 fn rewrite_pass(
     html: Vec<u8>,
     max_memory_bytes: usize,
     max_output_bytes: usize,
     expose_noscript: bool,
-) -> Result<(Vec<u8>, usize, usize), String> {
+) -> Result<(Vec<u8>, usize, usize, usize), String> {
     use std::cell::{Cell, RefCell};
 
     let renamed = Cell::new(0usize);
     let handler_calls = Cell::new(0usize);
+    let uncaptured_resources = Cell::new(0usize);
     let output = RefCell::new(Vec::new());
     let output_bytes = Cell::new(0usize);
     let sink_error = RefCell::new(None::<String>);
@@ -478,7 +602,17 @@ fn rewrite_pass(
                         element.remove_attribute("formaction");
                     }
                     Ok(())
-                }));
+                }))
+                .append_element_content_handler(element!(
+                    r#"link[href], img[src], img[srcset], input[src], video[src], video[poster], audio[src], source[src], source[srcset], track[src], image[href], image[xlink\:href]"#,
+                    |element| {
+                        uncaptured_resources.set(
+                            uncaptured_resources.get()
+                                + uncaptured_visual_resource_count(element),
+                        );
+                        Ok(())
+                    }
+                ));
         }
         let mut rewriter = HtmlRewriter::new(settings, |chunk: &[u8]| {
             if sink_error.borrow().is_some() {
@@ -512,21 +646,30 @@ fn rewrite_pass(
     if let Some(error) = sink_error.into_inner() {
         return Err(error);
     }
-    Ok((output.into_inner(), renamed.get(), handler_calls.get()))
+    Ok((
+        output.into_inner(),
+        renamed.get(),
+        handler_calls.get(),
+        uncaptured_resources.get(),
+    ))
 }
 
 fn neutralize_navigation_bytes_with_limits(
     mut html: Vec<u8>,
     max_memory_bytes: usize,
     max_output_bytes: usize,
-) -> Result<Vec<u8>, String> {
+) -> Result<NeutralizedSnapshot, String> {
     for depth in 0..=MAX_NOSCRIPT_DEPTH {
-        let (exposed, renamed, _) = rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
+        let (exposed, renamed, _, _) =
+            rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
         html = exposed;
         if renamed == 0 {
-            let (neutralized, _, _) =
+            let (neutralized, _, _, uncaptured_resource_count) =
                 rewrite_pass(html, max_memory_bytes, max_output_bytes, false)?;
-            return Ok(neutralized);
+            return Ok(NeutralizedSnapshot {
+                html: neutralized,
+                uncaptured_resource_count,
+            });
         }
         if depth == MAX_NOSCRIPT_DEPTH {
             return Err(format!(
@@ -1636,7 +1779,7 @@ mod tests {
     #[test]
     fn benign_dense_attributes_do_not_enter_navigation_handlers() {
         let html = format!("<div {}>Visible</div>", "data-x=x ".repeat(4096)).into_bytes();
-        let (_, renamed, handler_calls) =
+        let (_, renamed, handler_calls, _) =
             rewrite_pass(html, 16 * 1024 * 1024, 64 * 1024 * 1024, false).unwrap();
         assert_eq!(renamed, 0);
         assert_eq!(handler_calls, 0);
