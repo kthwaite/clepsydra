@@ -12,6 +12,7 @@ use super::atomic_file::install_noreplace;
 use super::path::VaultPath;
 
 pub const RUBBISH_MANIFEST_VERSION: u32 = 1;
+const PURGE_TOMBSTONE_PREFIX: &str = ".purge-";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RubbishManifest {
@@ -273,7 +274,7 @@ impl RubbishStore {
                     source,
                 ));
             }
-            Ok(_) => self.validate_root_if_present()?,
+            Ok(metadata) => self.validate_root_metadata(&metadata)?,
         }
 
         let directory = fs::read_dir(&self.root).map_err(|source| {
@@ -285,7 +286,7 @@ impl RubbishStore {
                 RubbishStoreError::filesystem("read rubbish directory entry", &self.root, source)
             })?;
             let item_id = entry.file_name().to_string_lossy().into_owned();
-            if item_id.starts_with(".stage-") {
+            if item_id.starts_with(".stage-") || purge_tombstone_item_id(&item_id).is_some() {
                 continue;
             }
             let file_type = entry.file_type().map_err(|source| {
@@ -333,8 +334,86 @@ impl RubbishStore {
         }
     }
 
-    /// Permanently remove one exactly-read item and durably record the
-    /// directory removal. Callers must finish cleanup before invoking this.
+    /// Finish any interrupted permanent deletion without reading item content.
+    ///
+    /// A purge tombstone is created only after the CAS release ledger commits,
+    /// so cleanup is intentionally deletion-only and idempotent.
+    pub(crate) fn finish_purge_tombstone(
+        &self,
+        item_id: Uuid,
+    ) -> Result<bool, RubbishStoreError> {
+        if !self.validate_root_for_cleanup()? {
+            return Ok(false);
+        }
+        let tombstone_dir = self.purge_tombstone_dir(item_id);
+        let metadata = match fs::symlink_metadata(&tombstone_dir) {
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(false),
+            Err(source) => {
+                return Err(RubbishStoreError::filesystem(
+                    "inspect rubbish purge tombstone",
+                    &tombstone_dir,
+                    source,
+                ));
+            }
+            Ok(metadata) => metadata,
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(RubbishStoreError::filesystem(
+                "validate rubbish purge tombstone",
+                &tombstone_dir,
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    "rubbish purge tombstone is not a physical directory",
+                ),
+            ));
+        }
+
+        fs::remove_dir_all(&tombstone_dir).map_err(|source| {
+            RubbishStoreError::filesystem(
+                "remove rubbish purge tombstone",
+                &tombstone_dir,
+                source,
+            )
+        })?;
+        sync_directory(&self.root)?;
+        Ok(true)
+    }
+
+    /// Remove every identifiable interrupted-purge tombstone at startup.
+    pub(crate) fn reconcile_purge_tombstones(&self) -> Result<(), RubbishStoreError> {
+        if !self.validate_root_for_cleanup()? {
+            return Ok(());
+        }
+        let directory = match fs::read_dir(&self.root) {
+            Err(error) if error.kind() == ErrorKind::NotFound => return Ok(()),
+            Err(source) => {
+                return Err(RubbishStoreError::filesystem(
+                    "enumerate rubbish purge tombstones",
+                    &self.root,
+                    source,
+                ));
+            }
+            Ok(directory) => directory,
+        };
+        for entry in directory {
+            let entry = entry.map_err(|source| {
+                RubbishStoreError::filesystem(
+                    "read rubbish purge tombstone entry",
+                    &self.root,
+                    source,
+                )
+            })?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if let Some(item_id) = purge_tombstone_item_id(&name) {
+                self.finish_purge_tombstone(item_id)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Permanently remove one exactly-read item. The complete UUID directory
+    /// first moves atomically to a hidden tombstone and that parent transition
+    /// is made durable before recursive deletion can partially remove content.
     pub(crate) fn remove_item(&self, expected: &RubbishItem) -> Result<(), RubbishStoreError> {
         let item_id = expected.manifest.item_id;
         if self.read_item(&item_id.to_string())? != *expected {
@@ -342,10 +421,16 @@ impl RubbishStore {
         }
 
         let item_dir = self.item_dir(item_id);
-        fs::remove_dir_all(&item_dir).map_err(|source| {
-            RubbishStoreError::filesystem("remove rubbish item directory", &item_dir, source)
+        let tombstone_dir = self.purge_tombstone_dir(item_id);
+        install_noreplace(&item_dir, &tombstone_dir).map_err(|source| {
+            RubbishStoreError::filesystem(
+                "transition rubbish item to purge tombstone",
+                &item_dir,
+                source,
+            )
         })?;
-        sync_directory(&self.root)
+        sync_directory(&self.root)?;
+        self.finish_purge_tombstone(item_id).map(|_| ())
     }
 
     /// Project the live authoritative state of one item after an ambiguous
@@ -463,7 +548,7 @@ impl RubbishStore {
 
     fn ensure_root(&self) -> Result<(), RubbishStoreError> {
         match fs::symlink_metadata(&self.root) {
-            Ok(_) => self.validate_root_if_present(),
+            Ok(metadata) => self.validate_root_metadata(&metadata),
             Err(error) if error.kind() == ErrorKind::NotFound => {
                 fs::create_dir(&self.root).map_err(|source| {
                     RubbishStoreError::filesystem("create rubbish root", &self.root, source)
@@ -482,6 +567,25 @@ impl RubbishStore {
         let metadata = fs::symlink_metadata(&self.root).map_err(|source| {
             RubbishStoreError::filesystem("inspect rubbish root", &self.root, source)
         })?;
+        self.validate_root_metadata(&metadata)
+    }
+
+    fn validate_root_for_cleanup(&self) -> Result<bool, RubbishStoreError> {
+        match fs::symlink_metadata(&self.root) {
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(false),
+            Err(source) => Err(RubbishStoreError::filesystem(
+                "inspect rubbish root",
+                &self.root,
+                source,
+            )),
+            Ok(metadata) => {
+                self.validate_root_metadata(&metadata)?;
+                Ok(true)
+            }
+        }
+    }
+
+    fn validate_root_metadata(&self, metadata: &fs::Metadata) -> Result<(), RubbishStoreError> {
         if metadata.file_type().is_symlink() || !metadata.is_dir() {
             return Err(RubbishStoreError::filesystem(
                 "validate rubbish root",
@@ -497,6 +601,10 @@ impl RubbishStore {
 
     fn item_dir(&self, item_id: Uuid) -> PathBuf {
         self.root.join(item_id.to_string())
+    }
+
+    fn purge_tombstone_dir(&self, item_id: Uuid) -> PathBuf {
+        self.root.join(format!("{PURGE_TOMBSTONE_PREFIX}{item_id}"))
     }
 
     fn page_path(&self, item_id: Uuid) -> PathBuf {
@@ -578,6 +686,12 @@ fn parse_item_id(item_id: &str) -> Result<Uuid, RubbishItemValidationError> {
         item_id: item_id.to_owned(),
         message: error.to_string(),
     })
+}
+
+fn purge_tombstone_item_id(name: &str) -> Option<Uuid> {
+    let item_id = name.strip_prefix(PURGE_TOMBSTONE_PREFIX)?;
+    let parsed = Uuid::parse_str(item_id).ok()?;
+    (parsed.to_string() == item_id).then_some(parsed)
 }
 
 fn validate_original_path(path: &str) -> Result<VaultPath, RubbishItemValidationError> {
@@ -1158,12 +1272,123 @@ mod tests {
             .unwrap();
         prepared.publish().unwrap();
         let page_path = root.join(&item_id_string).join("page.md");
+
         fs::set_permissions(&page_path, fs::Permissions::from_mode(0o000)).unwrap();
 
         assert_eq!(
             store.list_entries().unwrap(),
             vec![RubbishListEntry::Valid(expected)]
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn purge_rename_failure_leaves_the_complete_uuid_item_actionable() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("rubbish");
+        let store = RubbishStore::new(&root);
+        let item_id = uuid("00000000-0000-4000-8000-000000000004");
+        let expected_manifest = manifest(item_id, timestamp("2026-08-13T00:00:00Z"));
+        let mut prepared = store
+            .prepare_item(&item_id.to_string(), &expected_manifest, b"complete")
+            .unwrap();
+        prepared.publish().unwrap();
+        let expected = store.read_item(&item_id.to_string()).unwrap();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let error = store.remove_item(&expected).unwrap_err();
+
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(error, RubbishStoreError::Filesystem { .. }));
+        assert_eq!(store.read_item(&item_id.to_string()).unwrap(), expected);
+        assert!(!root.join(format!(".purge-{item_id}")).exists());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn purge_root_sync_failure_leaves_a_hidden_complete_tombstone_for_retry() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("rubbish");
+        let store = RubbishStore::new(&root);
+        let item_id = uuid("00000000-0000-4000-8000-000000000005");
+        let expected_manifest = manifest(item_id, timestamp("2026-08-13T00:00:00Z"));
+        let mut prepared = store
+            .prepare_item(&item_id.to_string(), &expected_manifest, b"complete")
+            .unwrap();
+        prepared.publish().unwrap();
+        let expected = store.read_item(&item_id.to_string()).unwrap();
+        let tombstone = root.join(format!(".purge-{item_id}"));
+        let _sync_failure = fail_next_directory_sync(&root);
+
+        let error = store.remove_item(&expected).unwrap_err();
+
+        assert!(matches!(error, RubbishStoreError::Filesystem { .. }));
+        assert!(!root.join(item_id.to_string()).exists());
+        assert_eq!(read_item_directory(&tombstone, item_id).unwrap(), expected);
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
+
+        assert!(store.finish_purge_tombstone(item_id).unwrap());
+        assert!(!tombstone.exists());
+        assert!(!store.finish_purge_tombstone(item_id).unwrap());
+    }
+
+    #[test]
+    fn startup_reconciliation_removes_partial_purge_tombstones_without_listing_them() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("rubbish");
+        let store = RubbishStore::new(&root);
+        let item_id = uuid("00000000-0000-4000-8000-000000000004");
+        let tombstone = root.join(format!(".purge-{item_id}"));
+        fs::create_dir_all(&tombstone).unwrap();
+        fs::write(tombstone.join("page.md"), b"partially removed").unwrap();
+
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
+
+        store.reconcile_purge_tombstones().unwrap();
+
+        assert!(!tombstone.exists());
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn startup_reconciliation_rejects_a_symlinked_root_without_deleting_its_target() {
+        let temp = TempDir::new().unwrap();
+        let outside = temp.path().join("outside");
+        let item_id = uuid("00000000-0000-4000-8000-000000000007");
+        let tombstone = outside.join(format!(".purge-{item_id}"));
+        fs::create_dir_all(&tombstone).unwrap();
+        fs::write(tombstone.join("page.md"), b"outside").unwrap();
+        let root = temp.path().join("rubbish");
+        std::os::unix::fs::symlink(&outside, &root).unwrap();
+        let store = RubbishStore::new(&root);
+
+        let error = store.reconcile_purge_tombstones().unwrap_err();
+
+        assert!(matches!(error, RubbishStoreError::Filesystem { .. }));
+        assert!(tombstone.exists());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn tombstone_removal_sync_failure_leaves_no_catalog_visible_or_retry_state() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("rubbish");
+        let store = RubbishStore::new(&root);
+        let item_id = uuid("00000000-0000-4000-8000-000000000008");
+        let tombstone = root.join(format!(".purge-{item_id}"));
+        fs::create_dir_all(&tombstone).unwrap();
+        fs::write(tombstone.join("page.md"), b"partial").unwrap();
+        let _sync_failure = fail_next_directory_sync(&root);
+
+        let error = store.finish_purge_tombstone(item_id).unwrap_err();
+
+        assert!(matches!(error, RubbishStoreError::Filesystem { .. }));
+        assert!(!tombstone.exists());
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
+        assert!(!store.finish_purge_tombstone(item_id).unwrap());
     }
 
     #[test]

@@ -653,11 +653,17 @@ struct RubbishPurgeContext {
     meta: PageMeta,
 }
 
-fn read_rubbish_purge_context(
+fn prepare_rubbish_purge_context(
     vault_root: &Path,
     item_id: uuid::Uuid,
-) -> Result<RubbishPurgeContext, MutationError> {
+) -> Result<Option<RubbishPurgeContext>, MutationError> {
     let store = RubbishStore::for_vault(vault_root);
+    if store
+        .finish_purge_tombstone(item_id)
+        .map_err(|source| MutationError::RubbishStore { item_id, source })?
+    {
+        return Ok(None);
+    }
     let item = store
         .read_item_if_exists(item_id)
         .map_err(|source| MutationError::RubbishStore { item_id, source })?
@@ -685,11 +691,11 @@ fn read_rubbish_purge_context(
             message: format!("invalid original path in validated manifest: {source}"),
         }
     })?;
-    Ok(RubbishPurgeContext {
+    Ok(Some(RubbishPurgeContext {
         item,
         original_path,
         meta,
-    })
+    }))
 }
 
 impl MutationCoordinator {
@@ -911,9 +917,18 @@ impl MutationCoordinator {
         let root = vault.root().to_path_buf();
         let read_root = root.clone();
         let (guard, context) = run_blocking_fs(root.clone(), guard, move || {
-            read_rubbish_purge_context(&read_root, item_id)
+            prepare_rubbish_purge_context(&read_root, item_id)
         })
         .await?;
+        let Some(context) = context else {
+            index
+                .with_index(move |index, _| index.take_rubbish_entry(item_id))
+                .await
+                .map_err(|source| MutationError::RubbishCatalog { item_id, source })?
+                .map_err(|source| MutationError::RubbishCatalog { item_id, source })?;
+            drop(guard);
+            return Err(MutationError::RubbishItemNotFound(item_id));
+        };
 
         let cleanup_cas = Arc::clone(&cas);
         let (guard, context) = run_blocking_fs(root.clone(), guard, move || {
@@ -2107,13 +2122,85 @@ mod tests {
         second.await.unwrap();
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn purge_rubbish_rename_failure_keeps_actionable_item_and_retries_one_shot_cleanup() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let fixture = BatchFixture::new(&[]);
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000391").unwrap();
+        let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000392").unwrap();
+        let (manifest, store, bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        let rubbish_root = fixture.root().join(".clepsydra/rubbish");
+        let tombstone = rubbish_root.join(format!(".purge-{item_id}"));
+        let cas_temp = tempfile::tempdir().unwrap();
+        let cas = Arc::new(parking_lot::Mutex::new(
+            ContentStore::open(cas_temp.path()).unwrap(),
+        ));
+        fs::set_permissions(&rubbish_root, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let error = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+
+        fs::set_permissions(&rubbish_root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(
+            error,
+            MutationError::RubbishStore {
+                item_id: found,
+                ..
+            } if found == item_id
+        ));
+        assert_eq!(store.read_item(&item_id.to_string()).unwrap().bytes, bytes);
+        assert!(!tombstone.exists());
+        assert_eq!(
+            fixture.rubbish_catalog_entry(item_id).await,
+            Some(RubbishListEntry::Valid(manifest))
+        );
+
+        fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.read_item(&item_id.to_string()).is_err());
+        assert!(!tombstone.exists());
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+                [item_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(releases, 1);
+    }
+
     #[cfg(not(windows))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn purge_rubbish_post_remove_root_sync_failure_does_not_restore_a_catalog_ghost() {
+    async fn purge_rubbish_post_rename_root_sync_failure_does_not_restore_a_catalog_ghost() {
         let fixture = BatchFixture::new(&[]);
         let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000401").unwrap();
         let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000402").unwrap();
         let (_manifest, store, _bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        let tombstone = fixture
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
         let cas_temp = tempfile::tempdir().unwrap();
         let cas = Arc::new(parking_lot::Mutex::new(
             ContentStore::open(cas_temp.path()).unwrap(),
@@ -2142,9 +2229,11 @@ mod tests {
         ));
         assert!(
             store.read_item(&item_id.to_string()).is_err(),
-            "remove_dir_all succeeded before the injected root sync failure"
+            "UUID item remained visible after the tombstone transition"
         );
         assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        assert!(tombstone.exists());
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
         let retry = fixture
             .coordinator
             .purge_rubbish(
@@ -2159,6 +2248,7 @@ mod tests {
             retry,
             MutationError::RubbishItemNotFound(found) if found == item_id
         ));
+        assert!(!tombstone.exists());
         let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
             .unwrap()
             .query_row(
@@ -2172,13 +2262,13 @@ mod tests {
 
     #[cfg(unix)]
     #[tokio::test]
-    async fn purge_rubbish_removal_failure_rebuilds_a_missing_catalog_row_and_retry_finishes() {
+    async fn purge_rubbish_partial_tombstone_retry_finishes_without_second_cas_release() {
         use std::os::unix::fs::PermissionsExt as _;
 
         let fixture = BatchFixture::new(&[]);
         let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000411").unwrap();
         let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000412").unwrap();
-        let (manifest, store, bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        let (_manifest, store, _bytes) = fixture.publish_purge_item(item_id, page_id).await;
         fixture
             .index
             .with_index(move |index, _| index.remove_rubbish_entry(&item_id.to_string()))
@@ -2190,6 +2280,10 @@ mod tests {
             .root()
             .join(".clepsydra/rubbish")
             .join(item_id.to_string());
+        let tombstone = fixture
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
         fs::set_permissions(&item_dir, fs::Permissions::from_mode(0o500)).unwrap();
         let cas_temp = tempfile::tempdir().unwrap();
         let cas = Arc::new(parking_lot::Mutex::new(
@@ -2206,7 +2300,7 @@ mod tests {
             )
             .await
             .unwrap_err();
-        fs::set_permissions(&item_dir, fs::Permissions::from_mode(0o700)).unwrap();
+        fs::set_permissions(&tombstone, fs::Permissions::from_mode(0o700)).unwrap();
 
         assert!(matches!(
             error,
@@ -2215,13 +2309,14 @@ mod tests {
                 ..
             } if found == item_id
         ));
-        assert_eq!(store.read_item(&item_id.to_string()).unwrap().bytes, bytes);
-        assert_eq!(
-            fixture.rubbish_catalog_entry(item_id).await,
-            Some(RubbishListEntry::Valid(manifest))
-        );
+        assert!(!item_dir.exists());
+        assert!(tombstone.exists());
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
 
-        fixture
+        fs::remove_file(tombstone.join("manifest.json")).unwrap();
+
+        let retry = fixture
             .coordinator
             .purge_rubbish(
                 &fixture.vault,
@@ -2230,9 +2325,14 @@ mod tests {
                 &item_id.to_string(),
             )
             .await
-            .unwrap();
+            .unwrap_err();
+        assert!(matches!(
+            retry,
+            MutationError::RubbishItemNotFound(found) if found == item_id
+        ));
 
         assert!(store.read_item(&item_id.to_string()).is_err());
+        assert!(!tombstone.exists());
         assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
         let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
             .unwrap()

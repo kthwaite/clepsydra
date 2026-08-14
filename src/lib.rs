@@ -614,6 +614,8 @@ pub async fn build_app_state_with_feeds(
     feed_settings: &FeedsSettings,
 ) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let vault = Vault::open(vault_root)?;
+    let rubbish = vault::rubbish::RubbishStore::for_vault(vault.root());
+    rubbish.reconcile_purge_tombstones()?;
     let recovered_batches =
         vault::batch_mutation::recover_pending(vault.root()).map_err(|source| {
             startup_transaction_error("startup filesystem recovery", source, vault.root())
@@ -672,7 +674,6 @@ pub async fn build_app_state_with_feeds(
         tokio::sync::broadcast::channel::<api::events::SyncNotification>(64);
 
     let cas_arc = Arc::new(parking_lot::Mutex::new(cas));
-    let rubbish = vault::rubbish::RubbishStore::for_vault(vault.root());
 
     let delete_hooks: Arc<Vec<Box<dyn vault::hooks::PostDeleteHook>>> =
         Arc::new(vec![Box::new(vault::archive_hook::ArchiveDeleteHook {
@@ -1234,6 +1235,31 @@ mod state_tests {
         crate::vault::init::init_vault(&root).unwrap();
         let state = build_app_state(&root).await.unwrap();
         assert!(state.vault.root().exists());
+    }
+
+    #[tokio::test]
+    async fn build_app_state_finishes_interrupted_rubbish_purge_tombstones() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let item_id = "00000000-0000-4000-8000-000000000006";
+        let tombstone = root
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
+        std::fs::create_dir_all(&tombstone).unwrap();
+        std::fs::write(tombstone.join("page.md"), b"partial").unwrap();
+
+        let state = build_app_state(&root).await.unwrap();
+
+        assert!(!tombstone.exists());
+        assert_eq!(state.rubbish.list_entries().unwrap(), Vec::new());
+        let catalog = state
+            .index
+            .with_index(|index, _| index.rubbish_entries())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(catalog, Vec::new());
     }
 
     #[tokio::test]
