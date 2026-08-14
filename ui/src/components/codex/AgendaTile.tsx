@@ -123,7 +123,6 @@ function AgendaTileContent({ className }: AgendaTileProps) {
 
                 <div className="min-w-0 flex-1">
                   <span
-                    aria-label={task.content}
                     title={task.content}
                     className="cl-mono block truncate text-[11px] text-ink"
                   >
