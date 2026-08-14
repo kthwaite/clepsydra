@@ -10,10 +10,10 @@
 //! uses bounded local scans; the view security boundary uses lol_html's
 //! browser-compatible streaming tokenizer and rewriter.
 
-use lol_html::html_content::Element;
-use lol_html::{HtmlRewriter, MemorySettings, Settings, element};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
+use lol_html::html_content::Element;
+use lol_html::{HtmlRewriter, MemorySettings, Settings, element};
 use pulldown_cmark::{Event, Options, Parser, Tag};
 use regex::Regex;
 use std::collections::BTreeMap;
@@ -143,14 +143,10 @@ fn html_tag_end(html: &str, start: usize) -> Option<usize> {
             (State::AttributeName, b'=') | (State::AfterAttributeName, b'=') => {
                 State::BeforeAttributeValue
             }
-            (State::AttributeName, byte) if byte.is_ascii_whitespace() => {
-                State::AfterAttributeName
-            }
+            (State::AttributeName, byte) if byte.is_ascii_whitespace() => State::AfterAttributeName,
             (State::AfterAttributeName, byte) if byte.is_ascii_whitespace() => state,
             (State::AfterAttributeName, _) => State::AttributeName,
-            (State::UnquotedValue, byte) if byte.is_ascii_whitespace() => {
-                State::AttributeName
-            }
+            (State::UnquotedValue, byte) if byte.is_ascii_whitespace() => State::AttributeName,
             _ => state,
         };
     }
@@ -329,9 +325,7 @@ const MAX_NOSCRIPT_DEPTH: usize = 16;
 const REWRITER_CHUNK_BYTES: usize = 16 * 1024;
 
 fn restore_noscript(element: &mut Element<'_, '_>) -> Result<(), String> {
-    if element.namespace_uri() == HTML_NAMESPACE
-        && element.tag_name() == "clepsydra-noscript"
-    {
+    if element.namespace_uri() == HTML_NAMESPACE && element.tag_name() == "clepsydra-noscript" {
         element
             .set_tag_name("noscript")
             .map_err(|error| error.to_string())?;
@@ -392,7 +386,6 @@ fn rewriting_error(error: impl std::fmt::Display) -> String {
         format!("archived snapshot rewrite failed: {message}")
     }
 }
-
 
 pub fn neutralize_navigation_bytes(html: Vec<u8>) -> Result<Vec<u8>, String> {
     neutralize_navigation_bytes_with_limits(
@@ -528,8 +521,7 @@ fn neutralize_navigation_bytes_with_limits(
     max_output_bytes: usize,
 ) -> Result<Vec<u8>, String> {
     for depth in 0..=MAX_NOSCRIPT_DEPTH {
-        let (exposed, renamed, _) =
-            rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
+        let (exposed, renamed, _) = rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
         html = exposed;
         if renamed == 0 {
             let (neutralized, _, _) =
@@ -1431,7 +1423,6 @@ mod tests {
         assert_eq!(out, "![b](https://cdn.example.com/b.png)");
     }
 
-
     #[test]
     fn standards_parser_recovers_latest_malformed_attribute_bypass() {
         let html = concat!(
@@ -1525,7 +1516,8 @@ mod tests {
 
         let neutralized = neutralize_navigation(html).unwrap();
         assert!(
-            neutralized.contains(r#".example::after { content: "<a href=https://live.example>"; }"#)
+            neutralized
+                .contains(r#".example::after { content: "<a href=https://live.example>"; }"#)
         );
         assert!(neutralized.contains("<textarea>"));
         assert!(neutralized.contains("<form action=https://live.example>"));
@@ -1603,10 +1595,16 @@ mod tests {
         assert!(!neutralized.contains("template.example"), "{neutralized}");
         assert!(!neutralized.contains("refresh.example"), "{neutralized}");
         assert!(neutralized.contains("<template"), "{neutralized}");
-        assert!(neutralized.contains(".captured { color: red }"), "{neutralized}");
+        assert!(
+            neutralized.contains(".captured { color: red }"),
+            "{neutralized}"
+        );
         assert!(neutralized.contains("Template text"), "{neutralized}");
         assert!(neutralized.contains("cas:sha256:template"), "{neutralized}");
-        assert!(neutralized.contains("alt=\"Template image\""), "{neutralized}");
+        assert!(
+            neutralized.contains("alt=\"Template image\""),
+            "{neutralized}"
+        );
     }
 
     #[test]
@@ -1635,7 +1633,6 @@ mod tests {
         assert!(neutralized.contains("cas:sha256:image"), "{neutralized}");
     }
 
-
     #[test]
     fn benign_dense_attributes_do_not_enter_navigation_handlers() {
         let html = format!("<div {}>Visible</div>", "data-x=x ".repeat(4096)).into_bytes();
@@ -1653,15 +1650,10 @@ mod tests {
         assert!(memory_error.contains("memory limit"), "{memory_error}");
 
         let output_error =
-            neutralize_navigation_bytes_with_limits(
-                b"<div>visible</div>".to_vec(),
-                1024 * 1024,
-                4,
-            )
+            neutralize_navigation_bytes_with_limits(b"<div>visible</div>".to_vec(), 1024 * 1024, 4)
                 .unwrap_err();
         assert!(output_error.contains("output limit"), "{output_error}");
     }
-
 
     #[test]
     fn nested_noscript_layers_are_exposed_and_neutralized() {
@@ -1689,7 +1681,10 @@ mod tests {
             "</noscript>".repeat(MAX_NOSCRIPT_DEPTH + 1)
         );
         let depth_error = neutralize_navigation(&too_deep).unwrap_err();
-        assert!(depth_error.contains("noscript depth limit"), "{depth_error}");
+        assert!(
+            depth_error.contains("noscript depth limit"),
+            "{depth_error}"
+        );
     }
 
     // -------------------------------------------------------------------

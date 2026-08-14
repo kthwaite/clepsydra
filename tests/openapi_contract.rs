@@ -3,6 +3,7 @@ use utoipa::OpenApi;
 
 const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/archive", "post"),
+    ("/api/vault/archive/view/{hash}", "get"),
     ("/api/vault/archive/status", "get"),
     ("/api/vault/cas/{hash}", "get"),
     ("/api/vault/journal/today", "get"),
@@ -60,8 +61,8 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 109,
-        "OpenAPI should document all 109 registered /api/vault operations"
+        operation_count, 110,
+        "OpenAPI should document all 110 registered /api/vault operations"
     );
 }
 

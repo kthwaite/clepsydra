@@ -523,9 +523,9 @@ mod tests {
             .as_array()
             .expect("PageMetaResponse.archive should be a nullable schema reference");
         assert!(
-            archive_variants.iter().any(|variant| {
-                variant["$ref"] == "#/components/schemas/ArchiveMetaResponse"
-            }),
+            archive_variants
+                .iter()
+                .any(|variant| { variant["$ref"] == "#/components/schemas/ArchiveMetaResponse" }),
             "PageMetaResponse.archive should reference ArchiveMetaResponse"
         );
     }

@@ -4,9 +4,9 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
-use axum::body::Body;
 use axum::Json;
 use axum::Router;
+use axum::body::Body;
 use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
@@ -14,8 +14,8 @@ use axum::routing::{get, post};
 use bytes::Bytes;
 use http_body::{Frame, SizeHint};
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
 use url::{Host, Url};
+use utoipa::ToSchema;
 
 use super::AppState;
 use super::error::ApiError;
@@ -270,15 +270,20 @@ impl ArchiveViewConfig {
             Host::Ipv4(host) => host.to_string(),
             Host::Ipv6(host) => format!("[{host}]"),
         };
-        let scheme = if settings.tls.enabled { "https" } else { "http" };
+        let scheme = if settings.tls.enabled {
+            "https"
+        } else {
+            "http"
+        };
         let origin = format!("{scheme}://{host}:{}", settings.port);
         let policy = format!(
             "sandbox; default-src 'none'; img-src {origin} data:; \
              media-src {origin} data:; style-src 'unsafe-inline' {origin} data:; \
              font-src {origin} data:"
         );
-        let content_security_policy = HeaderValue::from_str(&policy)
-            .map_err(|error| format!("invalid archive view CSP from server configuration: {error}"))?;
+        let content_security_policy = HeaderValue::from_str(&policy).map_err(|error| {
+            format!("invalid archive view CSP from server configuration: {error}")
+        })?;
         Ok(Self {
             content_security_policy,
         })
@@ -297,10 +302,7 @@ impl Default for ArchiveViewConfig {
 /// The body limit applies only to archive ingest. Snapshot views and status
 /// requests do not consume the ingest budget.
 pub fn router() -> Router<Arc<AppState>> {
-    router_with_body_limit(
-        archive_body_limit_bytes(250),
-        ArchiveViewConfig::default(),
-    )
+    router_with_body_limit(archive_body_limit_bytes(250), ArchiveViewConfig::default())
 }
 
 /// Build the archive router with a specific ingest body size limit (in bytes).
@@ -378,13 +380,9 @@ fn validate_http_url(field: &str, raw: &str) -> Result<(), ApiError> {
     }
 }
 
-
 fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("text/html"),
-    );
+    headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html"));
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         config.content_security_policy.clone(),
@@ -396,12 +394,8 @@ fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
     headers
 }
 
-
 enum LoadedSnapshot {
-    Body {
-        data: Vec<u8>,
-        content_type: String,
-    },
+    Body { data: Vec<u8>, content_type: String },
     Metadata(BlobMetadata),
 }
 
@@ -510,8 +504,7 @@ fn snapshot_response_with(
 
 // Ingest, GET, and HEAD share the 2 MiB stored-snapshot ceiling; the 64 MiB
 // rewrite ceiling covers expansion of validated CAS URLs.
-const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize =
-    archive_snapshot::ARCHIVE_VIEW_SNAPSHOT_BYTES;
+const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = archive_snapshot::ARCHIVE_VIEW_SNAPSHOT_BYTES;
 
 fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
     prepare_snapshot_body_with(
@@ -547,7 +540,6 @@ fn prepare_snapshot_body_with(
 fn cas_url_boundary(byte: u8) -> bool {
     byte.is_ascii_whitespace() || matches!(byte, b'"' | b'\'' | b')' | b'>' | b'#')
 }
-
 
 const STORED_CAS_URL_PREFIX: &[u8] = b"cas:sha256:";
 const SERVED_CAS_URL_PREFIX: &[u8] = b"/api/vault/cas/";
@@ -880,8 +872,7 @@ pub async fn view_snapshot(
     Extension(config): Extension<ArchiveViewConfig>,
     Path(hash): Path<String>,
 ) -> Result<Response, ApiError> {
-    let permit =
-        acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await?;
+    let permit = acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await?;
     let cas = Arc::clone(&state.cas);
     let worker_hash = hash.clone();
     let (snapshot, permit) = tokio::task::spawn_blocking(move || {
@@ -940,7 +931,6 @@ pub async fn head_snapshot(
         Err(error) => error.into_response(),
     })
 }
-
 
 #[utoipa::path(
     get,
@@ -1300,10 +1290,7 @@ mod tests {
                 explicit("vault.example", 7443, true),
                 "https://vault.example:7443",
             ),
-            (
-                explicit("127.0.0.1", 3000, false),
-                "http://127.0.0.1:3000",
-            ),
+            (explicit("127.0.0.1", 3000, false), "http://127.0.0.1:3000"),
             (explicit("[::1]", 7443, true), "https://[::1]:7443"),
             (explicit("::1", 8080, false), "http://[::1]:8080"),
         ];
@@ -1339,7 +1326,10 @@ mod tests {
             acquire_archive_view_permit(Arc::clone(&semaphore)),
         )
         .await;
-        assert!(blocked.is_err(), "a concurrent working set acquired a permit");
+        assert!(
+            blocked.is_err(),
+            "a concurrent working set acquired a permit"
+        );
 
         release_tx.send(()).unwrap();
         worker.await.unwrap();
@@ -1381,8 +1371,6 @@ mod tests {
         release_tx.send(()).unwrap();
         inspection.await.unwrap().unwrap();
     }
-
-
 
     #[test]
     fn head_snapshot_uses_metadata_without_retrieving_or_rewriting_bytes() {
@@ -1432,10 +1420,7 @@ mod tests {
         struct OversizeStore;
 
         impl SnapshotStore for OversizeStore {
-            fn inspect(
-                &self,
-                _hash: &str,
-            ) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
+            fn inspect(&self, _hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
                 Ok(BlobMetadata {
                     content_type: "text/html".to_string(),
                     size: MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 + 1,

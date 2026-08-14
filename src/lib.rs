@@ -138,9 +138,7 @@ impl ServerSettings {
             return Err("server.host must not be empty".to_string());
         }
         if raw.contains('*') {
-            return Err(format!(
-                "server.host must not contain a wildcard: {raw}"
-            ));
+            return Err(format!("server.host must not contain a wildcard: {raw}"));
         }
 
         let parsed_host = if let Some(inner) = raw
@@ -1005,8 +1003,9 @@ async fn serve_with_feed_scheduler(
 pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let (state, settings) = build_server_state(overrides).await?;
-    let archive_view_config = api::archive::ArchiveViewConfig::from_server_settings(&settings.server)
-        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    let archive_view_config =
+        api::archive::ArchiveViewConfig::from_server_settings(&settings.server)
+            .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
     run_startup_reconcile(&state).await;
     let _watcher = spawn_sync_watcher(&state)?;
     // `max_request_size_mb` budgets DECODED resource bytes, but the request

@@ -34,6 +34,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "guide", slug: "tasks-agenda-journals-and-board" },
   },
   {
+    id: "/archive/$",
+    label: "Archived snapshot viewer",
+    surface: "route",
+    disposition: { kind: "guide", slug: "capture-feeds-and-archives" },
+  },
+  {
     id: "/docs",
     label: "Documentation shell",
     surface: "route",

@@ -45,7 +45,6 @@ pub struct OpenBlob {
     expected_size: u64,
 }
 
-
 impl OpenBlob {
     pub fn content_type(&self) -> &str {
         &self.content_type
@@ -75,7 +74,6 @@ impl OpenBlob {
         Ok((data, self.content_type))
     }
 }
-
 
 /// Content-addressed blob store.
 ///
@@ -200,11 +198,7 @@ impl ContentStore {
     /// Validate metadata and acquire an open backing-file handle without reading
     /// bytes. Callers may release the CAS lock before `OpenBlob::read_limited`;
     /// unlinking cannot invalidate an already-open handle.
-    pub fn open_limited(
-        &self,
-        hash: &str,
-        limit: usize,
-    ) -> Result<OpenBlob, RetrieveLimitedError> {
+    pub fn open_limited(&self, hash: &str, limit: usize) -> Result<OpenBlob, RetrieveLimitedError> {
         self.open_limited_with(hash, limit, |path| File::open(path))
     }
 
@@ -460,10 +454,7 @@ mod tests {
         assert_eq!(opens.get(), 0, "oversize blob backing file was opened");
         assert!(matches!(
             error,
-            RetrieveLimitedError::TooLarge {
-                size: 17,
-                limit: 4
-            }
+            RetrieveLimitedError::TooLarge { size: 17, limit: 4 }
         ));
     }
 

@@ -13,9 +13,9 @@ use clepsydra::api::archive::{ArchiveViewConfig, rollback_cas_with};
 use clepsydra::api::error::ApiError;
 use clepsydra::api::events::SyncNotification;
 use clepsydra::api::{AppState, api_router_with_archive_limit};
-use clepsydra::{ServerSettings, TlsSettings};
 use clepsydra::vault::archive_hook::ArchiveDeleteHook;
 use clepsydra::vault::hooks::PostDeleteHook;
+use clepsydra::{ServerSettings, TlsSettings};
 use tempfile::TempDir;
 
 use support::ApiFixture;
@@ -54,22 +54,14 @@ fn setup_archive_view_server() -> (TestServer, TempDir, Arc<AppState>) {
     };
     let view_config = ArchiveViewConfig::from_server_settings(&server_settings).unwrap();
     let app = Router::new()
-        .nest(
-            "/api/vault",
-            api_router_with_archive_limit(1, view_config),
-        )
+        .nest("/api/vault", api_router_with_archive_limit(1, view_config))
         .with_state(Arc::clone(&state));
     let server = TestServer::new(app).unwrap();
     (server, temp_dir, state)
 }
 
 fn store_blob(state: &AppState, data: &[u8], content_type: &str) -> String {
-    state
-        .cas
-        .lock()
-        .store(data, content_type)
-        .unwrap()
-        .hash
+    state.cas.lock().store(data, content_type).unwrap().hash
 }
 
 #[test]
@@ -274,8 +266,7 @@ async fn archive_ingest_rejects_non_http_source_urls() {
         assert!(
             body["error"]
                 .as_str()
-                .is_some_and(|error| error.contains("url")
-                    && error.contains("absolute HTTP(S)")),
+                .is_some_and(|error| error.contains("url") && error.contains("absolute HTTP(S)")),
             "unexpected validation error for {url:?}: {body}"
         );
     }
@@ -305,10 +296,9 @@ async fn archive_ingest_rejects_non_http_canonical_urls() {
         response.assert_status(StatusCode::BAD_REQUEST);
         let body: serde_json::Value = response.json();
         assert!(
-            body["error"]
-                .as_str()
-                .is_some_and(|error| error.contains("canonical_url")
-                    && error.contains("absolute HTTP(S)")),
+            body["error"].as_str().is_some_and(
+                |error| error.contains("canonical_url") && error.contains("absolute HTTP(S)")
+            ),
             "unexpected validation error for {canonical_url:?}: {body}"
         );
     }
@@ -706,7 +696,6 @@ async fn archive_view_serves_html_with_configuration_bound_sandbox() {
         );
     }
 
-
     let head_response = server
         .method(
             axum::http::Method::HEAD,
@@ -770,9 +759,7 @@ async fn archive_view_structurally_neutralizes_navigation_without_losing_resourc
     );
     let hash = store_blob(&state, html.as_bytes(), "text/html");
 
-    let response = server
-        .get(&format!("/api/vault/archive/view/{hash}"))
-        .await;
+    let response = server.get(&format!("/api/vault/archive/view/{hash}")).await;
 
     response.assert_status(StatusCode::OK);
     let body = response.text();
@@ -820,9 +807,7 @@ async fn archive_view_structurally_neutralizes_navigation_without_losing_resourc
     assert!(body.contains(&format!(
         r#"@font-face {{ src: url(/api/vault/cas/{resource_hash}); }}"#
     )));
-    assert!(body.contains(&format!(
-        r#"<image href="/api/vault/cas/{resource_hash}">"#
-    )));
+    assert!(body.contains(&format!(r#"<image href="/api/vault/cas/{resource_hash}">"#)));
     assert!(body.contains(&format!(
         r#"<use xlink:href="/api/vault/cas/{resource_hash}#icon">"#
     )));
@@ -848,7 +833,10 @@ async fn archive_view_head_returns_metadata_headers_without_a_body() {
         .await;
 
     response.assert_status(StatusCode::OK);
-    assert!(response.as_bytes().is_empty(), "HEAD returned snapshot bytes");
+    assert!(
+        response.as_bytes().is_empty(),
+        "HEAD returned snapshot bytes"
+    );
     assert_eq!(
         response
             .headers()
@@ -864,10 +852,7 @@ async fn archive_view_head_returns_metadata_headers_without_a_body() {
         Some("nosniff")
     );
     assert!(
-        response
-            .headers()
-            .get("content-security-policy")
-            .is_some(),
+        response.headers().get("content-security-policy").is_some(),
         "HEAD omitted the snapshot sandbox policy"
     );
 }
@@ -885,7 +870,10 @@ async fn archive_view_head_missing_hash_is_404_without_a_body() {
         .await;
 
     response.assert_status(StatusCode::NOT_FOUND);
-    assert!(response.as_bytes().is_empty(), "HEAD returned an error body");
+    assert!(
+        response.as_bytes().is_empty(),
+        "HEAD returned an error body"
+    );
 }
 
 #[tokio::test]
@@ -923,15 +911,12 @@ async fn archive_view_head_treats_a_missing_backing_file_as_not_found() {
     assert!(response.as_bytes().is_empty());
 }
 
-
 #[tokio::test]
 async fn archive_view_rejects_non_html_and_names_its_content_type() {
     let (server, _tmp, state) = setup_archive_view_server();
     let hash = store_blob(&state, b"\x89PNG not html", "image/png");
 
-    let response = server
-        .get(&format!("/api/vault/archive/view/{hash}"))
-        .await;
+    let response = server.get(&format!("/api/vault/archive/view/{hash}")).await;
 
     response.assert_status(StatusCode::UNSUPPORTED_MEDIA_TYPE);
     assert_eq!(
