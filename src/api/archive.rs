@@ -21,7 +21,7 @@ use super::AppState;
 use super::error::ApiError;
 use crate::ServerSettings;
 use crate::vault::archive_snapshot::{self, SnapshotResource};
-use crate::vault::cas::{BlobMetadata, ContentStore, OpenBlob, RetrieveLimitedError};
+use crate::vault::cas::{ContentStore, OpenBlob, RetrieveLimitedError};
 use crate::vault::index::ArchiveUrlOwner;
 use crate::vault::index_policy::IndexMutation;
 use crate::vault::kind::Kind;
