@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RubbishBin } from "#/components/rubbish/RubbishBin";
@@ -52,8 +52,8 @@ const invalid = {
   error: "manifest checksum does not match stored payload",
 };
 
-function mutation(mutateAsync = vi.fn()) {
-  return { mutateAsync, isPending: false };
+function mutation(mutateAsync = vi.fn(), isPending = false) {
+  return { mutateAsync, isPending };
 }
 
 function setDefaultHooks() {
@@ -106,6 +106,9 @@ describe("RubbishBin", () => {
     expect(invalidRow).not.toBeNull();
     expect(within(invalidRow!).getByText(invalid.error)).toBeVisible();
     expect(within(invalidRow!).queryByRole("button")).toBeNull();
+    const timestamp = within(rows[0]).getByText(/Deleted 13 Aug 2026/);
+    expect(timestamp).toHaveClass("text-ink-mute");
+    expect(timestamp).not.toHaveClass("text-ink-faint");
   });
 
   it("fetches dedicated detail on selection and renders a bounded read-only preview", async () => {
@@ -120,6 +123,34 @@ describe("RubbishBin", () => {
     expect(screen.getByText("Stored body")).toBeVisible();
     expect(screen.getByText(/preview is truncated/i)).toBeVisible();
     expect(screen.queryByRole("textbox", { name: /page body/i })).toBeNull();
+  });
+
+  it("keeps a tall non-truncated preview keyboard-scrollable and fully reachable", async () => {
+    const bottomMarker = "BOTTOM OF STORED PREVIEW";
+    api.detail.mockReturnValue({
+      data: {
+        item: alpha.item,
+        preview: {
+          body: `${Array.from({ length: 80 }, (_, index) => `Paragraph ${index + 1}`).join("\n\n")}\n\n${bottomMarker}`,
+          encrypted: false,
+          read_only: true,
+          truncated: false,
+        },
+      },
+      isPending: false,
+      isError: false,
+      error: null,
+    });
+    const user = userEvent.setup();
+    render(<RubbishBin />);
+
+    await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
+
+    const preview = screen.getByLabelText("Read-only stored body preview");
+    expect(preview).toHaveClass("overflow-y-auto");
+    expect(preview).not.toHaveClass("pointer-events-none");
+    expect(within(preview).getByText(bottomMarker)).toBeInTheDocument();
+    expect(screen.queryByText(/preview is truncated/i)).toBeNull();
   });
 
   it("states loading, list failure, empty, and detail failure explicitly", async () => {
@@ -203,7 +234,33 @@ describe("RubbishBin", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "projects/alpha.md is occupied",
     );
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Move or rename the page at projects/alpha.md, then restore again.",
+    );
     expect(screen.getByRole("heading", { name: "Alpha dossier" })).toBeVisible();
+    expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
+  });
+
+  it("retains item-drift conflicts with distinct refresh-and-retry guidance", async () => {
+    api.restore.mockReturnValue(
+      mutation(
+        vi.fn().mockRejectedValue({
+          status: 409,
+          error: "retained item state changed while restoring",
+        }),
+      ),
+    );
+    const user = userEvent.setup();
+    render(<RubbishBin />);
+
+    await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
+    await user.click(screen.getByRole("button", { name: "Restore" }));
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("retained item state changed while restoring");
+    expect(alert).toHaveTextContent(
+      "The item remains in the Rubbish Bin. Refresh the Bin and retry.",
+    );
     expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
   });
 
@@ -228,6 +285,48 @@ describe("RubbishBin", () => {
     );
     expect(purge).toHaveBeenCalledWith(alpha.item.item_id);
     expect(screen.queryByRole("button", { name: /Alpha dossier/ })).toBeNull();
+  });
+
+  it("locks permanent-delete confirmation while its request is pending", async () => {
+    const purge = vi.fn(() => new Promise<never>(() => undefined));
+    api.purge.mockReturnValue(mutation(purge));
+    const user = userEvent.setup();
+    const view = render(<RubbishBin />);
+    await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Delete permanently",
+      }),
+    );
+
+    api.purge.mockReturnValue(mutation(purge, true));
+    view.rerender(<RubbishBin />);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("status")).toHaveTextContent(
+      "Deleting permanently",
+    );
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Close dialog" }),
+    ).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeVisible();
+  });
+
+  it("disables every lifecycle entry point while any lifecycle request is active", async () => {
+    api.restore.mockReturnValue(mutation(vi.fn(), true));
+    const user = userEvent.setup();
+    render(<RubbishBin />);
+
+    expect(
+      screen.getByRole("button", { name: "Empty Rubbish Bin" }),
+    ).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
+    expect(screen.getByRole("button", { name: "Restore" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Delete permanently" }),
+    ).toBeDisabled();
   });
 
   it("uses a stronger count-aware Empty Bin confirmation and preserves ordered outcomes", async () => {
@@ -268,5 +367,38 @@ describe("RubbishBin", () => {
     expect(outcomes[1]).toHaveTextContent("snapshot is still referenced");
     expect(screen.queryByRole("button", { name: /Alpha dossier/ })).toBeNull();
     expect(screen.getByRole("button", { name: /Beta note/ })).toBeVisible();
+    const completion = screen.getByRole("status", {
+      name: "Empty Bin completion",
+    });
+    expect(completion).toHaveTextContent("1 deleted permanently; 1 failed.");
+    await waitFor(() =>
+      expect(screen.getByLabelText("Empty Bin results")).toHaveFocus(),
+    );
+  });
+
+  it("locks Empty Bin confirmation and announces pending work", async () => {
+    const empty = vi.fn(() => new Promise<never>(() => undefined));
+    api.empty.mockReturnValue(mutation(empty));
+    const user = userEvent.setup();
+    const view = render(<RubbishBin />);
+    await user.click(screen.getByRole("button", { name: "Empty Rubbish Bin" }));
+    await user.click(
+      within(screen.getByRole("dialog")).getByRole("button", {
+        name: "Empty Rubbish Bin permanently",
+      }),
+    );
+
+    api.empty.mockReturnValue(mutation(empty, true));
+    view.rerender(<RubbishBin />);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("status")).toHaveTextContent(
+      "Deleting 2 retained items",
+    );
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Close dialog" }),
+    ).toBeDisabled();
+    await user.keyboard("{Escape}");
+    expect(screen.getByRole("dialog")).toBeVisible();
   });
 });

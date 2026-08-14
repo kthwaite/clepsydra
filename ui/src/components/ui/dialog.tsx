@@ -22,6 +22,7 @@ export interface DialogProps {
   footer?: ReactNode;
   size?: DialogSize;
   isDismissable?: boolean;
+  isCloseDisabled?: boolean;
   className?: string;
 }
 
@@ -43,6 +44,7 @@ export function Dialog({
   footer,
   size = "md",
   isDismissable = true,
+  isCloseDisabled = false,
   className,
 }: DialogProps) {
   const descriptionId = useId();
@@ -90,6 +92,7 @@ export function Dialog({
                 </div>
                 <IconButton
                   variant="secondary"
+                  isDisabled={isCloseDisabled}
                   onPress={close}
                   aria-label="Close dialog"
                   className="h-auto w-auto p-1"

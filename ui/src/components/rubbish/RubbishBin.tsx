@@ -1,5 +1,5 @@
 import { ArrowLeft, RotateCcw, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatApiError, isApiConflict } from "#/api/error";
 import {
   type EmptyRubbishResponse,
@@ -20,7 +20,7 @@ import { cn } from "#/lib/cn";
 
 type Confirmation =
   | { kind: "purge"; item: RubbishItemSummary }
-  | { kind: "empty"; count: number }
+  | { kind: "empty" }
   | null;
 
 interface RestoredPage {
@@ -94,7 +94,7 @@ function RubbishRow({
             {item.kind}
           </span>
         </span>
-        <span className="cl-mono mt-2 block text-[9px] tabular-nums text-ink-faint">
+        <span className="cl-mono mt-2 block text-[9px] tabular-nums text-ink-mute">
           Deleted {formatDeletedAt(item.deleted_at)}
         </span>
       </button>
@@ -137,12 +137,20 @@ export function RubbishBin() {
   const [emptyOutcomes, setEmptyOutcomes] = useState<
     EmptyRubbishResponse["outcomes"] | null
   >(null);
+  const emptyOutcomesRef = useRef<HTMLElement>(null);
   const detailQuery = useRubbishItem(selectedId);
   const restore = useRestoreRubbishItem();
   const purge = usePurgeRubbishItem();
   const empty = useEmptyRubbish();
   const openTab = useOpenTab();
   const mobile = useMobileLayout();
+  const lifecycleBusy = restore.isPending || purge.isPending || empty.isPending;
+  const confirmationBusy =
+    confirmation?.kind === "purge"
+      ? purge.isPending
+      : confirmation?.kind === "empty"
+        ? empty.isPending
+        : false;
 
   const entries = (listQuery.data ?? []).filter(
     (entry) =>
@@ -155,6 +163,11 @@ export function RubbishBin() {
     ? (validItems.find((item) => item.item_id === selectedId) ?? null)
     : null;
 
+  useEffect(() => {
+    if (!emptyOutcomes) return;
+    emptyOutcomesRef.current?.focus();
+  }, [emptyOutcomes]);
+
   function hideItems(itemIds: readonly string[]) {
     setHiddenIds((current) => {
       const next = new Set(current);
@@ -164,7 +177,7 @@ export function RubbishBin() {
   }
 
   async function restoreSelected() {
-    if (!selectedSummary) return;
+    if (!selectedSummary || lifecycleBusy) return;
     setActionError(null);
     setRestoredPage(null);
     try {
@@ -173,14 +186,22 @@ export function RubbishBin() {
       setSelectedId(null);
       setRestoredPage({ path: result.path, title: selectedSummary.title });
     } catch (error) {
-      const fallback = isApiConflict(error)
-        ? `The original path ${selectedSummary.original_path} is occupied. Move or rename the current page, then restore again.`
-        : "This item could not be restored.";
-      setActionError(formatApiError(error, fallback));
+      if (isApiConflict(error)) {
+        const serverMessage = formatApiError(error, "Restore conflict.");
+        const guidance = /occupied/i.test(serverMessage)
+          ? `Move or rename the page at ${selectedSummary.original_path}, then restore again.`
+          : "The item remains in the Rubbish Bin. Refresh the Bin and retry.";
+        setActionError(`${serverMessage} ${guidance}`);
+        return;
+      }
+      setActionError(
+        formatApiError(error, "This item could not be restored."),
+      );
     }
   }
 
   async function confirmPurge(item: RubbishItemSummary) {
+    if (lifecycleBusy) return;
     setActionError(null);
     try {
       const result = await purge.mutateAsync(item.item_id);
@@ -196,6 +217,7 @@ export function RubbishBin() {
   }
 
   async function confirmEmpty() {
+    if (lifecycleBusy) return;
     setActionError(null);
     setEmptyOutcomes(null);
     try {
@@ -243,10 +265,11 @@ export function RubbishBin() {
             <Button
               size="sm"
               variant="danger"
-              isDisabled={validItems.length === 0 || empty.isPending}
-              onPress={() =>
-                setConfirmation({ kind: "empty", count: validItems.length })
-              }
+              isDisabled={validItems.length === 0 || lifecycleBusy}
+              onPress={() => {
+                if (lifecycleBusy) return;
+                setConfirmation({ kind: "empty" });
+              }}
             >
               Empty Rubbish Bin
             </Button>
@@ -276,10 +299,24 @@ export function RubbishBin() {
         </div>
       ) : null}
       {emptyOutcomes ? (
-        <section aria-labelledby="empty-outcomes-heading" className="border-b border-rule bg-paper-2 px-4 py-3">
-          <h2 id="empty-outcomes-heading" className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]">
+        <section
+          ref={emptyOutcomesRef}
+          aria-label="Empty Bin results"
+          tabIndex={-1}
+          className="border-b border-rule bg-paper-2 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent"
+        >
+          <h2 className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]">
             Empty Bin results
           </h2>
+          <p
+            role="status"
+            aria-label="Empty Bin completion"
+            aria-live="polite"
+            className="mt-1 text-xs text-ink-2"
+          >
+            {emptyOutcomes.filter((outcome) => outcome.status === "purged").length} deleted permanently;{" "}
+            {emptyOutcomes.filter((outcome) => outcome.status === "failed").length} failed.
+          </p>
           <ol className="mt-2 space-y-1">
             {emptyOutcomes.map((outcome, index) => (
               <li
@@ -389,18 +426,25 @@ export function RubbishBin() {
                       <Button
                         size="sm"
                         variant="secondary"
-                        isDisabled={restore.isPending || purge.isPending}
-                        onPress={() => void restoreSelected()}
+                        isDisabled={lifecycleBusy}
+                        onPress={() => {
+                          if (!lifecycleBusy) void restoreSelected();
+                        }}
                       >
                         <RotateCcw aria-hidden /> Restore
                       </Button>
                       <Button
                         size="sm"
                         variant="danger"
-                        isDisabled={restore.isPending || purge.isPending}
-                        onPress={() =>
-                          setConfirmation({ kind: "purge", item: detailQuery.data.item })
-                        }
+                        isDisabled={lifecycleBusy}
+                        onPress={() => {
+                          if (!lifecycleBusy) {
+                            setConfirmation({
+                              kind: "purge",
+                              item: detailQuery.data.item,
+                            });
+                          }
+                        }}
                       >
                         <Trash2 aria-hidden /> Delete permanently
                       </Button>
@@ -418,7 +462,12 @@ export function RubbishBin() {
                         </span>
                       ) : null}
                     </div>
-                    <div className="pointer-events-none mt-3 max-h-96 overflow-hidden border-l-2 border-rule bg-paper-2 px-4 py-3" aria-readonly="true">
+                    <div
+                      aria-label="Read-only stored body preview"
+                      aria-readonly="true"
+                      tabIndex={0}
+                      className="mt-3 max-h-96 overflow-y-auto border-l-2 border-rule bg-paper-2 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                    >
                       {detailQuery.data.preview.encrypted ? (
                         <p className="text-xs text-ink-mute">
                           This retained body is encrypted and is not disclosed in the preview.
@@ -437,39 +486,56 @@ export function RubbishBin() {
 
       <Dialog
         isOpen={confirmation !== null}
+        isDismissable={!confirmationBusy}
+        isCloseDisabled={confirmationBusy}
         onOpenChange={(open) => {
-          if (!open) setConfirmation(null);
+          if (!open && !confirmationBusy) setConfirmation(null);
         }}
         title={confirmation?.kind === "purge" ? "Delete permanently" : "Empty Rubbish Bin"}
         description={
           confirmation?.kind === "purge"
             ? `Delete “${confirmation.item.title}” and its retained content permanently? This cannot be undone.`
             : confirmation?.kind === "empty"
-              ? `Permanently delete every valid item currently in the Rubbish Bin (${confirmation.count} ${confirmation.count === 1 ? "item" : "items"})? Every item will be attempted and this cannot be undone.`
+              ? `Permanently delete every valid item currently in the Rubbish Bin (${validItems.length} ${validItems.length === 1 ? "item" : "items"})? Every item will be attempted and this cannot be undone.`
               : undefined
         }
         footer={
           <>
-            <Button variant="secondary" onPress={() => setConfirmation(null)}>
+            <Button
+              variant="secondary"
+              isDisabled={confirmationBusy}
+              onPress={() => {
+                if (!confirmationBusy) setConfirmation(null);
+              }}
+            >
               Cancel
             </Button>
             {confirmation?.kind === "purge" ? (
-              <Button variant="danger" isDisabled={purge.isPending} onPress={() => void confirmPurge(confirmation.item)}>
-                Delete permanently
+              <Button variant="danger" isDisabled={confirmationBusy} onPress={() => void confirmPurge(confirmation.item)}>
+                {purge.isPending ? "Deleting permanently…" : "Delete permanently"}
               </Button>
             ) : confirmation?.kind === "empty" ? (
-              <Button variant="danger" isDisabled={empty.isPending} onPress={() => void confirmEmpty()}>
-                Empty Rubbish Bin permanently
+              <Button variant="danger" isDisabled={confirmationBusy} onPress={() => void confirmEmpty()}>
+                {empty.isPending ? "Emptying Rubbish Bin…" : "Empty Rubbish Bin permanently"}
               </Button>
             ) : null}
           </>
         }
       >
-        <p className="text-sm leading-relaxed text-ink-2">
-          {confirmation?.kind === "purge"
-            ? "The archived body, metadata, and retained attachments for this page will be removed."
-            : "Successful deletions disappear immediately. Any failures remain in the Bin and are reported in their original order."}
-        </p>
+        <>
+          <p className="text-sm leading-relaxed text-ink-2">
+            {confirmation?.kind === "purge"
+              ? "The archived body, metadata, and retained attachments for this page will be removed."
+              : "Successful deletions disappear immediately. Any failures remain in the Bin and are reported in their original order."}
+          </p>
+          {confirmationBusy ? (
+            <p role="status" aria-live="polite" className="mt-3 text-xs text-ink-mute">
+              {confirmation?.kind === "purge"
+                ? "Deleting permanently…"
+                : `Deleting ${validItems.length} retained ${validItems.length === 1 ? "item" : "items"}…`}
+            </p>
+          ) : null}
+        </>
       </Dialog>
     </main>
   );
