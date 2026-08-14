@@ -119,14 +119,9 @@ function init(): void {
 		button.disabled = active;
 		additionalInput.disabled = active;
 	};
-	const renderStatus = (
-		status: CaptureStatus,
-		restoreAdditionalTags = false,
-	) => {
+	const renderStatus = (status: CaptureStatus) => {
 		if (isInProgress(status.phase)) {
-			if (restoreAdditionalTags) {
-				additionalInput.value = status.additionalTags.join(", ");
-			}
+			additionalInput.value = status.additionalTags.join(", ");
 		} else {
 			additionalInput.value = "";
 		}
@@ -270,7 +265,7 @@ function init(): void {
 				return;
 			}
 			clearError();
-			renderStatus(status, true);
+			renderStatus(status);
 			if (isInProgress(status.phase)) schedulePoll(tab.id);
 		} catch {
 			if (!stopped && captureUiGeneration === openingGeneration) {

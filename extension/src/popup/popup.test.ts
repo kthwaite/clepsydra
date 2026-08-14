@@ -302,6 +302,26 @@ describe("popup tag controls", () => {
 		});
 		expect(popup.storageSet).not.toHaveBeenCalled();
 	});
+	it("shows attempt-owned tags when start acknowledges an existing capture", async () => {
+		const popup = await openPopup({
+			starts: [
+				{
+					status: captureStatus(
+						"processing",
+						"building the snapshot…",
+						"existing",
+						["attempt-owned"],
+					),
+				},
+			],
+		});
+		popup.elements["additional-tags"].value = "replacement-draft";
+
+		await popup.elements["capture-btn"].emit("click");
+
+		expect(popup.elements["additional-tags"].value).toBe("attempt-owned");
+		expect(popup.elements["additional-tags"].disabled).toBe(true);
+	});
 
 	it("restores active additions and disables editing", async () => {
 		const popup = await openPopup({
