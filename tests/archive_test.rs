@@ -261,10 +261,10 @@ async fn archive_ingest_rejects_unrenderable_snapshot_before_persistent_mutation
     response.assert_status(StatusCode::BAD_REQUEST);
     let error: serde_json::Value = response.json();
     assert!(
-        error["error"].as_str().is_some_and(
-            |message| message.contains("view constraints")
-                && message.contains("noscript depth limit")
-        ),
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("view constraints")
+                && message.contains("noscript depth limit")),
         "unexpected renderability error: {error}"
     );
     let after = state.cas.lock().stats().unwrap();
@@ -304,18 +304,12 @@ async fn archive_ingest_accepts_maximum_renderable_noscript_depth() {
     response.assert_status(StatusCode::CREATED);
     let created: serde_json::Value = response.json();
     let vault_path = created["vault_path"].as_str().unwrap();
-    let page_response = server
-        .get(&format!("/api/vault/pages/{vault_path}"))
-        .await;
+    let page_response = server.get(&format!("/api/vault/pages/{vault_path}")).await;
     page_response.assert_status(StatusCode::OK);
     let page: serde_json::Value = page_response.json();
-    let snapshot_hash = page["meta"]["archive"]["snapshot_hash"]
-        .as_str()
-        .unwrap();
+    let snapshot_hash = page["meta"]["archive"]["snapshot_hash"].as_str().unwrap();
 
-    let stored = server
-        .get(&format!("/api/vault/cas/{snapshot_hash}"))
-        .await;
+    let stored = server.get(&format!("/api/vault/cas/{snapshot_hash}")).await;
     stored.assert_status(StatusCode::OK);
     assert!(
         stored.text().contains("href=https://nested.example/path"),

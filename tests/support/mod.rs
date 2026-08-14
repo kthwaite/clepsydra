@@ -117,10 +117,9 @@ impl ApiFixtureBuilder {
         }
 
         let vault = Vault::open(&root).unwrap();
-        let archive_resource_concurrency =
-            clepsydra::api::archive::archive_resource_concurrency(
-                vault.config().archive.max_blob_size_mb,
-            );
+        let archive_resource_concurrency = clepsydra::api::archive::archive_resource_concurrency(
+            vault.config().archive.max_blob_size_mb,
+        );
         let db_path = vault.root().join(".clepsydra/cache.db");
         let mut index = VaultIndex::open(&db_path).unwrap();
         index.build(&vault).unwrap();

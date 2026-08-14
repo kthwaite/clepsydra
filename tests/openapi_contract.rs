@@ -72,7 +72,10 @@ fn openapi_defines_the_archive_view_head_contract() {
     let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
     let operation = &document["paths"]["/api/vault/archive/view/{snapshot_hash}"]["head"];
 
-    assert!(operation.is_object(), "archive snapshot HEAD is undocumented");
+    assert!(
+        operation.is_object(),
+        "archive snapshot HEAD is undocumented"
+    );
     for status in ["200", "404", "415", "500"] {
         assert!(
             operation["responses"][status].is_object(),
@@ -80,8 +83,7 @@ fn openapi_defines_the_archive_view_head_contract() {
         );
     }
     assert_eq!(
-        operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]
-            ["type"],
+        operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]["type"],
         "string"
     );
 }
