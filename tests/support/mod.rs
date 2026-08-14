@@ -129,6 +129,7 @@ impl ApiFixtureBuilder {
         let cas = Arc::new(parking_lot::Mutex::new(
             ContentStore::open(&cas_path).unwrap(),
         ));
+        let rubbish = clepsydra::vault::rubbish::RubbishStore::for_vault(vault.root());
         let delete_hooks = self
             .delete_hook_factory
             .map_or_else(Vec::new, |factory| factory(&cas));
@@ -147,6 +148,7 @@ impl ApiFixtureBuilder {
             vault,
             index,
             cas,
+            rubbish,
             warnings: parking_lot::Mutex::new(Vec::new()),
             change_tx,
             hooks: self.hooks,

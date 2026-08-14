@@ -1420,6 +1420,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/rubbish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_rubbish"];
+        put?: never;
+        post?: never;
+        delete: operations["empty_rubbish"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/rubbish/{item_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_rubbish_item"];
+        put?: never;
+        post?: never;
+        delete: operations["purge_rubbish_item"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/rubbish/{item_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["restore_rubbish_item"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/tasks": {
         parameters: {
             query?: never;
@@ -1591,6 +1639,7 @@ export interface components {
             /** Format: int32 */
             blobs_stored: number;
             page_id: string;
+            rubbish_item_id?: string | null;
             status: components["schemas"]["ArchiveStatus"];
             vault_path: string;
         };
@@ -2040,6 +2089,19 @@ export interface components {
         DeleteFeedRequest: {
             expected_revision: string;
         };
+        EmptyRubbishItemOutcome: {
+            item: components["schemas"]["RubbishPurgeResponse"];
+            /** @enum {string} */
+            status: "purged";
+        } | {
+            error: string;
+            item_id: string;
+            /** @enum {string} */
+            status: "failed";
+        };
+        EmptyRubbishResponse: {
+            outcomes: components["schemas"]["EmptyRubbishItemOutcome"][];
+        };
         EncryptionConfigResponse: {
             initialized: boolean;
             key_id?: string | null;
@@ -2135,7 +2197,7 @@ export interface components {
             source_value?: string | null;
         };
         /** @enum {string} */
-        FileOpKind: "rename" | "delete" | "create_dir" | "create_file";
+        FileOpKind: "rename" | "delete" | "create_dir" | "create_file" | "archive" | "restore";
         /** @description Recursive filter AST: all, any, not, or a field comparison */
         Filter: {
             all: components["schemas"]["Filter"][];
@@ -2486,10 +2548,11 @@ export interface components {
             old_text: string;
             path: string;
         };
+        /** @enum {string} */
+        PreviewMutationOperation: "move_page" | "move_folder";
         PreviewMutationRequest: {
             destination?: string;
-            operation: string;
-            rewrite?: string;
+            operation: components["schemas"]["PreviewMutationOperation"];
             source?: string;
         };
         /** @description A declared property in a base's schema. */
@@ -2671,6 +2734,46 @@ export interface components {
         RewrapIdentityRequest: {
             expected_revision: string;
             wrapped_identity: string;
+        };
+        RubbishItemDetail: {
+            item: components["schemas"]["RubbishItemSummary"];
+            preview: components["schemas"]["RubbishItemPreview"];
+        };
+        RubbishItemPreview: {
+            body: string;
+            encrypted: boolean;
+            encryption?: null | components["schemas"]["EncryptionMetaResponse"];
+            read_only: boolean;
+            truncated: boolean;
+        };
+        RubbishItemSummary: {
+            archive_url?: string | null;
+            deleted_at: string;
+            item_id: string;
+            kind: string;
+            original_path: string;
+            page_id: string;
+            title: string;
+        };
+        RubbishListEntryDto: {
+            item: components["schemas"]["RubbishItemSummary"];
+            /** @enum {string} */
+            status: "valid";
+        } | {
+            error: string;
+            item_id: string;
+            /** @enum {string} */
+            status: "invalid";
+        };
+        RubbishPurgeResponse: {
+            item_id: string;
+            original_path: string;
+            page_id: string;
+        };
+        RubbishRestoreResponse: {
+            item_id: string;
+            page_id: string;
+            path: string;
         };
         SearchResultEntry: {
             page_id: string;
@@ -6271,7 +6374,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Mutation preview */
+            /** @description Page or folder move preview */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6280,7 +6383,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Invalid operation */
+            /** @description Invalid move request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -7607,12 +7710,7 @@ export interface operations {
     };
     delete_page: {
         parameters: {
-            query?: {
-                /** @description Force delete despite backlinks */
-                force?: boolean;
-                /** @description Rewrite mode: plain_text, unlink, or none */
-                rewrite?: string;
-            };
+            query?: never;
             header?: never;
             path: {
                 /** @description Vault-relative page path */
@@ -7622,12 +7720,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Page deleted */
-            204: {
+            /** @description Page archived to the Rubbish Bin */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["RubbishItemSummary"];
+                };
             };
             /** @description Invalid input */
             400: {
@@ -7647,7 +7747,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Conflict (backlinks exist) */
+            /** @description Page changed during archival */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -7656,7 +7756,7 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
-            /** @description Internal server error */
+            /** @description Page could not be archived */
             500: {
                 headers: {
                     [name: string]: unknown;
@@ -7729,6 +7829,223 @@ export interface operations {
             };
             /** @description No page matches */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_rubbish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Newest-first valid rubbish items followed by invalid item rows */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubbishListEntryDto"][];
+                };
+            };
+            /** @description Rubbish catalog could not be read */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    empty_rubbish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ordered per-item outcomes for the initial valid-item snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmptyRubbishResponse"];
+                };
+            };
+            /** @description Rubbish Bin could not be enumerated */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    get_rubbish_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Opaque rubbish lifecycle UUID */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rubbish lifecycle metadata and bounded read-only preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubbishItemDetail"];
+                };
+            };
+            /** @description Malformed rubbish item UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Rubbish item not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Rubbish item is invalid or unreadable */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    purge_rubbish_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Opaque rubbish lifecycle UUID */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rubbish item permanently purged */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubbishPurgeResponse"];
+                };
+            };
+            /** @description Malformed rubbish item UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Rubbish item not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Rubbish item cleanup or removal failed */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    restore_rubbish_item: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Opaque rubbish lifecycle UUID */
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Rubbish item restored to its original page path */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RubbishRestoreResponse"];
+                };
+            };
+            /** @description Malformed rubbish item UUID */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Rubbish item not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Original page path is occupied or item state drifted */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Rubbish item could not be restored */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

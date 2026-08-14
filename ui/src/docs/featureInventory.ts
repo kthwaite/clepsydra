@@ -74,6 +74,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
+    id: "/rubbish",
+    label: "Rubbish Bin",
+    surface: "route",
+    disposition: { kind: "guide", slug: "pages-and-authoring" },
+  },
+  {
     id: "/tasking",
     label: "Tasking workspace",
     surface: "route",
@@ -170,6 +176,12 @@ export const FEATURE_INVENTORY = [
     label: "Open reference repairs",
     surface: "command",
     disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
+  },
+  {
+    id: "nav.rubbish",
+    label: "Open Rubbish Bin",
+    surface: "command",
+    disposition: { kind: "guide", slug: "pages-and-authoring" },
   },
   {
     id: "bases.create",

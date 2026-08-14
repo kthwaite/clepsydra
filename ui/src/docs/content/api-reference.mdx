@@ -273,7 +273,7 @@ Preview reference repair. Responses: `200` Reference repair preview; `400` Actio
 ### `GET /api/vault/index/outlinks/{path}`
 Get outlinks. Responses: `200` Outlinks; `400` Invalid path; `404` Page not found; `500` Internal server error.
 ### `POST /api/vault/index/preview-mutation`
-Preview mutation. Responses: `200` Mutation preview; `400` Invalid operation; `500` Internal server error.
+Preview a page or folder move. Archival consequences are described by the page archive confirmation, not this endpoint. Responses: `200` Move preview; `400` Invalid move request; `500` Internal server error.
 ### `POST /api/vault/index/rebuild`
 Rebuild index. Responses: `200` Index rebuilt; `500` Internal server error.
 ### `GET /api/vault/index/search`
@@ -326,7 +326,7 @@ Assign page. Responses: `200` Assigned and reconciled; `400` Invalid path or unk
 ### `POST /api/vault/pages-move/{path}`
 Move page. Responses: `200` Moved page; `400` Invalid input; `404` Page not found; `409` Destination conflict; `500` Internal server error.
 ### `DELETE /api/vault/pages/{path}`
-Delete page. Responses: `204` Page deleted; `400` Invalid input; `404` Page not found; `409` Conflict (backlinks exist); `500` Internal server error.
+Archive a page to the Rubbish Bin without rewriting backlinks. Responses: `201` Rubbish item summary; `400` Invalid input; `404` Page not found; `409` Page changed during archival; `500` Page could not be archived.
 ### `GET /api/vault/pages/{path}`
 Get page. Responses: `200` Page detail; `400` Invalid path; `404` Page not found; `500` Internal server error.
 ### `POST /api/vault/pages/{path}`
@@ -341,6 +341,19 @@ Update page by ID. Responses: `200` Updated page; `400` Invalid input; `404` Pag
 Protect page by ID. Responses: `200` Protected page; `400` Invalid encryption descriptor or body; `404` Page not found; `409` Page changed since it was loaded; `500` Page protected but cache maintenance failed.
 ### `POST /api/vault/pages/by-id/{uuid}/unprotect`
 Unprotect page by ID. Responses: `200` Unprotected page; `400` Page is not protected; `404` Page not found; `409` Page changed since it was loaded; `500` Internal server error.
+
+## Rubbish
+
+### `GET /api/vault/rubbish`
+List newest-first valid rubbish items followed by invalid item rows. Responses: `200` Rubbish entries; `500` Rubbish catalog could not be read.
+### `DELETE /api/vault/rubbish`
+Permanently purge the current valid-item snapshot. Responses: `200` Ordered per-item purge outcomes; `500` Rubbish Bin could not be enumerated.
+### `GET /api/vault/rubbish/{item_id}`
+Get lifecycle metadata and a bounded read-only preview. Responses: `200` Rubbish item detail; `400` Malformed item UUID; `404` Rubbish item not found; `500` Item invalid or unreadable.
+### `DELETE /api/vault/rubbish/{item_id}`
+Permanently purge one rubbish item. Responses: `200` Purged item identity; `400` Malformed item UUID; `404` Rubbish item not found; `500` Cleanup or removal failed.
+### `POST /api/vault/rubbish/{item_id}/restore`
+Restore an item to its original page path. Responses: `200` Restored page identity; `400` Malformed item UUID; `404` Rubbish item not found; `409` Original path occupied or item state drifted; `500` Restore failed.
 
 ## Tasks
 

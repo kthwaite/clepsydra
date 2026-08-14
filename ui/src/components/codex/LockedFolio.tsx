@@ -10,6 +10,7 @@ type LockedFolioProps = {
   derivedTags?: string[];
   state: Exclude<DecryptedBodyState, { status: "plain" }>;
   properties?: ReactNode;
+  pageActions?: ReactNode;
 };
 
 export function LockedFolio({
@@ -19,6 +20,7 @@ export function LockedFolio({
   derivedTags = [],
   state,
   properties,
+  pageActions,
 }: LockedFolioProps) {
   const config = useEncryptionConfig();
   const actions = useEncryptionActions();
@@ -81,6 +83,14 @@ export function LockedFolio({
         ) : null}
 
         {properties}
+        {pageActions ? (
+          <section className="mt-8 border border-rule bg-paper-2 p-5">
+            <h2 className="mb-3 text-sm font-bold uppercase tracking-wider">
+              Page actions
+            </h2>
+            {pageActions}
+          </section>
+        ) : null}
 
         <section className="mt-8 border border-rule bg-paper-2 p-5">
           {state.status === "decrypting" ? (

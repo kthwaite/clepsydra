@@ -21,7 +21,7 @@ use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, Expect
 use crate::vault::canonical::CanonicalName;
 use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
 use crate::vault::kind::{Kind, resolve};
-use crate::vault::mutation::{MutationOp, MutationPlanner, RewriteMode};
+use crate::vault::mutation::{MutationOp, MutationPlanner};
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
 };
@@ -251,18 +251,6 @@ pub struct ListPagesQuery {
     pub project: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct DeleteQuery {
-    #[serde(default)]
-    pub force: bool,
-    #[serde(default = "default_rewrite")]
-    pub rewrite: String,
-}
-
-fn default_rewrite() -> String {
-    "plain_text".to_string()
-}
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MovePageRequest {
     pub destination: String,
@@ -428,11 +416,7 @@ pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
     tags.extend(computed_tags.iter().cloned());
     let aliases_json: String = row.get(10)?;
     let aliases: Vec<String> = serde_json::from_str(&aliases_json).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            10,
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        )
+        rusqlite::Error::FromSqlConversionFailure(10, rusqlite::types::Type::Text, Box::new(error))
     })?;
 
     Ok(PageSummary {
@@ -1213,113 +1197,81 @@ async fn update_page_at_path(
     path = "/pages/{path}",
     context_path = "/api/vault",
     tag = "Pages",
-    params(
-        ("path" = String, Path, description = "Vault-relative page path"),
-        ("force" = Option<bool>, Query, description = "Force delete despite backlinks"),
-        ("rewrite" = Option<String>, Query, description = "Rewrite mode: plain_text, unlink, or none")
-    ),
+    params(("path" = String, Path, description = "Vault-relative page path")),
     responses(
-        (status = 204, description = "Page deleted"),
+        (status = 201, description = "Page archived to the Rubbish Bin", body = super::rubbish::RubbishItemSummary),
         (status = 400, description = "Invalid input", body = ApiError),
         (status = 404, description = "Page not found", body = ApiError),
-        (status = 409, description = "Conflict (backlinks exist)", body = ApiError),
-        (status = 500, description = "Internal server error", body = ApiError)
+        (status = 409, description = "Page changed during archival", body = ApiError),
+        (status = 500, description = "Page could not be archived", body = ApiError)
     )
 )]
 pub async fn delete_page(
     State(state): State<Arc<AppState>>,
     Path(path): Path<String>,
-    Query(query): Query<DeleteQuery>,
 ) -> Result<Response, ApiError> {
     let vault_path = crate::api::error::parse_request_path(&path, "invalid path")?;
-
-    let abs_path = state.vault.resolve(&vault_path);
-    if !abs_path.exists() {
-        return Err(ApiError::not_found(format!("page not found: {path}")));
-    }
-
-    // Check backlinks if not forcing
-    if !query.force {
-        let vp_str = vault_path.as_str().to_string();
-        let canonical = CanonicalName::from_filename(vault_path.filename());
-        let canonical_str = canonical.as_str().to_string();
-
-        let backlinks = state
-            .index
-            .with_index(move |index, _vault| {
-                let page_id: Option<String> = index
-                    .connection()
-                    .query_row(
-                        "SELECT id FROM pages WHERE path = ?1",
-                        params![vp_str],
-                        |row| row.get(0),
-                    )
-                    .ok();
-
-                if let Some(ref pid) = page_id {
-                    let mut stmt = index
-                        .connection()
-                        .prepare(
-                            "SELECT DISTINCT p.path FROM links l
-                             JOIN pages p ON p.id = l.source_id
-                             WHERE (l.target_id = ?1 OR l.target_path = ?2 OR l.target_canonical = ?3)
-                               AND l.source_id != ?1",
-                        )?;
-
-                    let backlinks: Vec<String> = stmt
-                        .query_map(
-                            params![pid, vp_str, canonical_str],
-                            |row| row.get(0),
-                        )?
-                        .filter_map(|r| r.ok())
-                        .collect();
-
-                    Ok(backlinks)
-                } else {
-                    Ok(Vec::new())
-                }
-            })
-            .await
-            .map_err(|e| ApiError::internal(e.to_string()))?
-            .map_err(|e: rusqlite::Error| ApiError::internal(e.to_string()))?;
-
-        if !backlinks.is_empty() {
-            return Err(ApiError::conflict_with_detail(
-                format!(
-                    "page has {} backlink(s); use force=true to delete",
-                    backlinks.len()
-                ),
-                serde_json::json!({ "backlinks": backlinks }),
-            ));
+    let expected_bytes = fs::read(state.vault.resolve(&vault_path)).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            ApiError::not_found(format!("page not found: {}", vault_path.as_str()))
+        } else {
+            ApiError::internal(format!(
+                "failed to read page {} for archival: {error}",
+                vault_path.as_str()
+            ))
         }
-    }
-
-    // Read page metadata before deletion (needed by delete hooks)
-    let page_meta = Page::from_file(&abs_path, vault_path.clone())
-        .map(|p| p.meta)
-        .ok();
-
-    // Plan and execute the delete
-    let rewrite_mode = match query.rewrite.as_str() {
-        "unlink" => RewriteMode::Unlink,
-        "none" => RewriteMode::None,
-        _ => RewriteMode::PlainText,
-    };
-
-    let op = MutationOp::DeletePage {
-        path: path.clone(),
-        rewrite: rewrite_mode,
+    })?;
+    let content = std::str::from_utf8(&expected_bytes).map_err(|error| {
+        ApiError::internal(format!(
+            "page {} is not UTF-8: {error}",
+            vault_path.as_str()
+        ))
+    })?;
+    let (meta, _) = parse_frontmatter(content).map_err(|error| {
+        ApiError::internal(format!(
+            "failed to parse page {} before archival: {error}",
+            vault_path.as_str()
+        ))
+    })?;
+    let title = meta.title.clone().unwrap_or_else(|| {
+        CanonicalName::from_filename(vault_path.filename())
+            .as_str()
+            .to_owned()
+    });
+    let (kind, _) = resolve(vault_path.as_str(), meta.kind);
+    let archive_url = meta
+        .extra
+        .get("archive")
+        .and_then(toml::Value::as_table)
+        .and_then(|archive| archive.get("url"))
+        .and_then(toml::Value::as_str)
+        .map(str::to_owned);
+    let manifest = crate::vault::rubbish::RubbishManifest::new(
+        uuid::Uuid::now_v7(),
+        meta.id,
+        vault_path.as_str(),
+        title,
+        kind.as_str(),
+        state.clock.now(),
+        archive_url,
+    )
+    .map_err(|error| ApiError::internal(format!("failed to build rubbish manifest: {error}")))?;
+    let summary = super::rubbish::RubbishItemSummary::from(&manifest);
+    let operation = MutationOp::ArchivePage {
+        path: vault_path.as_str().to_owned(),
+        expected_bytes,
+        manifest,
     };
     let command = state
         .index
         .with_index(move |index, vault| {
             MutationPlanner::new(vault, index)
-                .plan(&op)?
+                .plan(&operation)?
                 .into_batch_command(vault)
         })
         .await
-        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?
-        .map_err(|error| ApiError::internal(format!("mutation failed: {error}")))?;
+        .map_err(|error| ApiError::internal(format!("archive planning failed: {error}")))?
+        .map_err(|error| ApiError::internal(format!("archive planning failed: {error}")))?;
     state
         .mutation_coordinator
         .execute_batch(
@@ -1332,16 +1284,7 @@ pub async fn delete_page(
         .await
         .map_err(super::mutation_error)?;
 
-    // Run post-delete hooks (e.g. CAS ref_count cleanup for archive pages)
-    if let Some(ref meta) = page_meta {
-        for hook in state.delete_hooks.iter() {
-            if let Err(e) = hook.on_page_deleted(&vault_path, &meta.id, meta) {
-                tracing::warn!("delete hook error: {e}");
-            }
-        }
-    }
-
-    Ok(StatusCode::NO_CONTENT.into_response())
+    Ok((StatusCode::CREATED, Json(summary)).into_response())
 }
 
 // ---------------------------------------------------------------------------
@@ -1605,8 +1548,7 @@ fn plan_bulk_assignment(
     let mut pages = Vec::with_capacity(paths.len());
     for path in paths {
         let path = path.clone();
-        let (expected, meta, page_body) =
-            read_assignment_page_once(state, &path, indexed_paths)?;
+        let (expected, meta, page_body) = read_assignment_page_once(state, &path, indexed_paths)?;
         if let Some(kind) = assigned_kind {
             validate_kind_assignment(&path, meta.kind, kind)?;
         }

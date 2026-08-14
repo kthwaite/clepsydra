@@ -19,7 +19,7 @@ use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
 use crate::vault::index::UnresolvedReason;
 use crate::vault::kind::Kind;
-use crate::vault::mutation::{MutationOp, MutationPlan, MutationPlanner, RewriteMode};
+use crate::vault::mutation::{MutationOp, MutationPlan, MutationPlanner};
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
@@ -163,14 +163,21 @@ pub struct ContentIndexResponse {
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+#[schema(rename_all = "snake_case")]
+pub enum PreviewMutationOperation {
+    MovePage,
+    MoveFolder,
+}
+
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PreviewMutationRequest {
-    operation: String,
+    operation: PreviewMutationOperation,
     #[serde(default)]
     source: String,
     #[serde(default)]
     destination: String,
-    #[serde(default = "default_rewrite_mode")]
-    rewrite: String,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -528,10 +535,6 @@ fn reference_repair_error(error: VaultReferenceRepairError) -> ApiError {
             ApiError::internal("reference repair could not be prepared")
         }
     }
-}
-
-fn default_rewrite_mode() -> String {
-    "plain_text".to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -1249,38 +1252,27 @@ pub async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Respons
     tag = "Index",
     request_body = PreviewMutationRequest,
     responses(
-        (status = 200, description = "Mutation preview", body = serde_json::Value),
-        (status = 400, description = "Invalid operation", body = ApiError),
+        (status = 200, description = "Page or folder move preview", body = serde_json::Value),
+        (status = 400, description = "Invalid move request", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
 pub async fn preview_mutation(
     State(state): State<Arc<AppState>>,
-    Json(req): Json<PreviewMutationRequest>,
+    payload: Result<Json<PreviewMutationRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Response, ApiError> {
-    let op = match req.operation.as_str() {
-        "move_page" => MutationOp::MovePage {
+    let Json(req) = payload.map_err(|error| {
+        ApiError::bad_request(format!("invalid mutation preview request: {error}"))
+    })?;
+    let op = match req.operation {
+        PreviewMutationOperation::MovePage => MutationOp::MovePage {
             source: req.source,
             destination: req.destination,
         },
-        "delete_page" => {
-            let rewrite = match req.rewrite.as_str() {
-                "unlink" => RewriteMode::Unlink,
-                "none" => RewriteMode::None,
-                _ => RewriteMode::PlainText,
-            };
-            MutationOp::DeletePage {
-                path: req.source,
-                rewrite,
-            }
-        }
-        "move_folder" => MutationOp::MoveFolder {
+        PreviewMutationOperation::MoveFolder => MutationOp::MoveFolder {
             source: req.source,
             destination: req.destination,
         },
-        other => {
-            return Err(ApiError::bad_request(format!("unknown operation: {other}")));
-        }
     };
 
     let plan = state

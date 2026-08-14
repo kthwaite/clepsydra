@@ -1,15 +1,42 @@
 //! Content-addressed storage for blobs, with reference counting and garbage collection.
+use std::collections::BTreeSet;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
+use uuid::Uuid;
 
 /// Result of storing a blob in the CAS.
 pub struct StoreResult {
     pub hash: String,
     pub already_existed: bool,
+}
+
+/// Result of releasing captured-archive references for one rubbish item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReleaseOutcome {
+    Released,
+    AlreadyCompleted,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CasError {
+    #[error("invalid CAS hash '{hash}': {message}")]
+    InvalidHash { hash: String, message: String },
+    #[error("CAS blob row is missing for {0}")]
+    MissingBlob(String),
+    #[error("CAS blob {hash} has invalid stored size {size}")]
+    InvalidSize { hash: String, size: i64 },
+    #[error("CAS blob {hash} has no reference to release (ref_count {ref_count})")]
+    NoReference { hash: String, ref_count: i64 },
+    #[error("invalid CAS backing blob for {hash}: {message}")]
+    BackingBlob { hash: String, message: String },
+    #[error("CAS reference changed after prevalidation for {0}")]
+    ReferenceChanged(String),
+    #[error(transparent)]
+    Database(#[from] rusqlite::Error),
 }
 
 /// Metadata for a CAS blob whose database row and backing file agree.
@@ -98,6 +125,10 @@ impl ContentStore {
                 content_type TEXT NOT NULL,
                 created_at   TEXT NOT NULL,
                 ref_count    INTEGER NOT NULL DEFAULT 1
+            );
+            CREATE TABLE IF NOT EXISTS rubbish_archive_releases (
+                item_id      TEXT PRIMARY KEY,
+                completed_at TEXT NOT NULL
             );",
         )?;
         Ok(Self {
@@ -131,6 +162,111 @@ impl ContentStore {
         let hex = Self::validate_hash(hash)?;
         let prefix = &hex[..2];
         Ok(self.root.join(prefix).join(hex))
+    }
+
+    fn rubbish_release_completed(db: &Connection, item_id: &str) -> Result<bool, rusqlite::Error> {
+        db.query_row(
+            "SELECT 1 FROM rubbish_archive_releases WHERE item_id = ?1",
+            params![item_id],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+    }
+
+    /// Return whether this rubbish item's captured-archive references have
+    /// already been durably released for permanent deletion.
+    pub fn rubbish_archive_refs_released(&self, item_id: Uuid) -> Result<bool, CasError> {
+        Self::rubbish_release_completed(&self.db, &item_id.to_string()).map_err(Into::into)
+    }
+
+    fn prevalidate_rubbish_archive_ref(&self, hash: &str) -> Result<(), CasError> {
+        let hex = Self::validate_hash(hash).map_err(|error| CasError::InvalidHash {
+            hash: hash.to_string(),
+            message: error.to_string(),
+        })?;
+        let row: Option<(i64, i64)> = self
+            .db
+            .query_row(
+                "SELECT size, ref_count FROM blobs WHERE hash = ?1",
+                params![hash],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let (stored_size, ref_count) =
+            row.ok_or_else(|| CasError::MissingBlob(hash.to_string()))?;
+        let expected_size = u64::try_from(stored_size).map_err(|_| CasError::InvalidSize {
+            hash: hash.to_string(),
+            size: stored_size,
+        })?;
+        if ref_count <= 0 {
+            return Err(CasError::NoReference {
+                hash: hash.to_string(),
+                ref_count,
+            });
+        }
+
+        let path = self.root.join(&hex[..2]).join(hex);
+        let metadata = fs::metadata(&path).map_err(|error| CasError::BackingBlob {
+            hash: hash.to_string(),
+            message: error.to_string(),
+        })?;
+        if !metadata.is_file() {
+            return Err(CasError::BackingBlob {
+                hash: hash.to_string(),
+                message: format!("{} is not a file", path.display()),
+            });
+        }
+        if metadata.len() != expected_size {
+            return Err(CasError::BackingBlob {
+                hash: hash.to_string(),
+                message: format!(
+                    "size mismatch: expected {expected_size}, got {}",
+                    metadata.len()
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    /// Atomically release the captured-archive references owned by one rubbish
+    /// item. A completed item ID is durable and makes every later retry a no-op.
+    pub fn release_rubbish_archive_refs(
+        &mut self,
+        item_id: Uuid,
+        hashes: &BTreeSet<String>,
+    ) -> Result<ReleaseOutcome, CasError> {
+        let item_id = item_id.to_string();
+        if Self::rubbish_release_completed(&self.db, &item_id)? {
+            return Ok(ReleaseOutcome::AlreadyCompleted);
+        }
+
+        for hash in hashes {
+            self.prevalidate_rubbish_archive_ref(hash)?;
+        }
+
+        let transaction = self.db.transaction()?;
+        if Self::rubbish_release_completed(&transaction, &item_id)? {
+            return Ok(ReleaseOutcome::AlreadyCompleted);
+        }
+        for hash in hashes {
+            let changed = transaction.execute(
+                "UPDATE blobs
+                 SET ref_count = ref_count - 1
+                 WHERE hash = ?1 AND ref_count > 0",
+                params![hash],
+            )?;
+            if changed != 1 {
+                return Err(CasError::ReferenceChanged(hash.clone()));
+            }
+        }
+        transaction.execute(
+            "INSERT INTO rubbish_archive_releases (item_id, completed_at)
+             VALUES (?1, ?2)",
+            params![item_id, chrono::Utc::now().to_rfc3339()],
+        )?;
+        transaction.commit()?;
+        Ok(ReleaseOutcome::Released)
     }
 
     /// Store a blob. Returns the hash and whether it already existed.
@@ -387,12 +523,29 @@ pub struct CasStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
     use tempfile::TempDir;
+    use uuid::Uuid;
 
     fn test_store() -> (ContentStore, TempDir) {
         let tmp = TempDir::new().unwrap();
         let store = ContentStore::open(tmp.path()).unwrap();
         (store, tmp)
+    }
+
+    fn rubbish_cleanup_hashes(hashes: impl IntoIterator<Item = String>) -> BTreeSet<String> {
+        hashes.into_iter().collect()
+    }
+
+    fn simulate_rubbish_purge(
+        store: &mut ContentStore,
+        item_id: Uuid,
+        hashes: &BTreeSet<String>,
+        remove_item: impl FnOnce() -> std::io::Result<()>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        store.release_rubbish_archive_refs(item_id, hashes)?;
+        remove_item()?;
+        Ok(())
     }
 
     #[test]
@@ -558,5 +711,187 @@ mod tests {
         let stats = store.stats().unwrap();
         assert_eq!(stats.blob_count, 2);
         assert_eq!(stats.total_size_bytes, 10); // 5 + 5
+    }
+
+    #[test]
+    fn rubbish_cleanup_open_creates_an_item_keyed_completion_ledger() {
+        let (store, _tmp) = test_store();
+        let columns = store
+            .db
+            .prepare("PRAGMA table_info(rubbish_archive_releases)")
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(
+            columns
+                .iter()
+                .any(|(name, primary_key)| name == "item_id" && *primary_key == 1),
+            "cleanup completion must be keyed by opaque rubbish item ID"
+        );
+    }
+
+    #[test]
+    fn rubbish_cleanup_releases_unique_valid_refs_and_records_completion() {
+        let (mut store, _tmp) = test_store();
+        let first = store.store(b"first captured blob", "image/png").unwrap();
+        let second = store.store(b"second captured blob", "text/html").unwrap();
+        store.store(b"first captured blob", "image/png").unwrap();
+        store.store(b"second captured blob", "text/html").unwrap();
+        let item_id = Uuid::now_v7();
+        let hashes = rubbish_cleanup_hashes([first.hash.clone(), second.hash.clone()]);
+
+        let outcome = store
+            .release_rubbish_archive_refs(item_id, &hashes)
+            .unwrap();
+
+        assert_eq!(outcome, ReleaseOutcome::Released);
+        assert_eq!(store.ref_count(&first.hash).unwrap(), 1);
+        assert_eq!(store.ref_count(&second.hash).unwrap(), 1);
+        let recorded: String = store
+            .db
+            .query_row(
+                "SELECT item_id FROM rubbish_archive_releases WHERE item_id = ?1",
+                params![item_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(recorded, item_id.to_string());
+    }
+
+    #[test]
+    fn rubbish_cleanup_prevalidates_invalid_and_missing_refs_before_any_decrement() {
+        let (mut store, _tmp) = test_store();
+        let valid = store.store(b"still referenced", "image/png").unwrap();
+        store.store(b"still referenced", "image/png").unwrap();
+        let item_id = Uuid::now_v7();
+        let invalid_hashes =
+            rubbish_cleanup_hashes([valid.hash.clone(), "zz-not-a-cas-hash".to_string()]);
+
+        assert!(
+            store
+                .release_rubbish_archive_refs(item_id, &invalid_hashes)
+                .is_err()
+        );
+        assert_eq!(store.ref_count(&valid.hash).unwrap(), 2);
+
+        let missing_hash = ContentStore::hash_bytes(b"missing database row");
+        let missing_hashes = rubbish_cleanup_hashes([valid.hash.clone(), missing_hash]);
+        assert!(
+            store
+                .release_rubbish_archive_refs(item_id, &missing_hashes)
+                .is_err()
+        );
+        assert_eq!(store.ref_count(&valid.hash).unwrap(), 2);
+        assert_eq!(
+            store
+                .db
+                .query_row(
+                    "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+                    params![item_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn rubbish_cleanup_prevalidates_all_backing_files_before_any_decrement() {
+        let (mut store, _tmp) = test_store();
+        let valid = store.store(b"valid backing file", "image/png").unwrap();
+        store.store(b"valid backing file", "image/png").unwrap();
+        let missing_backing = store.store(b"missing backing file", "image/png").unwrap();
+        fs::remove_file(store.blob_path(&missing_backing.hash).unwrap()).unwrap();
+        let hashes = rubbish_cleanup_hashes([valid.hash.clone(), missing_backing.hash.clone()]);
+
+        assert!(
+            store
+                .release_rubbish_archive_refs(Uuid::now_v7(), &hashes)
+                .is_err()
+        );
+        assert_eq!(store.ref_count(&valid.hash).unwrap(), 2);
+        assert_eq!(store.ref_count(&missing_backing.hash).unwrap(), 1);
+    }
+
+    #[test]
+    fn rubbish_cleanup_rolls_back_decrements_when_completion_insert_fails() {
+        let (mut store, _tmp) = test_store();
+        let blob = store.store(b"transactional blob", "image/png").unwrap();
+        store.store(b"transactional blob", "image/png").unwrap();
+        store
+            .db
+            .execute_batch(
+                "CREATE TRIGGER fail_rubbish_cleanup_completion
+                 BEFORE INSERT ON rubbish_archive_releases
+                 BEGIN
+                     SELECT RAISE(ABORT, 'simulated completion failure');
+                 END;",
+            )
+            .unwrap();
+
+        let result = store.release_rubbish_archive_refs(
+            Uuid::now_v7(),
+            &rubbish_cleanup_hashes([blob.hash.clone()]),
+        );
+
+        assert!(result.is_err());
+        assert_eq!(
+            store.ref_count(&blob.hash).unwrap(),
+            2,
+            "decrement must roll back with the failed completion insert"
+        );
+    }
+
+    #[test]
+    fn rubbish_cleanup_completed_retry_is_a_no_op_even_if_backing_file_is_gone() {
+        let (mut store, _tmp) = test_store();
+        let blob = store.store(b"retry blob", "image/png").unwrap();
+        store.store(b"retry blob", "image/png").unwrap();
+        let item_id = Uuid::now_v7();
+        let hashes = rubbish_cleanup_hashes([blob.hash.clone()]);
+        assert_eq!(
+            store
+                .release_rubbish_archive_refs(item_id, &hashes)
+                .unwrap(),
+            ReleaseOutcome::Released
+        );
+        fs::remove_file(store.blob_path(&blob.hash).unwrap()).unwrap();
+
+        let retry = store
+            .release_rubbish_archive_refs(item_id, &hashes)
+            .unwrap();
+
+        assert_eq!(retry, ReleaseOutcome::AlreadyCompleted);
+        assert_eq!(store.ref_count(&blob.hash).unwrap(), 1);
+    }
+
+    #[test]
+    fn rubbish_cleanup_retry_after_item_removal_failure_decrements_exactly_once() {
+        let (mut store, _tmp) = test_store();
+        let blob = store.store(b"durable cleanup blob", "image/png").unwrap();
+        store.store(b"durable cleanup blob", "image/png").unwrap();
+        let item_id = Uuid::now_v7();
+        let hashes = rubbish_cleanup_hashes([blob.hash.clone()]);
+
+        let first_attempt = simulate_rubbish_purge(&mut store, item_id, &hashes, || {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "simulated rubbish item removal failure",
+            ))
+        });
+        assert!(first_attempt.is_err());
+        assert_eq!(store.ref_count(&blob.hash).unwrap(), 1);
+
+        simulate_rubbish_purge(&mut store, item_id, &hashes, || Ok(())).unwrap();
+        assert_eq!(
+            store.ref_count(&blob.hash).unwrap(),
+            1,
+            "retry after item-removal failure must not release CAS refs twice"
+        );
     }
 }

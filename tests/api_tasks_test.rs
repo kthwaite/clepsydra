@@ -25,6 +25,7 @@ fn setup_server_with_seed(seed: impl FnOnce(&std::path::Path)) -> (TestServer, T
     seed(&root);
 
     let vault = Vault::open(&root).unwrap();
+    let rubbish = clepsydra::vault::rubbish::RubbishStore::for_vault(vault.root());
     let archive_resource_concurrency = clepsydra::api::archive::archive_resource_concurrency(
         vault.config().archive.max_blob_size_mb,
     );
@@ -49,6 +50,7 @@ fn setup_server_with_seed(seed: impl FnOnce(&std::path::Path)) -> (TestServer, T
         started_at: std::time::Instant::now(),
         clock: Arc::new(clepsydra::api::SystemClock),
         vault,
+        rubbish,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
         warnings: parking_lot::Mutex::new(Vec::new()),

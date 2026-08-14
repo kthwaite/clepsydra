@@ -2,22 +2,26 @@ import { useState } from "react";
 import {
   type MutationPreview,
   type MutationPreviewRequest,
-  type MutationRewrite,
   usePreviewMutation,
 } from "#/api/index";
-import { useDeletePage, useMovePage } from "#/api/pages";
+import {
+  type ArchivedPage,
+  useArchivePage,
+  useMovePage,
+} from "#/api/pages";
 import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDialog";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
-import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 
-type PageAction = "move" | "delete";
-
-interface FrozenPagePreview {
-  action: PageAction;
+interface FrozenMovePreview {
   request: MutationPreviewRequest;
   preview: MutationPreview;
+}
+
+interface PageMutationProps {
+  path: string;
+  beforeMutation?: () => Promise<void>;
 }
 
 function mutationError(error: unknown): string {
@@ -37,57 +41,68 @@ export function PageActionsMenu({
   path,
   beforeMutation,
   onMoved,
-  onDeleted,
-}: {
-  path: string;
-  beforeMutation?: () => Promise<void>;
+  onArchived,
+  archiveOnly = false,
+}: PageMutationProps & {
   onMoved: (path: string) => void;
-  onDeleted: () => void;
+  onArchived: (archived: ArchivedPage) => void;
+  archiveOnly?: boolean;
 }) {
+  return (
+    <div className="grid gap-1">
+      {archiveOnly ? null : (
+        <MovePageAction
+          path={path}
+          beforeMutation={beforeMutation}
+          onMoved={onMoved}
+        />
+      )}
+      <ArchivePageAction
+        path={path}
+        beforeMutation={beforeMutation}
+        onArchived={onArchived}
+      />
+    </div>
+  );
+}
+
+function MovePageAction({
+  path,
+  beforeMutation,
+  onMoved,
+}: PageMutationProps & { onMoved: (path: string) => void }) {
   const previewMutation = usePreviewMutation();
   const movePage = useMovePage();
-  const deletePage = useDeletePage();
-  const [action, setAction] = useState<PageAction | null>(null);
+  const [isOpen, setIsOpen] = useState(false);
   const [destination, setDestination] = useState("");
-  const [rewrite, setRewrite] = useState<MutationRewrite>("plain_text");
   const [error, setError] = useState<string | null>(null);
-  const [frozenPreview, setFrozenPreview] = useState<FrozenPagePreview | null>(
-    null,
-  );
+  const [frozenMove, setFrozenMove] = useState<FrozenMovePreview | null>(null);
 
-  const isExecuting = movePage.isPending || deletePage.isPending;
-
-  function openAction(next: PageAction) {
-    setAction(next);
+  function openMove() {
     setDestination("");
-    setRewrite("plain_text");
     setError(null);
-    setFrozenPreview(null);
+    setFrozenMove(null);
+    setIsOpen(true);
   }
 
-  function closeAction() {
-    if (previewMutation.isPending || isExecuting) return;
-    resetAction();
-  }
-
-  function resetAction() {
-    setAction(null);
+  function resetMove() {
+    setIsOpen(false);
     setError(null);
-    setFrozenPreview(null);
+    setFrozenMove(null);
   }
 
-  async function requestPreview() {
-    if (!action) return;
-    const request: MutationPreviewRequest =
-      action === "move"
-        ? {
-            operation: "move_page",
-            source: path,
-            destination: destination.trim(),
-          }
-        : { operation: "delete_page", source: path, rewrite };
+  function closeMove() {
+    if (previewMutation.isPending || movePage.isPending) return;
+    resetMove();
+  }
 
-    if (action === "move" && !request.destination) {
+  async function requestMovePreview() {
+    const request: MutationPreviewRequest = {
+      operation: "move_page",
+      source: path,
+      destination: destination.trim(),
+    };
+    if (!request.destination) {
       setError("Destination path is required.");
       return;
     }
@@ -96,37 +111,24 @@ export function PageActionsMenu({
     try {
       await beforeMutation?.();
       const preview = await previewMutation.mutateAsync(request);
-      setFrozenPreview({ action, request, preview });
+      setFrozenMove({ request, preview });
     } catch (previewError) {
       setError(mutationError(previewError));
     }
   }
 
-  async function executePreview() {
-    if (!frozenPreview) return;
+  async function executeMove() {
+    if (!frozenMove) return;
+    const destination = frozenMove.request.destination;
+
     setError(null);
     try {
-      if (frozenPreview.action === "move") {
-        const destination = frozenPreview.request.destination;
-        if (!destination) return;
-        const moved = await movePage.mutateAsync({
-          params: { path: { path: frozenPreview.request.source } },
-          body: { destination },
-        });
-        resetAction();
-        onMoved(moved.path ?? destination);
-        return;
-      }
-
-      const frozenRewrite = frozenPreview.request.rewrite ?? "plain_text";
-      await deletePage.mutateAsync({
-        params: {
-          path: { path: frozenPreview.request.source },
-          query: { force: true, rewrite: frozenRewrite },
-        },
+      const moved = await movePage.mutateAsync({
+        params: { path: { path: frozenMove.request.source } },
+        body: { destination },
       });
-      resetAction();
-      onDeleted();
+      resetMove();
+      onMoved(moved.path ?? destination);
     } catch (mutationFailure) {
       setError(mutationError(mutationFailure));
     }
@@ -134,117 +136,162 @@ export function PageActionsMenu({
 
   return (
     <>
-      <div className="grid gap-1">
-        <button
-          type="button"
-          className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
-          onClick={() => openAction("move")}
-        >
-          Move or rename page
-        </button>
-        <button
-          type="button"
-          className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-destructive hover:underline"
-          onClick={() => openAction("delete")}
-        >
-          Delete page
-        </button>
-      </div>
+      <button
+        type="button"
+        className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+        onClick={openMove}
+      >
+        Move or rename page
+      </button>
 
       <Dialog
-        isOpen={action !== null && frozenPreview === null}
+        isOpen={isOpen && frozenMove === null}
         onOpenChange={(open) => {
-          if (!open) closeAction();
+          if (!open) closeMove();
         }}
-        title={action === "move" ? "Move or rename page" : "Delete page"}
+        title="Move or rename page"
         description={`Current path: ${path}`}
-        isDismissable={!previewMutation.isPending}
+        isDismissable={!previewMutation.isPending && !movePage.isPending}
         footer={
           <>
             <Button
               variant="secondary"
-              onPress={closeAction}
-              isDisabled={previewMutation.isPending}
+              onPress={closeMove}
+              isDisabled={previewMutation.isPending || movePage.isPending}
             >
               Cancel
             </Button>
             <Button
-              variant={action === "delete" ? "danger" : "primary"}
-              onPress={() => void requestPreview()}
-              isDisabled={previewMutation.isPending}
+              variant="primary"
+              onPress={() => void requestMovePreview()}
+              isDisabled={previewMutation.isPending || movePage.isPending}
             >
-              {previewMutation.isPending
-                ? "Preparing preview…"
-                : action === "move"
-                  ? "Preview move"
-                  : "Preview deletion"}
+              {previewMutation.isPending ? "Preparing preview…" : "Preview move"}
             </Button>
           </>
         }
       >
-        {action === "move" ? (
-          <TextField
-            label="Destination path"
-            value={destination}
-            onChange={(value) => {
-              setDestination(value);
-              setError(null);
-            }}
-            placeholder="archive/new-name.md"
-            description="Enter the complete vault-relative path, including .md."
-            isDisabled={previewMutation.isPending}
-            isInvalid={!!error}
-            errorMessage={error ?? undefined}
-            autoFocus
-          />
-        ) : (
-          <div>
-            <Select
-              label="Inbound links"
-              selectedKey={rewrite}
-              onSelectionChange={(key) => {
-                setRewrite(key as MutationRewrite);
-                setError(null);
-              }}
-              isDisabled={previewMutation.isPending}
-              className="w-full"
-              description="The preview will show every backlink rewrite before deletion."
-            >
-              <SelectItem id="plain_text">
-                Preserve labels as plain text
-              </SelectItem>
-              <SelectItem id="unlink">Remove link markup</SelectItem>
-              <SelectItem id="none">
-                Leave unresolved links unchanged
-              </SelectItem>
-            </Select>
-            {error ? (
-              <p className="mt-2 text-xs text-destructive">{error}</p>
-            ) : null}
-          </div>
-        )}
+        <TextField
+          label="Destination path"
+          value={destination}
+          onChange={(value) => {
+            setDestination(value);
+            setError(null);
+          }}
+          placeholder="archive/new-name.md"
+          description="Enter the complete vault-relative path, including .md."
+          isDisabled={previewMutation.isPending}
+          isInvalid={!!error}
+          errorMessage={error ?? undefined}
+          autoFocus
+        />
       </Dialog>
 
-      {frozenPreview ? (
+      {frozenMove ? (
         <MutationPreviewDialog
           isOpen
-          title={
-            frozenPreview.action === "move"
-              ? "Review page move"
-              : "Review page deletion"
-          }
-          confirmLabel={
-            frozenPreview.action === "move" ? "Move page" : "Confirm delete"
-          }
-          preview={frozenPreview.preview}
-          isExecuting={isExecuting}
+          title="Review page move"
+          confirmLabel="Move page"
+          preview={frozenMove.preview}
+          isExecuting={movePage.isPending}
           error={error}
-          onConfirm={() => void executePreview()}
+          onConfirm={() => void executeMove()}
           onCancel={() => {
-            if (!isExecuting) setFrozenPreview(null);
+            if (!movePage.isPending) setFrozenMove(null);
           }}
         />
       ) : null}
+    </>
+  );
+}
+
+function ArchivePageAction({
+  path,
+  beforeMutation,
+  onArchived,
+}: PageMutationProps & {
+  onArchived: (archived: ArchivedPage) => void;
+}) {
+  const archivePage = useArchivePage();
+  const [isOpen, setIsOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function openArchive() {
+    setError(null);
+    setIsOpen(true);
+  }
+
+  function closeArchive() {
+    if (archivePage.isPending) return;
+    setIsOpen(false);
+    setError(null);
+  }
+
+  async function executeArchive() {
+    setError(null);
+    try {
+      await beforeMutation?.();
+      const archived = await archivePage.mutateAsync({
+        params: { path: { path } },
+      });
+      setIsOpen(false);
+      onArchived(archived);
+    } catch (archiveFailure) {
+      setError(mutationError(archiveFailure));
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="cl-mono cursor-pointer text-left text-[10px] uppercase tracking-[0.1em] text-destructive hover:underline"
+        onClick={openArchive}
+      >
+        Archive Page
+      </button>
+
+      <Dialog
+        isOpen={isOpen}
+        onOpenChange={(open) => {
+          if (!open) closeArchive();
+        }}
+        title="Archive Page"
+        description={`Current path: ${path}`}
+        isDismissable={!archivePage.isPending}
+        footer={
+          <>
+            <Button
+              variant="secondary"
+              onPress={closeArchive}
+              isDisabled={archivePage.isPending}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onPress={() => void executeArchive()}
+              isDisabled={archivePage.isPending}
+            >
+              {archivePage.isPending ? "Archiving…" : "Confirm archive"}
+            </Button>
+          </>
+        }
+      >
+        <div className="space-y-2 text-sm">
+          <p>This page will be removed from normal views.</p>
+          <p>
+            Inbound links remain byte-identical and become unresolved after
+            archival.
+          </p>
+          <p>You can restore this page from the Rubbish Bin.</p>
+          {error ? (
+            <p className="text-xs text-destructive" role="alert">
+              {error}
+            </p>
+          ) : null}
+        </div>
+      </Dialog>
     </>
   );
 }

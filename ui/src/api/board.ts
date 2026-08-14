@@ -1,7 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
-import { invalidatePageStructure, queryKeys } from "./keys";
+import { invalidatePageStructure, invalidateRubbish, queryKeys } from "./keys";
+import type { ArchivedPage } from "./pages";
 
 export type BoardTask = components["schemas"]["BoardTask"];
 export type BoardCycle = components["schemas"]["BoardCycle"];
@@ -165,32 +166,33 @@ export function usePatchTask() {
 }
 
 /**
- * Delete a task by its vault page path.
- * Uses DELETE /api/vault/pages/{path} (force=true to skip backlink check).
- * Invalidates the board query + page structure on success.
+ * Archive a task's vault page to the Rubbish Bin.
+ *
+ * DELETE returns the typed 201 archive summary. Tasking shares the same page
+ * structure and Rubbish cache invalidation helpers as the general page hook.
  */
-export function useDeleteTask() {
+export function useArchiveTask() {
   const qc = useQueryClient();
-  return useMutation<void, Error, { path: string }>({
+
+  return useMutation<ArchivedPage, Error, { path: string }>({
     mutationFn: async ({ path }) => {
       const encoded = path
         .split("/")
-        .map((seg) => encodeURIComponent(seg))
+        .map((segment) => encodeURIComponent(segment))
         .join("/");
-      // rewrite=plain_text pinned explicitly: DESTROY removes the page;
-      // inbound wikilinks degrade to plain text so notes keep their meaning.
-      const res = await fetch(
-        `/api/vault/pages/${encoded}?force=true&rewrite=plain_text`,
-        { method: "DELETE" },
-      );
-      if (!res.ok && res.status !== 204) {
-        throw new Error("Failed to delete task");
+      const response = await fetch(`/api/vault/pages/${encoded}`, {
+        method: "DELETE",
+      });
+      if (response.status !== 201) {
+        throw new Error("Failed to archive task");
       }
+      return response.json() as Promise<ArchivedPage>;
     },
-    onError: () => toast.error("TASK DESTROY FAILED"),
+    onError: () => toast.error("TASK ARCHIVE FAILED"),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.board.all });
       invalidatePageStructure(qc);
+      invalidateRubbish(qc);
     },
   });
 }

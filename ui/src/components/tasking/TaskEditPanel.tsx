@@ -20,23 +20,28 @@
  *   - Debounced 300ms: title, assignee, estimate, start, due, hold reason,
  *     link, tags.
  *     Pending debounces are flushed on unmount (close/task-switch) so edits
- *     aren't dropped — unless a DESTROY is in flight (suppressed to avoid a
- *     trailing PATCH at the just-deleted task).
+ *     aren't dropped. Archiving explicitly flushes and awaits every pending
+ *     patch before it sends DELETE.
  *
  * Checklist deviation (plan decision 7):
  *   The checklist is read-only. We show a progress bar + "d / total done"
  *   and an "OPEN PAGE →" affordance (calls onOpenPage(task.path)). The
  *   markdown body is the source of truth for checklist items.
  *
- * Destroy: two-step confirm — first click arms the button ("CONFIRM
- * DESTROY?"), second fires DELETE. The armed state auto-disarms after 3s
- * and on pointer-leave of the footer.
+ * Archive: two-step confirm — first click arms the button ("CONFIRM
+ * ARCHIVE?"), second saves pending edits and archives the page. The armed
+ * state auto-disarms after 3s and on pointer-leave of the footer.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FocusScope } from "react-aria";
-import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
-import { useDeleteTask, usePatchTask } from "#/api/board";
+import type {
+  BoardCycle,
+  BoardOperation,
+  BoardTask,
+  PatchTaskRequest,
+} from "#/api/board";
+import { useArchiveTask, usePatchTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
 import { type ColLabelFn, opKey, priColor } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
@@ -50,60 +55,94 @@ import {
   SELECT_CLS,
 } from "./fields";
 
-/** How long the armed "CONFIRM DESTROY?" state persists before auto-disarm. */
-const DESTROY_DISARM_MS = 3000;
+/** How long the armed "CONFIRM ARCHIVE?" state persists before auto-disarm. */
+const ARCHIVE_DISARM_MS = 3000;
 
 /** Debounce delay for text-field patches (title, assignee, estimate, …). */
 const DEBOUNCE_MS = 300;
+
+type PatchIntentLane =
+  | "title"
+  | "assignee"
+  | "estimate"
+  | "due"
+  | "start"
+  | "holdReason"
+  | "link"
+  | "tags"
+  | "status"
+  | "priority"
+  | "project"
+  | "cycle"
+  | "holdToggle";
 
 // ── useDebounce ───────────────────────────────────────────────────────────────
 
 function useDebounced(
   value: string,
   delay: number,
-  onChange: (v: string) => void,
-  /**
-   * When suppress.current is true, neither the timer nor the unmount flush
-   * delivers the pending value — set before DELETE so no trailing PATCH is
-   * fired at a just-destroyed task.
-   */
-  suppress?: React.RefObject<boolean>,
-) {
+  onChange: (v: string) => void | Promise<void>,
+): () => Promise<void> {
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
-  // Latest value not yet delivered to onChange. Non-null only while a timer
-  // is pending — lets the unmount cleanup flush instead of dropping the edit.
-  const pending = useRef<string | null>(null);
+  const pending = useRef<{ value: string; version: number } | null>(null);
+  const version = useRef(0);
+  const queue = useRef<Promise<void>>(Promise.resolve());
+  const active = useRef<Promise<void> | null>(null);
+
+  const deliver = useCallback((): Promise<void> => {
+    clearTimeout(timer.current ?? undefined);
+    timer.current = null;
+    if (pending.current === null) {
+      return active.current ?? Promise.resolve();
+    }
+
+    const next = pending.current;
+    pending.current = null;
+    const delivery = queue.current.then(() => onChangeRef.current(next.value));
+    active.current = delivery;
+    queue.current = delivery.catch(() => {
+      // A failed save remains pending for an explicit retry, unless a newer
+      // value has already superseded it.
+      if (version.current === next.version && pending.current === null) {
+        pending.current = next;
+      }
+      return undefined;
+    });
+    void delivery.then(
+      () => {
+        if (active.current === delivery) active.current = null;
+      },
+      () => {
+        if (active.current === delivery) active.current = null;
+      },
+    );
+    return delivery;
+  }, []);
 
   useEffect(() => {
-    if (timer.current) clearTimeout(timer.current);
-    pending.current = value;
+    clearTimeout(timer.current ?? undefined);
+    version.current += 1;
+    pending.current = { value, version: version.current };
     timer.current = setTimeout(() => {
-      pending.current = null;
-      if (suppress?.current) return;
-      onChangeRef.current(value);
+      void deliver().catch(() => undefined);
     }, delay);
     return () => {
-      if (timer.current) clearTimeout(timer.current);
+      clearTimeout(timer.current ?? undefined);
     };
-  }, [value, delay, suppress]);
+  }, [value, delay, deliver]);
 
-  // Flush on unmount: closing the panel (✕ / Escape / scrim) or switching
-  // tasks within the debounce window must not silently lose the edit. The
-  // per-field onChange guards (value !== task.field) make a no-edit flush a
-  // no-op; a pending DESTROY suppresses the flush entirely.
+  // Flush on unmount: closing the panel or switching tasks within the debounce
+  // window must not silently lose the edit.
   useEffect(
     () => () => {
-      if (pending.current !== null) {
-        const v = pending.current;
-        pending.current = null;
-        if (suppress?.current) return;
-        onChangeRef.current(v);
-      }
+      void deliver().catch(() => undefined);
     },
-    [suppress],
+    [deliver],
   );
+
+  return deliver;
 }
 
 // ── TaskEditPanel ─────────────────────────────────────────────────────────────
@@ -129,10 +168,7 @@ export function TaskEditPanel({
 }: TaskEditPanelProps) {
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const patch = usePatchTask();
-  const del = useDeleteTask();
-
-  // Shared kill-switch for all pending debounced edits (see useDebounced).
-  const suppressFlush = useRef(false);
+  const archive = useArchiveTask();
 
   // Local mirror of text fields that debounce before patching
   const [titleVal, setTitleVal] = useState(task.title);
@@ -144,8 +180,9 @@ export function TaskEditPanel({
   const [linkVal, setLinkVal] = useState(task.link ?? "");
   const [tagsVal, setTagsVal] = useState(task.tags.join(", "));
 
-  // Destroy confirmation state (two-step; auto-disarms)
-  const [destroying, setDestroying] = useState(false);
+  // Archive confirmation state (two-step; auto-disarms)
+  const [archiveArmed, setArchiveArmed] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   const disarmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Hold toggle focus-on-activation: when the toggle is clicked to turn hold on,
@@ -155,24 +192,24 @@ export function TaskEditPanel({
   const focusReasonOnHold = useRef(false);
   const [needsFocus, setNeedsFocus] = useState(false);
 
-  const disarmDestroy = useCallback(() => {
-    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+  const disarmArchive = useCallback(() => {
+    clearTimeout(disarmTimer.current ?? undefined);
     disarmTimer.current = null;
-    setDestroying(false);
+    setArchiveArmed(false);
   }, []);
 
-  const armDestroy = useCallback(() => {
-    setDestroying(true);
-    if (disarmTimer.current) clearTimeout(disarmTimer.current);
+  const armArchive = useCallback(() => {
+    setArchiveArmed(true);
+    clearTimeout(disarmTimer.current ?? undefined);
     disarmTimer.current = setTimeout(
-      () => setDestroying(false),
-      DESTROY_DISARM_MS,
+      () => setArchiveArmed(false),
+      ARCHIVE_DISARM_MS,
     );
   }, []);
 
   useEffect(
     () => () => {
-      if (disarmTimer.current) clearTimeout(disarmTimer.current);
+      clearTimeout(disarmTimer.current ?? undefined);
     },
     [],
   );
@@ -189,17 +226,18 @@ export function TaskEditPanel({
     setHoldReason(task.hold ?? "");
     setLinkVal(task.link ?? "");
     setTagsVal(task.tags.join(", "));
-    setDestroying(false);
+    setArchiveArmed(false);
+    setArchiving(false);
   }, [taskId]);
 
-  // Escape closes
+  // Escape closes unless the save-and-archive sequence is in flight.
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape" && !archiving) onClose();
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  }, [archiving, onClose]);
 
   // When hold toggle is activated (task.hold becomes truthy from an optimistic
   // patch), sync the reason input's state with the hold value.
@@ -227,96 +265,130 @@ export function TaskEditPanel({
   // fallback focus target.
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Immediate patch helper
+  // Every Tasking PATCH enters one serial queue. `mutateAsync` retains the
+  // mutation hook's optimistic onMutate behavior while giving archive a single
+  // barrier for immediate controls, debounced fields, and earlier failures.
+  const patchAsync = patch.mutateAsync;
+  const patchQueue = useRef<Promise<void>>(Promise.resolve());
+  const failedPatchLanes = useRef(new Set<PatchIntentLane>());
+  const laneVersions = useRef<Partial<Record<PatchIntentLane, number>>>({});
+  const coordinatorTaskId = useRef(task.id);
+  const latestTaskPath = useRef(task.path);
+  const enqueuePatch = useCallback(
+    (lane: PatchIntentLane, nextPatch: PatchTaskRequest) => {
+      const requestTaskId = task.id;
+      const intentVersion = (laneVersions.current[lane] ?? 0) + 1;
+      laneVersions.current[lane] = intentVersion;
+      const request = patchQueue.current.then(async () => {
+        try {
+          const savedTask = await patchAsync({
+            id: requestTaskId,
+            patch: nextPatch,
+          });
+          if (coordinatorTaskId.current === requestTaskId) {
+            latestTaskPath.current = savedTask.path;
+            if (laneVersions.current[lane] === intentVersion) {
+              failedPatchLanes.current.delete(lane);
+            }
+          }
+        } catch (error) {
+          if (
+            coordinatorTaskId.current === requestTaskId &&
+            laneVersions.current[lane] === intentVersion
+          ) {
+            failedPatchLanes.current.add(lane);
+          }
+          throw error;
+        }
+      });
+      patchQueue.current = request.catch(() => undefined);
+      return request;
+    },
+    [patchAsync, task.id],
+  );
   const patchNow = useCallback(
-    (p: Parameters<typeof patch.mutate>[0]["patch"]) => {
-      patch.mutate({ id: task.id, patch: p });
+    (lane: PatchIntentLane, nextPatch: PatchTaskRequest) => {
+      void enqueuePatch(lane, nextPatch).catch(() => undefined);
     },
-    [patch, task.id],
+    [enqueuePatch],
   );
+  const savePatch = enqueuePatch;
+  const clearPatchFailure = useCallback((lane: PatchIntentLane) => {
+    laneVersions.current[lane] = (laneVersions.current[lane] ?? 0) + 1;
+    failedPatchLanes.current.delete(lane);
+  }, []);
+  const awaitPatchBarrier = useCallback(async () => {
+    await patchQueue.current;
+    if (failedPatchLanes.current.size > 0) {
+      throw new Error("One or more task edits failed to save.");
+    }
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only for a new task identity
+  useEffect(() => {
+    coordinatorTaskId.current = task.id;
+    latestTaskPath.current = task.path;
+    laneVersions.current = {};
+    failedPatchLanes.current.clear();
+  }, [task.id]);
 
-  // Debounced patches (300ms)
-  useDebounced(
-    titleVal,
-    DEBOUNCE_MS,
-    (v) => {
-      if (v.trim() && v !== task.title) patchNow({ title: v.trim() });
-    },
-    suppressFlush,
-  );
-  useDebounced(
-    assigneeVal,
-    DEBOUNCE_MS,
-    (v) => {
-      const trimmed = v.trim() || null;
-      if (trimmed !== (task.assignee ?? null)) patchNow({ assignee: trimmed });
-    },
-    suppressFlush,
-  );
-  useDebounced(
-    estimateVal,
-    DEBOUNCE_MS,
-    (v) => {
-      const trimmed = v.trim() || null;
-      if (trimmed !== (task.estimate ?? null)) patchNow({ estimate: trimmed });
-    },
-    suppressFlush,
-  );
-  useDebounced(
-    dueVal,
-    DEBOUNCE_MS,
-    (v) => {
-      const trimmed = v.trim() || null;
-      if (trimmed !== (task.due ?? null)) patchNow({ due: trimmed });
-    },
-    suppressFlush,
-  );
-  useDebounced(
-    startVal,
-    DEBOUNCE_MS,
-    (v) => {
-      const trimmed = v.trim() || null;
-      if (trimmed !== (task.start ?? null)) patchNow({ start: trimmed });
-    },
-    suppressFlush,
-  );
+  // Debounced patches (300ms). Each hook exposes an awaited flush used by
+  // archive so no local edit can be discarded or race the DELETE.
+  const flushTitle = useDebounced(titleVal, DEBOUNCE_MS, (v) => {
+    const trimmed = v.trim();
+    if (trimmed && trimmed !== task.title)
+      return savePatch("title", { title: trimmed });
+    if (trimmed === task.title) clearPatchFailure("title");
+  });
+  const flushAssignee = useDebounced(assigneeVal, DEBOUNCE_MS, (v) => {
+    const trimmed = v.trim() || null;
+    if (trimmed !== (task.assignee ?? null))
+      return savePatch("assignee", { assignee: trimmed });
+    clearPatchFailure("assignee");
+  });
+  const flushEstimate = useDebounced(estimateVal, DEBOUNCE_MS, (v) => {
+    const trimmed = v.trim() || null;
+    if (trimmed !== (task.estimate ?? null))
+      return savePatch("estimate", { estimate: trimmed });
+    clearPatchFailure("estimate");
+  });
+  const flushDue = useDebounced(dueVal, DEBOUNCE_MS, (v) => {
+    const trimmed = v.trim() || null;
+    if (trimmed !== (task.due ?? null))
+      return savePatch("due", { due: trimmed });
+    clearPatchFailure("due");
+  });
+  const flushStart = useDebounced(startVal, DEBOUNCE_MS, (v) => {
+    const trimmed = v.trim() || null;
+    if (trimmed !== (task.start ?? null))
+      return savePatch("start", { start: trimmed });
+    clearPatchFailure("start");
+  });
   // Asymmetric guard, deliberately: the reason input only exists while the
   // task is held (task.hold truthy), and an emptied reason falls back to the
   // previous reason rather than clearing the hold — clearing the hold is the
   // toggle's job (hold: null), never a side effect of editing the reason.
-  useDebounced(
-    holdReason,
-    DEBOUNCE_MS,
-    (v) => {
-      if (task.hold && v !== task.hold)
-        patchNow({ hold: v.trim() || task.hold });
-    },
-    suppressFlush,
-  );
-  useDebounced(
-    linkVal,
-    DEBOUNCE_MS,
-    (v) => {
-      const trimmed = v.trim() || null;
-      if (trimmed !== (task.link ?? null)) patchNow({ link: trimmed });
-    },
-    suppressFlush,
-  );
+  const flushHoldReason = useDebounced(holdReason, DEBOUNCE_MS, (v) => {
+    if (task.hold && v !== task.hold)
+      return savePatch("holdReason", { hold: v.trim() || task.hold });
+    if (v === task.hold) clearPatchFailure("holdReason");
+  });
+  const flushLink = useDebounced(linkVal, DEBOUNCE_MS, (v) => {
+    const trimmed = v.trim() || null;
+    if (trimmed !== (task.link ?? null))
+      return savePatch("link", { link: trimmed });
+    clearPatchFailure("link");
+  });
 
   // Tags: comma-sep input → debounced 300ms like the other text fields
-  useDebounced(
-    tagsVal,
-    DEBOUNCE_MS,
-    (v) => {
-      const arr = v
-        .split(",")
-        .map((t) => t.trim())
-        .filter(Boolean);
-      const current = task.tags.join(",");
-      if (arr.join(",") !== current) patchNow({ tags: arr });
-    },
-    suppressFlush,
-  );
+  const flushTags = useDebounced(tagsVal, DEBOUNCE_MS, (v) => {
+    const arr = v
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const current = task.tags.join(",");
+    if (arr.join(",") !== current) return savePatch("tags", { tags: arr });
+    clearPatchFailure("tags");
+  });
 
   // Checklist progress (read-only: decision 7)
   const {
@@ -346,24 +418,35 @@ export function TaskEditPanel({
       task.project)
     : "UNFILED";
 
-  const confirmDestroy = () => {
-    // Kill any pending debounced edits BEFORE the DELETE — a trailing PATCH
-    // at the just-deleted task would 404.
-    suppressFlush.current = true;
-    if (disarmTimer.current) clearTimeout(disarmTimer.current);
-    del.mutate(
-      { path: task.path },
-      {
-        onSuccess: () => {
-          setEditTaskId(null);
-        },
-        onError: () => {
-          // Page still exists — re-enable edit flushing.
-          suppressFlush.current = false;
-        },
-      },
-    );
-    setDestroying(false);
+  const confirmArchive = async () => {
+    if (archiving) return;
+    setArchiving(true);
+    clearTimeout(disarmTimer.current ?? undefined);
+    disarmTimer.current = null;
+
+    try {
+      for (const flush of [
+        flushTitle,
+        flushAssignee,
+        flushEstimate,
+        flushDue,
+        flushStart,
+        flushHoldReason,
+        flushLink,
+        flushTags,
+      ]) {
+        await flush();
+      }
+      await awaitPatchBarrier();
+      await archive.mutateAsync({ path: latestTaskPath.current });
+      setEditTaskId(null);
+    } catch {
+      // Both mutation hooks surface the specific failure. Keep the task open
+      // and return to the retryable first-step action.
+      setArchiveArmed(false);
+    } finally {
+      setArchiving(false);
+    }
   };
 
   return (
@@ -371,7 +454,7 @@ export function TaskEditPanel({
       {/* Scrim */}
       <div
         className="absolute inset-0 z-40 bg-black/28"
-        onClick={onClose}
+        onClick={archiving ? undefined : onClose}
         data-testid="edit-panel-scrim"
       />
 
@@ -417,8 +500,9 @@ export function TaskEditPanel({
             </span>
             <button
               type="button"
-              className="cl-mono inline-flex h-[22px] w-[22px] items-center justify-center border border-[var(--rule)] text-[13px] text-[var(--ink-3)] cursor-pointer hover:border-[var(--hot)] hover:text-[var(--hot)]"
+              className="cl-mono inline-flex h-[22px] w-[22px] items-center justify-center border border-[var(--rule)] text-[13px] text-[var(--ink-3)] cursor-pointer hover:border-[var(--hot)] hover:text-[var(--hot)] disabled:cursor-not-allowed disabled:opacity-50"
               onClick={onClose}
+              disabled={archiving}
               data-testid="edit-panel-close"
               aria-label="Close"
             >
@@ -427,7 +511,11 @@ export function TaskEditPanel({
           </div>
 
           {/* Panel body */}
-          <div className="flex flex-1 flex-col gap-[13px] overflow-y-auto p-[14px_12px]">
+          <fieldset
+            className="flex flex-1 flex-col gap-[13px] overflow-y-auto p-[14px_12px]"
+            disabled={archiving}
+            data-testid="edit-panel-fields"
+          >
             {/* TITLE */}
             <EdField label="TASKING / TITLE">
               <textarea
@@ -443,7 +531,7 @@ export function TaskEditPanel({
             <EdField label="DISPOSITION">
               <DispositionRow
                 value={task.status}
-                onChange={(colId) => patchNow({ status: colId })}
+                onChange={(colId) => patchNow("status", { status: colId })}
                 testIdPrefix="edit-panel"
                 colLabel={colLabel}
               />
@@ -453,7 +541,7 @@ export function TaskEditPanel({
             <EdField label="PRIORITY">
               <PriorityRow
                 value={task.priority}
-                onChange={(p) => patchNow({ priority: p })}
+                onChange={(p) => patchNow("priority", { priority: p })}
                 testIdPrefix="edit-panel"
               />
             </EdField>
@@ -466,7 +554,7 @@ export function TaskEditPanel({
                   value={task.project ?? ""}
                   onChange={(e) =>
                     /* empty string is the sentinel for clear → UNFILED */
-                    patchNow({ project: e.target.value })
+                    patchNow("project", { project: e.target.value })
                   }
                   data-testid="edit-panel-operation"
                 >
@@ -485,7 +573,7 @@ export function TaskEditPanel({
                   onChange={(e) => {
                     const v = e.target.value;
                     /* BACKLOG → send null to clear cycle */
-                    patchNow({ cycle: v === "BACKLOG" ? null : v });
+                    patchNow("cycle", { cycle: v === "BACKLOG" ? null : v });
                   }}
                   data-testid="edit-panel-cycle"
                 >
@@ -598,7 +686,7 @@ export function TaskEditPanel({
                   }
                   onClick={() => {
                     if (!task.hold) focusReasonOnHold.current = true;
-                    patchNow({
+                    patchNow("holdToggle", {
                       hold: task.hold ? null : "BLOCKED",
                     });
                   }}
@@ -642,38 +730,39 @@ export function TaskEditPanel({
                 )}
               </div>
             </EdField>
-          </div>
+          </fieldset>
 
-          {/* Footer — leaving it disarms a pending destroy */}
+          {/* Footer — leaving it disarms a pending archive */}
           <div
             className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg)] px-[12px] py-[10px]"
             onPointerLeave={() => {
-              if (destroying) disarmDestroy();
+              if (archiveArmed && !archiving) disarmArchive();
             }}
             data-testid="edit-panel-foot"
           >
-            {/* Two-step destroy */}
-            {destroying ? (
+            {/* Two-step archive */}
+            {archiveArmed ? (
               <button
                 type="button"
-                className="cl-mono cursor-pointer border border-[var(--hot)] bg-[var(--hot)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[#000]"
-                onClick={confirmDestroy}
-                data-testid="edit-panel-destroy-confirm"
+                className="cl-mono cursor-pointer border border-[var(--hot)] bg-[var(--hot)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[#000] disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => void confirmArchive()}
+                disabled={archiving}
+                data-testid="edit-panel-archive-confirm"
               >
-                CONFIRM DESTROY?
+                {archiving ? "SAVING + ARCHIVING…" : "CONFIRM ARCHIVE?"}
               </button>
             ) : (
               <button
                 type="button"
                 className="cl-mono cursor-pointer border border-[var(--rule)] px-[10px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-[background,color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:bg-[var(--hot)] hover:text-[#000]"
-                onClick={armDestroy}
-                data-testid="edit-panel-destroy"
+                onClick={armArchive}
+                data-testid="edit-panel-archive"
               >
-                ✕ DESTROY
+                ARCHIVE
               </button>
             )}
             <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-4)]">
-              EDITS AUTO-SEALED
+              {archiving ? "MOVING TO RUBBISH BIN" : "EDITS AUTO-SEALED"}
             </span>
           </div>
         </div>

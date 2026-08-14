@@ -506,12 +506,12 @@ describe("CodexFrame responsive shell", () => {
     expect(document.querySelectorAll("main")).toHaveLength(1);
   });
 
-  it("shows the six roots and global actions in the mobile chrome", () => {
+  it("shows the seven roots and global actions in the mobile chrome", () => {
     mobileLayoutState.matches = true;
     renderFrame();
 
     const roots = screen.getByRole("navigation", { name: "Mobile roots" });
-    expect(within(roots).getAllByRole("button")).toHaveLength(6);
+    expect(within(roots).getAllByRole("button")).toHaveLength(7);
     expect(
       within(roots).getByRole("button", { name: "Atrium" }),
     ).toHaveAttribute("aria-current", "page");
@@ -525,6 +525,9 @@ describe("CodexFrame responsive shell", () => {
     ).toBeVisible();
     expect(
       within(roots).getByRole("button", { name: "Constellation" }),
+    ).toBeVisible();
+    expect(
+      within(roots).getByRole("button", { name: "Rubbish Bin" }),
     ).toBeVisible();
     expect(screen.getByRole("button", { name: "Search" })).toBeVisible();
     expect(screen.getByRole("button", { name: "New note" })).toBeVisible();
@@ -628,7 +631,7 @@ describe("CodexFrame responsive shell", () => {
     ).toBeVisible();
   });
 
-  it("fits six 44px mobile targets at 320px with short labels and full accessible names", () => {
+  it("fits seven 44px mobile targets at 320px with short labels and full accessible names", () => {
     mobileLayoutState.matches = true;
     renderFrame();
 
@@ -640,6 +643,7 @@ describe("CodexFrame responsive shell", () => {
       ["Bases", "BASE"],
       ["Feeds", "FEED"],
       ["Constellation", "GRAPH"],
+      ["Rubbish Bin", "BIN"],
     ] as const;
 
     expect(within(roots).getAllByRole("button")).toHaveLength(

@@ -9,6 +9,7 @@ use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex, reserve_
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+use clepsydra::vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 use clepsydra::vault::tree::load_note_meta;
 use rusqlite::Connection;
 use tempfile::TempDir;
@@ -489,8 +490,7 @@ fn uuid_shaped_targets_fall_back_to_unique_canonical_names_without_an_exact_id()
     let canonical_target = format!(
         "---\nid: 019fd000-0000-7000-8000-000000000725\ntitle: {UUID_TITLE}\n---\nCanonical target.\n"
     );
-    let (_tmp, vault) =
-        setup_vault(&[("source.md", &source), ("canonical.md", &canonical_target)]);
+    let (_tmp, vault) = setup_vault(&[("source.md", &source), ("canonical.md", &canonical_target)]);
     let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
 
     index.build(&vault).unwrap();
@@ -1814,4 +1814,114 @@ fn code_reservation_keeps_families_independent() {
     assert_eq!(reserve_code_number(&mut conn, "CYCLE", 13).unwrap(), 14);
     assert_eq!(reserve_code_number(&mut conn, "TASK", 7).unwrap(), 9);
     assert_eq!(reserve_code_number(&mut conn, "CYCLE", 13).unwrap(), 15);
+}
+
+#[test]
+fn rubbish_catalog_build_reconciliation_is_idempotent_and_excludes_item_bodies() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let rubbish_root = vault.root().join(".clepsydra/rubbish");
+    let store = RubbishStore::new(&rubbish_root);
+    let item_id = uuid::Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+    let page_id = uuid::Uuid::parse_str("10000000-0000-4000-8000-000000000001").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        page_id,
+        "archive/catalog-only.md",
+        "Catalog Only",
+        "ARCHIVE",
+        "2026-08-13T12:00:00Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap(),
+        Some("https://example.com/catalog-only".to_owned()),
+    )
+    .unwrap();
+    let page_bytes = br#"+++
+id = "10000000-0000-4000-8000-000000000001"
+title = "Must Stay Out"
+tags = ["rubbish-body-tag"]
+linked = "[[Rubbish Target]]"
++++
+# Secret rubbish body
+
+unsearchable-rubbish-token
+"#;
+    let mut prepared = store
+        .prepare_item(&item_id.to_string(), &manifest, page_bytes)
+        .unwrap();
+    prepared.publish().unwrap();
+
+    let invalid_dir = rubbish_root.join("broken-entry");
+    fs::create_dir_all(&invalid_dir).unwrap();
+    let invalid_page_bytes = b"invalid body must stay byte-identical";
+    let invalid_manifest_bytes = b"not json";
+    fs::write(invalid_dir.join("page.md"), invalid_page_bytes).unwrap();
+    fs::write(invalid_dir.join("manifest.json"), invalid_manifest_bytes).unwrap();
+    let valid_manifest_before =
+        fs::read(rubbish_root.join(item_id.to_string()).join("manifest.json")).unwrap();
+
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    index
+        .upsert_rubbish_entry(&RubbishListEntry::Invalid {
+            item_id: "stale-entry".to_owned(),
+            error: "must be pruned".to_owned(),
+        })
+        .unwrap();
+
+    index.build(&vault).unwrap();
+    let first_catalog = index.rubbish_entries().unwrap();
+    assert_eq!(first_catalog.len(), 2);
+    assert!(matches!(
+        &first_catalog[0],
+        RubbishListEntry::Valid(found) if found == &manifest
+    ));
+    assert!(matches!(
+        &first_catalog[1],
+        RubbishListEntry::Invalid { item_id, error }
+            if item_id == "broken-entry" && !error.is_empty()
+    ));
+    assert_eq!(index.rubbish_entry("stale-entry").unwrap(), None);
+
+    let normal_index_rows: i64 = index
+        .connection()
+        .query_row(
+            "SELECT
+                (SELECT count(*) FROM pages)
+              + (SELECT count(*) FROM canonical_names)
+              + (SELECT count(*) FROM pages_fts)
+              + (SELECT count(*) FROM tags)
+              + (SELECT count(*) FROM links)
+              + (SELECT count(*) FROM page_properties)
+              + (SELECT count(*) FROM page_bodies)
+              + (SELECT count(*) FROM blocks)",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(
+        normal_index_rows, 0,
+        "rubbish bodies must never enter normal page lookup, FTS, names, tags, graph, properties, bodies, or blocks"
+    );
+    assert_eq!(
+        fs::read(rubbish_root.join(item_id.to_string()).join("page.md")).unwrap(),
+        page_bytes
+    );
+    assert_eq!(
+        fs::read(rubbish_root.join(item_id.to_string()).join("manifest.json")).unwrap(),
+        valid_manifest_before
+    );
+    assert_eq!(
+        fs::read(invalid_dir.join("page.md")).unwrap(),
+        invalid_page_bytes
+    );
+    assert_eq!(
+        fs::read(invalid_dir.join("manifest.json")).unwrap(),
+        invalid_manifest_bytes
+    );
+
+    index.build(&vault).unwrap();
+    assert_eq!(index.rubbish_entries().unwrap(), first_catalog);
+    assert_eq!(
+        fs::read(rubbish_root.join(item_id.to_string()).join("page.md")).unwrap(),
+        page_bytes
+    );
 }

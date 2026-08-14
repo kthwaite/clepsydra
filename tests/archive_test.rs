@@ -1,5 +1,6 @@
 mod support;
 
+use std::fs;
 use std::sync::Arc;
 
 use axum::Router;
@@ -15,6 +16,8 @@ use clepsydra::api::events::SyncNotification;
 use clepsydra::api::{AppState, api_router_with_archive_limit};
 use clepsydra::vault::archive_hook::ArchiveDeleteHook;
 use clepsydra::vault::hooks::PostDeleteHook;
+use clepsydra::vault::index::ArchiveUrlOwner;
+use clepsydra::vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 use clepsydra::{ServerSettings, TlsSettings};
 use tempfile::TempDir;
 
@@ -65,7 +68,7 @@ fn store_blob(state: &AppState, data: &[u8], content_type: &str) -> String {
 }
 
 #[test]
-fn archive_delete_hook_reports_cas_decrement_failure() {
+fn archive_hook_reports_cas_decrement_failure() {
     use clepsydra::vault::hooks::PostDeleteHook;
     use clepsydra::vault::page::PageMeta;
     use clepsydra::vault::path::VaultPath;
@@ -107,6 +110,141 @@ fn archive_delete_hook_reports_cas_decrement_failure() {
         1,
         "a failing decrement must not prevent later references from being compensated"
     );
+}
+
+#[test]
+fn archive_hook_deduplicates_captured_archive_metadata_hashes() {
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    let (_server, _tmp, state) = setup_server();
+    let hash = {
+        let cas = state.cas.lock();
+        let stored = cas
+            .store(b"duplicate captured reference", "application/octet-stream")
+            .unwrap();
+        cas.store(b"duplicate captured reference", "application/octet-stream")
+            .unwrap();
+        stored.hash
+    };
+    let mut archive = toml::Table::new();
+    archive.insert(
+        "snapshot_hash".to_string(),
+        toml::Value::String(hash.clone()),
+    );
+    archive.insert(
+        "blobs".to_string(),
+        toml::Value::Array(vec![
+            toml::Value::String(hash.clone()),
+            toml::Value::String(hash.clone()),
+        ]),
+    );
+    let mut meta = PageMeta::new();
+    meta.extra
+        .insert("archive".to_string(), toml::Value::Table(archive));
+    let hook = ArchiveDeleteHook {
+        cas: Arc::clone(&state.cas),
+    };
+
+    hook.on_page_deleted(
+        &VaultPath::new("archive/duplicate.md").unwrap(),
+        &uuid::Uuid::now_v7(),
+        &meta,
+    )
+    .unwrap();
+
+    let cas = state.cas.lock();
+    assert_eq!(
+        cas.gc(std::time::Duration::ZERO).unwrap(),
+        0,
+        "duplicate metadata entries must release one reference, not all references"
+    );
+    cas.decrement_ref(&hash).unwrap();
+    assert_eq!(
+        cas.gc(std::time::Duration::ZERO).unwrap(),
+        1,
+        "exactly one reference must remain after the hook"
+    );
+}
+
+#[tokio::test]
+async fn purge_rubbish_releases_unique_captured_refs_and_leaves_ordinary_attachments_untouched() {
+    let (_server, tmp, state) = setup_server();
+    let attachment_path = state.vault.root().join("attachments/ordinary.bin");
+    fs::create_dir_all(attachment_path.parent().unwrap()).unwrap();
+    fs::write(&attachment_path, b"ordinary attachment bytes").unwrap();
+    let captured_hash = store_blob(&state, b"captured snapshot", "text/html");
+    let unrelated_hash = store_blob(
+        &state,
+        b"unrelated ordinary attachment CAS blob",
+        "application/octet-stream",
+    );
+    let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000371").unwrap();
+    let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000372").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        page_id,
+        "archive/captured-rubbish.md",
+        "Captured rubbish",
+        "ARCHIVE",
+        "2026-08-14T16:00:00Z".parse().unwrap(),
+        Some("https://example.test/captured-rubbish".to_owned()),
+    )
+    .unwrap();
+    let page_bytes = format!(
+        "+++\nid = \"{page_id}\"\ntitle = \"Captured rubbish\"\n[archive]\nsnapshot_hash = \"{captured_hash}\"\nblobs = [\"{captured_hash}\", \"{captured_hash}\"]\n+++\nCaptured body.\n"
+    );
+    let store = RubbishStore::for_vault(state.vault.root());
+    let mut prepared = store
+        .prepare_item(&item_id.to_string(), &manifest, page_bytes.as_bytes())
+        .unwrap();
+    prepared.publish().unwrap();
+    state
+        .index
+        .with_index({
+            let manifest = manifest.clone();
+            move |index, _| index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest))
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let result = state
+        .mutation_coordinator
+        .purge_rubbish(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.cas),
+            &item_id.to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.item_id, item_id);
+    assert_eq!(result.page_id, page_id);
+    assert_eq!(result.original_path, "archive/captured-rubbish.md");
+    assert_eq!(
+        fs::read(&attachment_path).unwrap(),
+        b"ordinary attachment bytes"
+    );
+    let cas_db = rusqlite::Connection::open(tmp.path().join("cas/cas.db")).unwrap();
+    let captured_refs: i64 = cas_db
+        .query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            [&captured_hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let unrelated_refs: i64 = cas_db
+        .query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            [&unrelated_hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(captured_refs, 0);
+    assert_eq!(unrelated_refs, 1);
+    assert!(store.read_item(&item_id.to_string()).is_err());
 }
 
 #[test]
@@ -226,6 +364,32 @@ fn archive_url_payload(url: &str, canonical_url: Option<&str>) -> serde_json::Va
         "markdown_body": body,
         "tags": ["archive"],
     })
+}
+
+fn publish_rubbish_archive(
+    root: &std::path::Path,
+    item_id: &str,
+    page_id: &str,
+    original_path: &str,
+    url: &str,
+) {
+    let store = RubbishStore::new(root.join(".clepsydra/rubbish"));
+    let manifest = RubbishManifest::new(
+        uuid::Uuid::parse_str(item_id).unwrap(),
+        uuid::Uuid::parse_str(page_id).unwrap(),
+        original_path,
+        "Binned Archive",
+        "ARCHIVE",
+        "2026-08-13T12:00:00Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap(),
+        Some(url.to_owned()),
+    )
+    .unwrap();
+    let mut prepared = store
+        .prepare_item(item_id, &manifest, b"stored rubbish archive bytes")
+        .unwrap();
+    prepared.publish().unwrap();
 }
 
 fn nested_noscript_payload(url: &str, title: &str, depth: usize) -> serde_json::Value {
@@ -532,6 +696,98 @@ async fn archive_duplicate_url_different_content_returns_409() {
 }
 
 #[tokio::test]
+async fn archive_url_rubbish_catalog_startup_reserves_without_request_time_manifest_scan() {
+    const ITEM_ID: &str = "00000000-0000-4000-8000-000000000041";
+    const PAGE_ID: &str = "10000000-0000-4000-8000-000000000041";
+    const ORIGINAL_PATH: &str = "archive/example.com/binned.md";
+    const URL: &str = "https://example.com/binned";
+
+    let (server, tmp, state) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            publish_rubbish_archive(root, ITEM_ID, PAGE_ID, ORIGINAL_PATH, URL);
+        })
+        .build()
+        .into_parts();
+    let owner = state
+        .index
+        .with_index(|index, _vault| index.find_by_archive_url(URL))
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        owner,
+        ArchiveUrlOwner::Rubbish {
+            item_id: ITEM_ID.to_owned(),
+            page_id: PAGE_ID.to_owned(),
+            original_path: ORIGINAL_PATH.to_owned(),
+        }
+    );
+
+    fs::remove_dir_all(tmp.path().join("vault/.clepsydra/rubbish")).unwrap();
+    let before = state.cas.lock().stats().unwrap();
+    let response = server
+        .post("/api/vault/archive")
+        .json(&archive_url_payload(URL, None))
+        .await;
+
+    response.assert_status(StatusCode::OK);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], "already_exists");
+    assert_eq!(body["page_id"], PAGE_ID);
+    assert_eq!(body["vault_path"], ORIGINAL_PATH);
+    assert_eq!(body["rubbish_item_id"], ITEM_ID);
+    let after = state.cas.lock().stats().unwrap();
+    assert_eq!(after.blob_count, before.blob_count);
+    assert_eq!(after.total_size_bytes, before.total_size_bytes);
+}
+
+#[tokio::test]
+async fn archive_url_rubbish_catalog_explicit_index_rebuild_reconciles_new_items() {
+    const ITEM_ID: &str = "00000000-0000-4000-8000-000000000042";
+    const PAGE_ID: &str = "10000000-0000-4000-8000-000000000042";
+    const ORIGINAL_PATH: &str = "archive/example.com/rebuild.md";
+    const URL: &str = "https://example.com/rebuild";
+
+    let (server, tmp, state) = ApiFixture::builder().build().into_parts();
+    publish_rubbish_archive(
+        &tmp.path().join("vault"),
+        ITEM_ID,
+        PAGE_ID,
+        ORIGINAL_PATH,
+        URL,
+    );
+    assert!(
+        state
+            .index
+            .with_index(|index, _vault| index.find_by_archive_url(URL))
+            .await
+            .unwrap()
+            .unwrap()
+            .is_none()
+    );
+
+    server
+        .post("/api/vault/index/rebuild")
+        .await
+        .assert_status(StatusCode::OK);
+    let owner = state
+        .index
+        .with_index(|index, _vault| index.find_by_archive_url(URL))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        owner,
+        Some(ArchiveUrlOwner::Rubbish {
+            item_id: ITEM_ID.to_owned(),
+            page_id: PAGE_ID.to_owned(),
+            original_path: ORIGINAL_PATH.to_owned(),
+        })
+    );
+}
+
+#[tokio::test]
 async fn archive_status_returns_stats() {
     let (server, _tmp, _state) = setup_server();
 
@@ -634,7 +890,7 @@ async fn archive_content_hash_mismatch_rejected() {
 }
 
 #[tokio::test]
-async fn archive_delete_decrements_cas_ref_count() {
+async fn archive_retains_cas_refs_until_rubbish_item_is_purged() {
     let (server, _tmp, state) = setup_server();
 
     let blob_data = b"image for delete test";
@@ -667,19 +923,29 @@ async fn archive_delete_decrements_cas_ref_count() {
         assert!(cas.exists(&blob_hash).unwrap());
     }
 
-    // Delete the page
+    // Archive the page. Its captured blob remains live while the retained item
+    // can still be restored.
     let delete_url = format!("/api/vault/pages/{}", vault_path);
     let del_res = server.delete(&delete_url).await;
-    del_res.assert_status(StatusCode::NO_CONTENT);
-
-    // Verify blob ref_count was decremented (should be 0, eligible for GC)
+    del_res.assert_status(StatusCode::CREATED);
+    let archived: serde_json::Value = del_res.json();
+    let item_id = archived["item_id"].as_str().unwrap();
     {
         let cas = state.cas.lock();
-        // Blob should still exist in CAS (GC hasn't run), but ref_count = 0
-        assert!(
-            cas.exists(&blob_hash).unwrap(),
-            "blob should still exist in CAS after delete (awaiting GC)"
-        );
+        assert_eq!(cas.gc(std::time::Duration::ZERO).unwrap(), 0);
+        assert!(cas.exists(&blob_hash).unwrap());
+    }
+
+    // Permanent purge is the point at which the retained archive's CAS
+    // reference is released.
+    server
+        .delete(&format!("/api/vault/rubbish/{item_id}"))
+        .await
+        .assert_status(StatusCode::OK);
+    {
+        let cas = state.cas.lock();
+        assert!(cas.gc(std::time::Duration::ZERO).unwrap() >= 1);
+        assert!(!cas.exists(&blob_hash).unwrap());
     }
 }
 

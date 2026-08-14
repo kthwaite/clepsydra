@@ -6,9 +6,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BoardResponse, BoardTask } from "#/api/board";
 import {
   applyTaskPatch,
+  useArchiveTask,
   useCreateCycle,
   useCreateTask,
-  useDeleteTask,
   usePatchCycle,
   usePatchTask,
 } from "#/api/board";
@@ -256,31 +256,72 @@ describe("Board mutation error toasts", () => {
     });
   });
 
-  it("toasts when delete task fails", async () => {
+  it("accepts the typed archive summary and invalidates board, page, and Rubbish caches", async () => {
     const queryClient = freshQueryClient();
-    queryClient.setQueryData(queryKeys.board.all, {
-      columns: [],
-      cycles: [],
-      operations: [],
-      tasks: [makeTask()],
-    });
+    const pageListKey = ["get", "/api/vault/pages"] as const;
+    const archived = {
+      archive_url: null,
+      deleted_at: "2026-08-14T10:00:00Z",
+      item_id: "rubbish-1",
+      kind: "TASK",
+      original_path: "tasks/T-1.md",
+      page_id: "task-1",
+      title: "Test task",
+    };
+    queryClient.setQueryData(queryKeys.board.all, makeBoard([makeTask()]));
+    queryClient.setQueryData(pageListKey, []);
+    queryClient.setQueryData(queryKeys.rubbish.all, { items: [] });
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(archived), {
+        status: 201,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
 
-    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network error"));
-
-    const { result } = renderHook(() => useDeleteTask(), {
+    const { result } = renderHook(() => useArchiveTask(), {
       wrapper: wrapper(queryClient),
     });
 
-    try {
-      await result.current.mutateAsync({
+    const response = await result.current.mutateAsync({
+      path: "tasks/T-1.md",
+    });
+
+    expect(response).toEqual(archived);
+    const request = fetchSpy.mock.calls[0][0];
+    const url =
+      typeof request === "string"
+        ? request
+        : request instanceof URL
+          ? request.toString()
+          : request.url;
+    expect(new URL(url, "http://localhost").search).toBe("");
+    expect(queryClient.getQueryState(queryKeys.board.all)?.isInvalidated).toBe(
+      true,
+    );
+    expect(queryClient.getQueryState(pageListKey)?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(queryKeys.rubbish.all)?.isInvalidated).toBe(
+      true,
+    );
+  });
+
+  it("toasts when archiving a task fails", async () => {
+    const queryClient = freshQueryClient();
+    queryClient.setQueryData(queryKeys.board.all, makeBoard([makeTask()]));
+
+    vi.spyOn(global, "fetch").mockRejectedValueOnce(new Error("Network error"));
+
+    const { result } = renderHook(() => useArchiveTask(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    await expect(
+      result.current.mutateAsync({
         path: "tasks/T-1.md",
-      });
-    } catch {
-      // Expected error
-    }
+      }),
+    ).rejects.toThrow("Network error");
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("TASK DESTROY FAILED");
+      expect(toast.error).toHaveBeenCalledWith("TASK ARCHIVE FAILED");
     });
   });
 

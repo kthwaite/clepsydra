@@ -578,9 +578,7 @@ fn startup_index_error(
         .map(|recovered| recovered.directory().display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "startup index {operation} failed; retained transaction paths: {retained}: {source}"
-    )
+    format!("startup index {operation} failed; retained transaction paths: {retained}: {source}")
 }
 
 fn startup_transaction_error(
@@ -616,6 +614,8 @@ pub async fn build_app_state_with_feeds(
     feed_settings: &FeedsSettings,
 ) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let vault = Vault::open(vault_root)?;
+    let rubbish = vault::rubbish::RubbishStore::for_vault(vault.root());
+    rubbish.reconcile_purge_tombstones()?;
     let recovered_batches =
         vault::batch_mutation::recover_pending(vault.root()).map_err(|source| {
             startup_transaction_error("startup filesystem recovery", source, vault.root())
@@ -691,6 +691,7 @@ pub async fn build_app_state_with_feeds(
         vault,
         index: index_handle,
         cas: cas_arc,
+        rubbish,
         warnings: parking_lot::Mutex::new(stats.warnings),
         change_tx: change_broadcast_tx,
         hooks,
@@ -1237,6 +1238,31 @@ mod state_tests {
     }
 
     #[tokio::test]
+    async fn build_app_state_finishes_interrupted_rubbish_purge_tombstones() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let item_id = "00000000-0000-4000-8000-000000000006";
+        let tombstone = root
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
+        std::fs::create_dir_all(&tombstone).unwrap();
+        std::fs::write(tombstone.join("page.md"), b"partial").unwrap();
+
+        let state = build_app_state(&root).await.unwrap();
+
+        assert!(!tombstone.exists());
+        assert_eq!(state.rubbish.list_entries().unwrap(), Vec::new());
+        let catalog = state
+            .index
+            .with_index(|index, _| index.rubbish_entries())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(catalog, Vec::new());
+    }
+
+    #[tokio::test]
     async fn build_app_state_replays_committed_academic_move_hooks_before_finalization() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
@@ -1271,8 +1297,7 @@ mod state_tests {
         )
         .unwrap();
 
-        let source =
-            vault::path::VaultPath::new("library/papers/my-paper.md").unwrap();
+        let source = vault::path::VaultPath::new("library/papers/my-paper.md").unwrap();
         let destination = vault::path::VaultPath::new("archive/my-paper.md").unwrap();
         let command = vault::batch_mutation::BatchMutationCommand {
             intents: vec![vault::batch_mutation::BatchPathIntent::Move {
@@ -1683,7 +1708,10 @@ mod settings_tests {
 
         let error = generate_certificates_if_missing(&blocked, &cert, &key).unwrap_err();
 
-        assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
         assert!(!cert.exists());
         assert!(!key.exists());
     }

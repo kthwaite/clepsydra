@@ -1176,22 +1176,32 @@ async fn get_nonexistent_returns_404() {
 }
 
 #[tokio::test]
-async fn delete_page_no_backlinks() {
+async fn delete_page_archives_without_backlinks() {
     let (server, _tmp) = setup_server();
 
-    // Create and then delete
     server
         .post("/api/vault/pages/ephemeral.md")
         .json(&serde_json::json!({ "title": "Ephemeral" }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);
 
-    let res = server.delete("/api/vault/pages/ephemeral.md").await;
-    res.assert_status(axum::http::StatusCode::NO_CONTENT);
+    let archived = server.delete("/api/vault/pages/ephemeral.md").await;
+    archived.assert_status(axum::http::StatusCode::CREATED);
+    let archived: serde_json::Value = archived.json();
+    assert_eq!(archived["original_path"], "ephemeral.md");
+    assert!(archived["item_id"].as_str().is_some());
 
-    // Confirm it's gone
-    let res = server.get("/api/vault/pages/ephemeral.md").await;
-    res.assert_status(axum::http::StatusCode::NOT_FOUND);
+    server
+        .get("/api/vault/pages/ephemeral.md")
+        .await
+        .assert_status(axum::http::StatusCode::NOT_FOUND);
+    server
+        .get(&format!(
+            "/api/vault/rubbish/{}",
+            archived["item_id"].as_str().unwrap()
+        ))
+        .await
+        .assert_status_ok();
 }
 
 #[tokio::test]
@@ -1738,7 +1748,7 @@ async fn page_move_commits_primary_and_backlink_rewrite_before_one_notification(
 }
 
 #[tokio::test]
-async fn page_delete_commits_primary_and_backlink_rewrite_before_one_notification() {
+async fn delete_page_archives_primary_without_backlink_rewrite_before_one_notification() {
     let fixture = ApiFixture::builder().build();
     let vault_root = fixture.temp_dir.path().join("vault");
     fixture
@@ -1758,28 +1768,30 @@ async fn page_delete_commits_primary_and_backlink_rewrite_before_one_notificatio
         .post("/api/vault/index/rebuild")
         .await
         .assert_status_ok();
+    let backlink_before = fs::read(vault_root.join("linker.md")).unwrap();
     let mut notifications = fixture.state.change_tx.subscribe();
 
     fixture
         .server
-        .delete("/api/vault/pages/target.md?force=true&rewrite=plain_text")
+        .delete("/api/vault/pages/target.md")
         .await
-        .assert_status(StatusCode::NO_CONTENT);
+        .assert_status(StatusCode::CREATED);
 
     assert!(!vault_root.join("target.md").exists());
-    let backlink = fs::read_to_string(vault_root.join("linker.md")).unwrap();
-    assert!(!backlink.contains("[[Target]]"));
-    assert!(backlink.contains("See Target here."));
-    match notifications.try_recv().expect("delete notification") {
+    assert_eq!(
+        fs::read(vault_root.join("linker.md")).unwrap(),
+        backlink_before
+    );
+    match notifications.try_recv().expect("archive notification") {
         SyncNotification::IndexChanged { upserted, removed } => {
-            assert_eq!(upserted, vec!["linker.md"]);
+            assert!(upserted.is_empty());
             assert_eq!(removed, vec!["target.md"]);
         }
-        notification => panic!("unexpected delete notification: {notification:?}"),
+        notification => panic!("unexpected archive notification: {notification:?}"),
     }
     assert!(
         notifications.try_recv().is_err(),
-        "page delete must publish exactly one notification"
+        "page archive must publish exactly one notification"
     );
 }
 
@@ -1816,133 +1828,6 @@ async fn move_page_destination_exists_returns_409() {
         .json(&serde_json::json!({"destination": "b.md"}))
         .await;
     assert_eq!(res.status_code(), StatusCode::CONFLICT);
-}
-
-// ---------------------------------------------------------------------------
-// Delete with backlinks tests
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn delete_with_backlinks_returns_409() {
-    let (server, _tmp) = setup_server();
-
-    // Create target page
-    server
-        .post("/api/vault/pages/target.md")
-        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Create linker page that links to target
-    server
-        .post("/api/vault/pages/linker.md")
-        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild index to register links
-    server.post("/api/vault/index/rebuild").await;
-
-    // DELETE target without force -> 409 with backlinks list
-    let res = server.delete("/api/vault/pages/target.md").await;
-    assert_eq!(res.status_code(), StatusCode::CONFLICT);
-
-    let body: serde_json::Value = res.json();
-    assert!(
-        body["detail"]["backlinks"].is_array(),
-        "expected backlinks in error detail, got: {body}"
-    );
-}
-
-#[tokio::test]
-async fn delete_force_plain_text_rewrites() {
-    let (server, tmp) = setup_server();
-    let vault_root = tmp.path().join("vault");
-
-    // Create target page
-    server
-        .post("/api/vault/pages/target.md")
-        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Create linker page that links to target
-    server
-        .post("/api/vault/pages/linker.md")
-        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild index to register links
-    server.post("/api/vault/index/rebuild").await;
-
-    // DELETE target?force=true&rewrite=plain_text -> 204
-    let res = server
-        .delete("/api/vault/pages/target.md?force=true&rewrite=plain_text")
-        .await;
-    assert_eq!(res.status_code(), StatusCode::NO_CONTENT);
-
-    // Verify target is deleted
-    assert!(!vault_root.join("target.md").exists());
-
-    // Verify linker.md has plain text instead of [[Target]]
-    let content = fs::read_to_string(vault_root.join("linker.md")).unwrap();
-    assert!(
-        !content.contains("[[Target]]"),
-        "old link should be rewritten, but found: {content}"
-    );
-    assert!(
-        content.contains("Target"),
-        "display text should remain as plain text, but found: {content}"
-    );
-    // Should NOT have wikilink brackets
-    assert!(
-        !content.contains("[["),
-        "should not have wikilink brackets, but found: {content}"
-    );
-}
-
-#[tokio::test]
-async fn delete_force_unlink_rewrites() {
-    let (server, tmp) = setup_server();
-    let vault_root = tmp.path().join("vault");
-
-    // Create target page
-    server
-        .post("/api/vault/pages/target.md")
-        .json(&serde_json::json!({"title": "Target", "body": "Target content."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Create linker page that links to target
-    server
-        .post("/api/vault/pages/linker.md")
-        .json(&serde_json::json!({"title": "Linker", "body": "See [[Target]] here."}))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild index to register links
-    server.post("/api/vault/index/rebuild").await;
-
-    // DELETE target?force=true&rewrite=unlink -> 204
-    let res = server
-        .delete("/api/vault/pages/target.md?force=true&rewrite=unlink")
-        .await;
-    assert_eq!(res.status_code(), StatusCode::NO_CONTENT);
-
-    // Verify target is deleted
-    assert!(!vault_root.join("target.md").exists());
-
-    // Verify linker.md has strikethrough text instead of [[Target]]
-    let content = fs::read_to_string(vault_root.join("linker.md")).unwrap();
-    assert!(
-        !content.contains("[[Target]]"),
-        "old link should be rewritten, but found: {content}"
-    );
-    assert!(
-        content.contains("~~Target~~"),
-        "expected strikethrough ~~Target~~, but found: {content}"
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2341,7 +2226,10 @@ async fn reference_issues_filter_before_paginating() {
     assert_eq!(response["offset"], 0);
     assert_eq!(response["items"].as_array().unwrap().len(), 1);
     assert_eq!(response["items"][0]["kind"], "broken_block_ref");
-    assert_eq!(response["items"][0]["actions"], serde_json::json!(["open_source"]));
+    assert_eq!(
+        response["items"][0]["actions"],
+        serde_json::json!(["open_source"])
+    );
 }
 
 #[tokio::test]
@@ -2468,13 +2356,11 @@ async fn reference_issues_return_stable_ordering_and_fingerprints() {
     let second: serde_json::Value = server.get(path).await.json();
 
     assert_eq!(first, second);
-    assert!(
-        first["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|issue| issue["fingerprint"].as_str().is_some_and(|value| value.len() == 64))
-    );
+    assert!(first["items"].as_array().unwrap().iter().all(|issue| {
+        issue["fingerprint"]
+            .as_str()
+            .is_some_and(|value| value.len() == 64)
+    }));
 }
 
 #[tokio::test]
@@ -2507,7 +2393,14 @@ fn reference_issues_openapi_registers_route_parameters_and_schemas() {
 
     assert_eq!(
         names,
-        BTreeSet::from(["actionable", "kind", "limit", "offset", "page_kind", "project"])
+        BTreeSet::from([
+            "actionable",
+            "kind",
+            "limit",
+            "offset",
+            "page_kind",
+            "project"
+        ])
     );
     let limit = parameters
         .iter()
@@ -2585,8 +2478,7 @@ async fn reference_repair_issue(
         .get(&format!("/api/vault/index/issues?kind={kind}&limit=200"))
         .await;
     response.assert_status_ok();
-    response
-        .json::<serde_json::Value>()["items"]
+    response.json::<serde_json::Value>()["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -2654,8 +2546,14 @@ async fn reference_repair_preview_and_apply_report_the_same_text_edit() {
         preview["after"],
         format!("[[{candidate_id}|the chosen twin]]")
     );
-    assert_eq!(preview["plan"]["text_edits"][0]["old_text"], preview["before"]);
-    assert_eq!(preview["plan"]["text_edits"][0]["new_text"], preview["after"]);
+    assert_eq!(
+        preview["plan"]["text_edits"][0]["old_text"],
+        preview["before"]
+    );
+    assert_eq!(
+        preview["plan"]["text_edits"][0]["new_text"],
+        preview["after"]
+    );
 
     let apply = server
         .post("/api/vault/index/issues/apply")
@@ -2743,11 +2641,9 @@ async fn reference_repair_genuine_source_io_error_remains_internal() {
 #[tokio::test]
 async fn reference_repair_candidate_deleted_after_projection_is_stale() {
     let fixture = reference_repair_fixture();
-    let issue =
-        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
     let candidate = issue["candidates"][0].clone();
-    let request =
-        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    let request = reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
     fixture
         .server
         .post("/api/vault/index/issues/preview")
@@ -2794,11 +2690,9 @@ async fn reference_repair_candidate_deleted_after_projection_is_stale() {
 #[tokio::test]
 async fn reference_repair_candidate_changed_after_projection_is_stale() {
     let fixture = reference_repair_fixture();
-    let issue =
-        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
     let candidate = issue["candidates"][0].clone();
-    let request =
-        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    let request = reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
     fixture
         .server
         .post("/api/vault/index/issues/preview")
@@ -2842,8 +2736,7 @@ async fn reference_repair_candidate_changed_after_projection_is_stale() {
 #[tokio::test]
 async fn reference_repair_competing_canonical_target_after_projection_is_stale() {
     let fixture = reference_repair_fixture();
-    let issue =
-        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
     let request = reference_repair_replace_request(
         &issue,
         issue["candidates"][0]["page_id"].as_str().unwrap(),
@@ -2904,12 +2797,16 @@ async fn reference_repair_create_resolves_original_no_match_after_indexing() {
     assert_eq!(preview["after"], "[[Missing Page]]");
     assert_eq!(preview["plan"]["text_edits"], serde_json::json!([]));
     let file_ops = preview["plan"]["file_ops"].as_array().unwrap();
-    assert!(file_ops.iter().any(|op| {
-        op["kind"] == "create_dir" && op["path"] == "new"
-    }));
-    assert!(file_ops.iter().any(|op| {
-        op["kind"] == "create_dir" && op["path"] == "new/nested"
-    }));
+    assert!(
+        file_ops
+            .iter()
+            .any(|op| { op["kind"] == "create_dir" && op["path"] == "new" })
+    );
+    assert!(
+        file_ops
+            .iter()
+            .any(|op| { op["kind"] == "create_dir" && op["path"] == "new/nested" })
+    );
     let create_file = file_ops
         .iter()
         .find(|op| op["kind"] == "create_file")
@@ -2924,8 +2821,7 @@ async fn reference_repair_create_resolves_original_no_match_after_indexing() {
         .await
         .json();
     assert_eq!(
-        second_preview["plan"]["file_ops"],
-        preview["plan"]["file_ops"],
+        second_preview["plan"]["file_ops"], preview["plan"]["file_ops"],
         "the immutable created-page identity must not be regenerated"
     );
     let apply = server
@@ -3019,8 +2915,7 @@ async fn reference_repair_encrypted_source_has_no_preview_or_apply_action() {
         .json();
     let issue = &response["items"][0];
     assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
-    let request =
-        reference_repair_replace_request(issue, "019fd000-0000-7000-8000-000000000614");
+    let request = reference_repair_replace_request(issue, "019fd000-0000-7000-8000-000000000614");
 
     for endpoint in ["preview", "apply"] {
         let response = fixture
@@ -3073,8 +2968,7 @@ async fn reference_repair_property_reference_uses_format_preserving_patch() {
         ("notes/property-twin-a.md", twin_a),
         ("notes/property-twin-b.md", twin_b),
     ]);
-    let issue =
-        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let issue = reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
     let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
     let request = reference_repair_replace_request(&issue, candidate_id);
 
@@ -3084,8 +2978,7 @@ async fn reference_repair_property_reference_uses_format_preserving_patch() {
         .await
         .assert_status_ok();
 
-    let content =
-        fs::read_to_string(tmp.path().join("vault/notes/property-source.md")).unwrap();
+    let content = fs::read_to_string(tmp.path().join("vault/notes/property-source.md")).unwrap();
     assert!(content.contains("# preserve this comment"));
     assert!(content.contains("status = \"draft\" # and this one"));
     assert!(content.contains("Body stays byte-for-byte."));
@@ -3103,8 +2996,7 @@ async fn reference_repair_property_reference_can_patch_linkable_system_arrays() 
         ("notes/tagged-twin-a.md", twin_a),
         ("notes/tagged-twin-b.md", twin_b),
     ]);
-    let issue =
-        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let issue = reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
     let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
 
     server
@@ -3113,8 +3005,7 @@ async fn reference_repair_property_reference_can_patch_linkable_system_arrays() 
         .await
         .assert_status_ok();
 
-    let content =
-        fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
+    let content = fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
     assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
     assert!(content.contains("\"other\""));
 }
@@ -3198,6 +3089,65 @@ Content.
 
     // Should have text_edits (may be empty if only wikilinks and stem doesn't change)
     assert!(plan["text_edits"].is_array());
+}
+
+#[tokio::test]
+async fn preview_mutation_rejects_legacy_page_delete_and_rewrite_contract() {
+    let target = "\
+---
+id: 00000000-0000-0000-0000-000000000122
+title: Target
+---
+Target body.
+";
+    let (server, _tmp) = setup_server_with_files(&[("target.md", target)]);
+
+    server
+        .post("/api/vault/index/preview-mutation")
+        .json(&serde_json::json!({
+            "operation": "delete_page",
+            "source": "target.md"
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    server
+        .post("/api/vault/index/preview-mutation")
+        .json(&serde_json::json!({
+            "operation": "move_page",
+            "source": "target.md",
+            "destination": "moved.md",
+            "rewrite": "plain_text"
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn preview_mutation_openapi_excludes_legacy_page_delete_contract() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let schemas = &openapi["components"]["schemas"];
+    let request = &schemas["PreviewMutationRequest"];
+    let properties = request["properties"].as_object().unwrap();
+
+    assert!(
+        !properties.contains_key("rewrite"),
+        "legacy rewrite input remains in PreviewMutationRequest: {request}"
+    );
+    assert_eq!(
+        properties["operation"]["$ref"],
+        "#/components/schemas/PreviewMutationOperation"
+    );
+    assert_eq!(
+        schemas["PreviewMutationOperation"]["enum"],
+        serde_json::json!(["move_page", "move_folder"])
+    );
+    assert!(
+        !serde_json::to_string(request)
+            .unwrap()
+            .contains("delete_page"),
+        "legacy delete_page operation remains in PreviewMutationRequest: {request}"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -4744,12 +4694,11 @@ async fn content_index_groups_tags_and_links_per_page() {
 }
 
 // ---------------------------------------------------------------------------
-// delete_folder re-resolves affected links
+// Page archive and folder delete link-resolution behavior
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn delete_blocked_by_unresolved_backlinks() {
-    // Set up pages so that [[Target]] is ambiguous (unresolved)
+async fn delete_page_archives_despite_unresolved_backlinks_without_rewriting_them() {
     let target_a = "\
 ---
 id: 00000000-0000-0000-0000-000000000180
@@ -4772,16 +4721,21 @@ title: Source
 See [[Target]].
 ";
 
-    let (server, _tmp) = setup_server_with_files(&[
+    let (server, tmp) = setup_server_with_files(&[
         ("target.md", target_a),
         ("sub/target.md", target_b),
         ("source.md", source),
     ]);
+    let source_before = fs::read(tmp.path().join("vault/source.md")).unwrap();
 
-    // Try to delete target.md without force — should be blocked
-    // even though the link is unresolved (target_id is NULL due to ambiguity)
-    let res = server.delete("/api/vault/pages/target.md").await;
-    res.assert_status(StatusCode::CONFLICT);
+    server
+        .delete("/api/vault/pages/target.md")
+        .await
+        .assert_status(StatusCode::CREATED);
+    assert_eq!(
+        fs::read(tmp.path().join("vault/source.md")).unwrap(),
+        source_before
+    );
 }
 
 #[tokio::test]
@@ -5682,7 +5636,12 @@ async fn attachment_upload_rejects_duplicate_named_fields_and_unknown_binary_fie
             .await
             .assert_status_bad_request();
 
-        assert!(!tmp.path().join("vault/_attachments").join(destination).exists());
+        assert!(
+            !tmp.path()
+                .join("vault/_attachments")
+                .join(destination)
+                .exists()
+        );
         assert_no_attachment_temporaries(&tmp);
     }
 }
@@ -5703,8 +5662,7 @@ async fn attachment_upload_rejects_filename_less_unknown_binary_field() {
         .assert_status_bad_request();
 
     assert!(
-        !tmp
-            .path()
+        !tmp.path()
             .join("vault/_attachments/filenameless.bin")
             .exists()
     );
@@ -5714,12 +5672,9 @@ async fn attachment_upload_rejects_filename_less_unknown_binary_field() {
 #[tokio::test]
 async fn attachment_upload_openapi_documents_named_multipart_fields() {
     let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
-    let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]
-        ["content"]["multipart/form-data"]["schema"];
-    assert_eq!(
-        schema["$ref"],
-        "#/components/schemas/AttachmentUploadForm"
-    );
+    let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]["content"]
+        ["multipart/form-data"]["schema"];
+    assert_eq!(schema["$ref"], "#/components/schemas/AttachmentUploadForm");
     let form = &openapi["components"]["schemas"]["AttachmentUploadForm"];
     assert_eq!(form["type"], "object");
     assert_eq!(

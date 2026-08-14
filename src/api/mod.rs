@@ -23,6 +23,7 @@ pub mod pages;
 pub mod pagination;
 pub mod properties;
 pub mod query;
+pub mod rubbish;
 pub mod tasks;
 pub mod uptime;
 
@@ -35,6 +36,7 @@ use crate::api::events::SyncNotification;
 use crate::vault::Vault;
 use crate::vault::cas::ContentStore;
 use crate::vault::index_handle::IndexHandle;
+use crate::vault::rubbish::RubbishStore;
 
 /// Time source for date-sensitive API behavior.
 pub trait Clock: Send + Sync {
@@ -65,6 +67,8 @@ pub struct AppState {
     pub index: IndexHandle,
     /// Content-addressable storage (CAS) instance, shared across all API handlers.
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,
+    /// Authoritative reversible page-lifecycle store beneath the vault root.
+    pub rubbish: RubbishStore,
     /// Broadcast channel for notifying API clients of vault changes.
     pub warnings: parking_lot::Mutex<Vec<String>>,
     /// Broadcast channel for notifying API clients of vault changes.
@@ -140,6 +144,9 @@ pub(crate) fn mutation_error(
         MutationError::NotFound(path) => {
             error::ApiError::not_found(format!("page not found: {}", path.as_str()))
         }
+        MutationError::RubbishItemNotFound(item_id) => {
+            error::ApiError::not_found(format!("rubbish item not found: {item_id}"))
+        }
         MutationError::Conflict(message) => error::ApiError::conflict(message),
         MutationError::Stale(path) => {
             error::ApiError::conflict(format!("page changed during mutation: {}", path.as_str()))
@@ -158,7 +165,16 @@ pub(crate) fn mutation_error(
         | MutationError::BatchPrepare { .. }
         | MutationError::BatchPublish { .. }
         | MutationError::BatchRollback { .. }
-        | MutationError::BatchRecovery { .. } => error::ApiError::internal(error.to_string()),
+        | MutationError::BatchRecovery { .. }
+        | MutationError::RubbishEnumeration { .. }
+        | MutationError::RubbishStore { .. }
+        | MutationError::RubbishPageMetadata { .. }
+        | MutationError::RubbishPageIdentity { .. }
+        | MutationError::RubbishCleanup { .. }
+        | MutationError::RubbishCatalog { .. }
+        | MutationError::RubbishRemovalCatalogReconcile { .. } => {
+            error::ApiError::internal(error.to_string())
+        }
     }
 }
 
@@ -183,6 +199,7 @@ pub fn api_router_with_archive_limit(
         .nest("/pages", pages::router())
         .nest("/pages-move", pages::move_router())
         .nest("/pages-assign", pages::assign_router())
+        .nest("/rubbish", rubbish::router())
         .route(
             "/pages-assign-bulk",
             axum::routing::post(pages::assign_bulk),

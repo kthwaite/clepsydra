@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { clearBlockDetailsForPagePaths } from "#/api/blocks";
-import { invalidateByPath, queryKeys } from "#/api/keys";
+import { invalidateByPath, invalidateRubbish, queryKeys } from "#/api/keys";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
@@ -44,6 +44,7 @@ export function useVaultEvents(): ConnectionStatus {
             invalidateByPath(queryClient, queryKeys.folders.pathPrefix);
             invalidateByPath(queryClient, queryKeys.index.pathPrefix);
             invalidateByPath(queryClient, queryKeys.academic.pathPrefix);
+            invalidateRubbish(queryClient);
             queryClient.invalidateQueries({ queryKey: queryKeys.blocks.all });
             queryClient.invalidateQueries({ queryKey: queryKeys.tasks.all });
             queryClient.invalidateQueries({ queryKey: queryKeys.agenda.all });

@@ -487,6 +487,7 @@ name = "All"
         let feed_client =
             crate::feeds::network::CheckedHttpClient::new(feed_settings.max_response_bytes)
                 .unwrap();
+        let rubbish = crate::vault::rubbish::RubbishStore::for_vault(vault.root());
         let state = Arc::new(AppState {
             started_at: std::time::Instant::now(),
             clock: Arc::new(FixedClock(
@@ -497,6 +498,7 @@ name = "All"
             vault,
             index,
             cas,
+            rubbish,
             warnings: parking_lot::Mutex::new(Vec::new()),
             change_tx,
             hooks: Arc::new(Vec::new()),

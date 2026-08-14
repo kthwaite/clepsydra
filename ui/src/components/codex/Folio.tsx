@@ -31,7 +31,7 @@ import {
 } from "#/api/index";
 import type { PageMeta } from "#/api/types";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
-import { useAssignPage } from "#/api/pages";
+import { type ArchivedPage, useAssignPage } from "#/api/pages";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import {
@@ -72,6 +72,7 @@ import { WikilinkResolutionProvider } from "#/editor/wikilinkResolution";
 import { useDebounce } from "#/hooks/useDebounce";
 import {
   registerFolioHistoryTraversalGuard,
+  replaceFolioHistoryAfterArchive,
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
@@ -155,10 +156,8 @@ function RawMarkdownNavigationGuard({
       leaveApprovedRef.current = false;
       return true;
     };
-    const unregisterWorkspaceGuard =
-      registerWorkspaceTransitionGuard(guard);
-    const unregisterHistoryGuard =
-      registerFolioHistoryTraversalGuard(guard);
+    const unregisterWorkspaceGuard = registerWorkspaceTransitionGuard(guard);
+    const unregisterHistoryGuard = registerFolioHistoryTraversalGuard(guard);
     return () => {
       unregisterWorkspaceGuard();
       unregisterHistoryGuard();
@@ -249,6 +248,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const mobile = useMobileLayout();
   const navigate = useNavigate();
   const router = useRouter();
+  const routerHistory = router?.history;
   const leaveFolioWorkspace = useLeaveFolioWorkspace();
   const isTodayDraftPath = path === todayJournalPath();
   const { data: journalToday, isLoading: isJournalTodayLoading } =
@@ -291,7 +291,19 @@ export function Folio({ tabId, path }: FolioProps) {
       : null;
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
+  const setTabPageId = useWorkspaceStore((state) => state.setTabPageId);
   const closeTab = useWorkspaceStore((s) => s.closeTab);
+  const closeArchivedPageTabs = useWorkspaceStore(
+    (state) => state.closeArchivedPageTabs,
+  );
+  const handleArchived = useCallback(
+    (archived: ArchivedPage) => {
+      closeArchivedPageTabs(archived.page_id, archived.original_path);
+      if (routerHistory) replaceFolioHistoryAfterArchive(routerHistory);
+      if (mobile) void navigate({ to: "/" });
+    },
+    [closeArchivedPageTabs, mobile, navigate, routerHistory],
+  );
   const focusRequestId = useWorkspaceStore(
     (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
   );
@@ -300,6 +312,9 @@ export function Folio({ tabId, path }: FolioProps) {
     subscribeFolioHistoryRestorationRequests,
     () => readFolioHistoryRestorationRequestId(tabId, path),
   );
+  useEffect(() => {
+    if (editor.pageId) setTabPageId(tabId, editor.pageId);
+  }, [editor.pageId, setTabPageId, tabId]);
   const onMobileBack = () => {
     if (!router.history.canGoBack()) {
       leaveFolioWorkspace(() => {
@@ -371,15 +386,12 @@ export function Folio({ tabId, path }: FolioProps) {
       anchor: selection
         ? snapshotTextPoint(slateEditor, selection.anchor)
         : null,
-      focus: selection
-        ? snapshotTextPoint(slateEditor, selection.focus)
-        : null,
+      focus: selection ? snapshotTextPoint(slateEditor, selection.focus) : null,
     };
   }, [path, tabId]);
 
   useLayoutEffect(
-    () =>
-      registerFolioHistoryCapture(tabId, path, buildRestorationSnapshot),
+    () => registerFolioHistoryCapture(tabId, path, buildRestorationSnapshot),
     [buildRestorationSnapshot, path, tabId],
   );
 
@@ -790,8 +802,7 @@ export function Folio({ tabId, path }: FolioProps) {
       if (!slateEditor || !scrollContainer) return;
 
       if (restoration) {
-        const requireTextMatch =
-          restoration.revision !== editor.getRevision();
+        const requireTextMatch = restoration.revision !== editor.getRevision();
         let selection: Range | null = null;
         if (restoration.anchor && restoration.focus) {
           const anchor = validateTextPointSnapshot(
@@ -910,6 +921,19 @@ export function Folio({ tabId, path }: FolioProps) {
     editor.editorRevision,
     mobile,
   );
+  const pageActions = editor.isDraft ? null : (
+    <Suspense fallback={<p className="cl-marg mb-0">Loading page actions…</p>}>
+      <PageActionsMenu
+        path={path}
+        beforeMutation={editor.saveNow}
+        onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
+        onArchived={handleArchived}
+        archiveOnly={
+          folioReadOnly || (encrypted && encryptionState.status !== "plain")
+        }
+      />
+    </Suspense>
+  );
 
   if (
     !rawMarkdownSession &&
@@ -945,6 +969,7 @@ export function Folio({ tabId, path }: FolioProps) {
         derivedTags={computedTags}
         state={encryptionState}
         properties={folioProperties}
+        pageActions={pageActions}
       />
     );
   }
@@ -1289,8 +1314,17 @@ export function Folio({ tabId, path }: FolioProps) {
       </Block>
 
       <Block label="Organization">
-        {folioReadOnly ? (
-          <p className="cl-marg m-0">Switch to Edit to manage paths.</p>
+        {editor.isDraft ? (
+          <p className="cl-marg m-0">
+            Save this page before moving or archiving it.
+          </p>
+        ) : folioReadOnly ? (
+          <div className="grid gap-2">
+            <p className="cl-marg m-0">
+              Switch to Edit to move this page. Archiving remains available.
+            </p>
+            {pageActions}
+          </div>
         ) : (
           <>
             <button
@@ -1309,23 +1343,7 @@ export function Folio({ tabId, path }: FolioProps) {
                 }
               >
                 <div className="mt-2 grid gap-2">
-                  {editor.isDraft ? (
-                    <p className="cl-marg mb-0">
-                      Save this page before moving or deleting it.
-                    </p>
-                  ) : (
-                    <PageActionsMenu
-                      path={path}
-                      beforeMutation={editor.saveNow}
-                      onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
-                      onDeleted={() => {
-                        runWorkspaceTransition(() => {
-                          closeTab(tabId);
-                          if (mobile) void navigate({ to: "/" });
-                        });
-                      }}
-                    />
-                  )}
+                  {pageActions}
                   <FolderActionsMenu
                     beforeMutation={editor.saveNow}
                     onMoved={(source, destination) => {

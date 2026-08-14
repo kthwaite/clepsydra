@@ -22,6 +22,7 @@ use super::error::ApiError;
 use crate::ServerSettings;
 use crate::vault::archive_snapshot::{self, SnapshotResource};
 use crate::vault::cas::{ContentStore, OpenBlob, RetrieveLimitedError};
+use crate::vault::index::ArchiveUrlOwner;
 use crate::vault::index_policy::IndexMutation;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator, MutationGuard};
@@ -65,6 +66,8 @@ pub struct ArchiveRequest {
 pub struct ArchiveResponse {
     pub page_id: String,
     pub vault_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rubbish_item_id: Option<String>,
     pub blobs_stored: u32,
     pub blobs_deduped: u32,
     pub status: ArchiveStatus,
@@ -1182,29 +1185,56 @@ pub async fn ingest_archive(
         .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?
         .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?;
 
-    if let Some((page_id, vault_path, existing_hash)) = existing {
-        if existing_hash == source_hash {
-            return Ok((
-                StatusCode::OK,
-                Json(ArchiveResponse {
-                    page_id,
-                    vault_path,
-                    blobs_stored: 0,
-                    blobs_deduped: 0,
-                    status: ArchiveStatus::AlreadyExists,
-                }),
-            )
-                .into_response());
+    if let Some(owner) = existing {
+        match owner {
+            ArchiveUrlOwner::Active {
+                page_id,
+                path,
+                source_hash: existing_hash,
+            } => {
+                if existing_hash == source_hash {
+                    return Ok((
+                        StatusCode::OK,
+                        Json(ArchiveResponse {
+                            page_id,
+                            vault_path: path,
+                            rubbish_item_id: None,
+                            blobs_stored: 0,
+                            blobs_deduped: 0,
+                            status: ArchiveStatus::AlreadyExists,
+                        }),
+                    )
+                        .into_response());
+                }
+                return Err(ApiError::conflict_with_detail(
+                    format!("archive exists with different content: {}", req.url),
+                    serde_json::json!({
+                        "existing_hash": existing_hash,
+                        "new_hash": source_hash,
+                        "page_id": page_id,
+                        "vault_path": path,
+                    }),
+                ));
+            }
+            ArchiveUrlOwner::Rubbish {
+                item_id,
+                page_id,
+                original_path,
+            } => {
+                return Ok((
+                    StatusCode::OK,
+                    Json(ArchiveResponse {
+                        page_id,
+                        vault_path: original_path,
+                        rubbish_item_id: Some(item_id),
+                        blobs_stored: 0,
+                        blobs_deduped: 0,
+                        status: ArchiveStatus::AlreadyExists,
+                    }),
+                )
+                    .into_response());
+            }
         }
-        return Err(ApiError::conflict_with_detail(
-            format!("archive exists with different content: {}", req.url),
-            serde_json::json!({
-                "existing_hash": existing_hash,
-                "new_hash": source_hash,
-                "page_id": page_id,
-                "vault_path": vault_path,
-            }),
-        ));
     }
 
     // 2. Validate path BEFORE touching CAS (prevents orphaned blobs on bad input)
@@ -1365,6 +1395,7 @@ pub async fn ingest_archive(
         Json(ArchiveResponse {
             page_id,
             vault_path: vault_path.as_str().to_string(),
+            rubbish_item_id: None,
             blobs_stored,
             blobs_deduped,
             status: ArchiveStatus::Created,

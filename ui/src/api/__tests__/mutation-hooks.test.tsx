@@ -1,5 +1,9 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+} from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -18,7 +22,8 @@ vi.mock("#/api/client", () => ({
 
 import { useCreateFolder, useDeleteFolder, useMoveFolder } from "#/api/folders";
 import { usePreviewMutation } from "#/api/index";
-import { useDeletePage, useMovePage } from "#/api/pages";
+import { queryKeys } from "#/api/keys";
+import { useArchivePage, useMovePage } from "#/api/pages";
 
 function harness() {
   const client = new QueryClient({
@@ -48,7 +53,7 @@ describe("page and folder mutation hooks", () => {
     renderHook(
       () => {
         useMovePage();
-        useDeletePage();
+        useArchivePage();
         useCreateFolder();
         useMoveFolder();
         useDeleteFolder();
@@ -78,6 +83,52 @@ describe("page and folder mutation hooks", () => {
     }
 
     expect(invalidate).toHaveBeenCalled();
+  });
+
+  it("refetches the active rubbish list once and stales cached detail after archive", async () => {
+    const { client, wrapper } = harness();
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    const adjacentKey = ["get", "/api/vault/rubbish-bin"] as const;
+    const unrelatedKey = ["get", "/api/vault/feeds"] as const;
+    const fetchList = vi.fn(async () => ({ items: [] }));
+    const fetchDetail = vi.fn(async () => ({ item_id: "item-1" }));
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: fetchList,
+    });
+    const unsubscribe = listObserver.subscribe(() => undefined);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(1);
+    await client.fetchQuery({ queryKey: detailKey, queryFn: fetchDetail });
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    client.setQueryData(adjacentKey, { items: [] });
+    client.setQueryData(unrelatedKey, { items: [] });
+
+    renderHook(() => useArchivePage(), { wrapper });
+    const archiveCall = mocks.generatedMutation.mock.calls.find(
+      ([method, route]) =>
+        method === "delete" && route === "/api/vault/pages/{path}",
+    );
+    const options = archiveCall?.[2] as { onSuccess: () => void };
+
+    options.onSuccess();
+
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isFetching).toBe(false),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(2);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(client.getQueryState(adjacentKey)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
+    unsubscribe();
   });
 
   it("parses the server mutation preview through the typed hook", async () => {
@@ -130,8 +181,9 @@ describe("page and folder mutation hooks", () => {
 
     await expect(
       result.current.mutateAsync({
-        operation: "delete_page",
+        operation: "move_page",
         source: "notes/a.md",
+        destination: "notes/b.md",
       }),
     ).rejects.toThrow("invalid response");
   });

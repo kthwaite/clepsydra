@@ -397,6 +397,7 @@ describe("migrateWorkspace", () => {
         tabs: [
           {
             ...pageTab("old", "q1"),
+            pageId: "page-old",
             lastActiveAt: 42,
             focusBlockId: "abc123DEF0",
             focusRequestId: "request-1",
@@ -415,6 +416,7 @@ describe("migrateWorkspace", () => {
     expect(migrated.tabs).toStrictEqual([
       {
         id: "old",
+        pageId: "page-old",
         type: "page",
         path: "old.md",
         label: "old",
@@ -832,6 +834,79 @@ describe("workspace Folio history lifecycle", () => {
     expect(
       readFolioHistoryLocation("visit-other", "other", "other.md"),
     ).not.toBeNull();
+  });
+
+  it("atomically removes archived page UUID/path tabs and their Folio state", () => {
+    clearFolioHistoryState();
+    resetStore();
+    const archivedPageId = "page-alpha";
+    const archivedPath = "notes/alpha.md";
+    const archivedTabIds = ["tab-stale", "tab-current", "tab-path-copy"];
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          ...pageTab("tab-stale", "q1"),
+          pageId: archivedPageId,
+          path: "notes/legacy-alpha.md",
+        },
+        {
+          ...pageTab("tab-current", "q1"),
+          pageId: archivedPageId,
+          path: archivedPath,
+        },
+        {
+          ...pageTab("tab-path-copy", "q1"),
+          pageId: "page-path-copy",
+          path: archivedPath,
+        },
+        {
+          ...pageTab(archivedPageId),
+          pageId: "page-survivor",
+          path: "other.md",
+        },
+      ],
+      activeTabId: "tab-current",
+      openHistory: [
+        { path: archivedPath, openedAt: 3 },
+        { path: "notes/legacy-alpha.md", openedAt: 2 },
+        { path: "other.md", openedAt: 1 },
+      ],
+      quires: {
+        q1: { id: "q1", name: "Q", color: "sepia", collapsed: false },
+      },
+    });
+    const pathByTabId = {
+      "tab-stale": "notes/legacy-alpha.md",
+      "tab-current": archivedPath,
+      "tab-path-copy": archivedPath,
+      [archivedPageId]: "other.md",
+    };
+    for (const [tabId, recordPath] of Object.entries(pathByTabId)) {
+      seedRecord(tabId, recordPath);
+    }
+    request("tab-path-copy", archivedPath);
+
+    useWorkspaceStore
+      .getState()
+      .closeArchivedPageTabs(archivedPageId, archivedPath);
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs.map((tab) => tab.id)).toEqual([archivedPageId]);
+    expect(state.tabs[0].pageId).toBe("page-survivor");
+    expect(state.activeTabId).toBe(archivedPageId);
+    expect(state.openHistory).toEqual([{ path: "other.md", openedAt: 1 }]);
+    expect(state.quires).toEqual({});
+    for (const tabId of archivedTabIds) {
+      const recordPath = pathByTabId[tabId as keyof typeof pathByTabId];
+      expect(readFolioRestoration(tabId, recordPath)).toBeNull();
+      expect(
+        readFolioHistoryLocation(`visit-${tabId}`, tabId, recordPath),
+      ).toBeNull();
+    }
+    expect(
+      readFolioHistoryRestorationRequest("tab-path-copy", archivedPath),
+    ).toBeNull();
+    expect(readFolioRestoration(archivedPageId, "other.md")).not.toBeNull();
   });
 
   it("clears all Folio history during workspace teardown", () => {

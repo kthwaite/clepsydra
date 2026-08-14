@@ -106,6 +106,7 @@ fn setup_server() -> (TestServer, TempDir) {
     init_vault(&root).unwrap();
 
     let vault = Vault::open(&root).unwrap();
+    let rubbish = clepsydra::vault::rubbish::RubbishStore::for_vault(vault.root());
     let archive_resource_concurrency = clepsydra::api::archive::archive_resource_concurrency(
         vault.config().archive.max_blob_size_mb,
     );
@@ -132,6 +133,7 @@ fn setup_server() -> (TestServer, TempDir) {
         vault,
         index: index_handle,
         cas: Arc::new(parking_lot::Mutex::new(cas)),
+        rubbish,
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
@@ -238,10 +240,10 @@ async fn full_vault_lifecycle() {
     );
 
     // 7. Read index.md from disk -> verify [[Design Notes]] was rewritten
-    let index_content = fs::read_to_string(vault_root.join("index.md")).unwrap();
+    let index_content_before_archive = fs::read_to_string(vault_root.join("index.md")).unwrap();
     assert!(
-        !index_content.contains("[[Design Notes]]"),
-        "old wikilink should be rewritten, found: {index_content}"
+        !index_content_before_archive.contains("[[Design Notes]]"),
+        "old wikilink should be rewritten, found: {index_content_before_archive}"
     );
 
     // 8. GET /index/stats -> verify 2 pages
@@ -250,28 +252,41 @@ async fn full_vault_lifecycle() {
     let stats: serde_json::Value = res.json();
     assert_eq!(stats["pages"], 2);
 
-    // 9. DELETE /pages/architecture.md?force=true&rewrite=plain_text
-    let res = server
-        .delete("/api/vault/pages/architecture.md?force=true&rewrite=plain_text")
-        .await;
-    assert_eq!(res.status_code(), StatusCode::NO_CONTENT);
+    // 9. DELETE /pages/architecture.md -> archive and return the rubbish identity
+    let res = server.delete("/api/vault/pages/architecture.md").await;
+    res.assert_status(StatusCode::CREATED);
+    let archived: serde_json::Value = res.json();
+    assert_eq!(archived["original_path"], "architecture.md");
+    let item_id = archived["item_id"].as_str().unwrap();
 
-    // Verify architecture.md is deleted
+    // The active source leaves every ordinary page surface.
     assert!(
         !vault_root.join("architecture.md").exists(),
-        "architecture.md should be deleted"
+        "architecture.md should not remain active after archive"
+    );
+    server
+        .get("/api/vault/pages/architecture.md")
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+    let pages: serde_json::Value = server.get("/api/vault/pages").await.json();
+    assert!(
+        pages["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|page| page["path"] != "architecture.md")
     );
 
-    // 10. Read index.md from disk -> verify no [[ ]] syntax remains
-    let index_content = fs::read_to_string(vault_root.join("index.md")).unwrap();
-    assert!(
-        !index_content.contains("[["),
-        "no wikilink brackets should remain, found: {index_content}"
-    );
-    assert!(
-        !index_content.contains("]]"),
-        "no wikilink brackets should remain, found: {index_content}"
-    );
+    // The opaque lifecycle item remains available in the Rubbish Bin.
+    let rubbish = server.get(&format!("/api/vault/rubbish/{item_id}")).await;
+    rubbish.assert_status_ok();
+    let rubbish: serde_json::Value = rubbish.json();
+    assert_eq!(rubbish["item"]["item_id"], item_id);
+    assert_eq!(rubbish["item"]["original_path"], "architecture.md");
+
+    // Archival never rewrites the surviving backlink source.
+    let index_content_after_archive = fs::read_to_string(vault_root.join("index.md")).unwrap();
+    assert_eq!(index_content_after_archive, index_content_before_archive);
 
     // 11. POST /index/rebuild
     let res = server.post("/api/vault/index/rebuild").await;

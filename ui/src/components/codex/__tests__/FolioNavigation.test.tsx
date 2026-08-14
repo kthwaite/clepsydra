@@ -195,9 +195,26 @@ vi.mock("#/components/ThemeProvider", () => ({
   }),
 }));
 vi.mock("#/components/page-tree/PageActionsMenu", () => ({
-  PageActionsMenu: ({ onDeleted }: { onDeleted: () => void }) => (
-    <button type="button" onClick={onDeleted}>
-      Complete page deletion
+  PageActionsMenu: ({
+    path,
+    onArchived,
+  }: {
+    path: string;
+    onArchived: (archived: {
+      page_id: string;
+      original_path: string;
+    }) => void;
+  }) => (
+    <button
+      type="button"
+      onClick={() =>
+        onArchived({
+          page_id: `page:${path}`,
+          original_path: path,
+        })
+      }
+    >
+      Complete page archival
     </button>
   ),
 }));
@@ -1075,7 +1092,7 @@ describe("mobile Folio Back", () => {
     );
   });
 
-  it("keeps mobile deletion and router navigation in one raw-draft confirmation", async () => {
+  it("routes mobile home after archival closes the active page", async () => {
     const user = userEvent.setup();
     useWorkspaceStore.setState({
       tabs: [
@@ -1089,42 +1106,15 @@ describe("mobile Folio Back", () => {
       activeTabId: "page",
     });
     const router = renderNavigation("/workspace");
-    await screen.findByRole("button", { name: "Raw Markdown" });
+    await screen.findByRole("textbox", { name: "Page body" });
     const navigateSpy = vi.spyOn(router, "navigate");
     navigateSpy.mockClear();
 
-    await user.click(screen.getByRole("button", { name: "Raw Markdown" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Raw Markdown" }), {
-      target: { value: "Deletion must not discard this draft  \n" },
-    });
     await user.click(screen.getByRole("button", { name: "Document details" }));
     await user.click(screen.getByRole("button", { name: "Manage paths" }));
     await user.click(
-      await screen.findByRole("button", { name: "Complete page deletion" }),
+      await screen.findByRole("button", { name: "Complete page archival" }),
     );
-
-    expect(pageTabStillExists()).toBe(true);
-    expect(router.state.location.pathname).toBe("/workspace");
-    expect(navigateSpy).not.toHaveBeenCalled();
-    expect(
-      screen.getByRole("dialog", { name: "Unsaved raw Markdown" }),
-    ).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: "Stay" }));
-    expect(pageTabStillExists()).toBe(true);
-    expect(navigateSpy).not.toHaveBeenCalled();
-    await user.click(
-      screen.getByRole("button", { name: "Close document details" }),
-    );
-    expect(screen.getByRole("textbox", { name: "Raw Markdown" })).toHaveValue(
-      "Deletion must not discard this draft  \n",
-    );
-    await user.click(screen.getByRole("button", { name: "Document details" }));
-
-    await user.click(
-      screen.getByRole("button", { name: "Complete page deletion" }),
-    );
-    await user.click(screen.getByRole("button", { name: "Leave" }));
 
     await waitFor(() => {
       expect(pageTabStillExists()).toBe(false);
@@ -1159,6 +1149,59 @@ describe("mobile Folio Back", () => {
       act(() => router.history.forward());
       await expectFolioPosition("notes/beta.md", 222, 2);
       expect(router.state.location.pathname).toBe("/workspace");
+    });
+
+    it("replaces the archived desktop destination before Back and Forward", async () => {
+      const user = userEvent.setup();
+      mobileLayout.current = false;
+      seedHistoryTabs();
+      useWorkspaceStore.setState((state) => ({
+        tabs: state.tabs.filter((tab) => tab.type === "page"),
+      }));
+      const router = renderNavigation("/workspace");
+      await screen.findByRole("textbox", { name: "Page body" });
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+
+      await user.click(screen.getByRole("button", { name: "Visit Beta" }));
+      await waitFor(() => expect(activePagePath()).toBe("notes/beta.md"));
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/beta.md" }),
+      );
+      await user.click(screen.getByRole("button", { name: "Manage paths" }));
+      await user.click(
+        await screen.findByRole("button", { name: "Complete page archival" }),
+      );
+
+      await waitFor(() => expect(activePagePath()).toBe("notes/alpha.md"));
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+
+      act(() => router.history.back());
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+      act(() => router.history.forward());
+      await waitFor(() =>
+        expect(
+          readFolioHistoryDestination(router.history.location.state),
+        ).toMatchObject({ folioPath: "notes/alpha.md" }),
+      );
+      expect(
+        useWorkspaceStore
+          .getState()
+          .tabs.some((tab) => tab.path === "notes/beta.md"),
+      ).toBe(false);
     });
 
     it("keeps distinct restoration locations for repeated visits to A", async () => {

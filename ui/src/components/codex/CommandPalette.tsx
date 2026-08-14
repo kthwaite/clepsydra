@@ -162,6 +162,14 @@ function CommandPaletteContent() {
                 leaveWorkspace,
               });
               return;
+            case "navigate-rubbish":
+              goToView("rubbish", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
+              return;
             case "create-base":
               leaveWorkspace(() =>
                 navigate({ to: "/bases", search: { create: true } }),

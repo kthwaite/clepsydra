@@ -61,6 +61,63 @@ describe("useVaultEvents", () => {
     unmount();
   });
 
+  it("refetches the active rubbish list once and stales cached detail on index_changed", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    const adjacentKey = ["get", "/api/vault/rubbish-bin"] as const;
+    const unrelatedKey = ["get", "/api/vault/feeds"] as const;
+    const fetchList = vi.fn(async () => ({ items: [] }));
+    const fetchDetail = vi.fn(async () => ({ item_id: "item-1" }));
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: fetchList,
+    });
+    const unsubscribe = listObserver.subscribe(() => undefined);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(1);
+    await client.fetchQuery({ queryKey: detailKey, queryFn: fetchDetail });
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    client.setQueryData(adjacentKey, { items: [] });
+    client.setQueryData(unrelatedKey, { items: [] });
+
+    const { unmount } = renderHook(() => useVaultEvents(), {
+      wrapper: ({ children }: { children: ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      ),
+    });
+    const source = FakeEventSource.instances[0];
+
+    act(() => {
+      source?.onmessage?.({
+        data: JSON.stringify({
+          type: "index_changed",
+          upserted: [],
+          removed: ["notes/archived.md"],
+        }),
+      } as MessageEvent<string>);
+    });
+
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isFetching).toBe(false),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(2);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(client.getQueryState(adjacentKey)?.isInvalidated).toBe(false);
+    expect(client.getQueryState(unrelatedKey)?.isInvalidated).toBe(false);
+    unsubscribe();
+    unmount();
+  });
+
   it("invalidates the board query on index_changed", async () => {
     const client = new QueryClient();
     const boardKey = queryKeys.board.all;

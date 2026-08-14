@@ -144,6 +144,14 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     mobile: null,
     go: null,
   },
+  rubbish: {
+    label: "RUBBISH BIN",
+    folioCode: "RUBBISH",
+    showsSheaf: false,
+    navRoot: "rubbish",
+    mobile: { name: "Rubbish Bin", label: "BIN" },
+    go: ({ navigate }) => void navigate({ to: "/rubbish" }),
+  },
   repairs: {
     label: "REPAIRS",
     folioCode: "REPAIRS",
@@ -173,6 +181,7 @@ export const DESKTOP_NAV: readonly CodexView[] = [
   "bases",
   "feeds",
   "docs",
+  "rubbish",
 ];
 
 export const MOBILE_NAV: readonly CodexView[] = [
@@ -182,6 +191,7 @@ export const MOBILE_NAV: readonly CodexView[] = [
   "bases",
   "feeds",
   "constellation",
+  "rubbish",
 ];
 
 export function goToView(view: CodexView, deps: ViewNavDeps): void {

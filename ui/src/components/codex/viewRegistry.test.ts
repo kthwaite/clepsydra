@@ -39,6 +39,7 @@ describe("VIEW_REGISTRY", () => {
       "bases",
       "feeds",
       "docs",
+      "rubbish",
     ]);
     expect(DESKTOP_NAV.map((v) => VIEW_REGISTRY[v].label)).toEqual([
       "ATRIUM",
@@ -50,6 +51,7 @@ describe("VIEW_REGISTRY", () => {
       "BASES",
       "FEEDS",
       "DOCS",
+      "RUBBISH BIN",
     ]);
   });
   it("preserves today's mobile roots order and labels", () => {
@@ -60,6 +62,7 @@ describe("VIEW_REGISTRY", () => {
       "bases",
       "feeds",
       "constellation",
+      "rubbish",
     ]);
     expect(MOBILE_NAV.map((v) => VIEW_REGISTRY[v].mobile?.label)).toEqual([
       "ATR",
@@ -68,6 +71,7 @@ describe("VIEW_REGISTRY", () => {
       "BASE",
       "FEED",
       "GRAPH",
+      "BIN",
     ]);
   });
   it("shows the Sheaf exactly for folio, launcher, gazetteer, tasking", () => {
@@ -84,6 +88,7 @@ describe("VIEW_REGISTRY", () => {
     expect(VIEW_REGISTRY.docs.folioCode).toBe("DOC-001");
     expect(VIEW_REGISTRY.folio.folioCode).toBeNull();
     expect(VIEW_REGISTRY.launcher.folioCode).toBe("—");
+    expect(VIEW_REGISTRY.rubbish.folioCode).toBe("RUBBISH");
   });
   it("highlights FOLIO for launcher, nothing for repairs/agenda", () => {
     expect(VIEW_REGISTRY.launcher.navRoot).toBe("folio");
@@ -98,6 +103,10 @@ describe("goToView", () => {
     goToView("gazetteer", d);
     expect(d.navigate).toHaveBeenCalledWith({ to: "/gazetteer" });
     expect(d.leaveWorkspace).toHaveBeenCalledOnce();
+    const rubbish = deps();
+    goToView("rubbish", rubbish);
+    expect(rubbish.navigate).toHaveBeenCalledWith({ to: "/rubbish" });
+    expect(rubbish.leaveWorkspace).toHaveBeenCalledOnce();
   });
   it("routes docs to the default slug", () => {
     const d = deps();

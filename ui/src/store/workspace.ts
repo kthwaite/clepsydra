@@ -70,7 +70,7 @@ export function pushOpenHistory(
 }
 
 /** Persist migrations: v1→v2 adds openHistory, v2→v3 adds quires,
- * v3→v4 removes tab pins. */
+ * v3→v4 removes tab pins, v4→v5 persists page identity separately. */
 export function migrateWorkspace(
   persisted: unknown,
   version: number,
@@ -87,6 +87,7 @@ export function migrateWorkspace(
       ...s,
       tabs: s.tabs.map((tab) => ({
         id: tab.id,
+        pageId: tab.pageId,
         type: tab.type,
         path: tab.path,
         label: tab.label,
@@ -105,6 +106,8 @@ export function migrateWorkspace(
 export interface TabDescriptor {
   id: string;
   type: TabType;
+  /** Stable page identity from page metadata; distinct from the random tab ID. */
+  pageId?: string;
   path?: string;
   label: string;
   /** Epoch ms of last activation — orders the RECENT accordion section. */
@@ -149,6 +152,7 @@ interface WorkspaceActions {
   addTab: (tab: TabDescriptor) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
+  closeArchivedPageTabs: (pageId: string, path: string) => void;
   activateTab: (tabId: string) => void;
   /** Apply a router-approved history destination without re-entering guards. */
   activateTabFromHistory: (tabId: string) => void;
@@ -166,6 +170,7 @@ interface WorkspaceActions {
       | { position: "end" },
   ) => void;
   updateTabLabel: (tabId: string, label: string) => void;
+  setTabPageId: (tabId: string, pageId: string) => void;
   updateTabPath: (tabId: string, path: string, label?: string) => void;
   setNavigationMode: (mode: NavigationMode) => void;
   createQuire: (tabId: string, name: string) => void;
@@ -415,6 +420,51 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         );
       },
 
+      closeArchivedPageTabs(pageId, path) {
+        const state = get();
+        const removedTabs = state.tabs.filter(
+          (tab) =>
+            tab.type === "page" && (tab.pageId === pageId || tab.path === path),
+        );
+        if (removedTabs.length === 0) return;
+
+        const removedIds = new Set(removedTabs.map((tab) => tab.id));
+        const removedPaths = new Set(
+          removedTabs
+            .map((tab) => tab.path)
+            .filter((tabPath): tabPath is string => tabPath !== undefined),
+        );
+        removedPaths.add(path);
+        for (const tab of removedTabs) {
+          clearFolioRestoration(tab.id);
+          clearFolioHistoryForTab(tab.id);
+        }
+
+        const firstRemovedIndex = state.tabs.findIndex((tab) =>
+          removedIds.has(tab.id),
+        );
+        const nextTabs = state.tabs.filter((tab) => !removedIds.has(tab.id));
+        const activeTabId =
+          state.activeTabId && removedIds.has(state.activeTabId)
+            ? nextTabs.length === 0
+              ? null
+              : nearestVisibleTabId(
+                  nextTabs,
+                  state.quires,
+                  Math.min(firstRemovedIndex, nextTabs.length - 1),
+                )
+            : state.activeTabId;
+
+        set(
+          normalized(nextTabs, state.quires, {
+            activeTabId,
+            openHistory: state.openHistory.filter(
+              (entry) => !removedPaths.has(entry.path),
+            ),
+          }),
+        );
+      },
+
       activateTab(tabId) {
         if (workspaceTransitionDepth === 0 && get().activeTabId !== tabId) {
           runWorkspaceTransition(() => get().activateTab(tabId));
@@ -545,6 +595,18 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         set((state) => ({
           tabs: state.tabs.map((t) => (t.id === tabId ? { ...t, label } : t)),
         }));
+      },
+
+      setTabPageId(tabId, pageId) {
+        set((state) => {
+          const tab = state.tabs.find((candidate) => candidate.id === tabId);
+          if (tab?.type !== "page" || tab.pageId === pageId) return state;
+          return {
+            tabs: state.tabs.map((candidate) =>
+              candidate.id === tabId ? { ...candidate, pageId } : candidate,
+            ),
+          };
+        });
       },
 
       updateTabPath(tabId, path, label) {
@@ -745,7 +807,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
     }),
     {
       name: "clepsydra.workspace",
-      version: 4,
+      version: 5,
       migrate: (persisted, version): Partial<WorkspaceState> =>
         migrateWorkspace(persisted, version),
       partialize: (state) => ({

@@ -11,18 +11,22 @@ use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 use utoipa::ToSchema;
 
 use super::Vault;
+use super::archive_hook::release_rubbish_archive_refs_for_purge;
 use super::atomic_file::{
     AtomicPublicationError, ConditionalPublicationError, atomic_create, atomic_replace,
     atomic_replace_if_unchanged,
 };
 use super::batch_mutation::{self, BatchMutationCommand, BatchMutationError};
+use super::cas::{CasError, ContentStore};
 use super::hooks::PostMoveHook;
 use super::index::IndexError;
 use super::index_handle::IndexHandle;
 use super::index_policy::{IndexMutation, IndexPolicyError};
-use super::page::{Page, PageMeta, write_page_content};
+use super::mutation::{EmptyRubbishResult, PurgeRubbishOutcome, PurgeRubbishResult};
+use super::page::{Page, PageMeta, parse_frontmatter, write_page_content};
 use super::path::VaultPath;
 use super::projection::{project_path, project_path_cleared};
+use super::rubbish::{RubbishItem, RubbishListEntry, RubbishStore, RubbishStoreError};
 use super::sync::{ChangeEvent, SyncEngine};
 use super::task_history::{heal_task_replacement, heal_task_update, initialize_task_history};
 
@@ -35,11 +39,35 @@ type CreateRollbackSyncHook = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
 type BeforeLockAcquireHook = dyn Fn(&VaultPath) + Send + Sync;
 #[cfg(test)]
 type BeforeBatchLockHook = dyn Fn(&[VaultPath]) + Send + Sync;
+#[cfg(test)]
+type BeforeRubbishRemoveHook = dyn Fn(&Path, uuid::Uuid) + Send + Sync;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum MutationLockKey {
+    Path(VaultPath),
+    RubbishItem(uuid::Uuid),
+}
+
+impl Ord for MutationLockKey {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Self::Path(left), Self::Path(right)) => left.as_str().cmp(right.as_str()),
+            (Self::RubbishItem(left), Self::RubbishItem(right)) => left.cmp(right),
+            (Self::Path(_), Self::RubbishItem(_)) => std::cmp::Ordering::Less,
+            (Self::RubbishItem(_), Self::Path(_)) => std::cmp::Ordering::Greater,
+        }
+    }
+}
+
+impl PartialOrd for MutationLockKey {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
 
 /// Serializes mutations that touch the same normalized vault paths.
 pub struct MutationCoordinator {
     mutation_gate: Arc<RwLock<()>>,
-    locks: parking_lot::Mutex<HashMap<VaultPath, Weak<RwLock<()>>>>,
+    locks: parking_lot::Mutex<HashMap<MutationLockKey, Weak<RwLock<()>>>>,
     before_update_publish_hook: parking_lot::Mutex<Option<Arc<BeforeUpdatePublishHook>>>,
     after_page_id_lookup_hook: parking_lot::Mutex<Option<Arc<AfterPageIdLookupHook>>>,
     create_publication_hook: parking_lot::Mutex<Option<Arc<CreatePublicationHook>>>,
@@ -48,7 +76,10 @@ pub struct MutationCoordinator {
     before_lock_acquire_hook: parking_lot::Mutex<Option<Arc<BeforeLockAcquireHook>>>,
     #[cfg(test)]
     before_batch_lock_hook: parking_lot::Mutex<Option<Arc<BeforeBatchLockHook>>>,
+    #[cfg(test)]
+    before_rubbish_remove_hook: parking_lot::Mutex<Option<Arc<BeforeRubbishRemoveHook>>>,
     batch_publication_failure: parking_lot::Mutex<Option<usize>>,
+    batch_rollback_failure: parking_lot::Mutex<Option<usize>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -150,13 +181,20 @@ pub struct DeleteFolderResult {
     pub hook_targets: Vec<(VaultPath, PageMeta)>,
 }
 
-
 #[derive(Debug, Error)]
 pub enum BatchRecoveryError {
     #[error("index reconciliation failed: {0}")]
     Index(#[source] IndexError),
+    #[error("index reconciliation failed: {index}; filesystem rollback also failed: {rollback}")]
+    IndexRollback {
+        #[source]
+        index: IndexError,
+        rollback: BatchMutationError,
+    },
     #[error("transaction workspace cleanup failed: {0}")]
     Workspace(#[source] BatchMutationError),
+    #[error("transaction finalization failed: {0}")]
+    Transaction(#[source] BatchMutationError),
 }
 #[derive(Debug, Error)]
 pub enum MutationError {
@@ -164,6 +202,52 @@ pub enum MutationError {
     InvalidInput(String),
     #[error("page not found: {0}")]
     NotFound(VaultPath),
+    #[error("rubbish item not found: {0}")]
+    RubbishItemNotFound(uuid::Uuid),
+    #[error("failed to enumerate authoritative rubbish items: {source}")]
+    RubbishEnumeration {
+        #[source]
+        source: RubbishStoreError,
+    },
+    #[error("rubbish item {item_id} is invalid or unreadable: {source}")]
+    RubbishStore {
+        item_id: uuid::Uuid,
+        #[source]
+        source: RubbishStoreError,
+    },
+    #[error("stored page metadata for rubbish item {item_id} is invalid: {message}")]
+    RubbishPageMetadata {
+        item_id: uuid::Uuid,
+        message: String,
+    },
+    #[error(
+        "stored page UUID {stored_page_id} for rubbish item {item_id} does not match manifest page UUID {manifest_page_id}"
+    )]
+    RubbishPageIdentity {
+        item_id: uuid::Uuid,
+        manifest_page_id: uuid::Uuid,
+        stored_page_id: uuid::Uuid,
+    },
+    #[error("captured-archive cleanup failed for rubbish item {item_id}: {source}")]
+    RubbishCleanup {
+        item_id: uuid::Uuid,
+        #[source]
+        source: CasError,
+    },
+    #[error("rubbish catalog removal failed for item {item_id}: {source}")]
+    RubbishCatalog {
+        item_id: uuid::Uuid,
+        #[source]
+        source: IndexError,
+    },
+    #[error(
+        "rubbish item removal failed for {item_id}: {removal}; reconciling its catalog row to authoritative state also failed: {catalog_reconcile}"
+    )]
+    RubbishRemovalCatalogReconcile {
+        item_id: uuid::Uuid,
+        removal: Box<RubbishStoreError>,
+        catalog_reconcile: IndexError,
+    },
     #[error("mutation conflict: {0}")]
     Conflict(String),
     #[error("stale page content: {0}")]
@@ -227,7 +311,7 @@ pub enum MutationError {
     BatchPrepare {
         directory: Option<PathBuf>,
         #[source]
-        source: BatchMutationError,
+        source: Box<BatchMutationError>,
     },
     #[error("batch publication failed and was rolled back: {source}")]
     BatchPublish {
@@ -247,7 +331,7 @@ pub enum MutationError {
     BatchRecovery {
         directory: PathBuf,
         #[source]
-        source: BatchRecoveryError,
+        source: Box<BatchRecoveryError>,
     },
 }
 
@@ -269,14 +353,22 @@ impl MutationError {
             Self::FilesystemRollback { .. }
             | Self::IndexRollback { .. }
             | Self::BatchRollback { .. }
-            | Self::BatchRecovery { .. } => true,
-            // Rejected before anything is written.
+            | Self::BatchRecovery { .. }
+            | Self::RubbishRemovalCatalogReconcile { .. } => true,
+            // Rejected before an authoritative filesystem mutation completes.
             Self::ReadOnly(_) => false,
             Self::IndexCompensation { .. }
             | Self::BatchPrepare { .. }
             | Self::BatchPublish { .. }
             | Self::InvalidInput(_)
             | Self::NotFound(_)
+            | Self::RubbishItemNotFound(_)
+            | Self::RubbishEnumeration { .. }
+            | Self::RubbishStore { .. }
+            | Self::RubbishPageMetadata { .. }
+            | Self::RubbishPageIdentity { .. }
+            | Self::RubbishCleanup { .. }
+            | Self::RubbishCatalog { .. }
             | Self::Conflict(_)
             | Self::Stale(_) => false,
         }
@@ -319,14 +411,25 @@ where
             source: io::Error::other(format!("shielded mutation task failed: {error}")),
         })?
 }
-
 fn batch_prepare_error(source: BatchMutationError) -> MutationError {
-    match source.stale_vault_path() {
-        Some(path) => MutationError::Stale(path),
-        None => {
-            let directory = source.retained_directory().map(Path::to_path_buf);
-            MutationError::BatchPrepare { directory, source }
+    match source {
+        BatchMutationError::PageNotFound(path) => {
+            MutationError::NotFound(VaultPath::new(&path).expect("validated archive path"))
         }
+        BatchMutationError::RubbishItemNotFound(item_id) => {
+            MutationError::RubbishItemNotFound(item_id)
+        }
+        BatchMutationError::LifecycleConflict(message) => MutationError::Conflict(message),
+        source => match source.stale_vault_path() {
+            Some(path) => MutationError::Stale(path),
+            None => {
+                let directory = source.retained_directory().map(Path::to_path_buf);
+                MutationError::BatchPrepare {
+                    directory,
+                    source: Box::new(source),
+                }
+            }
+        },
     }
 }
 
@@ -372,7 +475,14 @@ fn publish_batch(
         Some(intent_index) => prepared.publish_with_failure_at(intent_index),
         None => prepared.publish(),
     };
-    if let Err(publish) = publication.and_then(|()| prepared.mark_filesystem_committed()) {
+    let publication = publication.and_then(|()| {
+        if command.contains_rubbish_lifecycle() {
+            Ok(())
+        } else {
+            prepared.mark_filesystem_committed()
+        }
+    });
+    if let Err(publish) = publication {
         return match prepared.rollback() {
             Ok(()) => Err(MutationError::BatchPublish { source: publish }),
             Err(rollback) => Err(MutationError::BatchRollback {
@@ -397,8 +507,45 @@ fn reconcile_batch_index(
     hooks: &[Box<dyn PostMoveHook>],
     index_events: &[ChangeEvent],
     moved_pages: &[(VaultPath, VaultPath)],
+    rubbish_catalog_events: &[batch_mutation::RubbishCatalogEvent],
     identity: MovedPageIdentity,
 ) -> Result<(), IndexError> {
+    if !rubbish_catalog_events.is_empty() {
+        if !moved_pages.is_empty() || index_events.len() != rubbish_catalog_events.len() {
+            return Err(IndexError::Other(
+                "rubbish lifecycle index and catalog events are not one-to-one".to_owned(),
+            ));
+        }
+        SyncEngine::process_events_atomically(
+            index_events,
+            vault,
+            index,
+            |event_index, index_event, index| {
+                match (index_event, &rubbish_catalog_events[event_index]) {
+                    (
+                        ChangeEvent::Remove(path),
+                        batch_mutation::RubbishCatalogEvent::Upsert(manifest),
+                    ) if path.as_str() == manifest.original_path => {
+                        index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest.clone()))?;
+                    }
+                    (
+                        ChangeEvent::Upsert(_),
+                        batch_mutation::RubbishCatalogEvent::Remove(item_id),
+                    ) => {
+                        index.remove_rubbish_entry(&item_id.to_string())?;
+                    }
+                    _ => {
+                        return Err(IndexError::Other(
+                            "rubbish lifecycle index and catalog events do not match".to_owned(),
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        )?;
+        return Ok(());
+    }
+
     let mut hook_events = Vec::new();
     for (old_path, new_path) in moved_pages {
         let identity_path = match identity {
@@ -429,6 +576,16 @@ fn reconcile_batch_index(
         }
     }
     SyncEngine::process_events(index_events, vault, index)?;
+    for event in rubbish_catalog_events {
+        match event {
+            batch_mutation::RubbishCatalogEvent::Upsert(manifest) => {
+                index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest.clone()))?;
+            }
+            batch_mutation::RubbishCatalogEvent::Remove(item_id) => {
+                index.remove_rubbish_entry(&item_id.to_string())?;
+            }
+        }
+    }
     SyncEngine::process_events(&hook_events, vault, index).map(|_| ())
 }
 
@@ -444,6 +601,7 @@ pub(crate) fn reconcile_recovered_batch_index(
         hooks,
         &recovered.index_events,
         &recovered.moved_pages,
+        &recovered.rubbish_catalog_events,
         MovedPageIdentity::Destination,
     )
 }
@@ -483,14 +641,62 @@ fn rollback_created_publication(
     })
 }
 
-#[cfg(not(windows))]
 fn sync_rollback_parent(parent: &Path) -> io::Result<()> {
-    fs::File::open(parent)?.sync_all()
+    super::atomic_file::flush_directory(parent)
 }
 
-#[cfg(windows)]
-fn sync_rollback_parent(_parent: &Path) -> io::Result<()> {
-    Ok(())
+struct RubbishPurgeContext {
+    item: RubbishItem,
+    original_path: VaultPath,
+    meta: PageMeta,
+}
+
+fn prepare_rubbish_purge_context(
+    vault_root: &Path,
+    item_id: uuid::Uuid,
+) -> Result<Option<RubbishPurgeContext>, MutationError> {
+    let store = RubbishStore::for_vault(vault_root);
+    let finished_tombstone = store
+        .finish_purge_tombstone(item_id)
+        .map_err(|source| MutationError::RubbishStore { item_id, source })?;
+    let item = store
+        .read_item_if_exists(item_id)
+        .map_err(|source| MutationError::RubbishStore { item_id, source })?;
+    let Some(item) = item else {
+        return if finished_tombstone {
+            Ok(None)
+        } else {
+            Err(MutationError::RubbishItemNotFound(item_id))
+        };
+    };
+    let content =
+        std::str::from_utf8(&item.bytes).map_err(|source| MutationError::RubbishPageMetadata {
+            item_id,
+            message: format!("stored page is not UTF-8: {source}"),
+        })?;
+    let (meta, _) =
+        parse_frontmatter(content).map_err(|source| MutationError::RubbishPageMetadata {
+            item_id,
+            message: source.to_string(),
+        })?;
+    if meta.id != item.manifest.page_id {
+        return Err(MutationError::RubbishPageIdentity {
+            item_id,
+            manifest_page_id: item.manifest.page_id,
+            stored_page_id: meta.id,
+        });
+    }
+    let original_path = VaultPath::new(&item.manifest.original_path).map_err(|source| {
+        MutationError::RubbishPageMetadata {
+            item_id,
+            message: format!("invalid original path in validated manifest: {source}"),
+        }
+    })?;
+    Ok(Some(RubbishPurgeContext {
+        item,
+        original_path,
+        meta,
+    }))
 }
 
 impl MutationCoordinator {
@@ -506,7 +712,10 @@ impl MutationCoordinator {
             before_lock_acquire_hook: parking_lot::Mutex::new(None),
             #[cfg(test)]
             before_batch_lock_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            before_rubbish_remove_hook: parking_lot::Mutex::new(None),
             batch_publication_failure: parking_lot::Mutex::new(None),
+            batch_rollback_failure: parking_lot::Mutex::new(None),
         }
     }
 
@@ -545,6 +754,20 @@ impl MutationCoordinator {
         *self.batch_publication_failure.lock() = intent_index;
     }
 
+    /// Inject one deterministic batch rollback failure for integration tests.
+    ///
+    /// `Some(index)` fails immediately before rolling back that zero-based intent;
+    /// `None` clears a pending failure.
+    #[doc(hidden)]
+    pub fn set_batch_rollback_fail_after(&self, intent_index: Option<usize>) {
+        *self.batch_rollback_failure.lock() = intent_index;
+    }
+
+    #[cfg(test)]
+    fn set_before_rubbish_remove_hook(&self, hook: Option<Arc<BeforeRubbishRemoveHook>>) {
+        *self.before_rubbish_remove_hook.lock() = hook;
+    }
+
     pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
         let hook = self.after_page_id_lookup_hook.lock().clone();
         if let Some(hook) = hook {
@@ -572,20 +795,40 @@ impl MutationCoordinator {
     /// subtrees proceed concurrently while a folder deletion excludes all
     /// descendants.
     pub async fn lock_paths(&self, paths: &[VaultPath]) -> MutationGuard {
+        self.lock_resources(paths, &[]).await
+    }
+
+    async fn lock_resources(
+        &self,
+        paths: &[VaultPath],
+        rubbish_items: &[uuid::Uuid],
+    ) -> MutationGuard {
         let gate_guard = Arc::clone(&self.mutation_gate).read_owned().await;
-        let mut guard = self.lock_paths_excluded(paths).await;
+        let mut guard = self.lock_resources_excluded(paths, rubbish_items).await;
         guard._gate_guard = Some(gate_guard);
         guard
     }
 
-    async fn lock_paths_excluded(&self, paths: &[VaultPath]) -> MutationGuard {
-        let mut requests = BTreeMap::<String, bool>::new();
+    async fn lock_resources_excluded(
+        &self,
+        paths: &[VaultPath],
+        rubbish_items: &[uuid::Uuid],
+    ) -> MutationGuard {
+        let mut requests = BTreeMap::<MutationLockKey, bool>::new();
         for path in paths {
             let components = path.as_str().split('/').collect::<Vec<_>>();
             for end in 1..components.len() {
-                requests.entry(components[..end].join("/")).or_insert(false);
+                requests
+                    .entry(MutationLockKey::Path(
+                        VaultPath::new(&components[..end].join("/"))
+                            .expect("normalized path prefix"),
+                    ))
+                    .or_insert(false);
             }
-            requests.insert(path.as_str().to_string(), true);
+            requests.insert(MutationLockKey::Path(path.clone()), true);
+        }
+        for item_id in rubbish_items {
+            requests.insert(MutationLockKey::RubbishItem(*item_id), true);
         }
 
         let locks = {
@@ -594,9 +837,11 @@ impl MutationCoordinator {
             requests
                 .into_iter()
                 .map(|(key, write)| {
-                    let key = VaultPath::new(&key).expect("normalized path prefix");
                     #[cfg(test)]
-                    let observed_path = key.clone();
+                    let observed_path = match &key {
+                        MutationLockKey::Path(path) => Some(path.clone()),
+                        MutationLockKey::RubbishItem(_) => None,
+                    };
                     let lock = if let Some(lock) = table.get(&key).and_then(Weak::upgrade) {
                         lock
                     } else {
@@ -617,8 +862,10 @@ impl MutationCoordinator {
         let mut guards = Vec::with_capacity(locks.len());
         for request in &locks {
             #[cfg(test)]
-            if let Some(hook) = self.before_lock_acquire_hook.lock().clone() {
-                hook(&request.observed_path);
+            if let Some(path) = &request.observed_path
+                && let Some(hook) = self.before_lock_acquire_hook.lock().clone()
+            {
+                hook(path);
             }
             guards.push(if request.write {
                 MutationLockGuard::Write {
@@ -651,6 +898,164 @@ impl MutationCoordinator {
         self.lock_paths(std::slice::from_ref(folder)).await
     }
 
+    /// Permanently purge one validated rubbish item addressed only by its
+    /// opaque lifecycle UUID.
+    pub async fn purge_rubbish(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        item_id: &str,
+    ) -> Result<PurgeRubbishResult, MutationError> {
+        let parsed_item_id = uuid::Uuid::parse_str(item_id).map_err(|source| {
+            MutationError::InvalidInput(format!("invalid rubbish item ID {item_id:?}: {source}"))
+        })?;
+        self.purge_rubbish_item(vault, index, cas, parsed_item_id)
+            .await
+    }
+
+    async fn purge_rubbish_item(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        item_id: uuid::Uuid,
+    ) -> Result<PurgeRubbishResult, MutationError> {
+        let guard = self.lock_resources(&[], &[item_id]).await;
+        let root = vault.root().to_path_buf();
+        let read_root = root.clone();
+        let (guard, context) = run_blocking_fs(root.clone(), guard, move || {
+            prepare_rubbish_purge_context(&read_root, item_id)
+        })
+        .await?;
+        let Some(context) = context else {
+            index
+                .with_index(move |index, _| index.take_rubbish_entry(item_id))
+                .await
+                .map_err(|source| MutationError::RubbishCatalog { item_id, source })?
+                .map_err(|source| MutationError::RubbishCatalog { item_id, source })?;
+            drop(guard);
+            return Err(MutationError::RubbishItemNotFound(item_id));
+        };
+
+        let cleanup_cas = Arc::clone(&cas);
+        let (guard, context) = run_blocking_fs(root.clone(), guard, move || {
+            release_rubbish_archive_refs_for_purge(
+                &cleanup_cas,
+                item_id,
+                &context.original_path,
+                &context.item.manifest.page_id,
+                &context.meta,
+            )
+            .map_err(|source| MutationError::RubbishCleanup { item_id, source })?;
+            Ok(context)
+        })
+        .await?;
+
+        index
+            .with_index(move |index, _| index.take_rubbish_entry(item_id))
+            .await
+            .map_err(|source| MutationError::RubbishCatalog { item_id, source })?
+            .map_err(|source| MutationError::RubbishCatalog { item_id, source })?;
+
+        #[cfg(test)]
+        let before_rubbish_remove_hook = self.before_rubbish_remove_hook.lock().clone();
+        let result = PurgeRubbishResult {
+            item_id,
+            page_id: context.item.manifest.page_id,
+            original_path: context.item.manifest.original_path.clone(),
+        };
+        let removal_root = root.clone();
+        let item = context.item;
+        let (guard, removal, authoritative_entry) = tokio::task::spawn_blocking(move || {
+            let store = RubbishStore::for_vault(&removal_root);
+            #[cfg(test)]
+            if let Some(hook) = before_rubbish_remove_hook {
+                hook(&removal_root, item_id);
+            }
+            let removal = store.remove_item(&item);
+            let authoritative_entry = if removal.is_err() {
+                store.catalog_entry_for_expected_item(&item)
+            } else {
+                None
+            };
+            (guard, removal, authoritative_entry)
+        })
+        .await
+        .map_err(|source| MutationError::Filesystem {
+            filesystem_applied: true,
+            path: root,
+            source: io::Error::other(format!("rubbish item removal task failed: {source}")),
+        })?;
+
+        if let Err(removal) = removal {
+            let catalog_reconcile = index
+                .with_index(move |index, _| match authoritative_entry {
+                    Some(entry) => index.upsert_rubbish_entry(&entry),
+                    None => index.remove_rubbish_entry(&item_id.to_string()).map(|_| ()),
+                })
+                .await;
+            let catalog_reconcile = match catalog_reconcile {
+                Ok(Ok(())) => None,
+                Ok(Err(source)) | Err(source) => Some(source),
+            };
+            if let Some(catalog_reconcile) = catalog_reconcile {
+                drop(guard);
+                return Err(MutationError::RubbishRemovalCatalogReconcile {
+                    item_id,
+                    removal: Box::new(removal),
+                    catalog_reconcile,
+                });
+            }
+            drop(guard);
+            return Err(MutationError::RubbishStore {
+                item_id,
+                source: removal,
+            });
+        }
+        drop(guard);
+        Ok(result)
+    }
+
+    /// Purge the initial authoritative valid-item snapshot newest-first,
+    /// preserving one ordered, truthful outcome per attempted item.
+    pub async fn empty_rubbish(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+    ) -> Result<EmptyRubbishResult, MutationError> {
+        let root = vault.root().to_path_buf();
+        let list_root = root.clone();
+        let entries =
+            tokio::task::spawn_blocking(move || RubbishStore::for_vault(&list_root).list_entries())
+                .await
+                .map_err(|source| MutationError::Filesystem {
+                    filesystem_applied: false,
+                    path: root,
+                    source: io::Error::other(format!("rubbish snapshot task failed: {source}")),
+                })?
+                .map_err(|source| MutationError::RubbishEnumeration { source })?;
+        let item_ids = entries.into_iter().filter_map(|entry| match entry {
+            RubbishListEntry::Valid(manifest) => Some(manifest.item_id),
+            RubbishListEntry::Invalid { .. } => None,
+        });
+        let mut outcomes = Vec::new();
+        for item_id in item_ids {
+            match self
+                .purge_rubbish_item(vault, index, Arc::clone(&cas), item_id)
+                .await
+            {
+                Ok(result) => outcomes.push(PurgeRubbishOutcome::Purged(result)),
+                Err(error) => outcomes.push(PurgeRubbishOutcome::Failed {
+                    item_id,
+                    error: error.to_string(),
+                }),
+            }
+        }
+        Ok(EmptyRubbishResult { outcomes })
+    }
+
     /// Execute a durable batch against an already-open offline index.
     ///
     /// This uses the same publication, hook, index-reconciliation, retained
@@ -663,6 +1068,8 @@ impl MutationCoordinator {
         command: BatchMutationCommand,
     ) -> Result<MutationNotification, MutationError> {
         let notification = batch_notification(&command.index_events);
+        let rubbish_catalog_events = command.rubbish_catalog_events();
+        let deferred_commit = command.contains_rubbish_lifecycle();
         let prepared = publish_batch(vault.root(), &command, None)?;
         let directory = prepared.directory().to_path_buf();
         if let Err(source) = reconcile_batch_index(
@@ -671,17 +1078,29 @@ impl MutationCoordinator {
             hooks,
             &command.index_events,
             &command.moved_pages,
+            &rubbish_catalog_events,
             MovedPageIdentity::Source,
         ) {
             return Err(MutationError::BatchRecovery {
                 directory,
-                source: BatchRecoveryError::Index(source),
+                source: Box::new(BatchRecoveryError::Index(source)),
             });
         }
-        prepared.finish().map_err(|source| MutationError::BatchRecovery {
-            directory,
-            source: BatchRecoveryError::Workspace(source),
-        })?;
+        let mut prepared = prepared;
+        if deferred_commit {
+            prepared.mark_filesystem_committed().map_err(|source| {
+                MutationError::BatchRecovery {
+                    directory: directory.clone(),
+                    source: Box::new(BatchRecoveryError::Transaction(source)),
+                }
+            })?;
+        }
+        prepared
+            .finish()
+            .map_err(|source| MutationError::BatchRecovery {
+                directory,
+                source: Box::new(BatchRecoveryError::Workspace(source)),
+            })?;
         Ok(notification)
     }
 
@@ -694,11 +1113,62 @@ impl MutationCoordinator {
         notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
     ) -> Result<MutationNotification, MutationError> {
         let affected_paths = command.affected_paths();
+        let affected_rubbish_items = command.affected_rubbish_items();
         #[cfg(test)]
         if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
             hook(&affected_paths);
         }
-        let guard = self.lock_paths(&affected_paths).await;
+        let guard = self
+            .lock_resources(&affected_paths, &affected_rubbish_items)
+            .await;
+        self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
+            .await
+    }
+
+    /// Restore one retained rubbish item unless its permanent-deletion CAS
+    /// release has already committed.
+    pub async fn restore_rubbish(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
+        command: BatchMutationCommand,
+        notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
+    ) -> Result<MutationNotification, MutationError> {
+        let affected_paths = command.affected_paths();
+        let affected_rubbish_items = command.affected_rubbish_items();
+        let item_id = match affected_rubbish_items.as_slice() {
+            [item_id] => *item_id,
+            _ => {
+                return Err(MutationError::InvalidInput(
+                    "rubbish restore must affect exactly one retained item".to_string(),
+                ));
+            }
+        };
+        #[cfg(test)]
+        if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
+            hook(&affected_paths);
+        }
+        let guard = self
+            .lock_resources(&affected_paths, &affected_rubbish_items)
+            .await;
+        let root = vault.root().to_path_buf();
+        let (guard, ()) = run_blocking_fs(root, guard, move || {
+            if cas
+                .lock()
+                .rubbish_archive_refs_released(item_id)
+                .map_err(|source| MutationError::RubbishCleanup { item_id, source })?
+            {
+                return Err(MutationError::Conflict(format!(
+                    "permanent deletion is already in progress for rubbish item {item_id}; \
+                     its captured-archive references have been released, so it cannot be \
+                     restored; retry permanent deletion"
+                )));
+            }
+            Ok(())
+        })
+        .await?;
         self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
             .await
     }
@@ -718,11 +1188,14 @@ impl MutationCoordinator {
             ));
         }
         let affected_paths = command.affected_paths();
+        let affected_rubbish_items = command.affected_rubbish_items();
         #[cfg(test)]
         if let Some(hook) = self.before_batch_lock_hook.lock().clone() {
             hook(&affected_paths);
         }
-        let mut guard = self.lock_paths_excluded(&affected_paths).await;
+        let mut guard = self
+            .lock_resources_excluded(&affected_paths, &affected_rubbish_items)
+            .await;
         guard._exclusion_guard = Some(exclusion);
         self.execute_batch_with_guard(vault, index, hooks, command, notify, guard)
             .await
@@ -743,18 +1216,17 @@ impl MutationCoordinator {
         let notification = batch_notification(&command.index_events);
         let index_events = command.index_events.clone();
         let moved_pages = command.moved_pages.clone();
+        let rubbish_catalog_events = command.rubbish_catalog_events();
+        let deferred_commit = command.contains_rubbish_lifecycle();
         let batch_publication_failure = self.batch_publication_failure.lock().take();
+        let batch_rollback_failure = self.batch_rollback_failure.lock().take();
 
         run_shielded_mutation(shield_path, move |filesystem_applied| async move {
             let blocking_root = root.clone();
             let blocking_error_path = root.clone();
             let blocking_applied = Arc::clone(&filesystem_applied);
             let prepared = tokio::task::spawn_blocking(move || {
-                let prepared = publish_batch(
-                    &blocking_root,
-                    &command,
-                    batch_publication_failure,
-                )?;
+                let prepared = publish_batch(&blocking_root, &command, batch_publication_failure)?;
                 blocking_applied.store(true, Ordering::Release);
                 Ok::<_, MutationError>((guard, prepared))
             })
@@ -767,7 +1239,7 @@ impl MutationCoordinator {
                 )),
             })??;
 
-            let (guard, prepared) = prepared;
+            let (guard, mut prepared) = prepared;
             let directory = prepared.directory().to_path_buf();
             let reconciliation = index
                 .with_index(move |vault_index, index_vault| {
@@ -777,35 +1249,81 @@ impl MutationCoordinator {
                         hooks.as_ref(),
                         &index_events,
                         &moved_pages,
+                        &rubbish_catalog_events,
                         MovedPageIdentity::Source,
                     )
                 })
                 .await
                 .and_then(|result| result);
             if let Err(source) = reconciliation {
-                return Err(MutationError::BatchRecovery {
-                    directory,
-                    source: BatchRecoveryError::Index(source),
-                });
+                if !deferred_commit {
+                    return Err(MutationError::BatchRecovery {
+                        directory,
+                        source: Box::new(BatchRecoveryError::Index(source)),
+                    });
+                }
+                let rollback_directory = directory.clone();
+                let rollback = tokio::task::spawn_blocking(move || {
+                    let result = match batch_rollback_failure {
+                        Some(intent_index) => prepared.rollback_with_failure_at(intent_index),
+                        None => prepared.rollback(),
+                    };
+                    (guard, result)
+                })
+                .await;
+                match rollback {
+                    Ok((_guard, Ok(()))) => {
+                        filesystem_applied.store(false, Ordering::Release);
+                        return Err(MutationError::Reconcile {
+                            filesystem_applied: false,
+                            source,
+                        });
+                    }
+                    Ok((_guard, Err(rollback))) => {
+                        return Err(MutationError::BatchRecovery {
+                            directory,
+                            source: Box::new(BatchRecoveryError::IndexRollback {
+                                index: source,
+                                rollback,
+                            }),
+                        });
+                    }
+                    Err(rollback) => {
+                        return Err(MutationError::BatchRecovery {
+                            directory,
+                            source: Box::new(BatchRecoveryError::IndexRollback {
+                                index: source,
+                                rollback: batch_blocking_error(
+                                    "rollback batch transaction after index reconciliation failure",
+                                    &rollback_directory,
+                                    rollback,
+                                ),
+                            }),
+                        });
+                    }
+                }
             }
 
             let cleanup_directory = directory.clone();
             tokio::task::spawn_blocking(move || {
                 let _guard = guard;
+                if deferred_commit {
+                    prepared.mark_filesystem_committed()?;
+                }
                 prepared.finish()
             })
             .await
             .map_err(|source| MutationError::BatchRecovery {
                 directory: directory.clone(),
-                source: BatchRecoveryError::Workspace(batch_blocking_error(
+                source: Box::new(BatchRecoveryError::Workspace(batch_blocking_error(
                     "finish batch transaction",
                     &directory,
                     source,
-                )),
+                ))),
             })?
             .map_err(|source| MutationError::BatchRecovery {
                 directory: cleanup_directory,
-                source: BatchRecoveryError::Workspace(source),
+                source: Box::new(BatchRecoveryError::Workspace(source)),
             })?;
 
             notify(notification.clone());
@@ -1444,7 +1962,7 @@ impl MutationCoordinator {
             .await?;
             filesystem_applied.store(true, Ordering::Release);
             let _guard = guard;
-            let mut removed = Vec::with_capacity(indexed_paths.len());
+            let removed = Vec::with_capacity(indexed_paths.len());
             for path in indexed_paths {
                 index
                     .apply_mutation(path.clone(), IndexMutation::Deleted)
@@ -1453,7 +1971,6 @@ impl MutationCoordinator {
                         filesystem_applied: true,
                         source: Box::new(source),
                     })?;
-                removed.push(path.as_str().to_string());
             }
             Ok(DeleteFolderResult {
                 removed,
@@ -1481,7 +1998,7 @@ impl Default for MutationCoordinator {
 
 struct MutationLockRequest {
     #[cfg(test)]
-    observed_path: VaultPath,
+    observed_path: Option<VaultPath>,
     lock: Arc<RwLock<()>>,
     write: bool,
 }
@@ -1491,7 +2008,6 @@ enum MutationLockGuard {
     Read { _guard: OwnedRwLockReadGuard<()> },
     Write { _guard: OwnedRwLockWriteGuard<()> },
 }
-
 
 pub struct MutationExclusionGuard {
     gate: Arc<RwLock<()>>,
@@ -1509,9 +2025,7 @@ pub struct MutationGuard {
 mod tests {
     use super::*;
 
-    use crate::vault::batch_mutation::{
-        BatchMutationCommand, BatchPathIntent, ExpectedPathState,
-    };
+    use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
     use crate::vault::sync::ChangeEvent;
 
     struct BatchFixture {
@@ -1549,6 +2063,486 @@ mod tests {
         fn root(&self) -> &Path {
             self.vault.root()
         }
+
+        async fn publish_purge_item(
+            &self,
+            item_id: uuid::Uuid,
+            page_id: uuid::Uuid,
+        ) -> (
+            crate::vault::rubbish::RubbishManifest,
+            RubbishStore,
+            Vec<u8>,
+        ) {
+            let manifest = crate::vault::rubbish::RubbishManifest::new(
+                item_id,
+                page_id,
+                "purge-boundary.md",
+                "Purge boundary",
+                "NOTE",
+                "2026-08-14T12:00:00Z".parse().unwrap(),
+                None,
+            )
+            .unwrap();
+            let bytes = batch_page(&page_id.to_string(), "Purge boundary", "body").into_bytes();
+            let store = RubbishStore::for_vault(self.root());
+            let mut prepared = store
+                .prepare_item(&item_id.to_string(), &manifest, &bytes)
+                .unwrap();
+            prepared.publish().unwrap();
+            self.index
+                .with_index({
+                    let manifest = manifest.clone();
+                    move |index, _| index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest))
+                })
+                .await
+                .unwrap()
+                .unwrap();
+            (manifest, store, bytes)
+        }
+
+        async fn rubbish_catalog_entry(&self, item_id: uuid::Uuid) -> Option<RubbishListEntry> {
+            self.index
+                .with_index(move |index, _| index.rubbish_entry(&item_id.to_string()))
+                .await
+                .unwrap()
+                .unwrap()
+        }
+    }
+
+    #[test]
+    fn created_page_rollback_parent_flush_failure_reports_removed_but_not_durable() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("page.md");
+        fs::write(&path, b"content").unwrap();
+        let _failure = crate::vault::atomic_file::fail_next_directory_flush(temp.path());
+
+        let error = rollback_created_publication(&path, None).unwrap_err();
+
+        assert!(!path.exists());
+        assert!(
+            error
+                .to_string()
+                .contains("failed to sync parent directory"),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
+    async fn rubbish_item_lock_serializes_the_same_internal_identity() {
+        let coordinator = Arc::new(MutationCoordinator::new());
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000091").unwrap();
+        let first_guard = coordinator.lock_resources(&[], &[item_id]).await;
+        let (entered_tx, mut entered_rx) = tokio::sync::mpsc::channel(1);
+
+        let second_coordinator = Arc::clone(&coordinator);
+        let second = tokio::spawn(async move {
+            let _guard = second_coordinator.lock_resources(&[], &[item_id]).await;
+            entered_tx.send(()).await.unwrap();
+        });
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(50), entered_rx.recv())
+                .await
+                .is_err(),
+            "a second lifecycle mutation entered while the item guard was held"
+        );
+        drop(first_guard);
+        tokio::time::timeout(std::time::Duration::from_secs(1), entered_rx.recv())
+            .await
+            .expect("second lifecycle mutation remained blocked")
+            .expect("second lifecycle mutation exited without entering");
+        second.await.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn purge_rubbish_rename_failure_keeps_actionable_item_and_retries_one_shot_cleanup() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let fixture = BatchFixture::new(&[]);
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000391").unwrap();
+        let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000392").unwrap();
+        let (manifest, store, bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        let rubbish_root = fixture.root().join(".clepsydra/rubbish");
+        let tombstone = rubbish_root.join(format!(".purge-{item_id}"));
+        let cas_temp = tempfile::tempdir().unwrap();
+        let cas = Arc::new(parking_lot::Mutex::new(
+            ContentStore::open(cas_temp.path()).unwrap(),
+        ));
+        fs::set_permissions(&rubbish_root, fs::Permissions::from_mode(0o500)).unwrap();
+
+        let error = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+
+        fs::set_permissions(&rubbish_root, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(
+            error,
+            MutationError::RubbishStore {
+                item_id: found,
+                ..
+            } if found == item_id
+        ));
+        assert_eq!(store.read_item(&item_id.to_string()).unwrap().bytes, bytes);
+        assert!(!tombstone.exists());
+        assert_eq!(
+            fixture.rubbish_catalog_entry(item_id).await,
+            Some(RubbishListEntry::Valid(manifest))
+        );
+
+        fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.read_item(&item_id.to_string()).is_err());
+        assert!(!tombstone.exists());
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+                [item_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(releases, 1);
+    }
+
+    #[tokio::test]
+    async fn purge_rubbish_tombstone_collision_retry_removes_uuid_catalog_and_releases_once() {
+        let fixture = BatchFixture::new(&[]);
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000421").unwrap();
+        let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000422").unwrap();
+        let (manifest, store, bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        let tombstone = fixture
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
+        let collision_injected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        fixture
+            .coordinator
+            .set_before_rubbish_remove_hook(Some(Arc::new({
+                let collision_injected = Arc::clone(&collision_injected);
+                move |root, found_item_id| {
+                    assert_eq!(found_item_id, item_id);
+                    if !collision_injected.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        fs::create_dir(
+                            root.join(".clepsydra/rubbish")
+                                .join(format!(".purge-{item_id}")),
+                        )
+                        .unwrap();
+                    }
+                }
+            })));
+        let cas_temp = tempfile::tempdir().unwrap();
+        let cas = Arc::new(parking_lot::Mutex::new(
+            ContentStore::open(cas_temp.path()).unwrap(),
+        ));
+        let release_count = || -> i64 {
+            rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+                    [item_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+
+        let first = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                &first,
+                MutationError::RubbishStore {
+                    item_id: found,
+                    ..
+                } if *found == item_id
+            ),
+            "{first:?}"
+        );
+        assert_eq!(store.read_item(&item_id.to_string()).unwrap().bytes, bytes);
+        assert!(tombstone.exists());
+        assert_eq!(
+            fixture.rubbish_catalog_entry(item_id).await,
+            Some(RubbishListEntry::Valid(manifest))
+        );
+        assert_eq!(release_count(), 1);
+
+        fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.read_item(&item_id.to_string()).is_err());
+        assert!(!tombstone.exists());
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        assert_eq!(release_count(), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn purge_rubbish_post_rename_root_sync_failure_does_not_restore_a_catalog_ghost() {
+        let fixture = BatchFixture::new(&[]);
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000401").unwrap();
+        let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000402").unwrap();
+        let (_manifest, store, _bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        let tombstone = fixture
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
+        let cas_temp = tempfile::tempdir().unwrap();
+        let cas = Arc::new(parking_lot::Mutex::new(
+            ContentStore::open(cas_temp.path()).unwrap(),
+        ));
+        let _sync_failure = crate::vault::rubbish::fail_next_directory_sync(
+            &fixture.root().join(".clepsydra/rubbish"),
+        );
+
+        let error = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            MutationError::RubbishStore {
+                item_id: found,
+                ..
+            } if found == item_id
+        ));
+        assert!(
+            store.read_item(&item_id.to_string()).is_err(),
+            "UUID item remained visible after the tombstone transition"
+        );
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        assert!(tombstone.exists());
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
+        let retry = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            retry,
+            MutationError::RubbishItemNotFound(found) if found == item_id
+        ));
+        assert!(!tombstone.exists());
+        let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+                [item_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(releases, 1);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn purge_rubbish_partial_tombstone_retry_finishes_without_second_cas_release() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let fixture = BatchFixture::new(&[]);
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000411").unwrap();
+        let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000412").unwrap();
+        let (_manifest, store, _bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        fixture
+            .index
+            .with_index(move |index, _| index.remove_rubbish_entry(&item_id.to_string()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        let item_dir = fixture
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(item_id.to_string());
+        let tombstone = fixture
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
+        fs::set_permissions(&item_dir, fs::Permissions::from_mode(0o500)).unwrap();
+        let cas_temp = tempfile::tempdir().unwrap();
+        let cas = Arc::new(parking_lot::Mutex::new(
+            ContentStore::open(cas_temp.path()).unwrap(),
+        ));
+
+        let error = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+        fs::set_permissions(&tombstone, fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert!(matches!(
+            error,
+            MutationError::RubbishStore {
+                item_id: found,
+                ..
+            } if found == item_id
+        ));
+        assert!(!item_dir.exists());
+        assert!(tombstone.exists());
+        assert_eq!(store.list_entries().unwrap(), Vec::new());
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+
+        fs::remove_file(tombstone.join("manifest.json")).unwrap();
+
+        let retry = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            retry,
+            MutationError::RubbishItemNotFound(found) if found == item_id
+        ));
+
+        assert!(store.read_item(&item_id.to_string()).is_err());
+        assert!(!tombstone.exists());
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+                [item_id.to_string()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(releases, 1);
+    }
+
+    #[tokio::test]
+    async fn rubbish_archive_revalidates_exact_bytes_after_resource_locks() {
+        let page = batch_page("019fd000-0000-7000-8000-000000000211", "Target", "body");
+        let fixture = BatchFixture::new(&[("target.md", &page)]);
+        let path = VaultPath::new("target.md").unwrap();
+        let expected = fs::read(fixture.root().join(path.as_str())).unwrap();
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000212").unwrap();
+        let manifest = crate::vault::rubbish::RubbishManifest::new(
+            item_id,
+            uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000211").unwrap(),
+            path.as_str(),
+            "Target",
+            "note",
+            "2026-08-14T12:00:00Z".parse().unwrap(),
+            None,
+        )
+        .unwrap();
+        let command = fixture
+            .index
+            .with_index(move |index, vault| {
+                crate::vault::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::vault::mutation::MutationOp::ArchivePage {
+                        path: "target.md".to_owned(),
+                        expected_bytes: expected,
+                        manifest,
+                    })?
+                    .into_batch_command(vault)
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let held = fixture
+            .coordinator
+            .lock_paths(std::slice::from_ref(&path))
+            .await;
+        let (waiting_tx, waiting_rx) = tokio::sync::oneshot::channel();
+        let waiting_tx = Arc::new(parking_lot::Mutex::new(Some(waiting_tx)));
+        let observed_waiting = Arc::clone(&waiting_tx);
+        fixture
+            .coordinator
+            .set_before_batch_lock_hook(Some(Arc::new(move |_| {
+                if let Some(sender) = observed_waiting.lock().take() {
+                    let _ = sender.send(());
+                }
+            })));
+        let coordinator = Arc::clone(&fixture.coordinator);
+        let vault = fixture.vault.clone();
+        let index = fixture.index.clone();
+        let pending = tokio::spawn(async move {
+            coordinator
+                .execute_batch(
+                    &vault,
+                    &index,
+                    Arc::new(Vec::new()),
+                    command,
+                    Arc::new(|_| panic!("conflicted archive must not notify")),
+                )
+                .await
+        });
+        waiting_rx
+            .await
+            .expect("archive did not reach resource locks");
+        fs::write(fixture.root().join(path.as_str()), b"changed while waiting").unwrap();
+        drop(held);
+
+        let error = pending.await.unwrap().unwrap_err();
+
+        assert!(matches!(
+            error,
+            MutationError::Conflict(message) if message.contains("active page bytes changed")
+        ));
+        assert_eq!(
+            fs::read(fixture.root().join(path.as_str())).unwrap(),
+            b"changed while waiting"
+        );
+        assert!(
+            crate::vault::rubbish::RubbishStore::for_vault(fixture.root())
+                .read_item(&item_id.to_string())
+                .is_err()
+        );
     }
 
     fn batch_page(id: &str, title: &str, body: &str) -> String {
@@ -1596,16 +2590,8 @@ mod tests {
 
     #[tokio::test]
     async fn batch_revalidates_every_path_after_lock_acquisition() {
-        let original_a = batch_page(
-            "019fd000-0000-7000-8000-000000000001",
-            "A",
-            "one",
-        );
-        let original_b = batch_page(
-            "019fd000-0000-7000-8000-000000000002",
-            "B",
-            "two",
-        );
+        let original_a = batch_page("019fd000-0000-7000-8000-000000000001", "A", "one");
+        let original_b = batch_page("019fd000-0000-7000-8000-000000000002", "B", "two");
         let fixture = BatchFixture::new(&[("a.md", &original_a), ("b.md", &original_b)]);
         let original_a = fs::read_to_string(fixture.root().join("a.md")).unwrap();
         let original_b = fs::read_to_string(fixture.root().join("b.md")).unwrap();
@@ -1741,11 +2727,7 @@ mod tests {
 
     #[tokio::test]
     async fn folder_batch_rolls_back_when_unexpected_source_content_blocks_cleanup() {
-        let page = batch_page(
-            "019fd000-0000-7000-8000-000000000013",
-            "Nested",
-            "body",
-        );
+        let page = batch_page("019fd000-0000-7000-8000-000000000013", "Nested", "body");
         let fixture = BatchFixture::new(&[("notes/nested/page.md", &page)]);
         let original = fs::read(fixture.root().join("notes/nested/page.md")).unwrap();
         let command = fixture
@@ -1792,16 +2774,8 @@ mod tests {
 
     #[tokio::test]
     async fn batch_notifies_once_after_every_file_and_index_commit() {
-        let original_a = batch_page(
-            "019fd000-0000-7000-8000-000000000011",
-            "A",
-            "one",
-        );
-        let original_b = batch_page(
-            "019fd000-0000-7000-8000-000000000012",
-            "B",
-            "two",
-        );
+        let original_a = batch_page("019fd000-0000-7000-8000-000000000011", "A", "one");
+        let original_b = batch_page("019fd000-0000-7000-8000-000000000012", "B", "two");
         let fixture = BatchFixture::new(&[("a.md", &original_a), ("b.md", &original_b)]);
         let original_a = fs::read_to_string(fixture.root().join("a.md")).unwrap();
         let original_b = fs::read_to_string(fixture.root().join("b.md")).unwrap();
@@ -1874,9 +2848,9 @@ mod tests {
         let indexed_paths = fixture
             .index
             .with_index(|index, _| {
-                let mut statement = index
-                    .connection()
-                    .prepare("SELECT path FROM pages WHERE path IN ('a.md', 'b.md') ORDER BY path")?;
+                let mut statement = index.connection().prepare(
+                    "SELECT path FROM pages WHERE path IN ('a.md', 'b.md') ORDER BY path",
+                )?;
                 statement
                     .query_map([], |row| row.get::<_, String>(0))?
                     .collect::<Result<Vec<_>, _>>()
@@ -1889,11 +2863,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_index_failure_retains_committed_workspace_without_notification() {
-        let original = batch_page(
-            "019fd000-0000-7000-8000-000000000021",
-            "A",
-            "before",
-        );
+        let original = batch_page("019fd000-0000-7000-8000-000000000021", "A", "before");
         let fixture = BatchFixture::new(&[("a.md", &original)]);
         let original = fs::read_to_string(fixture.root().join("a.md")).unwrap();
         let replacement = original.replace("before", "after");
@@ -1931,14 +2901,9 @@ mod tests {
 
     #[tokio::test]
     async fn batch_invalid_indexed_move_uuid_retains_workspace_without_notification() {
-        let seeded_source = batch_page(
-            "019fd000-0000-7000-8000-000000000029",
-            "Source",
-            "body",
-        );
+        let seeded_source = batch_page("019fd000-0000-7000-8000-000000000029", "Source", "body");
         let fixture = BatchFixture::new(&[("source.md", &seeded_source)]);
-        let source_content =
-            fs::read_to_string(fixture.root().join("source.md")).unwrap();
+        let source_content = fs::read_to_string(fixture.root().join("source.md")).unwrap();
         fixture
             .index
             .with_index(|index, _| {
@@ -1996,16 +2961,8 @@ mod tests {
 
     #[tokio::test]
     async fn batch_overlaps_with_reversed_input_order_without_deadlock() {
-        let original_a = batch_page(
-            "019fd000-0000-7000-8000-000000000031",
-            "A",
-            "zero",
-        );
-        let original_b = batch_page(
-            "019fd000-0000-7000-8000-000000000032",
-            "B",
-            "zero",
-        );
+        let original_a = batch_page("019fd000-0000-7000-8000-000000000031", "A", "zero");
+        let original_b = batch_page("019fd000-0000-7000-8000-000000000032", "B", "zero");
         let fixture = BatchFixture::new(&[("a.md", &original_a), ("b.md", &original_b)]);
         let original_a = fs::read_to_string(fixture.root().join("a.md")).unwrap();
         let original_b = fs::read_to_string(fixture.root().join("b.md")).unwrap();

@@ -49,6 +49,7 @@ vi.mock("#/api/index", () => ({
 }));
 vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
+  useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, isLoading: false }),

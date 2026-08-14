@@ -54,6 +54,10 @@ export const queryKeys = {
   academic: { pathPrefix: "/api/vault/academic" },
 
   feeds: { pathPrefix: "/api/vault/feeds" },
+  rubbish: {
+    all: ["get", "/api/vault/rubbish"] as const,
+    pathPrefix: "/api/vault/rubbish",
+  },
 
   pages: {
     pathPrefix: "/api/vault/pages",
@@ -85,6 +89,20 @@ export function invalidateByPath(qc: QueryClient, prefix: string) {
     predicate: (query) => {
       const path = query.queryKey[1];
       return typeof path === "string" && path.startsWith(prefix);
+    },
+  });
+}
+
+/** Invalidate the Rubbish Bin list and every item-detail query. */
+export function invalidateRubbish(qc: QueryClient) {
+  const prefix = queryKeys.rubbish.pathPrefix;
+  return qc.invalidateQueries({
+    predicate: (query) => {
+      const path = query.queryKey[1];
+      return (
+        typeof path === "string" &&
+        (path === prefix || path.startsWith(`${prefix}/`))
+      );
     },
   });
 }

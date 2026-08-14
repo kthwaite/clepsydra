@@ -6,14 +6,13 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use super::Vault;
-use super::batch_mutation::{
-    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
-};
+use super::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use super::canonical::CanonicalName;
 use super::index::{IndexError, VaultIndex};
 use super::page::parse_or_repair_frontmatter;
 use super::path::VaultPath;
 use super::rewriter;
+use super::rubbish::{RubbishItem, RubbishManifest};
 use super::sync::ChangeEvent;
 
 // ---------------------------------------------------------------------------
@@ -149,9 +148,47 @@ pub fn compute_relative_path(from_path: &str, to_path: &str) -> String {
 /// A mutation operation to be planned.
 #[derive(Debug, Clone)]
 pub enum MutationOp {
-    MovePage { source: String, destination: String },
-    DeletePage { path: String, rewrite: RewriteMode },
-    MoveFolder { source: String, destination: String },
+    MovePage {
+        source: String,
+        destination: String,
+    },
+    DeletePage {
+        path: String,
+        rewrite: RewriteMode,
+    },
+    MoveFolder {
+        source: String,
+        destination: String,
+    },
+    ArchivePage {
+        path: String,
+        expected_bytes: Vec<u8>,
+        manifest: RubbishManifest,
+    },
+    RestorePage {
+        item: RubbishItem,
+    },
+}
+
+/// Identity returned only after one rubbish item is durably purged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurgeRubbishResult {
+    pub item_id: uuid::Uuid,
+    pub page_id: uuid::Uuid,
+    pub original_path: String,
+}
+
+/// Truthful result for one item in an Empty Rubbish Bin snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PurgeRubbishOutcome {
+    Purged(PurgeRubbishResult),
+    Failed { item_id: uuid::Uuid, error: String },
+}
+
+/// Ordered outcomes for every valid item in the Empty Rubbish Bin snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmptyRubbishResult {
+    pub outcomes: Vec<PurgeRubbishOutcome>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,6 +217,8 @@ pub enum FileOpKind {
     Delete,
     CreateDir,
     CreateFile,
+    Archive,
+    Restore,
 }
 
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -339,12 +378,11 @@ impl MutationPlan {
                 }
                 FileOpKind::Rename => {
                     let source = VaultPath::new(&op.path).map_err(vp_err)?;
-                    let destination = VaultPath::new(
-                        op.destination
-                            .as_deref()
-                            .ok_or_else(|| IndexError::Other("rename missing destination".into()))?,
-                    )
-                    .map_err(vp_err)?;
+                    let destination =
+                        VaultPath::new(op.destination.as_deref().ok_or_else(|| {
+                            IndexError::Other("rename missing destination".into())
+                        })?)
+                        .map_err(vp_err)?;
                     let represented = remove_directories.contains(&source)
                         || primary_intents.iter().any(|intent| {
                             matches!(
@@ -367,10 +405,12 @@ impl MutationPlan {
                                 .filter_map(Result::ok)
                                 .filter(|entry| entry.file_type().is_file())
                             {
-                                let relative = entry.path().strip_prefix(&source_absolute).map_err(
-                                    |error| IndexError::Other(error.to_string()),
-                                )?;
-                                let destination_absolute = vault.resolve(&destination).join(relative);
+                                let relative = entry
+                                    .path()
+                                    .strip_prefix(&source_absolute)
+                                    .map_err(|error| IndexError::Other(error.to_string()))?;
+                                let destination_absolute =
+                                    vault.resolve(&destination).join(relative);
                                 let destination_file = VaultPath::new(
                                     &destination_absolute
                                         .strip_prefix(vault.root())
@@ -388,9 +428,7 @@ impl MutationPlan {
                                         &entry
                                             .path()
                                             .strip_prefix(vault.root())
-                                            .map_err(|error| {
-                                                IndexError::Other(error.to_string())
-                                            })?
+                                            .map_err(|error| IndexError::Other(error.to_string()))?
                                             .to_string_lossy(),
                                     )
                                     .map_err(vp_err)?,
@@ -398,11 +436,7 @@ impl MutationPlan {
                                     expected_source: fs::read(entry.path())?,
                                 });
                             }
-                            collect_source_directories(
-                                vault,
-                                &source,
-                                &mut remove_directories,
-                            )?;
+                            collect_source_directories(vault, &source, &mut remove_directories)?;
                         } else {
                             collect_missing_parent_directories(
                                 vault,
@@ -429,6 +463,47 @@ impl MutationPlan {
                         });
                     }
                 }
+                FileOpKind::Archive => {
+                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let represented = primary_intents.iter().any(|intent| {
+                        matches!(
+                            intent,
+                            BatchPathIntent::ArchivePage {
+                                path: planned,
+                                expected_source,
+                                ..
+                            } if planned == &path
+                                && op.content_hash.as_deref()
+                                    == Some(blake3::hash(expected_source).to_hex().as_str())
+                        )
+                    });
+                    if !represented {
+                        return Err(IndexError::Other(format!(
+                            "archive plan is missing immutable content for {}",
+                            path.as_str()
+                        )));
+                    }
+                }
+                FileOpKind::Restore => {
+                    let path = VaultPath::new(&op.path).map_err(vp_err)?;
+                    let represented = primary_intents.iter().any(|intent| {
+                        matches!(
+                            intent,
+                            BatchPathIntent::RestorePage {
+                                destination,
+                                item,
+                            } if destination == &path
+                                && op.content_hash.as_deref()
+                                    == Some(blake3::hash(&item.bytes).to_hex().as_str())
+                        )
+                    });
+                    if !represented {
+                        return Err(IndexError::Other(format!(
+                            "restore plan is missing immutable content for {}",
+                            path.as_str()
+                        )));
+                    }
+                }
             }
         }
         intents.extend(primary_intents);
@@ -441,7 +516,6 @@ impl MutationPlan {
             moved_pages,
         })
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -469,7 +543,79 @@ impl<'a> MutationPlanner<'a> {
                 source,
                 destination,
             } => self.plan_folder_move(source, destination),
+            MutationOp::ArchivePage {
+                path,
+                expected_bytes,
+                manifest,
+            } => self.plan_page_archive(path, expected_bytes, manifest),
+            MutationOp::RestorePage { item } => self.plan_page_restore(item),
         }
+    }
+
+    fn plan_page_archive(
+        &self,
+        path: &str,
+        expected_bytes: &[u8],
+        manifest: &RubbishManifest,
+    ) -> Result<MutationPlan, IndexError> {
+        let path = VaultPath::new(path).map_err(vp_err)?;
+        if manifest.original_path != path.as_str() {
+            return Err(IndexError::Other(format!(
+                "rubbish manifest original path {} does not match archive path {}",
+                manifest.original_path,
+                path.as_str()
+            )));
+        }
+
+        let indexed_page_id = self
+            .index
+            .connection()
+            .query_row(
+                "SELECT id FROM pages WHERE path = ?1",
+                params![path.as_str()],
+                |row| row.get::<_, String>(0),
+            )
+            .map_err(IndexError::Sqlite)?;
+        if indexed_page_id != manifest.page_id.to_string() {
+            return Err(IndexError::Other(format!(
+                "rubbish manifest page ID {} does not match indexed page ID {}",
+                manifest.page_id, indexed_page_id
+            )));
+        }
+
+        let mut plan = MutationPlan::empty();
+        plan.file_ops.push(PlannedFileOp {
+            kind: FileOpKind::Archive,
+            path: path.as_str().to_owned(),
+            destination: None,
+            content_hash: Some(blake3::hash(expected_bytes).to_hex().to_string()),
+        });
+        plan.primary_intents.push(BatchPathIntent::ArchivePage {
+            path: path.clone(),
+            expected_source: expected_bytes.to_vec(),
+            manifest: manifest.clone(),
+        });
+        plan.index_events.push(ChangeEvent::Remove(path));
+        Ok(plan)
+    }
+
+    fn plan_page_restore(&self, item: &RubbishItem) -> Result<MutationPlan, IndexError> {
+        let destination = VaultPath::new(&item.manifest.original_path).map_err(vp_err)?;
+        let mut plan = MutationPlan::empty();
+        collect_missing_parent_directories(self.vault, &destination, &mut plan.create_directories)?;
+        plan.file_ops.push(PlannedFileOp {
+            kind: FileOpKind::Restore,
+            path: destination.as_str().to_owned(),
+            destination: None,
+            content_hash: Some(blake3::hash(&item.bytes).to_hex().to_string()),
+        });
+        plan.primary_intents.push(BatchPathIntent::RestorePage {
+            destination: destination.clone(),
+            item: item.clone(),
+        });
+        plan.index_events.push(ChangeEvent::Upsert(destination));
+        plan.expose_create_directories();
+        Ok(plan)
     }
 
     fn plan_page_move(&self, source: &str, destination: &str) -> Result<MutationPlan, IndexError> {
@@ -496,11 +642,7 @@ impl<'a> MutationPlanner<'a> {
             content_hash: None,
         });
         plan.moved_pages.push((source_vp.clone(), dest_vp.clone()));
-        collect_missing_parent_directories(
-            self.vault,
-            &dest_vp,
-            &mut plan.create_directories,
-        )?;
+        collect_missing_parent_directories(self.vault, &dest_vp, &mut plan.create_directories)?;
         plan.primary_intents.push(BatchPathIntent::Move {
             source: source_vp.clone(),
             destination: dest_vp.clone(),
@@ -735,8 +877,7 @@ impl<'a> MutationPlanner<'a> {
             let destination_relative = destination_absolute
                 .strip_prefix(self.vault.root())
                 .map_err(vp_err)?;
-            let source_path =
-                VaultPath::new(&source_relative.to_string_lossy()).map_err(vp_err)?;
+            let source_path = VaultPath::new(&source_relative.to_string_lossy()).map_err(vp_err)?;
             let destination_path =
                 VaultPath::new(&destination_relative.to_string_lossy()).map_err(vp_err)?;
 
@@ -769,7 +910,10 @@ impl<'a> MutationPlanner<'a> {
                 destination: destination_path.clone(),
                 expected_source: expected_source.clone(),
             });
-            if absolute.extension().is_some_and(|extension| extension == "md") {
+            if absolute
+                .extension()
+                .is_some_and(|extension| extension == "md")
+            {
                 md_files.push((source_path, destination_path, expected_source));
             }
         }
@@ -779,10 +923,12 @@ impl<'a> MutationPlanner<'a> {
         for (old_vp, new_vp, expected_source) in &md_files {
             let old_stem = old_vp.stem().to_string();
             let new_stem = new_vp.stem().to_string();
-            let source_title = std::str::from_utf8(expected_source).ok().and_then(|content| {
-                let (meta, _, _, _) = parse_or_repair_frontmatter(content);
-                meta.title
-            });
+            let source_title = std::str::from_utf8(expected_source)
+                .ok()
+                .and_then(|content| {
+                    let (meta, _, _, _) = parse_or_repair_frontmatter(content);
+                    meta.title
+                });
             plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
             plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
             plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
@@ -834,8 +980,7 @@ impl<'a> MutationPlanner<'a> {
                     .iter()
                     .map(|(old, new)| (old.as_str(), new.as_str()))
                     .collect::<Vec<_>>();
-                let new_content =
-                    rewriter::rewrite_links_in_content(&content, &replacement_refs);
+                let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
                 if new_content == content {
                     continue;
                 }
