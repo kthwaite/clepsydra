@@ -1,12 +1,6 @@
-import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useBcl } from "#/api/bcl";
-import {
-  useContentIndex,
-  useReferenceIssues,
-  useStats,
-  useTags,
-} from "#/api/index";
+import { useContentIndex } from "#/api/index";
 import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
 import { useClock } from "#/hooks/useClock";
@@ -20,7 +14,6 @@ import { useWorkspaceStore } from "#/store/workspace";
 import { ActivityHeatmap } from "./ActivityHeatmap";
 import {
   buildHeatmap,
-  deriveInventory,
   formatBclDate,
   formatBclDuration,
   greeting,
@@ -34,16 +27,8 @@ import { ReadingContinuesPanel } from "./ReadingContinues";
 import { SkyCard } from "./SkyCard";
 import { deriveSky, hasCoords } from "./sky";
 
-const REFERENCE_ISSUE_COUNT_FILTERS = { limit: 1, offset: 0 };
-
 export function Atrium() {
-  const navigate = useNavigate();
-  const { data: tags } = useTags();
-  const { data: stats } = useStats();
   const { data: content } = useContentIndex({ limit: 500 });
-  const { data: referenceIssues } = useReferenceIssues(
-    REFERENCE_ISSUE_COUNT_FILTERS,
-  );
   const { data: bcl } = useBcl();
 
   const { data: journalToday } = useJournalToday();
@@ -93,16 +78,6 @@ export function Atrium() {
   const heat = useMemo(
     () => buildHeatmap(items, calendar.utcDate),
     [items, calendar],
-  );
-  const topTags = useMemo(
-    () => [...(tags ?? [])].sort((a, b) => b.count - a.count).slice(0, 8),
-    [tags],
-  );
-  const maxTag = topTags[0]?.count ?? 1;
-
-  const inventory = useMemo(
-    () => deriveInventory(stats, tags, items, calendar.utcDate),
-    [stats, tags, items, calendar],
   );
 
   const skyMinute = Math.floor(now.getTime() / 60_000);
@@ -176,65 +151,6 @@ export function Atrium() {
         </div>
       </section>
 
-      {/* INVENTORY — col-12 */}
-      <Card
-        className="col-span-12"
-        label="Vessel · Inventory"
-        caption="FIG. I — STEADY-STATE TELEMETRY"
-        action={
-          <button
-            type="button"
-            onClick={() => navigate({ to: "/repairs" })}
-            aria-label={
-              referenceIssues
-                ? `Open Reference Repairs, ${referenceIssues.total.toLocaleString("en-US")} issues`
-                : "Open Reference Repairs"
-            }
-            className="cl-mono border-l border-rule pl-2.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
-          >
-            {referenceIssues
-              ? `${referenceIssues.total.toLocaleString("en-US")} issues`
-              : "Repairs"}{" "}
-            →
-          </button>
-        }
-        tight
-      >
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8">
-          {inventory.map((cell, i) => (
-            <div
-              key={cell.label}
-              className={cn(
-                "flex flex-col gap-1 border-rule px-2.5 py-3 md:px-3.5",
-                i % 2 === 0 ? "border-r" : "border-r-0",
-                i >= 2 ? "border-t" : "border-t-0",
-                i % 4 !== 3 ? "md:border-r" : "md:border-r-0",
-                i >= 4 ? "md:border-t" : "md:border-t-0",
-                i !== 7 ? "lg:border-r" : "lg:border-r-0",
-                "lg:border-t-0",
-              )}
-            >
-              <span className="cl-mono text-[9px] uppercase tracking-[0.22em] text-ink-mute">
-                {cell.label}
-              </span>
-              <span
-                className={cn(
-                  "font-sans text-[28px] font-bold leading-none tabular-nums",
-                  cell.tone === "warn" ? "text-warn" : "text-ink",
-                )}
-              >
-                {cell.value}
-              </span>
-              {cell.sub ? (
-                <span className="cl-mono text-[9px] tracking-[0.12em] text-ink-mute">
-                  {cell.sub}
-                </span>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      </Card>
-
       {/* APHORISM + BCL (stacked, col-7) + SKY (col-5) */}
       <div className="col-span-12 flex flex-col gap-3.5 lg:col-span-7">
         <Card
@@ -274,7 +190,7 @@ export function Atrium() {
         onEdit={openLocation}
       />
 
-      {/* HEATMAP (col-8) + TAGS (col-4) */}
+      {/* HEATMAP */}
       <Card
         className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-8"
         label="Activity · Rolling 26 weeks"
@@ -289,46 +205,6 @@ export function Atrium() {
           current={heat.currentStreak}
           onOpenPage={(path, title) => openTab("page", path, title)}
         />
-      </Card>
-      <Card
-        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-4"
-        label="Subjects, by frequency"
-        caption="FIG. V"
-      >
-        {topTags.length === 0 ? (
-          <p className="cl-marg m-0">No tags yet.</p>
-        ) : (
-          <div className="flex flex-col gap-1.5">
-            {topTags.map((t) => (
-              <button
-                type="button"
-                key={t.tag}
-                onClick={() =>
-                  navigate({
-                    to: "/gazetteer",
-                    search: { tags: [t.tag] },
-                  })
-                }
-                className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_minmax(60px,1fr)_32px] items-center gap-2 text-left md:grid-cols-[120px_1fr_36px]"
-              >
-                <span className="cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[11px] text-ink-2 group-hover:text-accent">
-                  #{t.tag}
-                </span>
-                <span className="h-[8px] bg-rule-soft">
-                  <span
-                    className="block h-full bg-accent"
-                    style={{
-                      width: `${Math.max(4, (t.count / maxTag) * 100)}%`,
-                    }}
-                  />
-                </span>
-                <span className="cl-mono text-right text-[10px] tabular-nums text-ink-mute">
-                  {t.count}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
       </Card>
 
       <FeedRiverPanel />

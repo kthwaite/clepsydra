@@ -94,6 +94,14 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     mobile: { name: "Gazetteer", label: "GAZ" },
     go: ({ navigate }) => void navigate({ to: "/gazetteer" }),
   },
+  stats: {
+    label: "STATS",
+    folioCode: "STATS",
+    showsSheaf: false,
+    navRoot: "stats",
+    mobile: null,
+    go: ({ navigate }) => void navigate({ to: "/stats" }),
+  },
   tasking: {
     label: "TASKING",
     folioCode: "TASKING",
@@ -167,6 +175,7 @@ export const DESKTOP_NAV: readonly CodexView[] = [
   "atrium",
   "folio",
   "gazetteer",
+  "stats",
   "constellation",
   "tasking",
   "academic",

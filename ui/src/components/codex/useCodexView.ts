@@ -7,6 +7,7 @@ export type CodexView =
   | "launcher"
   | "constellation"
   | "gazetteer"
+  | "stats"
   | "tasking"
   | "academic"
   | "bases"
