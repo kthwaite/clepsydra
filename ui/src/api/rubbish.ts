@@ -69,7 +69,7 @@ export function usePurgeRubbishItem() {
         "Permanent deletion returned no result.",
       );
     },
-    onSuccess: () => {
+    onSettled: () => {
       void invalidateRubbish(queryClient);
     },
   });
@@ -86,7 +86,7 @@ export function useEmptyRubbish() {
         "Empty Rubbish Bin returned no result.",
       );
     },
-    onSuccess: () => {
+    onSettled: () => {
       void invalidateRubbish(queryClient);
     },
   });

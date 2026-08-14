@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use super::AppState;
 use super::error::ApiError;
+use super::events::SyncNotification;
 use super::pages::EncryptionMetaResponse;
 use crate::vault::mutation::{MutationOp, MutationPlanner, PurgeRubbishOutcome};
 use crate::vault::page::parse_frontmatter;
@@ -138,6 +139,13 @@ fn store_read_error(item_id: &str, error: RubbishStoreError) -> ApiError {
         }
         _ => ApiError::internal(error.to_string()),
     }
+}
+
+fn notify_rubbish_changed(state: &AppState) {
+    let _ = state.change_tx.send(SyncNotification::IndexChanged {
+        upserted: Vec::new(),
+        removed: Vec::new(),
+    });
 }
 
 fn truncate_preview(body: &str) -> (String, bool) {
@@ -302,8 +310,9 @@ pub async fn purge_rubbish_item(
     let result = state
         .mutation_coordinator
         .purge_rubbish(&state.vault, &state.index, Arc::clone(&state.cas), &item_id)
-        .await
-        .map_err(super::mutation_error)?;
+        .await;
+    notify_rubbish_changed(&state);
+    let result = result.map_err(super::mutation_error)?;
     Ok(Json(RubbishPurgeResponse {
         item_id: result.item_id.to_string(),
         page_id: result.page_id.to_string(),
@@ -327,8 +336,9 @@ pub async fn empty_rubbish(
     let result = state
         .mutation_coordinator
         .empty_rubbish(&state.vault, &state.index, Arc::clone(&state.cas))
-        .await
-        .map_err(super::mutation_error)?;
+        .await;
+    notify_rubbish_changed(&state);
+    let result = result.map_err(super::mutation_error)?;
     let outcomes = result
         .outcomes
         .into_iter()

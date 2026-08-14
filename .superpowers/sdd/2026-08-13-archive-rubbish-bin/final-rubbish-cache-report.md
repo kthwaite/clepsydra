@@ -71,3 +71,32 @@ Self-review confirmed one `invalidateQueries` call per Rubbish lifecycle invalid
 ### Concerns
 
 No scoped concerns. The focused runs continue to emit only the pre-existing Vite native-config compatibility warning documented above.
+
+## Definitive review correction: purge and Empty Bin settlement
+
+### Root cause and changes
+
+- The purge and Empty Bin REST handlers called coordinator methods that do not accept a mutation notifier, then returned without broadcasting any lifecycle catalog change. MCP purge and Empty Bin use these REST routes, so they inherited the gap.
+- Purge mapped coordinator errors before any API-layer action, preventing applied-error outcomes from telling other clients to refresh.
+- Local purge and Empty Bin hooks invalidated only in `onSuccess`, so a rejected response after durable state changed left the initiating client's cache fresh.
+- Each REST handler now sends exactly one empty-path `IndexChanged` lifecycle notification after its coordinator request settles and before success/error mapping. Empty Bin emits once for the request rather than once per item. Empty path sets are intentional: Rubbish cache invalidation keys off lifecycle index-event type, while no live page path changed.
+- Local purge and Empty Bin hooks now run the existing one-pass Rubbish family invalidation in `onSettled`. Both applied and pre-apply rejections therefore refresh harmlessly, with one invalidation per mutation settlement.
+
+### TDD evidence
+
+- UI RED: `bun run test -- src/api/rubbish.test.tsx` — exit 1: 1 failed, 3 passed. The rejected applied-error purge left the active list at one initial fetch instead of refetching once.
+- REST purge RED: `cargo test --test api_rubbish_test rubbish_item_delete_purges_exact_item` — exit 101: the expected lifecycle notification receiver was empty.
+- Applied-error purge RED: `cargo test --test api_rubbish_test failed_purge_after_cas_release_cannot_restore_and_retry_finishes` — exit 101: the expected lifecycle notification receiver was empty after CAS release and the injected catalog failure.
+- Empty Bin RED: `cargo test --test api_rubbish_test empty_rubbish_returns_ordered_partial_outcomes_and_retains_failures` — exit 101: the expected single lifecycle notification receiver was empty.
+- Final Rust GREEN: `cargo test --test api_rubbish_test` — exit 0: 11 tests passed.
+- Final UI GREEN: `bun run test -- src/api/__tests__/mutation-hooks.test.tsx src/api/rubbish.test.tsx src/hooks/useVaultEvents.test.tsx src/hooks/useVaultEvents.integration.test.tsx` — exit 0: 4 files passed, 15 tests passed.
+
+### Commit and self-review
+
+Task commit subject: `fix(rubbish): refresh caches after purge settlement`.
+
+Self-review confirmed the notification is issued once at each REST request boundary, including error settlement, and Empty Bin's per-item coordinator loop cannot emit duplicates. MCP inherits the same behavior through its REST client. UI rejection coverage proves both an applied-error and a harmless pre-apply error cause one additional active-list fetch apiece while an inactive detail becomes stale without fetching. The existing boundary-aware Rubbish query predicate and feed-event isolation remain unchanged.
+
+### Concerns
+
+No scoped concerns. Successful initiating clients may observe both their local settlement invalidation and the server's cross-client SSE notification, as they already can for archive/restore; each individual path now emits only once. The focused UI run continues to emit the pre-existing Vite native-config warning.

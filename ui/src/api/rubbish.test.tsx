@@ -1,5 +1,9 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+} from "@tanstack/react-query";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -153,5 +157,62 @@ describe("rubbish API hooks", () => {
       2,
       "/api/vault/rubbish",
     );
+  });
+
+  it("invalidates rubbish once for each rejected purge settlement", async () => {
+    transport.delete
+      .mockResolvedValueOnce({
+        data: undefined,
+        error: new Error("purge failed after applying"),
+      })
+      .mockResolvedValueOnce({
+        data: undefined,
+        error: new Error("purge rejected before applying"),
+      });
+    const { client, wrapper } = harness();
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    const fetchList = vi.fn(async () => ({ items: [] }));
+    const fetchDetail = vi.fn(async () => ({ item_id: "item-1" }));
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: fetchList,
+    });
+    const unsubscribe = listObserver.subscribe(() => undefined);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    await client.fetchQuery({ queryKey: detailKey, queryFn: fetchDetail });
+    const { result } = renderHook(() => usePurgeRubbishItem(), { wrapper });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync("item-1")).rejects.toThrow(
+        "purge failed after applying",
+      );
+    });
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isFetching).toBe(false),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(2);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+
+    client.setQueryData(detailKey, { item_id: "item-1" });
+    await act(async () => {
+      await expect(result.current.mutateAsync("item-1")).rejects.toThrow(
+        "purge rejected before applying",
+      );
+    });
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isFetching).toBe(false),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(3);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    unsubscribe();
   });
 });

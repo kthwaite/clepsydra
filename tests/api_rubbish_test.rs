@@ -8,12 +8,14 @@ use axum::body::{Body, to_bytes};
 use axum::http::{Method, Request, StatusCode};
 use chrono::{DateTime, Utc};
 use clepsydra::api::Clock;
+use clepsydra::api::events::SyncNotification;
 use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 use serde_json::{Value, json};
 use support::ApiFixture;
+use tokio::sync::broadcast;
 use tower::ServiceExt;
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -88,6 +90,22 @@ async fn archive_page(fixture: &ApiFixture, path: &str) -> Value {
         .await;
     response.assert_status(StatusCode::CREATED);
     response.json()
+}
+
+fn assert_single_rubbish_notification(
+    changes: &mut broadcast::Receiver<SyncNotification>,
+) {
+    let SyncNotification::IndexChanged { upserted, removed } =
+        changes.try_recv().expect("rubbish lifecycle notification")
+    else {
+        panic!("expected IndexChanged");
+    };
+    assert!(upserted.is_empty());
+    assert!(removed.is_empty());
+    assert!(matches!(
+        changes.try_recv(),
+        Err(broadcast::error::TryRecvError::Empty)
+    ));
 }
 
 #[tokio::test]
@@ -507,6 +525,7 @@ async fn rubbish_item_delete_purges_exact_item() {
         .assert_status(StatusCode::CREATED);
     let archived = archive_page(&fixture, "purge.md").await;
     let item_id = archived["item_id"].as_str().unwrap();
+    let mut changes = fixture.state.change_tx.subscribe();
 
     let purged = fixture
         .server
@@ -517,6 +536,7 @@ async fn rubbish_item_delete_purges_exact_item() {
     assert_eq!(purged["item_id"], item_id);
     assert_eq!(purged["page_id"], archived["page_id"]);
     assert_eq!(purged["original_path"], "purge.md");
+    assert_single_rubbish_notification(&mut changes);
     fixture
         .server
         .get(&format!("/api/vault/rubbish/{item_id}"))
@@ -571,6 +591,7 @@ async fn failed_purge_after_cas_release_cannot_restore_and_retry_finishes() {
         .unwrap()
         .unwrap();
 
+    let mut changes = fixture.state.change_tx.subscribe();
     let purge_error = fixture
         .server
         .delete(&format!("/api/vault/rubbish/{ITEM_ID_A}"))
@@ -582,6 +603,7 @@ async fn failed_purge_after_cas_release_cannot_restore_and_retry_finishes() {
             .unwrap()
             .contains("rubbish catalog removal failed")
     );
+    assert_single_rubbish_notification(&mut changes);
     assert_eq!(
         RubbishStore::for_vault(fixture.state.vault.root())
             .read_item(ITEM_ID_A)
@@ -717,6 +739,7 @@ async fn empty_rubbish_returns_ordered_partial_outcomes_and_retains_failures() {
     )
     .await;
 
+    let mut changes = fixture.state.change_tx.subscribe();
     let response = fixture.server.delete("/api/vault/rubbish").await;
     response.assert_status_ok();
     let body: Value = response.json();
@@ -732,6 +755,7 @@ async fn empty_rubbish_returns_ordered_partial_outcomes_and_retains_failures() {
     );
     assert_eq!(outcomes[1]["status"], "purged");
     assert_eq!(outcomes[1]["item"]["item_id"], ITEM_ID_A);
+    assert_single_rubbish_notification(&mut changes);
 
     fixture
         .server
