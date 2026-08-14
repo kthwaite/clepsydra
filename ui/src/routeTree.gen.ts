@@ -17,6 +17,7 @@ import { Route as FeedsRouteImport } from './routes/feeds'
 import { Route as GazetteerRouteImport } from './routes/gazetteer'
 import { Route as GraphRouteImport } from './routes/graph'
 import { Route as RepairsRouteImport } from './routes/repairs'
+import { Route as StatsRouteImport } from './routes/stats'
 import { Route as TaskingRouteImport } from './routes/tasking'
 import { Route as WorkspaceRouteImport } from './routes/workspace'
 import { Route as ArchiveSplatRouteImport } from './routes/archive.$'
@@ -64,6 +65,11 @@ const GraphRoute = GraphRouteImport.update({
 const RepairsRoute = RepairsRouteImport.update({
   id: '/repairs',
   path: '/repairs',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StatsRoute = StatsRouteImport.update({
+  id: '/stats',
+  path: '/stats',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TaskingRoute = TaskingRouteImport.update({
@@ -116,6 +122,7 @@ export interface FileRoutesByFullPath {
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/repairs': typeof RepairsRoute
+  '/stats': typeof StatsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/archive/$': typeof ArchiveSplatRoute
@@ -134,6 +141,7 @@ export interface FileRoutesByTo {
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/repairs': typeof RepairsRoute
+  '/stats': typeof StatsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/archive/$': typeof ArchiveSplatRoute
@@ -153,6 +161,7 @@ export interface FileRoutesById {
   '/gazetteer': typeof GazetteerRoute
   '/graph': typeof GraphRoute
   '/repairs': typeof RepairsRoute
+  '/stats': typeof StatsRoute
   '/tasking': typeof TaskingRoute
   '/workspace': typeof WorkspaceRoute
   '/archive/$': typeof ArchiveSplatRoute
@@ -173,6 +182,7 @@ export interface FileRouteTypes {
     | '/gazetteer'
     | '/graph'
     | '/repairs'
+    | '/stats'
     | '/tasking'
     | '/workspace'
     | '/archive/$'
@@ -191,6 +201,7 @@ export interface FileRouteTypes {
     | '/gazetteer'
     | '/graph'
     | '/repairs'
+    | '/stats'
     | '/tasking'
     | '/workspace'
     | '/archive/$'
@@ -209,6 +220,7 @@ export interface FileRouteTypes {
     | '/gazetteer'
     | '/graph'
     | '/repairs'
+    | '/stats'
     | '/tasking'
     | '/workspace'
     | '/archive/$'
@@ -228,6 +240,7 @@ export interface RootRouteChildren {
   GazetteerRoute: typeof GazetteerRoute
   GraphRoute: typeof GraphRoute
   RepairsRoute: typeof RepairsRoute
+  StatsRoute: typeof StatsRoute
   TaskingRoute: typeof TaskingRoute
   WorkspaceRoute: typeof WorkspaceRoute
   ArchiveSplatRoute: typeof ArchiveSplatRoute
@@ -292,6 +305,13 @@ declare module '@tanstack/react-router' {
       path: '/repairs'
       fullPath: '/repairs'
       preLoaderRoute: typeof RepairsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stats': {
+      id: '/stats'
+      path: '/stats'
+      fullPath: '/stats'
+      preLoaderRoute: typeof StatsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/tasking': {
@@ -384,6 +404,7 @@ const rootRouteChildren: RootRouteChildren = {
   GazetteerRoute: GazetteerRoute,
   GraphRoute: GraphRoute,
   RepairsRoute: RepairsRoute,
+  StatsRoute: StatsRoute,
   TaskingRoute: TaskingRoute,
   WorkspaceRoute: WorkspaceRoute,
   ArchiveSplatRoute: ArchiveSplatRoute,
