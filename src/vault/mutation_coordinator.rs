@@ -39,6 +39,8 @@ type CreateRollbackSyncHook = dyn Fn(&Path) -> io::Result<()> + Send + Sync;
 type BeforeLockAcquireHook = dyn Fn(&VaultPath) + Send + Sync;
 #[cfg(test)]
 type BeforeBatchLockHook = dyn Fn(&[VaultPath]) + Send + Sync;
+#[cfg(test)]
+type BeforeRubbishRemoveHook = dyn Fn(&Path, uuid::Uuid) + Send + Sync;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum MutationLockKey {
     Path(VaultPath),
@@ -74,6 +76,8 @@ pub struct MutationCoordinator {
     before_lock_acquire_hook: parking_lot::Mutex<Option<Arc<BeforeLockAcquireHook>>>,
     #[cfg(test)]
     before_batch_lock_hook: parking_lot::Mutex<Option<Arc<BeforeBatchLockHook>>>,
+    #[cfg(test)]
+    before_rubbish_remove_hook: parking_lot::Mutex<Option<Arc<BeforeRubbishRemoveHook>>>,
     batch_publication_failure: parking_lot::Mutex<Option<usize>>,
     batch_rollback_failure: parking_lot::Mutex<Option<usize>>,
 }
@@ -652,16 +656,19 @@ fn prepare_rubbish_purge_context(
     item_id: uuid::Uuid,
 ) -> Result<Option<RubbishPurgeContext>, MutationError> {
     let store = RubbishStore::for_vault(vault_root);
-    if store
+    let finished_tombstone = store
         .finish_purge_tombstone(item_id)
-        .map_err(|source| MutationError::RubbishStore { item_id, source })?
-    {
-        return Ok(None);
-    }
+        .map_err(|source| MutationError::RubbishStore { item_id, source })?;
     let item = store
         .read_item_if_exists(item_id)
-        .map_err(|source| MutationError::RubbishStore { item_id, source })?
-        .ok_or(MutationError::RubbishItemNotFound(item_id))?;
+        .map_err(|source| MutationError::RubbishStore { item_id, source })?;
+    let Some(item) = item else {
+        return if finished_tombstone {
+            Ok(None)
+        } else {
+            Err(MutationError::RubbishItemNotFound(item_id))
+        };
+    };
     let content =
         std::str::from_utf8(&item.bytes).map_err(|source| MutationError::RubbishPageMetadata {
             item_id,
@@ -705,6 +712,8 @@ impl MutationCoordinator {
             before_lock_acquire_hook: parking_lot::Mutex::new(None),
             #[cfg(test)]
             before_batch_lock_hook: parking_lot::Mutex::new(None),
+            #[cfg(test)]
+            before_rubbish_remove_hook: parking_lot::Mutex::new(None),
             batch_publication_failure: parking_lot::Mutex::new(None),
             batch_rollback_failure: parking_lot::Mutex::new(None),
         }
@@ -752,6 +761,11 @@ impl MutationCoordinator {
     #[doc(hidden)]
     pub fn set_batch_rollback_fail_after(&self, intent_index: Option<usize>) {
         *self.batch_rollback_failure.lock() = intent_index;
+    }
+
+    #[cfg(test)]
+    fn set_before_rubbish_remove_hook(&self, hook: Option<Arc<BeforeRubbishRemoveHook>>) {
+        *self.before_rubbish_remove_hook.lock() = hook;
     }
 
     pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
@@ -944,6 +958,8 @@ impl MutationCoordinator {
             .map_err(|source| MutationError::RubbishCatalog { item_id, source })?
             .map_err(|source| MutationError::RubbishCatalog { item_id, source })?;
 
+        #[cfg(test)]
+        let before_rubbish_remove_hook = self.before_rubbish_remove_hook.lock().clone();
         let result = PurgeRubbishResult {
             item_id,
             page_id: context.item.manifest.page_id,
@@ -953,6 +969,10 @@ impl MutationCoordinator {
         let item = context.item;
         let (guard, removal, authoritative_entry) = tokio::task::spawn_blocking(move || {
             let store = RubbishStore::for_vault(&removal_root);
+            #[cfg(test)]
+            if let Some(hook) = before_rubbish_remove_hook {
+                hook(&removal_root, item_id);
+            }
             let removal = store.remove_item(&item);
             let authoritative_entry = if removal.is_err() {
                 store.catalog_entry_for_expected_item(&item)
@@ -2198,6 +2218,93 @@ mod tests {
             )
             .unwrap();
         assert_eq!(releases, 1);
+    }
+
+    #[tokio::test]
+    async fn purge_rubbish_tombstone_collision_retry_removes_uuid_catalog_and_releases_once() {
+        let fixture = BatchFixture::new(&[]);
+        let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000421").unwrap();
+        let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000422").unwrap();
+        let (manifest, store, bytes) = fixture.publish_purge_item(item_id, page_id).await;
+        let tombstone = fixture
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(format!(".purge-{item_id}"));
+        let collision_injected = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        fixture
+            .coordinator
+            .set_before_rubbish_remove_hook(Some(Arc::new({
+                let collision_injected = Arc::clone(&collision_injected);
+                move |root, found_item_id| {
+                    assert_eq!(found_item_id, item_id);
+                    if !collision_injected.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                        fs::create_dir(
+                            root.join(".clepsydra/rubbish")
+                                .join(format!(".purge-{item_id}")),
+                        )
+                        .unwrap();
+                    }
+                }
+            })));
+        let cas_temp = tempfile::tempdir().unwrap();
+        let cas = Arc::new(parking_lot::Mutex::new(
+            ContentStore::open(cas_temp.path()).unwrap(),
+        ));
+        let release_count = || -> i64 {
+            rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+                .unwrap()
+                .query_row(
+                    "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+                    [item_id.to_string()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+
+        let first = fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(
+                &first,
+                MutationError::RubbishStore {
+                    item_id: found,
+                    ..
+                } if *found == item_id
+            ),
+            "{first:?}"
+        );
+        assert_eq!(store.read_item(&item_id.to_string()).unwrap().bytes, bytes);
+        assert!(tombstone.exists());
+        assert_eq!(
+            fixture.rubbish_catalog_entry(item_id).await,
+            Some(RubbishListEntry::Valid(manifest))
+        );
+        assert_eq!(release_count(), 1);
+
+        fixture
+            .coordinator
+            .purge_rubbish(
+                &fixture.vault,
+                &fixture.index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap();
+
+        assert!(store.read_item(&item_id.to_string()).is_err());
+        assert!(!tombstone.exists());
+        assert_eq!(fixture.rubbish_catalog_entry(item_id).await, None);
+        assert_eq!(release_count(), 1);
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
