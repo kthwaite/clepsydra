@@ -1,3 +1,4 @@
+import { useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useBcl } from "#/api/bcl";
 import { useContentIndex } from "#/api/index";
@@ -8,9 +9,10 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKind } from "#/lib/kind";
-import { formatClock, formatRelativeTime, pad2 } from "#/lib/time";
+import { formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
+import { AgendaTile } from "./AgendaTile";
 import { ActivityHeatmap } from "./ActivityHeatmap";
 import {
   buildHeatmap,
@@ -30,6 +32,14 @@ import { deriveSky, hasCoords } from "./sky";
 export function Atrium() {
   const { data: content } = useContentIndex({ limit: 500 });
   const { data: bcl } = useBcl();
+  const configuredBcl =
+    bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null
+      ? {
+          birthDate: bcl.birth_date,
+          date: bcl.bcl_date,
+          remainingSeconds: bcl.remaining_seconds,
+        }
+      : null;
 
   const { data: journalToday } = useJournalToday();
   const { data: location } = useLocation();
@@ -41,6 +51,7 @@ export function Atrium() {
   const now = useClock();
 
   const openTab = useOpenTab();
+  const navigate = useNavigate();
   const openTodayJournal = useOpenTodayJournal();
   const openHistory = useWorkspaceStore((s) => s.openHistory);
   const [recentTab, setRecentTab] = useState<"edited" | "created" | "opened">(
@@ -70,7 +81,7 @@ export function Atrium() {
   }, [recentTab, openHistory, byPath, items]);
 
   const calendar = useAtriumCalendar(now);
-  const clock = formatClock(now);
+  const clock = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
   const journalSub = journalToday?.meta.id
     ? `${journalToday.meta.id} · JOURNAL / ${calendar.dotDate}`
     : `JOURNAL / ${calendar.dotDate}`;
@@ -100,7 +111,6 @@ export function Atrium() {
             <span>
               DAY {calendar.doy} / {calendar.yearDays}
             </span>
-            <span>JD {calendar.julian}</span>
             <span className="tabular-nums">{clock} LOCAL</span>
           </div>
           <h1 className="font-sans text-[clamp(40px,6vw,72px)] font-black leading-[0.95] tracking-[-0.02em] text-ink">
@@ -148,52 +158,6 @@ export function Atrium() {
           </div>
         </div>
       </section>
-
-      {/* BCL (col-7) + SKY (col-5) */}
-      <div className="col-span-12 flex flex-col gap-3.5 lg:col-span-7">
-        {bcl?.birth_date && bcl.bcl_date && bcl.remaining_seconds !== null && (
-          <Card
-            className="flex-1 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
-            label="Brimley-Cocoon Line"
-            pip="dim"
-            caption="FIG. VII"
-          >
-            <div className="cl-mono text-[22px] leading-none text-accent">
-              {formatBclDuration(bcl.remaining_seconds)}
-            </div>
-            <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
-              {bcl.remaining_seconds >= 0 ? "crosses" : "crossed"}{" "}
-              {formatBclDate(bcl.bcl_date)} · natal {bcl.birth_date}
-            </div>
-          </Card>
-        )}
-      </div>
-      <SkyCard
-        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-5"
-        sky={sky}
-        hasLocation={located}
-        onEdit={openLocation}
-      />
-
-      {/* HEATMAP */}
-      <Card
-        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-8"
-        label="Activity · Rolling 26 weeks"
-        pip="cool"
-        caption="FIG. IV — CAPTURES PER DAY · UTC"
-      >
-        <ActivityHeatmap
-          weeks={heat.weeks}
-          monthLabels={heat.monthLabels}
-          total={heat.total}
-          longest={heat.longestStreak}
-          current={heat.currentStreak}
-          onOpenPage={(path, title) => openTab("page", path, title)}
-        />
-      </Card>
-
-      <FeedRiverPanel />
-
       {/* RECENTS (col-7) */}
       <section className="col-span-12 flex h-[340px] flex-col border border-rule bg-paper-2 lg:col-span-7">
         <div className="flex flex-col border-b border-rule bg-paper md:flex-row md:items-center md:justify-between">
@@ -286,6 +250,66 @@ export function Atrium() {
           )}
         </div>
       </section>
+      <AgendaTile className="col-span-12 lg:col-span-5" />
+
+      <FeedRiverPanel />
+      {/* BCL (col-7) + SKY (col-5) */}
+      <div className="col-span-12 grid grid-cols-12 gap-3.5">
+        {configuredBcl ? (
+          <Card
+            className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5 lg:col-span-7"
+            label="Brimley-Cocoon Line"
+            pip="dim"
+            caption="FIG. VII"
+          >
+            <div className="cl-mono text-[22px] leading-none text-accent">
+              {formatBclDuration(configuredBcl.remainingSeconds)}
+            </div>
+            <div className="cl-mono mt-1.5 text-[10px] text-ink-mute">
+              {configuredBcl.remainingSeconds >= 0 ? "crosses" : "crossed"}{" "}
+              {formatBclDate(configuredBcl.date)} · natal{" "}
+              {configuredBcl.birthDate}
+            </div>
+          </Card>
+        ) : null}
+        <SkyCard
+          className={cn(
+            "col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5",
+            configuredBcl ? "lg:col-span-5" : "lg:col-span-12",
+          )}
+          sky={sky}
+          hasLocation={located}
+          onEdit={openLocation}
+        />
+      </div>
+
+      {/* HEATMAP */}
+      <Card
+        className="col-span-12 [&>div:last-child]:p-2.5 md:[&>div:last-child]:p-3.5"
+        label="Activity · Rolling 26 weeks"
+        pip="cool"
+        caption="FIG. IV — CAPTURES PER DAY · UTC"
+        action={
+          <button
+            type="button"
+            onClick={() => navigate({ to: "/stats" })}
+            className="cl-mono border-l border-rule pl-2.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+          >
+            Stats →
+          </button>
+        }
+      >
+        <ActivityHeatmap
+          weeks={heat.weeks}
+          monthLabels={heat.monthLabels}
+          total={heat.total}
+          longest={heat.longestStreak}
+          current={heat.currentStreak}
+          onOpenPage={(path, title) => openTab("page", path, title)}
+        />
+      </Card>
+
+
 
       {/* READING CONTINUES — the bases pilot; hidden without a reading base */}
       <ReadingContinuesPanel />

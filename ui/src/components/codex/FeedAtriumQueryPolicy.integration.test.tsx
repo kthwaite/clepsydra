@@ -208,7 +208,7 @@ function renderAtrium(client: QueryClient) {
 
 function expectAtriumSurfaces() {
   expect(screen.getByText("Activity · Rolling 26 weeks")).toBeInTheDocument();
-  expect(screen.getByText("Subjects, by frequency")).toBeInTheDocument();
+  expect(screen.getByText(/DAYSTART \//)).toBeInTheDocument();
   expect(screen.getByText("FIG. VI")).toBeInTheDocument();
 }
 

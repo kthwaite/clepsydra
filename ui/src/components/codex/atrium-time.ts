@@ -3,7 +3,7 @@ import {
   daystampLabel,
   formatDotDate,
 } from "#/components/codex/atrium-data";
-import { dayOfYear, isLeapYear, julianDay } from "#/lib/time";
+import { dayOfYear, isLeapYear } from "#/lib/time";
 
 export function useAtriumCalendar(now: Date) {
   const year = now.getFullYear();
@@ -22,7 +22,6 @@ export function useAtriumCalendar(now: Date) {
       dayKey,
       dotDate: formatDotDate(day),
       doy,
-      julian: julianDay(day),
       todayLabel: daystampLabel(day),
       utcDate,
       week: Math.ceil(doy / 7),
