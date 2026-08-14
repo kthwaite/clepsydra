@@ -32,6 +32,8 @@ Build outputs:
 - `extension/dist/` (Chrome/Chromium/Brave/Edge)
 - `extension/dist-firefox/` (Firefox)
 
+The runtime selects a native `browser` WebExtension namespace when present and otherwise uses `chrome`. Clepsydra currently builds and verifies Chromium MV3 and Firefox MV2 packages. Safari conversion, signing, packaging, and runtime support are not provided.
+
 ## Install in Chrome / Chromium / Brave / Edge
 
 1. Open extensions page:
@@ -78,6 +80,8 @@ bun run build:firefox
 - Use the command shortcut:
   - Windows/Linux: `Ctrl+Shift+S`
   - macOS: `Command+Shift+S`
+
+Configured default tags are always included. The popup's Additional tags field applies only to the capture you are starting and does not change Settings. After capture, ordinary tags can be added or removed from the archived Folio; its captured body and snapshot remain protected.
 
 ## Dev workflow notes
 
