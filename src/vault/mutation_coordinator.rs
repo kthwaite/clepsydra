@@ -2190,7 +2190,6 @@ mod tests {
         assert_eq!(releases, 1);
     }
 
-    #[cfg(not(windows))]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn purge_rubbish_post_rename_root_sync_failure_does_not_restore_a_catalog_ghost() {
         let fixture = BatchFixture::new(&[]);

@@ -893,9 +893,19 @@ fn sync_directory(path: &Path) -> Result<(), RubbishStoreError> {
 }
 
 #[cfg(windows)]
-#[allow(clippy::unnecessary_wraps)]
-fn sync_directory(_path: &Path) -> Result<(), RubbishStoreError> {
-    Ok(())
+fn sync_directory(path: &Path) -> Result<(), RubbishStoreError> {
+    use std::os::windows::fs::OpenOptionsExt as _;
+
+    use windows_sys::Win32::Storage::FileSystem::FILE_FLAG_BACKUP_SEMANTICS;
+
+    #[cfg(test)]
+    hit_test_directory_sync_failure(path)?;
+    OpenOptions::new()
+        .write(true)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|source| RubbishStoreError::filesystem("sync directory", path, source))
 }
 
 #[cfg(test)]
@@ -1026,7 +1036,6 @@ mod tests {
         assert!(!root.exists());
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn prepare_item_cleans_staging_when_the_initial_root_sync_fails() {
         let temp = TempDir::new().unwrap();
@@ -1306,7 +1315,6 @@ mod tests {
         assert!(!root.join(format!(".purge-{item_id}")).exists());
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn purge_root_sync_failure_leaves_a_hidden_complete_tombstone_for_retry() {
         let temp = TempDir::new().unwrap();
@@ -1371,7 +1379,6 @@ mod tests {
         assert!(tombstone.exists());
     }
 
-    #[cfg(not(windows))]
     #[test]
     fn tombstone_removal_sync_failure_leaves_no_catalog_visible_or_retry_state() {
         let temp = TempDir::new().unwrap();
