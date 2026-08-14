@@ -189,12 +189,9 @@ describe("AgendaTile", () => {
     );
   });
 
-  it("renders a query failure inside the tile", () => {
-    agendaMocks.useTasks.mockReturnValue({
-      data: undefined,
-      error: new Error("Network unavailable"),
-      isError: true,
-      isLoading: false,
+  it("contains a thrown query failure inside the tile", () => {
+    agendaMocks.useTasks.mockImplementation(() => {
+      throw new Error("Network unavailable");
     });
 
     render(<AgendaTile />);
