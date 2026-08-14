@@ -134,7 +134,9 @@ The background worker then:
    as Readability resolved them — or, when it did not, emits fallback Markdown
    recording the page's URL and capture time and noting that the captured
    snapshot is still archived and viewable;
-2. adds `archive`, domain, current-month, and configured default tags; and
+2. builds the tag list from system tags (`archive`, domain, and current month),
+   then configured defaults, then popup additions, normalizing each group and
+   deduplicating exact matches in first-occurrence order; and
 3. posts one archive manifest containing `url`, optional `canonical_url`,
    `domain`, `title`, optional `description`, `captured_at`, `content_hash`
    (a hash of `markdown_body` exactly as sent), `snapshot_html` (the SingleFile
