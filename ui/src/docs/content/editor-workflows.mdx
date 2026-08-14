@@ -34,6 +34,153 @@ The header reports **Saved**, **Saving...**, **Unsaved changes**, or
 **Save failed**. A save sends the revision that was loaded with the Folio; it
 never silently overwrites a newer revision.
 
+### Format with Markdown shortcuts
+
+Folio rewrites Markdown shorthand as you type. Block triggers fire when you
+press `Space` after the marker at the start of a paragraph.
+
+| Type | Result |
+| --- | --- |
+| `# ` through `###### ` | Headings 1 through 6 |
+| `1. ` | Numbered list (any digits before the period) |
+| `- ` or `* ` | Bulleted list |
+| `[] ` | Task item |
+| `> ` | Blockquote |
+
+A third hyphen at the end of a line converts `---` into a divider and starts a
+fresh paragraph below it. A fence of three backticks, optionally followed by a
+language name, becomes a code block in that language when you press `Enter` at
+the end of the line. Nothing autoformats inside a code block.
+
+Only the empty `[] ` form can be typed: in any non-empty bracket pair the
+closing `]` fires the link scaffold described below instead. The `[ ] ` and
+`[x] ` forms are still recognized in pasted or loaded Markdown. Typing `[] ` or
+`[x] ` at the start of an existing bullet promotes it to a task and keeps its
+text.
+
+Inline triggers fire on their closing character.
+
+| Type | Result |
+| --- | --- |
+| `*text*` or `_text_` | Italic |
+| `**text**` or `__text__` | Bold |
+| `~text~` | Strikethrough, one tilde, written back as one tilde |
+| `` `code` `` | Inline code |
+| `[text](url)` | Link, on the closing parenthesis |
+
+An opener counts only at the start of the text or after whitespace or
+punctuation, so `snake_case` never italicizes. Typing `*` or `_` at a caret
+inserts the pair and centers the caret; typing the closing character again types
+through it rather than doubling it. Typing `*`, `_`, or `~` while text is
+selected wraps the selection in those literal characters and applies no mark.
+Typing `[`, a label, and then `]` inserts a `]()` scaffold with the caret
+between the parentheses.
+
+`[^id]` inserts a footnote reference. When no definition with that identifier
+exists, Clepsydra appends an editable definition block at the end of the
+document. A reference renders superscript with a hover preview.
+
+`$tex$` or `\(tex\)` becomes inline math, and `$$tex$$` or `\[tex\]` alone in a
+paragraph becomes display math. `Enter` inside an unclosed `$$` inserts a
+newline rather than splitting the paragraph. Click a math node, or press `Enter`
+with it selected, to edit its TeX source in place; `Escape` or blur commits it.
+
+`wiki:Foo`, `arxiv:2401.12345`, and `youtube:<id>` expand to external links with
+generated labels when you press `Space` or `Enter`. Quote a value that contains
+spaces, as in `wiki:"Foo Bar"`. Those three are the only prefixes.
+
+### Use keyboard marks and shortcuts
+
+Marks use `Command` on macOS and `Ctrl` elsewhere.
+
+| Shortcut | Mark |
+| --- | --- |
+| `Command+B` | Bold |
+| `Command+I` | Italic |
+| `Command+U` | Underline |
+| `Command+E` | Inline code |
+| `Command+D` | Strikethrough |
+| `Command+.` | Superscript |
+| `Command+,` | Subscript |
+
+Superscript and subscript are mutually exclusive. Underline, superscript, and
+subscript have no Markdown trigger and are written back as the inline HTML
+`<u>`, `<sup>`, and `<sub>`.
+
+Inside the editor, `Command+D` and `Command+,` take precedence over the global
+**Today's journal** and preferences shortcuts. Those still work outside the
+editor.
+
+`Command+Shift+Enter` inserts a time heading holding the current local time as
+`HH:MM`; an empty current paragraph is replaced. Selecting a time heading
+reveals a delete button.
+
+`Command+Enter` cycles the checkbox of a list item: plain bullet to unchecked
+task, unchecked to checked, checked back to unchecked. It never returns an item
+to a plain bullet.
+
+`Command+S` saves the Folio. There is no floating formatting toolbar.
+
+`ArrowRight` at the end of trailing inline code drops the code mark, and typing
+`,` `.` `;` `:` `!` or `?` immediately after a marked span leaves the
+punctuation unformatted.
+
+### Work in lists and outlines
+
+`Tab` indents a list item under its previous sibling and does nothing on a first
+item. `Shift+Tab` outdents an item, and the siblings that followed it become its
+children. `Alt+ArrowUp` and `Alt+ArrowDown` move an item together with its
+children past the sibling above or below it.
+
+`Enter` at the end of a non-empty item creates a sibling; from a task item that
+sibling is another unchecked task. `Enter` mid-text splits the item. `Enter` on
+an empty nested item outdents it one level, and on an empty top-level item it
+leaves the list for a paragraph.
+
+`Backspace` at the start of an item outdents a nested item, or unwraps a
+top-level item into a paragraph, preserving any nested sub-list.
+
+There is no outline folding.
+
+### Edit tasks and their properties
+
+Create a task with the `[] ` trigger, the **Task list** slash command, or
+`Command+Enter` on an existing item, then click its checkbox to toggle it. The
+editor's checkbox has exactly two states, unchecked and checked. The cancelled
+status `[-]` in
+[Tasks, Agenda, Journals, and Board](/docs/tasks-agenda-journals-and-board) is
+recognized by the index, not by Folio's checkbox.
+
+Inline properties such as `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
+`[priority:: P1]`, and a trailing `^blockId` marker, are Markdown-level
+constructs. Folio parses them when the page loads, holds them on the block
+without showing them, and re-emits them on save. It gives no way to see, add,
+edit, or remove one, and typing one does not work either: the closing bracket
+fires the link scaffold. To set a due date, schedule, or priority today, edit
+the Markdown outside the web editor — an external editor over the
+[LSP](/docs/lsp), the CLI, the API, or MCP tooling. The Tasks guide holds the
+syntax and how `due`, `scheduled`, and `priority` drive the agenda.
+
+A property whose value is a bare URL cannot round-trip, because the Markdown
+parser autolinks that URL first.
+
+### Use vim mode
+
+`Command+Shift+V` toggles vim mode for one editor instance. Every editor starts
+with vim mode off, and the choice is not persisted. While it is on, a status bar
+below the text reports NORMAL, INSERT, or VISUAL together with any pending keys.
+
+Supported: `h` `j` `k` `l` and the arrow keys; `w` `b` `e`; `0` `^` `$`; `gg`
+and `G`; `f` `F` `t` `T` plus a character, with `;` and `,` to repeat; the
+operators `d` `c` `y` as `dd` `cc` `yy` or as operator plus motion; text objects
+`i` and `a` over `` w " ' ` ( ) b [ ] { } B < > ``; insert entry with `i` `a`
+`I` `A` `o` `O`; `x` `p` `P` `u` `Ctrl+R` `J` `~` `r`; visual `v` and `V`; and
+counts on either side, such as `2d3w`. Typing `jk` within 500 ms leaves insert
+mode, as does `Escape`.
+
+Not supported: registers, macros, marks, search (`/` and `n`), and `:`
+commands. `Command` and `Alt` chords pass through to the application.
+
 ### Use slash commands
 
 At the start of an otherwise empty paragraph, type `/`. Continue typing to
@@ -108,6 +255,9 @@ not retry automatically.
 
 ## Failures and conflicts
 
+- Markdown tables are not supported and editing a page that contains one loses
+  it. A table in the file is invisible in Folio, and the next body edit saves
+  the page without it. Edit table-bearing pages outside Folio.
 - A normal save failure leaves the Folio in **Save failed**. Correct the server
   or network problem and save again.
 - If the page changed after it was loaded, the server returns a revision
@@ -124,6 +274,11 @@ not retry automatically.
   search or block-ID mutation.
 - A stale or deleted block displays the unavailable state. Retrying cannot
   restore a block that no longer exists.
+- Pasting a URL over selected text replaces the selection instead of linking it.
+- Block IDs and inline properties are invisible in Folio. They survive a save,
+  but they cannot be read or corrected there.
+- `Escape` in the wikilink chooser leaves the typed `[[query` text in the
+  document.
 
 ## Privacy
 
@@ -136,6 +291,10 @@ protected bodies intentionally supply no such block content.
 ## Related
 
 - [Pages and Authoring](/docs/pages-and-authoring)
+- [Tasks, Agenda, Journals, and Board](/docs/tasks-agenda-journals-and-board)
+  for task syntax and how inline properties drive the agenda and board
+- [Links, Search, Graph, and Repair](/docs/links-search-graph-and-repair) for
+  the `[[` wikilink chooser and create-from-link flow
 - [Bases](/docs/bases) for the complete embed format and table behavior
 - [Attachments and Media](/docs/attachments-and-media)
 - [Encryption and Protected Pages](/docs/encryption-and-protected-pages)
