@@ -215,4 +215,44 @@ describe("rubbish API hooks", () => {
     expect(fetchDetail).toHaveBeenCalledTimes(1);
     unsubscribe();
   });
+
+  it("invalidates rubbish once when Empty Bin rejects", async () => {
+    transport.delete.mockResolvedValue({
+      data: undefined,
+      error: new Error("empty failed after applying"),
+    });
+    const { client, wrapper } = harness();
+    const listKey = queryKeys.rubbish.all;
+    const detailKey = [
+      "get",
+      "/api/vault/rubbish/{item_id}",
+      { params: { path: { item_id: "item-1" } } },
+    ] as const;
+    const fetchList = vi.fn(async () => ({ items: [] }));
+    const fetchDetail = vi.fn(async () => ({ item_id: "item-1" }));
+    const listObserver = new QueryObserver(client, {
+      queryKey: listKey,
+      queryFn: fetchList,
+    });
+    const unsubscribe = listObserver.subscribe(() => undefined);
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    await client.fetchQuery({ queryKey: detailKey, queryFn: fetchDetail });
+    const { result } = renderHook(() => useEmptyRubbish(), { wrapper });
+
+    await act(async () => {
+      await expect(result.current.mutateAsync()).rejects.toThrow(
+        "empty failed after applying",
+      );
+    });
+    await waitFor(() =>
+      expect(listObserver.getCurrentResult().isFetching).toBe(false),
+    );
+    expect(fetchList).toHaveBeenCalledTimes(2);
+    expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
+    expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(transport.delete).toHaveBeenCalledWith("/api/vault/rubbish");
+    unsubscribe();
+  });
 });

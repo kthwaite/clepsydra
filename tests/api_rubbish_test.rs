@@ -769,6 +769,46 @@ async fn empty_rubbish_returns_ordered_partial_outcomes_and_retains_failures() {
         .assert_status_ok();
 }
 
+#[tokio::test]
+async fn empty_rubbish_enumeration_error_notifies_once() {
+    let fixture = fixture_at(ARCHIVE_TIME);
+    let rubbish_root = fixture.state.vault.root().join(".clepsydra/rubbish");
+    fs::create_dir_all(rubbish_root.parent().unwrap()).unwrap();
+    fs::write(&rubbish_root, b"not a directory").unwrap();
+    let mut changes = fixture.state.change_tx.subscribe();
+
+    let response = fixture.server.delete("/api/vault/rubbish").await;
+
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    assert!(
+        response.json::<Value>()["error"]
+            .as_str()
+            .unwrap()
+            .contains("failed to enumerate authoritative rubbish items")
+    );
+    assert_single_rubbish_notification(&mut changes);
+}
+
+#[tokio::test]
+async fn pre_apply_purge_errors_notify_once() {
+    let fixture = fixture_at(ARCHIVE_TIME);
+
+    for (item_id, expected_status) in [
+        ("not-a-uuid", StatusCode::BAD_REQUEST),
+        (ITEM_ID_A, StatusCode::NOT_FOUND),
+    ] {
+        let mut changes = fixture.state.change_tx.subscribe();
+
+        let response = fixture
+            .server
+            .delete(&format!("/api/vault/rubbish/{item_id}"))
+            .await;
+
+        response.assert_status(expected_status);
+        assert_single_rubbish_notification(&mut changes);
+    }
+}
+
 #[test]
 fn openapi_registers_rubbish_lifecycle_and_removes_permanent_page_delete_contract() {
     let document = serde_json::to_value(ApiDoc::openapi()).unwrap();

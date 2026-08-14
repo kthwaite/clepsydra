@@ -100,3 +100,32 @@ Self-review confirmed the notification is issued once at each REST request bound
 ### Concerns
 
 No scoped concerns. Successful initiating clients may observe both their local settlement invalidation and the server's cross-client SSE notification, as they already can for archive/restore; each individual path now emits only once. The focused UI run continues to emit the pre-existing Vite native-config warning.
+
+## Coverage follow-up: rejected Empty and pre-apply handlers
+
+### Added coverage
+
+- A rejected `useEmptyRubbish` mutation now has the same active/inactive regression coverage as purge: the exact active list performs one additional fetch, the exact inactive detail becomes stale, and its query function remains at one initial fetch.
+- A top-level Empty Bin enumeration failure is induced by replacing the test vault's Rubbish root with a regular file. The handler returns 500 and emits exactly one empty-path `IndexChanged`.
+- Invalid-ID and missing-item purge requests are exercised after subscribing. They return 400 and 404 respectively, and each emits exactly one empty-path `IndexChanged`.
+- All notification assertions also prove the receiver is empty after the first event.
+
+### Verification evidence
+
+These were coverage-only additions over the already-correct settlement implementation and passed on their first focused run; no production code changed.
+
+- `bun run test -- src/api/rubbish.test.tsx` — exit 0: 1 file passed, 5 tests passed.
+- `cargo test --test api_rubbish_test empty_rubbish_enumeration_error_notifies_once` — exit 0: 1 passed.
+- `cargo test --test api_rubbish_test pre_apply_purge_errors_notify_once` — exit 0: 1 passed.
+- Final Rust verification: `cargo test --test api_rubbish_test` — exit 0: 13 tests passed.
+- Final UI verification: `bun run test -- src/api/__tests__/mutation-hooks.test.tsx src/api/rubbish.test.tsx src/hooks/useVaultEvents.test.tsx src/hooks/useVaultEvents.integration.test.tsx` — exit 0: 4 files passed, 16 tests passed.
+
+### Commit and self-review
+
+Coverage commit subject: `test(rubbish): cover rejected lifecycle settlements`.
+
+Self-review confirmed the new tests use exact OpenAPI list/detail query keys, active observer fetch behavior, inactive detail fetch counts, real handler responses, and broadcast receiver emptiness rather than source-shape or invalidation call-count assertions.
+
+### Concerns
+
+None. The focused UI run emitted only the previously documented Vite native-config warning.
