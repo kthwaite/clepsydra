@@ -328,41 +328,50 @@ pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 const MAX_NOSCRIPT_DEPTH: usize = 16;
 const REWRITER_CHUNK_BYTES: usize = 16 * 1024;
 
-fn rewrite_navigation_element(element: &mut Element<'_, '_>) -> Result<(), String> {
-    let namespace = element.namespace_uri();
-    let mut tag = element.tag_name();
-    if namespace == HTML_NAMESPACE && tag == "clepsydra-noscript" {
+fn restore_noscript(element: &mut Element<'_, '_>) -> Result<(), String> {
+    if element.namespace_uri() == HTML_NAMESPACE
+        && element.tag_name() == "clepsydra-noscript"
+    {
         element
             .set_tag_name("noscript")
             .map_err(|error| error.to_string())?;
-        tag = "noscript".to_string();
     }
+    Ok(())
+}
 
-    if (namespace == HTML_NAMESPACE
-        && tag == "meta"
+fn remove_refresh_meta(element: &mut Element<'_, '_>) {
+    if element.namespace_uri() == HTML_NAMESPACE
+        && element.tag_name() == "meta"
         && element.get_attribute("http-equiv").is_some_and(|value| {
             decode_html_entities(&value)
                 .trim()
                 .eq_ignore_ascii_case("refresh")
-        }))
-        || (namespace == SVG_NAMESPACE
-            && matches!(
-                tag.as_str(),
-                "animate" | "animatecolor" | "animatemotion" | "animatetransform" | "set"
-            ))
+        })
     {
         element.remove();
-        return Ok(());
     }
+}
 
+fn remove_svg_smil(element: &mut Element<'_, '_>) {
+    if element.namespace_uri() == SVG_NAMESPACE
+        && matches!(
+            element.tag_name().as_str(),
+            "animate" | "animatecolor" | "animatemotion" | "animatetransform" | "set"
+        )
+    {
+        element.remove();
+    }
+}
+
+fn remove_link_hrefs(element: &mut Element<'_, '_>) {
+    let namespace = element.namespace_uri();
+    let tag = element.tag_name();
     if (matches!(namespace, HTML_NAMESPACE | SVG_NAMESPACE | MATHML_NAMESPACE)
         && matches!(tag.as_str(), "a" | "area"))
         || tag.ends_with(":a")
     {
         element.remove_attribute("href");
         element.remove_attribute("xlink:href");
-        // Legacy captures may preserve an arbitrary namespace prefix. Only
-        // link elements need this uncommon materialized-attribute fallback.
         let prefixed_hrefs = element
             .attributes()
             .iter()
@@ -373,17 +382,6 @@ fn rewrite_navigation_element(element: &mut Element<'_, '_>) -> Result<(), Strin
             element.remove_attribute(&attribute);
         }
     }
-    if namespace == HTML_NAMESPACE {
-        if tag == "base" {
-            element.remove_attribute("href");
-            element.remove_attribute("target");
-        }
-        if tag == "form" {
-            element.remove_attribute("action");
-        }
-        element.remove_attribute("formaction");
-    }
-    Ok(())
 }
 
 fn rewriting_error(error: impl std::fmt::Display) -> String {
@@ -409,35 +407,86 @@ fn rewrite_pass(
     max_memory_bytes: usize,
     max_output_bytes: usize,
     expose_noscript: bool,
-) -> Result<(Vec<u8>, usize), String> {
+) -> Result<(Vec<u8>, usize, usize), String> {
     use std::cell::{Cell, RefCell};
 
     let renamed = Cell::new(0usize);
+    let handler_calls = Cell::new(0usize);
     let output = RefCell::new(Vec::new());
     let output_bytes = Cell::new(0usize);
     let sink_error = RefCell::new(None::<String>);
     {
-        let settings = Settings::new()
+        let mut settings = Settings::new()
             .with_memory_settings(
                 MemorySettings::new()
                     .with_preallocated_parsing_buffer_size(0)
                     .with_max_allowed_memory_usage(max_memory_bytes),
             )
             .with_strict(false)
-            .with_adjust_charset_on_meta_tag(false)
-            .append_element_content_handler(element!("*", |element| {
-                if expose_noscript {
-                    if element.namespace_uri() == HTML_NAMESPACE
-                        && element.tag_name() == "noscript"
-                    {
-                        element.set_tag_name("clepsydra-noscript")?;
-                        renamed.set(renamed.get() + 1);
-                    }
-                } else {
-                    rewrite_navigation_element(element).map_err(std::io::Error::other)?;
+            .with_adjust_charset_on_meta_tag(false);
+        // Keep attribute-mutating handlers narrowly selected. Calling
+        // `remove_attribute` from a universal handler materializes every
+        // attribute on benign elements and defeats the fixed input bound.
+        if expose_noscript {
+            settings = settings.append_element_content_handler(element!("noscript", |element| {
+                handler_calls.set(handler_calls.get() + 1);
+                if element.namespace_uri() == HTML_NAMESPACE {
+                    element.set_tag_name("clepsydra-noscript")?;
+                    renamed.set(renamed.get() + 1);
                 }
                 Ok(())
             }));
+        } else {
+            settings = settings
+                .append_element_content_handler(element!("clepsydra-noscript", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    restore_noscript(element).map_err(std::io::Error::other)?;
+                    Ok(())
+                }))
+                .append_element_content_handler(element!("meta[http-equiv]", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    remove_refresh_meta(element);
+                    Ok(())
+                }))
+                .append_element_content_handler(element!(
+                    "animate, animatecolor, animatemotion, animatetransform, set",
+                    |element| {
+                        handler_calls.set(handler_calls.get() + 1);
+                        remove_svg_smil(element);
+                        Ok(())
+                    }
+                ))
+                .append_element_content_handler(element!(
+                    r#"a, area, [href], [xlink\:href]"#,
+                    |element| {
+                        handler_calls.set(handler_calls.get() + 1);
+                        remove_link_hrefs(element);
+                        Ok(())
+                    }
+                ))
+                .append_element_content_handler(element!("base", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    if element.namespace_uri() == HTML_NAMESPACE {
+                        element.remove_attribute("href");
+                        element.remove_attribute("target");
+                    }
+                    Ok(())
+                }))
+                .append_element_content_handler(element!("form[action]", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    if element.namespace_uri() == HTML_NAMESPACE {
+                        element.remove_attribute("action");
+                    }
+                    Ok(())
+                }))
+                .append_element_content_handler(element!("[formaction]", |element| {
+                    handler_calls.set(handler_calls.get() + 1);
+                    if element.namespace_uri() == HTML_NAMESPACE {
+                        element.remove_attribute("formaction");
+                    }
+                    Ok(())
+                }));
+        }
         let mut rewriter = HtmlRewriter::new(settings, |chunk: &[u8]| {
             if sink_error.borrow().is_some() {
                 return;
@@ -470,7 +519,7 @@ fn rewrite_pass(
     if let Some(error) = sink_error.into_inner() {
         return Err(error);
     }
-    Ok((output.into_inner(), renamed.get()))
+    Ok((output.into_inner(), renamed.get(), handler_calls.get()))
 }
 
 fn neutralize_navigation_bytes_with_limits(
@@ -479,11 +528,11 @@ fn neutralize_navigation_bytes_with_limits(
     max_output_bytes: usize,
 ) -> Result<Vec<u8>, String> {
     for depth in 0..=MAX_NOSCRIPT_DEPTH {
-        let (exposed, renamed) =
+        let (exposed, renamed, _) =
             rewrite_pass(html, max_memory_bytes, max_output_bytes, true)?;
         html = exposed;
         if renamed == 0 {
-            let (neutralized, _) =
+            let (neutralized, _, _) =
                 rewrite_pass(html, max_memory_bytes, max_output_bytes, false)?;
             return Ok(neutralized);
         }
@@ -1586,6 +1635,15 @@ mod tests {
         assert!(neutralized.contains("cas:sha256:image"), "{neutralized}");
     }
 
+
+    #[test]
+    fn benign_dense_attributes_do_not_enter_navigation_handlers() {
+        let html = format!("<div {}>Visible</div>", "data-x=x ".repeat(4096)).into_bytes();
+        let (_, renamed, handler_calls) =
+            rewrite_pass(html, 16 * 1024 * 1024, 64 * 1024 * 1024, false).unwrap();
+        assert_eq!(renamed, 0);
+        assert_eq!(handler_calls, 0);
+    }
 
     #[test]
     fn streaming_neutralizer_names_memory_and_output_limit_failures() {
