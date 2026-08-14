@@ -188,9 +188,9 @@ impl RubbishStore {
         fs::create_dir(&staging_dir).map_err(|source| {
             RubbishStoreError::filesystem("create rubbish staging directory", &staging_dir, source)
         })?;
-        sync_directory(&self.root)?;
 
         let preparation = (|| {
+            sync_directory(&self.root)?;
             write_synced_file(&staging_dir.join("page.md"), bytes)?;
             write_synced_file(&staging_dir.join("manifest.json"), &manifest_bytes)?;
             sync_directory(&staging_dir)
@@ -524,8 +524,43 @@ fn sync_directory_parent(path: &Path) -> Result<(), RubbishStoreError> {
     Ok(())
 }
 
+#[cfg(test)]
+thread_local! {
+    static FAIL_NEXT_DIRECTORY_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+struct TestDirectorySyncFailureGuard;
+
+#[cfg(test)]
+impl Drop for TestDirectorySyncFailureGuard {
+    fn drop(&mut self) {
+        FAIL_NEXT_DIRECTORY_SYNC.set(false);
+    }
+}
+
+#[cfg(test)]
+fn fail_next_directory_sync() -> TestDirectorySyncFailureGuard {
+    FAIL_NEXT_DIRECTORY_SYNC.set(true);
+    TestDirectorySyncFailureGuard
+}
+
+#[cfg(test)]
+fn hit_test_directory_sync_failure(path: &Path) -> Result<(), RubbishStoreError> {
+    if FAIL_NEXT_DIRECTORY_SYNC.replace(false) {
+        return Err(RubbishStoreError::filesystem(
+            "execute deterministic directory sync failpoint",
+            path,
+            io::Error::other("DirectorySync"),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(not(windows))]
 fn sync_directory(path: &Path) -> Result<(), RubbishStoreError> {
+    #[cfg(test)]
+    hit_test_directory_sync_failure(path)?;
     fs::File::open(path)
         .and_then(|directory| directory.sync_all())
         .map_err(|source| RubbishStoreError::filesystem("sync directory", path, source))
@@ -663,6 +698,25 @@ mod tests {
 
         assert!(!temp.path().join("outside").exists());
         assert!(!root.exists());
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn prepare_item_cleans_staging_when_the_initial_root_sync_fails() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("rubbish");
+        fs::create_dir(&root).unwrap();
+        let store = RubbishStore::new(&root);
+        let item_id = uuid("00000000-0000-4000-8000-000000000001");
+        let manifest = manifest(item_id, timestamp("2026-08-13T00:00:00Z"));
+        let _guard = fail_next_directory_sync();
+
+        let error = store
+            .prepare_item(&item_id.to_string(), &manifest, b"secret")
+            .unwrap_err();
+
+        assert!(matches!(error, RubbishStoreError::Filesystem { .. }));
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 0);
     }
 
     #[test]
