@@ -552,16 +552,13 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
         tag_end: usize,
         self_closing: bool,
     ) {
-        if named_tag_at(html, name_start, b"svg") {
-            namespaces.push(Namespace::Svg);
-            return;
-        }
-        if named_tag_at(html, name_start, b"math") {
-            namespaces.push(Namespace::MathMl);
-            return;
-        }
         let current = *namespaces.last().unwrap_or(&Namespace::Html);
         if current == Namespace::Html {
+            if named_tag_at(html, name_start, b"svg") {
+                namespaces.push(Namespace::Svg);
+            } else if named_tag_at(html, name_start, b"math") {
+                namespaces.push(Namespace::MathMl);
+            }
             return;
         }
         if tag_is_one_of(
@@ -2065,6 +2062,12 @@ mod tests {
             "a=x ".repeat(4097)
         );
         let error = neutralize_navigation(&mismatched_foreign_close).unwrap_err();
+        assert!(error.contains("attribute limit"), "{error}");
+        let nested_foreign_math = format!(
+            "<svg><math><mtext><style><a {}></a></style></mtext></math></svg>",
+            "a=x ".repeat(4097)
+        );
+        let error = neutralize_navigation(&nested_foreign_math).unwrap_err();
         assert!(error.contains("attribute limit"), "{error}");
         for integrated in [
             "<svg><foreignObject><style>.x{content:\"<a '>\"}</style></foreignObject></svg>",
