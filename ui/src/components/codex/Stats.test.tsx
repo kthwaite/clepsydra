@@ -48,8 +48,8 @@ vi.mock("#/api/index", () => ({
   }),
   useTags: () => ({
     data: [
-      { tag: "garden", count: 9 },
       { tag: "reading", count: 4 },
+      { tag: "garden", count: 9 },
       { tag: "singleton", count: 1 },
     ],
   }),
