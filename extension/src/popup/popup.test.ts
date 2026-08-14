@@ -71,7 +71,14 @@ function captureStatus(
 	detail: string,
 	attemptId = `attempt-${phase}`,
 ): CaptureStatus {
-	return { phase, detail, attemptId, startedAt: 10, updatedAt: 20 };
+	return {
+		phase,
+		detail,
+		attemptId,
+		startedAt: 10,
+		updatedAt: 20,
+		additionalTags: [],
+	};
 }
 
 function deferred<T>() {

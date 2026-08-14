@@ -31,6 +31,8 @@ type WorkerListener = (
 	sendResponse: (response?: unknown) => void,
 ) => unknown;
 
+type ToolbarTab = Pick<chrome.tabs.Tab, "id" | "url">;
+
 interface WorkerEndpoint {
 	dispatch: (
 		message: unknown,
@@ -38,6 +40,8 @@ interface WorkerEndpoint {
 	) => Promise<unknown>;
 	query: (tabId?: number) => Promise<unknown>;
 	removeTab: (tabId?: number) => void;
+	clickToolbar: (tab?: ToolbarTab) => void;
+	runCommand: (command?: string) => void;
 	notifications: Array<{ title: string; message: string }>;
 	badgeText: Mock;
 	title: Mock;
@@ -96,6 +100,8 @@ async function loadWorker(
 ): Promise<WorkerEndpoint> {
 	let listener: WorkerListener | undefined;
 	let onRemoved: (tabId: number) => void = () => undefined;
+	let onToolbarClicked: (tab: ToolbarTab) => void = () => undefined;
+	let onCommand: (command: string) => void = () => undefined;
 	const notifications: Array<{ title: string; message: string }> = [];
 	const badgeText = vi.fn();
 	const title = vi.fn();
@@ -149,7 +155,9 @@ async function loadWorker(
 			: { notifications: { create: createNotification } }),
 		tabs: {
 			get: tabsGet,
-			query: vi.fn(),
+			query: vi.fn(async () => [
+				{ id: 7, url: "https://example.com/article" },
+			]),
 			sendMessage: vi.fn(async () => ({})),
 			onRemoved: {
 				addListener: (next: (tabId: number) => void) => {
@@ -161,9 +169,19 @@ async function loadWorker(
 			setBadgeText: badgeText,
 			setBadgeBackgroundColor: vi.fn(),
 			setTitle: title,
-			onClicked: { addListener: vi.fn() },
+			onClicked: {
+				addListener: (next: (tab: ToolbarTab) => void) => {
+					onToolbarClicked = next;
+				},
+			},
 		},
-		commands: { onCommand: { addListener: vi.fn() } },
+		commands: {
+			onCommand: {
+				addListener: (next: (command: string) => void) => {
+					onCommand = next;
+				},
+			},
+		},
 	};
 	const namespace = options.namespace ?? "chrome";
 	vi.stubGlobal(namespace, api);
@@ -197,6 +215,10 @@ async function loadWorker(
 		dispatch,
 		query,
 		removeTab: (tabId = 7) => onRemoved(tabId),
+		clickToolbar: (
+			tab = { id: 7, url: "https://example.com/article" },
+		) => onToolbarClicked(tab),
+		runCommand: (command = "capture-page") => onCommand(command),
 		notifications,
 		badgeText,
 		title,
@@ -228,20 +250,26 @@ async function startTransfer(worker: WorkerEndpoint, captureId = "capture-1") {
 	await completeTransfer(worker.dispatch, captureId);
 }
 
-function statusMatching(phase: string, detail: string) {
+function statusMatching(
+	phase: string,
+	detail: string,
+	additionalTags: string[] = [],
+) {
 	return expect.objectContaining({
 		phase,
 		detail,
 		attemptId: expect.any(String),
 		startedAt: expect.any(Number),
 		updatedAt: expect.any(Number),
+		additionalTags,
 	});
 }
 
 async function currentStatus(
 	worker: WorkerEndpoint,
+	tabId = 7,
 ): Promise<CaptureStatus | null> {
-	const response = await worker.query();
+	const response = await worker.query(tabId);
 	// The harness dispatch boundary deliberately returns unknown like runtime messaging.
 	const typedResponse = response as { status: CaptureStatus | null };
 	return typedResponse.status;
@@ -280,6 +308,27 @@ describe("service-worker capture feedback", () => {
 		await injection.promise;
 	});
 
+	it("normalizes capture_start additions and returns them in status", async () => {
+		const worker = await loadWorker();
+
+		const response = await worker.dispatch({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: [" #reading ", "archive", "reading"],
+		});
+
+		expect(response).toEqual({
+			status: statusMatching("capturing", "reading the page…", [
+				"reading",
+				"archive",
+			]),
+		});
+		expect((await currentStatus(worker))?.additionalTags).toEqual([
+			"reading",
+			"archive",
+		]);
+	});
+
 	it("atomically suppresses duplicate starts for the active tab", async () => {
 		const injection = deferred<void>();
 		dependencies.executeCaptureScript.mockReturnValue(injection.promise);
@@ -293,6 +342,44 @@ describe("service-worker capture feedback", () => {
 		expect(dependencies.executeCaptureScript).toHaveBeenCalledTimes(1);
 		expect(duplicate).toEqual(first);
 		injection.resolve();
+	});
+
+	it("does not let an active duplicate start replace its additions", async () => {
+		const worker = await loadWorker();
+		const first = await worker.dispatch({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: ["reading"],
+		});
+
+		const duplicate = await worker.dispatch({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: ["replacement"],
+		});
+
+		expect(duplicate).toEqual(first);
+		expect((await currentStatus(worker))?.additionalTags).toEqual(["reading"]);
+		expect(dependencies.executeCaptureScript).toHaveBeenCalledTimes(1);
+	});
+
+	it.each([
+		{
+			name: "toolbar",
+			start: (worker: WorkerEndpoint) => worker.clickToolbar(),
+		},
+		{
+			name: "command",
+			start: (worker: WorkerEndpoint) => worker.runCommand(),
+		},
+	])("starts $name captures without additions", async ({ start }) => {
+		const worker = await loadWorker();
+
+		start(worker);
+
+		await vi.waitFor(async () => {
+			expect((await currentStatus(worker))?.additionalTags).toEqual([]);
+		});
 	});
 
 	it("rehydrates a terminal status after the worker module restarts", async () => {
@@ -349,6 +436,89 @@ describe("service-worker capture feedback", () => {
 		);
 	});
 
+	it("normalizes persisted additions and repairs missing or malformed legacy data", async () => {
+		const baseStatus = {
+			phase: "done",
+			detail: "Restored archive result.",
+			startedAt: 10,
+			updatedAt: 20,
+		};
+		const session = createSessionArea({
+			captureStatuses: {
+				"7": {
+					...baseStatus,
+					attemptId: "attempt-valid-additions",
+					additionalTags: [" #reading ", 7, "Research", "reading"],
+				},
+				"8": {
+					...baseStatus,
+					attemptId: "attempt-legacy-missing",
+				},
+				"9": {
+					...baseStatus,
+					attemptId: "attempt-legacy-malformed",
+					additionalTags: "reading",
+				},
+			},
+		});
+		const worker = await loadWorker({ session });
+
+		expect((await currentStatus(worker))?.additionalTags).toEqual([
+			"reading",
+			"Research",
+		]);
+		expect((await currentStatus(worker, 8))?.additionalTags).toEqual([]);
+		expect((await currentStatus(worker, 9))?.additionalTags).toEqual([]);
+		await vi.waitFor(() => {
+			const stored = session.data.captureStatuses as Record<
+				string,
+				CaptureStatus
+			>;
+			expect(stored["7"].additionalTags).toEqual(["reading", "Research"]);
+			expect(stored["8"].additionalTags).toEqual([]);
+			expect(stored["9"].additionalTags).toEqual([]);
+		});
+	});
+
+	it("uses persisted additions when capture_meta arrives after a worker restart", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 7, 14, 12));
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "created",
+			vault_path: "archives/example/article.md",
+			page_id: "page-1",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+		});
+		const session = createSessionArea();
+		const firstWorker = await loadWorker({ session });
+		await firstWorker.dispatch({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: ["reading"],
+		});
+		await vi.waitFor(() => {
+			const stored = session.data.captureStatuses as Record<
+				string,
+				CaptureStatus
+			>;
+			expect(stored["7"].additionalTags).toEqual(["reading"]);
+		});
+
+		vi.resetModules();
+		const restartedWorker = await loadWorker({ session });
+		await completeTransfer(restartedWorker.dispatch, "capture-after-restart");
+		await vi.waitFor(() =>
+			expect(dependencies.ingestArchive).toHaveBeenCalledTimes(1),
+		);
+
+		expect(dependencies.ingestArchive.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({
+				tags: ["archive", "example.com", "2026-08", "reading"],
+			}),
+		);
+	});
+
 	it("bounds recovery time for a rehydrated capturing attempt", async () => {
 		vi.useFakeTimers();
 		const now = Date.now();
@@ -358,6 +528,7 @@ describe("service-worker capture feedback", () => {
 			attemptId: "attempt-injected",
 			startedAt: now,
 			updatedAt: now,
+			additionalTags: [],
 		};
 		const session = createSessionArea({
 			captureStatuses: { "7": restored },
@@ -385,6 +556,7 @@ describe("service-worker capture feedback", () => {
 			attemptId: "attempt-long-capture",
 			startedAt: now - 300_000,
 			updatedAt: now - 300_000,
+			additionalTags: [],
 		};
 		const session = createSessionArea({
 			captureStatuses: { "7": restored },
@@ -411,6 +583,7 @@ describe("service-worker capture feedback", () => {
 			attemptId: "attempt-restored",
 			startedAt: 10,
 			updatedAt: 20,
+			additionalTags: [],
 		};
 		const session = createSessionArea();
 		const readGate = deferred<Record<string, unknown>>();
@@ -461,6 +634,43 @@ describe("service-worker capture feedback", () => {
 			>;
 			expect(stored["7"].phase).toBe("error");
 		});
+	});
+
+	it("merges manifest tags in system, default, and addition order", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 7, 14, 12));
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "created",
+			vault_path: "archives/example/article.md",
+			page_id: "page-1",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+		});
+		const worker = await loadWorker({
+			settings: { default_tags: ["archive", "default"] },
+		});
+		await worker.dispatch({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: ["#default", "reading", "archive"],
+		});
+
+		await completeTransfer(worker.dispatch);
+		await vi.waitFor(() =>
+			expect(dependencies.ingestArchive).toHaveBeenCalledTimes(1),
+		);
+
+		expect(dependencies.ingestArchive.mock.calls[0]?.[0]).toEqual(
+			expect.objectContaining({
+				tags: [
+					"archive",
+					"example.com",
+					"2026-08",
+					"default",
+					"reading",
+				],
+			}),
+		);
 	});
 
 	it.each([

@@ -8,6 +8,7 @@ import {
 	isTerminal,
 } from "#/lib/badge";
 import { CaptureQueue } from "#/lib/capture-queue";
+import { mergeCaptureTags, normalizeCaptureTags } from "#/lib/capture-tags";
 import {
 	CAPTURE_ABORT,
 	CAPTURE_CHUNK,
@@ -79,6 +80,7 @@ async function processCapture(
 	snapshotHtml: string,
 	tabId: number | undefined,
 	attemptId: string,
+	additionalTags: readonly string[],
 ): Promise<void> {
 	const settings = await loadSettings();
 	if (!(await reportPhase(tabId, attemptId, "uploading"))) return;
@@ -105,7 +107,11 @@ async function processCapture(
 		content_hash: await sha256String(markdownBody),
 		snapshot_html: snapshotHtml,
 		markdown_body: markdownBody,
-		tags: ["archive", domain, currentMonthTag(), ...settings.default_tags],
+		tags: mergeCaptureTags(
+			["archive", domain, currentMonthTag()],
+			settings.default_tags,
+			additionalTags,
+		),
 		byline: metadata.byline,
 		site_name: metadata.site_name,
 		published_time: metadata.published_time,
@@ -228,6 +234,7 @@ interface SessionStatusStorage {
 interface CaptureAttempt {
 	tabId: number;
 	attemptId: string;
+	additionalTags: string[];
 }
 
 interface RecentAbort {
@@ -266,7 +273,11 @@ function isCapturePhase(value: unknown): value is CapturePhase {
 	}
 }
 
-function isCaptureStatus(value: unknown): value is CaptureStatus {
+type StoredCaptureStatus = Omit<CaptureStatus, "additionalTags"> & {
+	additionalTags?: unknown;
+};
+
+function isCaptureStatus(value: unknown): value is StoredCaptureStatus {
 	if (!value || typeof value !== "object") return false;
 	if (!("phase" in value) || !isCapturePhase(value.phase)) return false;
 	return (
@@ -295,7 +306,23 @@ async function rehydrateStatuses(): Promise<void> {
 		const tabId = Number(rawTabId);
 		if (!Number.isSafeInteger(tabId) || !isCaptureStatus(rawStatus)) continue;
 
-		let status = rawStatus;
+		const additionalTags = normalizeCaptureTags(rawStatus.additionalTags);
+		const rawAdditionalTags = rawStatus.additionalTags;
+		if (
+			!Array.isArray(rawAdditionalTags) ||
+			rawAdditionalTags.length !== additionalTags.length ||
+			rawAdditionalTags.some((value, index) => value !== additionalTags[index])
+		) {
+			repaired = true;
+		}
+		let status: CaptureStatus = {
+			phase: rawStatus.phase,
+			detail: rawStatus.detail,
+			attemptId: rawStatus.attemptId,
+			startedAt: rawStatus.startedAt,
+			updatedAt: rawStatus.updatedAt,
+			additionalTags,
+		};
 		if (status.phase === "processing" || status.phase === "uploading") {
 			status = {
 				...status,
@@ -317,7 +344,10 @@ const statusReady = rehydrateStatuses().catch(() => {
 function persistStatuses(): Promise<void> {
 	if (!sessionStatusStorage) return Promise.resolve();
 	const snapshot = Object.fromEntries(
-		Array.from(statuses, ([tabId, status]) => [String(tabId), { ...status }]),
+		Array.from(statuses, ([tabId, status]) => [
+			String(tabId),
+			{ ...status, additionalTags: [...status.additionalTags] },
+		]),
 	);
 	const write = persistenceTail.then(
 		() => sessionStatusStorage.set({ [STATUS_STORAGE_KEY]: snapshot }),
@@ -408,7 +438,10 @@ void statusReady.then(() => {
 	}
 });
 
-function claimAttempt(tabId: number): AttemptClaim {
+function claimAttempt(
+	tabId: number,
+	additionalTags: readonly string[],
+): AttemptClaim {
 	const current = statuses.get(tabId);
 	if (current && !isTerminal(current.phase)) {
 		return { status: current, started: false, persisted: Promise.resolve() };
@@ -421,6 +454,7 @@ function claimAttempt(tabId: number): AttemptClaim {
 		attemptId: nextAttemptId(),
 		startedAt,
 		updatedAt: startedAt,
+		additionalTags: [...additionalTags],
 	};
 	statuses.set(tabId, status);
 	applyBadge(tabId, status);
@@ -460,7 +494,7 @@ async function reportUnconditionalError(
 	if (tabId === undefined) return false;
 	const current = statuses.get(tabId);
 	if (current?.phase === "error" && current.detail === detail) return false;
-	const claim = current ? null : claimAttempt(tabId);
+	const claim = current ? null : claimAttempt(tabId, []);
 	if (claim) await claim.persisted;
 	const attemptId = statuses.get(tabId)?.attemptId;
 	return attemptId ? reportPhase(tabId, attemptId, "error", detail) : false;
@@ -496,7 +530,7 @@ function consumeMatchingAbortError(
 function bindCaptureToCurrentAttempt(
 	tabId: number | undefined,
 	captureId: string,
-): string | null {
+): CaptureAttempt | null {
 	if (tabId === undefined) return null;
 	const current = statuses.get(tabId);
 	const existing = captureAttempts.get(captureId);
@@ -504,12 +538,17 @@ function bindCaptureToCurrentAttempt(
 		return existing.tabId === tabId &&
 			current?.attemptId === existing.attemptId &&
 			!isTerminal(current.phase)
-			? existing.attemptId
+			? existing
 			: null;
 	}
 	if (!current || isTerminal(current.phase)) return null;
-	captureAttempts.set(captureId, { tabId, attemptId: current.attemptId });
-	return current.attemptId;
+	const captureAttempt: CaptureAttempt = {
+		tabId,
+		attemptId: current.attemptId,
+		additionalTags: [...current.additionalTags],
+	};
+	captureAttempts.set(captureId, captureAttempt);
+	return captureAttempt;
 }
 
 /**
@@ -556,7 +595,7 @@ type WorkerMessage =
 	| CaptureChunk
 	| CaptureAbort
 	| { type: "capture_error"; error: string }
-	| { type: "capture_start"; tabId: number }
+	| { type: "capture_start"; tabId: number; additionalTags?: unknown }
 	| { type: "capture_status"; tabId: number };
 
 async function injectClaimedCapture(
@@ -592,9 +631,12 @@ async function fetchTabAndInject(
 	}
 }
 
-async function beginCaptureForTabId(tabId: number): Promise<CaptureStatus> {
+async function beginCaptureForTabId(
+	tabId: number,
+	additionalTags: unknown,
+): Promise<CaptureStatus> {
 	await statusReady;
-	const claim = claimAttempt(tabId);
+	const claim = claimAttempt(tabId, normalizeCaptureTags(additionalTags));
 	if (claim.started) void fetchTabAndInject(tabId, claim.status.attemptId);
 	await claim.persisted;
 	return statuses.get(tabId) ?? claim.status;
@@ -603,7 +645,7 @@ async function beginCaptureForTabId(tabId: number): Promise<CaptureStatus> {
 async function beginCaptureForTab(tab: chrome.tabs.Tab): Promise<void> {
 	await statusReady;
 	if (tab.id === undefined) return;
-	const claim = claimAttempt(tab.id);
+	const claim = claimAttempt(tab.id, []);
 	if (claim.started) void injectClaimedCapture(tab, claim.status.attemptId);
 	await claim.persisted;
 }
@@ -619,18 +661,27 @@ async function handleWorkerMessage(
 	}
 
 	if (workerMessage.type === "capture_start") {
-		return { status: await beginCaptureForTabId(workerMessage.tabId) };
+		return {
+			status: await beginCaptureForTabId(
+				workerMessage.tabId,
+				workerMessage.additionalTags,
+			),
+		};
 	}
 
 	const tabId = sender.tab?.id;
 
 	if (workerMessage.type === "capture_meta") {
-		const attemptId = bindCaptureToCurrentAttempt(
+		const captureAttempt = bindCaptureToCurrentAttempt(
 			tabId,
 			workerMessage.captureId,
 		);
-		if (!attemptId) return undefined;
-		if (!(await reportPhase(tabId, attemptId, "processing"))) return undefined;
+		if (!captureAttempt) return undefined;
+		if (
+			!(await reportPhase(tabId, captureAttempt.attemptId, "processing"))
+		) {
+			return undefined;
+		}
 		pendingTransfers.acceptMetadata(
 			workerMessage.captureId,
 			workerMessage.metadata,
@@ -640,11 +691,12 @@ async function handleWorkerMessage(
 	}
 
 	if (workerMessage.type === CAPTURE_CHUNK) {
-		const attemptId = bindCaptureToCurrentAttempt(
+		const captureAttempt = bindCaptureToCurrentAttempt(
 			tabId,
 			workerMessage.captureId,
 		);
-		if (!attemptId) return undefined;
+		if (!captureAttempt) return undefined;
+		const { attemptId } = captureAttempt;
 		let completed: CompletedTransfer<CaptureMetadata> | null;
 		try {
 			completed = pendingTransfers.acceptChunk(workerMessage, tabId);
@@ -672,14 +724,18 @@ async function handleWorkerMessage(
 		}
 
 		const started = captureQueue.run(metadata.url, () =>
-			processCapture(metadata, snapshotHtml, completedTabId, attemptId).catch(
-				async (err) => {
-					const detail = String(err);
-					if (await reportPhase(completedTabId, attemptId, "error", detail)) {
-						showNotification("Archive Failed", detail);
-					}
-				},
-			),
+			processCapture(
+				metadata,
+				snapshotHtml,
+				completedTabId,
+				attemptId,
+				captureAttempt.additionalTags,
+			).catch(async (err) => {
+				const detail = String(err);
+				if (await reportPhase(completedTabId, attemptId, "error", detail)) {
+					showNotification("Archive Failed", detail);
+				}
+			}),
 		);
 		if (!started) {
 			const detail = `${metadata.title} is already being archived.`;
@@ -691,12 +747,13 @@ async function handleWorkerMessage(
 	}
 
 	if (workerMessage.type === CAPTURE_ABORT) {
-		const attemptId = bindCaptureToCurrentAttempt(
+		const captureAttempt = bindCaptureToCurrentAttempt(
 			tabId,
 			workerMessage.captureId,
 		);
 		pendingTransfers.abort(workerMessage.captureId);
-		if (!attemptId || tabId === undefined) return undefined;
+		if (!captureAttempt || tabId === undefined) return undefined;
+		const { attemptId } = captureAttempt;
 		rememberAbortError(tabId, workerMessage.error);
 		const detail = `Snapshot transfer ${workerMessage.captureId}: ${workerMessage.error}`;
 		if (await reportPhase(tabId, attemptId, "error", detail)) {
