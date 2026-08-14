@@ -1,4 +1,4 @@
-use crate::vault::cas::ContentStore;
+use crate::vault::cas::{CasError, ContentStore, ReleaseOutcome};
 use crate::vault::hooks::PostDeleteHook;
 use crate::vault::page::PageMeta;
 use crate::vault::path::VaultPath;
@@ -30,6 +30,28 @@ pub(crate) fn captured_archive_hashes(meta: &PageMeta) -> BTreeSet<String> {
         }
     }
     hashes
+}
+
+/// Release only captured-archive references for one rubbish lifecycle item.
+/// The original page identity is carried through this boundary for truthful
+/// cleanup diagnostics; the item ID supplies durable idempotency.
+pub(crate) fn release_rubbish_archive_refs_for_purge(
+    cas: &parking_lot::Mutex<ContentStore>,
+    item_id: Uuid,
+    original_path: &VaultPath,
+    page_id: &Uuid,
+    meta: &PageMeta,
+) -> Result<ReleaseOutcome, CasError> {
+    let hashes = captured_archive_hashes(meta);
+    tracing::debug!(
+        rubbish_item_id = %item_id,
+        original_path = %original_path,
+        page_id = %page_id,
+        captured_archive_refs = hashes.len(),
+        "releasing captured-archive references for rubbish purge"
+    );
+    cas.lock()
+        .release_rubbish_archive_refs(item_id, &hashes)
 }
 
 impl PostDeleteHook for ArchiveDeleteHook {

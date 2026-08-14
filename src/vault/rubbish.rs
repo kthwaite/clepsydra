@@ -334,6 +334,21 @@ impl RubbishStore {
         }
     }
 
+    /// Permanently remove one exactly-read item and durably record the
+    /// directory removal. Callers must finish cleanup before invoking this.
+    pub(crate) fn remove_item(&self, expected: &RubbishItem) -> Result<(), RubbishStoreError> {
+        let item_id = expected.manifest.item_id;
+        if self.read_item(&item_id.to_string())? != *expected {
+            return Err(RubbishStoreError::ItemStateConflict { item_id });
+        }
+
+        let item_dir = self.item_dir(item_id);
+        fs::remove_dir_all(&item_dir).map_err(|source| {
+            RubbishStoreError::filesystem("remove rubbish item directory", &item_dir, source)
+        })?;
+        sync_directory(&self.root)
+    }
+
     pub(crate) fn publish_transaction_item(
         &self,
         expected: &RubbishItem,

@@ -16,12 +16,13 @@ use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{
-    FileOpKind, MutationOp, MutationPlan, MutationPlanner, PlannedFileOp, RewriteMode,
+    EmptyRubbishResult, FileOpKind, MutationOp, MutationPlan, MutationPlanner, PlannedFileOp,
+    PurgeRubbishOutcome, PurgeRubbishResult, RewriteMode,
 };
-use clepsydra::vault::rubbish::{RubbishManifest, RubbishStore};
 use clepsydra::vault::mutation_coordinator::{
     CreatePageCommand, MutationCoordinator, MutationError,
 };
+use clepsydra::vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 use clepsydra::vault::page::{PageMeta, parse_or_repair_frontmatter};
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::sync::ChangeEvent;
@@ -922,6 +923,560 @@ async fn rubbish_restore_publication_failure_rolls_back_without_notification() {
     assert_eq!(store.read_item(&item_id.to_string()).unwrap(), item);
     assert!(notifications.lock().is_empty());
 }
+
+fn publish_purge_item(
+    vault: &Vault,
+    index: &VaultIndex,
+    manifest: &RubbishManifest,
+    bytes: &[u8],
+) {
+    let store = RubbishStore::for_vault(vault.root());
+    let mut prepared = store
+        .prepare_item(&manifest.item_id.to_string(), manifest, bytes)
+        .unwrap();
+    prepared.publish().unwrap();
+    index
+        .upsert_rubbish_entry(&RubbishListEntry::Valid(manifest.clone()))
+        .unwrap();
+}
+
+fn purge_manifest(
+    item_id: &str,
+    page_id: &str,
+    original_path: &str,
+    deleted_at: &str,
+) -> RubbishManifest {
+    RubbishManifest::new(
+        Uuid::parse_str(item_id).unwrap(),
+        Uuid::parse_str(page_id).unwrap(),
+        original_path,
+        "Purge target",
+        "NOTE",
+        deleted_at.parse().unwrap(),
+        None,
+    )
+    .unwrap()
+}
+
+fn cas_ref_count(cas_root: &std::path::Path, hash: &str) -> i64 {
+    rusqlite::Connection::open(cas_root.join("cas.db"))
+        .unwrap()
+        .query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            [hash],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+fn rubbish_release_count(cas_root: &std::path::Path, item_id: Uuid) -> i64 {
+    rusqlite::Connection::open(cas_root.join("cas.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+            [item_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+#[tokio::test]
+async fn purge_rubbish_requires_an_opaque_uuid_and_removes_only_that_item_and_catalog_row() {
+    let (tmp, vault) = setup_vault(&[("attachments/kept.bin", "ordinary attachment")]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000301",
+        "019fd000-0000-7000-8000-000000000302",
+        "notes/original.md",
+        "2026-08-14T15:00:00Z",
+    );
+    let bytes = b"+++\nid = \"019fd000-0000-7000-8000-000000000302\"\ntitle = \"Original\"\n+++\nStored bytes.\n";
+    publish_purge_item(&vault, &raw_index, &manifest, bytes);
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let cas = Arc::new(parking_lot::Mutex::new(
+        ContentStore::open(&tmp.path().join("cas")).unwrap(),
+    ));
+    let coordinator = MutationCoordinator::new();
+
+    let invalid = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&cas),
+            manifest.original_path.as_str(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        invalid,
+        MutationError::InvalidInput(message) if message.contains("rubbish item ID")
+    ));
+    let store = RubbishStore::for_vault(vault.root());
+    assert_eq!(store.read_item(&manifest.item_id.to_string()).unwrap().bytes, bytes);
+    let item_id = manifest.item_id.to_string();
+    assert!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&item_id))
+            .await
+            .unwrap()
+            .unwrap()
+            .is_some()
+    );
+
+    let result = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&cas),
+            &manifest.item_id.to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result,
+        PurgeRubbishResult {
+            item_id: manifest.item_id,
+            page_id: manifest.page_id,
+            original_path: manifest.original_path.clone(),
+        }
+    );
+    assert!(store.read_item(&manifest.item_id.to_string()).is_err());
+    let item_id = manifest.item_id.to_string();
+    assert_eq!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&item_id))
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        fs::read(vault.root().join("attachments/kept.bin")).unwrap(),
+        b"ordinary attachment"
+    );
+}
+
+#[tokio::test]
+async fn purge_rubbish_cleanup_failure_retains_exact_item_bytes_and_retries_safely() {
+    let (tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000311",
+        "019fd000-0000-7000-8000-000000000312",
+        "archive/retry.md",
+        "2026-08-14T14:00:00Z",
+    );
+    let late_blob = b"available only after the first purge";
+    let missing_hash = ContentStore::hash_bytes(late_blob);
+    let bytes = format!(
+        "+++\nid = \"{}\"\ntitle = \"Retry\"\n[archive]\nsnapshot_hash = \"{missing_hash}\"\n+++\nStored bytes.\n",
+        manifest.page_id
+    )
+    .into_bytes();
+    publish_purge_item(&vault, &raw_index, &manifest, &bytes);
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let cas_root = tmp.path().join("cas");
+    let cas = Arc::new(parking_lot::Mutex::new(
+        ContentStore::open(&cas_root).unwrap(),
+    ));
+    let coordinator = MutationCoordinator::new();
+    let store = RubbishStore::for_vault(vault.root());
+    let manifest_before = fs::read(
+        vault
+            .root()
+            .join(".clepsydra/rubbish")
+            .join(manifest.item_id.to_string())
+            .join("manifest.json"),
+    )
+    .unwrap();
+
+    let error = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&cas),
+            &manifest.item_id.to_string(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::RubbishCleanup { item_id, .. } if item_id == manifest.item_id
+    ));
+    assert_eq!(
+        store.read_item(&manifest.item_id.to_string()).unwrap().bytes,
+        bytes
+    );
+    assert_eq!(
+        fs::read(
+            vault
+                .root()
+                .join(".clepsydra/rubbish")
+                .join(manifest.item_id.to_string())
+                .join("manifest.json")
+        )
+        .unwrap(),
+        manifest_before
+    );
+    let item_id = manifest.item_id.to_string();
+    assert!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&item_id))
+            .await
+            .unwrap()
+            .unwrap()
+            .is_some()
+    );
+
+    assert_eq!(
+        cas.lock()
+            .store(late_blob, "application/octet-stream")
+            .unwrap()
+            .hash,
+        missing_hash
+    );
+    coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&cas),
+            &manifest.item_id.to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert!(store.read_item(&manifest.item_id.to_string()).is_err());
+    assert_eq!(cas_ref_count(&cas_root, &missing_hash), 0);
+    assert_eq!(rubbish_release_count(&cas_root, manifest.item_id), 1);
+}
+
+#[tokio::test]
+async fn purge_rubbish_rejects_stored_page_identity_drift_before_cas_cleanup() {
+    let (tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000321",
+        "019fd000-0000-7000-8000-000000000322",
+        "archive/identity.md",
+        "2026-08-14T13:00:00Z",
+    );
+    let cas_root = tmp.path().join("cas");
+    let cas_store = ContentStore::open(&cas_root).unwrap();
+    let hash = cas_store
+        .store(b"identity snapshot", "text/html")
+        .unwrap()
+        .hash;
+    let bytes = format!(
+        "+++\nid = \"019fd000-0000-7000-8000-000000000323\"\ntitle = \"Wrong identity\"\n[archive]\nsnapshot_hash = \"{hash}\"\n+++\nStored bytes.\n"
+    );
+    publish_purge_item(&vault, &raw_index, &manifest, bytes.as_bytes());
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let cas = Arc::new(parking_lot::Mutex::new(cas_store));
+    let coordinator = MutationCoordinator::new();
+
+    let error = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&cas),
+            &manifest.item_id.to_string(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::RubbishPageIdentity {
+            item_id,
+            manifest_page_id,
+            stored_page_id,
+        } if item_id == manifest.item_id
+            && manifest_page_id == manifest.page_id
+            && stored_page_id
+                == Uuid::parse_str("019fd000-0000-7000-8000-000000000323").unwrap()
+    ));
+    assert_eq!(cas_ref_count(&cas_root, &hash), 1);
+    assert_eq!(rubbish_release_count(&cas_root, manifest.item_id), 0);
+    assert_eq!(
+        RubbishStore::for_vault(vault.root())
+            .read_item(&manifest.item_id.to_string())
+            .unwrap()
+            .bytes,
+        bytes.as_bytes()
+    );
+}
+
+#[tokio::test]
+async fn purge_rubbish_retries_after_completed_ledger_without_a_second_decrement() {
+    let (tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000331",
+        "019fd000-0000-7000-8000-000000000332",
+        "archive/post-ledger.md",
+        "2026-08-14T12:00:00Z",
+    );
+    let cas_root = tmp.path().join("cas");
+    let cas_store = ContentStore::open(&cas_root).unwrap();
+    let hash = cas_store
+        .store(b"one captured reference", "text/html")
+        .unwrap()
+        .hash;
+    let bytes = format!(
+        "+++\nid = \"{}\"\ntitle = \"Post ledger\"\n[archive]\nsnapshot_hash = \"{hash}\"\nblobs = [\"{hash}\", \"{hash}\"]\n+++\nStored bytes.\n",
+        manifest.page_id
+    );
+    publish_purge_item(&vault, &raw_index, &manifest, bytes.as_bytes());
+    raw_index
+        .connection()
+        .execute_batch(&format!(
+            "CREATE TRIGGER fail_rubbish_purge_catalog
+             BEFORE DELETE ON rubbish_items
+             WHEN OLD.item_id = '{}'
+             BEGIN
+                 SELECT RAISE(FAIL, 'injected rubbish catalog deletion failure');
+             END;",
+            manifest.item_id
+        ))
+        .unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let cas = Arc::new(parking_lot::Mutex::new(cas_store));
+    let coordinator = MutationCoordinator::new();
+    let store = RubbishStore::for_vault(vault.root());
+
+    let error = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&cas),
+            &manifest.item_id.to_string(),
+        )
+        .await
+        .unwrap_err();
+
+    assert!(matches!(
+        error,
+        MutationError::RubbishCatalog { item_id, .. } if item_id == manifest.item_id
+    ));
+    assert_eq!(
+        store.read_item(&manifest.item_id.to_string()).unwrap().bytes,
+        bytes.as_bytes()
+    );
+    assert_eq!(cas_ref_count(&cas_root, &hash), 0);
+    assert_eq!(rubbish_release_count(&cas_root, manifest.item_id), 1);
+
+    index
+        .with_index(|index, _| {
+            index
+                .connection()
+                .execute_batch("DROP TRIGGER fail_rubbish_purge_catalog")
+        })
+        .await
+        .unwrap()
+        .unwrap();
+    coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&cas),
+            &manifest.item_id.to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert!(store.read_item(&manifest.item_id.to_string()).is_err());
+    assert_eq!(cas_ref_count(&cas_root, &hash), 0);
+    assert_eq!(rubbish_release_count(&cas_root, manifest.item_id), 1);
+}
+
+#[tokio::test]
+async fn purge_rubbish_rejects_malformed_and_future_items_without_hiding_their_errors() {
+    let (tmp, vault) = setup_vault(&[]);
+    let store = RubbishStore::for_vault(vault.root());
+    let rubbish_root = vault.root().join(".clepsydra/rubbish");
+    fs::create_dir_all(&rubbish_root).unwrap();
+    let malformed_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000341").unwrap();
+    let malformed_dir = rubbish_root.join(malformed_id.to_string());
+    fs::create_dir(&malformed_dir).unwrap();
+    fs::write(malformed_dir.join("page.md"), b"malformed item bytes").unwrap();
+    fs::write(malformed_dir.join("manifest.json"), b"{not json").unwrap();
+    let future = purge_manifest(
+        "019fd000-0000-7000-8000-000000000342",
+        "019fd000-0000-7000-8000-000000000343",
+        "future.md",
+        "2026-08-14T11:00:00Z",
+    );
+    let future_dir = rubbish_root.join(future.item_id.to_string());
+    fs::create_dir(&future_dir).unwrap();
+    fs::write(
+        future_dir.join("page.md"),
+        format!(
+            "+++\nid = \"{}\"\ntitle = \"Future\"\n+++\nFuture bytes.\n",
+            future.page_id
+        ),
+    )
+    .unwrap();
+    let mut future_json = serde_json::to_value(&future).unwrap();
+    future_json["version"] = serde_json::json!(u32::MAX);
+    fs::write(
+        future_dir.join("manifest.json"),
+        serde_json::to_vec(&future_json).unwrap(),
+    )
+    .unwrap();
+    let entries_before = store.list_entries().unwrap();
+    assert_eq!(entries_before.len(), 2);
+    assert!(entries_before.iter().all(
+        |entry| matches!(entry, RubbishListEntry::Invalid { error, .. } if !error.is_empty())
+    ));
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.reconcile_rubbish_catalog(&store).unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let cas = Arc::new(parking_lot::Mutex::new(
+        ContentStore::open(&tmp.path().join("cas")).unwrap(),
+    ));
+    let coordinator = MutationCoordinator::new();
+
+    for item_id in [malformed_id, future.item_id] {
+        let error = coordinator
+            .purge_rubbish(
+                &vault,
+                &index,
+                Arc::clone(&cas),
+                &item_id.to_string(),
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            MutationError::RubbishStore {
+                item_id: found,
+                ..
+            } if found == item_id
+        ));
+    }
+
+    assert_eq!(store.list_entries().unwrap(), entries_before);
+    assert_eq!(
+        fs::read(malformed_dir.join("page.md")).unwrap(),
+        b"malformed item bytes"
+    );
+    assert!(future_dir.join("manifest.json").exists());
+}
+
+#[tokio::test]
+async fn empty_rubbish_snapshots_valid_items_newest_first_and_continues_truthful_failures() {
+    let (tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let newest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000351",
+        "019fd000-0000-7000-8000-000000000361",
+        "newest.md",
+        "2026-08-14T15:00:00Z",
+    );
+    let failing = purge_manifest(
+        "019fd000-0000-7000-8000-000000000352",
+        "019fd000-0000-7000-8000-000000000362",
+        "failing.md",
+        "2026-08-14T14:00:00Z",
+    );
+    let oldest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000353",
+        "019fd000-0000-7000-8000-000000000363",
+        "oldest.md",
+        "2026-08-14T13:00:00Z",
+    );
+    let missing_hash = ContentStore::hash_bytes(b"missing empty-bin cleanup blob");
+    let newest_bytes = format!(
+        "+++\nid = \"{}\"\ntitle = \"Newest\"\n+++\nNewest.\n",
+        newest.page_id
+    );
+    let failing_bytes = format!(
+        "+++\nid = \"{}\"\ntitle = \"Failing\"\n[archive]\nsnapshot_hash = \"{missing_hash}\"\n+++\nFailing.\n",
+        failing.page_id
+    );
+    let oldest_bytes = format!(
+        "+++\nid = \"{}\"\ntitle = \"Oldest\"\n+++\nOldest.\n",
+        oldest.page_id
+    );
+    for (manifest, bytes) in [
+        (&oldest, oldest_bytes.as_bytes()),
+        (&newest, newest_bytes.as_bytes()),
+        (&failing, failing_bytes.as_bytes()),
+    ] {
+        publish_purge_item(&vault, &raw_index, manifest, bytes);
+    }
+    let invalid_dir = vault.root().join(".clepsydra/rubbish/not-a-valid-item");
+    fs::create_dir(&invalid_dir).unwrap();
+    fs::write(invalid_dir.join("page.md"), b"invalid").unwrap();
+    fs::write(invalid_dir.join("manifest.json"), b"invalid").unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let cas = Arc::new(parking_lot::Mutex::new(
+        ContentStore::open(&tmp.path().join("cas")).unwrap(),
+    ));
+    let coordinator = MutationCoordinator::new();
+
+    let result: EmptyRubbishResult = coordinator
+        .empty_rubbish(&vault, &index, Arc::clone(&cas))
+        .await
+        .unwrap();
+
+    assert_eq!(result.outcomes.len(), 3);
+    assert_eq!(
+        result.outcomes[0],
+        PurgeRubbishOutcome::Purged(PurgeRubbishResult {
+            item_id: newest.item_id,
+            page_id: newest.page_id,
+            original_path: newest.original_path.clone(),
+        })
+    );
+    match &result.outcomes[1] {
+        PurgeRubbishOutcome::Failed { item_id, error } => {
+            assert_eq!(*item_id, failing.item_id);
+            assert!(error.contains(&missing_hash), "actual error was {error}");
+        }
+        other => panic!("expected truthful middle failure, got {other:?}"),
+    }
+    assert_eq!(
+        result.outcomes[2],
+        PurgeRubbishOutcome::Purged(PurgeRubbishResult {
+            item_id: oldest.item_id,
+            page_id: oldest.page_id,
+            original_path: oldest.original_path.clone(),
+        })
+    );
+
+    let store = RubbishStore::for_vault(vault.root());
+    assert!(store.read_item(&newest.item_id.to_string()).is_err());
+    assert_eq!(
+        store.read_item(&failing.item_id.to_string()).unwrap().bytes,
+        failing_bytes.as_bytes()
+    );
+    assert!(store.read_item(&oldest.item_id.to_string()).is_err());
+    assert!(invalid_dir.exists());
+    let ids = [
+        newest.item_id.to_string(),
+        failing.item_id.to_string(),
+        oldest.item_id.to_string(),
+    ];
+    let catalog = index
+        .with_index(move |index, _| {
+            ids.map(|item_id| index.rubbish_entry(&item_id).unwrap())
+        })
+        .await
+        .unwrap();
+    assert_eq!(catalog[0], None);
+    assert!(catalog[1].is_some());
+    assert_eq!(catalog[2], None);
+}
+
 // ---------------------------------------------------------------------------
 // Task 1: Type existence tests
 // ---------------------------------------------------------------------------

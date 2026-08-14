@@ -594,6 +594,33 @@ impl VaultIndex {
         )? != 0)
     }
 
+    /// Atomically read and remove one valid lifecycle identity from the
+    /// rebuildable rubbish catalog. The returned row can restore catalog
+    /// visibility if authoritative item removal fails.
+    pub fn take_rubbish_entry(
+        &mut self,
+        item_id: Uuid,
+    ) -> Result<Option<RubbishListEntry>, IndexError> {
+        let transaction = self.conn.transaction()?;
+        let item_id = item_id.to_string();
+        let entry = transaction
+            .query_row(
+                "SELECT item_id, page_id, original_path, title, kind, deleted_at,
+                        archive_url, valid, diagnostic
+                 FROM rubbish_items
+                 WHERE item_id = ?1",
+                params![&item_id],
+                rubbish_entry_from_row,
+            )
+            .optional()?;
+        transaction.execute(
+            "DELETE FROM rubbish_items WHERE item_id = ?1",
+            params![&item_id],
+        )?;
+        transaction.commit()?;
+        Ok(entry)
+    }
+
     /// List catalog rows deterministically: valid newest-first, then invalid
     /// identities in ascending order.
     pub fn rubbish_entries(&self) -> Result<Vec<RubbishListEntry>, IndexError> {

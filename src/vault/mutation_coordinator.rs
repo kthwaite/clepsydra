@@ -15,14 +15,17 @@ use super::atomic_file::{
     AtomicPublicationError, ConditionalPublicationError, atomic_create, atomic_replace,
     atomic_replace_if_unchanged,
 };
+use super::archive_hook::release_rubbish_archive_refs_for_purge;
 use super::batch_mutation::{self, BatchMutationCommand, BatchMutationError};
+use super::cas::{CasError, ContentStore};
 use super::hooks::PostMoveHook;
 use super::index::IndexError;
-use super::rubbish::RubbishListEntry;
 use super::index_handle::IndexHandle;
 use super::index_policy::{IndexMutation, IndexPolicyError};
-use super::page::{Page, PageMeta, write_page_content};
+use super::mutation::{EmptyRubbishResult, PurgeRubbishOutcome, PurgeRubbishResult};
+use super::page::{Page, PageMeta, parse_frontmatter, write_page_content};
 use super::path::VaultPath;
+use super::rubbish::{RubbishItem, RubbishListEntry, RubbishStore, RubbishStoreError};
 use super::projection::{project_path, project_path_cleared};
 use super::sync::{ChangeEvent, SyncEngine};
 use super::task_history::{heal_task_replacement, heal_task_update, initialize_task_history};
@@ -192,6 +195,50 @@ pub enum MutationError {
     NotFound(VaultPath),
     #[error("rubbish item not found: {0}")]
     RubbishItemNotFound(uuid::Uuid),
+    #[error("failed to enumerate authoritative rubbish items: {source}")]
+    RubbishEnumeration {
+        #[source]
+        source: RubbishStoreError,
+    },
+    #[error("rubbish item {item_id} is invalid or unreadable: {source}")]
+    RubbishStore {
+        item_id: uuid::Uuid,
+        #[source]
+        source: RubbishStoreError,
+    },
+    #[error("stored page metadata for rubbish item {item_id} is invalid: {message}")]
+    RubbishPageMetadata {
+        item_id: uuid::Uuid,
+        message: String,
+    },
+    #[error(
+        "stored page UUID {stored_page_id} for rubbish item {item_id} does not match manifest page UUID {manifest_page_id}"
+    )]
+    RubbishPageIdentity {
+        item_id: uuid::Uuid,
+        manifest_page_id: uuid::Uuid,
+        stored_page_id: uuid::Uuid,
+    },
+    #[error("captured-archive cleanup failed for rubbish item {item_id}: {source}")]
+    RubbishCleanup {
+        item_id: uuid::Uuid,
+        #[source]
+        source: CasError,
+    },
+    #[error("rubbish catalog removal failed for item {item_id}: {source}")]
+    RubbishCatalog {
+        item_id: uuid::Uuid,
+        #[source]
+        source: IndexError,
+    },
+    #[error(
+        "rubbish item removal failed for {item_id}: {removal}; restoring its catalog row also failed: {catalog_restore}"
+    )]
+    RubbishRemovalCatalogRestore {
+        item_id: uuid::Uuid,
+        removal: RubbishStoreError,
+        catalog_restore: IndexError,
+    },
     #[error("mutation conflict: {0}")]
     Conflict(String),
     #[error("stale page content: {0}")]
@@ -297,8 +344,9 @@ impl MutationError {
             Self::FilesystemRollback { .. }
             | Self::IndexRollback { .. }
             | Self::BatchRollback { .. }
-            | Self::BatchRecovery { .. } => true,
-            // Rejected before anything is written.
+            | Self::BatchRecovery { .. }
+            | Self::RubbishRemovalCatalogRestore { .. } => true,
+            // Rejected before an authoritative filesystem mutation completes.
             Self::ReadOnly(_) => false,
             Self::IndexCompensation { .. }
             | Self::BatchPrepare { .. }
@@ -306,6 +354,12 @@ impl MutationError {
             | Self::InvalidInput(_)
             | Self::NotFound(_)
             | Self::RubbishItemNotFound(_)
+            | Self::RubbishEnumeration { .. }
+            | Self::RubbishStore { .. }
+            | Self::RubbishPageMetadata { .. }
+            | Self::RubbishPageIdentity { .. }
+            | Self::RubbishCleanup { .. }
+            | Self::RubbishCatalog { .. }
             | Self::Conflict(_)
             | Self::Stale(_) => false,
         }
@@ -585,6 +639,52 @@ fn sync_rollback_parent(_parent: &Path) -> io::Result<()> {
     Ok(())
 }
 
+struct RubbishPurgeContext {
+    item: RubbishItem,
+    original_path: VaultPath,
+    meta: PageMeta,
+}
+
+fn read_rubbish_purge_context(
+    vault_root: &Path,
+    item_id: uuid::Uuid,
+) -> Result<RubbishPurgeContext, MutationError> {
+    let store = RubbishStore::for_vault(vault_root);
+    let item = store
+        .read_item_if_exists(item_id)
+        .map_err(|source| MutationError::RubbishStore { item_id, source })?
+        .ok_or(MutationError::RubbishItemNotFound(item_id))?;
+    let content = std::str::from_utf8(&item.bytes).map_err(|source| {
+        MutationError::RubbishPageMetadata {
+            item_id,
+            message: format!("stored page is not UTF-8: {source}"),
+        }
+    })?;
+    let (meta, _) =
+        parse_frontmatter(content).map_err(|source| MutationError::RubbishPageMetadata {
+            item_id,
+            message: source.to_string(),
+        })?;
+    if meta.id != item.manifest.page_id {
+        return Err(MutationError::RubbishPageIdentity {
+            item_id,
+            manifest_page_id: item.manifest.page_id,
+            stored_page_id: meta.id,
+        });
+    }
+    let original_path = VaultPath::new(&item.manifest.original_path).map_err(|source| {
+        MutationError::RubbishPageMetadata {
+            item_id,
+            message: format!("invalid original path in validated manifest: {source}"),
+        }
+    })?;
+    Ok(RubbishPurgeContext {
+        item,
+        original_path,
+        meta,
+    })
+}
+
 impl MutationCoordinator {
     pub fn new() -> Self {
         Self {
@@ -769,6 +869,143 @@ impl MutationCoordinator {
     /// Exclude every mutation below `folder` until the returned guard drops.
     pub async fn lock_subtree(&self, folder: &VaultPath) -> MutationGuard {
         self.lock_paths(std::slice::from_ref(folder)).await
+    }
+
+    /// Permanently purge one validated rubbish item addressed only by its
+    /// opaque lifecycle UUID.
+    pub async fn purge_rubbish(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        item_id: &str,
+    ) -> Result<PurgeRubbishResult, MutationError> {
+        let parsed_item_id = uuid::Uuid::parse_str(item_id).map_err(|source| {
+            MutationError::InvalidInput(format!("invalid rubbish item ID {item_id:?}: {source}"))
+        })?;
+        self.purge_rubbish_item(vault, index, cas, parsed_item_id)
+            .await
+    }
+
+    async fn purge_rubbish_item(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        item_id: uuid::Uuid,
+    ) -> Result<PurgeRubbishResult, MutationError> {
+        let guard = self.lock_resources(&[], &[item_id]).await;
+        let root = vault.root().to_path_buf();
+        let read_root = root.clone();
+        let (guard, context) = run_blocking_fs(root.clone(), guard, move || {
+            read_rubbish_purge_context(&read_root, item_id)
+        })
+        .await?;
+
+        let cleanup_cas = Arc::clone(&cas);
+        let (guard, context) = run_blocking_fs(root.clone(), guard, move || {
+            release_rubbish_archive_refs_for_purge(
+                &cleanup_cas,
+                item_id,
+                &context.original_path,
+                &context.item.manifest.page_id,
+                &context.meta,
+            )
+            .map_err(|source| MutationError::RubbishCleanup { item_id, source })?;
+            Ok(context)
+        })
+        .await?;
+
+        let catalog_entry = index
+            .with_index(move |index, _| index.take_rubbish_entry(item_id))
+            .await
+            .map_err(|source| MutationError::RubbishCatalog { item_id, source })?
+            .map_err(|source| MutationError::RubbishCatalog { item_id, source })?;
+
+        let result = PurgeRubbishResult {
+            item_id,
+            page_id: context.item.manifest.page_id,
+            original_path: context.item.manifest.original_path.clone(),
+        };
+        let removal_root = root.clone();
+        let item = context.item;
+        let (guard, removal) = tokio::task::spawn_blocking(move || {
+            let store = RubbishStore::for_vault(&removal_root);
+            (guard, store.remove_item(&item))
+        })
+        .await
+        .map_err(|source| MutationError::Filesystem {
+            filesystem_applied: true,
+            path: root,
+            source: io::Error::other(format!("rubbish item removal task failed: {source}")),
+        })?;
+
+        if let Err(removal) = removal {
+            if let Some(catalog_entry) = catalog_entry {
+                let catalog_restore = index
+                    .with_index(move |index, _| index.upsert_rubbish_entry(&catalog_entry))
+                    .await;
+                let catalog_restore = match catalog_restore {
+                    Ok(Ok(())) => None,
+                    Ok(Err(source)) | Err(source) => Some(source),
+                };
+                if let Some(catalog_restore) = catalog_restore {
+                    drop(guard);
+                    return Err(MutationError::RubbishRemovalCatalogRestore {
+                        item_id,
+                        removal,
+                        catalog_restore,
+                    });
+                }
+            }
+            drop(guard);
+            return Err(MutationError::RubbishStore {
+                item_id,
+                source: removal,
+            });
+        }
+        drop(guard);
+        Ok(result)
+    }
+
+    /// Purge the initial authoritative valid-item snapshot newest-first,
+    /// preserving one ordered, truthful outcome per attempted item.
+    pub async fn empty_rubbish(
+        &self,
+        vault: &Vault,
+        index: &IndexHandle,
+        cas: Arc<parking_lot::Mutex<ContentStore>>,
+    ) -> Result<EmptyRubbishResult, MutationError> {
+        let root = vault.root().to_path_buf();
+        let list_root = root.clone();
+        let entries = tokio::task::spawn_blocking(move || {
+            RubbishStore::for_vault(&list_root).list_entries()
+        })
+        .await
+        .map_err(|source| MutationError::Filesystem {
+            filesystem_applied: false,
+            path: root,
+            source: io::Error::other(format!("rubbish snapshot task failed: {source}")),
+        })?
+        .map_err(|source| MutationError::RubbishEnumeration { source })?;
+        let item_ids = entries.into_iter().filter_map(|entry| match entry {
+            RubbishListEntry::Valid(manifest) => Some(manifest.item_id),
+            RubbishListEntry::Invalid { .. } => None,
+        });
+        let mut outcomes = Vec::new();
+        for item_id in item_ids {
+            match self
+                .purge_rubbish_item(vault, index, Arc::clone(&cas), item_id)
+                .await
+            {
+                Ok(result) => outcomes.push(PurgeRubbishOutcome::Purged(result)),
+                Err(error) => outcomes.push(PurgeRubbishOutcome::Failed {
+                    item_id,
+                    error: error.to_string(),
+                }),
+            }
+        }
+        Ok(EmptyRubbishResult { outcomes })
     }
 
     /// Execute a durable batch against an already-open offline index.

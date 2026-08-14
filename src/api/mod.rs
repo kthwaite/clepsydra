@@ -161,7 +161,16 @@ pub(crate) fn mutation_error(
         | MutationError::BatchPrepare { .. }
         | MutationError::BatchPublish { .. }
         | MutationError::BatchRollback { .. }
-        | MutationError::BatchRecovery { .. } => error::ApiError::internal(error.to_string()),
+        | MutationError::BatchRecovery { .. }
+        | MutationError::RubbishEnumeration { .. }
+        | MutationError::RubbishStore { .. }
+        | MutationError::RubbishPageMetadata { .. }
+        | MutationError::RubbishPageIdentity { .. }
+        | MutationError::RubbishCleanup { .. }
+        | MutationError::RubbishCatalog { .. }
+        | MutationError::RubbishRemovalCatalogRestore { .. } => {
+            error::ApiError::internal(error.to_string())
+        }
     }
 }
 

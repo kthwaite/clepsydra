@@ -17,7 +17,7 @@ use clepsydra::api::{AppState, api_router_with_archive_limit};
 use clepsydra::vault::archive_hook::ArchiveDeleteHook;
 use clepsydra::vault::hooks::PostDeleteHook;
 use clepsydra::vault::index::ArchiveUrlOwner;
-use clepsydra::vault::rubbish::{RubbishManifest, RubbishStore};
+use clepsydra::vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 use clepsydra::{ServerSettings, TlsSettings};
 use tempfile::TempDir;
 
@@ -166,6 +166,91 @@ fn archive_hook_deduplicates_captured_archive_metadata_hashes() {
         "exactly one reference must remain after the hook"
     );
 }
+
+#[tokio::test]
+async fn purge_rubbish_releases_unique_captured_refs_and_leaves_ordinary_attachments_untouched() {
+    let (_server, tmp, state) = setup_server();
+    let attachment_path = state.vault.root().join("attachments/ordinary.bin");
+    fs::create_dir_all(attachment_path.parent().unwrap()).unwrap();
+    fs::write(&attachment_path, b"ordinary attachment bytes").unwrap();
+    let captured_hash = store_blob(&state, b"captured snapshot", "text/html");
+    let unrelated_hash = store_blob(
+        &state,
+        b"unrelated ordinary attachment CAS blob",
+        "application/octet-stream",
+    );
+    let item_id =
+        uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000371").unwrap();
+    let page_id =
+        uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000372").unwrap();
+    let manifest = RubbishManifest::new(
+        item_id,
+        page_id,
+        "archive/captured-rubbish.md",
+        "Captured rubbish",
+        "ARCHIVE",
+        "2026-08-14T16:00:00Z".parse().unwrap(),
+        Some("https://example.test/captured-rubbish".to_owned()),
+    )
+    .unwrap();
+    let page_bytes = format!(
+        "+++\nid = \"{page_id}\"\ntitle = \"Captured rubbish\"\n[archive]\nsnapshot_hash = \"{captured_hash}\"\nblobs = [\"{captured_hash}\", \"{captured_hash}\"]\n+++\nCaptured body.\n"
+    );
+    let store = RubbishStore::for_vault(state.vault.root());
+    let mut prepared = store
+        .prepare_item(&item_id.to_string(), &manifest, page_bytes.as_bytes())
+        .unwrap();
+    prepared.publish().unwrap();
+    state
+        .index
+        .with_index({
+            let manifest = manifest.clone();
+            move |index, _| {
+                index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest))
+            }
+        })
+        .await
+        .unwrap()
+        .unwrap();
+
+    let result = state
+        .mutation_coordinator
+        .purge_rubbish(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.cas),
+            &item_id.to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(result.item_id, item_id);
+    assert_eq!(result.page_id, page_id);
+    assert_eq!(result.original_path, "archive/captured-rubbish.md");
+    assert_eq!(
+        fs::read(&attachment_path).unwrap(),
+        b"ordinary attachment bytes"
+    );
+    let cas_db = rusqlite::Connection::open(tmp.path().join("cas/cas.db")).unwrap();
+    let captured_refs: i64 = cas_db
+        .query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            [&captured_hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let unrelated_refs: i64 = cas_db
+        .query_row(
+            "SELECT ref_count FROM blobs WHERE hash = ?1",
+            [&unrelated_hash],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(captured_refs, 0);
+    assert_eq!(unrelated_refs, 1);
+    assert!(store.read_item(&item_id.to_string()).is_err());
+}
+
 
 #[test]
 fn rollback_fault_injection_attempts_all_hashes_and_reports_each_failure() {

@@ -163,6 +163,27 @@ pub enum MutationOp {
     },
 }
 
+/// Identity returned only after one rubbish item is durably purged.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PurgeRubbishResult {
+    pub item_id: uuid::Uuid,
+    pub page_id: uuid::Uuid,
+    pub original_path: String,
+}
+
+/// Truthful result for one item in an Empty Rubbish Bin snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PurgeRubbishOutcome {
+    Purged(PurgeRubbishResult),
+    Failed { item_id: uuid::Uuid, error: String },
+}
+
+/// Ordered outcomes for every valid item in the Empty Rubbish Bin snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmptyRubbishResult {
+    pub outcomes: Vec<PurgeRubbishOutcome>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RewriteMode {
     PlainText,
