@@ -94,7 +94,11 @@ pub(crate) fn api_error_message(status: u16, body: &str) -> String {
             " — the page may have been moved by a kind/project assignment; \
              locate it with vault_search",
         ),
-        409 if error.contains("restore destination is occupied:") => {}
+        409 if error.starts_with("rubbish item bytes or manifest changed:") => message.push_str(
+            " — the binned item changed; re-list with vault_list_rubbish and inspect it with \
+             vault_get_rubbish_item before retrying",
+        ),
+        409 if error.starts_with("restore destination is occupied:") => {}
         409 => message
             .push_str(" — the page changed concurrently; re-read it with vault_get_page and retry"),
         _ => {}
@@ -331,13 +335,26 @@ mod tests {
     }
 
     #[test]
-    fn mcp_rubbish_restore_conflict_does_not_claim_concurrent_page_change() {
+    fn mcp_rubbish_occupied_restore_conflict_does_not_claim_item_drift() {
         let msg = api_error_message(
             409,
-            r#"{"status":409,"error":"rubbish lifecycle conflict: restore destination is occupied: notes/beta.md"}"#,
+            r#"{"status":409,"error":"restore destination is occupied: notes/beta.md"}"#,
         );
         assert!(msg.contains("restore destination is occupied"), "{msg}");
         assert!(!msg.contains("changed concurrently"), "{msg}");
+        assert!(!msg.contains("vault_list_rubbish"), "{msg}");
+    }
+
+    #[test]
+    fn mcp_rubbish_drift_conflict_guides_item_reread_not_active_page_reread() {
+        let msg = api_error_message(
+            409,
+            r#"{"status":409,"error":"rubbish item bytes or manifest changed: 0190f8a0-0000-7000-8000-0000000000ff"}"#,
+        );
+        assert!(msg.contains("vault_list_rubbish"), "{msg}");
+        assert!(msg.contains("vault_get_rubbish_item"), "{msg}");
+        assert!(!msg.contains("vault_get_page"), "{msg}");
+        assert!(!msg.contains("original path is occupied"), "{msg}");
     }
 
     #[test]

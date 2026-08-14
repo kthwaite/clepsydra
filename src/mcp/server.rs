@@ -29,6 +29,15 @@ fn pages_url(path: &str) -> String {
     format!("/api/vault/pages/{}", encode_vault_path(path))
 }
 
+/// Parse an opaque rubbish lifecycle UUID before it can influence routing.
+/// The canonical UUID rendering is always one safe path segment.
+fn rubbish_item_url(item_id: &str) -> Result<String, String> {
+    let item_id = uuid::Uuid::parse_str(item_id).map_err(|error| {
+        format!("API error 400: invalid rubbish item ID {item_id:?}: {error}")
+    })?;
+    Ok(format!("/api/vault/rubbish/{item_id}"))
+}
+
 /// The TASKING board read endpoint.
 const BOARD_URL: &str = "/api/vault/board";
 
@@ -178,9 +187,10 @@ codes; the `ai-generated` tag policy applies to LLM-authored tasks. Move tasks t
 TRIAGE → FIELD → REVIEW → SEALED with vault_task_update, addressing them by code, path, or id. \
 Seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks. Page \
 paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical top-level \
-folders. A restore conflict means the original path is occupied and the item remains binned; \
-resolve that path before retrying. On a page revision conflict, re-read the page and re-apply \
-the change.";
+folders. An occupied-path restore conflict means the original path is occupied and the item \
+remains binned; resolve that path before retrying. A rubbish item drift conflict means the item \
+remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
+a page revision conflict, re-read the page with vault_get_page and re-apply the change.";
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CreatePageParams {
@@ -1103,9 +1113,10 @@ impl VaultMcpServer {
         &self,
         Parameters(params): Parameters<RubbishItemParams>,
     ) -> Result<String, String> {
+        let url = rubbish_item_url(&params.item_id)?;
         let value = self
             .client
-            .get_json(&format!("/api/vault/rubbish/{}", params.item_id), &[])
+            .get_json(&url, &[])
             .await
             .map_err(|error| error.to_string())?;
         render(&value)
@@ -1124,12 +1135,10 @@ impl VaultMcpServer {
         &self,
         Parameters(params): Parameters<RubbishItemParams>,
     ) -> Result<String, String> {
+        let url = format!("{}/restore", rubbish_item_url(&params.item_id)?);
         let value = self
             .client
-            .post_json(
-                &format!("/api/vault/rubbish/{}/restore", params.item_id),
-                &serde_json::json!({}),
-            )
+            .post_json(&url, &serde_json::json!({}))
             .await
             .map_err(|error| error.to_string())?;
         render(&value)
@@ -1148,9 +1157,10 @@ impl VaultMcpServer {
         &self,
         Parameters(params): Parameters<RubbishItemParams>,
     ) -> Result<String, String> {
+        let url = rubbish_item_url(&params.item_id)?;
         let value = self
             .client
-            .delete_json(&format!("/api/vault/rubbish/{}", params.item_id), &[])
+            .delete_json(&url, &[])
             .await
             .map_err(|error| error.to_string())?;
         render(&value)
@@ -1744,12 +1754,15 @@ mod tests {
             .collect::<Vec<_>>()
             .join(" ")
             .to_lowercase();
-        assert!(
-            instructions.contains(
-                "a restore conflict means the original path is occupied and the item remains binned"
-            ),
-            "server instructions must distinguish retained restore conflicts: {instructions}"
-        );
+        for required_clause in [
+            "an occupied-path restore conflict means the original path is occupied and the item remains binned",
+            "a rubbish item drift conflict means the item remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item",
+        ] {
+            assert!(
+                instructions.contains(required_clause),
+                "server instructions are missing truthful restore guidance {required_clause:?}: {instructions}"
+            );
+        }
     }
 
     #[test]
@@ -2848,6 +2861,54 @@ mod tests {
         ] {
             assert!(error.contains("rubbish item not found"), "{error}");
             assert!(!error.contains("vault_search"), "{error}");
+        }
+    }
+
+    #[tokio::test]
+    async fn mcp_rubbish_rejects_dot_segments_and_reserved_item_ids_without_purging() {
+        for malicious_item_id in ["../rubbish", "?purge=true#fragment"] {
+            let (server, _tmp) = serve_seeded_vault().await;
+            for path in ["notes/alpha.md", "notes/beta.md"] {
+                parse(
+                    server
+                        .vault_archive_page(Parameters(ArchivePageParams {
+                            path: path.to_string(),
+                        }))
+                        .await,
+                );
+            }
+
+            let errors = [
+                server
+                    .vault_purge_page(Parameters(RubbishItemParams {
+                        item_id: malicious_item_id.to_string(),
+                    }))
+                    .await
+                    .expect_err("malformed item ID must not route to Empty Bin"),
+                server
+                    .vault_get_rubbish_item(Parameters(RubbishItemParams {
+                        item_id: malicious_item_id.to_string(),
+                    }))
+                    .await
+                    .expect_err("malformed item ID must not route to the list"),
+                server
+                    .vault_restore_page(Parameters(RubbishItemParams {
+                        item_id: malicious_item_id.to_string(),
+                    }))
+                    .await
+                    .expect_err("malformed item ID must not route elsewhere"),
+            ];
+            for error in errors {
+                assert!(error.contains("API error 400"), "{error}");
+                assert!(error.contains("invalid rubbish item ID"), "{error}");
+            }
+
+            let retained = parse(server.vault_list_rubbish().await);
+            assert_eq!(
+                retained.as_array().unwrap().len(),
+                2,
+                "malformed item ID {malicious_item_id:?} must retain every item"
+            );
         }
     }
 
