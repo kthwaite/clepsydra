@@ -444,6 +444,42 @@ fn reconcile_batch_index(
     rubbish_catalog_events: &[batch_mutation::RubbishCatalogEvent],
     identity: MovedPageIdentity,
 ) -> Result<(), IndexError> {
+    if !rubbish_catalog_events.is_empty() {
+        if !moved_pages.is_empty() || index_events.len() != rubbish_catalog_events.len() {
+            return Err(IndexError::Other(
+                "rubbish lifecycle index and catalog events are not one-to-one".to_owned(),
+            ));
+        }
+        SyncEngine::process_events_atomically(
+            index_events,
+            vault,
+            index,
+            |event_index, index_event, index| {
+                match (index_event, &rubbish_catalog_events[event_index]) {
+                    (
+                        ChangeEvent::Remove(path),
+                        batch_mutation::RubbishCatalogEvent::Upsert(manifest),
+                    ) if path.as_str() == manifest.original_path => {
+                        index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest.clone()))?;
+                    }
+                    (
+                        ChangeEvent::Upsert(_),
+                        batch_mutation::RubbishCatalogEvent::Remove(item_id),
+                    ) => {
+                        index.remove_rubbish_entry(&item_id.to_string())?;
+                    }
+                    _ => {
+                        return Err(IndexError::Other(
+                            "rubbish lifecycle index and catalog events do not match".to_owned(),
+                        ));
+                    }
+                }
+                Ok(())
+            },
+        )?;
+        return Ok(());
+    }
+
     let mut hook_events = Vec::new();
     for (old_path, new_path) in moved_pages {
         let identity_path = match identity {

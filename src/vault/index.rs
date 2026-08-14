@@ -1046,6 +1046,18 @@ impl VaultIndex {
         Ok(true)
     }
 
+    /// Index one lifecycle-restored page without repairing or rewriting its bytes.
+    pub(crate) fn index_page_opaque(
+        &mut self,
+        vault: &Vault,
+        vault_path: &VaultPath,
+    ) -> Result<bool, IndexError> {
+        let repair_frontmatter = std::mem::replace(&mut self.repair_frontmatter, false);
+        let result = self.index_page(vault, vault_path);
+        self.repair_frontmatter = repair_frontmatter;
+        result
+    }
+
     /// Remove a page from the index by its vault path.
     ///
     /// Returns `true` if a page was found and removed, `false` if no page
@@ -1203,6 +1215,21 @@ impl VaultIndex {
         )?;
 
         Ok(count)
+    }
+
+    /// Clear the retained resolved path after its target page has been removed.
+    ///
+    /// SQLite's `ON DELETE SET NULL` has already cleared `target_id`, so the
+    /// prior target path is the stable key available at this point.
+    pub(crate) fn invalidate_links_after_removal(
+        &mut self,
+        vault_path: &VaultPath,
+    ) -> Result<usize, IndexError> {
+        Ok(self.conn.execute(
+            "UPDATE links SET target_id = NULL, target_path = NULL
+             WHERE target_path = ?1",
+            params![vault_path.as_str()],
+        )?)
     }
 
     /// Query all unresolved links, enriched with reason and candidates.

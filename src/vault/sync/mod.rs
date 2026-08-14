@@ -136,4 +136,125 @@ impl SyncEngine {
 
         Ok(stats)
     }
+
+    /// Process lifecycle page events, a caller-supplied catalog mutation, and
+    /// affected-link reconciliation as one SQLite savepoint.
+    ///
+    /// The callback runs once per event after its page row mutation and before
+    /// any link invalidation or re-resolution for that event.
+    pub(crate) fn process_events_atomically<F>(
+        events: &[ChangeEvent],
+        vault: &Vault,
+        index: &mut VaultIndex,
+        mut after_page_mutation: F,
+    ) -> Result<SyncStats, super::index::IndexError>
+    where
+        F: FnMut(
+            usize,
+            &ChangeEvent,
+            &mut VaultIndex,
+        ) -> Result<(), super::index::IndexError>,
+    {
+        const SAVEPOINT: &str = "rubbish_lifecycle_reconciliation";
+        index
+            .connection_mut()
+            .execute_batch("SAVEPOINT rubbish_lifecycle_reconciliation")?;
+
+        let result = (|| {
+            let mut stats = SyncStats::default();
+            for (event_index, event) in events.iter().enumerate() {
+                match event {
+                    ChangeEvent::Upsert(vp) => {
+                        if vault.is_excluded(vp) {
+                            return Err(super::index::IndexError::Other(format!(
+                                "cannot restore excluded vault path: {}",
+                                vp.as_str()
+                            )));
+                        }
+
+                        let pre_deps = index.reverse_deps(vp)?;
+                        let indexed = index.index_page_opaque(vault, vp)?;
+                        if indexed {
+                            stats.pages_indexed += 1;
+                        } else {
+                            stats.pages_skipped += 1;
+                        }
+                        let post_deps = index.reverse_deps(vp)?;
+
+                        after_page_mutation(event_index, event, index)?;
+
+                        index.invalidate_links_to(vp)?;
+                        if indexed {
+                            stats.links_resolved += index.resolve_links_for_page(vp)?;
+                        }
+                        let mut all_deps = pre_deps;
+                        for dependency in post_deps {
+                            if !all_deps
+                                .iter()
+                                .any(|existing| existing.as_str() == dependency.as_str())
+                            {
+                                all_deps.push(dependency);
+                            }
+                        }
+                        for dependency in &all_deps {
+                            stats.deps_reresolved +=
+                                index.resolve_links_for_page(dependency)?;
+                        }
+                    }
+                    ChangeEvent::Remove(vp) => {
+                        let dependencies = index.reverse_deps(vp)?;
+                        if index.remove_page(vp)? {
+                            stats.pages_removed += 1;
+                        }
+
+                        after_page_mutation(event_index, event, index)?;
+
+                        index.invalidate_links_after_removal(vp)?;
+                        for dependency in &dependencies {
+                            stats.deps_reresolved +=
+                                index.resolve_links_for_page(dependency)?;
+                        }
+                    }
+                    ChangeEvent::BaseChanged => {
+                        return Err(super::index::IndexError::Other(
+                            "base changes cannot be part of rubbish lifecycle reconciliation"
+                                .to_owned(),
+                        ));
+                    }
+                }
+            }
+            Ok(stats)
+        })();
+
+        match result {
+            Ok(stats) => {
+                if let Err(source) = index
+                    .connection_mut()
+                    .execute_batch("RELEASE SAVEPOINT rubbish_lifecycle_reconciliation")
+                {
+                    let _ = index.connection_mut().execute_batch(
+                        "ROLLBACK TO SAVEPOINT rubbish_lifecycle_reconciliation;
+                         RELEASE SAVEPOINT rubbish_lifecycle_reconciliation;",
+                    );
+                    Err(source.into())
+                } else {
+                    Ok(stats)
+                }
+            }
+            Err(source) => {
+                index
+                    .connection_mut()
+                    .execute_batch(
+                        "ROLLBACK TO SAVEPOINT rubbish_lifecycle_reconciliation;
+                         RELEASE SAVEPOINT rubbish_lifecycle_reconciliation;",
+                    )
+                    .map_err(|rollback| {
+                        super::index::IndexError::Other(format!(
+                            "{source}; additionally failed to roll back {SAVEPOINT}: {rollback}"
+                        ))
+                    })?;
+                Err(source)
+            }
+        }
+    }
 }
