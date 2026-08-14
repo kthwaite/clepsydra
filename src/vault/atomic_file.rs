@@ -546,8 +546,37 @@ pub fn install_noreplace(source: &Path, destination: &Path) -> io::Result<()> {
 
 #[cfg(windows)]
 pub fn install_noreplace(source: &Path, destination: &Path) -> io::Result<()> {
-    // std::fs::rename maps to a no-replace move on Windows.
-    std::fs::rename(source, destination)
+    use std::os::windows::ffi::OsStrExt as _;
+
+    use windows_sys::Win32::Foundation::{ERROR_ALREADY_EXISTS, ERROR_FILE_EXISTS};
+    use windows_sys::Win32::Storage::FileSystem::MoveFileExW;
+
+    let source_wide = source
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let destination_wide = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    if unsafe { MoveFileExW(source_wide.as_ptr(), destination_wide.as_ptr(), 0) } != 0 {
+        return Ok(());
+    }
+
+    let error = io::Error::last_os_error();
+    let destination_occupied = fs::symlink_metadata(destination).is_ok();
+    if matches!(
+        error.raw_os_error(),
+        Some(code)
+            if code == ERROR_ALREADY_EXISTS as i32 || code == ERROR_FILE_EXISTS as i32
+    ) || destination_occupied
+    {
+        Err(io::Error::new(ErrorKind::AlreadyExists, error))
+    } else {
+        Err(error)
+    }
 }
 
 #[cfg(not(any(
@@ -562,4 +591,25 @@ pub fn install_noreplace(_source: &Path, _destination: &Path) -> io::Result<()> 
         ErrorKind::Unsupported,
         "atomic no-replace rename is unsupported on this operating system",
     ))
+}
+
+#[cfg(all(test, windows))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn install_noreplace_preserves_source_and_occupied_empty_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let source = temp.path().join("source");
+        let destination = temp.path().join("destination");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("sentinel"), b"source").unwrap();
+        fs::create_dir(&destination).unwrap();
+
+        let error = install_noreplace(&source, &destination).unwrap_err();
+
+        assert_eq!(error.kind(), ErrorKind::AlreadyExists);
+        assert_eq!(fs::read(source.join("sentinel")).unwrap(), b"source");
+        assert_eq!(fs::read_dir(&destination).unwrap().count(), 0);
+    }
 }

@@ -1290,6 +1290,28 @@ mod tests {
         );
     }
 
+    #[test]
+    fn purge_refuses_an_occupied_empty_tombstone_and_keeps_uuid_item_actionable() {
+        let temp = TempDir::new().unwrap();
+        let root = temp.path().join("rubbish");
+        let store = RubbishStore::new(&root);
+        let item_id = uuid("00000000-0000-4000-8000-000000000009");
+        let expected_manifest = manifest(item_id, timestamp("2026-08-13T00:00:00Z"));
+        let mut prepared = store
+            .prepare_item(&item_id.to_string(), &expected_manifest, b"complete")
+            .unwrap();
+        prepared.publish().unwrap();
+        let expected = store.read_item(&item_id.to_string()).unwrap();
+        let tombstone = root.join(format!(".purge-{item_id}"));
+        fs::create_dir(&tombstone).unwrap();
+
+        let error = store.remove_item(&expected).unwrap_err();
+
+        assert!(matches!(error, RubbishStoreError::Filesystem { .. }));
+        assert_eq!(store.read_item(&item_id.to_string()).unwrap(), expected);
+        assert_eq!(fs::read_dir(&tombstone).unwrap().count(), 0);
+    }
+
     #[cfg(unix)]
     #[test]
     fn purge_rename_failure_leaves_the_complete_uuid_item_actionable() {
