@@ -107,8 +107,8 @@ describe("RubbishBin", () => {
     expect(within(invalidRow!).getByText(invalid.error)).toBeVisible();
     expect(within(invalidRow!).queryByRole("button")).toBeNull();
     const timestamp = within(rows[0]).getByText(/Deleted 13 Aug 2026/);
-    expect(timestamp).toHaveClass("text-ink-mute");
-    expect(timestamp).not.toHaveClass("text-ink-faint");
+    expect(timestamp).toHaveClass("text-ink-2");
+    expect(timestamp).not.toHaveClass("text-ink-mute");
   });
 
   it("fetches dedicated detail on selection and renders a bounded read-only preview", async () => {

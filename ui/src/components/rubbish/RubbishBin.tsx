@@ -94,7 +94,7 @@ function RubbishRow({
             {item.kind}
           </span>
         </span>
-        <span className="cl-mono mt-2 block text-[9px] tabular-nums text-ink-mute">
+        <span className="cl-mono mt-2 block text-[9px] tabular-nums text-ink-2">
           Deleted {formatDeletedAt(item.deleted_at)}
         </span>
       </button>
