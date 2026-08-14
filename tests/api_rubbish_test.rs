@@ -92,9 +92,7 @@ async fn archive_page(fixture: &ApiFixture, path: &str) -> Value {
     response.json()
 }
 
-fn assert_single_rubbish_notification(
-    changes: &mut broadcast::Receiver<SyncNotification>,
-) {
+fn assert_single_rubbish_notification(changes: &mut broadcast::Receiver<SyncNotification>) {
     let SyncNotification::IndexChanged { upserted, removed } =
         changes.try_recv().expect("rubbish lifecycle notification")
     else {
