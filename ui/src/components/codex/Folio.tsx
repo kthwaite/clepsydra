@@ -960,7 +960,7 @@ export function Folio({ tabId, path }: FolioProps) {
             <Pip kind={kind} />
             {kindLabel(kind)}
           </span>
-          {folioReadOnly && editor.revisionConflict ? (
+          {folioReadOnly && !archiveTagEditor && editor.revisionConflict ? (
             <span className="text-xs text-destructive">
               Page changed on disk
             </span>

@@ -21,7 +21,6 @@ vi.mock("#/editor/usePageEditor", () => ({ usePageEditor: usePageEditorMock }));
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => mobileLayoutState.matches,
 }));
-vi.mock("#/editor/SaveIndicator", () => ({ SaveIndicator: () => null }));
 vi.mock("#/editor/SlateEditor", () => ({
   SlateEditor: (props: Record<string, unknown>) => {
     slateProps.current = props;
@@ -203,6 +202,30 @@ describe("Folio read-only bodies", () => {
     await user.tab();
     expect(state.saveNow).toHaveBeenCalledTimes(1);
     updated.unmount();
+  });
+
+  it("offers conflict recovery for archived tag edits", async () => {
+    const user = userEvent.setup();
+    const confirmReload = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const state = editor({
+      archive: ARCHIVE_META,
+      tags: ["saved"],
+      saveStatus: "error",
+      saveError: "page changed since it was loaded",
+      revisionConflict: { currentRevision: "rev-b" },
+    });
+    usePageEditorMock.mockReturnValue(state);
+
+    renderFolioInRouter(ARCHIVE_PATH);
+    await user.click(
+      await screen.findByRole("button", { name: "Reload from disk" }),
+    );
+
+    expect(confirmReload).toHaveBeenCalledWith(
+      "Reload this page from disk? Your unsaved changes will be discarded.",
+    );
+    expect(state.reloadAfterConflict).toHaveBeenCalledTimes(1);
+    confirmReload.mockRestore();
   });
 
   it("does not expose archive tag editing for other page presentations", () => {
