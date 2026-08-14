@@ -68,7 +68,7 @@ fn store_blob(state: &AppState, data: &[u8], content_type: &str) -> String {
 }
 
 #[test]
-fn archive_delete_hook_reports_cas_decrement_failure() {
+fn archive_hook_reports_cas_decrement_failure() {
     use clepsydra::vault::hooks::PostDeleteHook;
     use clepsydra::vault::page::PageMeta;
     use clepsydra::vault::path::VaultPath;
@@ -109,6 +109,61 @@ fn archive_delete_hook_reports_cas_decrement_failure() {
         state.cas.lock().gc(std::time::Duration::ZERO).unwrap(),
         1,
         "a failing decrement must not prevent later references from being compensated"
+    );
+}
+
+#[test]
+fn archive_hook_deduplicates_captured_archive_metadata_hashes() {
+    use clepsydra::vault::page::PageMeta;
+    use clepsydra::vault::path::VaultPath;
+
+    let (_server, _tmp, state) = setup_server();
+    let hash = {
+        let cas = state.cas.lock();
+        let stored = cas
+            .store(b"duplicate captured reference", "application/octet-stream")
+            .unwrap();
+        cas.store(b"duplicate captured reference", "application/octet-stream")
+            .unwrap();
+        stored.hash
+    };
+    let mut archive = toml::Table::new();
+    archive.insert(
+        "snapshot_hash".to_string(),
+        toml::Value::String(hash.clone()),
+    );
+    archive.insert(
+        "blobs".to_string(),
+        toml::Value::Array(vec![
+            toml::Value::String(hash.clone()),
+            toml::Value::String(hash.clone()),
+        ]),
+    );
+    let mut meta = PageMeta::new();
+    meta.extra
+        .insert("archive".to_string(), toml::Value::Table(archive));
+    let hook = ArchiveDeleteHook {
+        cas: Arc::clone(&state.cas),
+    };
+
+    hook.on_page_deleted(
+        &VaultPath::new("archive/duplicate.md").unwrap(),
+        &uuid::Uuid::now_v7(),
+        &meta,
+    )
+    .unwrap();
+
+    let cas = state.cas.lock();
+    assert_eq!(
+        cas.gc(std::time::Duration::ZERO).unwrap(),
+        0,
+        "duplicate metadata entries must release one reference, not all references"
+    );
+    cas.decrement_ref(&hash).unwrap();
+    assert_eq!(
+        cas.gc(std::time::Duration::ZERO).unwrap(),
+        1,
+        "exactly one reference must remain after the hook"
     );
 }
 

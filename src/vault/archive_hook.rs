@@ -2,12 +2,34 @@ use crate::vault::cas::ContentStore;
 use crate::vault::hooks::PostDeleteHook;
 use crate::vault::page::PageMeta;
 use crate::vault::path::VaultPath;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use uuid::Uuid;
 
 /// Decrements CAS ref_counts when an archive page is deleted.
 pub struct ArchiveDeleteHook {
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,
+}
+
+/// Return the deduplicated captured-archive CAS references encoded by the
+/// established `[archive]` page metadata convention.
+pub(crate) fn captured_archive_hashes(meta: &PageMeta) -> BTreeSet<String> {
+    let Some(toml::Value::Table(archive)) = meta.extra.get("archive") else {
+        return BTreeSet::new();
+    };
+
+    let mut hashes = BTreeSet::new();
+    if let Some(toml::Value::String(hash)) = archive.get("snapshot_hash") {
+        hashes.insert(hash.clone());
+    }
+    if let Some(toml::Value::Array(blob_hashes)) = archive.get("blobs") {
+        for value in blob_hashes {
+            if let toml::Value::String(hash) = value {
+                hashes.insert(hash.clone());
+            }
+        }
+    }
+    hashes
 }
 
 impl PostDeleteHook for ArchiveDeleteHook {
@@ -18,28 +40,7 @@ impl PostDeleteHook for ArchiveDeleteHook {
         meta: &PageMeta,
     ) -> Result<(), Box<dyn std::error::Error>> {
         tracing::debug!("ArchiveDeleteHook: page deleted, checking for archive metadata");
-        // Check if this page has archive metadata
-        let archive = match meta.extra.get("archive") {
-            Some(toml::Value::Table(m)) => m,
-            _ => return Ok(()), // not an archive page, nothing to do
-        };
-
-        let mut unique_hashes = std::collections::BTreeSet::new();
-
-        // Collect snapshot_hash
-        if let Some(toml::Value::String(hash)) = archive.get("snapshot_hash") {
-            unique_hashes.insert(hash.clone());
-        }
-
-        // Collect blob hashes
-        if let Some(toml::Value::Array(hashes)) = archive.get("blobs") {
-            for h in hashes {
-                if let toml::Value::String(hash) = h {
-                    unique_hashes.insert(hash.clone());
-                }
-            }
-        }
-
+        let unique_hashes = captured_archive_hashes(meta);
         if unique_hashes.is_empty() {
             return Ok(());
         }
