@@ -605,6 +605,20 @@ async fn sort_tasks_for_atrium_agenda() {
             .all(|task| task["content"] != "Completed earliest"),
         "completed tasks must be excluded from the Atrium agenda"
     );
+
+    let undated_res = server
+        .get("/api/vault/tasks?status=todo&sort=agenda&offset=8&limit=8")
+        .await;
+    undated_res.assert_status_ok();
+    let undated_body: serde_json::Value = undated_res.json();
+    let undated_contents: Vec<&str> = undated_body["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|task| task["content"].as_str().unwrap())
+        .collect();
+    assert_eq!(undated_contents, vec!["Undated A", "Undated C"]);
+    assert_eq!(undated_body["total"], 10);
 }
 
 #[tokio::test]
