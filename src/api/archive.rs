@@ -21,7 +21,7 @@ use super::AppState;
 use super::error::ApiError;
 use crate::ServerSettings;
 use crate::vault::archive_snapshot::{self, SnapshotResource};
-use crate::vault::cas::{BlobMetadata, ContentStore, RetrieveLimitedError};
+use crate::vault::cas::{ContentStore, OpenBlob, RetrieveLimitedError};
 use crate::vault::index_policy::IndexMutation;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationCoordinator, MutationGuard};
@@ -80,6 +80,7 @@ pub enum ArchiveStatus {
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ArchiveStatsResponse {
+    pub snapshot_view_version: u32,
     pub enabled: bool,
     pub blob_count: u64,
     pub total_size_bytes: u64,
@@ -328,6 +329,10 @@ pub fn cas_router() -> Router<Arc<AppState>> {
 }
 
 const OCTET_STREAM: &str = "application/octet-stream";
+const SNAPSHOT_VIEW_VERSION: u32 = 1;
+const ARCHIVE_DIAGNOSTIC_HEADER: &str = "x-clepsydra-archive-diagnostic";
+const ARCHIVE_UNCAPTURED_RESOURCE_COUNT_HEADER: &str =
+    "x-clepsydra-archive-uncaptured-resource-count";
 
 /// Content types that execute script when navigated to directly. These are
 /// forced to download rather than render, so archived page markup can never run
@@ -398,34 +403,11 @@ fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
 }
 
 enum LoadedSnapshot {
-    Body { data: Vec<u8>, content_type: String },
-    Metadata(BlobMetadata),
-}
-
-trait SnapshotStore {
-    fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>>;
-}
-
-impl SnapshotStore for ContentStore {
-    fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
-        ContentStore::inspect(self, hash)
-    }
-}
-
-fn load_snapshot_metadata(
-    store: &impl SnapshotStore,
-    hash: &str,
-) -> Result<LoadedSnapshot, ApiError> {
-    let metadata = store
-        .inspect(hash)
-        .map_err(|_| ApiError::not_found(format!("snapshot not found: {hash}")))?;
-    if metadata.size > MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 {
-        return Err(ApiError::internal(format!(
-            "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
-            metadata.size, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES
-        )));
-    }
-    Ok(LoadedSnapshot::Metadata(metadata))
+    Body {
+        data: Vec<u8>,
+        content_type: String,
+        uncaptured_resource_count: usize,
+    },
 }
 
 fn without_body(response: Response) -> Response {
@@ -479,28 +461,28 @@ fn admitted_body(data: Vec<u8>, permit: tokio::sync::OwnedSemaphorePermit) -> Bo
 fn snapshot_response_with(
     snapshot: LoadedSnapshot,
     config: &ArchiveViewConfig,
-    transform_body: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, ApiError>,
     body_permit: Option<tokio::sync::OwnedSemaphorePermit>,
-) -> Result<Response, ApiError> {
+) -> Response {
     match snapshot {
-        LoadedSnapshot::Metadata(metadata) => {
-            if !framable_content_type(&metadata.content_type) {
-                return Ok(without_body(unsupported_snapshot_response(
-                    &metadata.content_type,
-                )));
-            }
-            Ok((StatusCode::OK, sandbox_headers(config), Body::empty()).into_response())
-        }
-        LoadedSnapshot::Body { data, content_type } => {
+        LoadedSnapshot::Body {
+            data,
+            content_type,
+            uncaptured_resource_count,
+        } => {
             if !framable_content_type(&content_type) {
-                return Ok(unsupported_snapshot_response(&content_type));
+                return unsupported_snapshot_response(&content_type);
             }
-            let data = transform_body(data)?;
             let body = match body_permit {
                 Some(permit) => admitted_body(data, permit),
                 None => Body::from(data),
             };
-            Ok((StatusCode::OK, sandbox_headers(config), body).into_response())
+            let mut headers = sandbox_headers(config);
+            headers.insert(
+                ARCHIVE_UNCAPTURED_RESOURCE_COUNT_HEADER,
+                HeaderValue::from_str(&uncaptured_resource_count.to_string())
+                    .expect("resource count is a valid header value"),
+            );
+            (StatusCode::OK, headers, body).into_response()
         }
     }
 }
@@ -509,12 +491,19 @@ fn snapshot_response_with(
 // rewrite ceiling covers expansion of validated CAS URLs.
 const MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = archive_snapshot::ARCHIVE_VIEW_SNAPSHOT_BYTES;
 
-fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
-    prepare_snapshot_body_with(
-        data,
-        MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES,
-        archive_snapshot::neutralize_navigation_bytes,
-    )
+struct PreparedSnapshotBody {
+    data: Vec<u8>,
+    uncaptured_resource_count: usize,
+}
+
+fn prepare_snapshot_body(data: Vec<u8>) -> Result<PreparedSnapshotBody, ApiError> {
+    let data = prepare_snapshot_input(data, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)?;
+    let snapshot = archive_snapshot::neutralize_navigation_bytes_with_diagnostics(data)
+        .map_err(|error| ApiError::internal(format!("archived snapshot is corrupt: {error}")))?;
+    Ok(PreparedSnapshotBody {
+        data: snapshot.html,
+        uncaptured_resource_count: snapshot.uncaptured_resource_count,
+    })
 }
 
 fn validate_snapshot_renderability(snapshot: &str) -> Result<(), ApiError> {
@@ -531,11 +520,7 @@ fn validate_snapshot_renderability(snapshot: &str) -> Result<(), ApiError> {
         })
 }
 
-fn prepare_snapshot_body_with(
-    data: Vec<u8>,
-    input_limit: usize,
-    neutralize: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, String>,
-) -> Result<Vec<u8>, ApiError> {
+fn prepare_snapshot_input(data: Vec<u8>, input_limit: usize) -> Result<Vec<u8>, ApiError> {
     if data.len() > input_limit {
         return Err(ApiError::internal(format!(
             "archived snapshot is corrupt: snapshot size {} exceeds view input limit {}",
@@ -551,7 +536,16 @@ fn prepare_snapshot_body_with(
             archive_snapshot::DEFAULT_REWRITTEN_SNAPSHOT_BYTES
         )));
     }
-    neutralize(data)
+    Ok(data)
+}
+
+#[cfg(test)]
+fn prepare_snapshot_body_with(
+    data: Vec<u8>,
+    input_limit: usize,
+    neutralize: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, String>,
+) -> Result<Vec<u8>, ApiError> {
+    neutralize(prepare_snapshot_input(data, input_limit)?)
         .map_err(|error| ApiError::internal(format!("archived snapshot is corrupt: {error}")))
 }
 fn cas_url_boundary(byte: u8) -> bool {
@@ -871,6 +865,59 @@ fn limited_blob_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
     }
 }
 
+enum SnapshotLoadError {
+    Retrieval(ApiError),
+    Transformation(ApiError),
+}
+
+impl From<SnapshotLoadError> for ApiError {
+    fn from(error: SnapshotLoadError) -> Self {
+        match error {
+            SnapshotLoadError::Retrieval(error) | SnapshotLoadError::Transformation(error) => error,
+        }
+    }
+}
+
+fn open_snapshot(store: &ContentStore, hash: &str) -> Result<OpenBlob, SnapshotLoadError> {
+    store
+        .open_limited(hash, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
+        .map_err(|error| SnapshotLoadError::Retrieval(limited_snapshot_error(hash, error)))
+}
+
+fn load_snapshot(opened: OpenBlob, hash: &str) -> Result<LoadedSnapshot, SnapshotLoadError> {
+    let content_type = opened.content_type().to_string();
+    if !framable_content_type(&content_type) {
+        return Ok(LoadedSnapshot::Body {
+            data: Vec::new(),
+            content_type,
+            uncaptured_resource_count: 0,
+        });
+    }
+    let (data, content_type) = opened
+        .read_limited(MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
+        .map_err(|error| SnapshotLoadError::Retrieval(limited_snapshot_error(hash, error)))?;
+    let prepared = prepare_snapshot_body(data).map_err(SnapshotLoadError::Transformation)?;
+    Ok(LoadedSnapshot::Body {
+        data: prepared.data,
+        content_type,
+        uncaptured_resource_count: prepared.uncaptured_resource_count,
+    })
+}
+
+fn transformation_error_response(error: ApiError) -> Response {
+    let diagnostic = error
+        .error
+        .strip_prefix("archived snapshot is corrupt: ")
+        .unwrap_or(&error.error);
+    let diagnostic = HeaderValue::from_str(diagnostic)
+        .unwrap_or_else(|_| HeaderValue::from_static("snapshot transformation failed"));
+    let mut response = error.into_response();
+    response
+        .headers_mut()
+        .insert(ARCHIVE_DIAGNOSTIC_HEADER, diagnostic);
+    response
+}
+
 #[utoipa::path(
     get,
     path = "/archive/view/{snapshot_hash}",
@@ -878,7 +925,15 @@ fn limited_blob_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
     tag = "Archive",
     params(("snapshot_hash" = String, Path, description = "Archived snapshot blob hash")),
     responses(
-        (status = 200, description = "Sandboxed archived HTML snapshot", body = String, content_type = "text/html"),
+        (
+            status = 200,
+            description = "Sandboxed archived HTML snapshot",
+            body = String,
+            content_type = "text/html",
+            headers(
+                ("X-Clepsydra-Archive-Uncaptured-Resource-Count" = u64, description = "Count of render resources not captured in the archive")
+            )
+        ),
         (status = 404, description = "Snapshot blob not found", body = ApiError),
         (status = 415, description = "Blob is not an HTML snapshot", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
@@ -895,39 +950,26 @@ pub async fn view_snapshot(
     let (snapshot, permit) = tokio::task::spawn_blocking(move || {
         let opened = {
             let cas = cas.lock();
-            cas.open_limited(&worker_hash, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
-                .map_err(|error| limited_snapshot_error(&worker_hash, error))?
+            open_snapshot(&cas, &worker_hash)?
         };
-        let content_type = opened.content_type().to_string();
-        if !framable_content_type(&content_type) {
-            return Ok((
-                LoadedSnapshot::Body {
-                    data: Vec::new(),
-                    content_type,
-                },
-                permit,
-            ));
-        }
-        let (data, content_type) = opened
-            .read_limited(MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
-            .map_err(|error| limited_snapshot_error(&worker_hash, error))?;
-        let data = prepare_snapshot_body(data)?;
-        Ok::<_, ApiError>((LoadedSnapshot::Body { data, content_type }, permit))
+        let snapshot = load_snapshot(opened, &worker_hash)?;
+        Ok::<_, SnapshotLoadError>((snapshot, permit))
     })
     .await
-    .map_err(|error| ApiError::internal(format!("archive snapshot worker failed: {error}")))??;
+    .map_err(|error| ApiError::internal(format!("archive snapshot worker failed: {error}")))?
+    .map_err(ApiError::from)?;
 
-    snapshot_response_with(snapshot, &config, Ok, Some(permit))
+    Ok(snapshot_response_with(snapshot, &config, Some(permit)))
 }
 
 async fn run_head_inspection<T, F>(inspection: F) -> Result<T, ApiError>
 where
     T: Send + 'static,
-    F: FnOnce() -> Result<T, ApiError> + Send + 'static,
+    F: FnOnce() -> T + Send + 'static,
 {
     tokio::task::spawn_blocking(inspection)
         .await
-        .map_err(|error| ApiError::internal(format!("archive HEAD worker failed: {error}")))?
+        .map_err(|error| ApiError::internal(format!("archive HEAD worker failed: {error}")))
 }
 
 #[utoipa::path(
@@ -937,7 +979,13 @@ where
     tag = "Archive",
     params(("snapshot_hash" = String, Path, description = "Archived snapshot blob hash")),
     responses(
-        (status = 200, description = "Archived HTML snapshot metadata"),
+        (
+            status = 200,
+            description = "Validated archived HTML snapshot metadata",
+            headers(
+                ("X-Clepsydra-Archive-Uncaptured-Resource-Count" = u64, description = "Count of render resources not captured in the archive")
+            )
+        ),
         (status = 404, description = "Snapshot blob not found"),
         (
             status = 415,
@@ -946,7 +994,13 @@ where
                 ("X-Clepsydra-Archive-Content-Type" = String, description = "Stored snapshot media type")
             )
         ),
-        (status = 500, description = "Internal server error")
+        (
+            status = 500,
+            description = "Snapshot validation or internal server error",
+            headers(
+                ("X-Clepsydra-Archive-Diagnostic" = String, description = "Safe snapshot transformation diagnostic")
+            )
+        )
     )
 )]
 pub async fn head_snapshot(
@@ -954,17 +1008,26 @@ pub async fn head_snapshot(
     Extension(config): Extension<ArchiveViewConfig>,
     Path(hash): Path<String>,
 ) -> Response {
+    let permit = match acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await
+    {
+        Ok(permit) => permit,
+        Err(error) => return without_body(error.into_response()),
+    };
     let cas = Arc::clone(&state.cas);
     let worker_hash = hash.clone();
     let snapshot = run_head_inspection(move || {
-        let cas = cas.lock();
-        load_snapshot_metadata(&*cas, &worker_hash)
+        let _permit = permit;
+        let opened = {
+            let cas = cas.lock();
+            open_snapshot(&cas, &worker_hash)?
+        };
+        load_snapshot(opened, &worker_hash)
     })
     .await;
     without_body(match snapshot {
-        Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body, None)
-            .unwrap_or_else(IntoResponse::into_response),
-        Err(error) => error.into_response(),
+        Ok(Ok(snapshot)) => snapshot_response_with(snapshot, &config, None),
+        Ok(Err(SnapshotLoadError::Retrieval(error))) | Err(error) => error.into_response(),
+        Ok(Err(SnapshotLoadError::Transformation(error))) => transformation_error_response(error),
     })
 }
 
@@ -1050,6 +1113,7 @@ pub async fn archive_status(
         .map_err(|e| ApiError::internal(format!("stats: {e}")))?;
 
     Ok(Json(ArchiveStatsResponse {
+        snapshot_view_version: SNAPSHOT_VIEW_VERSION,
         enabled: state.vault.config().archive.enabled,
         blob_count: stats.blob_count,
         total_size_bytes: stats.total_size_bytes,
@@ -1386,7 +1450,7 @@ mod tests {
         assert_eq!(semaphore.available_permits(), 1);
     }
     #[tokio::test(flavor = "current_thread")]
-    async fn head_metadata_inspection_runs_off_runtime_worker() {
+    async fn head_snapshot_inspection_runs_off_runtime_worker() {
         use std::sync::atomic::{AtomicBool, Ordering};
 
         let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -1401,7 +1465,6 @@ mod tests {
             {
                 worker_timed_out.store(true, Ordering::SeqCst);
             }
-            Ok::<_, ApiError>(())
         }));
 
         started_rx.await.unwrap();
@@ -1411,71 +1474,6 @@ mod tests {
         );
         release_tx.send(()).unwrap();
         inspection.await.unwrap().unwrap();
-    }
-
-    #[test]
-    fn head_snapshot_uses_metadata_without_retrieving_or_rewriting_bytes() {
-        use std::cell::Cell;
-
-        struct ProbeStore {
-            inspections: Cell<usize>,
-        }
-
-        impl SnapshotStore for ProbeStore {
-            fn inspect(
-                &self,
-                _hash: &str,
-            ) -> Result<crate::vault::cas::BlobMetadata, Box<dyn std::error::Error>> {
-                self.inspections.set(self.inspections.get() + 1);
-                Ok(crate::vault::cas::BlobMetadata {
-                    content_type: "text/html".to_string(),
-                    size: 1024,
-                })
-            }
-        }
-
-        let store = ProbeStore {
-            inspections: Cell::new(0),
-        };
-
-        let snapshot = load_snapshot_metadata(&store, "sha256:test").unwrap();
-        assert_eq!(store.inspections.get(), 1);
-
-        let rewrites = Cell::new(0);
-        let response = snapshot_response_with(
-            snapshot,
-            &ArchiveViewConfig::default(),
-            |data| {
-                rewrites.set(rewrites.get() + 1);
-                Ok(data)
-            },
-            None,
-        )
-        .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(rewrites.get(), 0);
-    }
-
-    #[test]
-    fn head_snapshot_rejects_oversize_metadata_without_retrieving_bytes() {
-        struct OversizeStore;
-
-        impl SnapshotStore for OversizeStore {
-            fn inspect(&self, _hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
-                Ok(BlobMetadata {
-                    content_type: "text/html".to_string(),
-                    size: MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES as u64 + 1,
-                })
-            }
-        }
-
-        let store = OversizeStore;
-        let error = match load_snapshot_metadata(&store, "sha256:test") {
-            Ok(_) => panic!("oversize HEAD metadata was accepted"),
-            Err(error) => error,
-        };
-        assert_eq!(error.status, 500);
-        assert!(error.error.contains("view input limit"), "{}", error.error);
     }
 
     #[test]

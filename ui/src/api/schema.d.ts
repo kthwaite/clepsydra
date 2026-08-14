@@ -1598,6 +1598,8 @@ export interface components {
             /** Format: int64 */
             blob_count: number;
             enabled: boolean;
+            /** Format: int32 */
+            snapshot_view_version: number;
             /** Format: int64 */
             total_size_bytes: number;
         };
@@ -3701,6 +3703,8 @@ export interface operations {
             /** @description Sandboxed archived HTML snapshot */
             200: {
                 headers: {
+                    /** @description Count of render resources not captured in the archive */
+                    "X-Clepsydra-Archive-Uncaptured-Resource-Count"?: number;
                     [name: string]: unknown;
                 };
                 content: {
@@ -3748,9 +3752,11 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Archived HTML snapshot metadata */
+            /** @description Validated archived HTML snapshot metadata */
             200: {
                 headers: {
+                    /** @description Count of render resources not captured in the archive */
+                    "X-Clepsydra-Archive-Uncaptured-Resource-Count"?: number;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -3771,9 +3777,11 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Internal server error */
+            /** @description Snapshot validation or internal server error */
             500: {
                 headers: {
+                    /** @description Safe snapshot transformation diagnostic */
+                    "X-Clepsydra-Archive-Diagnostic"?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
