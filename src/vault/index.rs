@@ -594,9 +594,9 @@ impl VaultIndex {
         )? != 0)
     }
 
-    /// Atomically read and remove one valid lifecycle identity from the
-    /// rebuildable rubbish catalog. The returned row can restore catalog
-    /// visibility if authoritative item removal fails.
+    /// Atomically read and remove one lifecycle identity from the rebuildable
+    /// rubbish catalog. The returned row records prior cache state; the
+    /// authoritative store controls reconciliation after removal errors.
     pub fn take_rubbish_entry(
         &mut self,
         item_id: Uuid,

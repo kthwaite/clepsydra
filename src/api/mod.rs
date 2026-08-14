@@ -168,7 +168,7 @@ pub(crate) fn mutation_error(
         | MutationError::RubbishPageIdentity { .. }
         | MutationError::RubbishCleanup { .. }
         | MutationError::RubbishCatalog { .. }
-        | MutationError::RubbishRemovalCatalogRestore { .. } => {
+        | MutationError::RubbishRemovalCatalogReconcile { .. } => {
             error::ApiError::internal(error.to_string())
         }
     }

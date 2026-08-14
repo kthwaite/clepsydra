@@ -349,6 +349,44 @@ impl RubbishStore {
         sync_directory(&self.root)
     }
 
+    /// Project the live authoritative state of one item after an ambiguous
+    /// removal error. Only byte-identical content remains valid; absence
+    /// removes the catalog row, while partial or changed state stays visible
+    /// as an invalid entry.
+    pub(crate) fn catalog_entry_for_expected_item(
+        &self,
+        expected: &RubbishItem,
+    ) -> Option<RubbishListEntry> {
+        let item_id = expected.manifest.item_id;
+        let item_id_string = item_id.to_string();
+        let item_dir = self.item_dir(item_id);
+        match fs::symlink_metadata(&item_dir) {
+            Err(error) if error.kind() == ErrorKind::NotFound => None,
+            Err(source) => Some(RubbishListEntry::Invalid {
+                item_id: item_id_string,
+                error: RubbishStoreError::filesystem(
+                    "inspect rubbish item after failed removal",
+                    &item_dir,
+                    source,
+                )
+                .to_string(),
+            }),
+            Ok(_) => match self.read_item(&item_id_string) {
+                Ok(actual) if actual == *expected => {
+                    Some(RubbishListEntry::Valid(actual.manifest))
+                }
+                Ok(_) => Some(RubbishListEntry::Invalid {
+                    item_id: item_id_string,
+                    error: RubbishStoreError::ItemStateConflict { item_id }.to_string(),
+                }),
+                Err(error) => Some(RubbishListEntry::Invalid {
+                    item_id: item_id_string,
+                    error: error.to_string(),
+                }),
+            },
+        }
+    }
+
     pub(crate) fn publish_transaction_item(
         &self,
         expected: &RubbishItem,
@@ -695,29 +733,41 @@ fn sync_directory_parent(path: &Path) -> Result<(), RubbishStoreError> {
 }
 
 #[cfg(test)]
-thread_local! {
-    static FAIL_NEXT_DIRECTORY_SYNC: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
-}
+static FAIL_DIRECTORY_SYNCS: parking_lot::Mutex<Vec<PathBuf>> =
+    parking_lot::Mutex::new(Vec::new());
 
 #[cfg(test)]
-struct TestDirectorySyncFailureGuard;
+pub(crate) struct TestDirectorySyncFailureGuard {
+    path: PathBuf,
+}
 
 #[cfg(test)]
 impl Drop for TestDirectorySyncFailureGuard {
     fn drop(&mut self) {
-        FAIL_NEXT_DIRECTORY_SYNC.set(false);
+        FAIL_DIRECTORY_SYNCS
+            .lock()
+            .retain(|target| target != &self.path);
     }
 }
 
 #[cfg(test)]
-fn fail_next_directory_sync() -> TestDirectorySyncFailureGuard {
-    FAIL_NEXT_DIRECTORY_SYNC.set(true);
-    TestDirectorySyncFailureGuard
+pub(crate) fn fail_next_directory_sync(path: &Path) -> TestDirectorySyncFailureGuard {
+    let path = path.to_path_buf();
+    let mut targets = FAIL_DIRECTORY_SYNCS.lock();
+    assert!(
+        !targets.contains(&path),
+        "directory sync failpoint already armed for {}",
+        path.display()
+    );
+    targets.push(path.clone());
+    TestDirectorySyncFailureGuard { path }
 }
 
 #[cfg(test)]
 fn hit_test_directory_sync_failure(path: &Path) -> Result<(), RubbishStoreError> {
-    if FAIL_NEXT_DIRECTORY_SYNC.replace(false) {
+    let mut targets = FAIL_DIRECTORY_SYNCS.lock();
+    if let Some(index) = targets.iter().position(|target| target == path) {
+        targets.swap_remove(index);
         return Err(RubbishStoreError::filesystem(
             "execute deterministic directory sync failpoint",
             path,
@@ -879,7 +929,7 @@ mod tests {
         let store = RubbishStore::new(&root);
         let item_id = uuid("00000000-0000-4000-8000-000000000001");
         let manifest = manifest(item_id, timestamp("2026-08-13T00:00:00Z"));
-        let _guard = fail_next_directory_sync();
+        let _guard = fail_next_directory_sync(&root);
 
         let error = store
             .prepare_item(&item_id.to_string(), &manifest, b"secret")
