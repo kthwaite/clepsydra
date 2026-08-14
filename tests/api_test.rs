@@ -2226,7 +2226,10 @@ async fn reference_issues_filter_before_paginating() {
     assert_eq!(response["offset"], 0);
     assert_eq!(response["items"].as_array().unwrap().len(), 1);
     assert_eq!(response["items"][0]["kind"], "broken_block_ref");
-    assert_eq!(response["items"][0]["actions"], serde_json::json!(["open_source"]));
+    assert_eq!(
+        response["items"][0]["actions"],
+        serde_json::json!(["open_source"])
+    );
 }
 
 #[tokio::test]
@@ -2353,13 +2356,11 @@ async fn reference_issues_return_stable_ordering_and_fingerprints() {
     let second: serde_json::Value = server.get(path).await.json();
 
     assert_eq!(first, second);
-    assert!(
-        first["items"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .all(|issue| issue["fingerprint"].as_str().is_some_and(|value| value.len() == 64))
-    );
+    assert!(first["items"].as_array().unwrap().iter().all(|issue| {
+        issue["fingerprint"]
+            .as_str()
+            .is_some_and(|value| value.len() == 64)
+    }));
 }
 
 #[tokio::test]
@@ -2392,7 +2393,14 @@ fn reference_issues_openapi_registers_route_parameters_and_schemas() {
 
     assert_eq!(
         names,
-        BTreeSet::from(["actionable", "kind", "limit", "offset", "page_kind", "project"])
+        BTreeSet::from([
+            "actionable",
+            "kind",
+            "limit",
+            "offset",
+            "page_kind",
+            "project"
+        ])
     );
     let limit = parameters
         .iter()
@@ -2470,8 +2478,7 @@ async fn reference_repair_issue(
         .get(&format!("/api/vault/index/issues?kind={kind}&limit=200"))
         .await;
     response.assert_status_ok();
-    response
-        .json::<serde_json::Value>()["items"]
+    response.json::<serde_json::Value>()["items"]
         .as_array()
         .unwrap()
         .iter()
@@ -2539,8 +2546,14 @@ async fn reference_repair_preview_and_apply_report_the_same_text_edit() {
         preview["after"],
         format!("[[{candidate_id}|the chosen twin]]")
     );
-    assert_eq!(preview["plan"]["text_edits"][0]["old_text"], preview["before"]);
-    assert_eq!(preview["plan"]["text_edits"][0]["new_text"], preview["after"]);
+    assert_eq!(
+        preview["plan"]["text_edits"][0]["old_text"],
+        preview["before"]
+    );
+    assert_eq!(
+        preview["plan"]["text_edits"][0]["new_text"],
+        preview["after"]
+    );
 
     let apply = server
         .post("/api/vault/index/issues/apply")
@@ -2628,11 +2641,9 @@ async fn reference_repair_genuine_source_io_error_remains_internal() {
 #[tokio::test]
 async fn reference_repair_candidate_deleted_after_projection_is_stale() {
     let fixture = reference_repair_fixture();
-    let issue =
-        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
     let candidate = issue["candidates"][0].clone();
-    let request =
-        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    let request = reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
     fixture
         .server
         .post("/api/vault/index/issues/preview")
@@ -2679,11 +2690,9 @@ async fn reference_repair_candidate_deleted_after_projection_is_stale() {
 #[tokio::test]
 async fn reference_repair_candidate_changed_after_projection_is_stale() {
     let fixture = reference_repair_fixture();
-    let issue =
-        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
     let candidate = issue["candidates"][0].clone();
-    let request =
-        reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
+    let request = reference_repair_replace_request(&issue, candidate["page_id"].as_str().unwrap());
     fixture
         .server
         .post("/api/vault/index/issues/preview")
@@ -2727,8 +2736,7 @@ async fn reference_repair_candidate_changed_after_projection_is_stale() {
 #[tokio::test]
 async fn reference_repair_competing_canonical_target_after_projection_is_stale() {
     let fixture = reference_repair_fixture();
-    let issue =
-        reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
+    let issue = reference_repair_issue(&fixture.server, "ambiguous_page_link", "Twin").await;
     let request = reference_repair_replace_request(
         &issue,
         issue["candidates"][0]["page_id"].as_str().unwrap(),
@@ -2789,12 +2797,16 @@ async fn reference_repair_create_resolves_original_no_match_after_indexing() {
     assert_eq!(preview["after"], "[[Missing Page]]");
     assert_eq!(preview["plan"]["text_edits"], serde_json::json!([]));
     let file_ops = preview["plan"]["file_ops"].as_array().unwrap();
-    assert!(file_ops.iter().any(|op| {
-        op["kind"] == "create_dir" && op["path"] == "new"
-    }));
-    assert!(file_ops.iter().any(|op| {
-        op["kind"] == "create_dir" && op["path"] == "new/nested"
-    }));
+    assert!(
+        file_ops
+            .iter()
+            .any(|op| { op["kind"] == "create_dir" && op["path"] == "new" })
+    );
+    assert!(
+        file_ops
+            .iter()
+            .any(|op| { op["kind"] == "create_dir" && op["path"] == "new/nested" })
+    );
     let create_file = file_ops
         .iter()
         .find(|op| op["kind"] == "create_file")
@@ -2809,8 +2821,7 @@ async fn reference_repair_create_resolves_original_no_match_after_indexing() {
         .await
         .json();
     assert_eq!(
-        second_preview["plan"]["file_ops"],
-        preview["plan"]["file_ops"],
+        second_preview["plan"]["file_ops"], preview["plan"]["file_ops"],
         "the immutable created-page identity must not be regenerated"
     );
     let apply = server
@@ -2904,8 +2915,7 @@ async fn reference_repair_encrypted_source_has_no_preview_or_apply_action() {
         .json();
     let issue = &response["items"][0];
     assert_eq!(issue["actions"], serde_json::json!(["open_source"]));
-    let request =
-        reference_repair_replace_request(issue, "019fd000-0000-7000-8000-000000000614");
+    let request = reference_repair_replace_request(issue, "019fd000-0000-7000-8000-000000000614");
 
     for endpoint in ["preview", "apply"] {
         let response = fixture
@@ -2958,8 +2968,7 @@ async fn reference_repair_property_reference_uses_format_preserving_patch() {
         ("notes/property-twin-a.md", twin_a),
         ("notes/property-twin-b.md", twin_b),
     ]);
-    let issue =
-        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let issue = reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
     let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
     let request = reference_repair_replace_request(&issue, candidate_id);
 
@@ -2969,8 +2978,7 @@ async fn reference_repair_property_reference_uses_format_preserving_patch() {
         .await
         .assert_status_ok();
 
-    let content =
-        fs::read_to_string(tmp.path().join("vault/notes/property-source.md")).unwrap();
+    let content = fs::read_to_string(tmp.path().join("vault/notes/property-source.md")).unwrap();
     assert!(content.contains("# preserve this comment"));
     assert!(content.contains("status = \"draft\" # and this one"));
     assert!(content.contains("Body stays byte-for-byte."));
@@ -2988,8 +2996,7 @@ async fn reference_repair_property_reference_can_patch_linkable_system_arrays() 
         ("notes/tagged-twin-a.md", twin_a),
         ("notes/tagged-twin-b.md", twin_b),
     ]);
-    let issue =
-        reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
+    let issue = reference_repair_issue(&server, "invalid_relation_target", "Twin").await;
     let candidate_id = issue["candidates"][0]["page_id"].as_str().unwrap();
 
     server
@@ -2998,8 +3005,7 @@ async fn reference_repair_property_reference_can_patch_linkable_system_arrays() 
         .await
         .assert_status_ok();
 
-    let content =
-        fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
+    let content = fs::read_to_string(tmp.path().join("vault/notes/tagged-source.md")).unwrap();
     assert!(content.contains(&format!("[[{candidate_id}|chosen]]")));
     assert!(content.contains("\"other\""));
 }
@@ -5630,7 +5636,12 @@ async fn attachment_upload_rejects_duplicate_named_fields_and_unknown_binary_fie
             .await
             .assert_status_bad_request();
 
-        assert!(!tmp.path().join("vault/_attachments").join(destination).exists());
+        assert!(
+            !tmp.path()
+                .join("vault/_attachments")
+                .join(destination)
+                .exists()
+        );
         assert_no_attachment_temporaries(&tmp);
     }
 }
@@ -5651,8 +5662,7 @@ async fn attachment_upload_rejects_filename_less_unknown_binary_field() {
         .assert_status_bad_request();
 
     assert!(
-        !tmp
-            .path()
+        !tmp.path()
             .join("vault/_attachments/filenameless.bin")
             .exists()
     );
@@ -5662,12 +5672,9 @@ async fn attachment_upload_rejects_filename_less_unknown_binary_field() {
 #[tokio::test]
 async fn attachment_upload_openapi_documents_named_multipart_fields() {
     let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
-    let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]
-        ["content"]["multipart/form-data"]["schema"];
-    assert_eq!(
-        schema["$ref"],
-        "#/components/schemas/AttachmentUploadForm"
-    );
+    let schema = &openapi["paths"]["/api/vault/attachments/{path}"]["post"]["requestBody"]["content"]
+        ["multipart/form-data"]["schema"];
+    assert_eq!(schema["$ref"], "#/components/schemas/AttachmentUploadForm");
     let form = &openapi["components"]["schemas"]["AttachmentUploadForm"];
     assert_eq!(form["type"], "object");
     assert_eq!(

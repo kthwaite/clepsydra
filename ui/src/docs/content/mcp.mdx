@@ -63,7 +63,7 @@ TLS verifies the server and protects transport; it does not add an agent login.
 | Capture | `vault_journal_capture`, `vault_capture_conversation` | Add a fleeting journal entry or capture complete visible conversation turns. |
 | Tasking | `vault_board`, `vault_task_create`, `vault_task_update`, `vault_cycle_create`, `vault_cycle_update` | Inspect the board, create or update tasks, and create or atomically close and carry over cycles. |
 | Organize | `vault_assign`, `vault_move_page`, `vault_folder` | Declare kind/project, explicitly move a page, or create/move/delete folders. |
-| Review and delete | `vault_preview_mutation`, `vault_delete_page` | Preview move/delete link impact, then delete with backlink protection. |
+| Page lifecycle | `vault_archive_page`, `vault_list_rubbish`, `vault_get_rubbish_item`, `vault_restore_page`, `vault_purge_page`, `vault_empty_rubbish` | Archive without rewriting links; inspect retained items; restore to the original path; or permanently purge one/all retained items. |
 
 Search before creating. Prefer `vault_edit_page` for a targeted unique body
 change, `vault_append_page` for additive capture, and `vault_update_page` only
@@ -95,8 +95,13 @@ for an explicit destination that assignment cannot express.
 | `vault_assign` | organize | Declare kind/project (single or bulk); the vault relocates files |
 | `vault_move_page` | organize | Explicit rename/relocate with link rewriting |
 | `vault_folder` | organize | Create / delete (`recursive` opt-in) / move folders |
-| `vault_delete_page` | organize | Delete; refuses backlinked pages until `force: true` |
-| `vault_preview_mutation` | read | Dry-run a move/delete: the plan, including link rewrites |
+| `vault_archive_page` | organize | Archive an active page to the Rubbish Bin without rewriting inbound links |
+| `vault_list_rubbish` | read | List retained and invalid Rubbish Bin items newest first |
+| `vault_get_rubbish_item` | read | Read retained lifecycle metadata and a bounded read-only body preview |
+| `vault_restore_page` | organize | Restore a retained page only to its original path |
+| `vault_purge_page` | destructive | Permanently remove one retained item |
+| `vault_empty_rubbish` | destructive | Permanently purge the current valid-item snapshot with ordered outcomes |
+| `vault_preview_mutation` | read | Dry-run page/folder moves and inspect link rewrites |
 
 ### Author pages safely
 
@@ -115,15 +120,16 @@ Standalone pages must declare their real Kind and project in
 rather than inventing folders. Substantial project documentation must
 wikilink its project or hub page.
 
-Errors are written for agents: 404s suggest `vault_search` (the page may
-have been refiled), stale-write 409s say re-read and retry, and the delete
-tool's backlink refusal includes the linking pages so the agent can review
-them before forcing.
+Errors are written for agents: active-page 404s suggest `vault_search` because
+the page may have been refiled, while missing retained items stay within the
+Rubbish Bin workflow. Stale-write 409s say re-read and retry. Restore conflicts
+retain the archived item and distinguish an occupied original path from
+changed retained bytes.
 
-Preview is read-only and is a snapshot, not a reservation. Re-read before the
-real mutation. Bulk assignment is all-or-none. Recursive folder deletion is a
-separate destructive operation and does not gain page-delete backlink checks
-from `vault_delete_page`.
+Move preview is read-only and is a snapshot, not a reservation. Re-read before
+the real mutation. Bulk assignment is all-or-none. Recursive folder deletion
+is a separate permanent operation; folder contents do not enter the Rubbish
+Bin.
 
 ### Tasking
 
@@ -209,12 +215,13 @@ HTTP 200. A conflict has no success response and writes nothing.
   intended change, and retry. Only `vault_update_page`, `vault_edit_page`, and
   `vault_append_page` read and send `expected_revision`; the server checks it
   under the mutation path lock. `vault_create_page` instead uses atomic
-  no-overwrite creation. Assignment, move, and delete operate against the
-  mutation coordinator’s current server state; they do not send a revision
-  copied from an earlier MCP page read.
-- **`409` backlink refusal** — review the returned linking pages with the user.
-  Only then rerun `vault_delete_page` with `force: true` and the intended link
-  rewrite. This is not an automatic stale-write retry.
+  no-overwrite creation. Assignment and move operate against the mutation
+  coordinator's current server state; they do not send a revision copied from
+  an earlier MCP page read.
+- **`409` restore conflict** — an occupied original path or changed retained
+  item leaves the item in the Rubbish Bin. Inspect it again with
+  `vault_list_rubbish` and `vault_get_rubbish_item`; move an occupied active
+  page before retrying restoration.
 - **Validation or protocol error** — invalid paths, kinds, projects, tool
   fields, JSON, or unexpected response bodies are returned to the agent.
   Correct the request rather than guessing.

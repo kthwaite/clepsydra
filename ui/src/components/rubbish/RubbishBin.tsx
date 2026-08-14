@@ -112,7 +112,10 @@ function DetailMetadata({ item }: { item: RubbishItemSummary }) {
   return (
     <dl className="grid border-y border-rule-soft sm:grid-cols-2">
       {fields.map(([label, value]) => (
-        <div key={label} className="border-b border-rule-soft px-4 py-3 even:sm:border-l last:border-b-0 sm:[&:nth-last-child(2)]:border-b-0">
+        <div
+          key={label}
+          className="border-b border-rule-soft px-4 py-3 even:sm:border-l last:border-b-0 sm:[&:nth-last-child(2)]:border-b-0"
+        >
           <dt className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
             {label}
           </dt>
@@ -153,8 +156,7 @@ export function RubbishBin() {
         : false;
 
   const entries = (listQuery.data ?? []).filter(
-    (entry) =>
-      entry.status === "invalid" || !hiddenIds.has(entry.item.item_id),
+    (entry) => entry.status === "invalid" || !hiddenIds.has(entry.item.item_id),
   );
   const validItems = entries.flatMap((entry) =>
     entry.status === "valid" ? [entry.item] : [],
@@ -194,9 +196,7 @@ export function RubbishBin() {
         setActionError(`${serverMessage} ${guidance}`);
         return;
       }
-      setActionError(
-        formatApiError(error, "This item could not be restored."),
-      );
+      setActionError(formatApiError(error, "This item could not be restored."));
     }
   }
 
@@ -278,12 +278,18 @@ export function RubbishBin() {
       </header>
 
       {actionError ? (
-        <div role="alert" className="border-b border-hot bg-hot/5 px-4 py-3 text-sm text-hot">
+        <div
+          role="alert"
+          className="border-b border-hot bg-hot/5 px-4 py-3 text-sm text-hot"
+        >
           {actionError}
         </div>
       ) : null}
       {restoredPage ? (
-        <div role="status" className="flex flex-wrap items-center justify-between gap-3 border-b border-cool bg-paper-2 px-4 py-3 text-sm text-ink-2">
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 border-b border-cool bg-paper-2 px-4 py-3 text-sm text-ink-2"
+        >
           <span>
             Restored to <code>{restoredPage.path}</code>.
           </span>
@@ -314,13 +320,25 @@ export function RubbishBin() {
             aria-live="polite"
             className="mt-1 text-xs text-ink-2"
           >
-            {emptyOutcomes.filter((outcome) => outcome.status === "purged").length} deleted permanently;{" "}
-            {emptyOutcomes.filter((outcome) => outcome.status === "failed").length} failed.
+            {
+              emptyOutcomes.filter((outcome) => outcome.status === "purged")
+                .length
+            }{" "}
+            deleted permanently;{" "}
+            {
+              emptyOutcomes.filter((outcome) => outcome.status === "failed")
+                .length
+            }{" "}
+            failed.
           </p>
           <ol className="mt-2 space-y-1">
             {emptyOutcomes.map((outcome, index) => (
               <li
-                key={`${outcome.status === "purged" ? outcome.item.item_id : outcome.item_id}-${index}`}
+                key={
+                  outcome.status === "purged"
+                    ? outcome.item.item_id
+                    : outcome.item_id
+                }
                 aria-label={`Empty outcome ${index + 1}`}
                 className={cn(
                   "grid gap-x-3 border-l-2 px-3 py-2 text-xs sm:grid-cols-[minmax(0,1fr)_auto]",
@@ -331,7 +349,9 @@ export function RubbishBin() {
               >
                 {outcome.status === "purged" ? (
                   <>
-                    <code className="break-all">{outcome.item.original_path}</code>
+                    <code className="break-all">
+                      {outcome.item.original_path}
+                    </code>
                     <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-ink-mute">
                       Deleted permanently
                     </span>
@@ -349,18 +369,33 @@ export function RubbishBin() {
       ) : null}
 
       {listQuery.isPending ? (
-        <div role="status" className="cl-mono flex flex-1 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute">
+        <div
+          role="status"
+          className="cl-mono flex flex-1 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+        >
           Loading Rubbish Bin…
         </div>
       ) : listQuery.isError ? (
-        <div role="alert" className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-hot">
-          <p>{formatApiError(listQuery.error, "The Rubbish Bin could not load.")}</p>
-          <Button size="sm" variant="secondary" onPress={() => void listQuery.refetch()}>
+        <div
+          role="alert"
+          className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center text-sm text-hot"
+        >
+          <p>
+            {formatApiError(listQuery.error, "The Rubbish Bin could not load.")}
+          </p>
+          <Button
+            size="sm"
+            variant="secondary"
+            onPress={() => void listQuery.refetch()}
+          >
             Try again
           </Button>
         </div>
       ) : entries.length === 0 ? (
-        <div role="status" className="flex flex-1 items-center justify-center p-8 text-center">
+        <div
+          role="status"
+          className="flex flex-1 items-center justify-center p-8 text-center"
+        >
           <div>
             <p className="text-sm font-semibold">Rubbish Bin is empty.</p>
             <p className="mt-1 text-xs text-ink-mute">
@@ -370,48 +405,80 @@ export function RubbishBin() {
         </div>
       ) : (
         <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(18rem,0.78fr)_minmax(24rem,1.22fr)]">
-          {(!mobile || selectedId === null) ? (
-            <section aria-label="Rubbish ledger" className="min-h-0 overflow-y-auto border-rule md:border-r">
-              <ul>{entries.map((entry) => (
-                <RubbishRow
-                  key={entry.status === "valid" ? entry.item.item_id : `invalid:${entry.item_id}`}
-                  entry={entry}
-                  selected={entry.status === "valid" && entry.item.item_id === selectedId}
-                  onSelect={(itemId) => {
-                    setActionError(null);
-                    setRestoredPage(null);
-                    setSelectedId(itemId);
-                  }}
-                />
-              ))}</ul>
+          {!mobile || selectedId === null ? (
+            <section
+              aria-label="Rubbish ledger"
+              className="min-h-0 overflow-y-auto border-rule md:border-r"
+            >
+              <ul>
+                {entries.map((entry) => (
+                  <RubbishRow
+                    key={
+                      entry.status === "valid"
+                        ? entry.item.item_id
+                        : `invalid:${entry.item_id}`
+                    }
+                    entry={entry}
+                    selected={
+                      entry.status === "valid" &&
+                      entry.item.item_id === selectedId
+                    }
+                    onSelect={(itemId) => {
+                      setActionError(null);
+                      setRestoredPage(null);
+                      setSelectedId(itemId);
+                    }}
+                  />
+                ))}
+              </ul>
             </section>
           ) : null}
 
-          {(!mobile || selectedId !== null) ? (
-            <section aria-label="Rubbish item detail" className="min-h-0 overflow-y-auto bg-paper">
+          {!mobile || selectedId !== null ? (
+            <section
+              aria-label="Rubbish item detail"
+              className="min-h-0 overflow-y-auto bg-paper"
+            >
               {selectedId === null ? (
                 <div className="flex h-full min-h-64 items-center justify-center p-8 text-center">
                   <div>
-                    <p className="text-sm font-semibold">Select a retained page.</p>
+                    <p className="text-sm font-semibold">
+                      Select a retained page.
+                    </p>
                     <p className="mt-1 text-xs text-ink-mute">
-                      Inspect its stored metadata and read-only preview before acting.
+                      Inspect its stored metadata and read-only preview before
+                      acting.
                     </p>
                   </div>
                 </div>
               ) : detailQuery.isPending ? (
-                <div role="status" className="cl-mono flex min-h-64 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute">
+                <div
+                  role="status"
+                  className="cl-mono flex min-h-64 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+                >
                   Loading retained page…
                 </div>
               ) : detailQuery.isError ? (
-                <div role="alert" className="flex min-h-64 items-center justify-center p-8 text-center text-sm text-hot">
-                  {formatApiError(detailQuery.error, "This retained page could not load.")}
+                <div
+                  role="alert"
+                  className="flex min-h-64 items-center justify-center p-8 text-center text-sm text-hot"
+                >
+                  {formatApiError(
+                    detailQuery.error,
+                    "This retained page could not load.",
+                  )}
                 </div>
               ) : detailQuery.data ? (
                 <article>
                   <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-4 md:px-5">
                     <div className="min-w-0">
                       {mobile ? (
-                        <Button size="sm" variant="ghost" className="mb-3" onPress={() => setSelectedId(null)}>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="mb-3"
+                          onPress={() => setSelectedId(null)}
+                        >
                           <ArrowLeft aria-hidden /> Back to Rubbish Bin
                         </Button>
                       ) : null}
@@ -451,9 +518,15 @@ export function RubbishBin() {
                     </div>
                   </div>
                   <DetailMetadata item={detailQuery.data.item} />
-                  <section aria-labelledby="stored-preview-heading" className="px-4 py-5 md:px-5">
+                  <section
+                    aria-labelledby="stored-preview-heading"
+                    className="px-4 py-5 md:px-5"
+                  >
                     <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <h3 id="stored-preview-heading" className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]">
+                      <h3
+                        id="stored-preview-heading"
+                        className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]"
+                      >
                         Stored body preview
                       </h3>
                       {detailQuery.data.preview.truncated ? (
@@ -462,20 +535,21 @@ export function RubbishBin() {
                         </span>
                       ) : null}
                     </div>
-                    <div
+                    <section
                       aria-label="Read-only stored body preview"
-                      aria-readonly="true"
-                      tabIndex={0}
                       className="mt-3 max-h-96 overflow-y-auto border-l-2 border-rule bg-paper-2 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >
                       {detailQuery.data.preview.encrypted ? (
                         <p className="text-xs text-ink-mute">
-                          This retained body is encrypted and is not disclosed in the preview.
+                          This retained body is encrypted and is not disclosed
+                          in the preview.
                         </p>
                       ) : (
-                        <PreviewMarkdown content={detailQuery.data.preview.body} />
+                        <PreviewMarkdown
+                          content={detailQuery.data.preview.body}
+                        />
                       )}
-                    </div>
+                    </section>
                   </section>
                 </article>
               ) : null}
@@ -491,7 +565,11 @@ export function RubbishBin() {
         onOpenChange={(open) => {
           if (!open && !confirmationBusy) setConfirmation(null);
         }}
-        title={confirmation?.kind === "purge" ? "Delete permanently" : "Empty Rubbish Bin"}
+        title={
+          confirmation?.kind === "purge"
+            ? "Delete permanently"
+            : "Empty Rubbish Bin"
+        }
         description={
           confirmation?.kind === "purge"
             ? `Delete “${confirmation.item.title}” and its retained content permanently? This cannot be undone.`
@@ -511,31 +589,45 @@ export function RubbishBin() {
               Cancel
             </Button>
             {confirmation?.kind === "purge" ? (
-              <Button variant="danger" isDisabled={confirmationBusy} onPress={() => void confirmPurge(confirmation.item)}>
-                {purge.isPending ? "Deleting permanently…" : "Delete permanently"}
+              <Button
+                variant="danger"
+                isDisabled={confirmationBusy}
+                onPress={() => void confirmPurge(confirmation.item)}
+              >
+                {purge.isPending
+                  ? "Deleting permanently…"
+                  : "Delete permanently"}
               </Button>
             ) : confirmation?.kind === "empty" ? (
-              <Button variant="danger" isDisabled={confirmationBusy} onPress={() => void confirmEmpty()}>
-                {empty.isPending ? "Emptying Rubbish Bin…" : "Empty Rubbish Bin permanently"}
+              <Button
+                variant="danger"
+                isDisabled={confirmationBusy}
+                onPress={() => void confirmEmpty()}
+              >
+                {empty.isPending
+                  ? "Emptying Rubbish Bin…"
+                  : "Empty Rubbish Bin permanently"}
               </Button>
             ) : null}
           </>
         }
       >
-        <>
-          <p className="text-sm leading-relaxed text-ink-2">
+        <p className="text-sm leading-relaxed text-ink-2">
+          {confirmation?.kind === "purge"
+            ? "The archived body, metadata, and retained attachments for this page will be removed."
+            : "Successful deletions disappear immediately. Any failures remain in the Bin and are reported in their original order."}
+        </p>
+        {confirmationBusy ? (
+          <p
+            role="status"
+            aria-live="polite"
+            className="mt-3 text-xs text-ink-mute"
+          >
             {confirmation?.kind === "purge"
-              ? "The archived body, metadata, and retained attachments for this page will be removed."
-              : "Successful deletions disappear immediately. Any failures remain in the Bin and are reported in their original order."}
+              ? "Deleting permanently…"
+              : `Deleting ${validItems.length} retained ${validItems.length === 1 ? "item" : "items"}…`}
           </p>
-          {confirmationBusy ? (
-            <p role="status" aria-live="polite" className="mt-3 text-xs text-ink-mute">
-              {confirmation?.kind === "purge"
-                ? "Deleting permanently…"
-                : `Deleting ${validItems.length} retained ${validItems.length === 1 ? "item" : "items"}…`}
-            </p>
-          ) : null}
-        </>
+        ) : null}
       </Dialog>
     </main>
   );

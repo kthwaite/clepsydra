@@ -50,8 +50,7 @@ pub(crate) fn release_rubbish_archive_refs_for_purge(
         captured_archive_refs = hashes.len(),
         "releasing captured-archive references for rubbish purge"
     );
-    cas.lock()
-        .release_rubbish_archive_refs(item_id, &hashes)
+    cas.lock().release_rubbish_archive_refs(item_id, &hashes)
 }
 
 impl PostDeleteHook for ArchiveDeleteHook {

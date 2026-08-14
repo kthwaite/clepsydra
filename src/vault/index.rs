@@ -362,10 +362,7 @@ const RUBBISH_UPSERT: &str = "
         valid = excluded.valid,
         diagnostic = excluded.diagnostic";
 
-fn upsert_rubbish_entry_in(
-    conn: &Connection,
-    entry: &RubbishListEntry,
-) -> rusqlite::Result<()> {
+fn upsert_rubbish_entry_in(conn: &Connection, entry: &RubbishListEntry) -> rusqlite::Result<()> {
     match entry {
         RubbishListEntry::Valid(manifest) => {
             let item_id = manifest.item_id.to_string();
@@ -430,11 +427,13 @@ fn rubbish_entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RubbishLi
         ));
     }
 
-    let parsed_item_id = Uuid::parse_str(&item_id)
-        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error)))?;
+    let parsed_item_id = Uuid::parse_str(&item_id).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(0, Type::Text, Box::new(error))
+    })?;
     let page_id_raw: String = row.get(1)?;
-    let page_id = Uuid::parse_str(&page_id_raw)
-        .map_err(|error| rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(error)))?;
+    let page_id = Uuid::parse_str(&page_id_raw).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(1, Type::Text, Box::new(error))
+    })?;
     let deleted_at_raw: String = row.get(5)?;
     let deleted_at = chrono::DateTime::parse_from_rfc3339(&deleted_at_raw)
         .map_err(|error| rusqlite::Error::FromSqlConversionFailure(5, Type::Text, Box::new(error)))?
@@ -578,10 +577,7 @@ impl VaultIndex {
     }
 
     /// Insert or replace one rebuildable rubbish catalog row.
-    pub fn upsert_rubbish_entry(
-        &self,
-        entry: &RubbishListEntry,
-    ) -> Result<(), IndexError> {
+    pub fn upsert_rubbish_entry(&self, entry: &RubbishListEntry) -> Result<(), IndexError> {
         upsert_rubbish_entry_in(&self.conn, entry)?;
         Ok(())
     }
@@ -637,10 +633,7 @@ impl VaultIndex {
     }
 
     /// Read one rubbish catalog row by its opaque item identity.
-    pub fn rubbish_entry(
-        &self,
-        item_id: &str,
-    ) -> Result<Option<RubbishListEntry>, IndexError> {
+    pub fn rubbish_entry(&self, item_id: &str) -> Result<Option<RubbishListEntry>, IndexError> {
         Ok(self
             .conn
             .query_row(
@@ -656,10 +649,7 @@ impl VaultIndex {
 
     /// Replace the rebuildable catalog with the store's authoritative,
     /// validated manifest enumeration.
-    pub fn reconcile_rubbish_catalog(
-        &mut self,
-        store: &RubbishStore,
-    ) -> Result<(), IndexError> {
+    pub fn reconcile_rubbish_catalog(&mut self, store: &RubbishStore) -> Result<(), IndexError> {
         let entries = store.list_entries().map_err(|source| {
             IndexError::Other(format!("failed to enumerate rubbish catalog: {source}"))
         })?;
@@ -1683,10 +1673,7 @@ impl VaultIndex {
     /// Active `source_hash` is the hash of the markdown as captured, before
     /// image rewriting. Rubbish ownership is resolved only from SQLite; this
     /// request-time lookup never enumerates item manifests.
-    pub fn find_by_archive_url(
-        &self,
-        url: &str,
-    ) -> Result<Option<ArchiveUrlOwner>, IndexError> {
+    pub fn find_by_archive_url(&self, url: &str) -> Result<Option<ArchiveUrlOwner>, IndexError> {
         let active = self
             .conn
             .query_row(

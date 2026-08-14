@@ -32,9 +32,8 @@ fn pages_url(path: &str) -> String {
 /// Parse an opaque rubbish lifecycle UUID before it can influence routing.
 /// The canonical UUID rendering is always one safe path segment.
 fn rubbish_item_url(item_id: &str) -> Result<String, String> {
-    let item_id = uuid::Uuid::parse_str(item_id).map_err(|error| {
-        format!("API error 400: invalid rubbish item ID {item_id:?}: {error}")
-    })?;
+    let item_id = uuid::Uuid::parse_str(item_id)
+        .map_err(|error| format!("API error 400: invalid rubbish item ID {item_id:?}: {error}"))?;
     Ok(format!("/api/vault/rubbish/{item_id}"))
 }
 
@@ -1702,10 +1701,7 @@ mod tests {
 
         for (name, expected_properties) in [
             ("vault_archive_page", BTreeSet::from(["path"])),
-            (
-                "vault_get_rubbish_item",
-                BTreeSet::from(["item_id"]),
-            ),
+            ("vault_get_rubbish_item", BTreeSet::from(["item_id"])),
             ("vault_restore_page", BTreeSet::from(["item_id"])),
             ("vault_purge_page", BTreeSet::from(["item_id"])),
         ] {
@@ -2756,10 +2752,7 @@ mod tests {
         );
         let item_id = archived["item_id"].as_str().unwrap();
         assert_eq!(archived["original_path"], "notes/alpha.md");
-        assert_eq!(
-            archived["page_id"],
-            "0190f8a0-0000-7000-8000-0000000000a1"
-        );
+        assert_eq!(archived["page_id"], "0190f8a0-0000-7000-8000-0000000000a1");
 
         let listed = parse(server.vault_list_rubbish().await);
         assert_eq!(listed.as_array().unwrap().len(), 1);
@@ -2790,10 +2783,12 @@ mod tests {
                 .await,
         );
         assert_eq!(restored["path"], "notes/alpha.md");
-        assert!(parse(server.vault_list_rubbish().await)
-            .as_array()
-            .unwrap()
-            .is_empty());
+        assert!(
+            parse(server.vault_list_rubbish().await)
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
 
         let archived_again = parse(
             server

@@ -149,11 +149,7 @@ impl SyncEngine {
         mut after_page_mutation: F,
     ) -> Result<SyncStats, super::index::IndexError>
     where
-        F: FnMut(
-            usize,
-            &ChangeEvent,
-            &mut VaultIndex,
-        ) -> Result<(), super::index::IndexError>,
+        F: FnMut(usize, &ChangeEvent, &mut VaultIndex) -> Result<(), super::index::IndexError>,
     {
         const SAVEPOINT: &str = "rubbish_lifecycle_reconciliation";
         index
@@ -197,8 +193,7 @@ impl SyncEngine {
                             }
                         }
                         for dependency in &all_deps {
-                            stats.deps_reresolved +=
-                                index.resolve_links_for_page(dependency)?;
+                            stats.deps_reresolved += index.resolve_links_for_page(dependency)?;
                         }
                     }
                     ChangeEvent::Remove(vp) => {
@@ -211,8 +206,7 @@ impl SyncEngine {
 
                         index.invalidate_links_after_removal(vp)?;
                         for dependency in &dependencies {
-                            stats.deps_reresolved +=
-                                index.resolve_links_for_page(dependency)?;
+                            stats.deps_reresolved += index.resolve_links_for_page(dependency)?;
                         }
                     }
                     ChangeEvent::BaseChanged => {

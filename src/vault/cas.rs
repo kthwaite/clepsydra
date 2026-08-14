@@ -164,10 +164,7 @@ impl ContentStore {
         Ok(self.root.join(prefix).join(hex))
     }
 
-    fn rubbish_release_completed(
-        db: &Connection,
-        item_id: &str,
-    ) -> Result<bool, rusqlite::Error> {
+    fn rubbish_release_completed(db: &Connection, item_id: &str) -> Result<bool, rusqlite::Error> {
         db.query_row(
             "SELECT 1 FROM rubbish_archive_releases WHERE item_id = ?1",
             params![item_id],
@@ -192,11 +189,10 @@ impl ContentStore {
             .optional()?;
         let (stored_size, ref_count) =
             row.ok_or_else(|| CasError::MissingBlob(hash.to_string()))?;
-        let expected_size =
-            u64::try_from(stored_size).map_err(|_| CasError::InvalidSize {
-                hash: hash.to_string(),
-                size: stored_size,
-            })?;
+        let expected_size = u64::try_from(stored_size).map_err(|_| CasError::InvalidSize {
+            hash: hash.to_string(),
+            size: stored_size,
+        })?;
         if ref_count <= 0 {
             return Err(CasError::NoReference {
                 hash: hash.to_string(),
@@ -521,8 +517,8 @@ pub struct CasStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use std::collections::BTreeSet;
+    use tempfile::TempDir;
     use uuid::Uuid;
 
     fn test_store() -> (ContentStore, TempDir) {
@@ -719,10 +715,7 @@ mod tests {
             .prepare("PRAGMA table_info(rubbish_archive_releases)")
             .unwrap()
             .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(1)?,
-                    row.get::<_, i64>(5)?,
-                ))
+                Ok((row.get::<_, String>(1)?, row.get::<_, i64>(5)?))
             })
             .unwrap()
             .collect::<Result<Vec<_>, _>>()
@@ -808,8 +801,7 @@ mod tests {
         store.store(b"valid backing file", "image/png").unwrap();
         let missing_backing = store.store(b"missing backing file", "image/png").unwrap();
         fs::remove_file(store.blob_path(&missing_backing.hash).unwrap()).unwrap();
-        let hashes =
-            rubbish_cleanup_hashes([valid.hash.clone(), missing_backing.hash.clone()]);
+        let hashes = rubbish_cleanup_hashes([valid.hash.clone(), missing_backing.hash.clone()]);
 
         assert!(
             store

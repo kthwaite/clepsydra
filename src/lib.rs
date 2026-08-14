@@ -578,9 +578,7 @@ fn startup_index_error(
         .map(|recovered| recovered.directory().display().to_string())
         .collect::<Vec<_>>()
         .join(", ");
-    format!(
-        "startup index {operation} failed; retained transaction paths: {retained}: {source}"
-    )
+    format!("startup index {operation} failed; retained transaction paths: {retained}: {source}")
 }
 
 fn startup_transaction_error(
@@ -1273,8 +1271,7 @@ mod state_tests {
         )
         .unwrap();
 
-        let source =
-            vault::path::VaultPath::new("library/papers/my-paper.md").unwrap();
+        let source = vault::path::VaultPath::new("library/papers/my-paper.md").unwrap();
         let destination = vault::path::VaultPath::new("archive/my-paper.md").unwrap();
         let command = vault::batch_mutation::BatchMutationCommand {
             intents: vec![vault::batch_mutation::BatchPathIntent::Move {
@@ -1685,7 +1682,10 @@ mod settings_tests {
 
         let error = generate_certificates_if_missing(&blocked, &cert, &key).unwrap_err();
 
-        assert_eq!(error.downcast_ref::<std::io::Error>().unwrap().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::AlreadyExists
+        );
         assert!(!cert.exists());
         assert!(!key.exists());
     }

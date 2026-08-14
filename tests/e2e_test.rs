@@ -253,9 +253,7 @@ async fn full_vault_lifecycle() {
     assert_eq!(stats["pages"], 2);
 
     // 9. DELETE /pages/architecture.md -> archive and return the rubbish identity
-    let res = server
-        .delete("/api/vault/pages/architecture.md")
-        .await;
+    let res = server.delete("/api/vault/pages/architecture.md").await;
     res.assert_status(StatusCode::CREATED);
     let archived: serde_json::Value = res.json();
     assert_eq!(archived["original_path"], "architecture.md");
@@ -280,9 +278,7 @@ async fn full_vault_lifecycle() {
     );
 
     // The opaque lifecycle item remains available in the Rubbish Bin.
-    let rubbish = server
-        .get(&format!("/api/vault/rubbish/{item_id}"))
-        .await;
+    let rubbish = server.get(&format!("/api/vault/rubbish/{item_id}")).await;
     rubbish.assert_status_ok();
     let rubbish: serde_json::Value = rubbish.json();
     assert_eq!(rubbish["item"]["item_id"], item_id);

@@ -179,10 +179,8 @@ async fn purge_rubbish_releases_unique_captured_refs_and_leaves_ordinary_attachm
         b"unrelated ordinary attachment CAS blob",
         "application/octet-stream",
     );
-    let item_id =
-        uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000371").unwrap();
-    let page_id =
-        uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000372").unwrap();
+    let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000371").unwrap();
+    let page_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000372").unwrap();
     let manifest = RubbishManifest::new(
         item_id,
         page_id,
@@ -205,9 +203,7 @@ async fn purge_rubbish_releases_unique_captured_refs_and_leaves_ordinary_attachm
         .index
         .with_index({
             let manifest = manifest.clone();
-            move |index, _| {
-                index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest))
-            }
+            move |index, _| index.upsert_rubbish_entry(&RubbishListEntry::Valid(manifest))
         })
         .await
         .unwrap()
@@ -250,7 +246,6 @@ async fn purge_rubbish_releases_unique_captured_refs_and_leaves_ordinary_attachm
     assert_eq!(unrelated_refs, 1);
     assert!(store.read_item(&item_id.to_string()).is_err());
 }
-
 
 #[test]
 fn rollback_fault_injection_attempts_all_hashes_and_reports_each_failure() {
@@ -894,7 +889,7 @@ async fn archive_content_hash_mismatch_rejected() {
 }
 
 #[tokio::test]
-async fn archive_delete_decrements_cas_ref_count() {
+async fn archive_retains_cas_refs_until_rubbish_item_is_purged() {
     let (server, _tmp, state) = setup_server();
 
     let blob_data = b"image for delete test";
@@ -927,19 +922,29 @@ async fn archive_delete_decrements_cas_ref_count() {
         assert!(cas.exists(&blob_hash).unwrap());
     }
 
-    // Delete the page
+    // Archive the page. Its captured blob remains live while the retained item
+    // can still be restored.
     let delete_url = format!("/api/vault/pages/{}", vault_path);
     let del_res = server.delete(&delete_url).await;
-    del_res.assert_status(StatusCode::NO_CONTENT);
-
-    // Verify blob ref_count was decremented (should be 0, eligible for GC)
+    del_res.assert_status(StatusCode::CREATED);
+    let archived: serde_json::Value = del_res.json();
+    let item_id = archived["item_id"].as_str().unwrap();
     {
         let cas = state.cas.lock();
-        // Blob should still exist in CAS (GC hasn't run), but ref_count = 0
-        assert!(
-            cas.exists(&blob_hash).unwrap(),
-            "blob should still exist in CAS after delete (awaiting GC)"
-        );
+        assert_eq!(cas.gc(std::time::Duration::ZERO).unwrap(), 0);
+        assert!(cas.exists(&blob_hash).unwrap());
+    }
+
+    // Permanent purge is the point at which the retained archive's CAS
+    // reference is released.
+    server
+        .delete(&format!("/api/vault/rubbish/{item_id}"))
+        .await
+        .assert_status(StatusCode::OK);
+    {
+        let cas = state.cas.lock();
+        assert!(cas.gc(std::time::Duration::ZERO).unwrap() >= 1);
+        assert!(!cas.exists(&blob_hash).unwrap());
     }
 }
 

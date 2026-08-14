@@ -14,10 +14,7 @@ use super::rubbish::RubbishStore;
 
 /// Rebuild the SQLite rubbish catalog from the authoritative store without
 /// constructing or reading any internal item path directly.
-pub fn reconcile_rubbish_catalog(
-    vault: &Vault,
-    index: &mut VaultIndex,
-) -> Result<(), IndexError> {
+pub fn reconcile_rubbish_catalog(vault: &Vault, index: &mut VaultIndex) -> Result<(), IndexError> {
     let store = RubbishStore::for_vault(vault.root());
     index.reconcile_rubbish_catalog(&store)
 }

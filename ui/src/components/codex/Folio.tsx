@@ -155,10 +155,8 @@ function RawMarkdownNavigationGuard({
       leaveApprovedRef.current = false;
       return true;
     };
-    const unregisterWorkspaceGuard =
-      registerWorkspaceTransitionGuard(guard);
-    const unregisterHistoryGuard =
-      registerFolioHistoryTraversalGuard(guard);
+    const unregisterWorkspaceGuard = registerWorkspaceTransitionGuard(guard);
+    const unregisterHistoryGuard = registerFolioHistoryTraversalGuard(guard);
     return () => {
       unregisterWorkspaceGuard();
       unregisterHistoryGuard();
@@ -249,6 +247,7 @@ export function Folio({ tabId, path }: FolioProps) {
   const mobile = useMobileLayout();
   const navigate = useNavigate();
   const router = useRouter();
+  const routerHistory = router?.history;
   const leaveFolioWorkspace = useLeaveFolioWorkspace();
   const isTodayDraftPath = path === todayJournalPath();
   const { data: journalToday, isLoading: isJournalTodayLoading } =
@@ -288,10 +287,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const handleArchived = useCallback(
     (archived: ArchivedPage) => {
       closeArchivedPageTabs(archived.page_id, archived.original_path);
-      replaceFolioHistoryAfterArchive(router.history);
+      if (routerHistory) replaceFolioHistoryAfterArchive(routerHistory);
       if (mobile) void navigate({ to: "/" });
     },
-    [closeArchivedPageTabs, mobile, navigate, router.history],
+    [closeArchivedPageTabs, mobile, navigate, routerHistory],
   );
   const focusRequestId = useWorkspaceStore(
     (state) => state.tabs.find((tab) => tab.id === tabId)?.focusRequestId,
@@ -375,15 +374,12 @@ export function Folio({ tabId, path }: FolioProps) {
       anchor: selection
         ? snapshotTextPoint(slateEditor, selection.anchor)
         : null,
-      focus: selection
-        ? snapshotTextPoint(slateEditor, selection.focus)
-        : null,
+      focus: selection ? snapshotTextPoint(slateEditor, selection.focus) : null,
     };
   }, [path, tabId]);
 
   useLayoutEffect(
-    () =>
-      registerFolioHistoryCapture(tabId, path, buildRestorationSnapshot),
+    () => registerFolioHistoryCapture(tabId, path, buildRestorationSnapshot),
     [buildRestorationSnapshot, path, tabId],
   );
 
@@ -794,8 +790,7 @@ export function Folio({ tabId, path }: FolioProps) {
       if (!slateEditor || !scrollContainer) return;
 
       if (restoration) {
-        const requireTextMatch =
-          restoration.revision !== editor.getRevision();
+        const requireTextMatch = restoration.revision !== editor.getRevision();
         let selection: Range | null = null;
         if (restoration.anchor && restoration.focus) {
           const anchor = validateTextPointSnapshot(
@@ -906,8 +901,7 @@ export function Folio({ tabId, path }: FolioProps) {
         onMoved={(nextPath) => updateTabPath(tabId, nextPath)}
         onArchived={handleArchived}
         archiveOnly={
-          folioReadOnly ||
-          (encrypted && encryptionState.status !== "plain")
+          folioReadOnly || (encrypted && encryptionState.status !== "plain")
         }
       />
     </Suspense>

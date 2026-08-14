@@ -6,15 +6,13 @@ use serde::Serialize;
 use utoipa::ToSchema;
 
 use super::Vault;
-use super::batch_mutation::{
-    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
-};
+use super::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use super::canonical::CanonicalName;
 use super::index::{IndexError, VaultIndex};
 use super::page::parse_or_repair_frontmatter;
 use super::path::VaultPath;
-use super::rubbish::{RubbishItem, RubbishManifest};
 use super::rewriter;
+use super::rubbish::{RubbishItem, RubbishManifest};
 use super::sync::ChangeEvent;
 
 // ---------------------------------------------------------------------------
@@ -150,9 +148,18 @@ pub fn compute_relative_path(from_path: &str, to_path: &str) -> String {
 /// A mutation operation to be planned.
 #[derive(Debug, Clone)]
 pub enum MutationOp {
-    MovePage { source: String, destination: String },
-    DeletePage { path: String, rewrite: RewriteMode },
-    MoveFolder { source: String, destination: String },
+    MovePage {
+        source: String,
+        destination: String,
+    },
+    DeletePage {
+        path: String,
+        rewrite: RewriteMode,
+    },
+    MoveFolder {
+        source: String,
+        destination: String,
+    },
     ArchivePage {
         path: String,
         expected_bytes: Vec<u8>,
@@ -371,12 +378,11 @@ impl MutationPlan {
                 }
                 FileOpKind::Rename => {
                     let source = VaultPath::new(&op.path).map_err(vp_err)?;
-                    let destination = VaultPath::new(
-                        op.destination
-                            .as_deref()
-                            .ok_or_else(|| IndexError::Other("rename missing destination".into()))?,
-                    )
-                    .map_err(vp_err)?;
+                    let destination =
+                        VaultPath::new(op.destination.as_deref().ok_or_else(|| {
+                            IndexError::Other("rename missing destination".into())
+                        })?)
+                        .map_err(vp_err)?;
                     let represented = remove_directories.contains(&source)
                         || primary_intents.iter().any(|intent| {
                             matches!(
@@ -399,10 +405,12 @@ impl MutationPlan {
                                 .filter_map(Result::ok)
                                 .filter(|entry| entry.file_type().is_file())
                             {
-                                let relative = entry.path().strip_prefix(&source_absolute).map_err(
-                                    |error| IndexError::Other(error.to_string()),
-                                )?;
-                                let destination_absolute = vault.resolve(&destination).join(relative);
+                                let relative = entry
+                                    .path()
+                                    .strip_prefix(&source_absolute)
+                                    .map_err(|error| IndexError::Other(error.to_string()))?;
+                                let destination_absolute =
+                                    vault.resolve(&destination).join(relative);
                                 let destination_file = VaultPath::new(
                                     &destination_absolute
                                         .strip_prefix(vault.root())
@@ -420,9 +428,7 @@ impl MutationPlan {
                                         &entry
                                             .path()
                                             .strip_prefix(vault.root())
-                                            .map_err(|error| {
-                                                IndexError::Other(error.to_string())
-                                            })?
+                                            .map_err(|error| IndexError::Other(error.to_string()))?
                                             .to_string_lossy(),
                                     )
                                     .map_err(vp_err)?,
@@ -430,11 +436,7 @@ impl MutationPlan {
                                     expected_source: fs::read(entry.path())?,
                                 });
                             }
-                            collect_source_directories(
-                                vault,
-                                &source,
-                                &mut remove_directories,
-                            )?;
+                            collect_source_directories(vault, &source, &mut remove_directories)?;
                         } else {
                             collect_missing_parent_directories(
                                 vault,
@@ -514,7 +516,6 @@ impl MutationPlan {
             moved_pages,
         })
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -601,11 +602,7 @@ impl<'a> MutationPlanner<'a> {
     fn plan_page_restore(&self, item: &RubbishItem) -> Result<MutationPlan, IndexError> {
         let destination = VaultPath::new(&item.manifest.original_path).map_err(vp_err)?;
         let mut plan = MutationPlan::empty();
-        collect_missing_parent_directories(
-            self.vault,
-            &destination,
-            &mut plan.create_directories,
-        )?;
+        collect_missing_parent_directories(self.vault, &destination, &mut plan.create_directories)?;
         plan.file_ops.push(PlannedFileOp {
             kind: FileOpKind::Restore,
             path: destination.as_str().to_owned(),
@@ -645,11 +642,7 @@ impl<'a> MutationPlanner<'a> {
             content_hash: None,
         });
         plan.moved_pages.push((source_vp.clone(), dest_vp.clone()));
-        collect_missing_parent_directories(
-            self.vault,
-            &dest_vp,
-            &mut plan.create_directories,
-        )?;
+        collect_missing_parent_directories(self.vault, &dest_vp, &mut plan.create_directories)?;
         plan.primary_intents.push(BatchPathIntent::Move {
             source: source_vp.clone(),
             destination: dest_vp.clone(),
@@ -884,8 +877,7 @@ impl<'a> MutationPlanner<'a> {
             let destination_relative = destination_absolute
                 .strip_prefix(self.vault.root())
                 .map_err(vp_err)?;
-            let source_path =
-                VaultPath::new(&source_relative.to_string_lossy()).map_err(vp_err)?;
+            let source_path = VaultPath::new(&source_relative.to_string_lossy()).map_err(vp_err)?;
             let destination_path =
                 VaultPath::new(&destination_relative.to_string_lossy()).map_err(vp_err)?;
 
@@ -918,7 +910,10 @@ impl<'a> MutationPlanner<'a> {
                 destination: destination_path.clone(),
                 expected_source: expected_source.clone(),
             });
-            if absolute.extension().is_some_and(|extension| extension == "md") {
+            if absolute
+                .extension()
+                .is_some_and(|extension| extension == "md")
+            {
                 md_files.push((source_path, destination_path, expected_source));
             }
         }
@@ -928,10 +923,12 @@ impl<'a> MutationPlanner<'a> {
         for (old_vp, new_vp, expected_source) in &md_files {
             let old_stem = old_vp.stem().to_string();
             let new_stem = new_vp.stem().to_string();
-            let source_title = std::str::from_utf8(expected_source).ok().and_then(|content| {
-                let (meta, _, _, _) = parse_or_repair_frontmatter(content);
-                meta.title
-            });
+            let source_title = std::str::from_utf8(expected_source)
+                .ok()
+                .and_then(|content| {
+                    let (meta, _, _, _) = parse_or_repair_frontmatter(content);
+                    meta.title
+                });
             plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
             plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
             plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
@@ -983,8 +980,7 @@ impl<'a> MutationPlanner<'a> {
                     .iter()
                     .map(|(old, new)| (old.as_str(), new.as_str()))
                     .collect::<Vec<_>>();
-                let new_content =
-                    rewriter::rewrite_links_in_content(&content, &replacement_refs);
+                let new_content = rewriter::rewrite_links_in_content(&content, &replacement_refs);
                 if new_content == content {
                     continue;
                 }

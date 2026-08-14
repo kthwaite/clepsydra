@@ -65,7 +65,8 @@ fn indexed_link_target(db_path: &std::path::Path, source_id: Uuid) -> Option<Str
 
 #[test]
 fn rubbish_archive_index_failure_recovers_the_authoritative_active_state() {
-    let target = b"+++\nid = \"019fd000-0000-7000-8000-000000000101\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let target =
+        b"+++\nid = \"019fd000-0000-7000-8000-000000000101\"\ntitle = \"Target\"\n+++\nBody.\n";
     let (_temp, vault) = setup_vault("target.md", target);
     let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
     index.build(&vault).unwrap();
@@ -91,7 +92,10 @@ fn rubbish_archive_index_failure_recovers_the_authoritative_active_state() {
         .unwrap()
         .into_batch_command(&vault)
         .unwrap();
-    index.connection().execute_batch("DROP TABLE pages").unwrap();
+    index
+        .connection()
+        .execute_batch("DROP TABLE pages")
+        .unwrap();
 
     let error =
         MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap_err();
@@ -100,18 +104,18 @@ fn rubbish_archive_index_failure_recovers_the_authoritative_active_state() {
     let recovered = recover_pending(vault.root()).unwrap();
     assert!(recovered.is_empty());
     assert_eq!(fs::read(vault.resolve(&path)).unwrap(), expected_bytes);
-    assert!(RubbishStore::for_vault(vault.root())
-        .read_item(&item_id.to_string())
-        .is_err());
-    assert!(index
-        .rubbish_entry(&item_id.to_string())
-        .unwrap()
-        .is_none());
+    assert!(
+        RubbishStore::for_vault(vault.root())
+            .read_item(&item_id.to_string())
+            .is_err()
+    );
+    assert!(index.rubbish_entry(&item_id.to_string()).unwrap().is_none());
 }
 
 #[test]
 fn rubbish_restore_index_failure_recovers_the_authoritative_item_state() {
-    let target = b"+++\nid = \"019fd000-0000-7000-8000-000000000111\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let target =
+        b"+++\nid = \"019fd000-0000-7000-8000-000000000111\"\ntitle = \"Target\"\n+++\nBody.\n";
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("vault");
     init_vault(&root).unwrap();
@@ -141,7 +145,10 @@ fn rubbish_restore_index_failure_recovers_the_authoritative_item_state() {
         .unwrap()
         .into_batch_command(&vault)
         .unwrap();
-    index.connection().execute_batch("DROP TABLE pages").unwrap();
+    index
+        .connection()
+        .execute_batch("DROP TABLE pages")
+        .unwrap();
 
     let error =
         MutationCoordinator::execute_batch_direct(&vault, &mut index, &[], command).unwrap_err();
@@ -151,10 +158,7 @@ fn rubbish_restore_index_failure_recovers_the_authoritative_item_state() {
     assert!(recovered.is_empty());
     assert!(!vault.resolve(&path).exists());
     assert_eq!(store.read_item(&item_id.to_string()).unwrap(), item);
-    assert!(index
-        .rubbish_entry(&item_id.to_string())
-        .unwrap()
-        .is_some());
+    assert!(index.rubbish_entry(&item_id.to_string()).unwrap().is_some());
 }
 
 #[test]
@@ -162,8 +166,10 @@ fn rubbish_batch_preflights_every_item_before_staging_or_publication() {
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("vault");
     init_vault(&root).unwrap();
-    let first = b"+++\nid = \"019fd000-0000-7000-8000-000000000171\"\ntitle = \"First\"\n+++\nFirst.\n";
-    let second = b"+++\nid = \"019fd000-0000-7000-8000-000000000172\"\ntitle = \"Second\"\n+++\nSecond.\n";
+    let first =
+        b"+++\nid = \"019fd000-0000-7000-8000-000000000171\"\ntitle = \"First\"\n+++\nFirst.\n";
+    let second =
+        b"+++\nid = \"019fd000-0000-7000-8000-000000000172\"\ntitle = \"Second\"\n+++\nSecond.\n";
     fs::write(root.join("first.md"), first).unwrap();
     fs::write(root.join("second.md"), second).unwrap();
     let vault = Vault::open(&root).unwrap();
@@ -173,10 +179,8 @@ fn rubbish_batch_preflights_every_item_before_staging_or_publication() {
     let second_path = VaultPath::new("second.md").unwrap();
     let first_bytes = fs::read(vault.resolve(&first_path)).unwrap();
     let second_bytes = fs::read(vault.resolve(&second_path)).unwrap();
-    let first_item_id =
-        Uuid::parse_str("019fd000-0000-7000-8000-000000000173").unwrap();
-    let second_item_id =
-        Uuid::parse_str("019fd000-0000-7000-8000-000000000174").unwrap();
+    let first_item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000173").unwrap();
+    let second_item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000174").unwrap();
     let first_manifest = RubbishManifest::new(
         first_item_id,
         Uuid::parse_str("019fd000-0000-7000-8000-000000000171").unwrap(),
@@ -228,10 +232,12 @@ fn rubbish_batch_preflights_every_item_before_staging_or_publication() {
     ));
     assert_eq!(fs::read(vault.resolve(&first_path)).unwrap(), first_bytes);
     assert_eq!(fs::read(vault.resolve(&second_path)).unwrap(), b"drifted");
-    assert!(RubbishStore::for_vault(vault.root())
-        .list_entries()
-        .unwrap()
-        .is_empty());
+    assert!(
+        RubbishStore::for_vault(vault.root())
+            .list_entries()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 struct ArchiveIndexFailureFixture {
@@ -248,7 +254,8 @@ struct ArchiveIndexFailureFixture {
 }
 
 async fn execute_archive_index_failure(trigger_sql: &str) -> ArchiveIndexFailureFixture {
-    let target = b"+++\nid = \"019fd000-0000-7000-8000-000000000241\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let target =
+        b"+++\nid = \"019fd000-0000-7000-8000-000000000241\"\ntitle = \"Target\"\n+++\nBody.\n";
     let backlink = b"+++\nid = \"019fd000-0000-7000-8000-000000000242\"\ntitle = \"Backlink\"\n+++\nSee [[Target]].\n";
     let (temp, vault) = setup_vault("target.md", target);
     fs::write(vault.root().join("backlink.md"), backlink).unwrap();
@@ -315,7 +322,6 @@ struct RestoreIndexFailureFixture {
     db_path: std::path::PathBuf,
     path: VaultPath,
     item_id: Uuid,
-    page_id: Uuid,
     backlink_id: Uuid,
     item: clepsydra::vault::rubbish::RubbishItem,
     notifications: Arc<parking_lot::Mutex<Vec<MutationNotification>>>,
@@ -323,7 +329,8 @@ struct RestoreIndexFailureFixture {
 }
 
 async fn execute_restore_index_failure(trigger_sql: &str) -> RestoreIndexFailureFixture {
-    let target = b"+++\nid = \"019fd000-0000-7000-8000-000000000261\"\ntitle = \"Target\"\n+++\nBody.\n";
+    let target =
+        b"+++\nid = \"019fd000-0000-7000-8000-000000000261\"\ntitle = \"Target\"\n+++\nBody.\n";
     let backlink = b"+++\nid = \"019fd000-0000-7000-8000-000000000262\"\ntitle = \"Backlink\"\n+++\nSee [[Target]].\n";
     let temp = tempfile::tempdir().unwrap();
     let root = temp.path().join("vault");
@@ -380,7 +387,6 @@ async fn execute_restore_index_failure(trigger_sql: &str) -> RestoreIndexFailure
         db_path,
         path,
         item_id,
-        page_id,
         backlink_id,
         item,
         notifications,
@@ -399,9 +405,11 @@ async fn rubbish_archive_catalog_failure_rolls_back_the_entire_index_unit() {
 
     assert!(matches!(fixture.error, MutationError::BatchRecovery { .. }));
     assert!(!fixture.vault.resolve(&fixture.path).exists());
-    assert!(RubbishStore::for_vault(fixture.vault.root())
-        .read_item(&fixture.item_id.to_string())
-        .is_ok());
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_ok()
+    );
     assert_eq!(transaction_workspace_count(&fixture.vault), 1);
     assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
     assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
@@ -416,9 +424,11 @@ async fn rubbish_archive_catalog_failure_rolls_back_the_entire_index_unit() {
         fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
         fixture.expected_bytes
     );
-    assert!(RubbishStore::for_vault(fixture.vault.root())
-        .read_item(&fixture.item_id.to_string())
-        .is_err());
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_err()
+    );
     assert_eq!(transaction_workspace_count(&fixture.vault), 0);
     assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
     assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
@@ -446,9 +456,11 @@ async fn rubbish_archive_link_failure_rolls_back_page_catalog_and_links_together
 
     assert!(matches!(fixture.error, MutationError::BatchRecovery { .. }));
     assert!(!fixture.vault.resolve(&fixture.path).exists());
-    assert!(RubbishStore::for_vault(fixture.vault.root())
-        .read_item(&fixture.item_id.to_string())
-        .is_ok());
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_ok()
+    );
     assert_eq!(transaction_workspace_count(&fixture.vault), 1);
     assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
     assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
@@ -463,9 +475,11 @@ async fn rubbish_archive_link_failure_rolls_back_page_catalog_and_links_together
         fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
         fixture.expected_bytes
     );
-    assert!(RubbishStore::for_vault(fixture.vault.root())
-        .read_item(&fixture.item_id.to_string())
-        .is_err());
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_err()
+    );
     assert_eq!(transaction_workspace_count(&fixture.vault), 0);
     assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
     assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
@@ -490,9 +504,11 @@ async fn rubbish_restore_catalog_failure_rolls_back_the_entire_index_unit() {
         fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
         fixture.item.bytes
     );
-    assert!(RubbishStore::for_vault(fixture.vault.root())
-        .read_item(&fixture.item_id.to_string())
-        .is_err());
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_err()
+    );
     assert_eq!(transaction_workspace_count(&fixture.vault), 1);
     assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 0);
     assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 1);
@@ -540,9 +556,11 @@ async fn rubbish_restore_link_failure_rolls_back_page_catalog_and_links_together
         fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
         fixture.item.bytes
     );
-    assert!(RubbishStore::for_vault(fixture.vault.root())
-        .read_item(&fixture.item_id.to_string())
-        .is_err());
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_err()
+    );
     assert_eq!(transaction_workspace_count(&fixture.vault), 1);
     assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 0);
     assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 1);

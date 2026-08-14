@@ -43,10 +43,7 @@ fn fixture_at(timestamp: &str) -> ApiFixture {
 }
 
 fn stored_page(page_id: &str, title: &str, extra_meta: &str, body: &str) -> Vec<u8> {
-    format!(
-        "+++\nid = \"{page_id}\"\ntitle = \"{title}\"\n{extra_meta}+++\n{body}"
-    )
-    .into_bytes()
+    format!("+++\nid = \"{page_id}\"\ntitle = \"{title}\"\n{extra_meta}+++\n{body}").into_bytes()
 }
 
 fn manifest(
@@ -144,7 +141,13 @@ async fn page_delete_archives_with_backlinks_and_excludes_every_normal_page_surf
         .await
         .assert_status(StatusCode::NOT_FOUND);
     let pages: Value = fixture.server.get("/api/vault/pages").await.json();
-    assert!(pages["items"].as_array().unwrap().iter().all(|item| item["path"] != "target.md"));
+    assert!(
+        pages["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|item| item["path"] != "target.md")
+    );
     let search: Value = fixture
         .server
         .get("/api/vault/index/search?q=Unique%20rubbish%20search%20marker")
@@ -156,12 +159,12 @@ async fn page_delete_archives_with_backlinks_and_excludes_every_normal_page_surf
 #[tokio::test]
 async fn page_delete_maps_missing_source_to_404_and_post_read_byte_drift_to_409() {
     let fixture = fixture_at(ARCHIVE_TIME);
-    let missing = fixture
-        .server
-        .delete("/api/vault/pages/missing.md")
-        .await;
+    let missing = fixture.server.delete("/api/vault/pages/missing.md").await;
     missing.assert_status(StatusCode::NOT_FOUND);
-    assert_eq!(missing.json::<Value>()["error"], "page not found: missing.md");
+    assert_eq!(
+        missing.json::<Value>()["error"],
+        "page not found: missing.md"
+    );
 
     fixture
         .server
@@ -191,15 +194,15 @@ async fn page_delete_maps_missing_source_to_404_and_post_read_byte_drift_to_409(
 
     let response = request_task.await.unwrap();
     assert_eq!(response.status(), StatusCode::CONFLICT);
-    let body: Value = serde_json::from_slice(
-        &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-    )
-    .unwrap();
+    let body: Value =
+        serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
     assert_eq!(body["error"], "active page bytes changed: drift.md");
-    assert!(RubbishStore::for_vault(fixture.state.vault.root())
-        .list_entries()
-        .unwrap()
-        .is_empty());
+    assert!(
+        RubbishStore::for_vault(fixture.state.vault.root())
+            .list_entries()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -296,7 +299,7 @@ async fn rubbish_detail_is_bounded_read_only_and_never_enters_the_normal_index()
     assert_eq!(detail["preview"]["encrypted"], false);
     assert_eq!(detail["preview"]["truncated"], true);
     assert_eq!(
-        detail["preview"]["body"].as_str().unwrap().as_bytes().len(),
+        detail["preview"]["body"].as_str().unwrap().len(),
         PREVIEW_LIMIT_BYTES
     );
 
@@ -348,9 +351,7 @@ async fn rubbish_detail_discloses_protected_plaintext_and_encrypted_armor_withou
         stored_page(
             PAGE_ID_B,
             "Encrypted",
-            &format!(
-                "encryption = {{ format = \"age\", version = 1, key_id = \"{KEY_ID}\" }}\n"
-            ),
+            &format!("encryption = {{ format = \"age\", version = 1, key_id = \"{KEY_ID}\" }}\n"),
             armor,
         ),
     )
@@ -403,15 +404,16 @@ async fn rubbish_item_routes_map_malformed_uuid_to_400_and_missing_uuid_to_404()
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let body: Value = serde_json::from_slice(
-            &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-        )
-        .unwrap();
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
         assert_eq!(body["status"], 400);
-        assert!(body["error"]
-            .as_str()
-            .unwrap()
-            .contains("invalid rubbish item ID"));
+        assert!(
+            body["error"]
+                .as_str()
+                .unwrap()
+                .contains("invalid rubbish item ID")
+        );
     }
     for (method, path) in [
         (Method::GET, format!("/api/vault/rubbish/{missing}")),
@@ -434,20 +436,12 @@ async fn rubbish_item_routes_map_malformed_uuid_to_400_and_missing_uuid_to_404()
             )
             .await
             .unwrap();
-        assert_eq!(
-            response.status(),
-            StatusCode::NOT_FOUND,
-            "{request_label}"
-        );
-        let body: Value = serde_json::from_slice(
-            &to_bytes(response.into_body(), usize::MAX).await.unwrap(),
-        )
-        .unwrap();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND, "{request_label}");
+        let body: Value =
+            serde_json::from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
         assert_eq!(body["status"], 404);
-        assert_eq!(
-            body["error"],
-            format!("rubbish item not found: {missing}")
-        );
+        assert_eq!(body["error"], format!("rubbish item not found: {missing}"));
     }
 }
 
@@ -571,10 +565,12 @@ async fn empty_rubbish_returns_ordered_partial_outcomes_and_retains_failures() {
     assert_eq!(outcomes.len(), 2);
     assert_eq!(outcomes[0]["status"], "failed");
     assert_eq!(outcomes[0]["item_id"], ITEM_ID_B);
-    assert!(outcomes[0]["error"]
-        .as_str()
-        .unwrap()
-        .contains(&missing_blob));
+    assert!(
+        outcomes[0]["error"]
+            .as_str()
+            .unwrap()
+            .contains(&missing_blob)
+    );
     assert_eq!(outcomes[1]["status"], "purged");
     assert_eq!(outcomes[1]["item"]["item_id"], ITEM_ID_A);
 
@@ -606,16 +602,8 @@ fn openapi_registers_rubbish_lifecycle_and_removes_permanent_page_delete_contrac
         );
     }
     for (path, method, expected_statuses) in [
-        (
-            "/api/vault/rubbish",
-            "get",
-            vec!["200", "500"],
-        ),
-        (
-            "/api/vault/rubbish",
-            "delete",
-            vec!["200", "500"],
-        ),
+        ("/api/vault/rubbish", "get", vec!["200", "500"]),
+        ("/api/vault/rubbish", "delete", vec!["200", "500"]),
         (
             "/api/vault/rubbish/{item_id}",
             "get",
@@ -638,9 +626,11 @@ fn openapi_registers_rubbish_lifecycle_and_removes_permanent_page_delete_contrac
             .keys()
             .map(String::as_str)
             .collect::<Vec<_>>();
-        assert_eq!(actual, expected_statuses, "wrong response contract for {method} {path}");
+        assert_eq!(
+            actual, expected_statuses,
+            "wrong response contract for {method} {path}"
+        );
     }
-
 
     let page_delete = &document["paths"]["/api/vault/pages/{path}"]["delete"];
     let parameter_names = page_delete["parameters"]

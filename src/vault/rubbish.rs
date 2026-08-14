@@ -188,10 +188,9 @@ impl RubbishStore {
         })?;
 
         self.ensure_root()?;
-        let staging_dir = self.root.join(format!(
-            ".stage-{parsed_item_id}-{}",
-            Uuid::now_v7()
-        ));
+        let staging_dir = self
+            .root
+            .join(format!(".stage-{parsed_item_id}-{}", Uuid::now_v7()));
         fs::create_dir(&staging_dir).map_err(|source| {
             RubbishStoreError::filesystem("create rubbish staging directory", &staging_dir, source)
         })?;
@@ -372,9 +371,7 @@ impl RubbishStore {
                 .to_string(),
             }),
             Ok(_) => match self.read_item(&item_id_string) {
-                Ok(actual) if actual == *expected => {
-                    Some(RubbishListEntry::Valid(actual.manifest))
-                }
+                Ok(actual) if actual == *expected => Some(RubbishListEntry::Valid(actual.manifest)),
                 Ok(_) => Some(RubbishListEntry::Invalid {
                     item_id: item_id_string,
                     error: RubbishStoreError::ItemStateConflict { item_id }.to_string(),
@@ -397,9 +394,7 @@ impl RubbishStore {
         let item_dir = self.item_dir(item_id);
         match fs::symlink_metadata(&item_dir) {
             Ok(_) => {
-                if prepared_dir.exists()
-                    || self.read_item(&item_id.to_string())? != *expected
-                {
+                if prepared_dir.exists() || self.read_item(&item_id.to_string())? != *expected {
                     return Err(RubbishStoreError::ItemStateConflict { item_id });
                 }
                 return Ok(());
@@ -422,11 +417,7 @@ impl RubbishStore {
             if source.kind() == ErrorKind::AlreadyExists {
                 RubbishStoreError::ItemAlreadyExists { item_id }
             } else {
-                RubbishStoreError::filesystem(
-                    "publish transaction rubbish item",
-                    &item_dir,
-                    source,
-                )
+                RubbishStoreError::filesystem("publish transaction rubbish item", &item_dir, source)
             }
         })?;
         sync_directory(&self.root)?;
@@ -642,12 +633,8 @@ fn compare_list_entries(left: &RubbishListEntry, right: &RubbishListEntry) -> Or
         (RubbishListEntry::Valid(_), RubbishListEntry::Invalid { .. }) => Ordering::Less,
         (RubbishListEntry::Invalid { .. }, RubbishListEntry::Valid(_)) => Ordering::Greater,
         (
-            RubbishListEntry::Invalid {
-                item_id: left, ..
-            },
-            RubbishListEntry::Invalid {
-                item_id: right, ..
-            },
+            RubbishListEntry::Invalid { item_id: left, .. },
+            RubbishListEntry::Invalid { item_id: right, .. },
         ) => left.cmp(right),
     }
 }
@@ -696,8 +683,11 @@ fn read_item_directory(
             },
         ));
     }
-    let manifest_bytes =
-        read_physical_item_file(&directory.join("manifest.json"), &item_id, "rubbish manifest")?;
+    let manifest_bytes = read_physical_item_file(
+        &directory.join("manifest.json"),
+        &item_id,
+        "rubbish manifest",
+    )?;
     let manifest = parse_manifest(&manifest_bytes)
         .map_err(|error| RubbishStoreError::invalid(&item_id, error))?;
     if manifest.item_id != expected_item_id {
@@ -718,9 +708,12 @@ fn write_synced_file(path: &Path, content: &[u8]) -> Result<(), RubbishStoreErro
         .write(true)
         .create_new(true)
         .open(path)
-        .map_err(|source| RubbishStoreError::filesystem("create staged rubbish file", path, source))?;
-    file.write_all(content)
-        .map_err(|source| RubbishStoreError::filesystem("write staged rubbish file", path, source))?;
+        .map_err(|source| {
+            RubbishStoreError::filesystem("create staged rubbish file", path, source)
+        })?;
+    file.write_all(content).map_err(|source| {
+        RubbishStoreError::filesystem("write staged rubbish file", path, source)
+    })?;
     file.sync_all()
         .map_err(|source| RubbishStoreError::filesystem("sync staged rubbish file", path, source))
 }
@@ -733,8 +726,7 @@ fn sync_directory_parent(path: &Path) -> Result<(), RubbishStoreError> {
 }
 
 #[cfg(test)]
-static FAIL_DIRECTORY_SYNCS: parking_lot::Mutex<Vec<PathBuf>> =
-    parking_lot::Mutex::new(Vec::new());
+static FAIL_DIRECTORY_SYNCS: parking_lot::Mutex<Vec<PathBuf>> = parking_lot::Mutex::new(Vec::new());
 
 #[cfg(test)]
 pub(crate) struct TestDirectorySyncFailureGuard {
@@ -970,7 +962,10 @@ mod tests {
             .collect::<Vec<_>>();
         item_entries.sort();
         assert_eq!(item_entries, vec!["manifest.json", "page.md"]);
-        assert_eq!(fs::read(root.join(&item_id_string).join("page.md")).unwrap(), bytes);
+        assert_eq!(
+            fs::read(root.join(&item_id_string).join("page.md")).unwrap(),
+            bytes
+        );
 
         let item = store.read_item(&item_id_string).unwrap();
         assert_eq!(item.manifest, manifest);
@@ -1072,7 +1067,10 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(fs::read(root.join(&item_id_string).join("page.md")).unwrap(), page_bytes);
+        assert_eq!(
+            fs::read(root.join(&item_id_string).join("page.md")).unwrap(),
+            page_bytes
+        );
         assert_eq!(
             fs::read(root.join(&item_id_string).join("manifest.json")).unwrap(),
             manifest_bytes
@@ -1099,7 +1097,10 @@ mod tests {
                 ..
             }
         ));
-        assert_eq!(fs::read(root.join(&item_id_string).join("page.md")).unwrap(), page_bytes);
+        assert_eq!(
+            fs::read(root.join(&item_id_string).join("page.md")).unwrap(),
+            page_bytes
+        );
         assert_eq!(
             fs::read(root.join(&item_id_string).join("manifest.json")).unwrap(),
             manifest_bytes
@@ -1130,7 +1131,9 @@ mod tests {
 
         assert_eq!(entries.len(), 4);
         assert!(matches!(&entries[0], RubbishListEntry::Valid(value) if value.item_id == first_id));
-        assert!(matches!(&entries[1], RubbishListEntry::Valid(value) if value.item_id == second_id));
+        assert!(
+            matches!(&entries[1], RubbishListEntry::Valid(value) if value.item_id == second_id)
+        );
         assert!(matches!(&entries[2], RubbishListEntry::Valid(value) if value.item_id == older_id));
         assert!(matches!(
             &entries[3],

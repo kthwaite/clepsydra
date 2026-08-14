@@ -98,27 +98,31 @@ Open **Manage folders** in the same **Manage paths** panel.
 - **Move or rename** requires a source folder and destination. Choose
   **Preview folder move**, review every planned file and text edit, then choose
   **Move folder**.
-- **Delete** has no server preview. Select the folder, type its exact path to
-  confirm, and leave **Delete contents recursively** unchecked for an empty
-  folder. Checking it deletes the folder's contents too. Recursive folder
-  deletion does not check or rewrite inbound links to pages it removes, so
-  surviving Folios can retain unresolved references.
+- **Delete** is permanent and has no server preview. Select the folder, type
+  its exact path to confirm, and leave **Delete contents recursively**
+  unchecked for an empty folder. Checking it deletes the folder's contents
+  too. Recursive folder deletion does not check or rewrite inbound links.
+  Deleted folder pages do not enter the Rubbish Bin, so surviving Folios can
+  retain unresolved references.
 
-### Delete a page and handle backlinks
+### Archive, restore, or permanently delete a page
 
-Choose **Delete page**, then select how inbound links should be handled:
+Choose **Archive Page** from **Manage paths**. Clepsydra saves the current
+Folio first, then moves the page into the Rubbish Bin. The page disappears
+from normal views; inbound links remain byte-identical and become unresolved.
+Archiving closes every open tab for that page.
 
-- **Preserve labels as plain text**;
-- **Remove link markup**;
-- **Leave unresolved links unchanged**.
+Open **Rubbish Bin** from the desktop rail, mobile roots, or Command Palette.
+Select an item to inspect its original path, page ID, Kind, deletion time, and
+read-only stored-body preview. **Restore** returns it only to its original
+path. If that path is occupied, move or rename the active page and retry; the
+retained item stays in the bin. Successful restoration preserves the original
+page ID and content, so inbound links resolve again.
 
-Choose **Preview deletion** and inspect every backlink rewrite before
-**Confirm delete**. Confirmation submits the same page path and rewrite policy
-with `force=true`, and the server calculates a new deletion plan from current
-state. “Forced” means the normal API safeguard that refuses to delete a page
-with backlinks is deliberately bypassed after review. Deletion removes the page
-and applies the server's current rewrite plan atomically. Leaving links
-unchanged deliberately creates unresolved references.
+**Delete permanently** removes one retained item and cannot be undone.
+**Empty Rubbish Bin** requires a stronger confirmation, processes the current
+retained-item snapshot in order, and reports every success or failure. Failed
+items remain available for inspection and retry.
 
 ## Failures and conflicts
 
@@ -129,14 +133,14 @@ unchanged deliberately creates unresolved references.
   the new page remains at its created path.
 - Moving a missing source fails. Moving to an existing destination fails rather
   than replacing it.
-- Preview first flushes the current Folio. If saving fails, no preview or path
-  mutation starts.
-- Files can change after a preview. Confirmation replans instead of applying the
-  displayed snapshot byte-for-byte, so affected operations may differ or the
-  mutation may conflict. Re-preview immediately; after any failure, return to
-  the panel and preview again.
-- A direct delete without `force=true` returns a conflict when backlinks exist
-  and reports the referring pages. Review those pages before forcing deletion.
+- Move preview first flushes the current Folio. Files can change after a
+  preview, so move confirmation replans and may conflict; re-preview after a
+  failure.
+- Archive also flushes the current Folio. If saving or archival fails, no tab
+  closes and the page remains active. Archive does not rewrite or remove
+  backlink markup.
+- Restore conflicts retain the item. Move an active page occupying the
+  original path, or refresh the Rubbish Bin if retained bytes changed.
 - Folder deletion cannot be previewed. Non-recursive deletion fails for a
   non-empty folder. Recursive deletion is intentionally destructive, performs
   no inbound-link safety check, and performs no link rewriting.

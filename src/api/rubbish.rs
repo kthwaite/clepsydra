@@ -38,7 +38,9 @@ impl From<&RubbishManifest> for RubbishItemSummary {
             original_path: manifest.original_path.clone(),
             title: manifest.title.clone(),
             kind: manifest.kind.clone(),
-            deleted_at: manifest.deleted_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            deleted_at: manifest
+                .deleted_at
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
             archive_url: manifest.archive_url.clone(),
         }
     }
@@ -57,9 +59,7 @@ impl From<DomainRubbishListEntry> for RubbishListEntryDto {
             DomainRubbishListEntry::Valid(manifest) => Self::Valid {
                 item: RubbishItemSummary::from(&manifest),
             },
-            DomainRubbishListEntry::Invalid { item_id, error } => {
-                Self::Invalid { item_id, error }
-            }
+            DomainRubbishListEntry::Invalid { item_id, error } => Self::Invalid { item_id, error },
         }
     }
 }
@@ -116,8 +116,9 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 fn parse_item_id(item_id: &str) -> Result<Uuid, ApiError> {
-    Uuid::parse_str(item_id)
-        .map_err(|error| ApiError::bad_request(format!("invalid rubbish item ID {item_id:?}: {error}")))
+    Uuid::parse_str(item_id).map_err(|error| {
+        ApiError::bad_request(format!("invalid rubbish item ID {item_id:?}: {error}"))
+    })
 }
 
 fn store_read_error(item_id: &str, error: RubbishStoreError) -> ApiError {
@@ -211,10 +212,7 @@ pub async fn get_rubbish_item(
         )));
     }
     let encrypted = meta.encryption.is_some();
-    let encryption = meta
-        .encryption
-        .as_ref()
-        .map(EncryptionMetaResponse::from);
+    let encryption = meta.encryption.as_ref().map(EncryptionMetaResponse::from);
     let (body, truncated) = truncate_preview(&body);
     Ok(Json(RubbishItemDetail {
         item: RubbishItemSummary::from(&item.manifest),
@@ -302,12 +300,7 @@ pub async fn purge_rubbish_item(
 ) -> Result<Json<RubbishPurgeResponse>, ApiError> {
     let result = state
         .mutation_coordinator
-        .purge_rubbish(
-            &state.vault,
-            &state.index,
-            Arc::clone(&state.cas),
-            &item_id,
-        )
+        .purge_rubbish(&state.vault, &state.index, Arc::clone(&state.cas), &item_id)
         .await
         .map_err(super::mutation_error)?;
     Ok(Json(RubbishPurgeResponse {
@@ -346,12 +339,10 @@ pub async fn empty_rubbish(
                     original_path: item.original_path,
                 },
             },
-            PurgeRubbishOutcome::Failed { item_id, error } => {
-                EmptyRubbishItemOutcome::Failed {
-                    item_id: item_id.to_string(),
-                    error,
-                }
-            }
+            PurgeRubbishOutcome::Failed { item_id, error } => EmptyRubbishItemOutcome::Failed {
+                item_id: item_id.to_string(),
+                error,
+            },
         })
         .collect();
     Ok(Json(EmptyRubbishResponse { outcomes }))

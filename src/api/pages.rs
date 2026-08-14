@@ -251,7 +251,6 @@ pub struct ListPagesQuery {
     pub project: Option<String>,
 }
 
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MovePageRequest {
     pub destination: String,
@@ -417,11 +416,7 @@ pub(crate) fn page_summary_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result
     tags.extend(computed_tags.iter().cloned());
     let aliases_json: String = row.get(10)?;
     let aliases: Vec<String> = serde_json::from_str(&aliases_json).map_err(|error| {
-        rusqlite::Error::FromSqlConversionFailure(
-            10,
-            rusqlite::types::Type::Text,
-            Box::new(error),
-        )
+        rusqlite::Error::FromSqlConversionFailure(10, rusqlite::types::Type::Text, Box::new(error))
     })?;
 
     Ok(PageSummary {
@@ -1238,10 +1233,11 @@ pub async fn delete_page(
             vault_path.as_str()
         ))
     })?;
-    let title = meta
-        .title
-        .clone()
-        .unwrap_or_else(|| CanonicalName::from_filename(vault_path.filename()).as_str().to_owned());
+    let title = meta.title.clone().unwrap_or_else(|| {
+        CanonicalName::from_filename(vault_path.filename())
+            .as_str()
+            .to_owned()
+    });
     let (kind, _) = resolve(vault_path.as_str(), meta.kind);
     let archive_url = meta
         .extra
@@ -1552,8 +1548,7 @@ fn plan_bulk_assignment(
     let mut pages = Vec::with_capacity(paths.len());
     for path in paths {
         let path = path.clone();
-        let (expected, meta, page_body) =
-            read_assignment_page_once(state, &path, indexed_paths)?;
+        let (expected, meta, page_body) = read_assignment_page_once(state, &path, indexed_paths)?;
         if let Some(kind) = assigned_kind {
             validate_kind_assignment(&path, meta.kind, kind)?;
         }

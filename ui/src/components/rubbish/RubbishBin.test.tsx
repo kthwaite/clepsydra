@@ -103,9 +103,9 @@ describe("RubbishBin", () => {
     expect(within(rows[1]).getByText("Beta note")).toBeVisible();
 
     const invalidRow = screen.getByText("Invalid rubbish item").closest("li");
-    expect(invalidRow).not.toBeNull();
-    expect(within(invalidRow!).getByText(invalid.error)).toBeVisible();
-    expect(within(invalidRow!).queryByRole("button")).toBeNull();
+    if (!invalidRow) throw new Error("invalid Rubbish Bin row missing");
+    expect(within(invalidRow).getByText(invalid.error)).toBeVisible();
+    expect(within(invalidRow).queryByRole("button")).toBeNull();
     const timestamp = within(rows[0]).getByText(/Deleted 13 Aug 2026/);
     expect(timestamp).toHaveClass("text-ink-2");
     expect(timestamp).not.toHaveClass("text-ink-mute");
@@ -118,7 +118,9 @@ describe("RubbishBin", () => {
     await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
 
     expect(api.detail).toHaveBeenLastCalledWith(alpha.item.item_id);
-    expect(screen.getByRole("heading", { name: "Alpha dossier" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Alpha dossier" }),
+    ).toBeVisible();
     expect(screen.getByText(alpha.item.page_id)).toBeVisible();
     expect(screen.getByText("Stored body")).toBeVisible();
     expect(screen.getByText(/preview is truncated/i)).toBeVisible();
@@ -175,7 +177,9 @@ describe("RubbishBin", () => {
       refetch: vi.fn(),
     });
     loading.rerender(<RubbishBin />);
-    expect(screen.getByRole("status")).toHaveTextContent("Rubbish Bin is empty");
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Rubbish Bin is empty",
+    );
 
     setDefaultHooks();
     api.detail.mockReturnValue({
@@ -185,7 +189,9 @@ describe("RubbishBin", () => {
       error: new Error("stored payload unreadable"),
     });
     loading.rerender(<RubbishBin />);
-    await userEvent.click(screen.getByRole("button", { name: /Alpha dossier/ }));
+    await userEvent.click(
+      screen.getByRole("button", { name: /Alpha dossier/ }),
+    );
     expect(screen.getByRole("alert")).toHaveTextContent(
       "stored payload unreadable",
     );
@@ -206,7 +212,9 @@ describe("RubbishBin", () => {
 
     expect(restore).toHaveBeenCalledWith(alpha.item.item_id);
     expect(screen.queryByRole("button", { name: /Alpha dossier/ })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Open restored page" }));
+    await user.click(
+      screen.getByRole("button", { name: "Open restored page" }),
+    );
     expect(api.openTab).toHaveBeenCalledWith(
       "page",
       alpha.item.original_path,
@@ -237,7 +245,9 @@ describe("RubbishBin", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Move or rename the page at projects/alpha.md, then restore again.",
     );
-    expect(screen.getByRole("heading", { name: "Alpha dossier" })).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "Alpha dossier" }),
+    ).toBeVisible();
     expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
   });
 
@@ -257,7 +267,9 @@ describe("RubbishBin", () => {
     await user.click(screen.getByRole("button", { name: "Restore" }));
 
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent("retained item state changed while restoring");
+    expect(alert).toHaveTextContent(
+      "retained item state changed while restoring",
+    );
     expect(alert).toHaveTextContent(
       "The item remains in the Rubbish Bin. Refresh the Bin and retry.",
     );
@@ -275,7 +287,9 @@ describe("RubbishBin", () => {
     render(<RubbishBin />);
 
     await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await user.click(
+      screen.getByRole("button", { name: "Delete permanently" }),
+    );
 
     const dialog = screen.getByRole("dialog");
     expect(dialog).toHaveTextContent("Alpha dossier");
@@ -293,7 +307,9 @@ describe("RubbishBin", () => {
     const user = userEvent.setup();
     const view = render(<RubbishBin />);
     await user.click(screen.getByRole("button", { name: /Alpha dossier/ }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await user.click(
+      screen.getByRole("button", { name: "Delete permanently" }),
+    );
     await user.click(
       within(screen.getByRole("dialog")).getByRole("button", {
         name: "Delete permanently",
@@ -306,7 +322,9 @@ describe("RubbishBin", () => {
     expect(within(dialog).getByRole("status")).toHaveTextContent(
       "Deleting permanently",
     );
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    ).toBeDisabled();
     expect(
       within(dialog).getByRole("button", { name: "Close dialog" }),
     ).toBeDisabled();
@@ -356,10 +374,14 @@ describe("RubbishBin", () => {
     expect(dialog).toHaveTextContent("2 items");
     expect(dialog).toHaveTextContent(/permanently delete every valid item/i);
     await user.click(
-      within(dialog).getByRole("button", { name: "Empty Rubbish Bin permanently" }),
+      within(dialog).getByRole("button", {
+        name: "Empty Rubbish Bin permanently",
+      }),
     );
 
-    const outcomes = screen.getAllByRole("listitem", { name: /empty outcome/i });
+    const outcomes = screen.getAllByRole("listitem", {
+      name: /empty outcome/i,
+    });
     expect(outcomes).toHaveLength(2);
     expect(outcomes[0]).toHaveTextContent("projects/alpha.md");
     expect(outcomes[0]).toHaveTextContent("Deleted permanently");
@@ -394,7 +416,9 @@ describe("RubbishBin", () => {
     expect(within(dialog).getByRole("status")).toHaveTextContent(
       "Deleting 2 retained items",
     );
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Cancel" }),
+    ).toBeDisabled();
     expect(
       within(dialog).getByRole("button", { name: "Close dialog" }),
     ).toBeDisabled();

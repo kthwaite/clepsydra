@@ -316,7 +316,9 @@ fn validate_intents(intents: &[BatchPathIntent]) -> Result<(), IntentValidationE
         .intersection(&source_rubbish_items)
         .next()
     {
-        return Err(IntentValidationError::ConflictingSource(item_id.to_string()));
+        return Err(IntentValidationError::ConflictingSource(
+            item_id.to_string(),
+        ));
     }
     Ok(())
 }
@@ -446,7 +448,13 @@ impl PreparedBatch {
             }
         }
         let created = self.directory.join("created");
-        for (index, path) in self.manifest.create_directories.clone().into_iter().enumerate() {
+        for (index, path) in self
+            .manifest
+            .create_directories
+            .clone()
+            .into_iter()
+            .enumerate()
+        {
             let staged_directory = created.join(index.to_string());
             if !self.manifest.created_directories.contains(&path) {
                 self.manifest.created_directories.push(path.clone());
@@ -565,12 +573,7 @@ impl PreparedBatch {
         if self.manifest.phase == TransactionPhase::Prepared {
             self.change_phase(TransactionPhase::Committing)?;
         }
-        publish_intent(
-            &self.root,
-            &self.directory,
-            0,
-            &self.manifest.intents[0],
-        )
+        publish_intent(&self.root, &self.directory, 0, &self.manifest.intents[0])
     }
 }
 
@@ -732,10 +735,7 @@ pub(crate) fn prepare(
                 .moved_pages
                 .iter()
                 .map(|(source, destination)| {
-                    (
-                        source.as_str().to_owned(),
-                        destination.as_str().to_owned(),
-                    )
+                    (source.as_str().to_owned(), destination.as_str().to_owned())
                 })
                 .collect(),
         };
@@ -897,11 +897,10 @@ fn change_event_from_manifest(
 }
 
 fn manifest_path_value(manifest: &Path, path: &str) -> Result<VaultPath, BatchMutationError> {
-    let validated =
-        VaultPath::new(path).map_err(|error| BatchMutationError::InvalidManifest {
-            path: manifest.to_path_buf(),
-            message: error.to_string(),
-        })?;
+    let validated = VaultPath::new(path).map_err(|error| BatchMutationError::InvalidManifest {
+        path: manifest.to_path_buf(),
+        message: error.to_string(),
+    })?;
     if validated.as_str() != path {
         return Err(BatchMutationError::InvalidManifest {
             path: manifest.to_path_buf(),
@@ -967,9 +966,7 @@ fn validate_observed_state(
                 }
                 let destination_absolute = root.join(destination.as_str());
                 if read_optional(&destination_absolute)?.is_some() {
-                    return Err(BatchMutationError::Stale(
-                        destination.as_str().to_owned(),
-                    ));
+                    return Err(BatchMutationError::Stale(destination.as_str().to_owned()));
                 }
             }
             BatchPathIntent::Delete { path, expected } => {
@@ -986,9 +983,7 @@ fn validate_observed_state(
                 let absolute = root.join(path.as_str());
                 match read_optional(&absolute)? {
                     None => {
-                        return Err(BatchMutationError::PageNotFound(
-                            path.as_str().to_owned(),
-                        ));
+                        return Err(BatchMutationError::PageNotFound(path.as_str().to_owned()));
                     }
                     Some(observed) if observed == *expected_source => {}
                     Some(_) => {
@@ -1000,9 +995,7 @@ fn validate_observed_state(
                 }
                 if rubbish
                     .read_item_if_exists(manifest.item_id)
-                    .map_err(|source| {
-                        rubbish_error("preflight archive", manifest.item_id, source)
-                    })?
+                    .map_err(|source| rubbish_error("preflight archive", manifest.item_id, source))?
                     .is_some()
                 {
                     return Err(BatchMutationError::LifecycleConflict(format!(
@@ -1111,10 +1104,11 @@ fn publish_intent(
             };
             publish_file_state(&root.join(destination), None, page_hash, &bytes)?;
             RubbishStore::for_vault(root)
-                .withdraw_transaction_item(&item, &directory.join("rollback").join(index.to_string()))
-                .map_err(|source| {
-                    rubbish_error("publish restore", item.manifest.item_id, source)
-                })
+                .withdraw_transaction_item(
+                    &item,
+                    &directory.join("rollback").join(index.to_string()),
+                )
+                .map_err(|source| rubbish_error("publish restore", item.manifest.item_id, source))
         }
     }
 }
@@ -1278,11 +1272,14 @@ fn restore_file_state(
 ) -> Result<(), BatchMutationError> {
     match observed_hash(path)?.as_deref() {
         Some(observed) if observed == before_hash => Ok(()),
-        Some(observed) if observed == after_hash => super::atomic_file::atomic_replace(path, content)
-            .map_err(|source| BatchMutationError::Publication {
-                path: path.to_path_buf(),
-                source,
-            }),
+        Some(observed) if observed == after_hash => {
+            super::atomic_file::atomic_replace(path, content).map_err(|source| {
+                BatchMutationError::Publication {
+                    path: path.to_path_buf(),
+                    source,
+                }
+            })
+        }
         _ => Err(BatchMutationError::RecoveryConflict(
             path.display().to_string(),
         )),
@@ -1321,10 +1318,7 @@ fn restore_missing_file(
     }
 }
 
-fn preflight_remove_after_state(
-    path: &Path,
-    after_hash: &str,
-) -> Result<(), BatchMutationError> {
+fn preflight_remove_after_state(path: &Path, after_hash: &str) -> Result<(), BatchMutationError> {
     match observed_hash(path)?.as_deref() {
         None => Ok(()),
         Some(observed) if observed == after_hash => Ok(()),
@@ -1436,12 +1430,12 @@ fn read_manifest_if_present(
             ));
         }
     };
-    serde_json::from_slice(&content)
-        .map(Some)
-        .map_err(|error| BatchMutationError::InvalidManifest {
+    serde_json::from_slice(&content).map(Some).map_err(|error| {
+        BatchMutationError::InvalidManifest {
             path,
             message: error.to_string(),
-        })
+        }
+    })
 }
 
 fn validate_transaction_directory_name(directory: &Path) -> Result<(), BatchMutationError> {
@@ -1511,12 +1505,12 @@ fn validate_manifest_paths(
                 ..
             } => {
                 let intent_path = manifest_path_value(&path, intent_path)?;
-                manifest.validate().map_err(|error| {
-                    BatchMutationError::InvalidManifest {
+                manifest
+                    .validate()
+                    .map_err(|error| BatchMutationError::InvalidManifest {
                         path: path.clone(),
                         message: error.to_string(),
-                    }
-                })?;
+                    })?;
                 if manifest.original_path != intent_path.as_str() {
                     return Err(BatchMutationError::InvalidManifest {
                         path: path.clone(),
@@ -1530,12 +1524,12 @@ fn validate_manifest_paths(
                 ..
             } => {
                 let destination = manifest_path_value(&path, destination)?;
-                manifest.validate().map_err(|error| {
-                    BatchMutationError::InvalidManifest {
+                manifest
+                    .validate()
+                    .map_err(|error| BatchMutationError::InvalidManifest {
                         path: path.clone(),
                         message: error.to_string(),
-                    }
-                })?;
+                    })?;
                 if manifest.original_path != destination.as_str() {
                     return Err(BatchMutationError::InvalidManifest {
                         path: path.clone(),
@@ -1547,8 +1541,7 @@ fn validate_manifest_paths(
     }
     for event in &manifest.index_events {
         match event {
-            ManifestChangeEvent::Upsert(event_path)
-            | ManifestChangeEvent::Remove(event_path) => {
+            ManifestChangeEvent::Upsert(event_path) | ManifestChangeEvent::Remove(event_path) => {
                 manifest_path_value(&path, event_path)?;
             }
             ManifestChangeEvent::BaseChanged => {}
@@ -1569,7 +1562,10 @@ fn sync_manifest_and_directory(directory: &Path) -> Result<(), BatchMutationErro
     sync_directory(directory)
 }
 
-fn create_synced_directory_tree(root: &Path, transactions: &Path) -> Result<(), BatchMutationError> {
+fn create_synced_directory_tree(
+    root: &Path,
+    transactions: &Path,
+) -> Result<(), BatchMutationError> {
     let metadata = root.join(".clepsydra");
     if !metadata.exists() {
         fs::create_dir(&metadata).map_err(|source| {
@@ -1579,11 +1575,7 @@ fn create_synced_directory_tree(root: &Path, transactions: &Path) -> Result<(), 
     }
     if !transactions.exists() {
         fs::create_dir(transactions).map_err(|source| {
-            BatchMutationError::filesystem(
-                "create transaction directory",
-                transactions,
-                source,
-            )
+            BatchMutationError::filesystem("create transaction directory", transactions, source)
         })?;
         sync_directory(&metadata)?;
     }
@@ -1744,10 +1736,7 @@ pub(crate) fn fail_at(failpoints: &[TestFailpoint]) -> TestFailpointGuard {
 }
 
 #[cfg(test)]
-fn hit_test_failpoint(
-    failpoint: TestFailpoint,
-    path: &Path,
-) -> Result<(), BatchMutationError> {
+fn hit_test_failpoint(failpoint: TestFailpoint, path: &Path) -> Result<(), BatchMutationError> {
     let should_fail = TEST_FAILPOINTS.with(|current| {
         let mut current = current.borrow_mut();
         if let Some(index) = current.iter().position(|candidate| candidate == &failpoint) {
@@ -1768,10 +1757,7 @@ fn hit_test_failpoint(
 }
 
 #[cfg(not(test))]
-fn hit_test_failpoint(
-    failpoint: TestFailpoint,
-    _path: &Path,
-) -> Result<(), BatchMutationError> {
+fn hit_test_failpoint(failpoint: TestFailpoint, _path: &Path) -> Result<(), BatchMutationError> {
     match failpoint {
         TestFailpoint::Publication(index)
         | TestFailpoint::DirectoryOwnershipPublication(index)
@@ -1954,10 +1940,11 @@ mod tests {
         let recovered = recover_pending(fixture.root()).unwrap();
 
         assert_eq!(recovered.len(), 1);
-        assert_eq!(fs::read(fixture.root().join("target.md")).unwrap(), b"exact bytes");
-        assert!(store
-            .read_item(&manifest.item_id.to_string())
-            .is_err());
+        assert_eq!(
+            fs::read(fixture.root().join("target.md")).unwrap(),
+            b"exact bytes"
+        );
+        assert!(store.read_item(&manifest.item_id.to_string()).is_err());
         assert_eq!(
             recovered[0].rubbish_catalog_events,
             vec![RubbishCatalogEvent::Remove(manifest.item_id)]
@@ -2016,10 +2003,7 @@ mod tests {
         assert!(prepared.publish().is_err());
         prepared.rollback().unwrap();
 
-        assert!(fixture
-            .root()
-            .join(destination_directory.as_str())
-            .is_dir());
+        assert!(fixture.root().join(destination_directory.as_str()).is_dir());
     }
 
     #[test]
@@ -2043,10 +2027,7 @@ mod tests {
         drop(prepared);
 
         assert!(recover_pending(fixture.root()).unwrap().is_empty());
-        assert!(fixture
-            .root()
-            .join(destination_directory.as_str())
-            .is_dir());
+        assert!(fixture.root().join(destination_directory.as_str()).is_dir());
     }
 
     #[test]
@@ -2068,17 +2049,11 @@ mod tests {
         let _failure = fail_once_at(TestFailpoint::DirectoryOwnershipPublication(0));
 
         assert!(prepared.publish().is_err());
-        assert!(fixture
-            .root()
-            .join(destination_directory.as_str())
-            .is_dir());
+        assert!(fixture.root().join(destination_directory.as_str()).is_dir());
         drop(prepared);
 
         assert!(recover_pending(fixture.root()).unwrap().is_empty());
-        assert!(!fixture
-            .root()
-            .join(destination_directory.as_str())
-            .exists());
+        assert!(!fixture.root().join(destination_directory.as_str()).exists());
     }
 
     #[test]
@@ -2190,8 +2165,7 @@ mod tests {
     #[test]
     fn prepared_transaction_does_not_change_destinations() {
         let fixture = fixture_with_file("a.md", b"before");
-        let prepared =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
 
         assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
         assert!(prepared.directory().join("manifest.json").is_file());
@@ -2201,29 +2175,21 @@ mod tests {
 
     #[test]
     fn committing_transaction_recovers_exact_pre_state() {
-        let fixture =
-            fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
+        let fixture = fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
         let mut prepared = prepare(fixture.root(), &replace_two_files()).unwrap();
         prepared.test_publish_first_intent_only().unwrap();
         drop(prepared);
 
         assert!(recover_pending(fixture.root()).unwrap().is_empty());
-        assert_eq!(
-            fs::read(fixture.root().join("a.md")).unwrap(),
-            b"before-a"
-        );
-        assert_eq!(
-            fs::read(fixture.root().join("b.md")).unwrap(),
-            b"before-b"
-        );
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before-a");
+        assert_eq!(fs::read(fixture.root().join("b.md")).unwrap(), b"before-b");
         assert!(recover_pending(fixture.root()).unwrap().is_empty());
     }
 
     #[test]
     fn filesystem_committed_transaction_is_reported_for_index_reconciliation() {
         let fixture = fixture_with_file("a.md", b"before");
-        let mut prepared =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let mut prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
         prepared.publish().unwrap();
         prepared.mark_filesystem_committed().unwrap();
         let directory = prepared.directory().to_path_buf();
@@ -2283,10 +2249,8 @@ mod tests {
 
     #[test]
     fn interrupted_folder_publication_recovers_nested_directories_and_files() {
-        let fixture = fixture_with_files(&[
-            ("notes/nested/a.md", b"a"),
-            ("notes/nested/b.md", b"b"),
-        ]);
+        let fixture =
+            fixture_with_files(&[("notes/nested/a.md", b"a"), ("notes/nested/b.md", b"b")]);
         let command = BatchMutationCommand {
             intents: vec![
                 BatchPathIntent::Move {
@@ -2331,65 +2295,40 @@ mod tests {
 
     #[test]
     fn rollback_recovery_resumes_after_a_rollback_publication_failure() {
-        let fixture =
-            fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
+        let fixture = fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
         let mut prepared = prepare(fixture.root(), &replace_two_files()).unwrap();
         prepared.publish().unwrap();
         let _failure = fail_once_at(TestFailpoint::RollbackPublication(0));
 
         assert!(prepared.rollback().is_err());
         drop(prepared);
-        assert_eq!(
-            fs::read(fixture.root().join("a.md")).unwrap(),
-            b"after-a"
-        );
-        assert_eq!(
-            fs::read(fixture.root().join("b.md")).unwrap(),
-            b"before-b"
-        );
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"after-a");
+        assert_eq!(fs::read(fixture.root().join("b.md")).unwrap(), b"before-b");
         recover_pending(fixture.root()).unwrap();
-        assert_eq!(
-            fs::read(fixture.root().join("a.md")).unwrap(),
-            b"before-a"
-        );
-        assert_eq!(
-            fs::read(fixture.root().join("b.md")).unwrap(),
-            b"before-b"
-        );
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before-a");
+        assert_eq!(fs::read(fixture.root().join("b.md")).unwrap(), b"before-b");
     }
 
     #[test]
     fn indexed_publication_failure_is_recovered() {
-        let fixture =
-            fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
+        let fixture = fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
         let mut prepared = prepare(fixture.root(), &replace_two_files()).unwrap();
         let _failure = fail_once_at(TestFailpoint::Publication(1));
 
         assert!(prepared.publish().is_err());
         assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"after-a");
-        assert_eq!(
-            fs::read(fixture.root().join("b.md")).unwrap(),
-            b"before-b"
-        );
+        assert_eq!(fs::read(fixture.root().join("b.md")).unwrap(), b"before-b");
         drop(prepared);
         recover_pending(fixture.root()).unwrap();
-        assert_eq!(
-            fs::read(fixture.root().join("a.md")).unwrap(),
-            b"before-a"
-        );
-        assert_eq!(
-            fs::read(fixture.root().join("b.md")).unwrap(),
-            b"before-b"
-        );
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before-a");
+        assert_eq!(fs::read(fixture.root().join("b.md")).unwrap(), b"before-b");
     }
 
     #[test]
     fn phase_flush_failure_is_recovered_before_publication() {
         let fixture = fixture_with_file("a.md", b"before");
-        let mut prepared =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
-        let _failure =
-            fail_once_at(TestFailpoint::PhaseFlush(TransactionPhase::Committing));
+        let mut prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let _failure = fail_once_at(TestFailpoint::PhaseFlush(TransactionPhase::Committing));
 
         assert!(prepared.publish().is_err());
         assert!(prepared.publish().is_err());
@@ -2417,8 +2356,7 @@ mod tests {
             TestFailpoint::WorkspaceRemoval,
         ]);
 
-        let error =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap_err();
+        let error = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap_err();
 
         let (directory, retained, source, cleanup) = match error {
             BatchMutationError::PreparationCleanup {
@@ -2444,8 +2382,7 @@ mod tests {
             TestFailpoint::WorkspaceRemoval,
         ]);
 
-        let error =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap_err();
+        let error = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap_err();
 
         let (directory, retained, source, cleanup) = match error {
             BatchMutationError::PreparationCleanup {
@@ -2493,8 +2430,7 @@ mod tests {
     #[test]
     fn finished_transaction_removes_its_workspace() {
         let fixture = fixture_with_file("a.md", b"before");
-        let mut prepared =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let mut prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
         prepared.publish().unwrap();
         prepared.mark_filesystem_committed().unwrap();
         let directory = prepared.directory().to_path_buf();
@@ -2507,8 +2443,7 @@ mod tests {
     #[test]
     fn prepared_workspace_removal_can_be_retried() {
         let fixture = fixture_with_file("a.md", b"before");
-        let prepared =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
         let directory = prepared.directory().to_path_buf();
         drop(prepared);
         let _failure = fail_once_at(TestFailpoint::WorkspaceRemoval);
@@ -2539,11 +2474,11 @@ mod tests {
 
     #[test]
     fn failed_phase_publication_retry_remains_recoverable() {
-        let fixture =
-            fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
+        let fixture = fixture_with_files(&[("a.md", b"before-a"), ("b.md", b"before-b")]);
         let mut prepared = prepare(fixture.root(), &replace_two_files()).unwrap();
-        let _phase_failure =
-            fail_once_at(TestFailpoint::PhasePublication(TransactionPhase::Committing));
+        let _phase_failure = fail_once_at(TestFailpoint::PhasePublication(
+            TransactionPhase::Committing,
+        ));
 
         assert!(prepared.publish().is_err());
         let _publication_failure = fail_once_at(TestFailpoint::Publication(1));
@@ -2552,14 +2487,8 @@ mod tests {
         drop(prepared);
 
         recover_pending(fixture.root()).unwrap();
-        assert_eq!(
-            fs::read(fixture.root().join("a.md")).unwrap(),
-            b"before-a"
-        );
-        assert_eq!(
-            fs::read(fixture.root().join("b.md")).unwrap(),
-            b"before-b"
-        );
+        assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before-a");
+        assert_eq!(fs::read(fixture.root().join("b.md")).unwrap(), b"before-b");
     }
 
     #[test]
@@ -2671,8 +2600,7 @@ mod tests {
     #[test]
     fn workspace_parent_sync_failure_is_retryable_after_unlink() {
         let fixture = fixture_with_file("a.md", b"before");
-        let prepared =
-            prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
+        let prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
         let directory = prepared.directory().to_path_buf();
         drop(prepared);
         let _failure = fail_once_at(TestFailpoint::WorkspaceParentSync);
@@ -2684,5 +2612,4 @@ mod tests {
         assert!(!workspace_parent_sync_pending());
         assert_eq!(fs::read(fixture.root().join("a.md")).unwrap(), b"before");
     }
-
 }

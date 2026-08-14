@@ -537,7 +537,6 @@ fn reference_repair_error(error: VaultReferenceRepairError) -> ApiError {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -1260,10 +1259,7 @@ pub async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Respons
 )]
 pub async fn preview_mutation(
     State(state): State<Arc<AppState>>,
-    payload: Result<
-        Json<PreviewMutationRequest>,
-        axum::extract::rejection::JsonRejection,
-    >,
+    payload: Result<Json<PreviewMutationRequest>, axum::extract::rejection::JsonRejection>,
 ) -> Result<Response, ApiError> {
     let Json(req) = payload.map_err(|error| {
         ApiError::bad_request(format!("invalid mutation preview request: {error}"))

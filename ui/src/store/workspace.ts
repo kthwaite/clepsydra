@@ -424,8 +424,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
         const state = get();
         const removedTabs = state.tabs.filter(
           (tab) =>
-            tab.type === "page" &&
-            (tab.pageId === pageId || tab.path === path),
+            tab.type === "page" && (tab.pageId === pageId || tab.path === path),
         );
         if (removedTabs.length === 0) return;
 
@@ -601,7 +600,7 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
       setTabPageId(tabId, pageId) {
         set((state) => {
           const tab = state.tabs.find((candidate) => candidate.id === tabId);
-          if (!tab || tab.type !== "page" || tab.pageId === pageId) return state;
+          if (tab?.type !== "page" || tab.pageId === pageId) return state;
           return {
             tabs: state.tabs.map((candidate) =>
               candidate.id === tabId ? { ...candidate, pageId } : candidate,

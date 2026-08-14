@@ -9,8 +9,8 @@ use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex, reserve_
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
-use clepsydra::vault::tree::load_note_meta;
 use clepsydra::vault::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
+use clepsydra::vault::tree::load_note_meta;
 use rusqlite::Connection;
 use tempfile::TempDir;
 
@@ -490,8 +490,7 @@ fn uuid_shaped_targets_fall_back_to_unique_canonical_names_without_an_exact_id()
     let canonical_target = format!(
         "---\nid: 019fd000-0000-7000-8000-000000000725\ntitle: {UUID_TITLE}\n---\nCanonical target.\n"
     );
-    let (_tmp, vault) =
-        setup_vault(&[("source.md", &source), ("canonical.md", &canonical_target)]);
+    let (_tmp, vault) = setup_vault(&[("source.md", &source), ("canonical.md", &canonical_target)]);
     let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
 
     index.build(&vault).unwrap();
@@ -1856,16 +1855,11 @@ unsearchable-rubbish-token
     let invalid_page_bytes = b"invalid body must stay byte-identical";
     let invalid_manifest_bytes = b"not json";
     fs::write(invalid_dir.join("page.md"), invalid_page_bytes).unwrap();
-    fs::write(
-        invalid_dir.join("manifest.json"),
-        invalid_manifest_bytes,
-    )
-    .unwrap();
+    fs::write(invalid_dir.join("manifest.json"), invalid_manifest_bytes).unwrap();
     let valid_manifest_before =
         fs::read(rubbish_root.join(item_id.to_string()).join("manifest.json")).unwrap();
 
-    let mut index =
-        VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
     index
         .upsert_rubbish_entry(&RubbishListEntry::Invalid {
             item_id: "stale-entry".to_owned(),
