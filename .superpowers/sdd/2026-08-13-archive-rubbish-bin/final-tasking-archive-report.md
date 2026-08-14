@@ -103,3 +103,28 @@ Self-review confirmed DELETE remains absent until the gated operation PATCH sett
 ### Concerns
 
 No scoped concerns. The final focused run continues to emit only the existing Vite native-config warning.
+
+## Shared-field provenance correction
+
+### Defect and fix
+
+Final review identified that failure tracking by wire field was insufficient: the immediate hold toggle and debounced hold reason both write `hold`. An unchanged reason no-op could therefore clear a failed toggle mutation and allow DELETE.
+
+The coordinator now assigns every caller an explicit intent lane and maintains a generation per lane. `holdToggle` and `holdReason` are independent lanes even though both serialize to the same PATCH field. A success, failure, or equality no-op changes failure state only when it belongs to the latest generation of its own lane. The same provenance rule covers every immediate and debounced caller, so superseded asynchronous settlements cannot overwrite newer intent.
+
+### RED/GREEN evidence
+
+- RED: `bun run test -- src/components/tasking/__tests__/TaskEditPanel.test.tsx -t \"unchanged hold reason\"` — exit 1: 1 failed, 48 skipped. After the held task's toggle PATCH rejected and rolled back, the unchanged reason flush cleared the shared `hold` failure and archive removed the first-step action instead of blocking DELETE.
+- GREEN: the same command — exit 0: 1 passed, 48 skipped.
+- Final focused verification: `bun run test -- src/api/board.test.ts src/components/tasking/__tests__/TaskEditPanel.test.tsx src/api/__tests__/mutation-hooks.test.tsx` — exit 0: 3 files passed, 76 tests passed.
+- `bun run typecheck` — exit 0.
+
+### Commit and self-review
+
+Follow-up commit subject: `fix(ui): isolate Tasking patch intent failures`.
+
+Self-review confirmed each caller declares its lane, rapid same-lane intents invalidate older generations, failures in separate lanes remain independent, an unchanged hold reason can clear only `holdReason`, and the archive barrier blocks while `holdToggle` remains failed. Latest successful path handoff, queue serialization, retry behavior, and fieldset freezing remain intact. No Rust lifecycle files were touched.
+
+### Concerns
+
+No scoped concerns. The focused run continues to emit only the existing Vite native-config warning.

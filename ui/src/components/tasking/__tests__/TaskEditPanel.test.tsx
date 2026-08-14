@@ -24,7 +24,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BoardOperation, BoardTask } from "#/api/board";
+import type { BoardOperation, BoardResponse, BoardTask } from "#/api/board";
 import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
 import { TaskEditPanel } from "../TaskEditPanel";
@@ -812,6 +812,48 @@ describe("TaskEditPanel — archive two-step", () => {
       stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
     ).toHaveLength(0);
     expect(useBoardStore.getState().editTaskId).toBe(FULL_TASK.id);
+  });
+
+  it("does not let an unchanged hold reason clear a failed hold toggle", async () => {
+    const fallback = makeStub(HELD_TASK);
+    const stub = vi.fn((url: string, opts?: RequestInit) => {
+      if (opts?.method === "PATCH") {
+        return Promise.resolve(new Response(null, { status: 500 }));
+      }
+      return fallback(url, opts);
+    });
+    useBoardStore.setState({ editTaskId: HELD_TASK.id });
+    const { qc } = wrap({
+      task: HELD_TASK,
+      fetchStub: stub,
+      seedBoard: true,
+    });
+    const observedHolds: Array<string | null | undefined> = [];
+    const unsubscribe = qc.getQueryCache().subscribe(() => {
+      const board = qc.getQueryData<BoardResponse>(queryKeys.board.all);
+      observedHolds.push(
+        board?.tasks.find((candidate) => candidate.id === HELD_TASK.id)?.hold,
+      );
+    });
+
+    fireEvent.click(screen.getByTestId("edit-panel-hold-toggle"));
+
+    await waitFor(() => {
+      expect(observedHolds).toContain(null);
+      expect(observedHolds.at(-1)).toBe(HELD_TASK.hold);
+    });
+
+    fireEvent.click(screen.getByTestId("edit-panel-archive"));
+    fireEvent.click(screen.getByTestId("edit-panel-archive-confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("edit-panel-archive")).toBeEnabled();
+    });
+    expect(
+      stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
+    ).toHaveLength(0);
+    expect(useBoardStore.getState().editTaskId).toBe(HELD_TASK.id);
+    unsubscribe();
   });
 
   it("awaits the pending debounced PATCH before sending DELETE", async () => {
