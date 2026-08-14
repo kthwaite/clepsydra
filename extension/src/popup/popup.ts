@@ -1,8 +1,13 @@
 import { ClepsydraClient } from "#/lib/api-client";
-import { type CapturePhase, describePhase, isInProgress } from "#/lib/badge";
-import { executeCaptureScript } from "#/lib/inject-capture";
+import {
+	type CapturePhase,
+	type CaptureStatus,
+	isInProgress,
+} from "#/lib/badge";
 import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
 import { DEFAULT_SETTINGS } from "#/lib/types";
+
+const POLL_INTERVAL_MS = 250;
 
 function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 	return new Promise((resolve) => {
@@ -12,17 +17,33 @@ function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 	});
 }
 
-/** Ask the worker what, if anything, this tab is currently doing. */
-async function capturePhase(tabId: number): Promise<CapturePhase | null> {
+async function captureStatus(tabId: number): Promise<CaptureStatus | null> {
 	try {
 		const response = (await chrome.runtime.sendMessage({
 			type: "capture_status",
 			tabId,
-		})) as { phase?: CapturePhase | null } | undefined;
-		return response?.phase ?? null;
+		})) as { status?: CaptureStatus | null } | undefined;
+		return response?.status ?? null;
 	} catch {
-		// No receiver: the worker is asleep, which means nothing is in flight.
+		// No receiver means the worker has no retained or in-flight status.
 		return null;
+	}
+}
+
+function statusTone(phase: CapturePhase): string {
+	switch (phase) {
+		case "capturing":
+			return "reading";
+		case "processing":
+		case "uploading":
+			return "processing";
+		case "done":
+		case "duplicate":
+			return "success";
+		case "conflict":
+			return "conflict";
+		case "error":
+			return "error";
 	}
 }
 
@@ -35,32 +56,49 @@ async function init() {
 	const text = document.getElementById("status-text") as HTMLElement;
 	const error = document.getElementById("error-msg") as HTMLElement;
 	const button = document.getElementById("capture-btn") as HTMLButtonElement;
+	const panel = document.getElementById("capture-status") as HTMLElement;
 
 	const showError = (message: string) => {
 		error.textContent = message;
 		error.style.display = "block";
 	};
-
-	// Surface an uncapturable page before the user clicks, not after.
-	const progress = document.getElementById("progress") as HTMLElement;
-	const showProgress = (message: string | null) => {
-		progress.textContent = message ?? "";
-		progress.style.display = message ? "block" : "none";
+	const renderStatus = (status: CaptureStatus) => {
+		panel.textContent = status.detail;
+		panel.dataset.tone = statusTone(status.phase);
+		panel.style.display = "block";
+		button.disabled = isInProgress(status.phase);
 	};
+
+	let stopped = false;
+	let pollTimer: number | undefined;
+	const stopPolling = () => {
+		stopped = true;
+		if (pollTimer !== undefined) clearTimeout(pollTimer);
+		pollTimer = undefined;
+	};
+	const schedulePoll = (tabId: number) => {
+		if (stopped || pollTimer !== undefined) return;
+		pollTimer = setTimeout(async () => {
+			pollTimer = undefined;
+			if (stopped) return;
+			const status = await captureStatus(tabId);
+			if (stopped || status === null) return;
+			renderStatus(status);
+			if (isInProgress(status.phase)) schedulePoll(tabId);
+		}, POLL_INTERVAL_MS);
+	};
+
+	window.addEventListener("unload", stopPolling);
 
 	const tab = await activeTab();
 	if (isRestrictedUrl(tab?.url)) {
 		button.disabled = true;
 		showError(describeInjectionFailure(tab?.url));
-	}
-
-	// Report a capture that is already running for this tab, so reopening the
-	// popup mid-capture shows progress rather than an idle-looking button.
-	if (tab?.id !== undefined) {
-		const phase = await capturePhase(tab.id);
-		if (phase) {
-			showProgress(describePhase(phase));
-			if (isInProgress(phase)) button.disabled = true;
+	} else if (tab?.id !== undefined) {
+		const status = await captureStatus(tab.id);
+		if (status) {
+			renderStatus(status);
+			if (isInProgress(status.phase)) schedulePoll(tab.id);
 		}
 	}
 
@@ -72,21 +110,29 @@ async function init() {
 
 	button.addEventListener("click", async () => {
 		const target = await activeTab();
-		if (!target?.id) {
+		if (target?.id === undefined) {
 			showError("No active tab to capture.");
 			return;
 		}
-		button.disabled = true;
-		showProgress("reading the page…");
+
+		const starting: CaptureStatus = {
+			phase: "capturing",
+			detail: "reading the page…",
+		};
+		renderStatus(starting);
 		try {
-			// Keep the popup open until injection succeeds — closing first is what
-			// made failures on restricted pages invisible. The toolbar badge carries
-			// progress from here on, since the popup closes.
-			await executeCaptureScript(target.id);
-			window.close();
+			const response = (await chrome.runtime.sendMessage({
+				type: "capture_start",
+				tabId: target.id,
+			})) as { status?: CaptureStatus | null } | undefined;
+			const status = response?.status ?? starting;
+			renderStatus(status);
+			if (isInProgress(status.phase)) schedulePoll(target.id);
 		} catch (err) {
-			showProgress(null);
-			showError(describeInjectionFailure(target.url, err));
+			renderStatus({
+				phase: "error",
+				detail: `Capture could not start: ${String(err)}`,
+			});
 		}
 	});
 
@@ -99,4 +145,4 @@ async function init() {
 	);
 }
 
-init();
+void init();

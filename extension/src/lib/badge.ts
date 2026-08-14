@@ -14,6 +14,11 @@ export type CapturePhase =
 	| "conflict"
 	| "error";
 
+export interface CaptureStatus {
+	phase: CapturePhase;
+	detail: string;
+}
+
 export interface BadgeAppearance {
 	text: string;
 	color: string;

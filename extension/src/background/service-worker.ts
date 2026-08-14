@@ -1,6 +1,12 @@
 import type { CaptureMetaMessage, CaptureMetadata } from "#/content/capture";
 import { ArchiveConflictError, ClepsydraClient } from "#/lib/api-client";
-import { type CapturePhase, badgeFor, isTerminal } from "#/lib/badge";
+import {
+	type CapturePhase,
+	type CaptureStatus,
+	badgeFor,
+	describePhase,
+	isTerminal,
+} from "#/lib/badge";
 import { CaptureQueue } from "#/lib/capture-queue";
 import {
 	CAPTURE_ABORT,
@@ -109,7 +115,11 @@ async function processCapture(
 		const response = await client.ingestArchive(manifest);
 
 		if (response.status === "already_exists") {
-			reportPhase(tabId, "duplicate");
+			reportPhase(
+				tabId,
+				"duplicate",
+				`${metadata.title} was already archived.`,
+			);
 			if (settings.notify_on_duplicate) {
 				showNotification(
 					"Already Archived",
@@ -117,7 +127,11 @@ async function processCapture(
 				);
 			}
 		} else {
-			reportPhase(tabId, "done");
+			reportPhase(
+				tabId,
+				"done",
+				`${metadata.title} was archived to ${response.vault_path}.`,
+			);
 			if (settings.notify_on_success) {
 				showNotification(
 					"Page Archived",
@@ -127,14 +141,13 @@ async function processCapture(
 		}
 	} catch (err) {
 		if (err instanceof ArchiveConflictError) {
-			reportPhase(tabId, "conflict");
-			showNotification(
-				"Content Changed",
-				describeConflict(metadata.title, err),
-			);
+			const detail = describeConflict(metadata.title, err);
+			reportPhase(tabId, "conflict", detail);
+			showNotification("Content Changed", detail);
 		} else {
-			reportPhase(tabId, "error");
-			showNotification("Archive Failed", String(err));
+			const detail = String(err);
+			reportPhase(tabId, "error", detail);
+			showNotification("Archive Failed", detail);
 		}
 	}
 }
@@ -185,17 +198,20 @@ function badgeApi(): ToolbarBadgeApi | undefined {
 	return api as unknown as ToolbarBadgeApi | undefined;
 }
 
-/** Where each tab is in its capture, so the popup can report it. */
-const phases = new Map<number, CapturePhase>();
+/** Latest per-tab status, retained after terminal badges clear. */
+const statuses = new Map<number, CaptureStatus>();
 
 /**
  * Drive the toolbar badge. This is the primary progress signal: notifications
  * only fire at the end, and can be suppressed by the OS entirely.
  */
-function reportPhase(tabId: number | undefined, phase: CapturePhase): void {
+function reportPhase(
+	tabId: number | undefined,
+	phase: CapturePhase,
+	detail: string = describePhase(phase),
+): void {
 	if (tabId === undefined) return;
-	phases.set(tabId, phase);
-
+	statuses.set(tabId, { phase, detail });
 	const api = badgeApi();
 	if (!api) return;
 	const badge = badgeFor(phase);
@@ -210,8 +226,7 @@ function reportPhase(tabId: number | undefined, phase: CapturePhase): void {
 
 	if (isTerminal(phase) && badge.clearAfterMs !== null) {
 		setTimeout(() => {
-			if (phases.get(tabId) !== phase) return;
-			phases.delete(tabId);
+			if (statuses.get(tabId)?.phase !== phase) return;
 			try {
 				api.setBadgeText({ text: "", tabId });
 				api.setTitle({ title: "", tabId });
@@ -246,11 +261,9 @@ const captureQueue = new CaptureQueue({
 const pendingTransfers = new PendingTransferCoordinator<CaptureMetadata>({
 	keepAlive: keepServiceWorkerAlive,
 	onExpire: (captureId, tabId) => {
-		reportPhase(tabId, "error");
-		showNotification(
-			"Capture Failed",
-			`Snapshot transfer ${captureId} expired after ${CAPTURE_INACTIVITY_TIMEOUT_MS / 1_000} seconds of inactivity.`,
-		);
+		const detail = `Snapshot transfer ${captureId} expired after ${CAPTURE_INACTIVITY_TIMEOUT_MS / 1_000} seconds of inactivity.`;
+		reportPhase(tabId, "error", detail);
+		showNotification("Capture Failed", detail);
 	},
 });
 
@@ -263,6 +276,7 @@ type WorkerMessage =
 	| CaptureChunk
 	| CaptureAbort
 	| { type: "capture_error"; error: string }
+	| { type: "capture_start"; tabId: number }
 	| { type: "capture_status"; tabId: number };
 
 chrome.runtime.onConnect.addListener((port) => {
@@ -276,15 +290,24 @@ chrome.runtime.onMessage.addListener(
 		message: unknown,
 		sender: chrome.runtime.MessageSender,
 		sendResponse: (response?: unknown) => void,
-	): boolean | undefined | Promise<Record<string, never>> => {
+	): boolean | undefined | Promise<unknown> => {
 		const singleFileResponse = singleFileRuntime.handleMessage(message, sender);
 		if (singleFileResponse) return singleFileResponse;
 		const workerMessage = message as WorkerMessage;
 
 		if (workerMessage.type === "capture_status") {
 			// Answered synchronously, so no need to hold the channel open.
-			sendResponse({ phase: phases.get(workerMessage.tabId) ?? null });
+			sendResponse({ status: statuses.get(workerMessage.tabId) ?? null });
 			return undefined;
+		}
+
+		if (workerMessage.type === "capture_start") {
+			return chrome.tabs.get(workerMessage.tabId).then((tab) => {
+				// startCapture records `capturing` before its first await. Do not await
+				// injection: the popup needs an immediate acknowledgement, then polls.
+				void startCapture(tab);
+				return { status: statuses.get(workerMessage.tabId) ?? null };
+			});
 		}
 
 		const tabId = sender.tab?.id;
@@ -304,40 +327,35 @@ chrome.runtime.onMessage.addListener(
 			try {
 				completed = pendingTransfers.acceptChunk(workerMessage, tabId);
 			} catch (error) {
-				reportPhase(tabId, "error");
-				showNotification(
-					"Capture Failed",
-					`Malformed snapshot transfer: ${String(error)}`,
-				);
+				const detail = `Malformed snapshot transfer: ${String(error)}`;
+				reportPhase(tabId, "error", detail);
+				showNotification("Capture Failed", detail);
 				return undefined;
 			}
 			if (completed === null) return undefined;
 
 			const { metadata, snapshotHtml, tabId: completedTabId } = completed;
 			if (!metadata) {
-				reportPhase(completedTabId, "error");
-				showNotification(
-					"Archive Failed",
-					"Capture metadata was lost in transit.",
-				);
+				const detail = "Capture metadata was lost in transit.";
+				reportPhase(completedTabId, "error", detail);
+				showNotification("Archive Failed", detail);
 				return undefined;
 			}
 
 			const started = captureQueue.run(metadata.url, () =>
 				processCapture(metadata, snapshotHtml, completedTabId).catch((err) => {
-					reportPhase(completedTabId, "error");
-					showNotification("Archive Failed", String(err));
+					const detail = String(err);
+					reportPhase(completedTabId, "error", detail);
+					showNotification("Archive Failed", detail);
 				}),
 			);
 			if (!started) {
 				// Without this the tab keeps the non-clearing `processing` badge
 				// forever: the capture that owns the terminal phase is running for
 				// a different tab.
-				reportPhase(completedTabId, "duplicate");
-				showNotification(
-					"Capture In Progress",
-					`${metadata.title} is already being archived.`,
-				);
+				const detail = `${metadata.title} is already being archived.`;
+				reportPhase(completedTabId, "duplicate", detail);
+				showNotification("Capture In Progress", detail);
 			}
 			return undefined;
 		}
@@ -348,7 +366,7 @@ chrome.runtime.onMessage.addListener(
 		}
 
 		if (workerMessage.type === "capture_error") {
-			reportPhase(tabId, "error");
+			reportPhase(tabId, "error", workerMessage.error);
 			showNotification("Capture Failed", workerMessage.error);
 		}
 		return undefined;
@@ -356,7 +374,7 @@ chrome.runtime.onMessage.addListener(
 );
 
 chrome.tabs.onRemoved?.addListener((tabId) => {
-	phases.delete(tabId);
+	statuses.delete(tabId);
 	pendingTransfers.removeTab(tabId);
 	singleFileRuntime.removeTab(tabId);
 });
@@ -368,8 +386,9 @@ async function startCapture(tab: chrome.tabs.Tab): Promise<void> {
 	try {
 		await executeCaptureScript(tab.id);
 	} catch (err) {
-		reportPhase(tab.id, "error");
-		showNotification("Capture Failed", describeInjectionFailure(tab.url, err));
+		const detail = describeInjectionFailure(tab.url, err);
+		reportPhase(tab.id, "error", detail);
+		showNotification("Capture Failed", detail);
 	}
 }
 
