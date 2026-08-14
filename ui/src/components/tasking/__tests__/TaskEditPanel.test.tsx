@@ -728,6 +728,62 @@ describe("TaskEditPanel — archive two-step", () => {
     });
   });
 
+  it("archives the latest path returned by a gated operation PATCH", async () => {
+    let resolvePatch!: (response: Response) => void;
+    const patchGate = new Promise<Response>((resolve) => {
+      resolvePatch = resolve;
+    });
+    const fallback = makeStub();
+    const stub = vi.fn((url: string, opts?: RequestInit) => {
+      if (opts?.method === "PATCH") return patchGate;
+      return fallback(url, opts);
+    });
+    useBoardStore.setState({ editTaskId: FULL_TASK.id });
+    wrap({ fetchStub: stub, seedBoard: true });
+
+    await userEvent.selectOptions(
+      screen.getByTestId("edit-panel-operation"),
+      "beta",
+    );
+    await waitFor(() => {
+      expect(
+        stub.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
+      ).toHaveLength(1);
+    });
+
+    fireEvent.click(screen.getByTestId("edit-panel-archive"));
+    fireEvent.click(screen.getByTestId("edit-panel-archive-confirm"));
+
+    expect(
+      stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
+    ).toHaveLength(0);
+
+    resolvePatch(
+      new Response(
+        JSON.stringify({
+          ...FULL_TASK,
+          project: "beta",
+          path: "tasks/beta/t-full.md",
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await waitFor(() => {
+      expect(
+        stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
+      ).toHaveLength(1);
+    });
+    const deleteCall = stub.mock.calls.find(
+      ([, opts]) => opts?.method === "DELETE",
+    );
+    const url = new URL(deleteCall?.[0] as string, "http://localhost");
+    expect(url.pathname).toBe("/api/vault/pages/tasks/beta/t-full.md");
+  });
+
   it("keeps the task open when an immediate PATCH rejects", async () => {
     const fallback = makeStub();
     const stub = vi.fn((url: string, opts?: RequestInit) => {
@@ -891,6 +947,46 @@ describe("TaskEditPanel — archive two-step", () => {
       stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
     ).toHaveLength(0);
     expect(useBoardStore.getState().editTaskId).toBe(FULL_TASK.id);
+  });
+
+  it("archives without another PATCH after a failed title edit is reverted", async () => {
+    const fallback = makeStub();
+    const stub = vi.fn((url: string, opts?: RequestInit) => {
+      if (opts?.method === "PATCH") {
+        return Promise.resolve(new Response(null, { status: 500 }));
+      }
+      return fallback(url, opts);
+    });
+    useBoardStore.setState({ editTaskId: FULL_TASK.id });
+    wrap({ fetchStub: stub, seedBoard: true });
+
+    fireEvent.change(screen.getByTestId("edit-panel-title"), {
+      target: { value: "FAILED TITLE" },
+    });
+    fireEvent.click(screen.getByTestId("edit-panel-archive"));
+    fireEvent.click(screen.getByTestId("edit-panel-archive-confirm"));
+    await waitFor(() => {
+      expect(screen.getByTestId("edit-panel-archive")).toBeEnabled();
+    });
+    expect(
+      stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
+    ).toHaveLength(0);
+
+    fireEvent.change(screen.getByTestId("edit-panel-title"), {
+      target: { value: FULL_TASK.title },
+    });
+    fireEvent.click(screen.getByTestId("edit-panel-archive"));
+    fireEvent.click(screen.getByTestId("edit-panel-archive-confirm"));
+
+    await waitFor(() => {
+      expect(
+        stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
+      ).toHaveLength(1);
+      expect(useBoardStore.getState().editTaskId).toBeNull();
+    });
+    expect(
+      stub.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),
+    ).toHaveLength(1);
   });
 
   it("retries the unsaved PATCH before archiving after a save failure", async () => {

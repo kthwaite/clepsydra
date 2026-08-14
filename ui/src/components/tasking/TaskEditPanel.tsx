@@ -257,14 +257,19 @@ export function TaskEditPanel({
   const patchQueue = useRef<Promise<void>>(Promise.resolve());
   const failedPatchFields = useRef(new Set<keyof PatchTaskRequest>());
   const coordinatorTaskId = useRef(task.id);
+  const latestTaskPath = useRef(task.path);
   const enqueuePatch = useCallback(
     (nextPatch: PatchTaskRequest) => {
       const requestTaskId = task.id;
       const fields = Object.keys(nextPatch) as (keyof PatchTaskRequest)[];
       const request = patchQueue.current.then(async () => {
         try {
-          await patchAsync({ id: requestTaskId, patch: nextPatch });
+          const savedTask = await patchAsync({
+            id: requestTaskId,
+            patch: nextPatch,
+          });
           if (coordinatorTaskId.current === requestTaskId) {
+            latestTaskPath.current = savedTask.path;
             for (const field of fields) failedPatchFields.current.delete(field);
           }
         } catch (error) {
@@ -286,14 +291,22 @@ export function TaskEditPanel({
     [enqueuePatch],
   );
   const savePatch = enqueuePatch;
+  const clearPatchFailure = useCallback(
+    (field: keyof PatchTaskRequest) => {
+      failedPatchFields.current.delete(field);
+    },
+    [],
+  );
   const awaitPatchBarrier = useCallback(async () => {
     await patchQueue.current;
     if (failedPatchFields.current.size > 0) {
       throw new Error("One or more task edits failed to save.");
     }
   }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only for a new task identity
   useEffect(() => {
     coordinatorTaskId.current = task.id;
+    latestTaskPath.current = task.path;
     failedPatchFields.current.clear();
   }, [task.id]);
 
@@ -301,25 +314,32 @@ export function TaskEditPanel({
   // Debounced patches (300ms). Each hook exposes an awaited flush used by
   // archive so no local edit can be discarded or race the DELETE.
   const flushTitle = useDebounced(titleVal, DEBOUNCE_MS, (v) => {
-    if (v.trim() && v !== task.title) return savePatch({ title: v.trim() });
+    const trimmed = v.trim();
+    if (trimmed && trimmed !== task.title)
+      return savePatch({ title: trimmed });
+    if (trimmed === task.title) clearPatchFailure("title");
   });
   const flushAssignee = useDebounced(assigneeVal, DEBOUNCE_MS, (v) => {
     const trimmed = v.trim() || null;
     if (trimmed !== (task.assignee ?? null))
       return savePatch({ assignee: trimmed });
+    clearPatchFailure("assignee");
   });
   const flushEstimate = useDebounced(estimateVal, DEBOUNCE_MS, (v) => {
     const trimmed = v.trim() || null;
     if (trimmed !== (task.estimate ?? null))
       return savePatch({ estimate: trimmed });
+    clearPatchFailure("estimate");
   });
   const flushDue = useDebounced(dueVal, DEBOUNCE_MS, (v) => {
     const trimmed = v.trim() || null;
     if (trimmed !== (task.due ?? null)) return savePatch({ due: trimmed });
+    clearPatchFailure("due");
   });
   const flushStart = useDebounced(startVal, DEBOUNCE_MS, (v) => {
     const trimmed = v.trim() || null;
     if (trimmed !== (task.start ?? null)) return savePatch({ start: trimmed });
+    clearPatchFailure("start");
   });
   // Asymmetric guard, deliberately: the reason input only exists while the
   // task is held (task.hold truthy), and an emptied reason falls back to the
@@ -328,10 +348,12 @@ export function TaskEditPanel({
   const flushHoldReason = useDebounced(holdReason, DEBOUNCE_MS, (v) => {
     if (task.hold && v !== task.hold)
       return savePatch({ hold: v.trim() || task.hold });
+    if (v === task.hold) clearPatchFailure("hold");
   });
   const flushLink = useDebounced(linkVal, DEBOUNCE_MS, (v) => {
     const trimmed = v.trim() || null;
     if (trimmed !== (task.link ?? null)) return savePatch({ link: trimmed });
+    clearPatchFailure("link");
   });
 
   // Tags: comma-sep input → debounced 300ms like the other text fields
@@ -342,6 +364,7 @@ export function TaskEditPanel({
       .filter(Boolean);
     const current = task.tags.join(",");
     if (arr.join(",") !== current) return savePatch({ tags: arr });
+    clearPatchFailure("tags");
   });
 
   // Checklist progress (read-only: decision 7)
@@ -392,7 +415,7 @@ export function TaskEditPanel({
         await flush();
       }
       await awaitPatchBarrier();
-      await archive.mutateAsync({ path: task.path });
+      await archive.mutateAsync({ path: latestTaskPath.current });
       setEditTaskId(null);
     } catch {
       // Both mutation hooks surface the specific failure. Keep the task open

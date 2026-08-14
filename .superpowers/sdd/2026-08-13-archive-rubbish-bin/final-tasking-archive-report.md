@@ -78,3 +78,28 @@ Self-review confirmed immediate optimistic patches start through the same mutati
 ### Concerns
 
 No scoped concerns. The focused run continues to emit only the pre-existing Vite native-config warning documented above.
+
+## Final re-review correction: path handoff and reverted intent
+
+### Defects and fixes
+
+The PATCH coordinator initially discarded the returned `BoardTask`. An operation/project assignment may refile the task, so archiving with the render-time `task.path` could target the obsolete location. The coordinator now records the path from every successful typed PATCH response, resets that path only when task identity changes, and passes the latest successful path to DELETE after the queue barrier.
+
+The coordinator also retained a failed debounced field indefinitely when the user explicitly reverted that local value to the persisted value. Each guarded debouncer now treats equality as a newer no-op intent and clears the failure for that exact field. No replacement PATCH is sent for a true persisted-value revert; unrelated failed fields continue to block archival.
+
+### Additional RED/GREEN evidence
+
+- RED: `bun run test -- src/components/tasking/__tests__/TaskEditPanel.test.tsx -t \"latest path returned|failed title edit is reverted\"` — exit 1: 2 failed, 46 skipped. DELETE targeted `/api/vault/pages/tasks/t-full.md` instead of the returned `/api/vault/pages/tasks/beta/t-full.md`, and reverting the failed title left DELETE absent.
+- GREEN: the same command — exit 0: 2 passed, 46 skipped.
+- Final focused verification: `bun run test -- src/api/board.test.ts src/components/tasking/__tests__/TaskEditPanel.test.tsx src/api/__tests__/mutation-hooks.test.tsx` — exit 0: 3 files passed, 75 tests passed.
+- `bun run typecheck` — exit 0.
+
+### Final commit and self-review
+
+Follow-up commit subject: `fix(ui): archive the latest saved Tasking path`.
+
+Self-review confirmed DELETE remains absent until the gated operation PATCH settles, then uses the exact returned path. The latest-path ref is isolated by task identity. Equality no-ops clear only their own field's failure, while invalid blank titles do not clear a title failure and unrelated field failures remain intact. Reverting a failed title produces no replacement PATCH. No Rust lifecycle files were touched.
+
+### Concerns
+
+No scoped concerns. The final focused run continues to emit only the existing Vite native-config warning.
