@@ -43,6 +43,7 @@ const TEST_ROUTE_VIEWS: ReadonlyArray<[prefix: string, view: string]> = [
   ["/archive", "archive"],
   ["/workspace", "workspace"],
   ["/gazetteer", "gazetteer"],
+  ["/stats", "stats"],
   ["/tasking", "tasking"],
   ["/academic", "academic"],
   ["/bases", "bases"],
@@ -188,7 +189,6 @@ vi.mock("#/store/workspace", () => {
   };
 });
 
-import { Atrium } from "#/components/codex/Atrium";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { DEFAULT_DOC_SLUG } from "#/docs/registry";
 
@@ -241,21 +241,6 @@ function StatefulRouteProbe({
   );
 }
 
-describe("Atrium repair entry point", () => {
-  it("exposes the reference issue count and opens repairs", async () => {
-    const user = userEvent.setup();
-    render(<Atrium />);
-
-    const repairs = screen.getByRole("button", {
-      name: "Open Reference Repairs, 7 issues",
-    });
-    expect(repairs).toHaveTextContent("7 issues");
-
-    await user.click(repairs);
-
-    expect(navigateMock).toHaveBeenCalledWith({ to: "/repairs" });
-  });
-});
 
 describe("CodexFrame destination integration", () => {
   beforeEach(() => {
@@ -274,10 +259,10 @@ describe("CodexFrame destination integration", () => {
 
       const docsButton = within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /08.*DOCS/i });
+      ).getByRole("button", { name: /09.*DOCS/i });
       expect(docsButton).toHaveAttribute("aria-current", "page");
       expect(
-        screen.queryByRole("button", { name: /08.*STATUS/i }),
+        screen.queryByRole("button", { name: /09.*STATUS/i }),
       ).not.toBeInTheDocument();
       expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
       expect(screen.getByText(/FILE DOC-001.*VIEW DOCS/)).toBeInTheDocument();
@@ -298,7 +283,7 @@ describe("CodexFrame destination integration", () => {
         "page",
       );
       expect(
-        nav.getByRole("button", { name: /08.*DOCS/i }),
+        nav.getByRole("button", { name: /09.*DOCS/i }),
       ).not.toHaveAttribute("aria-current");
     },
   );
@@ -311,13 +296,49 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /08.*DOCS/i }),
+      ).getByRole("button", { name: /09.*DOCS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({
       to: "/docs/$slug",
       params: { slug: DEFAULT_DOC_SLUG },
     });
+  });
+
+  it("renders Stats as the active desktop destination after Gazetteer", () => {
+    locationState.pathname = "/stats";
+    renderFrame();
+
+    const nav = within(
+      screen.getByRole("navigation", { name: "Primary navigation" }),
+    );
+    const gazetteerButton = nav.getByRole("button", {
+      name: /02.*GAZETTEER/i,
+    });
+    const statsButton = nav.getByRole("button", { name: /03.*STATS/i });
+
+    expect(statsButton).toBeVisible();
+    expect(statsButton).toHaveAttribute("aria-current", "page");
+    expect(
+      gazetteerButton.compareDocumentPosition(statsButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
+    expect(screen.getByText(/FILE STATS.*VIEW STATS/)).toBeInTheDocument();
+  });
+
+  it("navigates to Stats from the desktop rail", async () => {
+    const user = userEvent.setup();
+    locationState.pathname = "/";
+    renderFrame();
+
+    await user.click(
+      within(
+        screen.getByRole("navigation", { name: "Primary navigation" }),
+      ).getByRole("button", { name: /03.*STATS/i }),
+    );
+
+    expect(navigateMock).toHaveBeenCalledWith({ to: "/stats" });
   });
 
   it("renders Feeds as a full-surface desktop destination before Docs", () => {
@@ -327,8 +348,8 @@ describe("CodexFrame destination integration", () => {
     const nav = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
     );
-    const feedsButton = nav.getByRole("button", { name: /07.*FEEDS/i });
-    const docsButton = nav.getByRole("button", { name: /08.*DOCS/i });
+    const feedsButton = nav.getByRole("button", { name: /08.*FEEDS/i });
+    const docsButton = nav.getByRole("button", { name: /09.*DOCS/i });
 
     expect(feedsButton).toHaveAttribute("aria-current", "page");
     expect(
@@ -336,7 +357,7 @@ describe("CodexFrame destination integration", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      screen.queryByRole("button", { name: /08.*STATUS/i }),
+      screen.queryByRole("button", { name: /09.*STATUS/i }),
     ).not.toBeInTheDocument();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE FEEDS.*VIEW FEEDS/)).toBeInTheDocument();
@@ -350,7 +371,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /07.*FEEDS/i }),
+      ).getByRole("button", { name: /08.*FEEDS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
@@ -367,7 +388,7 @@ describe("CodexFrame destination integration", () => {
 
     const basesButton = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /06.*BASES/i });
+    ).getByRole("button", { name: /07.*BASES/i });
     expect(basesButton).toHaveAttribute("aria-current", "page");
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE BASES.*VIEW BASES/)).toBeInTheDocument();
@@ -383,7 +404,7 @@ describe("CodexFrame destination integration", () => {
         screen.getByRole("navigation", { name: "Primary navigation" }),
       );
       expect(
-        nav.getByRole("button", { name: /06.*BASES/i }),
+        nav.getByRole("button", { name: /07.*BASES/i }),
       ).not.toHaveAttribute("aria-current");
       expect(nav.getByRole("button", { name: /00.*ATRIUM/i })).toHaveAttribute(
         "aria-current",
@@ -400,7 +421,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /06.*BASES/i }),
+      ).getByRole("button", { name: /07.*BASES/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
@@ -414,7 +435,7 @@ describe("CodexFrame destination integration", () => {
 
     const academic = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /05.*ACADEMIC/i });
+    ).getByRole("button", { name: /06.*ACADEMIC/i });
     expect(academic).toHaveAttribute("aria-current", "page");
     expect(screen.getByText(/FILE ACADEMIC.*VIEW ACADEMIC/)).toBeVisible();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
@@ -615,7 +636,7 @@ describe("CodexFrame responsive shell", () => {
       name: "Primary navigation",
     });
     const feeds = within(primary).getByRole("button", {
-      name: /07.*feeds/i,
+      name: /08.*feeds/i,
     });
 
     expect(header).toHaveClass("min-w-0");

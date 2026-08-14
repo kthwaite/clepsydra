@@ -98,13 +98,12 @@ function closestSection(element: HTMLElement): HTMLElement {
 }
 
 describe("Atrium feed river placement", () => {
-  it("keeps the feed panel after Activity and Subjects and before Recents", () => {
+  it("keeps the feed panel after Activity and before Recents without Stats cards", () => {
     render(<Atrium />);
 
     const activity = closestSection(
       screen.getByText("Activity · Rolling 26 weeks"),
     );
-    const subjects = closestSection(screen.getByText("Subjects, by frequency"));
     const panel = screen.getByRole("region", { name: "Feed river panel" });
     const recents = closestSection(screen.getByText("FIG. VI"));
 
@@ -113,11 +112,11 @@ describe("Atrium feed river placement", () => {
         Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
     expect(
-      subjects.compareDocumentPosition(panel) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(
       panel.compareDocumentPosition(recents) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+    expect(screen.queryByText("Vessel · Inventory")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Subjects, by frequency"),
+    ).not.toBeInTheDocument();
   });
 });
