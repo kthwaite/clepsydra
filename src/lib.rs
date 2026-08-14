@@ -685,6 +685,8 @@ pub async fn build_app_state_with_feeds(
     let bcl = vault::bcl::load_or_seed(vault.root());
     let location = vault::location::load_or_seed(vault.root());
 
+    let archive_resource_concurrency =
+        api::archive::archive_resource_concurrency(vault.config().archive.max_blob_size_mb);
     Ok(Arc::new(AppState {
         started_at: std::time::Instant::now(),
         clock: Arc::new(crate::api::SystemClock),
@@ -713,7 +715,9 @@ pub async fn build_app_state_with_feeds(
         feed_settings: feed_settings.clone(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
+        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(
+            archive_resource_concurrency,
+        )),
         bcl,
         location: parking_lot::RwLock::new(location),
     }))

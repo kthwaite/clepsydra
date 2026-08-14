@@ -233,6 +233,25 @@ pub(crate) fn archive_body_limit_bytes(max_request_size_mb: u64) -> usize {
         .saturating_mul(1024 * 1024);
     budget.saturating_mul(2).saturating_add(1024 * 1024)
 }
+const ARCHIVE_RESOURCE_WORKING_SET_MB: u64 = 256;
+
+/// Maximum bytes admitted for one archived resource. This is the same
+/// configured limit enforced during ingest, so accepted captures remain
+/// renderable.
+pub(crate) fn archive_resource_limit_bytes(max_blob_size_mb: u64) -> usize {
+    usize::try_from(max_blob_size_mb)
+        .unwrap_or(usize::MAX)
+        .saturating_mul(1024 * 1024)
+}
+
+/// Bound parallel resource buffers to approximately 256 MiB while allowing at
+/// most eight concurrent reads for small configured blob limits.
+pub(crate) fn archive_resource_concurrency(max_blob_size_mb: u64) -> usize {
+    let per_blob_mb = max_blob_size_mb.max(1);
+    usize::try_from(ARCHIVE_RESOURCE_WORKING_SET_MB / per_blob_mb)
+        .unwrap_or(1)
+        .clamp(1, 8)
+}
 
 /// Immutable response policy for the dedicated archive snapshot view.
 ///
@@ -658,12 +677,8 @@ fn validate_resource_sizes(
                 resource.hash, size, max_blob_size_mb
             )));
         }
-        if size > MAX_ARCHIVE_RESOURCE_BYTES as u64 {
-            return Err(ApiError::bad_request(format!(
-                "archived resource {} is {} bytes, over shared resource serving limit ({} bytes)",
-                resource.hash, size, MAX_ARCHIVE_RESOURCE_BYTES
-            )));
-        }
+        // The same configured per-blob limit is applied when the CAS resource
+        // is served, so every accepted resource remains renderable.
         total = total.checked_add(size).ok_or_else(&request_size_overflow)?;
     }
     if total > max_request_bytes {
@@ -913,7 +928,7 @@ pub async fn head_snapshot(
     })
 }
 
-const MAX_ARCHIVE_RESOURCE_BYTES: usize = 32 * 1024 * 1024;
+
 #[utoipa::path(
     get,
     path = "/cas/{hash}",
@@ -931,6 +946,8 @@ pub async fn serve_blob(
     State(state): State<Arc<AppState>>,
     Path(hash): Path<String>,
 ) -> Result<Response, ApiError> {
+    let resource_limit =
+        archive_resource_limit_bytes(state.vault.config().archive.max_blob_size_mb);
     let permit = Arc::clone(&state.archive_resource_semaphore)
         .acquire_owned()
         .await
@@ -940,11 +957,11 @@ pub async fn serve_blob(
     let (data, content_type, permit) = tokio::task::spawn_blocking(move || {
         let opened = {
             let cas = cas.lock();
-            cas.open_limited(&worker_hash, MAX_ARCHIVE_RESOURCE_BYTES)
+            cas.open_limited(&worker_hash, resource_limit)
                 .map_err(|error| limited_blob_error(&worker_hash, error))?
         };
         let (data, content_type) = opened
-            .read_limited(MAX_ARCHIVE_RESOURCE_BYTES)
+            .read_limited(resource_limit)
             .map_err(|error| limited_blob_error(&worker_hash, error))?;
         Ok::<_, ApiError>((data, content_type, permit))
     })
@@ -1450,6 +1467,20 @@ mod tests {
     fn semantic_limits_saturate_for_unrepresentable_budgets() {
         validate_resource_sizes(&[], 1, 1, u64::MAX, u64::MAX)
             .expect("unrepresentable MiB ceilings should behave as unbounded byte ceilings");
+    }
+
+    #[test]
+    fn configured_blob_limit_is_the_resource_serving_limit() {
+        let fifty_mib = 50 * 1024 * 1024;
+        let resources = vec![SnapshotResource {
+            hash: "sha256:test".to_string(),
+            bytes: vec![0; fifty_mib],
+            content_type: "video/mp4".to_string(),
+        }];
+        validate_resource_sizes(&resources, 1, 1, 100, 250)
+            .expect("a 50 MiB resource is valid under the default 100 MiB blob limit");
+        assert_eq!(archive_resource_limit_bytes(100), 100 * 1024 * 1024);
+        assert_eq!(archive_resource_concurrency(100), 2);
     }
 
     #[test]

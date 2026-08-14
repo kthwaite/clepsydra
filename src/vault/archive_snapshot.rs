@@ -401,6 +401,13 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
         SelfClosing,
     }
 
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum Namespace {
+        Html,
+        Svg,
+        MathMl,
+    }
+
     fn inert_name_at(html: &[u8], start: usize) -> Option<(&'static [u8], bool)> {
         for (name, plaintext) in [
             (b"style".as_slice(), false),
@@ -464,8 +471,181 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
             })
     }
 
+    fn tag_is_one_of(html: &[u8], start: usize, names: &[&[u8]]) -> bool {
+        names.iter().any(|name| named_tag_at(html, start, name))
+    }
+    fn foreign_transition_attributes(
+        html: &[u8],
+        mut cursor: usize,
+        end: usize,
+    ) -> (bool, bool) {
+        let mut font_exit = false;
+        let mut annotation_encoding_seen = false;
+        let mut annotation_html = false;
+        while cursor < end {
+            while cursor < end
+                && (html[cursor].is_ascii_whitespace() || html[cursor] == b'/')
+            {
+                cursor += 1;
+            }
+            let name_start = cursor;
+            while cursor < end
+                && !html[cursor].is_ascii_whitespace()
+                && !matches!(html[cursor], b'=' | b'/' | b'>')
+            {
+                cursor += 1;
+            }
+            if cursor == name_start {
+                cursor += 1;
+                continue;
+            }
+            let name = &html[name_start..cursor];
+            font_exit |= [b"color".as_slice(), b"size", b"face"]
+                .iter()
+                .any(|candidate| name.eq_ignore_ascii_case(candidate));
+            while cursor < end && html[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            if html.get(cursor) != Some(&b'=') {
+                continue;
+            }
+            cursor += 1;
+            while cursor < end && html[cursor].is_ascii_whitespace() {
+                cursor += 1;
+            }
+            let value = if let Some(&quote @ (b'\'' | b'"')) = html.get(cursor) {
+                cursor += 1;
+                let value_start = cursor;
+                while cursor < end && html[cursor] != quote {
+                    cursor += 1;
+                }
+                let value = &html[value_start..cursor];
+                cursor = cursor.saturating_add(1);
+                value
+            } else {
+                let value_start = cursor;
+                while cursor < end
+                    && !html[cursor].is_ascii_whitespace()
+                    && !matches!(html[cursor], b'/' | b'>')
+                {
+                    cursor += 1;
+                }
+                &html[value_start..cursor]
+            };
+            if !annotation_encoding_seen && name.eq_ignore_ascii_case(b"encoding") {
+                annotation_encoding_seen = true;
+                annotation_html = std::str::from_utf8(value).is_ok_and(|value| {
+                    let decoded = decode_html_entities(value);
+                    decoded.eq_ignore_ascii_case("text/html")
+                        || decoded.eq_ignore_ascii_case("application/xhtml+xml")
+                });
+            }
+        }
+        (font_exit, annotation_html)
+    }
+
+    fn transition_start(
+        namespaces: &mut Vec<Namespace>,
+        html: &[u8],
+        name_start: usize,
+        attributes_start: usize,
+        tag_end: usize,
+        self_closing: bool,
+    ) {
+        if named_tag_at(html, name_start, b"svg") {
+            namespaces.push(Namespace::Svg);
+            return;
+        }
+        if named_tag_at(html, name_start, b"math") {
+            namespaces.push(Namespace::MathMl);
+            return;
+        }
+        let current = *namespaces.last().unwrap_or(&Namespace::Html);
+        if current == Namespace::Html {
+            return;
+        }
+        if tag_is_one_of(
+            html,
+            name_start,
+            &[
+                b"b", b"big", b"blockquote", b"body", b"br", b"center", b"code", b"dd",
+                b"div", b"dl", b"dt", b"em", b"embed", b"h1", b"h2", b"h3", b"h4", b"h5",
+                b"h6", b"head", b"hr", b"i", b"img", b"li", b"listing", b"menu", b"meta",
+                b"nobr", b"ol", b"p", b"pre", b"ruby", b"s", b"small", b"span", b"strong",
+                b"strike", b"sub", b"sup", b"table", b"tt", b"u", b"ul", b"var",
+            ],
+        ) {
+            namespaces.pop();
+            return;
+        }
+        let (font_exit, annotation_html) =
+            foreign_transition_attributes(html, attributes_start, tag_end);
+        if named_tag_at(html, name_start, b"font") && font_exit {
+            namespaces.pop();
+            return;
+        }
+        if current == Namespace::MathMl
+            && named_tag_at(html, name_start, b"annotation-xml")
+            && annotation_html
+            && !self_closing
+        {
+            namespaces.push(Namespace::Html);
+            return;
+        }
+        let integration = match current {
+            Namespace::Svg => {
+                tag_is_one_of(html, name_start, &[b"desc", b"title", b"foreignobject"])
+            }
+            Namespace::MathMl => {
+                tag_is_one_of(html, name_start, &[b"mi", b"mo", b"mn", b"ms", b"mtext"])
+            }
+            Namespace::Html => false,
+        };
+        if integration && !self_closing {
+            namespaces.push(Namespace::Html);
+        }
+    }
+
+    fn transition_end(namespaces: &mut Vec<Namespace>, html: &[u8], name_start: usize) {
+        let current = *namespaces.last().unwrap_or(&Namespace::Html);
+        match current {
+            Namespace::Html => {
+                let Some(previous) = namespaces.get(namespaces.len().saturating_sub(2)).copied()
+                else {
+                    return;
+                };
+                let closes_integration = match previous {
+                    Namespace::Svg => tag_is_one_of(
+                        html,
+                        name_start,
+                        &[b"desc", b"title", b"foreignobject"],
+                    ),
+                    Namespace::MathMl => tag_is_one_of(
+                        html,
+                        name_start,
+                        &[b"mi", b"mo", b"mn", b"ms", b"mtext", b"annotation-xml"],
+                    ),
+                    Namespace::Html => false,
+                };
+                if closes_integration {
+                    namespaces.pop();
+                }
+            }
+            Namespace::Svg => {
+                if tag_is_one_of(html, name_start, &[b"svg", b"p", b"br"]) {
+                    namespaces.pop();
+                }
+            }
+            Namespace::MathMl => {
+                if tag_is_one_of(html, name_start, &[b"math", b"p", b"br"]) {
+                    namespaces.pop();
+                }
+            }
+        }
+    }
+
     let mut cursor = 0usize;
-    let mut foreign_stack: Vec<&'static [u8]> = Vec::new();
+    let mut namespaces = vec![Namespace::Html];
     while let Some(relative) = html[cursor..].iter().position(|byte| *byte == b'<') {
         let start = cursor + relative;
         if html.get(start..).is_some_and(|tail| tail.starts_with(b"<!--")) {
@@ -476,11 +656,7 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
             break;
         };
         if first == b'/' {
-            if let Some(expected) = foreign_stack.last()
-                && named_tag_at(html, start + 2, expected)
-            {
-                foreign_stack.pop();
-            }
+            transition_end(&mut namespaces, html, start + 2);
             cursor = start + 2;
             continue;
         }
@@ -494,18 +670,12 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
         }) {
             index += 1;
         }
-        let inert = if foreign_stack.is_empty() {
+        let inert = if namespaces.last() == Some(&Namespace::Html) {
             inert_name_at(html, start + 1)
         } else {
             None
         };
-        let enters_foreign = if named_tag_at(html, start + 1, b"svg") {
-            Some(b"svg".as_slice())
-        } else if named_tag_at(html, start + 1, b"math") {
-            Some(b"math".as_slice())
-        } else {
-            None
-        };
+        let attributes_start = index;
         if html.get(index) == Some(&b'>') {
             cursor = index + 1;
             if let Some((name, plaintext)) = inert {
@@ -514,8 +684,15 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
                 }
                 cursor = find_inert_end(&html[cursor..], name)
                     .map_or(html.len(), |offset| cursor + offset);
-            } else if let Some(name) = enters_foreign {
-                foreign_stack.push(name);
+            } else {
+                transition_start(
+                    &mut namespaces,
+                    html,
+                    start + 1,
+                    attributes_start,
+                    cursor,
+                    false,
+                );
             }
             continue;
         }
@@ -634,9 +811,15 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
             cursor = find_inert_end(&html[cursor..], name)
                 .map_or(html.len(), |offset| cursor + offset);
         }
-        if let Some(name) = enters_foreign {
-            foreign_stack.push(name);
-        }
+        let self_closing = html.get(cursor.saturating_sub(2)..cursor) == Some(b"/>");
+        transition_start(
+            &mut namespaces,
+            html,
+            start + 1,
+            attributes_start,
+            cursor,
+            self_closing,
+        );
     }
     Ok(())
 }
@@ -1883,6 +2066,34 @@ mod tests {
         );
         let error = neutralize_navigation(&mismatched_foreign_close).unwrap_err();
         assert!(error.contains("attribute limit"), "{error}");
+        for integrated in [
+            "<svg><foreignObject><style>.x{content:\"<a '>\"}</style></foreignObject></svg>",
+            "<svg><title>&lt;a '&gt;</title></svg>",
+            "<math><mtext><style>.x{content:\"<a '>\"}</style></mtext></math>",
+        ] {
+            assert!(neutralize_navigation(integrated).is_ok(), "{integrated}");
+        }
+        let integrated_style = format!(
+            "<svg><foreignObject><style>.x{{content:\"<a {}>\"}}</style></foreignObject></svg>",
+            "a=x ".repeat(4097)
+        );
+        assert!(
+            neutralize_navigation(&integrated_style).is_ok(),
+            "HTML integration-point style content must remain raw text"
+        );
+        for integrated in [
+            format!(
+                "<math><annotation-xml encoding=\"text/html\"><style>.x{{content:\"<a {}>\"}}</style></annotation-xml></math>",
+                "a=x ".repeat(4097)
+            ),
+            format!(
+                "<svg><font color=red></font><style>.x{{content:\"<a {}>\"}}</style></svg>",
+                "a=x ".repeat(4097)
+            ),
+        ] {
+            let result = neutralize_navigation(&integrated);
+            assert!(result.is_ok(), "{}: {}", result.unwrap_err(), integrated);
+        }
     }
 
     #[test]
