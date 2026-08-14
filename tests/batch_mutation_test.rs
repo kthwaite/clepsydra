@@ -403,23 +403,13 @@ async fn rubbish_archive_catalog_failure_rolls_back_the_entire_index_unit() {
     )
     .await;
 
-    assert!(matches!(fixture.error, MutationError::BatchRecovery { .. }));
-    assert!(!fixture.vault.resolve(&fixture.path).exists());
-    assert!(
-        RubbishStore::for_vault(fixture.vault.root())
-            .read_item(&fixture.item_id.to_string())
-            .is_ok()
-    );
-    assert_eq!(transaction_workspace_count(&fixture.vault), 1);
-    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
-    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
-    assert_eq!(
-        indexed_link_target(&fixture.db_path, fixture.backlink_id),
-        Some(fixture.page_id.to_string())
-    );
-    assert!(fixture.notifications.lock().is_empty());
-
-    assert!(recover_pending(fixture.vault.root()).unwrap().is_empty());
+    assert!(matches!(
+        fixture.error,
+        MutationError::Reconcile {
+            filesystem_applied: false,
+            ..
+        }
+    ));
     assert_eq!(
         fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
         fixture.expected_bytes
@@ -454,23 +444,13 @@ async fn rubbish_archive_link_failure_rolls_back_page_catalog_and_links_together
     )
     .await;
 
-    assert!(matches!(fixture.error, MutationError::BatchRecovery { .. }));
-    assert!(!fixture.vault.resolve(&fixture.path).exists());
-    assert!(
-        RubbishStore::for_vault(fixture.vault.root())
-            .read_item(&fixture.item_id.to_string())
-            .is_ok()
-    );
-    assert_eq!(transaction_workspace_count(&fixture.vault), 1);
-    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
-    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
-    assert_eq!(
-        indexed_link_target(&fixture.db_path, fixture.backlink_id),
-        Some(fixture.page_id.to_string())
-    );
-    assert!(fixture.notifications.lock().is_empty());
-
-    assert!(recover_pending(fixture.vault.root()).unwrap().is_empty());
+    assert!(matches!(
+        fixture.error,
+        MutationError::Reconcile {
+            filesystem_applied: false,
+            ..
+        }
+    ));
     assert_eq!(
         fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
         fixture.expected_bytes
@@ -499,26 +479,13 @@ async fn rubbish_restore_catalog_failure_rolls_back_the_entire_index_unit() {
     )
     .await;
 
-    assert!(matches!(fixture.error, MutationError::BatchRecovery { .. }));
-    assert_eq!(
-        fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
-        fixture.item.bytes
-    );
-    assert!(
-        RubbishStore::for_vault(fixture.vault.root())
-            .read_item(&fixture.item_id.to_string())
-            .is_err()
-    );
-    assert_eq!(transaction_workspace_count(&fixture.vault), 1);
-    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 0);
-    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 1);
-    assert_eq!(
-        indexed_link_target(&fixture.db_path, fixture.backlink_id),
-        None
-    );
-    assert!(fixture.notifications.lock().is_empty());
-
-    assert!(recover_pending(fixture.vault.root()).unwrap().is_empty());
+    assert!(matches!(
+        fixture.error,
+        MutationError::Reconcile {
+            filesystem_applied: false,
+            ..
+        }
+    ));
     assert!(!fixture.vault.resolve(&fixture.path).exists());
     assert_eq!(
         RubbishStore::for_vault(fixture.vault.root())
@@ -551,26 +518,13 @@ async fn rubbish_restore_link_failure_rolls_back_page_catalog_and_links_together
     )
     .await;
 
-    assert!(matches!(fixture.error, MutationError::BatchRecovery { .. }));
-    assert_eq!(
-        fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
-        fixture.item.bytes
-    );
-    assert!(
-        RubbishStore::for_vault(fixture.vault.root())
-            .read_item(&fixture.item_id.to_string())
-            .is_err()
-    );
-    assert_eq!(transaction_workspace_count(&fixture.vault), 1);
-    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 0);
-    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 1);
-    assert_eq!(
-        indexed_link_target(&fixture.db_path, fixture.backlink_id),
-        None
-    );
-    assert!(fixture.notifications.lock().is_empty());
-
-    assert!(recover_pending(fixture.vault.root()).unwrap().is_empty());
+    assert!(matches!(
+        fixture.error,
+        MutationError::Reconcile {
+            filesystem_applied: false,
+            ..
+        }
+    ));
     assert!(!fixture.vault.resolve(&fixture.path).exists());
     assert_eq!(
         RubbishStore::for_vault(fixture.vault.root())

@@ -180,6 +180,14 @@ pub struct DeleteFolderResult {
 pub enum BatchRecoveryError {
     #[error("index reconciliation failed: {0}")]
     Index(#[source] IndexError),
+    #[error(
+        "index reconciliation failed: {index}; filesystem rollback also failed: {rollback}"
+    )]
+    IndexRollback {
+        index: IndexError,
+        #[source]
+        rollback: BatchMutationError,
+    },
     #[error("transaction workspace cleanup failed: {0}")]
     Workspace(#[source] BatchMutationError),
     #[error("transaction finalization failed: {0}")]
@@ -1209,10 +1217,49 @@ impl MutationCoordinator {
                 .await
                 .and_then(|result| result);
             if let Err(source) = reconciliation {
-                return Err(MutationError::BatchRecovery {
-                    directory,
-                    source: Box::new(BatchRecoveryError::Index(source)),
-                });
+                if !deferred_commit {
+                    return Err(MutationError::BatchRecovery {
+                        directory,
+                        source: Box::new(BatchRecoveryError::Index(source)),
+                    });
+                }
+                let rollback_directory = directory.clone();
+                let rollback = tokio::task::spawn_blocking(move || {
+                    let result = prepared.rollback();
+                    (guard, result)
+                })
+                .await;
+                match rollback {
+                    Ok((_guard, Ok(()))) => {
+                        filesystem_applied.store(false, Ordering::Release);
+                        return Err(MutationError::Reconcile {
+                            filesystem_applied: false,
+                            source,
+                        });
+                    }
+                    Ok((_guard, Err(rollback))) => {
+                        return Err(MutationError::BatchRecovery {
+                            directory,
+                            source: Box::new(BatchRecoveryError::IndexRollback {
+                                index: source,
+                                rollback,
+                            }),
+                        });
+                    }
+                    Err(rollback) => {
+                        return Err(MutationError::BatchRecovery {
+                            directory,
+                            source: Box::new(BatchRecoveryError::IndexRollback {
+                                index: source,
+                                rollback: batch_blocking_error(
+                                    "rollback batch transaction after index reconciliation failure",
+                                    &rollback_directory,
+                                    rollback,
+                                ),
+                            }),
+                        });
+                    }
+                }
             }
 
             let cleanup_directory = directory.clone();
