@@ -129,3 +129,13 @@ Self-review confirmed the new tests use exact OpenAPI list/detail query keys, ac
 ### Concerns
 
 None. The focused UI run emitted only the previously documented Vite native-config warning.
+
+## Final coverage correction: rejected Empty isolation
+
+The rejected Empty Bin hook test now keeps an adjacent active `['get', '/api/vault/rubbish-bin']` observer alongside the active exact list and inactive exact detail. After settlement, the exact list has one additional fetch and the exact detail is stale without fetching, while the adjacent query remains at its single initial fetch and is not invalidated. This prevents a broad active-query invalidation from satisfying the lifecycle assertions.
+
+Focused verification: `bun run test -- src/api/rubbish.test.tsx` — exit 0: 1 file passed, 5 tests passed.
+
+Coverage commit subject: `test(rubbish): prove rejected Empty isolation`.
+
+No production code changed. No concerns beyond the previously documented Vite native-config warning.

@@ -228,15 +228,25 @@ describe("rubbish API hooks", () => {
       "/api/vault/rubbish/{item_id}",
       { params: { path: { item_id: "item-1" } } },
     ] as const;
+    const adjacentKey = ["get", "/api/vault/rubbish-bin"] as const;
     const fetchList = vi.fn(async () => ({ items: [] }));
     const fetchDetail = vi.fn(async () => ({ item_id: "item-1" }));
+    const fetchAdjacent = vi.fn(async () => ({ items: [] }));
     const listObserver = new QueryObserver(client, {
       queryKey: listKey,
       queryFn: fetchList,
     });
+    const adjacentObserver = new QueryObserver(client, {
+      queryKey: adjacentKey,
+      queryFn: fetchAdjacent,
+    });
     const unsubscribe = listObserver.subscribe(() => undefined);
+    const unsubscribeAdjacent = adjacentObserver.subscribe(() => undefined);
     await waitFor(() =>
       expect(listObserver.getCurrentResult().isSuccess).toBe(true),
+    );
+    await waitFor(() =>
+      expect(adjacentObserver.getCurrentResult().isSuccess).toBe(true),
     );
     await client.fetchQuery({ queryKey: detailKey, queryFn: fetchDetail });
     const { result } = renderHook(() => useEmptyRubbish(), { wrapper });
@@ -252,7 +262,10 @@ describe("rubbish API hooks", () => {
     expect(fetchList).toHaveBeenCalledTimes(2);
     expect(client.getQueryState(detailKey)?.isInvalidated).toBe(true);
     expect(fetchDetail).toHaveBeenCalledTimes(1);
+    expect(fetchAdjacent).toHaveBeenCalledTimes(1);
+    expect(client.getQueryState(adjacentKey)?.isInvalidated).toBe(false);
     expect(transport.delete).toHaveBeenCalledWith("/api/vault/rubbish");
     unsubscribe();
+    unsubscribeAdjacent();
   });
 });
