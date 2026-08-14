@@ -532,16 +532,34 @@ async fn sort_tasks_for_atrium_agenda() {
     let (server, _tmp) = setup_server();
 
     server
+        .post("/api/vault/pages/z-agenda-ties.md")
+        .json(&serde_json::json!({
+            "title": "Z Agenda Ties",
+            "body": "- [ ] Same-date B in z [due:: 2026-09-01] [priority:: B]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    server
+        .post("/api/vault/pages/a-agenda-ties.md")
+        .json(&serde_json::json!({
+            "title": "A Agenda Ties",
+            "body": "\
+- [ ] Same-date B first in a [due:: 2026-09-01] [priority:: B]\n\
+- [ ] Same-date B second in a [due:: 2026-09-01] [priority:: B]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    server
         .post("/api/vault/pages/atrium-agenda.md")
         .json(&serde_json::json!({
             "title": "Atrium Agenda",
             "body": "\
-- [ ] Undated other\n\
 - [ ] Same-date C [due:: 2026-09-01] [priority:: C]\n\
 - [ ] Overdue A later [due:: 2025-01-02] [priority:: A]\n\
 - [x] Completed earliest [due:: 2024-01-01] [priority:: A]\n\
 - [ ] Undated C [priority:: C]\n\
-- [ ] Same-date B [due:: 2026-09-01] [priority:: B]\n\
 - [ ] Overdue B earlier [due:: 2025-01-01] [priority:: B]\n\
 - [ ] Undated A [priority:: A]\n\
 - [ ] Same-date unknown [due:: 2026-09-01] [priority:: Z]\n\
@@ -556,28 +574,35 @@ async fn sort_tasks_for_atrium_agenda() {
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let tasks = body["tasks"].as_array().unwrap();
-    let ordered_contents: Vec<&str> = tasks
+    let ordered_tasks: Vec<(&str, &str)> = tasks
         .iter()
-        .map(|task| task["content"].as_str().unwrap())
+        .map(|task| {
+            (
+                task["page_path"].as_str().unwrap(),
+                task["content"].as_str().unwrap(),
+            )
+        })
         .collect();
 
     assert_eq!(
-        ordered_contents,
+        ordered_tasks,
         vec![
-            "Overdue B earlier",
-            "Overdue A later",
-            "Same-date A",
-            "Same-date B",
-            "Same-date C",
-            "Same-date unknown",
-            "Undated A",
-            "Undated C",
+            ("atrium-agenda.md", "Overdue B earlier"),
+            ("atrium-agenda.md", "Overdue A later"),
+            ("atrium-agenda.md", "Same-date A"),
+            ("a-agenda-ties.md", "Same-date B first in a"),
+            ("a-agenda-ties.md", "Same-date B second in a"),
+            ("z-agenda-ties.md", "Same-date B in z"),
+            ("atrium-agenda.md", "Same-date C"),
+            ("atrium-agenda.md", "Same-date unknown"),
         ]
     );
     assert_eq!(tasks.len(), 8);
-    assert_eq!(body["total"], 9);
+    assert_eq!(body["total"], 10);
     assert!(
-        !ordered_contents.contains(&"Completed earliest"),
+        tasks
+            .iter()
+            .all(|task| task["content"] != "Completed earliest"),
         "completed tasks must be excluded from the Atrium agenda"
     );
 }
