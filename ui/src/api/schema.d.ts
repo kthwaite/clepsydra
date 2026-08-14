@@ -2546,10 +2546,11 @@ export interface components {
             old_text: string;
             path: string;
         };
+        /** @enum {string} */
+        PreviewMutationOperation: "move_page" | "move_folder";
         PreviewMutationRequest: {
             destination?: string;
-            operation: string;
-            rewrite?: string;
+            operation: components["schemas"]["PreviewMutationOperation"];
             source?: string;
         };
         /** @description A declared property in a base's schema. */
@@ -6365,7 +6366,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Mutation preview */
+            /** @description Page or folder move preview */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -6374,7 +6375,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Invalid operation */
+            /** @description Invalid move request */
             400: {
                 headers: {
                     [name: string]: unknown;

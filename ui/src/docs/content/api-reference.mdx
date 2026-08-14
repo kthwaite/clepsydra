@@ -273,7 +273,7 @@ Preview reference repair. Responses: `200` Reference repair preview; `400` Actio
 ### `GET /api/vault/index/outlinks/{path}`
 Get outlinks. Responses: `200` Outlinks; `400` Invalid path; `404` Page not found; `500` Internal server error.
 ### `POST /api/vault/index/preview-mutation`
-Preview mutation. Responses: `200` Mutation preview; `400` Invalid operation; `500` Internal server error.
+Preview a page or folder move. Archival consequences are described by the page archive confirmation, not this endpoint. Responses: `200` Move preview; `400` Invalid move request; `500` Internal server error.
 ### `POST /api/vault/index/rebuild`
 Rebuild index. Responses: `200` Index rebuilt; `500` Internal server error.
 ### `GET /api/vault/index/search`

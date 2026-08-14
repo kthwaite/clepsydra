@@ -337,6 +337,7 @@ impl Modify for SchemaOverrides {
             crate::api::index_routes::GraphNode,
             crate::api::index_routes::GraphEdge,
             crate::api::index_routes::PreviewMutationRequest,
+            crate::api::index_routes::PreviewMutationOperation,
             crate::api::index_routes::ContentEntry,
             crate::api::index_routes::ContentIndexResponse,
             crate::api::index_routes::SearchResultEntry,

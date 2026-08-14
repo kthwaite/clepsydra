@@ -3085,6 +3085,65 @@ Content.
     assert!(plan["text_edits"].is_array());
 }
 
+#[tokio::test]
+async fn preview_mutation_rejects_legacy_page_delete_and_rewrite_contract() {
+    let target = "\
+---
+id: 00000000-0000-0000-0000-000000000122
+title: Target
+---
+Target body.
+";
+    let (server, _tmp) = setup_server_with_files(&[("target.md", target)]);
+
+    server
+        .post("/api/vault/index/preview-mutation")
+        .json(&serde_json::json!({
+            "operation": "delete_page",
+            "source": "target.md"
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+
+    server
+        .post("/api/vault/index/preview-mutation")
+        .json(&serde_json::json!({
+            "operation": "move_page",
+            "source": "target.md",
+            "destination": "moved.md",
+            "rewrite": "plain_text"
+        }))
+        .await
+        .assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[test]
+fn preview_mutation_openapi_excludes_legacy_page_delete_contract() {
+    let openapi = serde_json::to_value(ApiDoc::openapi()).unwrap();
+    let schemas = &openapi["components"]["schemas"];
+    let request = &schemas["PreviewMutationRequest"];
+    let properties = request["properties"].as_object().unwrap();
+
+    assert!(
+        !properties.contains_key("rewrite"),
+        "legacy rewrite input remains in PreviewMutationRequest: {request}"
+    );
+    assert_eq!(
+        properties["operation"]["$ref"],
+        "#/components/schemas/PreviewMutationOperation"
+    );
+    assert_eq!(
+        schemas["PreviewMutationOperation"]["enum"],
+        serde_json::json!(["move_page", "move_folder"])
+    );
+    assert!(
+        !serde_json::to_string(request)
+            .unwrap()
+            .contains("delete_page"),
+        "legacy delete_page operation remains in PreviewMutationRequest: {request}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Reference intelligence: enriched unresolved endpoint
 // ---------------------------------------------------------------------------
