@@ -579,13 +579,17 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
                 b"strike", b"sub", b"sup", b"table", b"tt", b"u", b"ul", b"var",
             ],
         ) {
-            namespaces.pop();
+            while namespaces.last().is_some_and(|namespace| *namespace != Namespace::Html) {
+                namespaces.pop();
+            }
             return;
         }
         let (font_exit, annotation_html) =
             foreign_transition_attributes(html, attributes_start, tag_end);
         if named_tag_at(html, name_start, b"font") && font_exit {
-            namespaces.pop();
+            while namespaces.last().is_some_and(|namespace| *namespace != Namespace::Html) {
+                namespaces.pop();
+            }
             return;
         }
         if current == Namespace::MathMl
@@ -2089,6 +2093,14 @@ mod tests {
             let error = neutralize_navigation(&same_namespace).unwrap_err();
             assert!(error.contains("attribute limit"), "{error}");
         }
+        let nested_breakout = format!(
+            "<svg><svg><br><math></svg><style><a {}></a></style></math>",
+            (0..=MAX_ATTRIBUTES_PER_TAG)
+                .map(|index| format!("a{index}=x "))
+                .collect::<String>()
+        );
+        let error = neutralize_navigation(&nested_breakout).unwrap_err();
+        assert!(error.contains("attribute limit"), "{error}");
         for integrated in [
             "<svg><foreignObject><style>.x{content:\"<a '>\"}</style></foreignObject></svg>",
             "<svg><title>&lt;a '&gt;</title></svg>",
