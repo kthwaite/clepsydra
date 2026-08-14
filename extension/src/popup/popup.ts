@@ -4,6 +4,7 @@ import {
 	type CaptureStatus,
 	isInProgress,
 } from "#/lib/badge";
+import { normalizeCaptureTags } from "#/lib/capture-tags";
 import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
 import { DEFAULT_SETTINGS } from "#/lib/types";
 import { webext } from "#/lib/webext";
@@ -38,10 +39,14 @@ async function requestCaptureStatus(
 	return response.status;
 }
 
-async function requestCaptureStart(tabId: number): Promise<CaptureStatus> {
+async function requestCaptureStart(
+	tabId: number,
+	additionalTags: string[],
+): Promise<CaptureStatus> {
 	const response: unknown = await webext.runtime.sendMessage({
 		type: "capture_start",
 		tabId,
+		additionalTags,
 	});
 	if (!isStatusResponse(response) || response.status === null) {
 		throw new Error("The extension worker did not acknowledge the capture.");
@@ -72,6 +77,10 @@ function init(): void {
 	const error = document.getElementById("error-msg") as HTMLElement;
 	const button = document.getElementById("capture-btn") as HTMLButtonElement;
 	const panel = document.getElementById("capture-status") as HTMLElement;
+	const defaultTags = document.getElementById("default-tags") as HTMLElement;
+	const additionalInput = document.getElementById(
+		"additional-tags",
+	) as HTMLInputElement;
 	const optionsLink = document.getElementById(
 		"options-link",
 	) as HTMLAnchorElement;
@@ -89,13 +98,38 @@ function init(): void {
 		error.textContent = message;
 		error.style.display = "block";
 	};
+	const renderDefaultTags = (tags: string[]) => {
+		defaultTags.replaceChildren();
+		if (tags.length === 0) {
+			defaultTags.textContent = "None";
+			return;
+		}
+		for (const tag of tags) {
+			const chip = document.createElement("span");
+			chip.className = "tag";
+			chip.textContent = tag;
+			defaultTags.append(chip);
+		}
+	};
 	const renderPhase = (phase: CapturePhase, detail: string) => {
+		const active = isInProgress(phase);
 		panel.textContent = detail;
 		panel.dataset.tone = statusTone(phase);
 		panel.style.display = "block";
-		button.disabled = isInProgress(phase);
+		button.disabled = active;
+		additionalInput.disabled = active;
 	};
-	const renderStatus = (status: CaptureStatus) => {
+	const renderStatus = (
+		status: CaptureStatus,
+		restoreAdditionalTags = false,
+	) => {
+		if (isInProgress(status.phase)) {
+			if (restoreAdditionalTags) {
+				additionalInput.value = status.additionalTags.join(", ");
+			}
+		} else {
+			additionalInput.value = "";
+		}
 		renderPhase(status.phase, status.detail);
 	};
 	const stopPolling = () => {
@@ -106,6 +140,7 @@ function init(): void {
 	const showStatusTransportError = () => {
 		showError(STATUS_TRANSPORT_ERROR);
 		button.disabled = false;
+		additionalInput.disabled = false;
 	};
 	const showAbsentStatus = () => {
 		clearError();
@@ -140,6 +175,9 @@ function init(): void {
 	window.addEventListener("unload", stopPolling);
 	button.addEventListener("click", async () => {
 		if (stopped || startPending || button.disabled) return;
+		const additionalTags = normalizeCaptureTags(
+			additionalInput.value.split(","),
+		);
 		startPending = true;
 		captureUiGeneration += 1;
 		clearError();
@@ -158,7 +196,7 @@ function init(): void {
 			}
 
 			renderPhase("capturing", "reading the page…");
-			const status = await requestCaptureStart(target.id);
+			const status = await requestCaptureStart(target.id, additionalTags);
 			if (stopped) return;
 			renderStatus(status);
 			if (isInProgress(status.phase)) schedulePoll(target.id);
@@ -181,9 +219,22 @@ function init(): void {
 
 	void (async () => {
 		const openingGeneration = captureUiGeneration;
-		const stored = await webext.storage.sync.get("settings");
-		if (stopped) return;
-		const settings = { ...DEFAULT_SETTINGS, ...stored.settings };
+		let settings = DEFAULT_SETTINGS;
+		try {
+			const stored = await webext.storage.sync.get("settings");
+			if (stopped) return;
+			const storedSettings =
+				stored.settings &&
+				typeof stored.settings === "object" &&
+				!Array.isArray(stored.settings)
+					? stored.settings
+					: {};
+			settings = { ...DEFAULT_SETTINGS, ...storedSettings };
+			renderDefaultTags(normalizeCaptureTags(settings.default_tags));
+		} catch {
+			if (stopped) return;
+			defaultTags.textContent = "Defaults unavailable";
+		}
 		const client = new ClepsydraClient(settings.server_url);
 
 		// Reachability is informational. It never gates capture interaction or
@@ -219,7 +270,7 @@ function init(): void {
 				return;
 			}
 			clearError();
-			renderStatus(status);
+			renderStatus(status, true);
 			if (isInProgress(status.phase)) schedulePoll(tab.id);
 		} catch {
 			if (!stopped && captureUiGeneration === openingGeneration) {
