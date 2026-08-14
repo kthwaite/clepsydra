@@ -338,10 +338,7 @@ impl RubbishStore {
     ///
     /// A purge tombstone is created only after the CAS release ledger commits,
     /// so cleanup is intentionally deletion-only and idempotent.
-    pub(crate) fn finish_purge_tombstone(
-        &self,
-        item_id: Uuid,
-    ) -> Result<bool, RubbishStoreError> {
+    pub(crate) fn finish_purge_tombstone(&self, item_id: Uuid) -> Result<bool, RubbishStoreError> {
         if !self.validate_root_for_cleanup()? {
             return Ok(false);
         }
@@ -369,11 +366,7 @@ impl RubbishStore {
         }
 
         fs::remove_dir_all(&tombstone_dir).map_err(|source| {
-            RubbishStoreError::filesystem(
-                "remove rubbish purge tombstone",
-                &tombstone_dir,
-                source,
-            )
+            RubbishStoreError::filesystem("remove rubbish purge tombstone", &tombstone_dir, source)
         })?;
         sync_directory(&self.root)?;
         Ok(true)
