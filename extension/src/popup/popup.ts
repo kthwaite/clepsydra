@@ -8,26 +8,45 @@ import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
 import { DEFAULT_SETTINGS } from "#/lib/types";
 
 const POLL_INTERVAL_MS = 250;
+const STATUS_TRANSPORT_ERROR =
+	"Capture status is temporarily unavailable. You can try Capture This Page again.";
+
+interface CaptureStatusResponse {
+	status: CaptureStatus | null;
+}
 
 function activeTab(): Promise<chrome.tabs.Tab | undefined> {
 	return new Promise((resolve) => {
-		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) =>
-			resolve(tabs[0]),
-		);
+		chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+			resolve(tabs[0]);
+		});
 	});
 }
 
-async function captureStatus(tabId: number): Promise<CaptureStatus | null> {
-	try {
-		const response = (await chrome.runtime.sendMessage({
-			type: "capture_status",
-			tabId,
-		})) as { status?: CaptureStatus | null } | undefined;
-		return response?.status ?? null;
-	} catch {
-		// No receiver means the worker has no retained or in-flight status.
-		return null;
+function isStatusResponse(value: unknown): value is CaptureStatusResponse {
+	return Boolean(value && typeof value === "object" && "status" in value);
+}
+
+async function requestCaptureStatus(tabId: number): Promise<CaptureStatus | null> {
+	const response: unknown = await chrome.runtime.sendMessage({
+		type: "capture_status",
+		tabId,
+	});
+	if (!isStatusResponse(response)) {
+		throw new Error("The extension worker returned no capture status.");
 	}
+	return response.status;
+}
+
+async function requestCaptureStart(tabId: number): Promise<CaptureStatus> {
+	const response: unknown = await chrome.runtime.sendMessage({
+		type: "capture_start",
+		tabId,
+	});
+	if (!isStatusResponse(response) || response.status === null) {
+		throw new Error("The extension worker did not acknowledge the capture.");
+	}
+	return response.status;
 }
 
 function statusTone(phase: CapturePhase): string {
@@ -47,102 +66,165 @@ function statusTone(phase: CapturePhase): string {
 	}
 }
 
-async function init() {
-	const stored = await chrome.storage.sync.get("settings");
-	const settings = { ...DEFAULT_SETTINGS, ...stored.settings };
-	const client = new ClepsydraClient(settings.server_url);
-
+function init(): void {
 	const dot = document.getElementById("status-dot") as HTMLElement;
 	const text = document.getElementById("status-text") as HTMLElement;
 	const error = document.getElementById("error-msg") as HTMLElement;
 	const button = document.getElementById("capture-btn") as HTMLButtonElement;
 	const panel = document.getElementById("capture-status") as HTMLElement;
+	const optionsLink = document.getElementById("options-link") as HTMLAnchorElement;
 
+	let stopped = false;
+	let startPending = false;
+	let captureUiGeneration = 0;
+	let pollTimer: number | undefined;
+
+	const clearError = () => {
+		error.textContent = "";
+		error.style.display = "none";
+	};
 	const showError = (message: string) => {
 		error.textContent = message;
 		error.style.display = "block";
 	};
-	const renderStatus = (status: CaptureStatus) => {
-		panel.textContent = status.detail;
-		panel.dataset.tone = statusTone(status.phase);
+	const renderPhase = (phase: CapturePhase, detail: string) => {
+		panel.textContent = detail;
+		panel.dataset.tone = statusTone(phase);
 		panel.style.display = "block";
-		button.disabled = isInProgress(status.phase);
+		button.disabled = isInProgress(phase);
 	};
-
-	let stopped = false;
-	let pollTimer: number | undefined;
+	const renderStatus = (status: CaptureStatus) => {
+		renderPhase(status.phase, status.detail);
+	};
 	const stopPolling = () => {
 		stopped = true;
 		if (pollTimer !== undefined) clearTimeout(pollTimer);
 		pollTimer = undefined;
+	};
+	const showStatusTransportError = () => {
+		showError(STATUS_TRANSPORT_ERROR);
+		button.disabled = false;
+	};
+	const showAbsentStatus = () => {
+		clearError();
+		renderPhase(
+			"error",
+			"No capture is currently running. You can try Capture This Page again.",
+		);
 	};
 	const schedulePoll = (tabId: number) => {
 		if (stopped || pollTimer !== undefined) return;
 		pollTimer = setTimeout(async () => {
 			pollTimer = undefined;
 			if (stopped) return;
-			const status = await captureStatus(tabId);
-			if (stopped || status === null) return;
-			renderStatus(status);
-			if (isInProgress(status.phase)) schedulePoll(tabId);
+			try {
+				const status = await requestCaptureStatus(tabId);
+				if (stopped) return;
+				if (status === null) {
+					showAbsentStatus();
+					return;
+				}
+				clearError();
+				renderStatus(status);
+				if (isInProgress(status.phase)) schedulePoll(tabId);
+			} catch {
+				if (!stopped) showStatusTransportError();
+			}
 		}, POLL_INTERVAL_MS);
 	};
 
+	// All interaction and teardown hooks are installed before initialization can
+	// wait on storage, tab lookup, worker rehydration, or server reachability.
 	window.addEventListener("unload", stopPolling);
-
-	const tab = await activeTab();
-	if (isRestrictedUrl(tab?.url)) {
-		button.disabled = true;
-		showError(describeInjectionFailure(tab?.url));
-	} else if (tab?.id !== undefined) {
-		const status = await captureStatus(tab.id);
-		if (status) {
-			renderStatus(status);
-			if (isInProgress(status.phase)) schedulePoll(tab.id);
-		}
-	}
-
-	const reachable = await client.isReachable();
-	dot.classList.add(reachable ? "connected" : "disconnected");
-	text.textContent = reachable
-		? `Connected to ${settings.server_url}`
-		: "Server unreachable";
-
 	button.addEventListener("click", async () => {
-		const target = await activeTab();
-		if (target?.id === undefined) {
-			showError("No active tab to capture.");
-			return;
-		}
-
-		const starting: CaptureStatus = {
-			phase: "capturing",
-			detail: "reading the page…",
-		};
-		renderStatus(starting);
+		if (stopped || startPending || button.disabled) return;
+		startPending = true;
+		captureUiGeneration += 1;
+		clearError();
+		renderPhase("capturing", "Starting capture…");
 		try {
-			const response = (await chrome.runtime.sendMessage({
-				type: "capture_start",
-				tabId: target.id,
-			})) as { status?: CaptureStatus | null } | undefined;
-			const status = response?.status ?? starting;
+			const target = await activeTab();
+			if (stopped) return;
+			if (target?.id === undefined) {
+				renderPhase("error", "No active tab to capture.");
+				return;
+			}
+			if (isRestrictedUrl(target.url)) {
+				renderPhase("error", describeInjectionFailure(target.url));
+				button.disabled = true;
+				return;
+			}
+
+			renderPhase("capturing", "reading the page…");
+			const status = await requestCaptureStart(target.id);
+			if (stopped) return;
 			renderStatus(status);
 			if (isInProgress(status.phase)) schedulePoll(target.id);
 		} catch (err) {
-			renderStatus({
-				phase: "error",
-				detail: `Capture could not start: ${String(err)}`,
-			});
+			if (stopped) return;
+			const reason = err instanceof Error ? err.message : String(err);
+			const punctuatedReason = /[.!?]$/.test(reason) ? reason : `${reason}.`;
+			renderPhase(
+				"error",
+				`Capture could not start: ${punctuatedReason} Try again.`,
+			);
+		} finally {
+			startPending = false;
 		}
 	});
+	optionsLink.addEventListener("click", (event) => {
+		event?.preventDefault();
+		chrome.runtime.openOptionsPage();
+	});
 
-	(document.getElementById("options-link") as HTMLElement).addEventListener(
-		"click",
-		(e) => {
-			e.preventDefault();
-			chrome.runtime.openOptionsPage();
-		},
-	);
+	void (async () => {
+		const openingGeneration = captureUiGeneration;
+		const stored = await chrome.storage.sync.get("settings");
+		if (stopped) return;
+		const settings = { ...DEFAULT_SETTINGS, ...stored.settings };
+		const client = new ClepsydraClient(settings.server_url);
+
+		// Reachability is informational. It never gates capture interaction or
+		// mutates capture feedback.
+		void client
+			.isReachable()
+			.catch(() => false)
+			.then((reachable) => {
+				if (stopped) return;
+				dot.classList.add(reachable ? "connected" : "disconnected");
+				text.textContent = reachable
+					? `Connected to ${settings.server_url}`
+					: "Server unreachable";
+			});
+
+		if (captureUiGeneration !== openingGeneration) return;
+		const tab = await activeTab();
+		if (stopped || captureUiGeneration !== openingGeneration) return;
+		if (isRestrictedUrl(tab?.url)) {
+			button.disabled = true;
+			showError(describeInjectionFailure(tab?.url));
+			return;
+		}
+		if (tab?.id === undefined) return;
+
+		try {
+			const status = await requestCaptureStatus(tab.id);
+			if (
+				stopped ||
+				captureUiGeneration !== openingGeneration ||
+				status === null
+			) {
+				return;
+			}
+			clearError();
+			renderStatus(status);
+			if (isInProgress(status.phase)) schedulePoll(tab.id);
+		} catch {
+			if (!stopped && captureUiGeneration === openingGeneration) {
+				showStatusTransportError();
+			}
+		}
+	})();
 }
 
-void init();
+init();
