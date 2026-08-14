@@ -39,7 +39,7 @@ vi.mock("#/api/location", () => ({
 }));
 
 vi.mock("#/hooks/useClock", () => ({
-  useClock: () => new Date("2026-08-09T12:00:00Z"),
+  useClock: () => new Date(2026, 7, 9, 12),
 }));
 
 vi.mock("#/hooks/useOpenTab", () => ({
@@ -117,6 +117,15 @@ describe("Atrium feed river placement", () => {
     expect(screen.queryByText("Vessel · Inventory")).not.toBeInTheDocument();
     expect(
       screen.queryByText("Subjects, by frequency"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does not render the retired aphorism card or quotation", () => {
+    render(<Atrium />);
+
+    expect(screen.queryByText("Aphorism")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/The notebook is a net for catching days\./),
     ).not.toBeInTheDocument();
   });
 });

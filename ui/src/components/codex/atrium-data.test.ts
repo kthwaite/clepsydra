@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  aphorismForDay,
   buildHeatmap,
   daystampLabel,
   deriveInventory,
@@ -26,14 +25,6 @@ describe("daystart presentation", () => {
     expect(greeting(new Date(2026, 0, 1, 14))).toBe("Good afternoon");
     expect(greeting(new Date(2026, 0, 1, 20))).toBe("Good evening");
     expect(greeting(new Date(2026, 0, 1, 23))).toBe("Good night");
-  });
-
-  it("rotates the aphorism by day and stays stable within a day", () => {
-    const a = aphorismForDay(new Date(2026, 7, 7, 1));
-    const b = aphorismForDay(new Date(2026, 7, 7, 23));
-    expect(a).toEqual(b);
-    expect(a.text).toBeTruthy();
-    expect(a.who).toBeTruthy();
   });
 
   it("formats BCL countdowns with sign and locale separators", () => {

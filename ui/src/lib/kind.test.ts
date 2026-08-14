@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  ASSIGNABLE_KINDS,
   KIND_META,
   KINDS,
   kindColorVar,
@@ -8,6 +9,7 @@ import {
   resolveKind,
   resolveKindFromPath,
 } from "#/lib/kind";
+import type { Kind } from "#/lib/kind";
 
 describe("resolveKindFromPath", () => {
   it("maps known top-level folders to kinds (case-insensitive)", () => {
@@ -92,6 +94,16 @@ describe("resolveKind prefers backend kind", () => {
     expect(resolveKind({ path: "journals/2026-05-31.md", kind: null })).toBe(
       "JOURNAL",
     );
+  });
+});
+
+describe("assignable kinds", () => {
+  it("excludes quotation while retaining it in the backend-compatible kind set", () => {
+    const backendKind: Kind = "QUOTE";
+
+    expect(KINDS).toContain(backendKind);
+    expect(ASSIGNABLE_KINDS).not.toContain(backendKind);
+    expect(ASSIGNABLE_KINDS).toContain("NOTE");
   });
 });
 

@@ -24,6 +24,25 @@ describe("repairs route", () => {
     });
   });
 
+  it("keeps quotation available as a backend-facing page kind filter", () => {
+    expect(parseRepairSearch({ pageKind: "QUOTE" })).toEqual({
+      pageKind: "QUOTE",
+    });
+    expect(
+      repairFiltersToSearch(
+        {},
+        {
+          kind: [],
+          project: "",
+          pageKind: "QUOTE",
+          actionable: undefined,
+          limit: 100,
+          offset: 0,
+        },
+      ),
+    ).toMatchObject({ pageKind: "QUOTE" });
+  });
+
   it("writes workspace filter changes back to clean URL search state", () => {
     expect(
       repairFiltersToSearch(
