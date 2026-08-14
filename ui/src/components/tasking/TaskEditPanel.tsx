@@ -85,9 +85,7 @@ function useDebounced(
 
     const next = pending.current;
     pending.current = null;
-    const delivery = queue.current.then(() =>
-      onChangeRef.current(next.value),
-    );
+    const delivery = queue.current.then(() => onChangeRef.current(next.value));
     active.current = delivery;
     queue.current = delivery.catch(() => {
       // A failed save remains pending for an explicit retry, unless a newer
@@ -252,20 +250,53 @@ export function TaskEditPanel({
   // fallback focus target.
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Immediate patch helper
-  const patchNow = useCallback(
-    (p: PatchTaskRequest) => {
-      patch.mutate({ id: task.id, patch: p });
-    },
-    [patch, task.id],
-  );
+  // Every Tasking PATCH enters one serial queue. `mutateAsync` retains the
+  // mutation hook's optimistic onMutate behavior while giving archive a single
+  // barrier for immediate controls, debounced fields, and earlier failures.
   const patchAsync = patch.mutateAsync;
-  const savePatch = useCallback(
-    async (p: PatchTaskRequest) => {
-      await patchAsync({ id: task.id, patch: p });
+  const patchQueue = useRef<Promise<void>>(Promise.resolve());
+  const failedPatchFields = useRef(new Set<keyof PatchTaskRequest>());
+  const coordinatorTaskId = useRef(task.id);
+  const enqueuePatch = useCallback(
+    (nextPatch: PatchTaskRequest) => {
+      const requestTaskId = task.id;
+      const fields = Object.keys(nextPatch) as (keyof PatchTaskRequest)[];
+      const request = patchQueue.current.then(async () => {
+        try {
+          await patchAsync({ id: requestTaskId, patch: nextPatch });
+          if (coordinatorTaskId.current === requestTaskId) {
+            for (const field of fields) failedPatchFields.current.delete(field);
+          }
+        } catch (error) {
+          if (coordinatorTaskId.current === requestTaskId) {
+            for (const field of fields) failedPatchFields.current.add(field);
+          }
+          throw error;
+        }
+      });
+      patchQueue.current = request.catch(() => undefined);
+      return request;
     },
     [patchAsync, task.id],
   );
+  const patchNow = useCallback(
+    (nextPatch: PatchTaskRequest) => {
+      void enqueuePatch(nextPatch).catch(() => undefined);
+    },
+    [enqueuePatch],
+  );
+  const savePatch = enqueuePatch;
+  const awaitPatchBarrier = useCallback(async () => {
+    await patchQueue.current;
+    if (failedPatchFields.current.size > 0) {
+      throw new Error("One or more task edits failed to save.");
+    }
+  }, []);
+  useEffect(() => {
+    coordinatorTaskId.current = task.id;
+    failedPatchFields.current.clear();
+  }, [task.id]);
+
 
   // Debounced patches (300ms). Each hook exposes an awaited flush used by
   // archive so no local edit can be discarded or race the DELETE.
@@ -360,6 +391,7 @@ export function TaskEditPanel({
       ]) {
         await flush();
       }
+      await awaitPatchBarrier();
       await archive.mutateAsync({ path: task.path });
       setEditTaskId(null);
     } catch {
@@ -433,7 +465,11 @@ export function TaskEditPanel({
           </div>
 
           {/* Panel body */}
-          <div className="flex flex-1 flex-col gap-[13px] overflow-y-auto p-[14px_12px]">
+          <fieldset
+            className="flex flex-1 flex-col gap-[13px] overflow-y-auto p-[14px_12px]"
+            disabled={archiving}
+            data-testid="edit-panel-fields"
+          >
             {/* TITLE */}
             <EdField label="TASKING / TITLE">
               <textarea
@@ -648,7 +684,7 @@ export function TaskEditPanel({
                 )}
               </div>
             </EdField>
-          </div>
+          </fieldset>
 
           {/* Footer — leaving it disarms a pending archive */}
           <div
