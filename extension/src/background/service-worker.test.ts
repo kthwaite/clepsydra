@@ -155,9 +155,7 @@ async function loadWorker(
 			: { notifications: { create: createNotification } }),
 		tabs: {
 			get: tabsGet,
-			query: vi.fn(async () => [
-				{ id: 7, url: "https://example.com/article" },
-			]),
+			query: vi.fn(async () => [{ id: 7, url: "https://example.com/article" }]),
 			sendMessage: vi.fn(async () => ({})),
 			onRemoved: {
 				addListener: (next: (tabId: number) => void) => {
@@ -215,9 +213,8 @@ async function loadWorker(
 		dispatch,
 		query,
 		removeTab: (tabId = 7) => onRemoved(tabId),
-		clickToolbar: (
-			tab = { id: 7, url: "https://example.com/article" },
-		) => onToolbarClicked(tab),
+		clickToolbar: (tab = { id: 7, url: "https://example.com/article" }) =>
+			onToolbarClicked(tab),
 		runCommand: (command = "capture-page") => onCommand(command),
 		notifications,
 		badgeText,
@@ -662,13 +659,7 @@ describe("service-worker capture feedback", () => {
 
 		expect(dependencies.ingestArchive.mock.calls[0]?.[0]).toEqual(
 			expect.objectContaining({
-				tags: [
-					"archive",
-					"example.com",
-					"2026-08",
-					"default",
-					"reading",
-				],
+				tags: ["archive", "example.com", "2026-08", "default", "reading"],
 			}),
 		);
 	});

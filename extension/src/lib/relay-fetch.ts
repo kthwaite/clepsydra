@@ -11,8 +11,8 @@
  * capture happens in the browser at all.
  */
 
-import { webext } from "#/lib/webext";
 import { SNAPSHOT_NETWORK_TIMEOUT_MS } from "#/lib/singlefile";
+import { webext } from "#/lib/webext";
 
 export const RELAY_PORT_NAME = "singlefile-relay";
 const RELAY_CHUNK_BYTES = 4 * 1024 * 1024;

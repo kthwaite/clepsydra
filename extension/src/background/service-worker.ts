@@ -677,9 +677,7 @@ async function handleWorkerMessage(
 			workerMessage.captureId,
 		);
 		if (!captureAttempt) return undefined;
-		if (
-			!(await reportPhase(tabId, captureAttempt.attemptId, "processing"))
-		) {
+		if (!(await reportPhase(tabId, captureAttempt.attemptId, "processing"))) {
 			return undefined;
 		}
 		pendingTransfers.acceptMetadata(

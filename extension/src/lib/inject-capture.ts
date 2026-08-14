@@ -13,7 +13,7 @@ interface LegacyTabsApi {
 		tabId: number,
 		details: { file: string; allFrames?: boolean },
 		callback?: () => void,
-	) => Promise<unknown> | void;
+	) => Promise<unknown> | undefined;
 }
 
 /** `chrome.runtime.lastError` is MV2-era and absent from chrome-types. */
@@ -52,7 +52,7 @@ function executeLegacyScript(
 			else resolveOnce();
 		};
 
-		let completion: Promise<unknown> | void;
+		let completion: Promise<unknown> | undefined;
 		try {
 			completion = executeScript(tabId, details, callback);
 		} catch {

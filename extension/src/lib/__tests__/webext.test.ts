@@ -60,7 +60,9 @@ describe("browser-only entry modules", () => {
 			title: "Captured page",
 			documentElement: { lang: "en" },
 		});
-		vi.stubGlobal("window", { location: { href: "https://example.com/article" } });
+		vi.stubGlobal("window", {
+			location: { href: "https://example.com/article" },
+		});
 		vi.doMock("@mozilla/readability", () => ({
 			Readability: class {
 				parse() {

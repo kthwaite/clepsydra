@@ -98,12 +98,15 @@ describe("executeCaptureScript", () => {
 	});
 
 	it("captures anyway when a frame cannot be scripted", async () => {
-		const { calls, capture } = await stubScripting("chrome", async (injection) => {
-			if (injection.files[0] === "content/frames.js") {
-				throw new Error("Cannot access contents of the frame");
-			}
-			return [];
-		});
+		const { calls, capture } = await stubScripting(
+			"chrome",
+			async (injection) => {
+				if (injection.files[0] === "content/frames.js") {
+					throw new Error("Cannot access contents of the frame");
+				}
+				return [];
+			},
+		);
 
 		await expect(capture(7)).resolves.toBeUndefined();
 		expect(calls.map((call) => call.files[0])).toContain("content/capture.js");
@@ -130,14 +133,17 @@ describe("executeCaptureScript", () => {
 
 	it("supports promise-only browser MV2 injection", async () => {
 		const files: string[] = [];
-		const executeScript = vi.fn(function (
-			_tabId: number,
-			details: LegacyInjection,
-		): Promise<unknown> {
-			if (arguments.length > 2) throw new TypeError("callback unsupported");
-			files.push(details.file);
-			return Promise.resolve([]);
-		});
+		const executeScript = vi.fn(
+			(
+				_tabId: number,
+				details: LegacyInjection,
+				...callbacks: Array<(() => void) | undefined>
+			): Promise<unknown> => {
+				if (callbacks.length > 0) throw new TypeError("callback unsupported");
+				files.push(details.file);
+				return Promise.resolve([]);
+			},
+		);
 		const capture = await loadLegacy("browser", executeScript);
 
 		await capture(7);

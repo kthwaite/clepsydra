@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type {
-	RelayPort,
 	createRelayFetch as CreateRelayFetchValue,
 	handleRelayFetchPort as HandleRelayFetchPortValue,
+	RelayPort,
 } from "#/lib/relay-fetch";
 
 type CreateRelayFetch = typeof CreateRelayFetchValue;
@@ -159,22 +159,23 @@ describe("createRelayFetch", () => {
 		vi.resetModules();
 		vi.unstubAllGlobals();
 		const ports = pairedPorts();
-		let browserHandleRelayFetchPort: HandleRelayFetchPort;
 		const workerFetch = vi
 			.fn()
 			.mockResolvedValue(response(new Uint8Array([7, 8])));
-		const connect = vi.fn(() => {
-			browserHandleRelayFetchPort(ports.worker, workerFetch);
-			return ports.content;
-		});
+		const connect = vi.fn();
 		vi.stubGlobal("browser", { runtime: { connect } });
 		vi.stubGlobal("chrome", undefined);
 		// The boundary is intentionally reloaded after its namespace global is set.
 		const relay = await import("#/lib/relay-fetch");
-		browserHandleRelayFetchPort = relay.handleRelayFetchPort;
+		connect.mockImplementation(() => {
+			relay.handleRelayFetchPort(ports.worker, workerFetch);
+			return ports.content;
+		});
 		vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("CORS")));
 
-		const result = await relay.createRelayFetch()("https://cdn.example.com/a.png");
+		const result = await relay.createRelayFetch()(
+			"https://cdn.example.com/a.png",
+		);
 
 		expect(new Uint8Array(await result.arrayBuffer())).toEqual(
 			new Uint8Array([7, 8]),

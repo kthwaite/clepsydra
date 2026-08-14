@@ -4,13 +4,7 @@ import { mergeCaptureTags, normalizeCaptureTags } from "../capture-tags";
 describe("normalizeCaptureTags", () => {
 	it("normalizes strings while preserving first-seen order and case distinctions", () => {
 		expect(
-			normalizeCaptureTags([
-				"  #research ",
-				"",
-				7,
-				"Research",
-				"research",
-			]),
+			normalizeCaptureTags(["  #research ", "", 7, "Research", "research"]),
 		).toEqual(["research", "Research"]);
 	});
 
