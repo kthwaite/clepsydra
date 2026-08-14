@@ -75,6 +75,7 @@ pub struct MutationCoordinator {
     #[cfg(test)]
     before_batch_lock_hook: parking_lot::Mutex<Option<Arc<BeforeBatchLockHook>>>,
     batch_publication_failure: parking_lot::Mutex<Option<usize>>,
+    batch_rollback_failure: parking_lot::Mutex<Option<usize>>,
 }
 
 /// A transport-independent description of the index change emitted after a
@@ -184,8 +185,8 @@ pub enum BatchRecoveryError {
         "index reconciliation failed: {index}; filesystem rollback also failed: {rollback}"
     )]
     IndexRollback {
-        index: IndexError,
         #[source]
+        index: IndexError,
         rollback: BatchMutationError,
     },
     #[error("transaction workspace cleanup failed: {0}")]
@@ -707,6 +708,7 @@ impl MutationCoordinator {
             #[cfg(test)]
             before_batch_lock_hook: parking_lot::Mutex::new(None),
             batch_publication_failure: parking_lot::Mutex::new(None),
+            batch_rollback_failure: parking_lot::Mutex::new(None),
         }
     }
 
@@ -743,6 +745,15 @@ impl MutationCoordinator {
     #[doc(hidden)]
     pub fn set_batch_publication_fail_after(&self, intent_index: Option<usize>) {
         *self.batch_publication_failure.lock() = intent_index;
+    }
+
+    /// Inject one deterministic batch rollback failure for integration tests.
+    ///
+    /// `Some(index)` fails immediately before rolling back that zero-based intent;
+    /// `None` clears a pending failure.
+    #[doc(hidden)]
+    pub fn set_batch_rollback_fail_after(&self, intent_index: Option<usize>) {
+        *self.batch_rollback_failure.lock() = intent_index;
     }
 
     pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
@@ -1181,6 +1192,7 @@ impl MutationCoordinator {
         let rubbish_catalog_events = command.rubbish_catalog_events();
         let deferred_commit = command.contains_rubbish_lifecycle();
         let batch_publication_failure = self.batch_publication_failure.lock().take();
+        let batch_rollback_failure = self.batch_rollback_failure.lock().take();
 
         run_shielded_mutation(shield_path, move |filesystem_applied| async move {
             let blocking_root = root.clone();
@@ -1225,7 +1237,12 @@ impl MutationCoordinator {
                 }
                 let rollback_directory = directory.clone();
                 let rollback = tokio::task::spawn_blocking(move || {
-                    let result = prepared.rollback();
+                    let result = match batch_rollback_failure {
+                        Some(intent_index) => {
+                            prepared.rollback_with_failure_at(intent_index)
+                        }
+                        None => prepared.rollback(),
+                    };
                     (guard, result)
                 })
                 .await;

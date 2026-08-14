@@ -51,3 +51,34 @@ Task commit subject: `fix(vault): rollback lifecycle batch after index failure`.
 ## Concerns
 
 No concerns within the assigned lifecycle rollback path. The direct/offline `execute_batch_direct` recovery contract remains unchanged because this assignment targets guarded async lifecycle execution.
+
+## Review round 1 correction
+
+### Changes
+
+- `BatchRecoveryError::IndexRollback` now exposes the primary `IndexError` through `std::error::Error::source`; the secondary rollback failure remains visible in the complete display string.
+- Added a deterministic one-shot guarded rollback failpoint matching `RollbackPublication(index)`.
+- Added symmetric async archive and restore coverage combining injected catalog reconciliation failure with `RollbackPublication(0)`. Each test verifies `BatchRecoveryError::IndexRollback`, `filesystem_applied=true`, no notification, the published filesystem state, the reverted page/catalog/link index state, one retained transaction workspace, and successful `recover_pending` after the one-shot failure.
+
+### RED
+
+- `cargo test --test batch_mutation_test batch_index_rollback_preserves_primary_error_as_source` — exit 101: 0 passed, 1 failed, 7 filtered. `Error::source` exposed the secondary rollback error instead of the primary index error.
+- `cargo test --test batch_mutation_test index_and_rollback_failure` — exit 101 at compilation: two `E0599` errors because the deterministic guarded rollback-injection API did not exist.
+
+### GREEN
+
+- `cargo test --test batch_mutation_test batch_index_rollback_preserves_primary_error_as_source` — exit 0: 1 passed, 0 failed, 7 filtered.
+- `cargo test --test batch_mutation_test index_and_rollback_failure` — exit 0: 2 passed, 0 failed, 8 filtered; 0.26s.
+- `cargo test --lib batch_mutation::tests::rollback_` — exit 0: 3 passed, 0 failed, 1,048 filtered; 0.28s.
+- `cargo test --test batch_mutation_test` — exit 0: 10 passed, 0 failed; 0.73s.
+- `cargo test --test mutation_test rubbish_lifecycle_notifies_once_only_after_publication_and_indexing` — exit 0: 1 passed, 0 failed, 65 filtered; 0.24s.
+
+### Commit and self-review
+
+Follow-up commit subject: `fix(vault): preserve index source on rollback failure`.
+
+Self-review found the failpoint isolated to the existing hidden deterministic-injection convention: it is consumed once by `execute_batch_with_guard`, affects only the rollback attempt after reconciliation failure, and leaves normal production rollback on the allocation-free default path. Recovery uses the unchanged non-injected rollback path. No purge restore-safety code changed.
+
+### Concerns
+
+None.

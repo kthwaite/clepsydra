@@ -2,13 +2,13 @@ use std::fs;
 use std::sync::Arc;
 
 use clepsydra::vault::Vault;
-use clepsydra::vault::batch_mutation::recover_pending;
-use clepsydra::vault::index::VaultIndex;
+use clepsydra::vault::batch_mutation::{BatchMutationError, recover_pending};
+use clepsydra::vault::index::{IndexError, VaultIndex};
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::mutation::{MutationOp, MutationPlanner};
 use clepsydra::vault::mutation_coordinator::{
-    MutationCoordinator, MutationError, MutationNotification,
+    BatchRecoveryError, MutationCoordinator, MutationError, MutationNotification,
 };
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::rubbish::{RubbishManifest, RubbishStore};
@@ -61,6 +61,18 @@ fn indexed_link_target(db_path: &std::path::Path, source_id: Uuid) -> Option<Str
             |row| row.get(0),
         )
         .unwrap()
+}
+
+#[test]
+fn batch_index_rollback_preserves_primary_error_as_source() {
+    let error = BatchRecoveryError::IndexRollback {
+        index: IndexError::Other("primary index failure".to_owned()),
+        rollback: BatchMutationError::Validation("secondary rollback failure".to_owned()),
+    };
+
+    let source = std::error::Error::source(&error).unwrap();
+    assert!(source.to_string().contains("primary index failure"));
+    assert!(error.to_string().contains("secondary rollback failure"));
 }
 
 #[test]
@@ -253,7 +265,10 @@ struct ArchiveIndexFailureFixture {
     error: MutationError,
 }
 
-async fn execute_archive_index_failure(trigger_sql: &str) -> ArchiveIndexFailureFixture {
+async fn execute_archive_index_failure(
+    trigger_sql: &str,
+    rollback_failure: Option<usize>,
+) -> ArchiveIndexFailureFixture {
     let target =
         b"+++\nid = \"019fd000-0000-7000-8000-000000000241\"\ntitle = \"Target\"\n+++\nBody.\n";
     let backlink = b"+++\nid = \"019fd000-0000-7000-8000-000000000242\"\ntitle = \"Backlink\"\n+++\nSee [[Target]].\n";
@@ -291,7 +306,9 @@ async fn execute_archive_index_failure(trigger_sql: &str) -> ArchiveIndexFailure
     let index = IndexHandle::spawn(raw_index, vault.clone());
     let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let observed = Arc::clone(&notifications);
-    let error = MutationCoordinator::new()
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_batch_rollback_fail_after(rollback_failure);
+    let error = coordinator
         .execute_batch(
             &vault,
             &index,
@@ -328,7 +345,10 @@ struct RestoreIndexFailureFixture {
     error: MutationError,
 }
 
-async fn execute_restore_index_failure(trigger_sql: &str) -> RestoreIndexFailureFixture {
+async fn execute_restore_index_failure(
+    trigger_sql: &str,
+    rollback_failure: Option<usize>,
+) -> RestoreIndexFailureFixture {
     let target =
         b"+++\nid = \"019fd000-0000-7000-8000-000000000261\"\ntitle = \"Target\"\n+++\nBody.\n";
     let backlink = b"+++\nid = \"019fd000-0000-7000-8000-000000000262\"\ntitle = \"Backlink\"\n+++\nSee [[Target]].\n";
@@ -370,7 +390,9 @@ async fn execute_restore_index_failure(trigger_sql: &str) -> RestoreIndexFailure
     let index = IndexHandle::spawn(raw_index, vault.clone());
     let notifications = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let observed = Arc::clone(&notifications);
-    let error = MutationCoordinator::new()
+    let coordinator = MutationCoordinator::new();
+    coordinator.set_batch_rollback_fail_after(rollback_failure);
+    let error = coordinator
         .execute_batch(
             &vault,
             &index,
@@ -400,6 +422,7 @@ async fn rubbish_archive_catalog_failure_rolls_back_the_entire_index_unit() {
         "CREATE TRIGGER fail_rubbish_catalog
          BEFORE INSERT ON rubbish_items
          BEGIN SELECT RAISE(ABORT, 'catalog failure'); END;",
+        None,
     )
     .await;
 
@@ -441,6 +464,7 @@ async fn rubbish_archive_link_failure_rolls_back_page_catalog_and_links_together
          BEFORE UPDATE OF target_path ON links
          WHEN (SELECT armed FROM lifecycle_failure_probe) = 1
          BEGIN SELECT RAISE(ABORT, 'link failure'); END;",
+        None,
     )
     .await;
 
@@ -471,11 +495,75 @@ async fn rubbish_archive_link_failure_rolls_back_page_catalog_and_links_together
 }
 
 #[tokio::test]
+async fn rubbish_archive_index_and_rollback_failure_retains_recoverable_transaction() {
+    let fixture = execute_archive_index_failure(
+        "CREATE TRIGGER fail_rubbish_catalog
+         BEFORE INSERT ON rubbish_items
+         BEGIN SELECT RAISE(ABORT, 'catalog failure'); END;",
+        Some(0),
+    )
+    .await;
+
+    assert!(fixture.error.filesystem_applied());
+    match &fixture.error {
+        MutationError::BatchRecovery { directory, source } => {
+            assert!(directory.is_dir());
+            assert!(matches!(
+                source.as_ref(),
+                BatchRecoveryError::IndexRollback { .. }
+            ));
+            assert!(
+                std::error::Error::source(source.as_ref())
+                    .unwrap()
+                    .to_string()
+                    .contains("catalog failure")
+            );
+            assert!(source.to_string().contains("RollbackPublication(0)"));
+        }
+        error => panic!("expected retained batch recovery, got {error:?}"),
+    }
+    assert!(!fixture.vault.resolve(&fixture.path).exists());
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_ok()
+    );
+    assert_eq!(transaction_workspace_count(&fixture.vault), 1);
+    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
+    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
+    assert_eq!(
+        indexed_link_target(&fixture.db_path, fixture.backlink_id),
+        Some(fixture.page_id.to_string())
+    );
+    assert!(fixture.notifications.lock().is_empty());
+
+    assert!(recover_pending(fixture.vault.root()).unwrap().is_empty());
+    assert_eq!(
+        fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
+        fixture.expected_bytes
+    );
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_err()
+    );
+    assert_eq!(transaction_workspace_count(&fixture.vault), 0);
+    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 1);
+    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 0);
+    assert_eq!(
+        indexed_link_target(&fixture.db_path, fixture.backlink_id),
+        Some(fixture.page_id.to_string())
+    );
+    assert!(fixture.notifications.lock().is_empty());
+}
+
+#[tokio::test]
 async fn rubbish_restore_catalog_failure_rolls_back_the_entire_index_unit() {
     let fixture = execute_restore_index_failure(
         "CREATE TRIGGER fail_rubbish_catalog
          BEFORE DELETE ON rubbish_items
          BEGIN SELECT RAISE(ABORT, 'catalog failure'); END;",
+        None,
     )
     .await;
 
@@ -515,6 +603,7 @@ async fn rubbish_restore_link_failure_rolls_back_page_catalog_and_links_together
          BEFORE UPDATE OF target_path ON links
          WHEN (SELECT armed FROM lifecycle_failure_probe) = 1
          BEGIN SELECT RAISE(ABORT, 'link failure'); END;",
+        None,
     )
     .await;
 
@@ -525,6 +614,70 @@ async fn rubbish_restore_link_failure_rolls_back_page_catalog_and_links_together
             ..
         }
     ));
+    assert!(!fixture.vault.resolve(&fixture.path).exists());
+    assert_eq!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .unwrap(),
+        fixture.item
+    );
+    assert_eq!(transaction_workspace_count(&fixture.vault), 0);
+    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 0);
+    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 1);
+    assert_eq!(
+        indexed_link_target(&fixture.db_path, fixture.backlink_id),
+        None
+    );
+    assert!(fixture.notifications.lock().is_empty());
+}
+
+#[tokio::test]
+async fn rubbish_restore_index_and_rollback_failure_retains_recoverable_transaction() {
+    let fixture = execute_restore_index_failure(
+        "CREATE TRIGGER fail_rubbish_catalog
+         BEFORE DELETE ON rubbish_items
+         BEGIN SELECT RAISE(ABORT, 'catalog failure'); END;",
+        Some(0),
+    )
+    .await;
+
+    assert!(fixture.error.filesystem_applied());
+    match &fixture.error {
+        MutationError::BatchRecovery { directory, source } => {
+            assert!(directory.is_dir());
+            assert!(matches!(
+                source.as_ref(),
+                BatchRecoveryError::IndexRollback { .. }
+            ));
+            assert!(
+                std::error::Error::source(source.as_ref())
+                    .unwrap()
+                    .to_string()
+                    .contains("catalog failure")
+            );
+            assert!(source.to_string().contains("RollbackPublication(0)"));
+        }
+        error => panic!("expected retained batch recovery, got {error:?}"),
+    }
+    assert_eq!(
+        fs::read(fixture.vault.resolve(&fixture.path)).unwrap(),
+        fixture.item.bytes
+    );
+    assert!(
+        RubbishStore::for_vault(fixture.vault.root())
+            .read_item(&fixture.item_id.to_string())
+            .is_err()
+    );
+    assert_eq!(transaction_workspace_count(&fixture.vault), 1);
+    assert_eq!(indexed_page_count(&fixture.db_path, "target.md"), 0);
+    assert_eq!(indexed_catalog_count(&fixture.db_path, fixture.item_id), 1);
+    assert_eq!(
+        indexed_link_target(&fixture.db_path, fixture.backlink_id),
+        None
+    );
+    assert!(fixture.notifications.lock().is_empty());
+
+    assert!(recover_pending(fixture.vault.root()).unwrap().is_empty());
     assert!(!fixture.vault.resolve(&fixture.path).exists());
     assert_eq!(
         RubbishStore::for_vault(fixture.vault.root())

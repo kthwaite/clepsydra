@@ -497,11 +497,30 @@ impl PreparedBatch {
     }
 
     pub(crate) fn rollback(&mut self) -> Result<(), BatchMutationError> {
+        self.rollback_inner::<false>(usize::MAX)
+    }
+
+    pub(crate) fn rollback_with_failure_at(
+        &mut self,
+        intent_index: usize,
+    ) -> Result<(), BatchMutationError> {
+        self.rollback_inner::<true>(intent_index)
+    }
+
+    fn rollback_inner<const INJECT_FAILURE: bool>(
+        &mut self,
+        failure_index: usize,
+    ) -> Result<(), BatchMutationError> {
         self.ensure_phase_certain()?;
         match self.manifest.phase {
             TransactionPhase::Prepared => {}
             TransactionPhase::Committing => {
-                rollback_manifest(&self.root, &self.directory, &self.manifest)?;
+                rollback_manifest::<INJECT_FAILURE>(
+                    &self.root,
+                    &self.directory,
+                    &self.manifest,
+                    failure_index,
+                )?;
             }
             phase => {
                 return Err(BatchMutationError::InvalidPhase {
@@ -806,7 +825,7 @@ pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutation
         match manifest.phase {
             TransactionPhase::Prepared => remove_workspace(&directory)?,
             TransactionPhase::Committing => {
-                rollback_manifest(root, &directory, &manifest)?;
+                rollback_manifest::<false>(root, &directory, &manifest, usize::MAX)?;
                 remove_workspace(&directory)?;
             }
             TransactionPhase::FilesystemCommitted => {
@@ -1113,10 +1132,11 @@ fn publish_intent(
     }
 }
 
-fn rollback_manifest(
+fn rollback_manifest<const INJECT_FAILURE: bool>(
     root: &Path,
     directory: &Path,
     manifest: &TransactionManifest,
+    failure_index: usize,
 ) -> Result<(), BatchMutationError> {
     for path in &manifest.remove_directories {
         let absolute = root.join(path);
@@ -1127,6 +1147,13 @@ fn rollback_manifest(
         }
     }
     for index in (0..manifest.intents.len()).rev() {
+        if INJECT_FAILURE && index == failure_index {
+            return Err(BatchMutationError::filesystem(
+                "execute deterministic rollback publication failpoint",
+                directory,
+                io::Error::other(format!("RollbackPublication({index})")),
+            ));
+        }
         hit_test_failpoint(TestFailpoint::RollbackPublication(index), directory)?;
         let rollback_path = directory.join("rollback").join(index.to_string());
         match &manifest.intents[index] {
