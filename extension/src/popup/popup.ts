@@ -27,7 +27,9 @@ function isStatusResponse(value: unknown): value is CaptureStatusResponse {
 	return Boolean(value && typeof value === "object" && "status" in value);
 }
 
-async function requestCaptureStatus(tabId: number): Promise<CaptureStatus | null> {
+async function requestCaptureStatus(
+	tabId: number,
+): Promise<CaptureStatus | null> {
 	const response: unknown = await chrome.runtime.sendMessage({
 		type: "capture_status",
 		tabId,
@@ -72,12 +74,14 @@ function init(): void {
 	const error = document.getElementById("error-msg") as HTMLElement;
 	const button = document.getElementById("capture-btn") as HTMLButtonElement;
 	const panel = document.getElementById("capture-status") as HTMLElement;
-	const optionsLink = document.getElementById("options-link") as HTMLAnchorElement;
+	const optionsLink = document.getElementById(
+		"options-link",
+	) as HTMLAnchorElement;
 
 	let stopped = false;
 	let startPending = false;
 	let captureUiGeneration = 0;
-	let pollTimer: number | undefined;
+	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 
 	const clearError = () => {
 		error.textContent = "";

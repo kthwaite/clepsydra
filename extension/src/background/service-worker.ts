@@ -333,7 +333,6 @@ function nextStatusTimestamp(previous?: CaptureStatus): number {
 	return previous ? Math.max(now, previous.updatedAt + 1) : now;
 }
 
-
 /** Drive the toolbar badge without changing the retained status revision. */
 function applyBadge(tabId: number, status: CaptureStatus): void {
 	const api = badgeApi();
@@ -372,29 +371,26 @@ function applyBadge(tabId: number, status: CaptureStatus): void {
 
 function scheduleCapturingRecovery(tabId: number, status: CaptureStatus): void {
 	if (status.phase !== "capturing") return;
-	setTimeout(
-		() => {
-			const current = statuses.get(tabId);
-			if (
-				current?.attemptId !== status.attemptId ||
-				current.updatedAt !== status.updatedAt ||
-				current.phase !== "capturing"
-			) {
-				return;
+	setTimeout(() => {
+		const current = statuses.get(tabId);
+		if (
+			current?.attemptId !== status.attemptId ||
+			current.updatedAt !== status.updatedAt ||
+			current.phase !== "capturing"
+		) {
+			return;
+		}
+		void reportPhase(
+			tabId,
+			status.attemptId,
+			"error",
+			CAPTURING_RECOVERY_DETAIL,
+		).then((applied) => {
+			if (applied) {
+				showNotification("Capture Failed", CAPTURING_RECOVERY_DETAIL);
 			}
-			void reportPhase(
-				tabId,
-				status.attemptId,
-				"error",
-				CAPTURING_RECOVERY_DETAIL,
-			).then((applied) => {
-				if (applied) {
-					showNotification("Capture Failed", CAPTURING_RECOVERY_DETAIL);
-				}
-			});
-		},
-		CAPTURING_RECOVERY_MS,
-	);
+		});
+	}, CAPTURING_RECOVERY_MS);
 }
 
 void statusReady.then(() => {
@@ -422,7 +418,6 @@ function claimAttempt(tabId: number): AttemptClaim {
 	applyBadge(tabId, status);
 	return { status, started: true, persisted: persistStatuses() };
 }
-
 
 async function reportPhase(
 	tabId: number | undefined,
@@ -560,10 +555,7 @@ async function injectClaimedCapture(
 	tab: chrome.tabs.Tab,
 	attemptId: string,
 ): Promise<void> {
-	if (
-		tab.id === undefined ||
-		statuses.get(tab.id)?.attemptId !== attemptId
-	) {
+	if (tab.id === undefined || statuses.get(tab.id)?.attemptId !== attemptId) {
 		return;
 	}
 	try {
@@ -576,7 +568,10 @@ async function injectClaimedCapture(
 	}
 }
 
-async function fetchTabAndInject(tabId: number, attemptId: string): Promise<void> {
+async function fetchTabAndInject(
+	tabId: number,
+	attemptId: string,
+): Promise<void> {
 	try {
 		const tab = await chrome.tabs.get(tabId);
 		await injectClaimedCapture(tab, attemptId);
@@ -622,7 +617,10 @@ async function handleWorkerMessage(
 	const tabId = sender.tab?.id;
 
 	if (workerMessage.type === "capture_meta") {
-		const attemptId = bindCaptureToCurrentAttempt(tabId, workerMessage.captureId);
+		const attemptId = bindCaptureToCurrentAttempt(
+			tabId,
+			workerMessage.captureId,
+		);
 		if (!attemptId) return undefined;
 		if (!(await reportPhase(tabId, attemptId, "processing"))) return undefined;
 		pendingTransfers.acceptMetadata(
@@ -634,7 +632,10 @@ async function handleWorkerMessage(
 	}
 
 	if (workerMessage.type === CAPTURE_CHUNK) {
-		const attemptId = bindCaptureToCurrentAttempt(tabId, workerMessage.captureId);
+		const attemptId = bindCaptureToCurrentAttempt(
+			tabId,
+			workerMessage.captureId,
+		);
 		if (!attemptId) return undefined;
 		let completed: CompletedTransfer<CaptureMetadata> | null;
 		try {
@@ -666,9 +667,7 @@ async function handleWorkerMessage(
 			processCapture(metadata, snapshotHtml, completedTabId, attemptId).catch(
 				async (err) => {
 					const detail = String(err);
-					if (
-						await reportPhase(completedTabId, attemptId, "error", detail)
-					) {
+					if (await reportPhase(completedTabId, attemptId, "error", detail)) {
 						showNotification("Archive Failed", detail);
 					}
 				},
@@ -676,9 +675,7 @@ async function handleWorkerMessage(
 		);
 		if (!started) {
 			const detail = `${metadata.title} is already being archived.`;
-			if (
-				await reportPhase(completedTabId, attemptId, "duplicate", detail)
-			) {
+			if (await reportPhase(completedTabId, attemptId, "duplicate", detail)) {
 				showNotification("Capture In Progress", detail);
 			}
 		}
@@ -686,7 +683,10 @@ async function handleWorkerMessage(
 	}
 
 	if (workerMessage.type === CAPTURE_ABORT) {
-		const attemptId = bindCaptureToCurrentAttempt(tabId, workerMessage.captureId);
+		const attemptId = bindCaptureToCurrentAttempt(
+			tabId,
+			workerMessage.captureId,
+		);
 		pendingTransfers.abort(workerMessage.captureId);
 		if (!attemptId || tabId === undefined) return undefined;
 		rememberAbortError(tabId, workerMessage.error);

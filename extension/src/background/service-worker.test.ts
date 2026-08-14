@@ -87,9 +87,11 @@ function createSessionArea(initial: Record<string, unknown> = {}): SessionArea {
 	};
 }
 
-async function loadWorker(options: WorkerOptions = {}): Promise<WorkerEndpoint> {
+async function loadWorker(
+	options: WorkerOptions = {},
+): Promise<WorkerEndpoint> {
 	let listener: WorkerListener | undefined;
-	let onRemoved = (_tabId: number) => undefined;
+	let onRemoved: (tabId: number) => void = () => undefined;
 	const notifications: Array<{ title: string; message: string }> = [];
 	const badgeText = vi.fn();
 	const title = vi.fn();
@@ -127,9 +129,11 @@ async function loadWorker(options: WorkerOptions = {}): Promise<WorkerEndpoint> 
 			session,
 		},
 		notifications: {
-			create: vi.fn(async (notification: { title: string; message: string }) => {
-				notifications.push(notification);
-			}),
+			create: vi.fn(
+				async (notification: { title: string; message: string }) => {
+					notifications.push(notification);
+				},
+			),
 		},
 		tabs: {
 			get: tabsGet,
@@ -219,7 +223,9 @@ function statusMatching(phase: string, detail: string) {
 	});
 }
 
-async function currentStatus(worker: WorkerEndpoint): Promise<CaptureStatus | null> {
+async function currentStatus(
+	worker: WorkerEndpoint,
+): Promise<CaptureStatus | null> {
 	const response = await worker.query();
 	// The harness dispatch boundary deliberately returns unknown like runtime messaging.
 	const typedResponse = response as { status: CaptureStatus | null };
@@ -279,7 +285,10 @@ describe("service-worker capture feedback", () => {
 		await firstWorker.dispatch({ type: "capture_start", tabId: 7 });
 		await vi.waitFor(async () => {
 			expect(await currentStatus(firstWorker)).toEqual(
-				statusMatching("error", "Capture could not start: Cannot access this page"),
+				statusMatching(
+					"error",
+					"Capture could not start: Cannot access this page",
+				),
 			);
 		});
 		const beforeRestart = await firstWorker.query();
@@ -410,7 +419,9 @@ describe("service-worker capture feedback", () => {
 			if (writes === 1) await firstWrite.promise;
 			Object.assign(session.data, structuredClone(items));
 		});
-		dependencies.executeCaptureScript.mockRejectedValueOnce(new Error("blocked"));
+		dependencies.executeCaptureScript.mockRejectedValueOnce(
+			new Error("blocked"),
+		);
 		const worker = await loadWorker({ session });
 		const start = worker.dispatch({ type: "capture_start", tabId: 7 });
 		await vi.waitFor(() => expect(writes).toBe(1));
@@ -425,7 +436,10 @@ describe("service-worker capture feedback", () => {
 			);
 		});
 		await vi.waitFor(() => {
-			const stored = session.data.captureStatuses as Record<string, CaptureStatus>;
+			const stored = session.data.captureStatuses as Record<
+				string,
+				CaptureStatus
+			>;
 			expect(stored["7"].phase).toBe("error");
 		});
 	});
@@ -462,7 +476,9 @@ describe("service-worker capture feedback", () => {
 		await startTransfer(worker);
 
 		await vi.waitFor(async () => {
-			expect(await currentStatus(worker)).toEqual(statusMatching(phase, detail));
+			expect(await currentStatus(worker)).toEqual(
+				statusMatching(phase, detail),
+			);
 		});
 	});
 
@@ -510,15 +526,16 @@ describe("service-worker capture feedback", () => {
 		);
 
 		await worker.dispatch(
-			{ type: "capture_abort", captureId: "aborted", error: "message port closed" },
+			{
+				type: "capture_abort",
+				captureId: "aborted",
+				error: "message port closed",
+			},
 			{ tab: { id: 7 } },
 		);
 
 		expect(await currentStatus(worker)).toEqual(
-			statusMatching(
-				"error",
-				"Snapshot transfer aborted: message port closed",
-			),
+			statusMatching("error", "Snapshot transfer aborted: message port closed"),
 		);
 	});
 
@@ -597,22 +614,28 @@ describe("service-worker capture feedback", () => {
 			name: "content error",
 			trigger: async (worker: WorkerEndpoint) => {
 				await worker.dispatch(
-					{ type: "capture_error", error: "The page produced an empty snapshot." },
+					{
+						type: "capture_error",
+						error: "The page produced an empty snapshot.",
+					},
 					{ tab: { id: 7 } },
 				);
 			},
 			detail: "The page produced an empty snapshot.",
 		},
-	])("publishes structured error detail for $name", async ({ trigger, detail }) => {
-		const worker = await loadWorker();
-		await trigger(worker);
+	])(
+		"publishes structured error detail for $name",
+		async ({ trigger, detail }) => {
+			const worker = await loadWorker();
+			await trigger(worker);
 
-		await vi.waitFor(async () => {
-			expect(await currentStatus(worker)).toEqual(
-				statusMatching("error", detail),
-			);
-		});
-	});
+			await vi.waitFor(async () => {
+				expect(await currentStatus(worker)).toEqual(
+					statusMatching("error", detail),
+				);
+			});
+		},
+	);
 
 	it("ignores completion from an attempt superseded after a generic error", async () => {
 		const ingest = deferred<{
@@ -625,7 +648,9 @@ describe("service-worker capture feedback", () => {
 		dependencies.ingestArchive.mockReturnValueOnce(ingest.promise);
 		const worker = await loadWorker();
 		await startTransfer(worker, "old-capture");
-		await vi.waitFor(() => expect(dependencies.ingestArchive).toHaveBeenCalled());
+		await vi.waitFor(() =>
+			expect(dependencies.ingestArchive).toHaveBeenCalled(),
+		);
 		await worker.dispatch(
 			{ type: "capture_error", error: "old attempt lost its channel" },
 			{ tab: { id: 7 } },
@@ -690,10 +715,14 @@ describe("service-worker capture feedback", () => {
 		dependencies.ingestArchive.mockReturnValueOnce(ingest.promise);
 		const worker = await loadWorker({ session });
 		await startTransfer(worker);
-		await vi.waitFor(() => expect(dependencies.ingestArchive).toHaveBeenCalled());
+		await vi.waitFor(() =>
+			expect(dependencies.ingestArchive).toHaveBeenCalled(),
+		);
 
 		worker.removeTab();
-		await vi.waitFor(async () => expect(await currentStatus(worker)).toBeNull());
+		await vi.waitFor(async () =>
+			expect(await currentStatus(worker)).toBeNull(),
+		);
 		ingest.resolve({
 			status: "created",
 			vault_path: "archives/example/removed.md",
@@ -706,7 +735,10 @@ describe("service-worker capture feedback", () => {
 
 		expect(await currentStatus(worker)).toBeNull();
 		await vi.waitFor(() => {
-			const stored = session.data.captureStatuses as Record<string, CaptureStatus>;
+			const stored = session.data.captureStatuses as Record<
+				string,
+				CaptureStatus
+			>;
 			expect(stored?.["7"]).toBeUndefined();
 		});
 	});
@@ -769,7 +801,9 @@ describe("service-worker capture feedback", () => {
 	});
 
 	it("keeps generic error notifications unconditional", async () => {
-		dependencies.ingestArchive.mockRejectedValueOnce(new Error("vault offline"));
+		dependencies.ingestArchive.mockRejectedValueOnce(
+			new Error("vault offline"),
+		);
 		const worker = await loadWorker({
 			settings: { notify_on_success: false, notify_on_duplicate: false },
 		});

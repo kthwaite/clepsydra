@@ -11,7 +11,9 @@ vi.mock("#/lib/api-client", () => ({
 	},
 }));
 
-type Listener = (event?: { preventDefault: () => void }) => void | Promise<void>;
+type Listener = (event?: {
+	preventDefault: () => void;
+}) => void | Promise<void>;
 interface StatusResponse {
 	status: CaptureStatus | null;
 }
@@ -113,13 +115,15 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 	let statusQuery = 0;
 	let startRequest = 0;
 	let tabQuery = 0;
-	let unload = () => undefined;
+	let unload: () => void = () => undefined;
 	const close = vi.fn();
 	const scripting = vi.fn(async () => []);
 	const sendMessage = vi.fn(async (message: { type?: string }) => {
 		messages.push(message);
-		const outcomes = message.type === "capture_start" ? startOutcomes : statusOutcomes;
-		const index = message.type === "capture_start" ? startRequest++ : statusQuery++;
+		const outcomes =
+			message.type === "capture_start" ? startOutcomes : statusOutcomes;
+		const index =
+			message.type === "capture_start" ? startRequest++ : statusQuery++;
 		const outcome = outcomes[Math.min(index, outcomes.length - 1)];
 		if (outcome instanceof Error) throw outcome;
 		return outcome;
@@ -139,8 +143,7 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 		},
 		tabs: {
 			query: vi.fn((_query: unknown, callback: (tabs: TestTab[]) => void) => {
-				const outcome =
-					tabOutcomes[Math.min(tabQuery, tabOutcomes.length - 1)];
+				const outcome = tabOutcomes[Math.min(tabQuery, tabOutcomes.length - 1)];
 				tabQuery += 1;
 				void Promise.resolve(outcome).then(callback);
 			}),
@@ -256,10 +259,7 @@ describe("popup capture feedback", () => {
 		},
 	] as const)("uses one feedback surface for a $name", async ({ target }) => {
 		const popup = await openPopup({
-			tabs: [
-				[{ id: 7, url: "https://example.com/article" }],
-				[...target],
-			],
+			tabs: [[{ id: 7, url: "https://example.com/article" }], [...target]],
 		});
 
 		await popup.elements["capture-btn"].emit("click");
@@ -383,7 +383,9 @@ describe("popup capture feedback", () => {
 		expect(popup.elements["capture-status"].textContent).toContain(
 			"Capture could not start: worker unavailable.",
 		);
-		expect(popup.elements["capture-status"].textContent).toContain("Try again.");
+		expect(popup.elements["capture-status"].textContent).toContain(
+			"Try again.",
+		);
 
 		await popup.elements["capture-btn"].emit("click");
 
@@ -403,7 +405,9 @@ describe("popup capture feedback", () => {
 		const popup = await openPopup();
 
 		expect(popup.elements["status-dot"].classes).toContain("disconnected");
-		expect(popup.elements["status-text"].textContent).toBe("Server unreachable");
+		expect(popup.elements["status-text"].textContent).toBe(
+			"Server unreachable",
+		);
 		expect(popup.elements["capture-btn"].disabled).toBe(false);
 		expect(popup.elements["error-msg"].style.display).not.toBe("block");
 	});
@@ -436,9 +440,7 @@ describe("popup capture feedback", () => {
 	it("cancels polling when the popup unloads", async () => {
 		vi.useFakeTimers();
 		const popup = await openPopup({
-			status: [
-				{ status: captureStatus("capturing", "reading the page…") },
-			],
+			status: [{ status: captureStatus("capturing", "reading the page…") }],
 		});
 
 		expect(popup.elements["capture-btn"].disabled).toBe(true);
@@ -449,7 +451,10 @@ describe("popup capture feedback", () => {
 	});
 
 	it("ships native accessible controls and live feedback in the real popup markup", () => {
-		const markup = readFileSync(new URL("./popup.html", import.meta.url), "utf8");
+		const markup = readFileSync(
+			new URL("./popup.html", import.meta.url),
+			"utf8",
+		);
 
 		expect(markup).toMatch(/<html\s+lang="en">/);
 		expect(markup).toMatch(/<button\s+id="capture-btn"[^>]*>/);
