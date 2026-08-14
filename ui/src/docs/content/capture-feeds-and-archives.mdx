@@ -31,6 +31,8 @@ inlined as a `data:` URI) to `POST /api/vault/archive`. The server
 deconstructs the snapshot and stores its resources in the CAS; the extension
 does not hash, split, or upload resources itself.
 
+Configured default tags are always included. The popup's Additional tags field applies only to the capture you are starting and does not change Settings. After capture, ordinary tags can be added or removed from the archived Folio; its captured body and snapshot remain protected.
+
 The Chromium manifest requests `activeTab`, `storage`, `notifications`, and
 `scripting`, plus host access for `http://*/*` and `https://*/*`. The Firefox
 manifest puts the same HTTP(S) host patterns directly in `permissions` alongside
@@ -52,10 +54,12 @@ update or retry the existing archive.
 
 ### Understand archive Folios and CAS blobs
 
-The archive Folio contains editable Markdown plus archive metadata. Its snapshot
-and resource bytes live in the separate CAS, keyed as `sha256:<digest>`. Equal
-bytes are stored once and their reference count is incremented. The server can
-serve a referenced blob from `/api/vault/cas/<hash>`.
+The archive Folio keeps its captured title and body read-only while allowing
+ordinary frontmatter tags to be amended. Computed tags remain read-only. Its
+snapshot and resource bytes live in the separate CAS, keyed as
+`sha256:<digest>`. Equal bytes are stored once and their reference count is
+incremented. The server can serve a referenced blob from
+`/api/vault/cas/<hash>`.
 
 Deleting an archive Folio through Clepsydra removes the Folio and then runs a
 post-delete hook that attempts to decrement each distinct snapshot and resource
@@ -71,8 +75,8 @@ maintenance accordingly rather than assuming an automatic retention purge.
 CAS blobs are not editable note attachments. Attachments are user-managed files
 beneath `vault.attachment_folder`, referenced by attachment URLs and deleted
 explicitly through the attachment API. CAS blobs are immutable archived bytes,
-deduplicated by content hash and reference-counted by archive pages. Editing an
-archive Folio's Markdown does not edit or replace either kind of byte.
+deduplicated by content hash and reference-counted by archive pages. Changing an
+archive Folio's ordinary tags does not edit or replace either kind of byte.
 
 ### View an archived snapshot
 

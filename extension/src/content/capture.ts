@@ -15,6 +15,7 @@ import { sendCaptureTransfer } from "#/lib/chunked-transfer";
 import { createRelayFetch } from "#/lib/relay-fetch";
 import { captureSnapshot } from "#/lib/singlefile";
 import { DEFAULT_SETTINGS } from "#/lib/types";
+import { webext } from "#/lib/webext";
 
 export interface CaptureMetadata {
 	url: string;
@@ -50,12 +51,12 @@ function clean(value: string | null | undefined): string | undefined {
 }
 
 function send(message: unknown): Promise<unknown> {
-	return chrome.runtime.sendMessage(message);
+	return webext.runtime.sendMessage(message);
 }
 
 async function maxResourceSizeMb(): Promise<number> {
 	try {
-		const stored = await chrome.storage.sync.get("settings");
+		const stored = await webext.storage.sync.get("settings");
 		const settings = { ...DEFAULT_SETTINGS, ...stored.settings };
 		return settings.max_blob_size_mb;
 	} catch {

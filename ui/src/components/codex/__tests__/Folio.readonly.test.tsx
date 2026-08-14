@@ -6,7 +6,7 @@ import {
   Outlet,
   RouterProvider,
 } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./FolioProperties.mock";
@@ -21,7 +21,6 @@ vi.mock("#/editor/usePageEditor", () => ({ usePageEditor: usePageEditorMock }));
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => mobileLayoutState.matches,
 }));
-vi.mock("#/editor/SaveIndicator", () => ({ SaveIndicator: () => null }));
 vi.mock("#/editor/SlateEditor", () => ({
   SlateEditor: (props: Record<string, unknown>) => {
     slateProps.current = props;
@@ -157,6 +156,121 @@ describe("Folio read-only bodies", () => {
     window.scrollTo = vi.fn();
     mobileLayoutState.matches = false;
     slateProps.current = null;
+  });
+
+  it("edits ordinary tags on protected archives without exposing computed tags or the body", async () => {
+    const user = userEvent.setup();
+    const state = editor({
+      archive: ARCHIVE_META,
+      tags: ["saved"],
+      computedTags: ["archive"],
+    });
+    usePageEditorMock.mockReturnValue(state);
+
+    const rendered = renderFolioInRouter(ARCHIVE_PATH);
+
+    const tags = await screen.findByRole("combobox", {
+      name: "Archive tags",
+    });
+    expect(slateProps.current?.readOnly).toBe(true);
+    expect(screen.queryByRole("textbox", { name: "Page title" })).toBeNull();
+    const computed = screen.getByRole("grid", { name: "Read-only Tags" });
+    expect(within(computed).getByText("archive")).toBeInTheDocument();
+    expect(within(computed).queryByRole("button")).toBeNull();
+
+    await user.type(tags, "reading{Enter}");
+    expect(state.setTags).toHaveBeenCalledWith(["saved", "reading"]);
+
+    rendered.unmount();
+    const updatedState = { ...state, tags: ["saved", "reading"] };
+    usePageEditorMock.mockReturnValue(updatedState);
+    const updated = renderFolioInRouter(ARCHIVE_PATH);
+    const editable = await screen.findByRole("grid", {
+      name: "Archive tags",
+    });
+    await user.click(
+      within(editable).getByRole(
+        "button",
+        { name: "Remove saved" },
+      ),
+    );
+    expect(state.setTags).toHaveBeenLastCalledWith(["reading"]);
+
+    state.saveNow.mockClear();
+    await user.click(
+      await screen.findByRole("combobox", { name: "Archive tags" }),
+    );
+    await user.tab();
+    expect(state.saveNow).toHaveBeenCalledTimes(1);
+    updated.unmount();
+  });
+
+  it("offers conflict recovery for archived tag edits", async () => {
+    const user = userEvent.setup();
+    const confirmReload = vi.spyOn(window, "confirm").mockReturnValue(true);
+    const state = editor({
+      archive: ARCHIVE_META,
+      tags: ["saved"],
+      saveStatus: "error",
+      saveError: "page changed since it was loaded",
+      revisionConflict: { currentRevision: "rev-b" },
+    });
+    usePageEditorMock.mockReturnValue(state);
+
+    renderFolioInRouter(ARCHIVE_PATH);
+    await user.click(
+      await screen.findByRole("button", { name: "Reload from disk" }),
+    );
+
+    expect(confirmReload).toHaveBeenCalledWith(
+      "Reload this page from disk? Your unsaved changes will be discarded.",
+    );
+    expect(state.reloadAfterConflict).toHaveBeenCalledTimes(1);
+    confirmReload.mockRestore();
+  });
+
+  it("does not expose archive tag editing for other page presentations", () => {
+    const cases = [
+      {
+        path: "notes/a-note.md",
+        overrides: {
+          archive: null,
+          kind: "NOTE",
+          computedTags: ["note"],
+          readonly: false,
+        },
+      },
+      {
+        path: "conversations/a-conversation.md",
+        overrides: {
+          archive: null,
+          kind: "AI_CONVERSATION",
+          computedTags: ["ai-conversation"],
+          conversationProvider: "claude",
+          readonly: false,
+        },
+      },
+      {
+        path: "recipes/a-recipe.md",
+        overrides: {
+          archive: null,
+          kind: "RECIPE",
+          computedTags: ["recipe"],
+          readonly: false,
+          bodyMarkdown:
+            "A dish.\n\nINGREDIENTS\n• one lemon\n\nSTEPS\n1. Serve.\n\nNOTES\nEnjoy.\n",
+        },
+      },
+    ];
+
+    for (const { path, overrides } of cases) {
+      usePageEditorMock.mockReturnValue(editor(overrides));
+      const rendered = renderFolioInRouter(path);
+      expect(
+        screen.queryByRole("combobox", { name: "Archive tags" }),
+      ).toBeNull();
+      rendered.unmount();
+    }
   });
 
   it("renders a protected archive body as non-editable", () => {

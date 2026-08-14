@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { CapturePhase, CaptureStatus } from "#/lib/badge";
+const parseHTML = createRequire(import.meta.url)("linkedom").parseHTML as (
+	markup: string,
+) => { document: Document; window: Window };
 
 const client = vi.hoisted(() => ({ isReachable: vi.fn(async () => true) }));
 
@@ -28,10 +32,14 @@ type StartOutcome = StatusResponse | Error;
 type TabOutcome = TestTab[] | Promise<TestTab[]>;
 
 class FakeElement {
+	private ownTextContent = "";
 	textContent = "";
 	disabled = false;
+	value = "";
+	className = "";
 	style = { display: "" };
 	dataset: Record<string, string> = {};
+	readonly children: FakeElement[] = [];
 	readonly classes = new Set<string>();
 	private readonly listeners = new Map<string, Listener>();
 	readonly classList = {
@@ -44,6 +52,19 @@ class FakeElement {
 		this.listeners.set(type, listener);
 	}
 
+	replaceChildren() {
+		this.children.length = 0;
+		this.textContent = "";
+		this.ownTextContent = "";
+	}
+
+	append(child: FakeElement) {
+		this.children.push(child);
+		this.textContent = `${this.ownTextContent}${this.children
+			.map((item) => item.textContent)
+			.join("")}`;
+	}
+
 	async emit(type: string) {
 		await this.listeners.get(type)?.({ preventDefault: () => undefined });
 	}
@@ -54,12 +75,14 @@ interface PopupOptions {
 	starts?: StartOutcome[];
 	tabs?: TabOutcome[];
 	storage?: Promise<Record<string, unknown>>;
+	namespace?: "browser" | "chrome";
 }
 
 interface PopupHarness {
 	elements: Record<string, FakeElement>;
 	messages: unknown[];
 	sendMessage: Mock;
+	storageSet: Mock;
 	scripting: Mock;
 	close: Mock;
 	unload: () => void;
@@ -69,8 +92,16 @@ function captureStatus(
 	phase: CapturePhase,
 	detail: string,
 	attemptId = `attempt-${phase}`,
+	additionalTags: string[] = [],
 ): CaptureStatus {
-	return { phase, detail, attemptId, startedAt: 10, updatedAt: 20 };
+	return {
+		phase,
+		detail,
+		attemptId,
+		startedAt: 10,
+		updatedAt: 20,
+		additionalTags,
+	};
 }
 
 function deferred<T>() {
@@ -81,6 +112,34 @@ function deferred<T>() {
 		reject = rejectPromise;
 	});
 	return { promise, resolve, reject };
+}
+
+async function openRealPopup(settings: Record<string, unknown>) {
+	const markup = readFileSync(new URL("./popup.html", import.meta.url), "utf8");
+	const parsed = parseHTML(markup);
+	const storageSet = vi.fn();
+	const api = {
+		storage: {
+			sync: {
+				get: vi.fn(async () => ({ settings })),
+				set: storageSet,
+			},
+		},
+		tabs: { query: vi.fn(async () => []) },
+		runtime: {
+			sendMessage: vi.fn(),
+			openOptionsPage: vi.fn(),
+		},
+		scripting: { executeScript: vi.fn() },
+	};
+	vi.stubGlobal("document", parsed.document);
+	vi.stubGlobal("window", parsed.window);
+	vi.stubGlobal("chrome", api);
+	vi.stubGlobal("browser", undefined);
+
+	await import("./popup");
+	await settle();
+	return { document: parsed.document, storageSet };
 }
 
 function messageHasType(message: unknown, type: string): boolean {
@@ -102,6 +161,8 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 		"capture-btn",
 		"capture-status",
 		"options-link",
+		"default-tags",
+		"additional-tags",
 	];
 	const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement()]));
 	const messages: unknown[] = [];
@@ -118,6 +179,7 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 	let unload: () => void = () => undefined;
 	const close = vi.fn();
 	const scripting = vi.fn(async () => []);
+	const storageSet = vi.fn();
 	const sendMessage = vi.fn(async (message: { type?: string }) => {
 		messages.push(message);
 		const outcomes =
@@ -130,6 +192,7 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 	});
 	vi.stubGlobal("document", {
 		getElementById: (id: string) => elements[id],
+		createElement: () => new FakeElement(),
 	});
 	vi.stubGlobal("window", {
 		close,
@@ -137,15 +200,18 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 			if (type === "unload") unload = listener;
 		},
 	});
-	vi.stubGlobal("chrome", {
+	const api = {
 		storage: {
-			sync: { get: vi.fn(() => options.storage ?? Promise.resolve({})) },
+			sync: {
+				get: vi.fn(() => options.storage ?? Promise.resolve({})),
+				set: storageSet,
+			},
 		},
 		tabs: {
-			query: vi.fn((_query: unknown, callback: (tabs: TestTab[]) => void) => {
+			query: vi.fn(async () => {
 				const outcome = tabOutcomes[Math.min(tabQuery, tabOutcomes.length - 1)];
 				tabQuery += 1;
-				void Promise.resolve(outcome).then(callback);
+				return outcome;
 			}),
 		},
 		runtime: {
@@ -153,12 +219,23 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 			openOptionsPage: vi.fn(),
 		},
 		scripting: { executeScript: scripting },
-	});
+	};
+	const namespace = options.namespace ?? "chrome";
+	vi.stubGlobal(namespace, api);
+	vi.stubGlobal(namespace === "chrome" ? "browser" : "chrome", undefined);
 
 	// Opening a popup is the module boundary; a static import cannot reload it.
 	await import("./popup");
 	await settle();
-	return { elements, messages, sendMessage, scripting, close, unload };
+	return {
+		elements,
+		messages,
+		sendMessage,
+		storageSet,
+		scripting,
+		close,
+		unload,
+	};
 }
 
 beforeEach(() => {
@@ -172,7 +249,186 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+describe("popup tag controls", () => {
+	it("ships labelled native controls in the real popup markup", () => {
+		const markup = readFileSync(
+			new URL("./popup.html", import.meta.url),
+			"utf8",
+		);
+		const { document } = parseHTML(markup);
+		const defaultsLabel = document.querySelector("#capture-tags-label");
+		const input = document.querySelector<HTMLInputElement>("#additional-tags");
+		const inputLabel = document.querySelector('label[for="additional-tags"]');
+
+		expect(defaultsLabel?.textContent).toBe("Defaults");
+		expect(input?.tagName).toBe("INPUT");
+		expect(input?.getAttribute("type")).toBe("text");
+		expect(input?.hasAttribute("disabled")).toBe(false);
+		expect(inputLabel?.textContent).toBe("Additional tags");
+		expect(document.body.textContent).toMatch(/only to this capture/i);
+	});
+
+	it("renders immutable normalized defaults outside the additions input", async () => {
+		const popup = await openRealPopup({
+			default_tags: [" #archive ", "research", "archive"],
+		});
+		const input =
+			popup.document.querySelector<HTMLInputElement>("#additional-tags");
+		const defaults = Array.from(
+			popup.document.querySelectorAll<HTMLElement>("#default-tags .tag"),
+			(tag) => tag.textContent,
+		);
+
+		expect(defaults).toEqual(["archive", "research"]);
+		expect(input?.value).toBe("");
+		expect(popup.storageSet).not.toHaveBeenCalled();
+		expect(
+			popup.document.querySelector(
+				'#default-tags button, #default-tags input, #default-tags [role="button"]',
+			),
+		).toBeNull();
+	});
+
+	it("normalizes one-capture additions into the capture_start message", async () => {
+		const popup = await openPopup();
+		popup.elements["additional-tags"].value = " #reading, research, reading ";
+
+		await popup.elements["capture-btn"].emit("click");
+
+		expect(popup.messages).toContainEqual({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: ["reading", "research"],
+		});
+		expect(popup.storageSet).not.toHaveBeenCalled();
+	});
+	it("shows attempt-owned tags when start acknowledges an existing capture", async () => {
+		const popup = await openPopup({
+			starts: [
+				{
+					status: captureStatus(
+						"processing",
+						"building the snapshot…",
+						"existing",
+						["attempt-owned"],
+					),
+				},
+			],
+		});
+		popup.elements["additional-tags"].value = "replacement-draft";
+
+		await popup.elements["capture-btn"].emit("click");
+
+		expect(popup.elements["additional-tags"].value).toBe("attempt-owned");
+		expect(popup.elements["additional-tags"].disabled).toBe(true);
+	});
+
+	it("restores active additions and disables editing", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: captureStatus(
+						"processing",
+						"building the snapshot…",
+						"active",
+						["research", "reading"],
+					),
+				},
+			],
+		});
+
+		expect(popup.elements["additional-tags"].value).toBe("research, reading");
+		expect(popup.elements["additional-tags"].disabled).toBe(true);
+	});
+
+	it("does not restore additions from terminal status", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: captureStatus("done", "Archived.", "done", ["research"]),
+				},
+			],
+		});
+
+		expect(popup.elements["additional-tags"].value).toBe("");
+		expect(popup.elements["additional-tags"].disabled).toBe(false);
+	});
+
+	it("disables additions synchronously while active-tab lookup waits", async () => {
+		const tabLookup = deferred<TestTab[]>();
+		const popup = await openPopup({
+			tabs: [
+				[{ id: 7, url: "https://example.com/article" }],
+				tabLookup.promise,
+			],
+		});
+
+		const click = popup.elements["capture-btn"].emit("click");
+
+		expect(popup.elements["additional-tags"].disabled).toBe(true);
+		tabLookup.resolve([{ id: 7, url: "https://example.com/article" }]);
+		await click;
+	});
+
+	it("starts fresh when an active capture reaches a terminal status", async () => {
+		vi.useFakeTimers();
+		const popup = await openPopup({
+			status: [
+				{
+					status: captureStatus("capturing", "reading the page…", "active", [
+						"research",
+					]),
+				},
+				{ status: captureStatus("done", "Archived.", "active", ["research"]) },
+			],
+		});
+		expect(popup.elements["additional-tags"].value).toBe("research");
+
+		await vi.advanceTimersByTimeAsync(250);
+
+		expect(popup.elements["additional-tags"].value).toBe("");
+		expect(popup.elements["additional-tags"].disabled).toBe(false);
+	});
+
+	it("keeps capture interactive and reports unavailable defaults when settings fail", async () => {
+		const storage = deferred<Record<string, unknown>>();
+		const popup = await openPopup({ storage: storage.promise });
+		storage.reject(new Error("settings unavailable"));
+		await settle();
+		expect(popup.elements["default-tags"].textContent).toBe(
+			"Defaults unavailable",
+		);
+		expect(popup.elements["capture-btn"].disabled).toBe(false);
+		await popup.elements["capture-btn"].emit("click");
+		expect(popup.messages).toContainEqual({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: [],
+		});
+	});
+
+	it("cancels polling on unload without changing the additions draft", async () => {
+		vi.useFakeTimers();
+		const popup = await openPopup({
+			status: [{ status: captureStatus("capturing", "reading the page…") }],
+		});
+		popup.elements["additional-tags"].value = "unfinished draft";
+
+		popup.unload();
+		await vi.advanceTimersByTimeAsync(2_000);
+
+		expect(popup.elements["additional-tags"].value).toBe("unfinished draft");
+		expect(popup.messages).toHaveLength(1);
+	});
+});
+
 describe("popup capture feedback", () => {
+	it("loads and queries the active tab with only the browser namespace", async () => {
+		const popup = await openPopup({ namespace: "browser" });
+
+		expect(popup.messages).toContainEqual({ type: "capture_status", tabId: 7 });
+	});
+
 	it("binds capture before an unresolved connectivity probe completes", async () => {
 		let resolveReachability!: (reachable: boolean) => void;
 		client.isReachable.mockReturnValueOnce(
@@ -184,7 +440,11 @@ describe("popup capture feedback", () => {
 
 		await popup.elements["capture-btn"].emit("click");
 
-		expect(popup.messages).toContainEqual({ type: "capture_start", tabId: 7 });
+		expect(popup.messages).toContainEqual({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: [],
+		});
 		expect(popup.close).not.toHaveBeenCalled();
 		resolveReachability(true);
 		await settle();
@@ -196,7 +456,11 @@ describe("popup capture feedback", () => {
 
 		await popup.elements["capture-btn"].emit("click");
 
-		expect(popup.messages).toContainEqual({ type: "capture_start", tabId: 7 });
+		expect(popup.messages).toContainEqual({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: [],
+		});
 	});
 
 	it("disables immediately and suppresses duplicate clicks while tab lookup waits", async () => {
@@ -273,7 +537,11 @@ describe("popup capture feedback", () => {
 
 		await popup.elements["capture-btn"].emit("click");
 
-		expect(popup.messages).toContainEqual({ type: "capture_start", tabId: 7 });
+		expect(popup.messages).toContainEqual({
+			type: "capture_start",
+			tabId: 7,
+			additionalTags: [],
+		});
 		expect(popup.scripting).not.toHaveBeenCalled();
 		expect(popup.close).not.toHaveBeenCalled();
 		expect(popup.elements["capture-btn"].disabled).toBe(true);

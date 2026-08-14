@@ -58,6 +58,7 @@ import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
+import { TagInput } from "#/components/ui/tag-input";
 import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
 import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
 import { ConversationPresentationProvider } from "#/editor/conversation/presentation";
@@ -277,6 +278,17 @@ export function Folio({ tabId, path }: FolioProps) {
         : [],
     [tagSuggestionRequest.data, tagSuggestionsCurrent],
   );
+  const tagSuggestionsLoading =
+    tagSuggestionQuery.length > 0 &&
+    (!tagSuggestionsCurrent ||
+      tagSuggestionRequest.isLoading ||
+      tagSuggestionRequest.isFetching);
+  const tagSuggestionsError =
+    tagSuggestionsCurrent &&
+    !tagSuggestionRequest.isFetching &&
+    tagSuggestionRequest.error
+      ? new Error(tagSuggestionRequest.error.error)
+      : null;
   const updateTabLabel = useWorkspaceStore((s) => s.updateTabLabel);
   const updateTabPath = useWorkspaceStore((s) => s.updateTabPath);
   const setTabPageId = useWorkspaceStore((state) => state.setTabPageId);
@@ -864,6 +876,22 @@ export function Folio({ tabId, path }: FolioProps) {
     () => [...editableTags, ...computedTags],
     [computedTags, editableTags],
   );
+  const archiveTagEditor: ArchiveTagEditorProps | undefined =
+    bodyProtected && editor.archive
+      ? {
+          values: editableTags,
+          computedValues: computedTags,
+          suggestions: tagSuggestions,
+          onSuggestionQueryChange: setTagSuggestionQuery,
+          suggestionsLoading: tagSuggestionsLoading,
+          suggestionsError: tagSuggestionsError,
+          onRetrySuggestions: tagSuggestionRequest.refetch,
+          onChange: editor.setTags,
+          onBlur: () => {
+            void Promise.resolve(editor.saveNow()).catch(() => undefined);
+          },
+        }
+      : undefined;
   const inferred = editor.inferred;
   const project = editor.project;
 
@@ -957,7 +985,7 @@ export function Folio({ tabId, path }: FolioProps) {
             <Pip kind={kind} />
             {kindLabel(kind)}
           </span>
-          {folioReadOnly && editor.revisionConflict ? (
+          {folioReadOnly && !archiveTagEditor && editor.revisionConflict ? (
             <span className="text-xs text-destructive">
               Page changed on disk
             </span>
@@ -985,6 +1013,7 @@ export function Folio({ tabId, path }: FolioProps) {
           aliases={editor.aliases}
           encrypted={encrypted}
           archive={bodyProtected ? editor.archive : null}
+          archiveTagEditor={archiveTagEditor}
         />
       ) : (
         <div className="mt-4">
@@ -997,19 +1026,8 @@ export function Folio({ tabId, path }: FolioProps) {
             derivedTags={computedTags}
             tagSuggestions={tagSuggestions}
             onTagSuggestionQueryChange={setTagSuggestionQuery}
-            tagSuggestionsLoading={
-              tagSuggestionQuery.length > 0 &&
-              (!tagSuggestionsCurrent ||
-                tagSuggestionRequest.isLoading ||
-                tagSuggestionRequest.isFetching)
-            }
-            tagSuggestionsError={
-              tagSuggestionsCurrent &&
-              !tagSuggestionRequest.isFetching &&
-              tagSuggestionRequest.error
-                ? new Error(tagSuggestionRequest.error.error)
-                : null
-            }
+            tagSuggestionsLoading={tagSuggestionsLoading}
+            tagSuggestionsError={tagSuggestionsError}
             onRetryTagSuggestions={tagSuggestionRequest.refetch}
             onTagsChange={editor.setTags}
             aliases={editor.aliases}
@@ -1641,12 +1659,25 @@ function DesktopFolioLayout({
   );
 }
 
+type ArchiveTagEditorProps = {
+  values: string[];
+  computedValues: string[];
+  suggestions: string[];
+  onSuggestionQueryChange: (query: string) => void;
+  suggestionsLoading: boolean;
+  suggestionsError: Error | null;
+  onRetrySuggestions: () => void;
+  onChange: (tags: string[]) => void;
+  onBlur: () => void;
+};
+
 function ReadOnlyPageHeader({
   path,
   title,
   tags,
   aliases,
   archive,
+  archiveTagEditor,
   encrypted,
 }: {
   path: string;
@@ -1654,6 +1685,7 @@ function ReadOnlyPageHeader({
   tags: string[];
   aliases: string[];
   archive: NonNullable<PageMeta["archive"]> | null;
+  archiveTagEditor?: ArchiveTagEditorProps;
   encrypted: boolean;
 }) {
   const displayTitle = title || path.split("/").pop() || path;
@@ -1677,40 +1709,62 @@ function ReadOnlyPageHeader({
           View archived snapshot
         </Link>
       ) : null}
-      <dl className="cl-mono mt-2 grid gap-2 text-[10px]">
-        <div className="flex flex-wrap items-baseline gap-2">
-          <dt className="uppercase tracking-[0.12em] text-ink-mute">Tags</dt>
-          <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
-            {tags.length > 0
-              ? tags.map((tag) => (
+      {archiveTagEditor ? (
+        <TagInput
+          label="Tags"
+          ariaLabel="Archive tags"
+          values={archiveTagEditor.values}
+          readOnlyValues={archiveTagEditor.computedValues}
+          suggestions={archiveTagEditor.suggestions}
+          onSuggestionQueryChange={archiveTagEditor.onSuggestionQueryChange}
+          suggestionsLoading={archiveTagEditor.suggestionsLoading}
+          suggestionsError={archiveTagEditor.suggestionsError}
+          onRetrySuggestions={archiveTagEditor.onRetrySuggestions}
+          onChange={archiveTagEditor.onChange}
+          onBlur={archiveTagEditor.onBlur}
+          placeholder="Add tag..."
+        />
+      ) : null}
+      {!archiveTagEditor || aliases.length > 0 ? (
+        <dl className="cl-mono mt-2 grid gap-2 text-[10px]">
+          {!archiveTagEditor ? (
+            <div className="flex flex-wrap items-baseline gap-2">
+              <dt className="uppercase tracking-[0.12em] text-ink-mute">
+                Tags
+              </dt>
+              <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
+                {tags.length > 0
+                  ? tags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="border border-rule px-1.5 py-[1px]"
+                      >
+                        {tag}
+                      </span>
+                    ))
+                  : "—"}
+              </dd>
+            </div>
+          ) : null}
+          {aliases.length > 0 ? (
+            <div className="flex flex-wrap items-baseline gap-2">
+              <dt className="uppercase tracking-[0.12em] text-ink-mute">
+                Aliases
+              </dt>
+              <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
+                {aliases.map((alias) => (
                   <span
-                    key={tag}
+                    key={alias}
                     className="border border-rule px-1.5 py-[1px]"
                   >
-                    {tag}
+                    {alias}
                   </span>
-                ))
-              : "—"}
-          </dd>
-        </div>
-        {aliases.length > 0 ? (
-          <div className="flex flex-wrap items-baseline gap-2">
-            <dt className="uppercase tracking-[0.12em] text-ink-mute">
-              Aliases
-            </dt>
-            <dd className="m-0 flex flex-wrap gap-1.5 text-ink-2">
-              {aliases.map((alias) => (
-                <span
-                  key={alias}
-                  className="border border-rule px-1.5 py-[1px]"
-                >
-                  {alias}
-                </span>
-              ))}
-            </dd>
-          </div>
-        ) : null}
-      </dl>
+                ))}
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
     </section>
   );
 }

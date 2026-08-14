@@ -1,6 +1,7 @@
 import { ClepsydraClient } from "#/lib/api-client";
 import type { ExtensionSettings } from "#/lib/types";
 import { DEFAULT_SETTINGS } from "#/lib/types";
+import { webext } from "#/lib/webext";
 
 function input(id: string): HTMLInputElement {
 	return document.getElementById(id) as HTMLInputElement;
@@ -17,7 +18,7 @@ function positiveNumber(id: string, fallback: number): number {
 }
 
 async function init() {
-	const stored = await chrome.storage.sync.get("settings");
+	const stored = await webext.storage.sync.get("settings");
 	const settings: ExtensionSettings = {
 		...DEFAULT_SETTINGS,
 		...stored.settings,
@@ -50,7 +51,7 @@ async function init() {
 			),
 		};
 
-		await chrome.storage.sync.set({ settings: newSettings });
+		await webext.storage.sync.set({ settings: newSettings });
 
 		const savedMsg = element("saved-msg");
 		savedMsg.style.display = "inline";

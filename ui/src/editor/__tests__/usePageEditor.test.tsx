@@ -128,6 +128,58 @@ describe("usePageEditor save sequencing", () => {
     expect(result.current.archive).toEqual(ARCHIVE_META);
   });
 
+  it("saves protected archive tags without sending or changing the body", async () => {
+    const archivedPage = {
+      ...makePage("Captured body bytes"),
+      path: "archive/example.com/an-article.md",
+      kind: "ARCHIVE",
+      inferred: false,
+      readonly: true,
+      computed_tags: ["archive"],
+      meta: {
+        ...makePage("Captured body bytes").meta,
+        tags: ["saved"],
+        archive: ARCHIVE_META,
+      },
+    };
+    const updatedPage = {
+      ...archivedPage,
+      revision: "rev-b",
+      meta: {
+        ...archivedPage.meta,
+        tags: ["saved", "reading"],
+      },
+    };
+    usePageMock.mockReturnValue({
+      data: archivedPage,
+      isLoading: false,
+      error: null,
+      refetch: refetchPageMock,
+    });
+    mutateAsyncMock.mockResolvedValue(updatedPage);
+    useUpdatePageMock.mockReturnValue({ mutateAsync: mutateAsyncMock });
+
+    const { result } = renderHook(() =>
+      usePageEditor("archive/example.com/an-article.md"),
+    );
+    act(() => result.current.setTags(["saved", "reading"]));
+    await act(async () => {
+      await result.current.saveNow();
+    });
+
+    expect(mutateAsyncMock).toHaveBeenCalledTimes(1);
+    const request = mutateAsyncMock.mock.calls[0][0];
+    expect(request.body).toEqual({
+      expected_revision: "rev-a",
+      tags: ["saved", "reading"],
+    });
+    expect(Object.hasOwn(request.body, "body")).toBe(false);
+    expect(result.current.saveStatus).toBe("saved");
+    expect(result.current.tags).toEqual(["saved", "reading"]);
+    expect(result.current.bodyMarkdown).toBe("Captured body bytes\n");
+    expect(result.current.archive).toEqual(ARCHIVE_META);
+  });
+
   it("serializes overlapping saves and advances the expected revision", async () => {
     const pending: Array<{
       request: { body: Record<string, unknown> };
