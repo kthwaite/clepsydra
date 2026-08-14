@@ -228,6 +228,122 @@ fn archive_url_payload(url: &str, canonical_url: Option<&str>) -> serde_json::Va
     })
 }
 
+fn nested_noscript_payload(url: &str, title: &str, depth: usize) -> serde_json::Value {
+    let markdown = format!("# {title}");
+    let snapshot_html = format!(
+        "<html><body>{}<a href=https://nested.example/path>Nested visible text</a>{}</body></html>",
+        "<noscript>".repeat(depth),
+        "</noscript>".repeat(depth),
+    );
+    serde_json::json!({
+        "url": url,
+        "domain": "example.com",
+        "title": title,
+        "captured_at": "2026-08-14T12:00:00Z",
+        "content_hash": content_hash(&markdown),
+        "snapshot_html": snapshot_html,
+        "markdown_body": markdown,
+        "tags": ["archive"],
+    })
+}
+
+#[tokio::test]
+async fn archive_ingest_rejects_unrenderable_snapshot_before_persistent_mutation() {
+    let (server, tmp, state) = setup_server();
+    let before = state.cas.lock().stats().unwrap();
+    let url = "https://example.com/noscript-depth-17";
+
+    let response = server
+        .post("/api/vault/archive")
+        .json(&nested_noscript_payload(url, "Noscript Depth 17", 17))
+        .await;
+
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"].as_str().is_some_and(
+            |message| message.contains("view constraints")
+                && message.contains("noscript depth limit")
+        ),
+        "unexpected renderability error: {error}"
+    );
+    let after = state.cas.lock().stats().unwrap();
+    assert_eq!(after.blob_count, before.blob_count);
+    assert_eq!(after.total_size_bytes, before.total_size_bytes);
+    assert!(
+        !tmp.path()
+            .join("vault/archive/example.com/noscript-depth-17.md")
+            .exists(),
+        "unrenderable ingest created a page"
+    );
+    let lookup_url = url.to_string();
+    let indexed = state
+        .index
+        .with_index(move |index, _vault| index.find_by_archive_url(&lookup_url))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(
+        indexed.is_none(),
+        "unrenderable ingest mutated the archive index"
+    );
+}
+
+#[tokio::test]
+async fn archive_ingest_accepts_maximum_renderable_noscript_depth() {
+    let (server, _tmp, _state) = setup_server();
+    let response = server
+        .post("/api/vault/archive")
+        .json(&nested_noscript_payload(
+            "https://example.com/noscript-depth-16",
+            "Noscript Depth 16",
+            16,
+        ))
+        .await;
+
+    response.assert_status(StatusCode::CREATED);
+    let created: serde_json::Value = response.json();
+    let vault_path = created["vault_path"].as_str().unwrap();
+    let page_response = server
+        .get(&format!("/api/vault/pages/{vault_path}"))
+        .await;
+    page_response.assert_status(StatusCode::OK);
+    let page: serde_json::Value = page_response.json();
+    let snapshot_hash = page["meta"]["archive"]["snapshot_hash"]
+        .as_str()
+        .unwrap();
+
+    let stored = server
+        .get(&format!("/api/vault/cas/{snapshot_hash}"))
+        .await;
+    stored.assert_status(StatusCode::OK);
+    assert!(
+        stored.text().contains("href=https://nested.example/path"),
+        "ingest must store the deconstructed snapshot, not its view transform"
+    );
+
+    server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{snapshot_hash}"),
+        )
+        .await
+        .assert_status(StatusCode::OK);
+    let viewed = server
+        .get(&format!("/api/vault/archive/view/{snapshot_hash}"))
+        .await;
+    viewed.assert_status(StatusCode::OK);
+    let rendered = viewed.text();
+    assert!(
+        rendered.contains("Nested visible text"),
+        "bounded view transform lost visible text: {rendered}"
+    );
+    assert!(
+        !rendered.contains("nested.example") && !rendered.contains("href"),
+        "bounded view transform retained navigation: {rendered}"
+    );
+}
+
 #[tokio::test]
 async fn archive_ingest_accepts_absolute_http_urls() {
     let (server, _tmp, _state) = setup_server();

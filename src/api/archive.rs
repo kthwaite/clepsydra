@@ -514,6 +514,20 @@ fn prepare_snapshot_body(data: Vec<u8>) -> Result<Vec<u8>, ApiError> {
     )
 }
 
+fn validate_snapshot_renderability(snapshot: &str) -> Result<(), ApiError> {
+    prepare_snapshot_body(snapshot.as_bytes().to_vec())
+        .map(drop)
+        .map_err(|error| {
+            let reason = error
+                .error
+                .strip_prefix("archived snapshot is corrupt: ")
+                .unwrap_or(&error.error);
+            ApiError::bad_request(format!(
+                "archived snapshot violates view constraints: {reason}"
+            ))
+        })
+}
+
 fn prepare_snapshot_body_with(
     data: Vec<u8>,
     input_limit: usize,
@@ -1128,6 +1142,11 @@ pub async fn ingest_archive(
         max_blob_size_mb,
         max_request_size_mb,
     )?;
+
+    // Run the exact bounded GET transformation before any derived hashes, CAS
+    // references, or page/index mutations. Its output is deliberately dropped:
+    // the immutable deconstructed snapshot remains the stored source artifact.
+    validate_snapshot_renderability(&deconstructed.html)?;
 
     // The map is built from the rewritten snapshot, because it pairs each
     // `data-sf-original-src` with the `cas:` reference that just replaced that
