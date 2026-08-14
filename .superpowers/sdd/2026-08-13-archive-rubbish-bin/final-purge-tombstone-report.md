@@ -131,7 +131,26 @@ Focused GREEN on this workstation:
 
 Independent review of the uncommitted source diff reported no Critical or Important findings and marked the shared helper and callers ready. The reviewer specifically confirmed cfg correctness, non-Windows behavior preservation, Windows handle/flush semantics, typed uncertainty/error propagation, and deterministic failpoint isolation.
 
+### Tombstone-collision retry follow-up
+
+Commit `79f464dd` (`fix(rubbish): complete purge after tombstone collision`) fixes the remaining collision state: a prior purge can durably commit the CAS release, encounter an already-occupied `.purge-<uuid>` destination, restore the complete UUID catalog row, and return an error. On retry, tombstone cleanup no longer implies that the UUID item is absent. `prepare_rubbish_purge_context` now reads the UUID directory after cleanup and:
+
+- continues normal validated context parsing, idempotent CAS release, catalog removal, and atomic tombstone removal when the UUID item still exists; or
+- returns the established completed-tombstone path only when the UUID directory is absent.
+
+The deterministic coordinator regression injects an empty tombstone immediately before the first removal attempt. It proves the first attempt leaves the complete UUID item and valid catalog row actionable with one durable CAS release ledger row; the second attempt removes the tombstone, UUID item, and catalog row; and the release ledger count remains exactly one.
+
+Strict RED/GREEN:
+
+- RED: `cargo test purge_rubbish_tombstone_collision_retry_removes_uuid_catalog_and_releases_once --lib` failed at the second attempt with `RubbishItemNotFound`, reproducing the hidden actionable UUID item.
+- GREEN: the same command passed, 1 passed and 0 failed.
+- `cargo test purge_rubbish_ --lib`: 4 passed, 0 failed.
+- `cargo test --test api_rubbish_test failed_purge_after_cas_release_cannot_restore_and_retry_finishes`: 1 passed, 0 failed.
+- `cargo test --test api_rubbish_test rubbish_`: 8 passed, 0 failed.
+
+Independent scoped review reported no Critical or Important findings and marked the production change and first-collision/retry regression ready.
+
 ## Concerns
 
-- A retry that successfully finishes a pre-existing tombstone returns the established `RubbishItemNotFound` error because partial tombstones intentionally contain no trustworthy result metadata. Cleanup and catalog reconciliation have completed at that point; startup is also idempotent.
+- A retry that finishes a pre-existing tombstone returns the established `RubbishItemNotFound` error only when no complete UUID item remains. A collision-preserved complete UUID item instead continues through the ordinary idempotent purge path. Partial tombstones intentionally contain no trustworthy result metadata; startup cleanup remains idempotent.
 - Permission-based before-rename and mid-removal boundary tests are Unix-gated. The deterministic root-sync failure tests are portable and enabled on Windows, but this macOS workstation has no Windows Rust target installed, so the Windows-specific handle/flush branch could not be compiled or executed locally.
