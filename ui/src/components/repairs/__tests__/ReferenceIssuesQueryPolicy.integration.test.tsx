@@ -175,12 +175,16 @@ describe("reference issue query production error policy", () => {
     expect(
       screen.queryByRole("button", { name: "Open Reference Repairs" }),
     ).not.toBeInTheDocument();
-    expect(mocks.get).not.toHaveBeenCalled();
+    expect(mocks.get).not.toHaveBeenCalledWith(
+      "/api/vault/index/issues",
+      expect.anything(),
+    );
     expect(
       screen.queryByText("Application boundary rendered."),
     ).not.toBeInTheDocument();
 
     atrium.unmount();
+    mocks.get.mockClear();
     renderWithProductionPolicy(<Stats />);
 
     await waitFor(() => expect(mocks.get).toHaveBeenCalledTimes(1));

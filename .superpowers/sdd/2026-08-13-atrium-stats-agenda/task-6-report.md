@@ -26,3 +26,10 @@
 - **Scope:** Only tests and the documentation inventory/report changed; production behavior was not modified.
 - **Commit:** Included in `test(ui): align final feature inventories`.
 - **Validation:** Intentionally not run by assignment.
+
+## Atrium reference-query assertion correction
+
+- **Scoped policy assertion:** Atrium may legitimately request `/api/vault/tasks` for its Agenda tile, so the integration test now excludes only `/api/vault/index/issues` while retaining the no-repair-action and application-boundary assertions.
+- **Stats isolation:** Cleared the GET spy after unmounting Atrium so the Stats reference-issue request count remains phase-local.
+- **Commit:** Included in `test(ui): scope Atrium reference query assertion`.
+- **Validation:** Intentionally not run by assignment.
