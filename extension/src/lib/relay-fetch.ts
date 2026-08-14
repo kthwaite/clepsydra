@@ -12,6 +12,7 @@
  */
 
 import { SNAPSHOT_NETWORK_TIMEOUT_MS } from "#/lib/singlefile";
+import { webext } from "#/lib/webext";
 
 export const RELAY_PORT_NAME = "singlefile-relay";
 const RELAY_CHUNK_BYTES = 4 * 1024 * 1024;
@@ -264,7 +265,7 @@ export function createRelayFetch(
 
 		const port = connect
 			? connect({ name: RELAY_PORT_NAME })
-			: (chrome.runtime.connect as unknown as RelayConnect)({
+			: (webext.runtime.connect as unknown as RelayConnect)({
 					name: RELAY_PORT_NAME,
 				});
 

@@ -5,8 +5,9 @@ export const meta = {
 }
 
 The Clepsydra Web Archive extension captures the current HTTP or HTTPS page and
-sends an archive manifest to a running Clepsydra server. Chromium uses a
-Manifest V3 bundle; Firefox uses a temporary Manifest V2 bundle.
+sends an archive manifest to a running Clepsydra server.
+
+The runtime selects a native `browser` WebExtension namespace when present and otherwise uses `chrome`. Clepsydra currently builds and verifies Chromium MV3 and Firefox MV2 packages. Safari conversion, signing, packaging, and runtime support are not provided.
 
 ## Prerequisites
 
@@ -102,6 +103,8 @@ but does not add user authentication.
 Open a normal `http://` or `https://` page and choose **Capture This Page**, or
 use `Ctrl+Shift+S` (Windows/Linux) or `Command+Shift+S` (macOS).
 
+Configured default tags are always included. The popup's Additional tags field applies only to the capture you are starting and does not change Settings. After capture, ordinary tags can be added or removed from the archived Folio; its captured body and snapshot remain protected.
+
 The injected content script runs [SingleFile](https://github.com/gildas-lormeau/single-file-core)
 over the live DOM, inlining every resource it can reach as a `data:` URI, then
 runs Readability over the same page visit to extract the article body.
@@ -131,7 +134,9 @@ The background worker then:
    as Readability resolved them — or, when it did not, emits fallback Markdown
    recording the page's URL and capture time and noting that the captured
    snapshot is still archived and viewable;
-2. adds `archive`, domain, current-month, and configured default tags; and
+2. builds the tag list from system tags (`archive`, domain, and current month),
+   then configured defaults, then popup additions, normalizing each group and
+   deduplicating exact matches in first-occurrence order; and
 3. posts one archive manifest containing `url`, optional `canonical_url`,
    `domain`, `title`, optional `description`, `captured_at`, `content_hash`
    (a hash of `markdown_body` exactly as sent), `snapshot_html` (the SingleFile

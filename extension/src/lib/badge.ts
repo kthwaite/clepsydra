@@ -23,6 +23,7 @@ export interface CaptureStatus {
 	startedAt: number;
 	/** Monotonic epoch milliseconds for this status revision. */
 	updatedAt: number;
+	additionalTags: string[];
 }
 
 export interface BadgeAppearance {
