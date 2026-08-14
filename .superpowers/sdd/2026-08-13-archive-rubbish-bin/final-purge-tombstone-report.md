@@ -82,7 +82,7 @@ Per assignment constraints, formatters, linters, builds, and project-wide test s
 - Confirmed the normal purge result and existing typed errors remain unchanged.
 - Confirmed startup cleanup precedes authoritative catalog reconciliation.
 - Confirmed ordinary purge, restore, failed-post-ledger restore lockout, cleanup retry, Empty Bin ordering, and unique CAS release tests remain green.
-- Confirmed the implementation commits touch only `src/vault/atomic_file.rs`, `src/vault/rubbish.rs`, `src/vault/mutation_coordinator.rs`, and `src/lib.rs`.
+- Confirmed the implementation commits touch only `src/vault/atomic_file.rs`, `src/vault/batch_mutation.rs`, `src/vault/rubbish.rs`, `src/vault/mutation_coordinator.rs`, and `src/lib.rs`.
 
 ## Independent review
 
@@ -104,6 +104,32 @@ Focused GREEN on this workstation:
 - `cargo test purge_rubbish_ --lib`: 3 passed, 0 failed.
 
 The Windows sentinel is RED against the replaced `std::fs::rename` implementation by contract but could not be executed locally because no Windows target is installed. Independent source review checked Microsoft `MoveFileExW`, Rust `last_os_error`, the resolved `windows-sys` 0.61.2 bindings/features, error normalization, path lifetime/encoding, cfg isolation, and both tests; it reported no Critical or Important findings and marked the change ready.
+
+### Shared Windows directory durability follow-up
+
+Commit `68697014` (`fix(vault): flush directory mutations on Windows`) extracts the verified directory flush into `atomic_file::flush_directory` and routes every affected durability boundary through it:
+
+- atomic file create/replace parent publication;
+- batch transaction phase publication, prepared-directory ownership publication, directory creation/removal, and transaction workspace cleanup;
+- active-page create compensation after a published-but-not-durable write; and
+- Rubbish item publication, tombstone transition, and tombstone removal.
+
+On non-Windows platforms the helper preserves `File::open(path)?.sync_all()`. On Windows it opens a writable directory handle with `FILE_FLAG_BACKUP_SEMANTICS` and calls `File::sync_all`, which uses `FlushFileBuffers`. Errors remain at their established typed boundaries: atomic publication returns `PublishedButNotDurable`, batch publication returns `BatchMutationError::Publication` and marks the phase uncertain, batch directory mutations return `BatchMutationError::Filesystem`, active-page compensation reports the post-removal sync error, and Rubbish cleanup returns `RubbishStoreError::Filesystem`.
+
+New shared single-shot flush-failure tests cover atomic active-page creation, batch phase publication before destination mutation, and active-page rollback removal. The existing Rubbish root-sync tests now exercise the same helper.
+
+Focused GREEN on this workstation:
+
+- `cargo test atomic_create_parent_flush_failure_is_post_publication_uncertainty --lib`: 1 passed, 0 failed.
+- `cargo test phase_publication_parent_flush_failure_is_uncertain_before_mutation --lib`: 1 passed, 0 failed.
+- `cargo test created_page_rollback_parent_flush_failure_reports_removed_but_not_durable --lib`: 1 passed, 0 failed.
+- `cargo test phase_ --lib`: 6 passed, 0 failed.
+- `cargo test vault::batch_mutation::tests --lib`: 34 passed, 0 failed.
+- `cargo test vault::rubbish::tests --lib`: 19 passed, 0 failed.
+- `cargo test purge_rubbish_ --lib`: 3 passed, 0 failed.
+- `cargo test --test api_test page_create_reports_primary_and_rollback_sync_failures_without_indexing`: 1 passed, 0 failed.
+
+Independent review of the uncommitted source diff reported no Critical or Important findings and marked the shared helper and callers ready. The reviewer specifically confirmed cfg correctness, non-Windows behavior preservation, Windows handle/flush semantics, typed uncertainty/error propagation, and deterministic failpoint isolation.
 
 ## Concerns
 
