@@ -78,10 +78,10 @@ archive Folio's Markdown does not edit or replace either kind of byte.
 
 An archive Folio with a stored snapshot includes a **View archived snapshot**
 link. Select it to open the deconstructed SingleFile HTML in the archive viewer.
-The viewer shows the capture's provenance (including its source URL and capture
-time, plus any available Readability fields) and provides a back link to the
-Folio. Use that back link when you are finished so you return to the same
-archive context rather than treating the snapshot as a new page.
+The viewer banner displays, when present, the optional site name, byline, and
+publication time, and provides a back link to the Folio. Use that back link
+when you are finished so you return to the same archive context rather than
+treating the snapshot as a new page.
 
 The snapshot is displayed in an inert sandbox. Captured scripts do not run,
 forms and other active controls do not submit, and links cannot turn the
@@ -97,18 +97,22 @@ The viewer can also explain why it cannot display a snapshot:
 - **Unavailable snapshot** — the Folio references a snapshot that is no longer
   present in the CAS (for example, after an inconsistent restore or
   garbage-collection mistake).
+- **Snapshot availability could not be checked** — a preflight or network
+  failure prevented the server from confirming whether the referenced snapshot
+  is available. Select **Retry** to check again.
 
 These states do not change the Folio or repair the CAS. Return to the Folio and
 use its Markdown and archive metadata while you investigate storage or backup
 problems.
 
-The viewer accepts at most **2 MiB of deconstructed HTML** for one snapshot.
-This is a fixed viewer ceiling, measured after the server deconstructs the
-captured HTML; it is distinct from the configurable archive budgets:
-`max_blob_size_mb` limits each deconstructed resource and
-`max_request_size_mb` limits the aggregate capture (the deconstructed HTML
-plus its resources). A capture can therefore fit the configurable capture
-budgets but still be too large for the viewer.
+The stored deconstructed HTML has a fixed, inclusive ceiling of **2 MiB
+(2,097,152 bytes)**. The same ceiling applies at ingest and on both `HEAD` and
+`GET`; ingest rejects a snapshot over the ceiling before creating its archive
+Folio or CAS entries. This ceiling is distinct from the configurable archive
+budgets: `max_blob_size_mb` limits each deconstructed resource, and
+`max_request_size_mb` totals the deconstructed HTML, submitted Markdown body,
+and deconstructed resources. A request can fit those configurable budgets yet
+still be rejected during capture by the fixed HTML ceiling.
 
 
 ### Subscribe and read privately
