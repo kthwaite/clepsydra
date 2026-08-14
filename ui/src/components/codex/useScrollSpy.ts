@@ -22,6 +22,13 @@ interface TriggerMap {
 
 const EMPTY_MAP: TriggerMap = { headingTops: [], triggers: [], maxScroll: 0 };
 
+export interface ScrollSpyOptions {
+  /** selector for the heading-bearing subtree inside the scroll container */
+  rootSelector?: string;
+  /** selector for the headings the TOC lists, in document order */
+  headingSelector?: string;
+}
+
 /**
  * Tracks the active heading within a scroll container for TOC scrollspy.
  * Heading DOM order matches the TOC entry order (both are document order), so
@@ -32,14 +39,21 @@ const EMPTY_MAP: TriggerMap = { headingTops: [], triggers: [], maxScroll: 0 };
  * which uplifts otherwise-unreachable triggers near the document end onto the
  * scrollable range and drives `scrollTo` from the same map — so every TOC
  * entry is reachable and the clicked entry is always the one highlighted.
+ *
+ * `options` narrows discovery for surfaces other than the Folio (the docs
+ * viewer scopes to `article` and skips the h1 page title so its DOM order
+ * matches `extractDocToc`); omitting it keeps the Folio selectors.
  */
 export function useScrollSpy(
   containerRef: RefObject<HTMLElement | null>,
   recount: unknown,
   reattach?: unknown,
+  options?: ScrollSpyOptions,
 ): { activeIndex: number; scrollTo: (index: number) => void } {
   const [activeIndex, setActiveIndex] = useState(0);
   const mapRef = useRef<TriggerMap>(EMPTY_MAP);
+  const rootSelector = options?.rootSelector ?? HEADING_ROOT_SELECTOR;
+  const headingSelector = options?.headingSelector ?? HEADING_SELECTOR;
 
   const remap = useCallback(() => {
     const el = containerRef.current;
@@ -47,9 +61,9 @@ export function useScrollSpy(
       mapRef.current = EMPTY_MAP;
       return;
     }
-    const headingRoot = el.querySelector<HTMLElement>(HEADING_ROOT_SELECTOR);
+    const headingRoot = el.querySelector<HTMLElement>(rootSelector);
     const hs = Array.from(
-      headingRoot?.querySelectorAll<HTMLElement>(HEADING_SELECTOR) ?? [],
+      headingRoot?.querySelectorAll<HTMLElement>(headingSelector) ?? [],
     );
     const containerTop = el.getBoundingClientRect().top;
     const headingTops = hs.map(
@@ -61,7 +75,7 @@ export function useScrollSpy(
       triggers: computeTriggers(headingTops, maxScroll),
       maxScroll,
     };
-  }, [containerRef]);
+  }, [containerRef, rootSelector, headingSelector]);
 
   useEffect(() => {
     const el = containerRef.current;

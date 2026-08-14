@@ -2,17 +2,21 @@ import { Menu, X } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Dialog, Heading, Modal, ModalOverlay } from "react-aria-components";
 import { DocsSidebar } from "#/components/docs/DocsSidebar";
+import { DocsToc } from "#/components/docs/DocsToc";
 import { IconButton } from "#/components/ui/icon-button";
+import type { DocTocEntry } from "#/docs/toc";
 
 const DESKTOP_MEDIA_QUERY = "(min-width: 768px)";
 
 export interface DocsLayoutProps {
   activeSlug?: string;
+  toc?: readonly DocTocEntry[];
   children: ReactNode;
 }
 
-export function DocsLayout({ activeSlug, children }: DocsLayoutProps) {
+export function DocsLayout({ activeSlug, toc, children }: DocsLayoutProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const hasToc = toc !== undefined && toc.length > 0;
 
   const articleRef = useRef<HTMLElement>(null);
 
@@ -67,6 +71,19 @@ export function DocsLayout({ activeSlug, children }: DocsLayoutProps) {
         </main>
       </div>
 
+      {hasToc ? (
+        <aside
+          data-testid="docs-toc-rail"
+          className="hidden w-64 shrink-0 flex-col overflow-y-auto border-l border-rule bg-paper-2 xl:flex"
+        >
+          <DocsToc
+            entries={toc}
+            containerRef={articleRef}
+            recount={activeSlug}
+          />
+        </aside>
+      ) : null}
+
       <ModalOverlay
         data-testid="docs-drawer-overlay"
         isOpen={drawerOpen}
@@ -97,6 +114,15 @@ export function DocsLayout({ activeSlug, children }: DocsLayoutProps) {
                   </IconButton>
                 </div>
                 <DocsSidebar activeSlug={activeSlug} onNavigate={close} />
+                {hasToc ? (
+                  <DocsToc
+                    entries={toc}
+                    containerRef={articleRef}
+                    recount={activeSlug}
+                    onNavigate={close}
+                    className="max-h-64 shrink-0 border-t border-rule"
+                  />
+                ) : null}
               </>
             )}
           </Dialog>
