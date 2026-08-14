@@ -71,6 +71,7 @@ fn setup_server() -> (TestServer, TempDir) {
         feed_settings,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
         bcl: None,
         location: parking_lot::RwLock::new(None),
     });

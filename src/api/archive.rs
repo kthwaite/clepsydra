@@ -1,6 +1,8 @@
 //! API endpoints for ingesting web page archives, including associated blobs stored in
 //! the CAS.
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 
 use axum::body::Body;
 use axum::Json;
@@ -9,6 +11,8 @@ use axum::extract::{Extension, Path, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
+use bytes::Bytes;
+use http_body::{Frame, SizeHint};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use url::{Host, Url};
@@ -429,10 +433,38 @@ fn unsupported_snapshot_response(content_type: &str) -> Response {
     (StatusCode::UNSUPPORTED_MEDIA_TYPE, headers, Json(error)).into_response()
 }
 
+struct AdmittedBody {
+    inner: Body,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+impl http_body::Body for AdmittedBody {
+    type Data = Bytes;
+    type Error = axum::Error;
+
+    fn poll_frame(
+        mut self: Pin<&mut Self>,
+        context: &mut Context<'_>,
+    ) -> Poll<Option<Result<Frame<Self::Data>, Self::Error>>> {
+        Pin::new(&mut self.inner).poll_frame(context)
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        self.inner.size_hint()
+    }
+}
+
+fn admitted_body(data: Vec<u8>, permit: tokio::sync::OwnedSemaphorePermit) -> Body {
+    Body::new(AdmittedBody {
+        inner: Body::from(data),
+        _permit: permit,
+    })
+}
 fn snapshot_response_with(
     snapshot: LoadedSnapshot,
     config: &ArchiveViewConfig,
     transform_body: impl FnOnce(Vec<u8>) -> Result<Vec<u8>, ApiError>,
+    body_permit: Option<tokio::sync::OwnedSemaphorePermit>,
 ) -> Result<Response, ApiError> {
     match snapshot {
         LoadedSnapshot::Metadata(metadata) => {
@@ -447,12 +479,12 @@ fn snapshot_response_with(
             if !framable_content_type(&content_type) {
                 return Ok(unsupported_snapshot_response(&content_type));
             }
-            Ok((
-                StatusCode::OK,
-                sandbox_headers(config),
-                transform_body(data)?,
-            )
-                .into_response())
+            let data = transform_body(data)?;
+            let body = match body_permit {
+                Some(permit) => admitted_body(data, permit),
+                None => Body::from(data),
+            };
+            Ok((StatusCode::OK, sandbox_headers(config), body).into_response())
         }
     }
 }
@@ -624,6 +656,12 @@ fn validate_resource_sizes(
             return Err(ApiError::bad_request(format!(
                 "archived resource {} is {} bytes, over max_blob_size_mb ({} MB)",
                 resource.hash, size, max_blob_size_mb
+            )));
+        }
+        if size > MAX_ARCHIVE_RESOURCE_BYTES as u64 {
+            return Err(ApiError::bad_request(format!(
+                "archived resource {} is {} bytes, over shared resource serving limit ({} bytes)",
+                resource.hash, size, MAX_ARCHIVE_RESOURCE_BYTES
             )));
         }
         total = total.checked_add(size).ok_or_else(&request_size_overflow)?;
@@ -800,6 +838,15 @@ fn limited_snapshot_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
     }
 }
 
+fn limited_blob_error(hash: &str, error: RetrieveLimitedError) -> ApiError {
+    match error {
+        RetrieveLimitedError::TooLarge { size, limit } => ApiError::internal(format!(
+            "archived resource is corrupt: blob size {size} exceeds resource limit {limit}"
+        )),
+        RetrieveLimitedError::Store(_) => ApiError::not_found(format!("blob not found: {hash}")),
+    }
+}
+
 #[utoipa::path(
     get,
     path = "/archive/view/{hash}",
@@ -822,8 +869,7 @@ pub async fn view_snapshot(
         acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await?;
     let cas = Arc::clone(&state.cas);
     let worker_hash = hash.clone();
-    let snapshot = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
+    let (snapshot, permit) = tokio::task::spawn_blocking(move || {
         let opened = {
             let cas = cas.lock();
             cas.open_limited(&worker_hash, MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
@@ -831,21 +877,24 @@ pub async fn view_snapshot(
         };
         let content_type = opened.content_type().to_string();
         if !framable_content_type(&content_type) {
-            return Ok(LoadedSnapshot::Body {
-                data: Vec::new(),
-                content_type,
-            });
+            return Ok((
+                LoadedSnapshot::Body {
+                    data: Vec::new(),
+                    content_type,
+                },
+                permit,
+            ));
         }
         let (data, content_type) = opened
             .read_limited(MAX_ARCHIVE_VIEW_SNAPSHOT_BYTES)
             .map_err(|error| limited_snapshot_error(&worker_hash, error))?;
         let data = prepare_snapshot_body(data)?;
-        Ok::<_, ApiError>(LoadedSnapshot::Body { data, content_type })
+        Ok::<_, ApiError>((LoadedSnapshot::Body { data, content_type }, permit))
     })
     .await
     .map_err(|error| ApiError::internal(format!("archive snapshot worker failed: {error}")))??;
 
-    snapshot_response_with(snapshot, &config, Ok)
+    snapshot_response_with(snapshot, &config, Ok, Some(permit))
 }
 
 pub async fn head_snapshot(
@@ -858,12 +907,13 @@ pub async fn head_snapshot(
         load_snapshot_metadata(&*cas, &hash)
     };
     without_body(match snapshot {
-        Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body)
+        Ok(snapshot) => snapshot_response_with(snapshot, &config, prepare_snapshot_body, None)
             .unwrap_or_else(IntoResponse::into_response),
         Err(error) => error.into_response(),
     })
 }
 
+const MAX_ARCHIVE_RESOURCE_BYTES: usize = 32 * 1024 * 1024;
 #[utoipa::path(
     get,
     path = "/cas/{hash}",
@@ -876,14 +926,30 @@ pub async fn head_snapshot(
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
+
 pub async fn serve_blob(
     State(state): State<Arc<AppState>>,
     Path(hash): Path<String>,
 ) -> Result<Response, ApiError> {
-    let cas = state.cas.lock();
-    let (data, content_type) = cas
-        .retrieve(&hash)
-        .map_err(|_| ApiError::not_found(format!("blob not found: {hash}")))?;
+    let permit = Arc::clone(&state.archive_resource_semaphore)
+        .acquire_owned()
+        .await
+        .map_err(|_| ApiError::internal("archive resource service is unavailable"))?;
+    let cas = Arc::clone(&state.cas);
+    let worker_hash = hash.clone();
+    let (data, content_type, permit) = tokio::task::spawn_blocking(move || {
+        let opened = {
+            let cas = cas.lock();
+            cas.open_limited(&worker_hash, MAX_ARCHIVE_RESOURCE_BYTES)
+                .map_err(|error| limited_blob_error(&worker_hash, error))?
+        };
+        let (data, content_type) = opened
+            .read_limited(MAX_ARCHIVE_RESOURCE_BYTES)
+            .map_err(|error| limited_blob_error(&worker_hash, error))?;
+        Ok::<_, ApiError>((data, content_type, permit))
+    })
+    .await
+    .map_err(|error| ApiError::internal(format!("archive resource worker failed: {error}")))??;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -891,9 +957,6 @@ pub async fn serve_blob(
         HeaderValue::from_str(&content_type)
             .unwrap_or_else(|_| HeaderValue::from_static(OCTET_STREAM)),
     );
-    // Blob bytes are authored by whatever page was archived. They are served
-    // from the vault's own origin, alongside an unauthenticated API, so they
-    // must never be treated as trusted same-origin content.
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
         HeaderValue::from_static("sandbox; default-src 'none'"),
@@ -909,7 +972,7 @@ pub async fn serve_blob(
         );
     }
 
-    Ok((StatusCode::OK, headers, data).into_response())
+    Ok((StatusCode::OK, headers, admitted_body(data, permit)).into_response())
 }
 
 #[utoipa::path(
@@ -1252,6 +1315,15 @@ mod tests {
         worker.await.unwrap();
         let _permit = acquire_archive_view_permit(semaphore).await.unwrap();
     }
+    #[tokio::test]
+    async fn admitted_body_holds_permit_until_body_drop() {
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+        let permit = Arc::clone(&semaphore).acquire_owned().await.unwrap();
+        let body = admitted_body(vec![1, 2, 3], permit);
+        assert_eq!(semaphore.available_permits(), 0);
+        drop(body);
+        assert_eq!(semaphore.available_permits(), 1);
+    }
 
 
     #[test]
@@ -1290,6 +1362,7 @@ mod tests {
                 rewrites.set(rewrites.get() + 1);
                 Ok(data)
             },
+            None,
         )
         .unwrap();
         assert_eq!(response.status(), StatusCode::OK);

@@ -713,6 +713,7 @@ pub async fn build_app_state_with_feeds(
         feed_settings: feed_settings.clone(),
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(8)),
         bcl,
         location: parking_lot::RwLock::new(location),
     }))

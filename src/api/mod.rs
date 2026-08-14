@@ -103,6 +103,8 @@ pub struct AppState {
     pub archive_ingest_lock: tokio::sync::Mutex<()>,
     /// Serializes archive snapshot retrieval and rewrite working sets.
     pub archive_view_semaphore: Arc<tokio::sync::Semaphore>,
+    /// Bounds concurrent CAS resource reads to 8 × 32 MiB.
+    pub archive_resource_semaphore: Arc<tokio::sync::Semaphore>,
     /// Optional Brimley-Cocoon Line birth date, loaded once at startup from
     /// `<vault>/.clepsydra/bcl` (with a one-time copy from `~/.config/bcl`
     /// when the vault file is absent). `None` means the feature is hidden.

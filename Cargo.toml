@@ -60,6 +60,8 @@ uuid = { version = "1", features = ["v7", "serde"] }
 walkdir = "2"
 rmcp = { version = "3.1.0", features = ["server", "transport-io"] }
 schemars = "1.2.2"
+bytes = "1"
+http-body = "1"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

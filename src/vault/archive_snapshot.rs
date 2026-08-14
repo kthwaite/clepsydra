@@ -316,9 +316,9 @@ const MATHML_NAMESPACE: &str = "http://www.w3.org/1998/Math/MathML";
 pub const ARCHIVE_VIEW_SNAPSHOT_BYTES: usize = 32 * 1024 * 1024;
 const DEFAULT_REWRITER_MEMORY_BYTES: usize = 16 * 1024 * 1024;
 pub const DEFAULT_REWRITTEN_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
-const MAX_START_TAG_BYTES: usize = 1024 * 1024;
-const MAX_ATTRIBUTES_PER_TAG: usize = 4096;
+const MAX_START_TAG_BYTES: usize = 256 * 1024;
 const MAX_NOSCRIPT_DEPTH: usize = 16;
+const MAX_ATTRIBUTES_PER_TAG: usize = 4096;
 const REWRITER_CHUNK_BYTES: usize = 16 * 1024;
 
 fn rewrite_navigation_element(element: &mut Element<'_, '_>) -> Result<(), String> {
@@ -389,25 +389,143 @@ fn rewriting_error(error: impl std::fmt::Display) -> String {
 }
 
 fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
+    #[derive(Clone, Copy)]
+    enum AttributeState {
+        BeforeName,
+        Name,
+        AfterName,
+        BeforeValue,
+        SingleQuoted,
+        DoubleQuoted,
+        Unquoted,
+        SelfClosing,
+    }
+
+    fn inert_name_at(html: &[u8], start: usize) -> Option<(&'static [u8], bool)> {
+        for (name, plaintext) in [
+            (b"style".as_slice(), false),
+            (b"script", false),
+            (b"xmp", false),
+            (b"iframe", false),
+            (b"noembed", false),
+            (b"noframes", false),
+            (b"title", false),
+            (b"textarea", false),
+            (b"plaintext", true),
+        ] {
+            let end = start.checked_add(name.len())?;
+            if html.get(start..end)?.eq_ignore_ascii_case(name)
+                && html.get(end).is_some_and(|byte| {
+                    byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>')
+                })
+            {
+                return Some((name, plaintext));
+            }
+        }
+        None
+    }
+
+    fn find_inert_end(haystack: &[u8], name: &[u8]) -> Option<usize> {
+        haystack
+            .windows(name.len() + 3)
+            .position(|window| {
+                window[..2] == *b"</"
+                    && window[2..2 + name.len()].eq_ignore_ascii_case(name)
+                    && (window[2 + name.len()].is_ascii_whitespace()
+                        || matches!(window[2 + name.len()], b'/' | b'>'))
+            })
+    }
+    fn comment_end(html: &[u8], content_start: usize) -> usize {
+        let tail = &html[content_start..];
+        for index in 0..tail.len() {
+            if tail[index] != b'>' {
+                continue;
+            }
+            let prefix = &tail[..index];
+            if index == 0
+                || prefix.ends_with(b"--")
+                || prefix.ends_with(b"--!")
+                || (prefix.iter().all(|byte| *byte == b'-') && !prefix.is_empty())
+            {
+                return content_start + index + 1;
+            }
+        }
+        html.len()
+    }
+
+    fn named_tag_at(html: &[u8], start: usize, name: &[u8]) -> bool {
+        let Some(end) = start.checked_add(name.len()) else {
+            return false;
+        };
+        html.get(start..end)
+            .is_some_and(|tag| tag.eq_ignore_ascii_case(name))
+            && html.get(end).is_some_and(|byte| {
+                byte.is_ascii_whitespace() || matches!(byte, b'/' | b'>')
+            })
+    }
+
     let mut cursor = 0usize;
+    let mut foreign_stack: Vec<&'static [u8]> = Vec::new();
     while let Some(relative) = html[cursor..].iter().position(|byte| *byte == b'<') {
         let start = cursor + relative;
+        if html.get(start..).is_some_and(|tail| tail.starts_with(b"<!--")) {
+            cursor = comment_end(html, start + 4);
+            continue;
+        }
         let Some(first) = html.get(start + 1).copied() else {
             break;
         };
+        if first == b'/' {
+            if let Some(expected) = foreign_stack.last()
+                && named_tag_at(html, start + 2, expected)
+            {
+                foreign_stack.pop();
+            }
+            cursor = start + 2;
+            continue;
+        }
         if !first.is_ascii_alphabetic() {
             cursor = start + 1;
             continue;
         }
-
         let mut index = start + 1;
-        while html.get(index).is_some_and(u8::is_ascii_alphanumeric) {
+        while html.get(index).is_some_and(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b':')
+        }) {
             index += 1;
         }
-        let mut quote = None;
-        let mut after_quoted_value = false;
+        let inert = if foreign_stack.is_empty() {
+            inert_name_at(html, start + 1)
+        } else {
+            None
+        };
+        let enters_foreign = if named_tag_at(html, start + 1, b"svg") {
+            Some(b"svg".as_slice())
+        } else if named_tag_at(html, start + 1, b"math") {
+            Some(b"math".as_slice())
+        } else {
+            None
+        };
+        if html.get(index) == Some(&b'>') {
+            cursor = index + 1;
+            if let Some((name, plaintext)) = inert {
+                if plaintext {
+                    return Ok(());
+                }
+                cursor = find_inert_end(&html[cursor..], name)
+                    .map_or(html.len(), |offset| cursor + offset);
+            } else if let Some(name) = enters_foreign {
+                foreign_stack.push(name);
+            }
+            continue;
+        }
+        let mut state = match html.get(index) {
+            Some(b'/') => AttributeState::SelfClosing,
+            Some(byte) if byte.is_ascii_whitespace() => AttributeState::BeforeName,
+            Some(_) => AttributeState::BeforeName,
+            None => return Err("archived snapshot rewrite failed: unterminated start tag".into()),
+        };
         let mut attributes = 0usize;
-        let mut between_attributes = false;
         loop {
             if index.saturating_sub(start) > MAX_START_TAG_BYTES {
                 return Err(format!(
@@ -417,49 +535,107 @@ fn validate_token_bounds(html: &[u8]) -> Result<(), String> {
             let Some(byte) = html.get(index).copied() else {
                 return Err("archived snapshot rewrite failed: unterminated start tag".to_string());
             };
-            if let Some(active) = quote {
-                if byte == active {
-                    quote = None;
-                    after_quoted_value = true;
-                }
-                index += 1;
-                continue;
-            }
-            if after_quoted_value {
-                match byte {
+            let mut reconsume = false;
+            state = match state {
+                AttributeState::BeforeName => match byte {
+                    b if b.is_ascii_whitespace() => AttributeState::BeforeName,
+                    b'/' => AttributeState::SelfClosing,
                     b'>' => {
                         cursor = index + 1;
                         break;
                     }
-                    byte if byte.is_ascii_whitespace() => {
-                        after_quoted_value = false;
-                        between_attributes = true;
+                    _ => {
+                        attributes += 1;
+                        if attributes > MAX_ATTRIBUTES_PER_TAG {
+                            return Err(format!(
+                                "archived snapshot attribute limit exceeded: maximum {MAX_ATTRIBUTES_PER_TAG} per tag"
+                            ));
+                        }
+                        AttributeState::Name
                     }
-                    _ => {}
+                },
+                AttributeState::Name => match byte {
+                    b if b.is_ascii_whitespace() => AttributeState::AfterName,
+                    b'=' => AttributeState::BeforeValue,
+                    b'/' => AttributeState::SelfClosing,
+                    b'>' => {
+                        cursor = index + 1;
+                        break;
+                    }
+                    _ => AttributeState::Name,
+                },
+                AttributeState::AfterName => match byte {
+                    b if b.is_ascii_whitespace() => AttributeState::AfterName,
+                    b'/' => AttributeState::SelfClosing,
+                    b'=' => AttributeState::BeforeValue,
+                    b'>' => {
+                        cursor = index + 1;
+                        break;
+                    }
+                    _ => {
+                        attributes += 1;
+                        if attributes > MAX_ATTRIBUTES_PER_TAG {
+                            return Err(format!(
+                                "archived snapshot attribute limit exceeded: maximum {MAX_ATTRIBUTES_PER_TAG} per tag"
+                            ));
+                        }
+                        AttributeState::Name
+                    }
+                },
+                AttributeState::BeforeValue => match byte {
+                    b if b.is_ascii_whitespace() => AttributeState::BeforeValue,
+                    b'"' => AttributeState::DoubleQuoted,
+                    b'\'' => AttributeState::SingleQuoted,
+                    b'>' => {
+                        cursor = index + 1;
+                        break;
+                    }
+                    _ => AttributeState::Unquoted,
+                },
+                AttributeState::SingleQuoted => {
+                    if byte == b'\'' {
+                        AttributeState::BeforeName
+                    } else {
+                        AttributeState::SingleQuoted
+                    }
                 }
+                AttributeState::DoubleQuoted => {
+                    if byte == b'"' {
+                        AttributeState::BeforeName
+                    } else {
+                        AttributeState::DoubleQuoted
+                    }
+                }
+                AttributeState::Unquoted => match byte {
+                    b if b.is_ascii_whitespace() => AttributeState::BeforeName,
+                    b'>' => {
+                        cursor = index + 1;
+                        break;
+                    }
+                    _ => AttributeState::Unquoted,
+                },
+                AttributeState::SelfClosing => {
+                    if byte == b'>' {
+                        cursor = index + 1;
+                        break;
+                    }
+                    reconsume = true;
+                    AttributeState::BeforeName
+                }
+            };
+            if !reconsume {
                 index += 1;
-                continue;
             }
-            match byte {
-                b'\'' | b'"' => quote = Some(byte),
-                b'>' => {
-                    cursor = index + 1;
-                    break;
-                }
-                byte if byte.is_ascii_whitespace() => between_attributes = true,
-                b'/' => between_attributes = true,
-                _ if between_attributes => {
-                    attributes += 1;
-                    if attributes > MAX_ATTRIBUTES_PER_TAG {
-                        return Err(format!(
-                            "archived snapshot attribute limit exceeded: maximum {MAX_ATTRIBUTES_PER_TAG} per tag"
-                        ));
-                    }
-                    between_attributes = false;
-                }
-                _ => {}
+        }
+        if let Some((name, plaintext)) = inert {
+            if plaintext {
+                return Ok(());
             }
-            index += 1;
+            cursor = find_inert_end(&html[cursor..], name)
+                .map_or(html.len(), |offset| cursor + offset);
+        }
+        if let Some(name) = enters_foreign {
+            foreign_stack.push(name);
         }
     }
     Ok(())
@@ -1675,6 +1851,41 @@ mod tests {
     }
 
     #[test]
+    fn token_bounds_ignore_comment_and_raw_text_contents() {
+        for html in [
+            "<style>.x{content:\"<a '>\"}</style>".to_string(),
+            format!(
+                "<style>.x{{content:\"<a {}>\"}}</style>",
+                "x".repeat(MAX_START_TAG_BYTES + 1)
+            ),
+            "<script>const x = \"<a '>\";</script>".to_string(),
+            "<title>&lt;a '&gt;</title>".to_string(),
+            "<textarea><a '></textarea>".to_string(),
+            "<plaintext><a '>".to_string(),
+            format!("<!-- <a {}> -->", "x".repeat(MAX_START_TAG_BYTES + 1)),
+        ] {
+            let result = neutralize_navigation(&html);
+            assert!(result.is_ok(), "{}", result.unwrap_err());
+        }
+
+        let escaped_comment = format!("<!--><a {}>", "a=x ".repeat(4097));
+        let foreign_style = format!(
+            "<svg><style><a {}></a></style></svg>",
+            "a=x ".repeat(4097)
+        );
+        let error = neutralize_navigation(&foreign_style).unwrap_err();
+        assert!(error.contains("attribute limit"), "{error}");
+        let error = neutralize_navigation(&escaped_comment).unwrap_err();
+        assert!(error.contains("attribute limit"), "{error}");
+        let mismatched_foreign_close = format!(
+            "<svg></math><style><a {}></a></style></svg>",
+            "a=x ".repeat(4097)
+        );
+        let error = neutralize_navigation(&mismatched_foreign_close).unwrap_err();
+        assert!(error.contains("attribute limit"), "{error}");
+    }
+
+    #[test]
     fn nested_noscript_layers_are_exposed_and_neutralized() {
         let html = concat!(
             "<template><noscript><noscript>",
@@ -1706,25 +1917,14 @@ mod tests {
         let tag_error = neutralize_navigation(&long_tag).unwrap_err();
         assert!(tag_error.contains("start tag limit"), "{tag_error}");
 
-        let many_attributes = format!(
-            "<div {}>",
-            (0..=MAX_ATTRIBUTES_PER_TAG)
-                .map(|index| format!("a{index}=x"))
-                .collect::<Vec<_>>()
-                .join(" ")
-        );
-        let attribute_error = neutralize_navigation(&many_attributes).unwrap_err();
-        assert!(attribute_error.contains("attribute limit"), "{attribute_error}");
-
-        let solidus_attributes = format!(
-            "<a{} href=https://live.example>visible</a>",
-            "/a".repeat(MAX_ATTRIBUTES_PER_TAG + 1)
-        );
-        let solidus_error = neutralize_navigation(&solidus_attributes).unwrap_err();
-        assert!(
-            solidus_error.contains("attribute limit"),
-            "{solidus_error}"
-        );
+        for tag in [
+            format!("<a x=\"\"{}>visible</a>", "a=\"\"".repeat(4097)),
+            format!("<a x='v'{}>visible</a>", "/a".repeat(4097)),
+            format!("<a {}>visible</a>", "\"a ".repeat(4097)),
+        ] {
+            let error = neutralize_navigation(&tag).unwrap_err();
+            assert!(error.contains("attribute limit"), "{error}");
+        }
     }
 
     // -------------------------------------------------------------------
