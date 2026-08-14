@@ -10,9 +10,16 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DocsLayout } from "#/components/docs/DocsLayout";
+import type { DocTocEntry } from "#/docs/toc";
 
 const desktopListeners = new Set<(event: MediaQueryListEvent) => void>();
 let desktopMatches = false;
+
+const TOC: readonly DocTocEntry[] = [
+  { depth: 2, text: "Prerequisites", id: "prerequisites" },
+  { depth: 3, text: "Install the binary", id: "install-the-binary" },
+  { depth: 2, text: "Related", id: "related" },
+];
 
 function setDesktop(matches: boolean) {
   desktopMatches = matches;
@@ -20,10 +27,13 @@ function setDesktop(matches: boolean) {
   for (const listener of desktopListeners) listener(event);
 }
 
-function renderLayout(docsLoadGate?: Promise<void>) {
+function renderLayout(
+  docsLoadGate?: Promise<void>,
+  toc?: readonly DocTocEntry[],
+) {
   function RootLayout() {
     return (
-      <DocsLayout>
+      <DocsLayout toc={toc}>
         <div data-testid="stable-article-child">
           Article remains mounted
           <Outlet />
@@ -218,6 +228,80 @@ describe("DocsLayout", () => {
       ).not.toBeInTheDocument();
       expect(article).toHaveFocus();
       expect(article.closest("[aria-hidden='true'], [inert]")).toBeNull();
+    });
+  });
+
+  describe("on this page", () => {
+    // jsdom has no Element scroll implementation; entry clicks only need it
+    // to exist, since the article geometry is zero here either way
+    const proto = HTMLElement.prototype as HTMLElement & {
+      scrollTo: (opts: ScrollToOptions) => void;
+    };
+    const origScrollTo = proto.scrollTo;
+
+    beforeEach(() => {
+      proto.scrollTo = vi.fn();
+    });
+
+    afterEach(() => {
+      proto.scrollTo = origScrollTo;
+    });
+
+    it("gives the guide its own heading rail beside the article", async () => {
+      renderLayout(undefined, TOC);
+      await screen.findByTestId("stable-article-child");
+
+      const rail = screen.getByTestId("docs-toc-rail");
+      expect(rail).toHaveClass("hidden", "xl:flex", "overflow-y-auto");
+      expect(
+        within(rail).getByRole("navigation", { name: "On this page" }),
+      ).toBeInTheDocument();
+      expect(
+        within(rail)
+          .getAllByRole("button")
+          .map((button) => button.textContent),
+      ).toEqual(TOC.map((entry) => entry.text));
+    });
+
+    it("omits the rail for a guide with no headings", async () => {
+      renderLayout();
+      await screen.findByTestId("stable-article-child");
+
+      expect(screen.queryByTestId("docs-toc-rail")).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("navigation", { name: "On this page" }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("closes the drawer when a heading is chosen from it", async () => {
+      const user = userEvent.setup();
+      renderLayout(undefined, TOC);
+      await screen.findByTestId("stable-article-child");
+
+      await user.click(
+        screen.getByRole("button", {
+          name: "Open documentation navigation",
+        }),
+      );
+      const dialog = screen.getByRole("dialog", {
+        name: "Documentation navigation",
+      });
+      const drawerToc = within(dialog).getByRole("navigation", {
+        name: "On this page",
+      });
+      expect(
+        within(dialog).getByRole("navigation", { name: "Documentation" }),
+      ).toBeInTheDocument();
+
+      await user.click(
+        within(drawerToc).getByRole("button", { name: "Related" }),
+      );
+
+      await waitFor(() => {
+        expect(
+          screen.queryByRole("dialog", { name: "Documentation navigation" }),
+        ).not.toBeInTheDocument();
+      });
     });
   });
 });

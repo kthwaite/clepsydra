@@ -14,6 +14,8 @@ import {
   useReadOnly,
   useSlateStatic,
 } from "slate-react";
+import { TASK_PROPERTY_KEYS, type TaskPropertyKey } from "#/editor/properties";
+import { useTaskPropertyPopover } from "#/editor/taskPropertyContext";
 import { cn } from "#/lib/cn";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type {
@@ -22,6 +24,127 @@ import type {
   NumberedListElement,
 } from "../types";
 import { makeParagraph } from "./paragraph";
+
+// ---------------------------------------------------------------------------
+// Task property chips — read-only ledger stamps for due / scheduled / priority
+// ---------------------------------------------------------------------------
+
+/** Mirrors `priorityLabel` in `#/components/TaskList` so agenda and editor agree. */
+function priorityLabel(value: string): string {
+  switch (value) {
+    case "A":
+      return "HIGH";
+    case "B":
+      return "MED";
+    case "C":
+      return "LOW";
+    default:
+      return value.toUpperCase();
+  }
+}
+
+interface ChipSpec {
+  /** Ledger prefix shown before the value; empty for self-describing values. */
+  prefix: string;
+  /** Word that opens the accessible name. */
+  name: string;
+  display: (value: string) => string;
+}
+
+const CHIP_SPECS: Record<TaskPropertyKey, ChipSpec> = {
+  due: { prefix: "DUE", name: "Due", display: (value) => value },
+  scheduled: { prefix: "SCHED", name: "Scheduled", display: (value) => value },
+  priority: { prefix: "", name: "Priority", display: priorityLabel },
+};
+
+const CHIP_CLASS =
+  "cl-mono inline-flex items-center border border-rule px-1 py-px text-[10px] uppercase leading-none tracking-wider text-ink-mute";
+
+const CHIP_INTERACTIVE =
+  "cursor-pointer hover:border-ink-mute hover:text-ink focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none";
+
+interface TaskPropertyChip {
+  key: string;
+  text: string;
+  name: string;
+}
+
+function taskPropertyChips(
+  properties: Record<string, string> | undefined,
+): TaskPropertyChip[] {
+  if (!properties) return [];
+  const chips: TaskPropertyChip[] = [];
+  for (const key of TASK_PROPERTY_KEYS) {
+    const value = properties[key];
+    if (!value) continue;
+    const spec = CHIP_SPECS[key];
+    const display = spec.display(value);
+    chips.push({
+      key,
+      text: spec.prefix ? `${spec.prefix} ${display}` : display,
+      name: `${spec.name} ${display}`,
+    });
+  }
+  return chips;
+}
+
+function TaskPropertyControls({ element }: { element: ListItemElement }) {
+  const editor = useSlateStatic();
+  const readOnly = useReadOnly();
+  const popover = useTaskPropertyPopover();
+  const chips = taskPropertyChips(element.properties);
+
+  // Nothing to display and nothing to edit.
+  if (readOnly && chips.length === 0) return null;
+
+  const open = (event: React.MouseEvent<HTMLButtonElement>) => {
+    popover?.openForPath(
+      ReactEditor.findPath(editor, element),
+      event.currentTarget,
+    );
+  };
+  // Keep the caret where it was — the popover edits the node, not the text.
+  const keepSelection = (event: React.MouseEvent<HTMLButtonElement>) =>
+    event.preventDefault();
+
+  return (
+    <span
+      contentEditable={false}
+      data-task-properties=""
+      className="ml-2 shrink-0 select-none space-x-1 whitespace-nowrap"
+    >
+      {chips.length > 0 ? (
+        chips.map((chip) => (
+          <button
+            key={chip.key}
+            type="button"
+            aria-label={chip.name}
+            disabled={readOnly}
+            className={cn(CHIP_CLASS, !readOnly && CHIP_INTERACTIVE)}
+            onMouseDown={keepSelection}
+            onClick={open}
+          >
+            {chip.text}
+          </button>
+        ))
+      ) : (
+        <button
+          type="button"
+          aria-label="Task properties"
+          className={cn(
+            CHIP_CLASS,
+            CHIP_INTERACTIVE,
+            "opacity-0 focus-visible:opacity-100 group-focus-within:opacity-100 group-hover:opacity-100",
+          )}
+          onMouseDown={keepSelection}
+          onClick={open}
+        >
+          +
+        </button>
+      )}
+    </span>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // ListItem — renders an interactive checkbox when `checked` is set
@@ -55,7 +178,7 @@ function ListItem({
       {...attributes}
       data-block-id={element.blockId}
       className={cn(
-        "flex items-baseline",
+        "group flex items-baseline",
         checked === true && "line-through text-muted-foreground",
       )}
     >
@@ -82,7 +205,12 @@ function ListItem({
           className="accent-foreground"
         />
       </span>
-      {children}
+      {/* Chips sit outside the content column so they stay on the first line
+          even when the item carries a nested sub-list. */}
+      <div data-task-content="" className="min-w-0 flex-1">
+        {children}
+      </div>
+      <TaskPropertyControls element={element} />
     </li>
   );
 }

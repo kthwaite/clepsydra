@@ -1,13 +1,16 @@
 import { Link } from "@tanstack/react-router";
+import { useMemo } from "react";
 import { DocsArticle } from "#/components/docs/DocsArticle";
 import { DocsLayout } from "#/components/docs/DocsLayout";
 import { DEFAULT_DOC_SLUG, getDocPage } from "#/docs/registry";
+import { extractDocToc } from "#/docs/toc";
 
 export function DocsScreen({ slug }: { slug: string }) {
   const page = getDocPage(slug);
+  const toc = useMemo(() => (page ? extractDocToc(page.source) : []), [page]);
 
   return (
-    <DocsLayout activeSlug={page?.slug}>
+    <DocsLayout activeSlug={page?.slug} toc={toc}>
       {page ? (
         <DocsArticle page={page} />
       ) : (

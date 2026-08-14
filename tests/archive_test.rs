@@ -796,6 +796,7 @@ async fn archive_status_returns_stats() {
     let body: serde_json::Value = res.json();
     assert_eq!(body["enabled"], true);
     assert_eq!(body["blob_count"], 0);
+    assert_eq!(body["snapshot_view_version"], 1);
 }
 
 #[tokio::test]
@@ -1230,6 +1231,76 @@ async fn archive_view_head_returns_metadata_headers_without_a_body() {
     assert!(
         response.headers().get("content-security-policy").is_some(),
         "HEAD omitted the snapshot sandbox policy"
+    );
+}
+
+#[tokio::test]
+async fn archive_view_head_reports_snapshot_transformation_failures() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let html = format!(
+        "{}<p>Visible snapshot</p>{}",
+        "<noscript>".repeat(18),
+        "</noscript>".repeat(18)
+    );
+    let hash = store_blob(&state, html.as_bytes(), "text/html");
+
+    let response = server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{hash}"),
+        )
+        .await;
+
+    response.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-clepsydra-archive-diagnostic")
+            .and_then(|value| value.to_str().ok()),
+        Some("archived snapshot noscript depth limit exceeded: maximum 16")
+    );
+    assert!(
+        response.as_bytes().is_empty(),
+        "HEAD returned an error body"
+    );
+}
+
+#[tokio::test]
+async fn archive_view_head_reports_only_uncaptured_visual_resources() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let html = concat!(
+        r#"<link rel="stylesheet" href="https://live.example/site.css">"#,
+        r#"<link rel="stylesheet alternate" href="data:text/css,body{}">"#,
+        r#"<a href="https://navigation.example/page">Navigation</a>"#,
+        r#"<script src="https://blocked.example/app.js"></script>"#,
+        r#"<img src="https://live.example/hero.png">"#,
+        r#"<img src="data:image/png;base64,iVBORw0KGgo=">"#,
+        r#"<img src="cas:sha256:captured">"#,
+        r#"<video src="/live/movie.mp4" poster="/live/poster.jpg"></video>"#,
+        r#"<source src="/api/vault/cas/sha256:captured">"#,
+        r#"<img srcset="data:image/png;base64,AAAA 1x, https://live.example/retina.png 2x, /api/vault/cas/sha256:captured 3x">"#,
+        r#"<source srcset="cas:sha256:captured 480w, /live/wide.webp 960w">"#,
+    );
+    let hash = store_blob(&state, html.as_bytes(), "text/html");
+
+    let response = server
+        .method(
+            axum::http::Method::HEAD,
+            &format!("/api/vault/archive/view/{hash}"),
+        )
+        .await;
+
+    response.assert_status(StatusCode::OK);
+    assert_eq!(
+        response
+            .headers()
+            .get("x-clepsydra-archive-uncaptured-resource-count")
+            .and_then(|value| value.to_str().ok()),
+        Some("6")
+    );
+    assert!(
+        response.as_bytes().is_empty(),
+        "HEAD returned transformed snapshot bytes"
     );
 }
 

@@ -73,6 +73,18 @@ fn openapi_documents_every_registered_vault_operation() {
 }
 
 #[test]
+fn openapi_defines_the_archive_view_get_resource_diagnostic() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let operation = &document["paths"]["/api/vault/archive/view/{snapshot_hash}"]["get"];
+
+    assert_eq!(
+        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]["schema"]
+            ["type"],
+        "integer"
+    );
+}
+
+#[test]
 fn openapi_defines_the_archive_view_head_contract() {
     let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
     let operation = &document["paths"]["/api/vault/archive/view/{snapshot_hash}"]["head"];
@@ -89,6 +101,15 @@ fn openapi_defines_the_archive_view_head_contract() {
     }
     assert_eq!(
         operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]["type"],
+        "string"
+    );
+    assert_eq!(
+        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]["schema"]
+            ["type"],
+        "integer"
+    );
+    assert_eq!(
+        operation["responses"]["500"]["headers"]["X-Clepsydra-Archive-Diagnostic"]["schema"]["type"],
         "string"
     );
 }

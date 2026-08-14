@@ -14,6 +14,17 @@ export type CapturePhase =
 	| "conflict"
 	| "error";
 
+export interface CaptureStatus {
+	phase: CapturePhase;
+	detail: string;
+	/** Unique generation for one tab capture; stale work must match it to report. */
+	attemptId: string;
+	/** Epoch milliseconds when this attempt was claimed. */
+	startedAt: number;
+	/** Monotonic epoch milliseconds for this status revision. */
+	updatedAt: number;
+}
+
 export interface BadgeAppearance {
 	text: string;
 	color: string;
