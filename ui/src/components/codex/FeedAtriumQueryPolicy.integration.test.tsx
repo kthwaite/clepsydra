@@ -99,6 +99,12 @@ vi.mock("#/components/codex/ActivityHeatmap", () => ({
   ActivityHeatmap: () => <div data-testid="activity-heatmap" />,
 }));
 
+vi.mock("#/components/codex/AgendaTile", () => ({
+  AgendaTile: ({ className }: { className?: string }) => (
+    <section aria-label="Outstanding agenda" className={className} />
+  ),
+}));
+
 vi.mock("#/components/codex/ReadingContinues", () => ({
   ReadingContinuesPanel: () => null,
 }));
