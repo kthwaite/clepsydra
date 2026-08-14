@@ -1,3 +1,11 @@
+import {
+  createMemoryHistory,
+  createRootRoute,
+  createRoute,
+  createRouter,
+  Outlet,
+  RouterProvider,
+} from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -104,9 +112,48 @@ function editor(overrides: Record<string, unknown> = {}) {
 
 const ARCHIVE_PATH = "archive/example.com/an-article.md";
 
+const ARCHIVE_META = {
+  blobs: [],
+  byline: "A. Writer",
+  canonical_url: "https://example.com/an-article",
+  captured_at: "2026-08-13T12:00:00Z",
+  content_hash: "content-hash",
+  description: "An archived article.",
+  domain: "example.com",
+  excerpt: "A short excerpt.",
+  lang: "en",
+  published_time: "2026-08-12T09:00:00Z",
+  resource_count: 0,
+  site_name: "Example",
+  snapshot_hash: "snapshot-hash",
+  source_hash: "source-hash",
+  url: "https://example.com/an-article",
+};
+
+function renderFolioInRouter(path: string) {
+  const rootRoute = createRootRoute({ component: Outlet });
+  const folioRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/",
+    component: () => <Folio tabId="t1" path={path} />,
+  });
+  const archiveRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "/archive/$",
+    component: () => null,
+  });
+  const router = createRouter({
+    routeTree: rootRoute.addChildren([folioRoute, archiveRoute]),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+
+  return render(<RouterProvider router={router} />);
+}
+
 describe("Folio read-only bodies", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.scrollTo = vi.fn();
     mobileLayoutState.matches = false;
     slateProps.current = null;
   });
@@ -136,6 +183,32 @@ describe("Folio read-only bodies", () => {
 
     expect(slateProps.current?.readOnly).toBe(false);
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("links a protected archive to its snapshot viewer while ordinary pages omit the action", async () => {
+    usePageEditorMock.mockReturnValue(editor({ archive: ARCHIVE_META }));
+
+    const archived = renderFolioInRouter(ARCHIVE_PATH);
+
+    expect(
+      await screen.findByRole("link", { name: "View archived snapshot" }),
+    ).toHaveAttribute("href", `/archive/${ARCHIVE_PATH}`);
+
+    archived.unmount();
+    usePageEditorMock.mockReturnValue(
+      editor({
+        archive: null,
+        kind: "NOTE",
+        computedTags: ["note"],
+        readonly: false,
+      }),
+    );
+    renderFolioInRouter("notes/a-note.md");
+
+    await screen.findByRole("textbox", { name: "Page title" });
+    expect(
+      screen.queryByRole("link", { name: "View archived snapshot" }),
+    ).toBeNull();
   });
 
   it("clears protection when the reader chooses to edit anyway", async () => {
