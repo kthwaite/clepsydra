@@ -2,7 +2,7 @@
 
 ## Result
 
-Implemented crash-resumable permanent removal for Rubbish Bin items in commit `14fd5b30` (`fix(rubbish): make purge removal crash-resumable`).
+Implemented crash-resumable permanent removal for Rubbish Bin items in commits `14fd5b30` (`fix(rubbish): make purge removal crash-resumable`) and `4d189337` (`fix(rubbish): flush purge directories on Windows`).
 
 No UI query-invalidation files were touched.
 
@@ -16,7 +16,9 @@ After the CAS release ledger commits, permanent removal never recursively delete
 4. recursively removes only the hidden tombstone; and
 5. fsyncs the Rubbish root again.
 
-Therefore, failure or process loss at any boundary leaves either the complete actionable UUID directory or an identifiable hidden purge tombstone. Recursive deletion can make only the tombstone partial; it cannot create a visible invalid UUID row.
+On Windows, the directory flush opens the physical directory with `FILE_FLAG_BACKUP_SEMANTICS` and write access, then uses `File::sync_all`/`FlushFileBuffers`; flush errors remain typed `RubbishStoreError::Filesystem` failures. The sync failpoint boundary tests are no longer excluded on Windows.
+
+Therefore, until recursive deletion completes, failure or process loss leaves either the complete actionable UUID directory or an identifiable hidden purge tombstone. Once tombstone removal completes, a successful second root sync makes absence durable; if that sync returns an error, absence is applied in the live namespace but durability is indeterminate, and restart may reveal either the tombstone or its durable absence. No boundary can create a visible partial UUID item.
 
 Exact, canonical `.purge-<uuid>` names are excluded from authoritative listing. Malformed lookalikes remain visible as invalid store entries. Cleanup validates that the Rubbish root and tombstone are physical directories and does not follow symlinked roots or tombstones.
 
@@ -44,6 +46,8 @@ Observed RED failures before production changes:
 - `cargo test startup_reconciliation_rejects_a_symlinked_root_without_deleting_its_target --lib`
   - failed because initial recovery followed the symlinked Rubbish root; root validation was added before cleanup.
 
+- Independent review identified that the prior Windows `sync_directory` no-op violated the durability invariant. The Windows directory flush in `4d189337` replaces that no-op, and the portable sync-boundary tests are now enabled on Windows.
+
 Final focused verification:
 
 - `cargo test vault::rubbish::tests --lib`
@@ -62,6 +66,9 @@ Final focused verification:
   - 1 passed, 0 failed.
 - `cargo test --test archive_test purge_rubbish_releases_unique_captured_refs_and_leaves_ordinary_attachments_untouched`
   - 1 passed, 0 failed.
+- Follow-up verification after the Windows durability fix:
+  - `cargo test vault::rubbish::tests --lib`: 18 passed, 0 failed.
+  - `cargo test purge_rubbish_ --lib`: 3 passed, 0 failed.
 
 The focused cases cover failure before rename, rename/root-fsync ambiguity, failure during tombstone removal, an already-partial tombstone, failure after tombstone removal before durable root sync, explicit retry, startup reconciliation, catalog truth, restore lockout, Empty Bin ordering, and CAS release behavior.
 
@@ -75,9 +82,13 @@ Per assignment constraints, formatters, linters, builds, and project-wide test s
 - Confirmed the normal purge result and existing typed errors remain unchanged.
 - Confirmed startup cleanup precedes authoritative catalog reconciliation.
 - Confirmed ordinary purge, restore, failed-post-ledger restore lockout, cleanup retry, Empty Bin ordering, and unique CAS release tests remain green.
-- Confirmed only `src/vault/rubbish.rs`, `src/vault/mutation_coordinator.rs`, and `src/lib.rs` are in the implementation commit.
+- Confirmed the implementation commits touch only `src/vault/rubbish.rs`, `src/vault/mutation_coordinator.rs`, and `src/lib.rs`.
+
+## Independent review
+
+The first independent review found one Important issue and no Critical issues: Windows returned success from `sync_directory` without a durability operation. Commit `4d189337` addresses the finding with a backup-semantics writable directory handle and `sync_all`, and enables the four deterministic directory-sync failure tests on Windows. Follow-up review found no Critical or Important implementation defects and marked the implementation ready; its sole report-accuracy finding was corrected above by distinguishing a returned post-removal sync error from process-loss recovery.
 
 ## Concerns
 
 - A retry that successfully finishes a pre-existing tombstone returns the established `RubbishItemNotFound` error because partial tombstones intentionally contain no trustworthy result metadata. Cleanup and catalog reconciliation have completed at that point; startup is also idempotent.
-- Permission-based before-rename and mid-removal boundary tests are Unix-gated. Portable tests still cover partial-tombstone startup cleanup, listing exclusion, and post-removal root-fsync failure.
+- Permission-based before-rename and mid-removal boundary tests are Unix-gated. The deterministic root-sync failure tests are portable and enabled on Windows, but this macOS workstation has no Windows Rust target installed, so the Windows-specific handle/flush branch could not be compiled or executed locally.
