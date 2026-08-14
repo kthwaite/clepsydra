@@ -1,10 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type { components } from "#/api/schema";
 import { $api, fetchClient } from "./client";
-import {
-  invalidatePageStructure,
-  invalidateRubbish,
-} from "./keys";
+import { invalidatePageStructure, invalidateRubbish } from "./keys";
 
 export type RubbishListEntry = components["schemas"]["RubbishListEntryDto"];
 export type RubbishItemSummary = components["schemas"]["RubbishItemSummary"];
@@ -16,7 +13,11 @@ export type RubbishPurgeResponse =
 export type EmptyRubbishResponse =
   components["schemas"]["EmptyRubbishResponse"];
 
-function requiredResponse<T>(data: T | undefined, error: unknown, fallback: string): T {
+function requiredResponse<T>(
+  data: T | undefined,
+  error: unknown,
+  fallback: string,
+): T {
   if (error !== undefined) throw error;
   if (data === undefined) throw new Error(fallback);
   return data;
@@ -62,7 +63,11 @@ export function usePurgeRubbishItem() {
         "/api/vault/rubbish/{item_id}",
         { params: { path: { item_id: itemId } } },
       );
-      return requiredResponse(data, error, "Permanent deletion returned no result.");
+      return requiredResponse(
+        data,
+        error,
+        "Permanent deletion returned no result.",
+      );
     },
     onSuccess: () => {
       void invalidateRubbish(queryClient);
@@ -75,7 +80,11 @@ export function useEmptyRubbish() {
   return useMutation<EmptyRubbishResponse, unknown, void>({
     mutationFn: async () => {
       const { data, error } = await fetchClient.DELETE("/api/vault/rubbish");
-      return requiredResponse(data, error, "Empty Rubbish Bin returned no result.");
+      return requiredResponse(
+        data,
+        error,
+        "Empty Rubbish Bin returned no result.",
+      );
     },
     onSuccess: () => {
       void invalidateRubbish(queryClient);

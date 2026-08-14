@@ -218,10 +218,10 @@ HTTP 200. A conflict has no success response and writes nothing.
   no-overwrite creation. Assignment and move operate against the mutation
   coordinator's current server state; they do not send a revision copied from
   an earlier MCP page read.
-- **`409` restore conflict** — an occupied original path or changed retained
-  item leaves the item in the Rubbish Bin. Inspect it again with
-  `vault_list_rubbish` and `vault_get_rubbish_item`; move an occupied active
-  page before retrying restoration.
+- **`409` restore conflict** — an occupied original path, changed retained
+  item, or already-committed permanent-deletion cleanup blocks restoration.
+  Inspect the item again; move an occupied active page, refresh changed state,
+  or retry `vault_purge_page` when the server reports deletion in progress.
 - **Validation or protocol error** — invalid paths, kinds, projects, tool
   fields, JSON, or unexpected response bodies are returned to the agent.
   Correct the request rather than guessing.

@@ -121,8 +121,9 @@ page ID and content, so inbound links resolve again.
 
 **Delete permanently** removes one retained item and cannot be undone.
 **Empty Rubbish Bin** requires a stronger confirmation, processes the current
-retained-item snapshot in order, and reports every success or failure. Failed
-items remain available for inspection and retry.
+retained-item snapshot in order, and reports every success or failure. A
+failed permanent deletion remains safe to retry. If attachment cleanup already
+committed, that item is deletion-only and cannot be restored.
 
 ## Failures and conflicts
 
@@ -140,7 +141,8 @@ items remain available for inspection and retry.
   closes and the page remains active. Archive does not rewrite or remove
   backlink markup.
 - Restore conflicts retain the item. Move an active page occupying the
-  original path, or refresh the Rubbish Bin if retained bytes changed.
+  original path, refresh if retained bytes changed, or retry permanent deletion
+  when the server reports that attachment cleanup already committed.
 - Folder deletion cannot be previewed. Non-recursive deletion fails for a
   non-empty folder. Recursive deletion is intentionally destructive, performs
   no inbound-link safety check, and performs no link rewriting.
