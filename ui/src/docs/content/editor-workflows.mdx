@@ -52,11 +52,11 @@ fresh paragraph below it. A fence of three backticks, optionally followed by a
 language name, becomes a code block in that language when you press `Enter` at
 the end of the line. Nothing autoformats inside a code block.
 
-Only the empty `[] ` form can be typed: in any non-empty bracket pair the
-closing `]` fires the link scaffold described below instead. The `[ ] ` and
-`[x] ` forms are still recognized in pasted or loaded Markdown. Typing `[] ` or
-`[x] ` at the start of an existing bullet promotes it to a task and keeps its
-text.
+Only the empty `[] ` form can be typed: in a non-empty bracket pair the closing
+`]` fires the link scaffold or the inline-property rule described below instead.
+The `[ ] ` and `[x] ` forms are still recognized in pasted or loaded Markdown.
+Typing `[] ` or `[x] ` at the start of an existing bullet promotes it to a task
+and keeps its text.
 
 Inline triggers fire on their closing character.
 
@@ -74,7 +74,9 @@ inserts the pair and centers the caret; typing the closing character again types
 through it rather than doubling it. Typing `*`, `_`, or `~` while text is
 selected wraps the selection in those literal characters and applies no mark.
 Typing `[`, a label, and then `]` inserts a `]()` scaffold with the caret
-between the parentheses.
+between the parentheses. A completed `[key:: value]` pair is the one exception:
+it becomes a block property rather than text, as
+[Edit tasks and their properties](#edit-tasks-and-their-properties) describes.
 
 `[^id]` inserts a footnote reference. When no definition with that identifier
 exists, Clepsydra appends an editable definition block at the end of the
@@ -119,6 +121,10 @@ reveals a delete button.
 task, unchecked to checked, checked back to unchecked. It never returns an item
 to a plain bullet.
 
+`Command+Shift+P` opens the **Task properties** popover for the task item
+holding the caret. With the caret anywhere else the editor leaves the chord to
+whatever else handles it rather than swallowing it.
+
 `Command+S` saves the Folio. There is no floating formatting toolbar.
 
 `ArrowRight` at the end of trailing inline code drops the code mark, and typing
@@ -151,15 +157,43 @@ status `[-]` in
 [Tasks, Agenda, Journals, and Board](/docs/tasks-agenda-journals-and-board) is
 recognized by the index, not by Folio's checkbox.
 
-Inline properties such as `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
-`[priority:: P1]`, and a trailing `^blockId` marker, are Markdown-level
-constructs. Folio parses them when the page loads, holds them on the block
-without showing them, and re-emits them on save. It gives no way to see, add,
-edit, or remove one, and typing one does not work either: the closing bracket
-fires the link scaffold. To set a due date, schedule, or priority today, edit
-the Markdown outside the web editor — an external editor over the
-[LSP](/docs/lsp), the CLI, the API, or MCP tooling. The Tasks guide holds the
-syntax and how `due`, `scheduled`, and `priority` drive the agenda.
+A task item renders its `due`, `scheduled`, and `priority` properties as
+read-only chips after its text: `DUE 2026-08-20`, `SCHED 2026-08-15`, and the
+priority values `A`, `B`, and `C` as `HIGH`, `MED`, and `LOW`, the same mapping
+the agenda's task list uses. Another priority value is shown verbatim in
+capitals. The chips stay on the first line of an item that carries a nested
+sub-list. Plain bullets and other blocks show no chips, and property keys other
+than those three stay invisible everywhere. A read-only Folio shows the chips
+but they are inert there: the popover below does not open.
+
+Click a chip — or the `+` control that appears when you hover or focus a task
+item with none of the three properties set — to open the **Task properties**
+popover. `Command+Shift+P` on macOS or `Ctrl+Shift+P` elsewhere opens the same
+popover for the task item holding the caret, including from vim normal mode.
+Due and Scheduled are date fields, each with a clear control, and Priority is a
+HIGH / MED / LOW toggle writing `A`, `B`, or `C`; pressing the level already set
+clears it. The popover buffers its edits: `Enter` commits them, as does clicking
+outside it, and `Escape` discards them. `Enter` while one of the popover's own
+buttons has focus activates that button instead of committing. A commit that
+changes nothing writes nothing, other properties on the item are left untouched,
+clearing every property removes the record, and focus returns to the editor.
+
+Typing an inline property also works. In any block that can carry properties,
+`[key:: value]` converts on the closing `]`, for any key, as long as at least
+one space follows the `::`. The typed text disappears together with the
+whitespace before the `[`, and the pair becomes a block property: on a task line
+its chip appears at once; elsewhere it is held invisibly, exactly as if it had
+been loaded from the file. Typing the same key again overwrites its value, and
+one undo reverses the whole conversion. Nothing converts inside a code block or
+inline code, `[key::value]` without that space still scaffolds a link, and so
+does a plain `[label]`.
+
+A trailing `^blockId` marker, properties on blocks other than task items, and
+keys outside those three remain Markdown-level constructs that Folio parses on
+load and re-emits on save without ever showing. Read or correct those outside
+the web editor — an external editor over the [LSP](/docs/lsp), the CLI, the
+API, or MCP tooling. The Tasks guide holds the syntax and how `due`,
+`scheduled`, and `priority` drive the agenda.
 
 A property whose value is a bare URL cannot round-trip, because the Markdown
 parser autolinks that URL first.
@@ -275,8 +309,10 @@ not retry automatically.
 - A stale or deleted block displays the unavailable state. Retrying cannot
   restore a block that no longer exists.
 - Pasting a URL over selected text replaces the selection instead of linking it.
-- Block IDs and inline properties are invisible in Folio. They survive a save,
-  but they cannot be read or corrected there.
+- Block IDs are invisible in Folio. They survive a save, but they cannot be read
+  or corrected there. Of the inline properties, only `due`, `scheduled`, and
+  `priority` on a task item can be seen and edited, as chips; every other key,
+  and every property on a block that is not a task item, stays invisible.
 - `Escape` in the wikilink chooser leaves the typed `[[query` text in the
   document.
 

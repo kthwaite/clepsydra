@@ -63,6 +63,12 @@ import { makeBaseEmbed } from "./schema/elements/baseEmbed";
 import { makeBlockRef } from "./schema/elements/blockRef";
 import { makeWikilink } from "./schema/elements/wikilink";
 import { withSchema } from "./schema/withSchema";
+import {
+  TaskPropertyPopover,
+  taskItemAtSelection,
+  useTaskPropertyPopoverController,
+} from "./TaskPropertyPopover";
+import { TaskPropertyPopoverProvider } from "./taskPropertyContext";
 import { insertMarkdown } from "./transforms/insertMarkdown";
 import {
   handleJournalTimeHeadingDeletion,
@@ -203,6 +209,7 @@ export function SlateEditor({
   const wikilinkEditing = useWikilinkEditingController(editor);
   const mathEditing = useMathEditingController(editor);
   const baseEmbedEditing = useBaseEmbedEditingController(editor);
+  const taskProperties = useTaskPropertyPopoverController(editor);
   const handledInsertionRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -568,6 +575,20 @@ export function SlateEditor({
       }
     }
 
+    // Only a task item claims this chord; anywhere else the event is left
+    // untouched rather than silently swallowed.
+    if (matchesChord(event, SHORTCUTS["editor.taskProperties"].chord)) {
+      const taskItem = taskItemAtSelection(editor);
+      if (taskItem) {
+        event.preventDefault();
+        taskProperties.opener.openForPath(
+          taskItem[1],
+          ReactEditor.toDOMNode(editor, taskItem[0]),
+        );
+        return;
+      }
+    }
+
     // --- Vim mode (after popovers, before app chords) ---
     if (matchesChord(event, SHORTCUTS["editor.vimMode"].chord)) {
       event.preventDefault();
@@ -729,21 +750,23 @@ export function SlateEditor({
         <BaseEmbedEditingProvider value={baseEmbedEditing}>
           <MathEditingProvider value={mathEditing}>
             <WikilinkEditingProvider value={wikilinkEditing}>
-              <Editable
-                data-folio-heading-root
-                renderElement={renderElement}
-                renderLeaf={renderLeaf}
-                decorate={decorateCode}
-                readOnly={readOnly}
-                onKeyDown={readOnly ? undefined : handleKeyDown}
-                onDOMBeforeInput={
-                  readOnly ? undefined : vim.handleDOMBeforeInput
-                }
-                onMouseDown={readOnly ? undefined : vim.handleMouseDown}
-                placeholder="Start writing..."
-                className="min-h-[200px] w-full min-w-0 outline-none"
-                spellCheck
-              />
+              <TaskPropertyPopoverProvider value={taskProperties.opener}>
+                <Editable
+                  data-folio-heading-root
+                  renderElement={renderElement}
+                  renderLeaf={renderLeaf}
+                  decorate={decorateCode}
+                  readOnly={readOnly}
+                  onKeyDown={readOnly ? undefined : handleKeyDown}
+                  onDOMBeforeInput={
+                    readOnly ? undefined : vim.handleDOMBeforeInput
+                  }
+                  onMouseDown={readOnly ? undefined : vim.handleMouseDown}
+                  placeholder="Start writing..."
+                  className="min-h-[200px] w-full min-w-0 outline-none"
+                  spellCheck
+                />
+              </TaskPropertyPopoverProvider>
               {!readOnly && isVimEnabled && (
                 <VimStatusBar mode={vim.mode} pending={vim.pending} />
               )}
@@ -771,6 +794,16 @@ export function SlateEditor({
           reference={createSelectionReference(editor)}
           onSelect={insertBlockRef}
           onClose={() => setBlockRefTrigger(null)}
+        />
+      )}
+
+      {!readOnly && taskProperties.session && (
+        <TaskPropertyPopover
+          key={taskProperties.session.id}
+          anchor={taskProperties.session.anchor}
+          initial={taskProperties.session.initial}
+          onCommit={taskProperties.commit}
+          onDiscard={taskProperties.discard}
         />
       )}
 

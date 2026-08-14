@@ -171,6 +171,13 @@ export const SHORTCUTS = {
     group: "Editor",
     scope: "editor",
   },
+  "editor.taskProperties": {
+    chord: { key: "p", mod: true, shift: true },
+    label: "Task properties",
+    group: "Editor",
+    scope: "editor",
+    note: "on a task item",
+  },
   "editor.mark.bold": {
     chord: { key: "b", mod: true },
     label: "Bold",

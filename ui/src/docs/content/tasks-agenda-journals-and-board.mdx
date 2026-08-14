@@ -14,7 +14,13 @@ and mutations over those files, not a second task store.
 - Open `/agenda` for due work and `/tasking` for project and cycle planning.
 - Use checkbox list items such as `- [ ] Draft proposal`. Inline properties use
   the Markdown form `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
-  `[priority:: P1]`.
+  `[priority:: A]`. Write them in Markdown, or set them on a task item from the
+  **Task properties** popover in Folio
+  ([Editor Workflows](/docs/editor-workflows)).
+- The inline `priority` values the interface renders are `A`, `B`, and `C`,
+  badged `HIGH`, `MED`, and `LOW` in agenda task lists and in the Folio chips.
+  Another value is badged verbatim in capitals. These are the checkbox-task
+  priorities; the Tasking board's own `P0` through `P3` are separate.
 - Enter task `due` and `scheduled` values and board-cycle start and end strings
   as exact `YYYY-MM-DD`. They are not validated as dates by the server. For
   agenda tasks, the API compares their indexed strings lexicographically, so

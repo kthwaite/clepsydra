@@ -129,6 +129,28 @@ describe("registry", () => {
     });
   });
 
+  it("registers Mod+Shift+P for the task property popover", () => {
+    const shortcut = SHORTCUTS["editor.taskProperties"];
+    expect(shortcut).toEqual({
+      chord: { key: "p", mod: true, shift: true },
+      label: "Task properties",
+      group: "Editor",
+      scope: "editor",
+      note: "on a task item",
+    });
+    // Declared shift is enforced, so plain ⌘P stays the browser's print.
+    expect(
+      matchesChord(
+        ev("P", { metaKey: true, shiftKey: true }),
+        shortcut.chord,
+        true,
+      ),
+    ).toBe(true);
+    expect(matchesChord(ev("p", { metaKey: true }), shortcut.chord, true)).toBe(
+      false,
+    );
+  });
+
   it("shortcutsByGroup covers every shortcut exactly once", () => {
     const listed = shortcutsByGroup().flatMap(([, defs]) =>
       defs.map((d) => d.id),

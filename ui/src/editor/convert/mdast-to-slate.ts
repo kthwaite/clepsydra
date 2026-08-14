@@ -8,6 +8,7 @@ import {
   type ConversationMarker,
   parseConversationMarker,
 } from "#/editor/conversation/marker";
+import { inlinePropertyScanner } from "#/editor/properties";
 import type {
   BlockRefElement,
   CustomElement,
@@ -680,18 +681,6 @@ function splitBlockRefs(value: string, marks: Marks): Descendant[] {
 const BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})$/;
 const CODE_BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})\s*$/;
 
-/**
- * Pattern for inline properties: [key:: value]
- *
- * Known limitation: URL values (e.g. `[url:: https://example.com]`) fail to
- * parse because remark-gfm auto-links the URL before this regex runs,
- * fragmenting the `[key:: value]` text across multiple AST nodes (text + link
- * + text). Fixing this would require either disabling auto-linking globally
- * (breaking other features) or pre-processing raw markdown (fragile). Accepted
- * as a v2 concern — URL values in inline properties are uncommon in practice.
- */
-const INLINE_PROP_RE = /\[([A-Za-z_][\w-]*)::[ \t]+([^\]]+)\]/g;
-
 const NESTED_LIST_TYPES: ReadonlySet<string> = new Set([
   "bulleted-list",
   "numbered-list",
@@ -769,10 +758,10 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
   const allTextNodes = collectTextNodes(searchChildren);
   const properties: Record<string, string> = {};
   for (const textChild of allTextNodes) {
-    INLINE_PROP_RE.lastIndex = 0;
+    const scanner = inlinePropertyScanner();
     const matches: Array<{ full: string; key: string; value: string }> = [];
     let match: RegExpExecArray | null;
-    while ((match = INLINE_PROP_RE.exec(textChild.text)) !== null) {
+    while ((match = scanner.exec(textChild.text)) !== null) {
       matches.push({ full: match[0], key: match[1], value: match[2] });
     }
     for (const m of matches) {
