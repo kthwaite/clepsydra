@@ -171,19 +171,26 @@ function describeConflict(title: string, err: ArchiveConflictError): string {
 }
 
 function showNotification(title: string, message: string): void {
-	// The worker lives at /background/, so a relative icon path resolves to
-	// /background/icons/... and Chrome rejects the whole notification with
-	// "Unable to download all specified images". Always use an extension URL.
-	void Promise.resolve(
-		chrome.notifications.create({
-			type: "basic",
-			iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
-			title,
-			message,
-		}),
-	).catch(() => {
-		// Notifications are best-effort; the badge is the reliable signal.
-	});
+	const notifications = chrome.notifications;
+	if (!notifications?.create) return;
+
+	try {
+		// The worker lives at /background/, so a relative icon path resolves to
+		// /background/icons/... and Chrome rejects the whole notification with
+		// "Unable to download all specified images". Always use an extension URL.
+		void Promise.resolve(
+			notifications.create({
+				type: "basic",
+				iconUrl: chrome.runtime.getURL("icons/icon-128.png"),
+				title,
+				message,
+			}),
+		).catch(() => {
+			// Notifications are best-effort; the badge is the reliable signal.
+		});
+	} catch {
+		// Some notification implementations throw before returning a promise.
+	}
 }
 
 const legacyChrome = chrome as typeof chrome & {
