@@ -933,10 +933,9 @@ mod tests {
             .expect("BasePropertyEntry.required should be an array");
         assert!(entry_required.iter().any(|field| field == "key"));
         assert!(entry_required.iter().any(|field| field == "definition"));
-        let preview_required =
-            json["components"]["schemas"]["PreviewFieldDefinition"]["required"]
-                .as_array()
-                .expect("PreviewFieldDefinition.required should be an array");
+        let preview_required = json["components"]["schemas"]["PreviewFieldDefinition"]["required"]
+            .as_array()
+            .expect("PreviewFieldDefinition.required should be an array");
         assert!(preview_required.iter().any(|field| field == "field"));
         assert!(!preview_required.iter().any(|field| field == "label"));
 

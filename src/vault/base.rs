@@ -1046,13 +1046,9 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             );
         }
         let path = format!("preview[{preview_index}].field");
-        if let Some(identity) = validate_projection_field(
-            base,
-            &definition.field,
-            &path,
-            "preview",
-            &mut push,
-        ) && !preview_fields.insert(identity)
+        if let Some(identity) =
+            validate_projection_field(base, &definition.field, &path, "preview", &mut push)
+            && !preview_fields.insert(identity)
         {
             push(
                 BaseDiagnosticSeverity::Error,
@@ -1657,9 +1653,11 @@ labels = { title = "\t" }
                     && diagnostic.path.as_deref() == Some(expected_path)
             }));
         }
-        assert!(!diagnostics.iter().any(|diagnostic| {
-            diagnostic.path.as_deref() == Some("preview[1].label")
-        }));
+        assert!(
+            !diagnostics
+                .iter()
+                .any(|diagnostic| { diagnostic.path.as_deref() == Some("preview[1].label") })
+        );
     }
 
     #[test]
@@ -1688,7 +1686,10 @@ title = { type = "text" }
             .filter_map(|diagnostic| diagnostic.path.as_deref())
             .collect::<Vec<_>>();
 
-        assert_eq!(duplicate_paths, vec!["preview[1].field", "preview[4].field"]);
+        assert_eq!(
+            duplicate_paths,
+            vec!["preview[1].field", "preview[4].field"]
+        );
         assert!(!duplicate_paths.contains(&"preview[2].field"));
     }
 

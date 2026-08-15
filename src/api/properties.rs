@@ -308,10 +308,7 @@ fn project_page_preview(
         .map(|property| {
             (
                 property.key.as_str(),
-                matches!(
-                    property.compatibility,
-                    PagePropertyCompatibility::Conflict
-                ),
+                matches!(property.compatibility, PagePropertyCompatibility::Conflict),
             )
         })
         .collect::<HashMap<_, _>>();
@@ -329,9 +326,7 @@ fn project_page_preview(
                 .label
                 .clone()
                 .filter(|label| !label.trim().is_empty());
-            let effective_label = configured_label
-                .clone()
-                .unwrap_or_else(|| key.clone());
+            let effective_label = configured_label.clone().unwrap_or_else(|| key.clone());
             let source = PagePreviewSource {
                 base: base_identity.clone(),
                 label: configured_label,

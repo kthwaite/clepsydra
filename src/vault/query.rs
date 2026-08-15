@@ -189,9 +189,7 @@ pub enum QueryError {
 /// Resolve a presentation field to its canonical identity. Bare names bind
 /// system-first; `sys.<name>` / `prop.<name>` disambiguate. All accepted body
 /// spellings resolve to the projection-only body identity.
-pub fn resolve_projection_field(
-    field: &str,
-) -> Result<ProjectionFieldIdentity, QueryError> {
+pub fn resolve_projection_field(field: &str) -> Result<ProjectionFieldIdentity, QueryError> {
     if is_body_field_reference(field) {
         return Ok(ProjectionFieldIdentity::Body);
     }
@@ -242,10 +240,9 @@ pub fn project_page_field_value(
             true,
             Some(serde_json::Value::String(page.meta.id.to_string())),
         ),
-        ProjectionFieldIdentity::System(SysField::Path) => (
-            true,
-            Some(serde_json::Value::String(path.to_string())),
-        ),
+        ProjectionFieldIdentity::System(SysField::Path) => {
+            (true, Some(serde_json::Value::String(path.to_string())))
+        }
         ProjectionFieldIdentity::System(SysField::Title) => {
             optional_string(page.meta.title.clone())
         }
@@ -353,7 +350,6 @@ fn page_journal_date(path: &str) -> Option<&str> {
     }
     Some(candidate)
 }
-
 
 // ---------------------------------------------------------------------------
 // Filter compilation
@@ -1466,20 +1462,14 @@ mod tests {
 
     #[test]
     fn page_field_projection_materializes_every_system_shape_from_effective_metadata() {
-        let page = projection_page(
-            "journals/2026-08-15.md",
-            "one two\n\nthree".to_string(),
-        );
+        let page = projection_page("journals/2026-08-15.md", "one two\n\nthree".to_string());
         let cases = [
             (SysField::Id, serde_json::json!(page.meta.id.to_string())),
             (SysField::Path, serde_json::json!("journals/2026-08-15.md")),
             (SysField::Title, serde_json::json!("Daily log")),
             (SysField::Kind, serde_json::json!("JOURNAL")),
             (SysField::Project, serde_json::json!("clepsydra")),
-            (
-                SysField::Tags,
-                serde_json::json!(["Research", "journal"]),
-            ),
+            (SysField::Tags, serde_json::json!(["Research", "journal"])),
             (SysField::Aliases, serde_json::json!(["Log", "Daily"])),
             (
                 SysField::CreatedAt,
@@ -1535,11 +1525,15 @@ mod tests {
     fn page_field_projection_reuses_the_unicode_safe_body_excerpt() {
         let page = projection_page(
             "notes/log.md",
-            format!("# Heading\n\n[link](https://example.com) {}", "界".repeat(260)),
+            format!(
+                "# Heading\n\n[link](https://example.com) {}",
+                "界".repeat(260)
+            ),
         );
-        let (present, value) =
-            project_page_field_value(&page, &ProjectionFieldIdentity::Body);
-        let excerpt = value.and_then(|value| value.as_str().map(str::to_owned)).unwrap();
+        let (present, value) = project_page_field_value(&page, &ProjectionFieldIdentity::Body);
+        let excerpt = value
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .unwrap();
 
         assert!(present);
         assert!(excerpt.starts_with("Heading link "));

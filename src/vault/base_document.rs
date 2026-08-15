@@ -336,12 +336,7 @@ fn merge_document(
         let current_item = current.as_table().get(key);
         let desired_item = desired.as_table().get(key);
         if *key == "preview" {
-            merge_preview_key(
-                document.as_table_mut(),
-                key,
-                current_item,
-                desired_item,
-            )?;
+            merge_preview_key(document.as_table_mut(), key, current_item, desired_item)?;
         } else if *key == "views" {
             merge_views_key(
                 document.as_table_mut(),
@@ -501,9 +496,7 @@ fn merge_preview_array(
             current_fields
                 .iter()
                 .enumerate()
-                .find(|(index, current_field)| {
-                    !claimed[*index] && *current_field == desired_field
-                })
+                .find(|(index, current_field)| !claimed[*index] && *current_field == desired_field)
                 .map(|(index, _)| {
                     claimed[index] = true;
                     index
@@ -1472,9 +1465,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::vault::base::{
-        BaseFile, PreviewFieldDefinition, PropertyDefinition, PropertyType,
-    };
+    use crate::vault::base::{BaseFile, PreviewFieldDefinition, PropertyDefinition, PropertyType};
     use std::sync::mpsc;
     use std::thread;
 
@@ -1625,9 +1616,7 @@ layout = "table"
         let stored = create(root.path(), "reading", &file).unwrap();
         let raw = fs::read_to_string(root.path().join("bases/reading.base.toml")).unwrap();
 
-        assert!(
-            raw.find(r#"field = "body""#).unwrap() < raw.find(r#"field = "title""#).unwrap()
-        );
+        assert!(raw.find(r#"field = "body""#).unwrap() < raw.find(r#"field = "title""#).unwrap());
         assert!(raw.contains(r#"labels = { body = "Excerpt", title = "Headline" }"#));
         assert_eq!(stored.revision, revision(&raw));
     }
@@ -1666,8 +1655,7 @@ layout = "table"
         assert!(added.contains(r#"{ field = "title" }"#), "{added}");
         assert!(stored.definition.file.preview[1].label.is_none());
         assert!(
-            added.find(r#"field = "body""#).unwrap()
-                < added.find(r#"field = "title""#).unwrap()
+            added.find(r#"field = "body""#).unwrap() < added.find(r#"field = "title""#).unwrap()
         );
 
         stored.definition.file.preview[0].label = Some("Summary".into());
@@ -1686,8 +1674,7 @@ layout = "table"
         assert!(edited.contains("plugin_key = \"keep\""));
         assert!(edited.contains(r#"label = "Summary""#));
         assert!(
-            edited.find(r#"field = "title""#).unwrap()
-                < edited.find(r#"field = "body""#).unwrap()
+            edited.find(r#"field = "title""#).unwrap() < edited.find(r#"field = "body""#).unwrap()
         );
 
         stored.definition.file.preview.remove(0);
