@@ -9,6 +9,7 @@ type ButtonVariant = "primary" | "secondary" | "ghost" | "danger";
 type ButtonSize = "sm" | "md" | "icon";
 
 export interface ButtonProps extends RACButtonProps {
+  ref?: React.Ref<HTMLButtonElement>;
   variant?: ButtonVariant;
   size?: ButtonSize;
 }

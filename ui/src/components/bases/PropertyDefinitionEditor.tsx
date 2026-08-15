@@ -18,6 +18,7 @@ import {
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
+import { Select, SelectItem } from "#/components/ui/select";
 import type { DraftProperty } from "./definition-model";
 import { moveItem } from "./definition-model";
 
@@ -487,50 +488,43 @@ export function PropertyDefinitionEditor({
                 className={renaming ? "mt-4 border-t border-border pt-4" : ""}
               >
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                    Type for {property.key}
-                    <select
-                      value={property.definition.type}
-                      onChange={(event) =>
-                        onChange(
-                          changePropertyType(
-                            property,
-                            event.target.value as PropertyType,
-                          ),
-                        )
-                      }
-                      className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-                    >
-                      {PROPERTY_TYPES.map((type) => (
-                        <option key={type} value={type}>
-                          {PROPERTY_TYPE_LABELS[type]}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                  <Select
+                    label={`Type for ${property.key}`}
+                    value={property.definition.type}
+                    onChange={(key) => {
+                      if (key == null) return;
+                      const type = String(key) as PropertyType;
+                      if (!PROPERTY_TYPES.includes(type)) return;
+                      onChange(changePropertyType(property, type));
+                    }}
+                  >
+                    {PROPERTY_TYPES.map((type) => (
+                      <SelectItem key={type} id={type}>
+                        {PROPERTY_TYPE_LABELS[type]}
+                      </SelectItem>
+                    ))}
+                  </Select>
 
                   {property.definition.type === "relation" && (
-                    <div className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-                      <label htmlFor={`${property.id}-cardinality`}>
-                        Cardinality for {property.key}
-                      </label>
-                      <select
+                    <div>
+                      <Select
                         id={`${property.id}-cardinality`}
+                        label={`Cardinality for ${property.key}`}
                         value={
                           property.definition.many === false ? "one" : "many"
                         }
-                        onChange={(event) =>
+                        onChange={(key) => {
+                          if (key !== "one" && key !== "many") return;
                           updateDefinition({
                             type: "relation",
-                            many: event.target.value === "many",
-                          })
-                        }
-                        className="mt-1 block w-full border border-input bg-background px-2 py-1.5 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+                            many: key === "many",
+                          });
+                        }}
                       >
-                        <option value="one">One page</option>
-                        <option value="many">Many pages</option>
-                      </select>
-                      <p className="mt-1 font-normal normal-case tracking-normal leading-5">
+                        <SelectItem id="one">One page</SelectItem>
+                        <SelectItem id="many">Many pages</SelectItem>
+                      </Select>
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
                         Cardinality is advisory: existing page values are
                         diagnosed, not rewritten.
                       </p>

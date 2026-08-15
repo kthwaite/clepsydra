@@ -1,8 +1,22 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseDetailResponse, BaseMutationResponse } from "#/api/bases";
 import { BaseDefinitionWorkspace } from "#/components/bases/BaseDefinitionWorkspace";
+function selectTriggerName(label: string) {
+  return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+async function chooseSelectOption(
+  user: UserEvent,
+  label: string,
+  option: string,
+) {
+  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 
 const { previewMock, updateMock, useBlockerMock } = vi.hoisted(() => ({
   previewMock: vi.fn(),
@@ -195,10 +209,7 @@ describe("BaseDefinitionWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
     await user.click(screen.getByRole("button", { name: "Add condition" }));
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "id",
-    );
+    await chooseSelectOption(user, "Field for condition 1", "ID");
     await user.type(screen.getByLabelText("Value for condition 1"), "page-1");
     await user.click(screen.getByRole("button", { name: "Save" }));
 
@@ -286,7 +297,7 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Save" }));
     await user.click(screen.getByRole("button", { name: "Properties" }));
     await user.click(screen.getByRole("button", { name: "Edit status" }));
-    await user.selectOptions(screen.getByLabelText("Type for status"), "url");
+    await chooseSelectOption(user, "Type for status", "URL");
     await act(async () => {
       pending.resolve(
         mutationResponse({
@@ -746,10 +757,7 @@ describe("BaseDefinitionWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Properties" }));
     await user.click(screen.getByRole("button", { name: "Edit status" }));
-    await user.selectOptions(
-      screen.getByLabelText("Type for status"),
-      "relation",
-    );
+    await chooseSelectOption(user, "Type for status", "Relation");
 
     const save = screen.getByRole("button", { name: "Save" });
     expect(save).toBeDisabled();
@@ -761,10 +769,12 @@ describe("BaseDefinitionWorkspace", () => {
         name: /status.*cannot be sorted/i,
       }),
     );
-    const sortField = screen.getByLabelText("Sort field 1");
-    expect(sortField).toHaveValue("status");
+    const sortField = screen.getByRole("button", {
+      name: selectTriggerName("Sort field 1"),
+    });
+    expect(sortField).toHaveTextContent("status (unsupported for sorting)");
     expect(sortField).toHaveFocus();
-    expect(sortField).toHaveAttribute("aria-invalid", "true");
+    expect(sortField.closest(".group")).toHaveAttribute("data-invalid", "true");
     expect(sortField).toHaveAttribute(
       "aria-describedby",
       "view-0-sort-field-error-0",
@@ -772,8 +782,9 @@ describe("BaseDefinitionWorkspace", () => {
     expect(
       sortField.ownerDocument.getElementById("view-0-sort-field-error-0"),
     ).toHaveTextContent(/status.*cannot be sorted/i);
+    await user.click(sortField);
     expect(
-      screen.getByRole("option", {
+      await screen.findByRole("option", {
         name: "status (unsupported for sorting)",
       }),
     ).toBeInTheDocument();
@@ -809,10 +820,7 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(
       screen.getByRole("button", { name: "Add condition to Match all" }),
     );
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "kind",
-    );
+    await chooseSelectOption(user, "Field for condition 1", "Kind");
     await user.type(screen.getByLabelText("Value for condition 1"), "book");
     await waitFor(() =>
       expect(previewMock).toHaveBeenLastCalledWith({
@@ -900,8 +908,10 @@ describe("BaseDefinitionWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Views" }));
     await waitFor(() => expect(previewMock).toHaveBeenCalled());
 
-    const layout = screen.getByLabelText("Layout");
-    expect(layout).toHaveAttribute("aria-invalid", "true");
+    const layout = screen.getByRole("button", {
+      name: selectTriggerName("Layout"),
+    });
+    expect(layout.closest(".group")).toHaveAttribute("data-invalid", "true");
     expect(layout).toHaveAttribute("aria-describedby", "view-layout-error-0");
     const diagnostic = screen.getByRole("button", {
       name: /unsupported layout “board”/i,
@@ -916,7 +926,7 @@ describe("BaseDefinitionWorkspace", () => {
 
     await user.click(diagnostic);
     expect(layout).toHaveFocus();
-    await user.selectOptions(layout, "table");
+    await chooseSelectOption(user, "Layout", "Table");
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(updateMock).toHaveBeenCalledWith({
       params: { path: { slug: "reading-log" } },

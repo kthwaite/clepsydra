@@ -9,6 +9,7 @@ import {
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { ForceGraph } from "#/components/ForceGraph";
 import { Button } from "#/components/ui/button";
+import { Select, SelectItem } from "#/components/ui/select";
 import type { ConstellationViewMode } from "#/store/constellation";
 import { applyFilters } from "./constellation-filters";
 
@@ -124,26 +125,32 @@ export function MobileConstellation({
         aria-label="Constellation controls"
         className="shrink-0 space-y-3 border-b border-rule-soft px-4 py-3"
       >
-        <label className="block">
+        <div className="block">
           <span className="cl-mono mb-1 block text-[9px] uppercase tracking-[0.12em] text-ink-mute">
             Anchor page
           </span>
-          <select
+          <Select
             aria-label="Anchor page"
-            className="cl-mono min-h-11 w-full border border-rule bg-paper-2 px-3 text-[12px] text-ink outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="[&>button]:min-h-11"
             value={anchorId ?? ""}
-            onChange={(event) => onAnchorChange(event.target.value || null)}
+            onChange={(key) =>
+              onAnchorChange(key === null || key === "" ? null : String(key))
+            }
           >
-            <option value="" disabled>
+            <SelectItem id="" isDisabled>
               Choose a page to focus the map
-            </option>
+            </SelectItem>
             {anchorOptions.map((node) => (
-              <option key={node.id} value={node.id}>
+              <SelectItem
+                key={node.id}
+                id={node.id}
+                textValue={`${nodeLabel(node)} · ${node.path}`}
+              >
                 {nodeLabel(node)} · {node.path}
-              </option>
+              </SelectItem>
             ))}
-          </select>
-        </label>
+          </Select>
+        </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <span className="cl-mono mr-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">

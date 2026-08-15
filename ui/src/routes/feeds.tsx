@@ -3,17 +3,19 @@ import {
   type SearchSchemaInput,
   useNavigate,
 } from "@tanstack/react-router";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
 import { FeedManagement } from "#/components/codex/FeedManagement";
 import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
 import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
+import { Select, SelectItem } from "#/components/ui/select";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 
 type FeedsSearch = FeedRiverFilters & {
   manage: boolean;
+  ungrouped: boolean;
   entry?: number;
 };
 
@@ -34,15 +36,20 @@ export const Route = createFileRoute("/feeds")({
         : typeof search.entry === "string"
           ? Number(search.entry)
           : undefined;
+    const parsedGroup =
+      typeof search.group === "string" && search.group
+        ? search.group
+        : undefined;
+    const parsedUngrouped =
+      parsedGroup === undefined &&
+      (search.ungrouped === true || search.ungrouped === "true");
     return {
       view:
         search.view === "unread" || search.view === "saved"
           ? search.view
           : "all",
-      group:
-        typeof search.group === "string" && search.group
-          ? search.group
-          : undefined,
+      group: parsedGroup,
+      ungrouped: parsedUngrouped,
       feed:
         parsedFeed !== undefined && Number.isFinite(parsedFeed)
           ? parsedFeed
@@ -72,9 +79,15 @@ function FeedsPage() {
   const mobileListScrollTop = useRef(0);
   const [tagDraft, setTagDraft] = useState(search.tag ?? "");
   useEffect(() => setTagDraft(search.tag ?? ""), [search.tag]);
+  const selectedGroupName = search.ungrouped ? "" : search.group;
+  const selectedGroupId = search.ungrouped
+    ? "group:"
+    : search.group !== undefined
+      ? `group:${search.group}`
+      : "all-groups";
   const filters: FeedRiverFilters = {
     view: search.view,
-    group: search.group,
+    group: selectedGroupName,
     feed: search.feed,
     tag: search.tag,
   };
@@ -190,18 +203,30 @@ function FeedsPage() {
 
               <FilterSelect
                 label="Group"
-                value={search.group ?? ""}
-                onChange={(value) =>
-                  updateSearch({ group: value || undefined, feed: undefined })
-                }
-              >
-                <option value="">All groups</option>
-                {groups.map((group) => (
-                  <option key={group.name} value={group.name}>
-                    {group.name || "Ungrouped"}
-                  </option>
-                ))}
-              </FilterSelect>
+                value={selectedGroupId}
+                onChange={(selectionId) => {
+                  const groupName = selectionId.startsWith("group:")
+                    ? selectionId.slice("group:".length)
+                    : undefined;
+                  updateSearch({
+                    group: groupName || undefined,
+                    ungrouped: selectionId === "group:",
+                    feed: undefined,
+                  });
+                }}
+                options={[
+                  {
+                    id: "all-groups",
+                    value: "all-groups",
+                    label: "All groups",
+                  },
+                  ...groups.map((group) => ({
+                    id: `group:${group.name}`,
+                    value: `group:${group.name}`,
+                    label: group.name || "Ungrouped",
+                  })),
+                ]}
+              />
 
               <FilterSelect
                 label="Feed"
@@ -209,18 +234,21 @@ function FeedsPage() {
                 onChange={(value) =>
                   updateSearch({ feed: value ? Number(value) : undefined })
                 }
-              >
-                <option value="">All feeds</option>
-                {feeds
-                  .filter(
-                    (feed) => !search.group || feed.group === search.group,
-                  )
-                  .map((feed) => (
-                    <option key={feed.id} value={feed.id}>
-                      {feed.title_override || feed.title}
-                    </option>
-                  ))}
-              </FilterSelect>
+                options={[
+                  { id: "all-feeds", value: "", label: "All feeds" },
+                  ...feeds
+                    .filter(
+                      (feed) =>
+                        (!search.ungrouped && search.group === undefined) ||
+                        feed.group === selectedGroupName,
+                    )
+                    .map((feed) => ({
+                      id: `feed:${feed.id}`,
+                      value: String(feed.id),
+                      label: feed.title_override || feed.title,
+                    })),
+                ]}
+              />
 
               <form
                 className="min-w-0"
@@ -246,13 +274,17 @@ function FeedsPage() {
                 </label>
               </form>
 
-              {search.group || search.feed !== undefined || search.tag ? (
+              {search.group ||
+              search.ungrouped ||
+              search.feed !== undefined ||
+              search.tag ? (
                 <Button
                   className="cl-btn justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
                   onPress={() => {
                     setTagDraft("");
                     updateSearch({
                       group: undefined,
+                      ungrouped: false,
                       feed: undefined,
                       tag: undefined,
                     });
@@ -304,27 +336,41 @@ function FeedsPage() {
   );
 }
 
+interface FilterSelectOption {
+  id: string;
+  value: string;
+  label: string;
+}
+
 function FilterSelect({
   label,
   value,
   onChange,
-  children,
+  options,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
-  children: ReactNode;
+  options: FilterSelectOption[];
 }) {
+  const selectedId =
+    options.find((option) => option.value === value)?.id ?? null;
+
   return (
-    <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-      {label}
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[11px] normal-case tracking-normal text-ink outline-none focus:border-accent"
-      >
-        {children}
-      </select>
-    </label>
+    <Select
+      label={label}
+      value={selectedId}
+      onChange={(key) => {
+        const selected = options.find((option) => option.id === key);
+        if (selected) onChange(selected.value);
+      }}
+      className="cl-mono min-w-0"
+    >
+      {options.map((option) => (
+        <SelectItem key={option.id} id={option.id} textValue={option.label}>
+          {option.label}
+        </SelectItem>
+      ))}
+    </Select>
   );
 }

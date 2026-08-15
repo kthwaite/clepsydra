@@ -42,6 +42,7 @@ import type {
   PatchTaskRequest,
 } from "#/api/board";
 import { useArchiveTask, usePatchTask } from "#/api/board";
+import { Select, SelectItem } from "#/components/ui/select";
 import { useBoardStore } from "#/store/board";
 import { type ColLabelFn, opKey, priColor } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
@@ -52,7 +53,6 @@ import {
   INPUT_CLS,
   PriorityRow,
   RADIO_CLS_BASE,
-  SELECT_CLS,
 } from "./fields";
 
 /** How long the armed "CONFIRM ARCHIVE?" state persists before auto-disarm. */
@@ -549,41 +549,55 @@ export function TaskEditPanel({
             {/* OPERATION + CYCLE */}
             <div className="grid grid-cols-2 gap-[12px]">
               <EdField label="OPERATION">
-                <select
-                  className={SELECT_CLS}
+                <Select
+                  aria-label="Operation"
                   value={task.project ?? ""}
-                  onChange={(e) =>
+                  onChange={(key) =>
                     /* empty string is the sentinel for clear → UNFILED */
-                    patchNow("project", { project: e.target.value })
+                    patchNow("project", {
+                      project: key === null ? "" : String(key),
+                    })
                   }
+                  isDisabled={archiving}
                   data-testid="edit-panel-operation"
                 >
-                  <option value="">UNFILED</option>
+                  <SelectItem id="">UNFILED</SelectItem>
                   {assignableOps.map((op) => (
-                    <option key={op.id} value={opKey(op)}>
+                    <SelectItem
+                      key={op.id}
+                      id={opKey(op)}
+                      textValue={op.code}
+                    >
                       {op.code}
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
+                </Select>
               </EdField>
               <EdField label="CYCLE">
-                <select
-                  className={SELECT_CLS}
+                <Select
+                  aria-label="Cycle"
                   value={task.cycle ?? "BACKLOG"}
-                  onChange={(e) => {
-                    const v = e.target.value;
+                  onChange={(key) => {
+                    const value = key === null ? "BACKLOG" : String(key);
                     /* BACKLOG → send null to clear cycle */
-                    patchNow("cycle", { cycle: v === "BACKLOG" ? null : v });
+                    patchNow("cycle", {
+                      cycle: value === "BACKLOG" ? null : value,
+                    });
                   }}
+                  isDisabled={archiving}
                   data-testid="edit-panel-cycle"
                 >
-                  <option value="BACKLOG">BACKLOG</option>
+                  <SelectItem id="BACKLOG">BACKLOG</SelectItem>
                   {selectableCycles.map((c) => (
-                    <option key={c.id} value={c.code}>
+                    <SelectItem
+                      key={c.id}
+                      id={c.code}
+                      textValue={`${c.code} (${c.state})`}
+                    >
                       {c.code} ({c.state})
-                    </option>
+                    </SelectItem>
                   ))}
-                </select>
+                </Select>
               </EdField>
             </div>
 

@@ -8,6 +8,7 @@ import type {
 import { useBase, useBases } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
+import { Select, SelectItem } from "#/components/ui/select";
 import {
   extractBaseEmbedTomlBody,
   parseBaseEmbedConfig,
@@ -344,24 +345,21 @@ export function BaseEmbedInspector({
           ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label className={labelClass} htmlFor="base-embed-base">
-                Base
-              </label>
-              <select
+              <Select
                 id="base-embed-base"
+                label="Base"
                 autoFocus
-                className={controlClass}
                 value={draft.base}
-                aria-invalid={baseDiagnostics.length > 0}
+                isInvalid={baseDiagnostics.length > 0}
                 aria-describedby="base-embed-base-description base-embed-base-diagnostics"
-                disabled={registryRefreshing}
-                onChange={(event) => {
-                  const base = bases.find(
-                    (item) => item.slug === event.target.value,
-                  );
+                isDisabled={registryRefreshing}
+                onChange={(key) => {
+                  if (key == null) return;
+                  const selectedBase = String(key);
+                  const base = bases.find((item) => item.slug === selectedBase);
                   setDraft((current) => ({
                     ...current,
-                    base: event.target.value,
+                    base: selectedBase,
                     view: base?.views[0] ?? "",
                     filter: undefined,
                     sort: undefined,
@@ -370,15 +368,22 @@ export function BaseEmbedInspector({
               >
                 {draft.base &&
                 !bases.some((base) => base.slug === draft.base) ? (
-                  <option value={draft.base}>{draft.base} (missing)</option>
+                  <SelectItem
+                    id={draft.base}
+                    textValue={`${draft.base} (missing)`}
+                  >
+                    {draft.base} (missing)
+                  </SelectItem>
                 ) : null}
-                {!draft.base ? <option value="">Choose a Base</option> : null}
+                {!draft.base ? (
+                  <SelectItem id="">Choose a Base</SelectItem>
+                ) : null}
                 {bases.map((base) => (
-                  <option key={base.slug} value={base.slug}>
+                  <SelectItem key={base.slug} id={base.slug}>
                     {base.name}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
+              </Select>
               <p id="base-embed-base-description" className={descriptionClass}>
                 Select a saved Base from the vault registry.
               </p>
@@ -394,36 +399,39 @@ export function BaseEmbedInspector({
             </div>
 
             <div>
-              <label className={labelClass} htmlFor="base-embed-view">
-                Saved view
-              </label>
-              <select
+              <Select
                 id="base-embed-view"
-                className={controlClass}
+                label="Saved view"
                 value={selectedViewName ?? draft.view}
-                aria-invalid={viewDiagnostics.length > 0}
+                isInvalid={viewDiagnostics.length > 0}
                 aria-describedby="base-embed-view-description base-embed-view-diagnostics"
-                disabled={!selectedSummary || registryRefreshing}
-                onChange={(event) =>
+                isDisabled={!selectedSummary || registryRefreshing}
+                onChange={(key) => {
+                  if (key == null) return;
                   setDraft((current) => ({
                     ...current,
-                    view: event.target.value,
+                    view: String(key),
                     sort: undefined,
-                  }))
-                }
+                  }));
+                }}
               >
                 {draft.view && selectedSummary && !selectedViewName ? (
-                  <option value={draft.view}>{draft.view} (missing)</option>
+                  <SelectItem
+                    id={draft.view}
+                    textValue={`${draft.view} (missing)`}
+                  >
+                    {draft.view} (missing)
+                  </SelectItem>
                 ) : null}
                 {!draft.view ? (
-                  <option value="">Choose a saved view</option>
+                  <SelectItem id="">Choose a saved view</SelectItem>
                 ) : null}
                 {selectedSummary?.views.map((view) => (
-                  <option key={view} value={view}>
+                  <SelectItem key={view} id={view}>
                     {view}
-                  </option>
+                  </SelectItem>
                 ))}
-              </select>
+              </Select>
               <p id="base-embed-view-description" className={descriptionClass}>
                 Views are scoped to the selected Base.
               </p>

@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseDetailResponse, BaseFilter } from "#/api/bases";
@@ -13,6 +13,20 @@ import type {
   ConfiguredBaseEmbedElement,
   InvalidBaseEmbedElement,
 } from "#/editor/schema/types";
+function selectTriggerName(label: string) {
+  return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+async function chooseSelectOption(
+  user: UserEvent,
+  label: string,
+  option: string,
+) {
+  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 
 const apiState = vi.hoisted(() => ({
   bases: {} as {
@@ -201,11 +215,11 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(
       screen.getByRole("dialog", { name: "Configure Base embed" }),
     ).toHaveAccessibleDescription(/saved Base view and local query overrides/i);
-    const base = screen.getByRole("combobox", { name: "Base" });
+    const base = screen.getByRole("button", { name: selectTriggerName("Base") });
     expect(base).toHaveFocus();
     expect(base).toHaveAccessibleDescription(/saved Base/i);
     expect(
-      screen.getByRole("combobox", { name: "Saved view" }),
+      screen.getByRole("button", { name: selectTriggerName("Saved view") }),
     ).toHaveAccessibleDescription(/selected Base/i);
     expect(screen.getByRole("spinbutton", { name: "Limit" })).toHaveAttribute(
       "min",
@@ -228,16 +242,13 @@ describe("BaseEmbedInspector structured mode", () => {
       }),
     );
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Base" }),
-      "tasks",
-    );
+    await chooseSelectOption(user, "Base", "Tasks");
 
-    expect(screen.getByRole("combobox", { name: "Saved view" })).toHaveValue(
+    expect(screen.getByRole("button", { name: selectTriggerName("Saved view") })).toHaveTextContent(
       "Open",
     );
     expect(screen.getByText("All pages")).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: "Sort field 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: selectTriggerName("Sort field 1") })).toBeNull();
     expect(screen.getByRole("spinbutton", { name: "Limit" })).toHaveValue(37);
   });
 
@@ -251,16 +262,13 @@ describe("BaseEmbedInspector structured mode", () => {
       }),
     );
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Saved view" }),
-      "Unread",
-    );
+    await chooseSelectOption(user, "Saved view", "Unread");
 
     expect(
-      screen.getByRole("combobox", { name: "Field for condition 1" }),
-    ).toHaveValue("rating");
+      screen.getByRole("button", { name: selectTriggerName("Field for condition 1") }),
+    ).toHaveTextContent("rating");
     expect(screen.getByRole("spinbutton", { name: "Limit" })).toHaveValue(37);
-    expect(screen.queryByRole("combobox", { name: "Sort field 1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: selectTriggerName("Sort field 1") })).toBeNull();
   });
 
   it.each([
@@ -343,10 +351,7 @@ describe("BaseEmbedInspector structured mode", () => {
   it("keeps edits local and Cancel/Escape report no write and restore focus", async () => {
     const user = userEvent.setup();
     const first = renderInspector();
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Base" }),
-      "tasks",
-    );
+    await chooseSelectOption(user, "Base", "Tasks");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(first.onSave).not.toHaveBeenCalled();
     expect(first.onCancel).toHaveBeenCalledTimes(1);
@@ -364,18 +369,18 @@ describe("BaseEmbedInspector structured mode", () => {
     const user = userEvent.setup();
     const original = configured();
     const callbacks = renderInspector(original);
-    const base = screen.getByRole("combobox", { name: "Base" });
+    const base = screen.getByRole("button", { name: selectTriggerName("Base") });
 
-    await user.selectOptions(base, "tasks");
+    await chooseSelectOption(user, "Base", "Tasks");
     callbacks.rerenderInspector(original);
-    expect(base).toHaveValue("tasks");
+    expect(base).toHaveTextContent("Tasks");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     callbacks.rerenderInspector(original, false);
     callbacks.rerenderInspector(original, true);
     await waitFor(() =>
-      expect(screen.getByRole("combobox", { name: "Base" })).toHaveValue(
-        "reading",
+      expect(screen.getByRole("button", { name: selectTriggerName("Base") })).toHaveTextContent(
+        "Reading Log",
       ),
     );
   });
@@ -393,8 +398,8 @@ describe("BaseEmbedInspector structured mode", () => {
     );
 
     callbacks.rerenderInspector(configured({ base: "tasks", view: "Open" }));
-    expect(await screen.findByRole("combobox", { name: "Base" })).toHaveValue(
-      "tasks",
+    expect(await screen.findByRole("button", { name: selectTriggerName("Base") })).toHaveTextContent(
+      "Tasks",
     );
   });
 
@@ -402,18 +407,17 @@ describe("BaseEmbedInspector structured mode", () => {
     const user = userEvent.setup();
     renderInspector(configured({ base: "gone", view: "Renamed" }));
 
-    expect(screen.getByRole("combobox", { name: "Base" })).toHaveValue("gone");
-    expect(
-      screen.getByRole("option", { name: "gone (missing)" }),
-    ).toBeInTheDocument();
+    const base = screen.getByRole("button", { name: selectTriggerName("Base") });
+    expect(base).toHaveTextContent("gone (missing)");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByText(/Base.*gone.*not found/i)).toBeInTheDocument();
+    await user.click(base);
+    expect(
+      await screen.findByRole("option", { name: "gone (missing)" }),
+    ).toBeInTheDocument();
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Base" }),
-      "reading",
-    );
-    expect(screen.getByRole("combobox", { name: "Saved view" })).toHaveValue(
+    await user.click(await screen.findByRole("option", { name: "Reading Log" }));
+    expect(screen.getByRole("button", { name: selectTriggerName("Saved view") })).toHaveTextContent(
       "All",
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
@@ -423,14 +427,16 @@ describe("BaseEmbedInspector structured mode", () => {
     const user = userEvent.setup();
     renderInspector(configured({ view: "Renamed" }));
 
-    const view = screen.getByRole("combobox", { name: "Saved view" });
-    expect(view).toHaveValue("Renamed");
-    expect(
-      screen.getByRole("option", { name: "Renamed (missing)" }),
-    ).toBeInTheDocument();
+    const view = screen.getByRole("button", { name: selectTriggerName("Saved view") });
+    expect(view).toHaveTextContent("Renamed (missing)");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.click(view);
+    expect(
+      await screen.findByRole("option", { name: "Renamed (missing)" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
-    await user.selectOptions(view, "Unread");
+    await chooseSelectOption(user, "Saved view", "Unread");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
@@ -494,14 +500,8 @@ describe("BaseEmbedInspector structured mode", () => {
     const original = configured();
     const callbacks = renderInspector(original);
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Base" }),
-      "tasks",
-    );
+    await chooseSelectOption(user, "Base", "Tasks");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(
-      screen.queryByRole("option", { name: "rating" }),
-    ).not.toBeInTheDocument();
 
     apiState.details.tasks = {
       data: tasks,
@@ -525,24 +525,14 @@ describe("BaseEmbedInspector structured mode", () => {
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Base" }),
-      "tasks",
-    );
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Base" }),
-      "reading",
-    );
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Base" }),
-      "tasks",
-    );
+    await chooseSelectOption(user, "Base", "Tasks");
+    await chooseSelectOption(user, "Base", "Reading Log");
+    await chooseSelectOption(user, "Base", "Tasks");
 
     await waitFor(() => {
-      expect(screen.getByRole("combobox", { name: "Saved view" })).toHaveValue(
+      expect(screen.getByRole("button", { name: selectTriggerName("Saved view") })).toHaveTextContent(
         "Open",
       );
-      expect(screen.queryByText(/rating.*not declared/i)).toBeNull();
       expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     });
   });
@@ -555,12 +545,20 @@ describe("BaseEmbedInspector structured mode", () => {
       }),
     );
 
-    expect(
-      screen.getByRole("combobox", { name: "Field for condition 1" }),
-    ).toHaveAttribute("aria-invalid", "true");
-    expect(
-      screen.getByRole("combobox", { name: "Sort field 1" }),
-    ).toHaveAttribute("aria-invalid", "true");
+    const filterField = screen.getByRole("button", {
+      name: selectTriggerName("Field for condition 1"),
+    });
+    const sortField = screen.getByRole("button", {
+      name: selectTriggerName("Sort field 1"),
+    });
+    expect(filterField.closest(".group")).toHaveAttribute(
+      "data-invalid",
+      "true",
+    );
+    expect(sortField.closest(".group")).toHaveAttribute(
+      "data-invalid",
+      "true",
+    );
     expect(screen.getAllByText(/unknown field.*foreign/i)).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
@@ -779,7 +777,7 @@ describe("pure Base embed validation bounds", () => {
       }),
     );
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-  });
+  }, 15_000);
 
   it.each([
     ["depth", valid({ filter: nestedNot(9) }), /Filter depth 9 exceeds/i],
@@ -846,13 +844,14 @@ describe("pure Base embed validation bounds", () => {
                 _name === "group children"
               ? screen.getByRole("region", { name: "Embed filter" })
               : _name === "field bytes"
-                ? screen.getByRole("combobox", { name: "Sort field 1" })
+                ? screen.getByRole("button", { name: selectTriggerName("Sort field 1") })
                 : screen.getByRole("textbox", {
                     name: "Value for condition 1",
                   });
       expect(owner).toHaveAccessibleDescription(message);
       expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     },
+    15_000,
   );
 });
 

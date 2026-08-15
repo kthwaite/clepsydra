@@ -10,7 +10,12 @@ import {
   SelectValue,
   type ValidationResult,
 } from "react-aria-components/Select";
-import { DropdownItem, DropdownListBox } from "#/components/ui/list-box";
+import type { ListBoxSectionProps } from "react-aria-components/ListBox";
+import {
+  DropdownItem,
+  DropdownListBox,
+  ListBoxSection,
+} from "#/components/ui/list-box";
 import { cn } from "#/lib/cn";
 import { Button } from "./button";
 import { Description } from "./form";
@@ -18,6 +23,7 @@ import { Popover } from "./popover";
 
 export interface SelectProps<T, M extends "single" | "multiple">
   extends Omit<AriaSelectProps<T, M>, "children"> {
+  triggerRef?: React.Ref<HTMLButtonElement>;
   label?: string;
   description?: string;
   errorMessage?: string | ((validation: ValidationResult) => string);
@@ -31,6 +37,7 @@ export function Select<T, M extends "single" | "multiple" = "single">({
   errorMessage,
   children,
   items,
+  triggerRef,
   className,
   ...props
 }: SelectProps<T, M>) {
@@ -46,7 +53,10 @@ export function Select<T, M extends "single" | "multiple" = "single">({
           {label}
         </Label>
       )}
-      <Button className="w-full min-w-0 justify-between text-start group-data-[invalid]:border-destructive data-[pressed]:bg-accent data-[pressed]:text-accent-foreground">
+      <Button
+        ref={triggerRef}
+        className="w-full min-w-0 justify-between text-start group-data-[invalid]:border-destructive data-[pressed]:bg-accent data-[pressed]:text-accent-foreground"
+      >
         <SelectValue className="min-w-0 flex-1 truncate text-sm normal-case tracking-normal data-[placeholder]:text-muted-foreground" />
         <ChevronDown
           aria-hidden
@@ -80,6 +90,21 @@ export function SelectListBox<T>({
       {...props}
       className={composeRenderProps(className, (className) =>
         cn("max-h-64 overflow-auto p-1 outline-none", className),
+      )}
+    />
+  );
+}
+
+export function SelectSection<T>({
+  className,
+  ...props
+}: ListBoxSectionProps<T>) {
+  return (
+    <ListBoxSection
+      {...props}
+      className={cn(
+        "py-1 first:pt-0 last:pb-0 [&>header]:px-2 [&>header]:py-1 [&>header]:text-xs [&>header]:font-bold [&>header]:uppercase [&>header]:tracking-widest [&>header]:text-muted-foreground",
+        className,
       )}
     />
   );

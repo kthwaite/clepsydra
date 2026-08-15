@@ -552,7 +552,9 @@ describe("BaseMemberDraft", () => {
     );
     await user.click(display);
     expect(
-      screen.getByRole("combobox", { name: "New member — Reading Status" }),
+      screen.getByRole("button", {
+        name: /—.*New member — Reading Status/,
+      }),
     ).toHaveAccessibleDescription(
       "Required for the active view. Choose a reading status.",
     );
