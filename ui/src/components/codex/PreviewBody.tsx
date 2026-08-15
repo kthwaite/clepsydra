@@ -1,4 +1,5 @@
-import { lazy, Suspense } from "react";
+import type { PagePreviewProjection } from "#/api/bases";
+import { Fragment, lazy, Suspense } from "react";
 import {
   countWords,
   previewMarkdownSource,
@@ -18,6 +19,42 @@ const PreviewMarkdown = lazy(() =>
 // Soft fade so clipped content reads as "continues below" rather than a hard cut.
 const FADE = "linear-gradient(to bottom, black 78%, transparent)";
 
+const MAX_PREVIEW_VALUE_CHARACTERS = 160;
+const LABEL_CONFLICT_DESCRIPTION =
+  "Label conflict: matching Bases disagree, so the stored key is shown.";
+const SCHEMA_CONFLICT_DESCRIPTION =
+  "Schema conflict: matching Bases declare incompatible field schemas.";
+
+function canonicalizePreviewValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalizePreviewValue);
+  if (typeof value !== "object" || value === null) return value;
+
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+      .map(([key, entry]) => [key, canonicalizePreviewValue(entry)]),
+  );
+}
+
+function unboundedPreviewValue(value: unknown): string {
+  if (value === null) return "null";
+  if (Array.isArray(value)) {
+    return value.map(unboundedPreviewValue).join(", ");
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(canonicalizePreviewValue(value)) ?? String(value);
+  }
+  return String(value);
+}
+
+function formatPreviewValue(value: unknown): string {
+  const characters = Array.from(unboundedPreviewValue(value));
+  if (characters.length <= MAX_PREVIEW_VALUE_CHARACTERS) {
+    return characters.join("");
+  }
+  return `${characters.slice(0, MAX_PREVIEW_VALUE_CHARACTERS - 1).join("")}…`;
+}
+
 export type PreviewBodyProps = {
   path: string;
   /** Page payload as returned by `usePage`; undefined while loading. */
@@ -30,6 +67,12 @@ export type PreviewBodyProps = {
   backlinks?: unknown[];
   /** Render the tag row. The floating link window shows tags; the tab card hides them. */
   showTags?: boolean;
+  /** Authoritative, backend-bounded Base projection for this page. */
+  preview?: PagePreviewProjection;
+  /** Projection fetch state. Pending is intentionally rendered without a skeleton. */
+  previewPending?: boolean;
+  /** Passive projection failures do not replace the existing preview content. */
+  previewError?: boolean;
 };
 
 /**
@@ -41,6 +84,8 @@ export function PreviewBody({
   path,
   page,
   backlinks,
+  preview,
+  previewError = false,
   showTags = true,
 }: PreviewBodyProps) {
   const title = page?.meta.title || path;
@@ -78,6 +123,63 @@ export function PreviewBody({
           </Suspense>
         </div>
       )}
+      {!encrypted && previewError ? (
+        <div className="cl-mono mt-[5px] border-t border-dotted border-rule-soft pt-1 text-[9px] text-ink-mute">
+          Properties unavailable
+        </div>
+      ) : null}
+      {!encrypted &&
+      !previewError &&
+      preview &&
+      (preview.fields.length > 0 || preview.remaining_count > 0) ? (
+        <dl className="cl-mono mt-[5px] grid min-w-0 grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] gap-x-2 gap-y-1 border-t border-dotted border-rule-soft pt-1 text-[9px]">
+          {preview.fields.map((field) => {
+            const body = field.key === "body";
+            const labelClass = body
+              ? "col-span-2 min-w-0 break-words text-ink-mute"
+              : "min-w-0 break-words text-ink-mute";
+            const valueClass = body
+              ? "col-span-2 line-clamp-2 min-w-0 whitespace-normal break-words text-left text-ink-2"
+              : "min-w-0 break-words text-right text-ink-2";
+            return (
+              <Fragment key={field.key}>
+                <dt className={labelClass}>
+                  {field.label}
+                  {field.label_conflict ? (
+                    <span
+                      aria-label={LABEL_CONFLICT_DESCRIPTION}
+                      title={LABEL_CONFLICT_DESCRIPTION}
+                      className="ml-1 font-bold text-hot"
+                    >
+                      !
+                    </span>
+                  ) : null}
+                  {field.schema_conflict ? (
+                    <span
+                      aria-label={SCHEMA_CONFLICT_DESCRIPTION}
+                      title={SCHEMA_CONFLICT_DESCRIPTION}
+                      className="ml-1 font-bold text-hot"
+                    >
+                      ≠
+                    </span>
+                  ) : null}
+                </dt>
+                <dd className={valueClass}>
+                  {field.present ? formatPreviewValue(field.value) : "—"}
+                </dd>
+              </Fragment>
+            );
+          })}
+          {preview.remaining_count > 0 ? (
+            <>
+              <dt className="sr-only">Additional projected fields</dt>
+              <dd className="col-span-2 text-right text-ink-mute">
+                +{preview.remaining_count} more
+              </dd>
+            </>
+          ) : null}
+        </dl>
+      ) : null}
       {showTags && tags.length > 0 && (
         <div className="cl-mono mt-[5px] border-t border-dotted border-rule-soft pt-1 text-[9px] text-accent">
           {tags.map((t) => `#${t}`).join(" ")}

@@ -80,6 +80,7 @@ function projection(
     revision: "projection-rev-1",
     encrypted: false,
     matching_bases: matchingBases,
+    preview: { fields: [], remaining_count: 0 },
     properties,
   };
 }
