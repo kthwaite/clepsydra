@@ -218,6 +218,7 @@ export function FeedReaderPane({
             setIsCapturing(true);
           }}
           onCancelCapture={() => {
+            if (captureInFlightRef.current) return;
             captureGenerationRef.current += 1;
             captureInFlightRef.current = false;
             resetCaptureMutation?.();

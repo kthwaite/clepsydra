@@ -381,6 +381,36 @@ describe("FeedReaderPane", () => {
     );
   });
 
+  it("keeps same-entry controls from unlocking an active capture", async () => {
+    const user = userEvent.setup();
+    const pendingCapture = deferred<typeof capturedJournal>();
+    paneMocks.captureAsync.mockReturnValue(pendingCapture.promise);
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    const form = draft.closest("form");
+    expect(form).not.toBeNull();
+    const cancel = screen.getByRole("button", { name: "Cancel" });
+    const open = screen.getByRole("button", { name: "Capture in journal" });
+
+    act(() => {
+      form!.requestSubmit();
+      fireEvent.click(cancel);
+      fireEvent.click(open);
+      form!.requestSubmit();
+    });
+
+    expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);
+    expect(draft).toBeVisible();
+    await act(async () => pendingCapture.resolve(capturedJournal));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Captured in today’s journal.",
+    );
+  });
+
   it("settles capture in the reader and explicitly opens today's journal", async () => {
     const user = userEvent.setup();
     renderPane();
