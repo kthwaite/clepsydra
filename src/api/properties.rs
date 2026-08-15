@@ -27,7 +27,10 @@ use crate::vault::base::{
 use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
 use crate::vault::page::{Page, page_revision, parse_or_repair_frontmatter, write_page_content};
 use crate::vault::path::VaultPath;
-use crate::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
+use crate::vault::query::{
+    ProjectionFieldIdentity, QueryContext, QueryOutput, QuerySpec, evaluate,
+    project_page_field_value, resolve_projection_field,
+};
 use crate::vault::toml_json::toml_value_to_json;
 use crate::vault::toml_patch::{FrontmatterEdits, SpliceError, ValueHint, splice_frontmatter};
 
@@ -68,6 +71,16 @@ pub struct PropertyPatchResponse {
 pub struct PageBaseIdentity {
     pub slug: String,
     pub name: String,
+}
+
+/// One matching Base that contributed a configured preview field.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct PagePreviewSource {
+    pub base: PageBaseIdentity,
+    /// The configured label, absent only for malformed legacy input that has
+    /// no usable label and therefore falls back to the canonical key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// One original property declaration and the Base that supplied it.
@@ -112,6 +125,26 @@ pub struct PageBaseProperty {
     pub blockers: Vec<PagePropertyBlocker>,
 }
 
+/// One canonical field in the merged current-page preview projection.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct PagePreviewField {
+    pub key: String,
+    pub label: String,
+    pub present: bool,
+    #[schema(value_type = Option<serde_json::Value>, required = true)]
+    pub value: Option<serde_json::Value>,
+    pub schema_conflict: bool,
+    pub label_conflict: bool,
+    pub sources: Vec<PagePreviewSource>,
+}
+
+/// Bounded generic preview data merged from every matching Base.
+#[derive(Debug, Default, Serialize, ToSchema)]
+pub struct PagePreviewProjection {
+    pub fields: Vec<PagePreviewField>,
+    pub remaining_count: usize,
+}
+
 /// Authoritative Base property projection for one current page.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct PageBasePropertiesResponse {
@@ -121,6 +154,7 @@ pub struct PageBasePropertiesResponse {
     pub encrypted: bool,
     pub matching_bases: Vec<PageBaseIdentity>,
     pub properties: Vec<PageBaseProperty>,
+    pub preview: PagePreviewProjection,
 }
 
 fn hint_for(ty: Option<&PropertyType>) -> Option<ValueHint> {
@@ -236,6 +270,128 @@ fn project_matching_bases(
     (identities, properties)
 }
 
+const PAGE_PREVIEW_FIELD_LIMIT: usize = 4;
+
+#[derive(Debug)]
+struct MergedPreviewField {
+    identity: ProjectionFieldIdentity,
+    key: String,
+    agreed_label: String,
+    label_conflict: bool,
+    sources: Vec<PagePreviewSource>,
+}
+
+fn projection_key(identity: &ProjectionFieldIdentity) -> String {
+    match identity {
+        ProjectionFieldIdentity::System(field) => field.as_str().to_string(),
+        ProjectionFieldIdentity::Property(key) => key.clone(),
+        ProjectionFieldIdentity::Body => BODY_COLUMN.to_string(),
+    }
+}
+
+fn project_page_preview(
+    matching: &[BaseDefinition],
+    page: &Page,
+    properties: &[PageBaseProperty],
+) -> PagePreviewProjection {
+    if page.is_encrypted() {
+        return PagePreviewProjection::default();
+    }
+
+    let schema_conflicts = properties
+        .iter()
+        .map(|property| {
+            (
+                property.key.as_str(),
+                matches!(
+                    property.compatibility,
+                    PagePropertyCompatibility::Conflict
+                ),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+    let mut positions = HashMap::<ProjectionFieldIdentity, usize>::new();
+    let mut merged = Vec::<MergedPreviewField>::new();
+
+    for base in matching {
+        let base_identity = page_base_identity(base);
+        for definition in &base.file.preview {
+            let Ok(identity) = resolve_projection_field(&definition.field) else {
+                continue;
+            };
+            let key = projection_key(&identity);
+            let configured_label = (!definition.label.trim().is_empty())
+                .then(|| definition.label.clone());
+            let effective_label = configured_label
+                .clone()
+                .unwrap_or_else(|| key.clone());
+            let source = PagePreviewSource {
+                base: base_identity.clone(),
+                label: configured_label,
+            };
+
+            if let Some(position) = positions.get(&identity).copied() {
+                let field = &mut merged[position];
+                if field.agreed_label != effective_label {
+                    field.label_conflict = true;
+                }
+                field.sources.push(source);
+                continue;
+            }
+
+            positions.insert(identity.clone(), merged.len());
+            merged.push(MergedPreviewField {
+                identity,
+                key,
+                agreed_label: effective_label,
+                label_conflict: false,
+                sources: vec![source],
+            });
+        }
+    }
+
+    let remaining_count = merged.len().saturating_sub(PAGE_PREVIEW_FIELD_LIMIT);
+    let fields = merged
+        .into_iter()
+        .take(PAGE_PREVIEW_FIELD_LIMIT)
+        .map(|field| {
+            let schema_conflict = match &field.identity {
+                ProjectionFieldIdentity::Property(key) => {
+                    schema_conflicts.get(key.as_str()).copied().unwrap_or(false)
+                }
+                ProjectionFieldIdentity::System(_) | ProjectionFieldIdentity::Body => false,
+            };
+            let (present, value) = match &field.identity {
+                ProjectionFieldIdentity::Property(key)
+                    if is_reserved_property_key(key)
+                        || !schema_conflicts.contains_key(key.as_str()) =>
+                {
+                    (false, None)
+                }
+                _ => project_page_field_value(page, &field.identity),
+            };
+            PagePreviewField {
+                label: if field.label_conflict {
+                    field.key.clone()
+                } else {
+                    field.agreed_label
+                },
+                key: field.key,
+                present,
+                value,
+                schema_conflict,
+                label_conflict: field.label_conflict,
+                sources: field.sources,
+            }
+        })
+        .collect();
+
+    PagePreviewProjection {
+        fields,
+        remaining_count,
+    }
+}
+
 /// Project matching Base declarations and current custom values for one page.
 #[utoipa::path(
     get,
@@ -340,7 +496,10 @@ pub async fn get_page_base_properties(
 
     let revision = page_revision(&page.raw_content);
     let encrypted = page.meta.encryption.is_some();
+    let mut matching = matching;
+    matching.sort_by(|left, right| left.slug.cmp(&right.slug));
     let (matching_bases, properties) = project_matching_bases(&matching, &page);
+    let preview = project_page_preview(&matching, &page, &properties);
     Ok(Json(PageBasePropertiesResponse {
         id: page_id,
         path,
@@ -348,6 +507,7 @@ pub async fn get_page_base_properties(
         encrypted,
         matching_bases,
         properties,
+        preview,
     }))
 }
 

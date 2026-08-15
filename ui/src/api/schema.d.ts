@@ -1723,6 +1723,7 @@ export interface components {
             description?: string | null;
             filter?: null | components["schemas"]["Filter"];
             name: string;
+            preview?: components["schemas"]["PreviewFieldDefinition"][];
             properties?: components["schemas"]["BasePropertyEntry"][];
             views?: components["schemas"]["ViewDefinition"][];
         };
@@ -2394,6 +2395,7 @@ export interface components {
             id: string;
             matching_bases: components["schemas"]["PageBaseIdentity"][];
             path: string;
+            preview: components["schemas"]["PagePreviewProjection"];
             properties: components["schemas"]["PageBaseProperty"][];
             revision: string;
         };
@@ -2441,6 +2443,30 @@ export interface components {
             tags?: string[] | null;
             title?: string | null;
             updated_at?: string | null;
+        };
+        /** @description One canonical field in the merged current-page preview projection. */
+        PagePreviewField: {
+            key: string;
+            label: string;
+            label_conflict: boolean;
+            present: boolean;
+            schema_conflict: boolean;
+            sources: components["schemas"]["PagePreviewSource"][];
+            value: unknown;
+        };
+        /** @description Bounded generic preview data merged from every matching Base. */
+        PagePreviewProjection: {
+            fields: components["schemas"]["PagePreviewField"][];
+            remaining_count: number;
+        };
+        /** @description One matching Base that contributed a configured preview field. */
+        PagePreviewSource: {
+            base: components["schemas"]["PageBaseIdentity"];
+            /**
+             * @description The configured label, absent only for malformed legacy input that has
+             *     no usable label and therefore falls back to the canonical key.
+             */
+            label?: string | null;
         };
         /**
          * @description Backend-authoritative reasons that a projected property cannot be patched.
@@ -2547,6 +2573,11 @@ export interface components {
             new_text: string;
             old_text: string;
             path: string;
+        };
+        /** @description One field shown in a Base's default preview, in configured order. */
+        PreviewFieldDefinition: {
+            field: string;
+            label: string;
         };
         /** @enum {string} */
         PreviewMutationOperation: "move_page" | "move_folder";
@@ -2987,6 +3018,10 @@ export interface components {
             columns?: string[];
             filter?: null | components["schemas"]["Filter"];
             group_by?: string | null;
+            /** @description Per-field display labels. A sorted map makes wire serialization stable. */
+            labels?: {
+                [key: string]: string;
+            };
             layout?: string;
             name: string;
             sort?: components["schemas"]["SortKey"][];

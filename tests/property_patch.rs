@@ -284,6 +284,7 @@ async fn unknown_page_is_404() {
 
 const EMPTY_DECLARATIONS_ID: &str = "0190f8a0-0000-7000-8000-0000000000f2";
 const ENCRYPTED_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f3";
+const PREVIEW_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f4";
 
 fn projection_property<'a>(response: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
     response["properties"]
@@ -292,6 +293,15 @@ fn projection_property<'a>(response: &'a serde_json::Value, key: &str) -> &'a se
         .iter()
         .find(|property| property["key"] == key)
         .unwrap_or_else(|| panic!("missing projected property `{key}` in {response}"))
+}
+
+fn preview_field<'a>(response: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
+    response["preview"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["key"] == key)
+        .unwrap_or_else(|| panic!("missing preview field `{key}` in {response}"))
 }
 
 fn seed_projection(root: &Path) {
@@ -326,9 +336,25 @@ PRIVATE BODY SENTINEL
     )
     .unwrap();
     fs::write(
+        root.join("preview-note.md"),
+        format!(
+            "+++\nid = \"{PREVIEW_PAGE_ID}\"\ntitle = \"Preview Note\"\ntype = \"PROJECT\"\n+++\n# Heading\n\nA [link](https://example.com) and **bold** body.\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
         root.join("bases/a-reader.base.toml"),
         r#"name = "Alpha Reader"
 filter = { field = "kind", op = "eq", value = "BOOK" }
+preview = [
+    { field = "rating", label = "rating" },
+    { field = "featured", label = "Featured" },
+    { field = "conflict_relation", label = "Series" },
+    { field = "non_finite", label = "Non-finite" },
+    { field = "body", label = "Summary" },
+    { field = "note", label = "Note" },
+]
+
 
 [properties]
 status = { type = "select", options = ["queued", "reading"] }
@@ -353,6 +379,14 @@ conversation = { type = "text" }
         root.join("bases/b-linked.base.toml"),
         r#"name = "Linked Reader"
 filter = { field = "series", op = "links_to", value = "Solar Cycle" }
+preview = [
+    { field = "featured", label = "Spotlight" },
+    { field = "prop.rating", label = "rating" },
+    { field = "conflict_relation", label = "Series" },
+    { field = "sys.title", label = "Title" },
+    { field = "body", label = "Summary" },
+]
+
 
 [properties]
 status = { type = "select", options = ["queued", "reading"] }
@@ -370,6 +404,20 @@ filter = { field = "kind", op = "eq", value = "NOTE" }
 
 [properties]
 excluded = { type = "text" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("bases/d-preview-note.base.toml"),
+        r#"name = "Project Preview"
+filter = { field = "kind", op = "eq", value = "PROJECT" }
+preview = [
+    { field = "body", label = "Summary" },
+    { field = "note", label = "Note" },
+]
+
+[properties]
+note = { type = "text" }
 "#,
     )
     .unwrap();
@@ -403,6 +451,70 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
             { "slug": "b-linked", "name": "Linked Reader" }
         ])
     );
+    assert_eq!(body["preview"]["remaining_count"], 3);
+    assert_eq!(
+        body["preview"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|field| field["key"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["rating", "featured", "conflict_relation", "non_finite"]
+    );
+    assert_eq!(
+        preview_field(&body, "rating"),
+        &serde_json::json!({
+            "key": "rating",
+            "label": "rating",
+            "present": true,
+            "value": 0,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "a-reader", "name": "Alpha Reader" },
+                    "label": "rating"
+                },
+                {
+                    "base": { "slug": "b-linked", "name": "Linked Reader" },
+                    "label": "rating"
+                }
+            ]
+        })
+    );
+    let featured_preview = preview_field(&body, "featured");
+    assert_eq!(featured_preview["label"], "featured");
+    assert_eq!(featured_preview["present"], true);
+    assert_eq!(featured_preview["value"], false);
+    assert_eq!(featured_preview["schema_conflict"], false);
+    assert_eq!(featured_preview["label_conflict"], true);
+    assert_eq!(
+        featured_preview["sources"],
+        serde_json::json!([
+            {
+                "base": { "slug": "a-reader", "name": "Alpha Reader" },
+                "label": "Featured"
+            },
+            {
+                "base": { "slug": "b-linked", "name": "Linked Reader" },
+                "label": "Spotlight"
+            }
+        ])
+    );
+    let conflicted_preview = preview_field(&body, "conflict_relation");
+    assert_eq!(conflicted_preview["label"], "Series");
+    assert_eq!(conflicted_preview["present"], true);
+    assert_eq!(
+        conflicted_preview["value"],
+        serde_json::json!(["[[Solar Cycle]]"])
+    );
+    assert_eq!(conflicted_preview["schema_conflict"], true);
+    assert_eq!(conflicted_preview["label_conflict"], false);
+    let non_finite_preview = preview_field(&body, "non_finite");
+    assert_eq!(non_finite_preview["present"], true);
+    assert_eq!(non_finite_preview["value"], serde_json::Value::Null);
+    assert_eq!(non_finite_preview["schema_conflict"], false);
+    assert_eq!(non_finite_preview["label_conflict"], false);
     let keys = body["properties"]
         .as_array()
         .unwrap()
@@ -538,6 +650,60 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
 }
 
 #[tokio::test]
+async fn get_projects_body_excerpt_and_missing_custom_value() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{PREVIEW_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(
+        body["matching_bases"],
+        serde_json::json!([
+            { "slug": "d-preview-note", "name": "Project Preview" }
+        ])
+    );
+    assert_eq!(body["preview"]["remaining_count"], 0);
+    assert_eq!(
+        preview_field(&body, "body"),
+        &serde_json::json!({
+            "key": "body",
+            "label": "Summary",
+            "present": true,
+            "value": "Heading A link and bold body.",
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [{
+                "base": { "slug": "d-preview-note", "name": "Project Preview" },
+                "label": "Summary"
+            }]
+        })
+    );
+    assert_eq!(
+        preview_field(&body, "note"),
+        &serde_json::json!({
+            "key": "note",
+            "label": "Note",
+            "present": false,
+            "value": null,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [{
+                "base": { "slug": "d-preview-note", "name": "Project Preview" },
+                "label": "Note"
+            }]
+        })
+    );
+}
+
+#[tokio::test]
 async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(|root| {
@@ -565,6 +731,10 @@ async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
         .json();
     assert_eq!(no_matches["matching_bases"], serde_json::json!([]));
     assert_eq!(no_matches["properties"], serde_json::json!([]));
+    assert_eq!(
+        no_matches["preview"],
+        serde_json::json!({ "fields": [], "remaining_count": 0 })
+    );
 
     let no_declarations: serde_json::Value = server
         .get(&format!(
@@ -577,6 +747,10 @@ async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
         serde_json::json!([{ "slug": "empty", "name": "Empty Base" }])
     );
     assert_eq!(no_declarations["properties"], serde_json::json!([]));
+    assert_eq!(
+        no_declarations["preview"],
+        serde_json::json!({ "fields": [], "remaining_count": 0 })
+    );
 }
 
 #[tokio::test]
@@ -594,7 +768,7 @@ async fn get_reports_encryption_without_exposing_the_page_body() {
             .unwrap();
             fs::write(
                 root.join("bases/protected.base.toml"),
-                "name = \"Protected Metadata\"\nfilter = { field = \"kind\", op = \"eq\", value = \"NOTE\" }\n\n[properties]\nstatus = { type = \"text\" }\n",
+                "name = \"Protected Metadata\"\nfilter = { field = \"kind\", op = \"eq\", value = \"NOTE\" }\npreview = [\n    { field = \"status\", label = \"Status\" },\n    { field = \"body\", label = \"Summary\" },\n]\n\n[properties]\nstatus = { type = \"text\" }\n",
             )
             .unwrap();
         })
@@ -610,6 +784,10 @@ async fn get_reports_encryption_without_exposing_the_page_body() {
     let body: serde_json::Value = response.json();
     assert_eq!(body["encrypted"], true);
     assert_eq!(projection_property(&body, "status")["value"], "private");
+    assert_eq!(
+        body["preview"],
+        serde_json::json!({ "fields": [], "remaining_count": 0 })
+    );
     let serialized = serde_json::to_string(&body).unwrap();
     assert!(
         !serialized.contains("BEGIN AGE ENCRYPTED FILE"),

@@ -268,6 +268,9 @@ impl Modify for SchemaOverrides {
             crate::api::properties::PagePropertyCompatibility,
             crate::api::properties::PagePropertyBlocker,
             crate::api::properties::PageBaseProperty,
+            crate::api::properties::PagePreviewSource,
+            crate::api::properties::PagePreviewField,
+            crate::api::properties::PagePreviewProjection,
             crate::api::properties::PageBasePropertiesResponse,
             crate::api::properties::PropertyPatchRequest,
             crate::api::properties::PropertyPatchResponse,
@@ -710,6 +713,60 @@ mod tests {
                 .get("CreateDefaultPageRequest")
                 .is_some()
         );
+    }
+
+    #[test]
+    fn openapi_requires_the_nested_page_preview_projection_contract() {
+        let json = serde_json::to_value(ApiDoc::openapi()).unwrap();
+        let schemas = &json["components"]["schemas"];
+        let response = &schemas["PageBasePropertiesResponse"];
+        let response_required = response["required"]
+            .as_array()
+            .expect("PageBasePropertiesResponse.required should be an array");
+        assert!(response_required.contains(&serde_json::json!("preview")));
+        assert_eq!(
+            response["properties"]["preview"]["$ref"],
+            "#/components/schemas/PagePreviewProjection"
+        );
+
+        let projection = &schemas["PagePreviewProjection"];
+        let projection_required = projection["required"]
+            .as_array()
+            .expect("PagePreviewProjection.required should be an array");
+        for field in ["fields", "remaining_count"] {
+            assert!(
+                projection_required.contains(&serde_json::json!(field)),
+                "PagePreviewProjection should require {field}"
+            );
+        }
+        assert_eq!(
+            projection["properties"]["fields"]["items"]["$ref"],
+            "#/components/schemas/PagePreviewField"
+        );
+
+        let field = &schemas["PagePreviewField"];
+        let field_required = field["required"]
+            .as_array()
+            .expect("PagePreviewField.required should be an array");
+        for name in [
+            "key",
+            "label",
+            "present",
+            "value",
+            "schema_conflict",
+            "label_conflict",
+            "sources",
+        ] {
+            assert!(
+                field_required.contains(&serde_json::json!(name)),
+                "PagePreviewField should require {name}"
+            );
+        }
+        assert_eq!(
+            field["properties"]["sources"]["items"]["$ref"],
+            "#/components/schemas/PagePreviewSource"
+        );
+        assert!(schemas["PagePreviewSource"].is_object());
     }
 
     #[test]

@@ -20,6 +20,8 @@ use super::base::{
 };
 use super::canonical::CanonicalName;
 use super::link::normalize_links_to_target;
+use super::page::Page;
+use super::toml_json::toml_value_to_json;
 
 // ---------------------------------------------------------------------------
 // Field resolution
@@ -218,6 +220,138 @@ pub fn resolve_field(field: &str, ctx: &QueryContext) -> Result<ResolvedField, Q
         }
         ProjectionFieldIdentity::Body => Err(QueryError::ProjectionOnlyBody),
     }
+}
+
+/// Materialize one canonical presentation field from an already-read page.
+///
+/// The caller supplies canonical identities so each merged field is resolved
+/// once. This stays file-backed and read-only: no per-field index query is
+/// needed, and the page body is borrowed until an excerpt is requested.
+pub fn project_page_field_value(
+    page: &Page,
+    identity: &ProjectionFieldIdentity,
+) -> (bool, Option<serde_json::Value>) {
+    let path = page.path.as_str();
+    let optional_string = |value: Option<String>| match value {
+        Some(value) => (true, Some(serde_json::Value::String(value))),
+        None => (false, None),
+    };
+
+    match identity {
+        ProjectionFieldIdentity::System(SysField::Id) => (
+            true,
+            Some(serde_json::Value::String(page.meta.id.to_string())),
+        ),
+        ProjectionFieldIdentity::System(SysField::Path) => (
+            true,
+            Some(serde_json::Value::String(path.to_string())),
+        ),
+        ProjectionFieldIdentity::System(SysField::Title) => {
+            optional_string(page.meta.title.clone())
+        }
+        ProjectionFieldIdentity::System(SysField::Kind) => (
+            true,
+            Some(serde_json::Value::String(
+                crate::vault::kind::resolve(path, page.meta.kind)
+                    .0
+                    .as_str()
+                    .to_string(),
+            )),
+        ),
+        ProjectionFieldIdentity::System(SysField::Project) => {
+            optional_string(page.meta.project.clone())
+        }
+        ProjectionFieldIdentity::System(SysField::Tags) => {
+            let kind = crate::vault::kind::resolve(path, page.meta.kind).0;
+            (
+                true,
+                Some(serde_json::Value::Array(
+                    crate::vault::kind::effective_tags(kind, &page.meta.tags)
+                        .into_iter()
+                        .map(serde_json::Value::String)
+                        .collect(),
+                )),
+            )
+        }
+        ProjectionFieldIdentity::System(SysField::Aliases) => {
+            if page.meta.aliases.is_empty() {
+                (false, None)
+            } else {
+                (
+                    true,
+                    Some(serde_json::Value::Array(
+                        page.meta
+                            .aliases
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::String)
+                            .collect(),
+                    )),
+                )
+            }
+        }
+        ProjectionFieldIdentity::System(SysField::CreatedAt) => {
+            optional_string(page.meta.created_at.map(|value| value.to_rfc3339()))
+        }
+        ProjectionFieldIdentity::System(SysField::UpdatedAt) => {
+            optional_string(page.meta.updated_at.map(|value| value.to_rfc3339()))
+        }
+        ProjectionFieldIdentity::System(SysField::Encryption) => (
+            true,
+            Some(serde_json::Value::Bool(page.meta.encryption.is_some())),
+        ),
+        ProjectionFieldIdentity::System(SysField::JournalDate) => {
+            optional_string(page_journal_date(path).map(str::to_owned))
+        }
+        ProjectionFieldIdentity::System(SysField::WordCount) => {
+            if page.is_encrypted() {
+                (false, None)
+            } else {
+                (
+                    true,
+                    Some(serde_json::json!(page.body.split_whitespace().count())),
+                )
+            }
+        }
+        ProjectionFieldIdentity::Property(key) => match page.meta.extra.get(key) {
+            Some(value) => (true, Some(toml_value_to_json(value))),
+            None => (false, None),
+        },
+        ProjectionFieldIdentity::Body => {
+            if page.is_encrypted() {
+                (false, None)
+            } else {
+                (
+                    true,
+                    Some(serde_json::Value::String(body_excerpt(&page.body))),
+                )
+            }
+        }
+    }
+}
+
+/// Match the journal-date path forms materialized by the page index.
+fn page_journal_date(path: &str) -> Option<&str> {
+    let filename = path.strip_prefix("journals/")?;
+    let stem = filename.strip_suffix(".md").unwrap_or(filename);
+    let candidate = if stem.len() == 10 {
+        stem
+    } else if crate::vault::path::is_canonical_page_filename(filename) {
+        stem.split('.').nth(1)?
+    } else {
+        return None;
+    };
+    let bytes = candidate.as_bytes();
+    if candidate.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || [0, 1, 2, 3, 5, 6, 8, 9]
+            .into_iter()
+            .any(|index| !bytes[index].is_ascii_digit())
+    {
+        return None;
+    }
+    Some(candidate)
 }
 
 
@@ -1203,6 +1337,8 @@ mod tests {
     use super::*;
     use crate::vault::Vault;
     use crate::vault::index::VaultIndex;
+    use crate::vault::page::{Page, PageMeta};
+    use crate::vault::path::VaultPath;
 
     // -- Task 3.1: AST + field resolution ---------------------------------
 
@@ -1293,6 +1429,122 @@ mod tests {
             resolve_projection_field("sys.missing"),
             Err(QueryError::UnknownSystemField(field)) if field == "missing"
         ));
+    }
+
+    fn projection_page(path: &str, body: String) -> Page {
+        let mut extra = toml::Table::new();
+        extra.insert("status".into(), toml::Value::String("reading".into()));
+        extra.insert("rating".into(), toml::Value::Integer(0));
+        extra.insert("featured".into(), toml::Value::Boolean(false));
+        extra.insert(
+            "themes".into(),
+            toml::Value::Array(vec![
+                toml::Value::String("memory".into()),
+                toml::Value::String("identity".into()),
+            ]),
+        );
+        extra.insert("non_finite".into(), toml::Value::Float(f64::NAN));
+        Page {
+            path: VaultPath::new(path).unwrap(),
+            meta: PageMeta {
+                id: uuid::Uuid::parse_str("0190f8a0-0000-7000-8000-0000000000f1").unwrap(),
+                title: Some("Daily log".into()),
+                tags: vec!["Research".into(), "journal".into(), "research".into()],
+                aliases: vec!["Log".into(), "Daily".into()],
+                kind: None,
+                project: Some("clepsydra".into()),
+                created_at: Some("2026-08-15T09:30:00Z".parse().unwrap()),
+                updated_at: Some("2026-08-15T10:45:00Z".parse().unwrap()),
+                encryption: None,
+                readonly: None,
+                extra,
+            },
+            raw_content: String::new(),
+            body,
+        }
+    }
+
+    #[test]
+    fn page_field_projection_materializes_every_system_shape_from_effective_metadata() {
+        let page = projection_page(
+            "journals/2026-08-15.md",
+            "one two\n\nthree".to_string(),
+        );
+        let cases = [
+            (SysField::Id, serde_json::json!(page.meta.id.to_string())),
+            (SysField::Path, serde_json::json!("journals/2026-08-15.md")),
+            (SysField::Title, serde_json::json!("Daily log")),
+            (SysField::Kind, serde_json::json!("JOURNAL")),
+            (SysField::Project, serde_json::json!("clepsydra")),
+            (
+                SysField::Tags,
+                serde_json::json!(["Research", "journal"]),
+            ),
+            (SysField::Aliases, serde_json::json!(["Log", "Daily"])),
+            (
+                SysField::CreatedAt,
+                serde_json::json!("2026-08-15T09:30:00+00:00"),
+            ),
+            (
+                SysField::UpdatedAt,
+                serde_json::json!("2026-08-15T10:45:00+00:00"),
+            ),
+            (SysField::Encryption, serde_json::json!(false)),
+            (SysField::JournalDate, serde_json::json!("2026-08-15")),
+            (SysField::WordCount, serde_json::json!(3)),
+        ];
+
+        for (field, expected) in cases {
+            assert_eq!(
+                project_page_field_value(&page, &ProjectionFieldIdentity::System(field)),
+                (true, Some(expected)),
+                "{field:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn page_field_projection_distinguishes_custom_values_from_missing_values() {
+        let page = projection_page("notes/log.md", String::new());
+        for (key, expected) in [
+            ("status", serde_json::json!("reading")),
+            ("rating", serde_json::json!(0)),
+            ("featured", serde_json::json!(false)),
+            ("themes", serde_json::json!(["memory", "identity"])),
+            ("non_finite", serde_json::Value::Null),
+        ] {
+            assert_eq!(
+                project_page_field_value(
+                    &page,
+                    &ProjectionFieldIdentity::Property(key.to_string())
+                ),
+                (true, Some(expected)),
+                "{key}"
+            );
+        }
+        assert_eq!(
+            project_page_field_value(
+                &page,
+                &ProjectionFieldIdentity::Property("missing".to_string())
+            ),
+            (false, None)
+        );
+    }
+
+    #[test]
+    fn page_field_projection_reuses_the_unicode_safe_body_excerpt() {
+        let page = projection_page(
+            "notes/log.md",
+            format!("# Heading\n\n[link](https://example.com) {}", "界".repeat(260)),
+        );
+        let (present, value) =
+            project_page_field_value(&page, &ProjectionFieldIdentity::Body);
+        let excerpt = value.and_then(|value| value.as_str().map(str::to_owned)).unwrap();
+
+        assert!(present);
+        assert!(excerpt.starts_with("Heading link "));
+        assert!(excerpt.ends_with('…'));
+        assert_eq!(excerpt.chars().count(), BODY_EXCERPT_MAX_CHARS);
     }
 
     // -- Fixture ----------------------------------------------------------
