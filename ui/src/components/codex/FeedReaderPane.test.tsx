@@ -298,6 +298,44 @@ describe("FeedReaderPane", () => {
     expect(paneMocks.captureAsync).not.toHaveBeenCalled();
   });
 
+  it("orders reader actions for keyboard navigation", () => {
+    renderPane();
+
+    const openOriginal = screen.getByRole("link", { name: /open original/i });
+    const actionRow = openOriginal.parentElement;
+    if (!actionRow) throw new Error("Expected feed reader action row");
+
+    expect(
+      Array.from(actionRow.children).map((action) =>
+        action.textContent?.trim(),
+      ),
+    ).toEqual([
+      "Open original ↗",
+      "Capture in journal",
+      "Copy link",
+      "Mark read",
+      "Unsave",
+      "Edit tags",
+    ]);
+  });
+
+  it("refuses a whitespace-only journal draft", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    fireEvent.change(draft, { target: { value: " \n\t " } });
+    expect(screen.getByRole("button", { name: "Capture" })).toBeDisabled();
+
+    const form = draft.closest("form");
+    if (!form) throw new Error("Expected journal capture form");
+    fireEvent.submit(form);
+    expect(paneMocks.captureAsync).not.toHaveBeenCalled();
+  });
+
   it("submits edited journal text with only edge whitespace trimmed", async () => {
     const user = userEvent.setup();
     renderPane();

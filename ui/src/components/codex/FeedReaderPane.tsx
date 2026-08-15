@@ -381,17 +381,17 @@ function ReaderArticle({
         {markdownLink ? (
           <Button
             className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            onPress={() => void copy(markdownLink)}
+            onPress={onOpenCapture}
           >
-            {copied ? "Copied" : "Copy link"}
+            Capture in journal
           </Button>
         ) : null}
         {markdownLink ? (
           <Button
             className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            onPress={onOpenCapture}
+            onPress={() => void copy(markdownLink)}
           >
-            Capture in journal
+            {copied ? "Copied" : "Copy link"}
           </Button>
         ) : null}
         <Button
