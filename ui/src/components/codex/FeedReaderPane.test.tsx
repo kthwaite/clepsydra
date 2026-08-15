@@ -344,9 +344,7 @@ describe("FeedReaderPane", () => {
 
     const draft = screen.getByRole("textbox", { name: "Journal entry" });
     expect(draft).toBeDisabled();
-    expect(
-      screen.getByRole("button", { name: "Capturing…" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Capturing…" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Mark read" })).toBeEnabled();
 
@@ -420,9 +418,9 @@ describe("FeedReaderPane", () => {
     );
     await user.click(screen.getByRole("button", { name: "Capture" }));
 
-    expect(
-      await screen.findByRole("status"),
-    ).toHaveTextContent("Captured in today’s journal.");
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Captured in today’s journal.",
+    );
     expect(
       screen.queryByRole("textbox", { name: "Journal entry" }),
     ).not.toBeInTheDocument();
@@ -805,16 +803,10 @@ describe("feedEntryMarkdownLink", () => {
       ),
     ).toBe("[Stored dispatch](https://source.example/posts/stored)");
     expect(
-      feedEntryMarkdownLink(
-        "A [bracket]",
-        "http://source.example/plain",
-      ),
+      feedEntryMarkdownLink("A [bracket]", "http://source.example/plain"),
     ).toBe(String.raw`[A \[bracket\]](http://source.example/plain)`);
     expect(
-      feedEntryMarkdownLink(
-        String.raw`A \ B`,
-        "https://source.example/slash",
-      ),
+      feedEntryMarkdownLink(String.raw`A \ B`, "https://source.example/slash"),
     ).toBe(String.raw`[A \\ B](https://source.example/slash)`);
     expect(feedEntryMarkdownLink("Unsafe", "javascript:alert(1)")).toBeNull();
     expect(feedEntryMarkdownLink("Missing", null)).toBeNull();

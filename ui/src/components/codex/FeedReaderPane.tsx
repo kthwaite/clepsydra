@@ -105,11 +105,7 @@ export function FeedReaderPane({
 
   const submitCapture = async () => {
     const content = captureDraft.trim();
-    if (
-      !content ||
-      captureMutation.isPending ||
-      captureInFlightRef.current
-    ) {
+    if (!content || captureMutation.isPending || captureInFlightRef.current) {
       return;
     }
     captureGenerationRef.current += 1;
