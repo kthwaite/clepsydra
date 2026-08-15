@@ -97,6 +97,7 @@ The server was then stopped through the process manager. Generated inspection co
 - required `PageBasePropertiesResponse.preview`;
 - required `PagePreviewField.present`, `value`, `schema_conflict`, and `label_conflict`;
 - named projection/field/source schemas.
+- optional `PreviewFieldDefinition.label?: string | null`.
 
 `bun run typecheck` exited 2 with exactly four expected generated-contract consumer failures, all for missing required `preview` and intentionally left for Tasks 4/5:
 
@@ -150,6 +151,92 @@ conflict fallback. The cross-Base agreement fixture now proves that an omitted
 source label and an explicit canonical-key label agree without conflict while
 preserving source provenance. The DTO/OpenAPI shape did not change, so the
 generated TypeScript schema was intentionally not regenerated.
+
+## Re-review corrections
+
+Re-review exposed two deeper contract faults: wire-key encoding also collided
+when a custom key already began with `prop.`, and the Task 1 model had made
+the approved optional preview label required.
+
+### RED
+
+The optional-label model test was written first:
+
+```text
+cargo test vault::base::tests::presentation_fields_round_trip_references_without_reordering_preview -- --nocapture
+# exit 101
+# E0599: no method named `as_deref` found for `String`
+# E0599: no method named `is_none` found for `String`
+```
+
+After adding the third canonical identity (`prop.prop.title`) to the
+integration fixture, the regression was mutation-checked against the
+system-name-only prefix rule:
+
+```text
+cargo test --test property_patch get_keeps_shadowed_system_and_property_preview_identities_distinct -- --nocapture
+# exit 101
+# left: [\"title\", \"prop.title\", \"prop.title\"]
+# right: [\"title\", \"prop.title\", \"prop.prop.title\"]
+# 0 passed; 1 failed; 14 filtered out
+```
+
+### Correction
+
+- `PreviewFieldDefinition.label` is now `Option<String>` with serde default
+  and empty omission. Validation rejects only an explicitly present blank
+  label. Base model tests cover omission/round-trip and the persistence suite
+  proves an unlabeled preview entry is written without a synthetic label.
+- Source provenance now carries the configured option directly. An omitted
+  source label and an explicit canonical wire-key label agree through the
+  effective-label fallback without conflict.
+- Wire keys remain bare for system/body and ordinary custom keys. Custom keys
+  are prefixed with `prop.` when they collide with a system name or already
+  start with `prop.`, making the encoding injective for the resolver grammar.
+  The integration fixture proves three distinct identities, positions,
+  values/presence, per-identity de-duplication, and fallback labels.
+- The OpenAPI test now asserts `PreviewFieldDefinition.field` is required and
+  `label` is optional.
+
+### Final focused GREEN
+
+```text
+cargo test vault::base::tests -- --nocapture
+# 38 passed; 0 failed; 1925 filtered out
+
+cargo test vault::base_document::tests -- --nocapture
+# 35 passed; 0 failed; 1928 filtered out
+
+cargo test vault::query::tests -- --nocapture
+# 41 passed; 0 failed; 1922 filtered out
+
+cargo test --test property_patch get_ -- --nocapture
+# 7 passed; 0 failed; 8 filtered out
+
+cargo test api::openapi::tests -- --nocapture
+# 13 passed; 0 failed; 1950 filtered out
+```
+
+The final restored injective rule was also rerun directly: one passed, zero
+failed, fourteen filtered out.
+
+### Schema regeneration and TypeScript
+
+A new disposable initialized vault and temporary `XDG_CONFIG_HOME` backed the
+managed `task3-openapi-rereview` server on the coordinator-authorized
+`127.0.0.1:3001`. From `ui/`:
+
+```text
+bunx openapi-typescript http://127.0.0.1:3001/api/openapi.json -o src/api/schema.d.ts
+✨ openapi-typescript 7.13.0
+🚀 http://127.0.0.1:3001/api/openapi.json → src/api/schema.d.ts [145ms]
+```
+
+The managed server was stopped and the disposable vault removed. Generated
+TypeScript now contains `label?: string | null`. `bun run typecheck` still
+reports exactly the same four expected downstream missing-`preview` consumer
+failures at `bases.test.ts:372,520,526` and
+`FolioProperties.test.tsx:77`; no new optional-label consumer failure exists.
 
 ## Remaining concerns
 

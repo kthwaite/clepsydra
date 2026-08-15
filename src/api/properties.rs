@@ -284,7 +284,9 @@ struct MergedPreviewField {
 fn projection_key(identity: &ProjectionFieldIdentity) -> String {
     match identity {
         ProjectionFieldIdentity::System(field) => field.as_str().to_string(),
-        ProjectionFieldIdentity::Property(key) if SYSTEM_FIELDS.contains(&key.as_str()) => {
+        ProjectionFieldIdentity::Property(key)
+            if SYSTEM_FIELDS.contains(&key.as_str()) || key.starts_with("prop.") =>
+        {
             format!("prop.{key}")
         }
         ProjectionFieldIdentity::Property(key) => key.clone(),
@@ -323,8 +325,10 @@ fn project_page_preview(
                 continue;
             };
             let key = projection_key(&identity);
-            let configured_label = (!definition.label.trim().is_empty())
-                .then(|| definition.label.clone());
+            let configured_label = definition
+                .label
+                .clone()
+                .filter(|label| !label.trim().is_empty());
             let effective_label = configured_label
                 .clone()
                 .unwrap_or_else(|| key.clone());

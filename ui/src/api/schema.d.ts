@@ -2577,7 +2577,7 @@ export interface components {
         /** @description One field shown in a Base's default preview, in configured order. */
         PreviewFieldDefinition: {
             field: string;
-            label: string;
+            label?: string | null;
         };
         /** @enum {string} */
         PreviewMutationOperation: "move_page" | "move_folder";

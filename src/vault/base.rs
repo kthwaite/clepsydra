@@ -198,7 +198,8 @@ pub enum AggregateFn {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct PreviewFieldDefinition {
     pub field: String,
-    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// A saved view: layout, optional extra filter, sort, grouping, columns.
@@ -1033,7 +1034,11 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
 
     let mut preview_fields = HashSet::new();
     for (preview_index, definition) in base.file.preview.iter().enumerate() {
-        if definition.label.trim().is_empty() {
+        if definition
+            .label
+            .as_deref()
+            .is_some_and(|label| label.trim().is_empty())
+        {
             push(
                 BaseDiagnosticSeverity::Error,
                 Some(format!("preview[{preview_index}].label")),
@@ -1578,6 +1583,7 @@ preview = [
     { field = "title", label = "Title" },
     { field = "sys.kind", label = "Kind" },
     { field = "prop.kind", label = "Custom kind" },
+    { field = "rating" },
 ]
 
 [[views]]
@@ -1589,13 +1595,14 @@ labels = { body = "Excerpt", title = "Title", "sys.kind" = "Kind", "prop.kind" =
         assert_eq!(
             file.preview
                 .iter()
-                .map(|definition| (definition.field.as_str(), definition.label.as_str()))
+                .map(|definition| (definition.field.as_str(), definition.label.as_deref()))
                 .collect::<Vec<_>>(),
             vec![
-                ("body", "Excerpt"),
-                ("title", "Title"),
-                ("sys.kind", "Kind"),
-                ("prop.kind", "Custom kind"),
+                ("body", Some("Excerpt")),
+                ("title", Some("Title")),
+                ("sys.kind", Some("Kind")),
+                ("prop.kind", Some("Custom kind")),
+                ("rating", None),
             ]
         );
         assert_eq!(file.views[0].labels["body"], "Excerpt");
@@ -1611,8 +1618,10 @@ labels = { body = "Excerpt", title = "Title", "sys.kind" = "Kind", "prop.kind" =
                 .iter()
                 .map(|definition| definition.field.as_str())
                 .collect::<Vec<_>>(),
-            vec!["body", "title", "sys.kind", "prop.kind"]
+            vec!["body", "title", "sys.kind", "prop.kind", "rating"]
         );
+        assert!(round_tripped.preview[4].label.is_none());
+        assert!(!serialized.contains("field = \"rating\", label"));
         assert_eq!(round_tripped.views[0].labels, file.views[0].labels);
     }
 
@@ -1630,7 +1639,10 @@ labels = { body = "Excerpt", title = "Title", "sys.kind" = "Kind", "prop.kind" =
     fn presentation_labels_reject_whitespace_only_values_at_addressed_paths() {
         let content = r#"
 name = "Reading"
-preview = [{ field = "title", label = "   " }]
+preview = [
+    { field = "title", label = "   " },
+    { field = "rating" },
+]
 
 [[views]]
 name = "All"
@@ -1645,6 +1657,9 @@ labels = { title = "\t" }
                     && diagnostic.path.as_deref() == Some(expected_path)
             }));
         }
+        assert!(!diagnostics.iter().any(|diagnostic| {
+            diagnostic.path.as_deref() == Some("preview[1].label")
+        }));
     }
 
     #[test]

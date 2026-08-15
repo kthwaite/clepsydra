@@ -346,7 +346,7 @@ PRIVATE BODY SENTINEL
     fs::write(
         root.join("shadow-title.md"),
         format!(
-            "+++\nid = \"{SHADOW_PAGE_ID}\"\ntitle = \"System title\"\ntype = \"CODE\"\n+++\n"
+            "+++\nid = \"{SHADOW_PAGE_ID}\"\ntitle = \"System title\"\ntype = \"CODE\"\n\"prop.title\" = \"Nested custom\"\n+++\n"
         ),
     )
     .unwrap();
@@ -355,7 +355,7 @@ PRIVATE BODY SENTINEL
         r#"name = "Alpha Reader"
 filter = { field = "kind", op = "eq", value = "BOOK" }
 preview = [
-    { field = "rating", label = "" },
+    { field = "rating" },
     { field = "featured", label = "Featured" },
     { field = "conflict_relation", label = "Series" },
     { field = "non_finite", label = "Non-finite" },
@@ -434,12 +434,14 @@ note = { type = "text" }
         r#"name = "Shadow Alpha"
 filter = { field = "kind", op = "eq", value = "CODE" }
 preview = [
-    { field = "title", label = "" },
-    { field = "prop.title", label = "" },
+    { field = "title" },
+    { field = "prop.title" },
+    { field = "prop.prop.title" },
 ]
 
 [properties]
 title = { type = "text" }
+"prop.title" = { type = "text" }
 "#,
     )
     .unwrap();
@@ -450,10 +452,12 @@ filter = { field = "kind", op = "eq", value = "CODE" }
 preview = [
     { field = "sys.title", label = "title" },
     { field = "prop.title", label = "prop.title" },
+    { field = "prop.prop.title", label = "prop.prop.title" },
 ]
 
 [properties]
 title = { type = "text" }
+"prop.title" = { type = "text" }
 "#,
     )
     .unwrap();
@@ -760,7 +764,7 @@ async fn get_keeps_shadowed_system_and_property_preview_identities_distinct() {
             .iter()
             .map(|field| field["key"].as_str().unwrap())
             .collect::<Vec<_>>(),
-        ["title", "prop.title"]
+        ["title", "prop.title", "prop.prop.title"]
     );
     assert_eq!(
         fields[0],
@@ -798,6 +802,26 @@ async fn get_keeps_shadowed_system_and_property_preview_identities_distinct() {
                 {
                     "base": { "slug": "f-shadow-beta", "name": "Shadow Beta" },
                     "label": "prop.title"
+                }
+            ]
+        })
+    );
+    assert_eq!(
+        fields[2],
+        serde_json::json!({
+            "key": "prop.prop.title",
+            "label": "prop.prop.title",
+            "present": true,
+            "value": "Nested custom",
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "e-shadow-alpha", "name": "Shadow Alpha" }
+                },
+                {
+                    "base": { "slug": "f-shadow-beta", "name": "Shadow Beta" },
+                    "label": "prop.prop.title"
                 }
             ]
         })

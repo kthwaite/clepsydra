@@ -1642,11 +1642,11 @@ layout = "table"
         stored.definition.file.preview = vec![
             PreviewFieldDefinition {
                 field: "body".into(),
-                label: "Excerpt".into(),
+                label: Some("Excerpt".into()),
             },
             PreviewFieldDefinition {
                 field: "title".into(),
-                label: "Headline".into(),
+                label: None,
             },
         ];
         stored = update(
@@ -1663,12 +1663,14 @@ layout = "table"
         assert!(added.contains("plugin_key = \"keep\""));
         assert!(added.contains(r#"field = "body""#), "{added}");
         assert!(added.contains(r#"field = "title""#), "{added}");
+        assert!(added.contains(r#"{ field = "title" }"#), "{added}");
+        assert!(stored.definition.file.preview[1].label.is_none());
         assert!(
             added.find(r#"field = "body""#).unwrap()
                 < added.find(r#"field = "title""#).unwrap()
         );
 
-        stored.definition.file.preview[0].label = "Summary".into();
+        stored.definition.file.preview[0].label = Some("Summary".into());
         stored.definition.file.preview.swap(0, 1);
         stored = update(
             fixture.root(),
@@ -1873,7 +1875,7 @@ layout = "table"
         let mut next = load_for_test(fixture.root(), "reading").definition.file;
         next.preview.push(PreviewFieldDefinition {
             field: "body".into(),
-            label: "Excerpt".into(),
+            label: Some("Excerpt".into()),
         });
         next.views[0]
             .labels
