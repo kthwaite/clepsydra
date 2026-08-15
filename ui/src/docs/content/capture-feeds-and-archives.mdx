@@ -135,6 +135,12 @@ subscriptions due. A success or `304` uses the configured fetch interval, whose
 default is a 30-minute base interval. Repeated failures use exponential backoff
 from that base, capped at 24 hours.
 
+For an entry with a safe HTTP(S) source URL, **Capture in journal** opens an
+editable Markdown draft and appends the submitted text to today’s journal.
+The reader stays in place and does not change read or bookmark state. **Copy
+link** copies the entry title and source URL as a Markdown link. Neither action
+copies the stored article body.
+
 Age retention defaults to 30 days for read entries and 90 days for unread
 entries. Quotas retain at most 5,000 entries or 128 MiB per feed and 50,000
 entries or 1 GiB globally. Both age pruning and those budgets apply only to

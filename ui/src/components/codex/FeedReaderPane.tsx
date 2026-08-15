@@ -6,6 +6,9 @@ import {
   useFeeds,
   usePatchFeedEntry,
 } from "#/api/feeds";
+import { useQuickCapture } from "#/api/journal";
+import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
+import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { formatFeedTime } from "#/lib/time";
 
 export function FeedReaderPane({
@@ -22,12 +25,25 @@ export function FeedReaderPane({
   const entryQuery = useFeedEntry(selectedEntryId);
   const feedsQuery = useFeeds();
   const patchEntry = usePatchFeedEntry();
+  const { copied, copy } = useCopyToClipboard();
+  const captureMutation = useQuickCapture();
+  const resetCaptureMutation = captureMutation.reset;
+  const openTodayJournal = useOpenTodayJournal();
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
   const [localMutationError, setLocalMutationError] = useState<unknown>(null);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const [captureDraft, setCaptureDraft] = useState("");
+  const [captureError, setCaptureError] = useState<unknown>(null);
+  const [captured, setCaptured] = useState(false);
   const reportedMissingId = useRef<number | undefined>(undefined);
+  const captureGenerationRef = useRef(0);
+  const captureInFlightRef = useRef(false);
   const entry =
     entryQuery.data?.id === selectedEntryId ? entryQuery.data : undefined;
+  const markdownLink = entry
+    ? feedEntryMarkdownLink(entry.title, entry.url)
+    : null;
   const missing =
     typeof entryQuery.error === "object" &&
     entryQuery.error !== null &&
@@ -45,11 +61,18 @@ export function FeedReaderPane({
   }, [entry, feedsQuery.data]);
 
   useEffect(() => {
+    captureGenerationRef.current += 1;
+    captureInFlightRef.current = false;
+    resetCaptureMutation?.();
     setIsEditingTags(false);
     setTagDraft("");
     setLocalMutationError(null);
+    setIsCapturing(false);
+    setCaptureDraft("");
+    setCaptureError(null);
+    setCaptured(false);
     if (selectedEntryId === undefined) reportedMissingId.current = undefined;
-  }, [selectedEntryId]);
+  }, [resetCaptureMutation, selectedEntryId]);
 
   useEffect(() => {
     if (
@@ -77,6 +100,32 @@ export function FeedReaderPane({
     } catch (error) {
       setLocalMutationError(error);
       return false;
+    }
+  };
+
+  const submitCapture = async () => {
+    const content = captureDraft.trim();
+    if (!content || captureMutation.isPending || captureInFlightRef.current) {
+      return;
+    }
+    captureGenerationRef.current += 1;
+    const generation = captureGenerationRef.current;
+    captureInFlightRef.current = true;
+    resetCaptureMutation?.();
+    setCaptureError(null);
+    try {
+      await captureMutation.mutateAsync(content);
+      if (captureGenerationRef.current !== generation) return;
+      setIsCapturing(false);
+      setCaptureDraft("");
+      setCaptured(true);
+    } catch (error) {
+      if (captureGenerationRef.current !== generation) return;
+      setCaptureError(error);
+    } finally {
+      if (captureGenerationRef.current === generation) {
+        captureInFlightRef.current = false;
+      }
     }
   };
 
@@ -143,6 +192,37 @@ export function FeedReaderPane({
         <ReaderArticle
           entry={entry}
           feedName={manifestFeedName ?? feedName}
+          markdownLink={markdownLink}
+          copied={copied}
+          copy={copy}
+          isCapturing={isCapturing}
+          captureDraft={captureDraft}
+          captureError={captureError}
+          captureMutationError={captureMutation.error}
+          captured={captured}
+          isCapturePending={captureMutation.isPending}
+          onOpenTodayJournal={openTodayJournal}
+          onCaptureDraftChange={setCaptureDraft}
+          onOpenCapture={() => {
+            if (!markdownLink || captureInFlightRef.current) return;
+            captureGenerationRef.current += 1;
+            captureInFlightRef.current = false;
+            resetCaptureMutation?.();
+            setCaptureDraft(`- ${markdownLink}`);
+            setCaptureError(null);
+            setCaptured(false);
+            setIsCapturing(true);
+          }}
+          onCancelCapture={() => {
+            if (captureInFlightRef.current) return;
+            captureGenerationRef.current += 1;
+            captureInFlightRef.current = false;
+            resetCaptureMutation?.();
+            setIsCapturing(false);
+            setCaptureDraft("");
+            setCaptureError(null);
+          }}
+          onSubmitCapture={submitCapture}
           isEditingTags={isEditingTags}
           tagDraft={tagDraft}
           isPatchPending={patchEntry.isPending}
@@ -175,6 +255,20 @@ export function FeedReaderPane({
 function ReaderArticle({
   entry,
   feedName,
+  markdownLink,
+  copied,
+  copy,
+  isCapturing,
+  captureDraft,
+  captureError,
+  captureMutationError,
+  captured,
+  isCapturePending,
+  onOpenTodayJournal,
+  onCaptureDraftChange,
+  onOpenCapture,
+  onCancelCapture,
+  onSubmitCapture,
   isEditingTags,
   tagDraft,
   isPatchPending,
@@ -188,6 +282,20 @@ function ReaderArticle({
 }: {
   entry: FeedEntry;
   feedName?: string;
+  markdownLink: string | null;
+  copied: boolean;
+  copy: (text: string) => Promise<void>;
+  isCapturing: boolean;
+  captureDraft: string;
+  captureError: unknown;
+  captureMutationError: unknown;
+  captured: boolean;
+  isCapturePending: boolean;
+  onOpenTodayJournal: () => void;
+  onCaptureDraftChange: (value: string) => void;
+  onOpenCapture: () => void;
+  onCancelCapture: () => void;
+  onSubmitCapture: () => Promise<void>;
   isEditingTags: boolean;
   tagDraft: string;
   isPatchPending: boolean;
@@ -202,6 +310,15 @@ function ReaderArticle({
   const titleId = `feed-reader-title-${entry.id}`;
   const originalUrl = safeFeedEntryUrl(entry.url);
   const timestamp = entry.published_at ?? entry.fetched_at;
+  const captureDraftRef = useRef<HTMLTextAreaElement>(null);
+  const captureFailure = captureError ?? captureMutationError;
+  const hasCaptureFailure =
+    captureError !== null ||
+    (captureMutationError !== null && captureMutationError !== undefined);
+
+  useEffect(() => {
+    if (isCapturing) captureDraftRef.current?.focus();
+  }, [isCapturing]);
 
   return (
     <article
@@ -261,6 +378,22 @@ function ReaderArticle({
             Open original ↗
           </a>
         ) : null}
+        {markdownLink ? (
+          <Button
+            className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            onPress={onOpenCapture}
+          >
+            Capture in journal
+          </Button>
+        ) : null}
+        {markdownLink ? (
+          <Button
+            className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            onPress={() => void copy(markdownLink)}
+          >
+            {copied ? "Copied" : "Copy link"}
+          </Button>
+        ) : null}
         <Button
           className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
           isDisabled={isPatchPending}
@@ -283,6 +416,70 @@ function ReaderArticle({
           Edit tags
         </Button>
       </div>
+
+      {isCapturing ? (
+        <form
+          className="mt-3 grid gap-2 border-l-2 border-accent pl-3 sm:grid-cols-[minmax(0,1fr)_auto]"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void onSubmitCapture();
+          }}
+        >
+          <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+            Journal entry
+            <textarea
+              ref={captureDraftRef}
+              disabled={isCapturePending}
+              value={captureDraft}
+              onChange={(event) => onCaptureDraftChange(event.target.value)}
+              className="mt-1 block min-h-20 w-full min-w-0 resize-y border border-rule bg-paper px-2 py-1.5 text-[12px] normal-case tracking-normal text-ink outline-none focus:border-accent"
+            />
+          </label>
+          <div className="flex items-end gap-2">
+            <Button
+              type="submit"
+              isDisabled={isCapturePending || !captureDraft.trim()}
+              className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            >
+              {isCapturePending ? "Capturing…" : "Capture"}
+            </Button>
+            <Button
+              type="button"
+              isDisabled={isCapturePending}
+              className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              onPress={onCancelCapture}
+            >
+              Cancel
+            </Button>
+          </div>
+          {hasCaptureFailure ? (
+            <div
+              role="alert"
+              className="border border-hot px-3 py-2 text-[12px] text-hot sm:col-span-2"
+            >
+              {errorMessage(captureFailure, "Capture failed. Try again.")}
+            </div>
+          ) : null}
+        </form>
+      ) : null}
+
+      {captured ? (
+        <div className="mt-3 flex flex-wrap items-center gap-2 border-l-2 border-accent pl-3">
+          <div
+            role="status"
+            aria-live="polite"
+            className="text-[12px] text-ink-2"
+          >
+            Captured in today’s journal.
+          </div>
+          <Button
+            className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            onPress={onOpenTodayJournal}
+          >
+            Open today’s journal
+          </Button>
+        </div>
+      ) : null}
 
       {isEditingTags ? (
         <form
@@ -336,6 +533,19 @@ export function safeFeedEntryUrl(
   } catch {
     return null;
   }
+}
+
+export function feedEntryMarkdownLink(
+  title: string,
+  url: string | null | undefined,
+): string | null {
+  const safeUrl = safeFeedEntryUrl(url);
+  if (!safeUrl) return null;
+  const label = title
+    .replaceAll("\\", "\\\\")
+    .replaceAll("[", "\\[")
+    .replaceAll("]", "\\]");
+  return `[${label}](${safeUrl})`;
 }
 
 export function normalizeFeedEntryTags(value: string) {
