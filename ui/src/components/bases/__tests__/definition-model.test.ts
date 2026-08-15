@@ -55,6 +55,11 @@ describe("base definition model", () => {
           },
         ],
       },
+      preview: [
+        { field: "body", label: "Excerpt" },
+        { field: "sys.title" },
+        { field: "prop.title", label: "Custom title" },
+      ],
       properties: [
         {
           key: "status",
@@ -74,6 +79,10 @@ describe("base definition model", () => {
           group_by: "status",
           aggregates: [{ fn: "count" }, { fn: "avg", field: "rating" }],
           columns: ["title", "status", "rating"],
+          labels: {
+            body: "Excerpt",
+            "prop.title": "Custom title",
+          },
         },
         {
           name: "All",
@@ -91,6 +100,16 @@ describe("base definition model", () => {
       "status",
       "rating",
     ]);
+    expect(draft.preview.map(({ field }) => field)).toEqual([
+      "body",
+      "sys.title",
+      "prop.title",
+    ]);
+    expect(new Set(draft.preview.map(({ id }) => id)).size).toBe(3);
+    expect(draft.views[0].labels).toEqual({
+      body: "Excerpt",
+      "prop.title": "Custom title",
+    });
     expect(draft.views.map((view) => view.name)).toEqual(["Reading", "All"]);
     expect(new Set(draft.properties.map((property) => property.id)).size).toBe(
       2,
@@ -168,6 +187,49 @@ describe("base definition model", () => {
     expect(detail.views).toEqual([{ name: "Compact" }]);
   });
 
+  it("materializes presentation defaults with stable draft references", () => {
+    const detail = baseDetail({
+      preview: [{ field: "body" }],
+      views: [{ name: "Compact" }],
+    });
+
+    const draft = fromWire(detail);
+    const preview = draft.preview;
+    const labels = draft.views[0].labels;
+
+    expect(preview).toEqual([
+      expect.objectContaining({ field: "body", id: expect.any(String) }),
+    ]);
+    expect(labels).toEqual({});
+    expect(draft.preview).toBe(preview);
+    expect(draft.views[0].labels).toBe(labels);
+    expect(detail.preview).toEqual([{ field: "body" }]);
+    expect(detail.views).toEqual([{ name: "Compact" }]);
+  });
+
+  it("strips presentation row IDs and clones mutable presentation data", () => {
+    const detail = baseDetail({
+      preview: [{ field: "body", label: "Excerpt" }],
+      views: [{ name: "All", labels: { body: "Excerpt" } }],
+    });
+
+    const draft = fromWire(detail);
+    draft.preview[0].label = "Summary";
+    draft.views[0].labels.body = "Summary";
+    const wire = toWire(draft);
+
+    expect(detail.preview).toEqual([{ field: "body", label: "Excerpt" }]);
+    expect(detail.views?.[0].labels).toEqual({ body: "Excerpt" });
+    expect(wire.preview).toEqual([{ field: "body", label: "Summary" }]);
+    expect(wire.views?.[0].labels).toEqual({ body: "Summary" });
+    expect(wire.preview?.[0]).not.toHaveProperty("id");
+
+    draft.preview[0].label = "Changed again";
+    draft.views[0].labels.body = "Changed again";
+    expect(wire.preview).toEqual([{ field: "body", label: "Summary" }]);
+    expect(wire.views?.[0].labels).toEqual({ body: "Summary" });
+  });
+
   it("creates a valid minimal All view with the supplied membership", () => {
     const filter = { field: "kind", op: "eq", value: "BOOK" } as const;
 
@@ -176,12 +238,14 @@ describe("base definition model", () => {
       description: "Reading tracker",
       filter,
       properties: [],
+      preview: [],
       views: [
         expect.objectContaining({
           name: "All",
           layout: "table",
           sort: [],
           aggregates: [],
+          labels: {},
           columns: ["title"],
         }),
       ],

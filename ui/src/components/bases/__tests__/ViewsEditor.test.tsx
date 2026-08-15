@@ -103,6 +103,7 @@ function view(overrides: Partial<DraftView> = {}): DraftView {
     layout: "table",
     sort: [],
     aggregates: [],
+    labels: {},
     columns: ["title"],
     ...overrides,
   };
@@ -112,6 +113,7 @@ function draft(overrides: Partial<BaseDraft> = {}): BaseDraft {
   return {
     name: "Reading Log",
     properties: [property("rating", "number"), property("status", "select")],
+    preview: [],
     views: [view({ id: "view-all", columns: ["title", "rating"] })],
     ...overrides,
   };
@@ -981,6 +983,68 @@ describe("ViewsEditor", () => {
       screen.getByLabelText("Aggregate field 1"),
     );
   });
+
+  it("adds and resets display labels for fields outside columns and body without changing view behavior", async () => {
+    const user = userEvent.setup();
+    const initial = view({
+      id: "view-all",
+      columns: ["title"],
+      sort: [{ field: "rating", dir: "desc" }],
+      filter: { field: "status", op: "eq", value: "reading" },
+      aggregates: [{ fn: "avg", field: "rating" }],
+    });
+    const onChange = renderViews({ views: [initial] });
+
+    const select = screen.getByLabelText("Field to label");
+    expect(within(select).getByRole("option", { name: "status" })).toBeEnabled();
+    expect(
+      within(select).getByRole("option", { name: /body.*read-only/i }),
+    ).toBeEnabled();
+    await user.selectOptions(select, "status");
+    await user.click(screen.getByRole("button", { name: "Add label" }));
+    await user.clear(screen.getByLabelText("Display label for status"));
+    await user.type(
+      screen.getByLabelText("Display label for status"),
+      "Reading state",
+    );
+
+    expect(onChange).toHaveBeenLastCalledWith([
+      {
+        ...initial,
+        labels: { status: "Reading state" },
+      },
+    ]);
+    expect(
+      within(screen.getByLabelText("Field to label")).getByRole("option", {
+        name: /status.*already labelled/i,
+      }),
+    ).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Reset label status" }));
+    expect(onChange).toHaveBeenLastCalledWith([{ ...initial, labels: {} }]);
+  });
+
+  it("registers exact view label diagnostic controls", () => {
+    const registerFocus = vi.fn();
+    renderViews({
+      views: [view({ labels: { body: "Excerpt" } })],
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "views[0].labels.body",
+          message: "label must not be empty",
+        },
+      ],
+      registerFocus,
+    });
+
+    expect(registerFocus).toHaveBeenCalledWith(
+      "views[0].labels.body",
+      expect.any(HTMLElement),
+    );
+  });
+
 });
 
 describe("BasePreview", () => {
@@ -1016,23 +1080,22 @@ describe("BasePreview", () => {
           name: "Newest",
           description: undefined,
           filter: undefined,
+          preview: [],
           properties: [
             {
               key: "rating",
-              definition: { type: "number", options: undefined },
+              definition: { type: "number" },
             },
             {
               key: "status",
-              definition: { type: "select", options: undefined },
+              definition: { type: "select" },
             },
           ],
           views: [
             {
               name: "All",
               layout: "table",
-              filter: undefined,
               sort: [],
-              group_by: undefined,
               aggregates: [],
               columns: ["title", "rating"],
             },

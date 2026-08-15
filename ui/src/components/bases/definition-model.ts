@@ -16,6 +16,13 @@ export interface DraftProperty {
   definition: PropertyDefinition;
 }
 
+type WirePreviewField = NonNullable<BaseFile["preview"]>[number];
+
+export interface DraftPreviewField extends Omit<WirePreviewField, "label"> {
+  id: string;
+  label?: Exclude<WirePreviewField["label"], null>;
+}
+
 export interface DraftView {
   id: string;
   name: string;
@@ -25,6 +32,7 @@ export interface DraftView {
   sort: SortKey[];
   group_by?: string;
   aggregates: Aggregate[];
+  labels: NonNullable<NonNullable<BaseFile["views"]>[number]["labels"]>;
   columns: string[];
 }
 
@@ -33,6 +41,7 @@ export interface BaseDraft {
   description?: string;
   filter?: BaseFilter;
   properties: DraftProperty[];
+  preview: DraftPreviewField[];
   views: DraftView[];
 }
 
@@ -139,7 +148,9 @@ function cloneFilter(filter: BaseFilter | null | undefined) {
 function clonePropertyDefinition(definition: PropertyDefinition) {
   return {
     ...definition,
-    options: definition.options ? [...definition.options] : undefined,
+    ...(definition.options === undefined
+      ? {}
+      : { options: [...definition.options] }),
   };
 }
 
@@ -148,6 +159,11 @@ export function fromWire(detail: BaseFile): BaseDraft {
     name: detail.name,
     description: detail.description ?? undefined,
     filter: cloneFilter(detail.filter),
+    preview: (detail.preview ?? []).map((definition) => ({
+      id: crypto.randomUUID(),
+      field: definition.field,
+      ...(definition.label == null ? {} : { label: definition.label }),
+    })),
     properties: (detail.properties ?? []).map(({ key, definition }) => ({
       id: crypto.randomUUID(),
       key,
@@ -164,6 +180,7 @@ export function fromWire(detail: BaseFile): BaseDraft {
       aggregates: (view.aggregates ?? []).map((aggregate) => ({
         ...aggregate,
       })),
+      labels: { ...(view.labels ?? {}) },
       columns: [...(view.columns ?? [])],
     })),
   };
@@ -174,6 +191,10 @@ export function toWire(draft: BaseDraft): BaseFile {
     name: draft.name,
     description: draft.description,
     filter: cloneFilter(draft.filter),
+    preview: draft.preview.map(({ field, label }) => ({
+      field,
+      ...(label === undefined ? {} : { label }),
+    })),
     properties: draft.properties.map(({ key, definition }) => ({
       key,
       definition: clonePropertyDefinition(definition),
@@ -181,10 +202,15 @@ export function toWire(draft: BaseDraft): BaseFile {
     views: draft.views.map((view) => ({
       name: view.name,
       layout: view.layout,
-      filter: cloneFilter(view.filter),
+      ...(view.filter === undefined
+        ? {}
+        : { filter: cloneFilter(view.filter) }),
       sort: view.sort.map((sort) => ({ ...sort })),
-      group_by: view.group_by,
+      ...(view.group_by === undefined ? {} : { group_by: view.group_by }),
       aggregates: view.aggregates.map((aggregate) => ({ ...aggregate })),
+      ...(Object.keys(view.labels).length === 0
+        ? {}
+        : { labels: { ...view.labels } }),
       columns: [...view.columns],
     })),
   };
@@ -208,6 +234,7 @@ export function createMinimalDraft(
     description,
     filter: cloneFilter(filter),
     properties: [],
+    preview: [],
     views: [
       {
         id: crypto.randomUUID(),
@@ -215,6 +242,7 @@ export function createMinimalDraft(
         layout: "table",
         sort: [],
         aggregates: [],
+        labels: {},
         columns: ["title"],
       },
     ],

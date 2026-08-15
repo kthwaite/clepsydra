@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseDetailResponse, BaseMutationResponse } from "#/api/bases";
@@ -41,12 +41,14 @@ const detail = {
   description: "Books in progress",
   filter: undefined,
   properties: [],
+  preview: [],
   views: [
     {
       name: "All",
       layout: "table",
       sort: [],
       aggregates: [],
+      labels: {},
       columns: ["title"],
     },
   ],
@@ -126,6 +128,127 @@ describe("BaseDefinitionWorkspace", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Saved")).toBeInTheDocument();
   });
+  it("places Preview properties immediately after Properties in definition navigation", () => {
+    renderWorkspace();
+
+    expect(
+      within(screen.getByRole("navigation", { name: "Definition sections" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["General", "Filter", "Properties", "Preview properties", "Views"]);
+  });
+
+  it("keeps presentation edits local until Save and sends both additions", async () => {
+    const user = userEvent.setup();
+    updateMock.mockResolvedValue(
+      mutationResponse({
+        preview: [{ field: "body", label: "Excerpt" }],
+        views: [
+          {
+            ...detail.views[0],
+            labels: { body: "Excerpt" },
+          },
+        ],
+        revision: "revision-2",
+      }),
+    );
+    renderWorkspace();
+
+    await user.click(
+      screen.getByRole("button", { name: "Preview properties" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Preview property to add"),
+      "body",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add preview property" }),
+    );
+    await user.type(screen.getByLabelText("Label for body"), "Excerpt");
+
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.selectOptions(screen.getByLabelText("Field to label"), "body");
+    await user.click(screen.getByRole("button", { name: "Add label" }));
+    await user.clear(screen.getByLabelText("Display label for body"));
+    await user.type(screen.getByLabelText("Display label for body"), "Excerpt");
+
+    expect(updateMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateMock).toHaveBeenCalledWith({
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-1",
+        definition: expect.objectContaining({
+          preview: [{ field: "body", label: "Excerpt" }],
+          views: [
+            expect.objectContaining({
+              name: "All",
+              labels: { body: "Excerpt" },
+            }),
+          ],
+        }),
+        view_origins: [{ kind: "existing", name: "All" }],
+      },
+    });
+  });
+
+  it("restores presentation metadata on Discard without mutating the server fixture", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(
+      screen.getByRole("button", { name: "Preview properties" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Preview property to add"),
+      "body",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add preview property" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(screen.queryByLabelText("Label for body")).toBeNull();
+    expect(detail.preview).toEqual([]);
+    expect(detail.views[0].labels).toEqual({});
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("focuses exact preview and view label controls from server diagnostics", async () => {
+    baseState.data = {
+      ...detail,
+      preview: [{ field: "body", label: "Excerpt" }],
+      views: [{ ...detail.views[0], labels: { body: "Excerpt" } }],
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "preview[0].label",
+          message: "preview label is invalid",
+        },
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "views[0].labels.body",
+          message: "view label is invalid",
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(
+      screen.getByRole("button", { name: /preview label is invalid/i }),
+    );
+    expect(screen.getByLabelText("Label for body")).toHaveFocus();
+
+    await user.click(
+      screen.getByRole("button", { name: /^view label is invalid/i }),
+    );
+    expect(screen.getByLabelText("Display label for body")).toHaveFocus();
+  });
+
 
   it("keeps body out of the property declaration flow", async () => {
     renderWorkspace();

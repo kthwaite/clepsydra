@@ -21,6 +21,7 @@ import { GeneralEditor } from "./GeneralEditor";
 import { asciiCaseFold, validateBaseDraftStructure } from "./local-validation";
 import { MembershipEditor } from "./MembershipEditor";
 import { PropertiesEditor } from "./PropertiesEditor";
+import { PreviewPropertiesEditor } from "./PreviewPropertiesEditor";
 import { ValidationSummary } from "./ValidationSummary";
 import { ViewsEditor } from "./ViewsEditor";
 
@@ -42,7 +43,7 @@ interface BaseDefinitionWorkspaceProps {
   slug: string;
 }
 
-type SectionId = "general" | "filter" | "properties" | "views";
+type SectionId = "general" | "filter" | "properties" | "preview" | "views";
 
 interface ViewSelection {
   id?: string;
@@ -69,6 +70,7 @@ const sectionOrder: Array<{ id: SectionId; label: string }> = [
   { id: "general", label: "General" },
   { id: "filter", label: "Filter" },
   { id: "properties", label: "Properties" },
+  { id: "preview", label: "Preview properties" },
   { id: "views", label: "Views" },
 ];
 
@@ -76,6 +78,7 @@ function sectionForDiagnostic(path: string): SectionId {
   if (path === "filter" || path.startsWith("filter.")) return "filter";
   if (path === "properties" || path.startsWith("properties."))
     return "properties";
+  if (path === "preview" || path.startsWith("preview[")) return "preview";
   if (path === "views" || path.startsWith("views[")) return "views";
   return "general";
 }
@@ -279,9 +282,16 @@ export function BaseDefinitionWorkspace({
           property.id,
         ]),
       );
+      const submittedPreviewIds = new Map(
+        submittedDraft.preview.map((preview) => [preview.field, preview.id]),
+      );
       const responseDraft = fromWire(response);
       const serverDraft = {
         ...responseDraft,
+        preview: responseDraft.preview.map((preview) => ({
+          ...preview,
+          id: submittedPreviewIds.get(preview.field) ?? preview.id,
+        })),
         properties: responseDraft.properties.map((property) => ({
           ...property,
           id: submittedPropertyIds.get(property.key) ?? property.id,
@@ -552,6 +562,17 @@ export function BaseDefinitionWorkspace({
                 changeDraft((current) => ({ ...current, properties }))
               }
               onDiagnosticsChange={setLocalDiagnostics}
+              registerFocus={registerFocusTarget}
+            />
+          )}
+          {selectedSection === "preview" && (
+            <PreviewPropertiesEditor
+              preview={draft.preview}
+              properties={draft.properties}
+              diagnostics={visibleDiagnostics}
+              onChange={(preview) =>
+                changeDraft((current) => ({ ...current, preview }))
+              }
               registerFocus={registerFocusTarget}
             />
           )}

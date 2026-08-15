@@ -34,6 +34,7 @@ function newView(name: string): DraftView {
     layout: "table",
     sort: [],
     aggregates: [],
+    labels: {},
     columns: ["title"],
   };
 }
@@ -55,6 +56,9 @@ function hasSpecificDiagnosticControl(
   if (sort) return Number(sort[1]) < view.sort.length;
   const aggregate = path.match(/^views\[\d+\]\.aggregates\[(\d+)\]/);
   if (aggregate) return Number(aggregate[1]) < view.aggregates.length;
+  if (path.startsWith(`${prefix}.labels.`)) {
+    return Object.hasOwn(view.labels, path.slice(`${prefix}.labels.`.length));
+  }
   return path.startsWith(`${prefix}.filter.`) && view.filter !== undefined;
 }
 
