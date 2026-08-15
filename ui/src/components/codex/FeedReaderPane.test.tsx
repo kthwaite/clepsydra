@@ -203,6 +203,7 @@ describe("FeedReaderPane", () => {
     expect(paneMocks.copy).toHaveBeenCalledWith(
       "[Stored dispatch](https://source.example/posts/stored)",
     );
+    expect(screen.getByRole("button", { name: "Copy link" })).toBeVisible();
 
     paneMocks.copyState.copied = true;
     page.rerender(
