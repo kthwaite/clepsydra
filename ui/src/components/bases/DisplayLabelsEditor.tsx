@@ -181,6 +181,7 @@ export function DisplayLabelsEditor({
               <div>
                 <span className={labelClass}>Stored key</span>
                 <span
+                  role="note"
                   aria-label={`Stored label key ${field}`}
                   className="mt-1 block border border-border bg-muted/30 px-3 py-2 font-mono text-sm text-foreground"
                 >
