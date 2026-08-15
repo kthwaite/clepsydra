@@ -983,7 +983,7 @@ describe("FeedManagement", () => {
     expect(window.localStorage.getItem(key)).toBe(stored);
   });
 
-  it("keeps summary metadata collapsed and details in the expanded feed panel", async () => {
+  it("keeps summary metadata and actions visible in compact collapsed rows", async () => {
     managementMocks.feedsQuery.data = disclosureFeedList;
     const user = userEvent.setup();
     renderManagement();
@@ -1002,11 +1002,11 @@ describe("FeedManagement", () => {
     expect(collapsed.getByText("#rust")).toBeVisible();
     expect(collapsed.getByText("#systems")).toBeVisible();
     expect(
-      collapsed.queryByRole("button", { name: /edit one example/i }),
-    ).not.toBeInTheDocument();
+      collapsed.getByRole("button", { name: /edit one example/i }),
+    ).toBeVisible();
     expect(
-      collapsed.queryByRole("button", { name: /unsubscribe one example/i }),
-    ).not.toBeInTheDocument();
+      collapsed.getByRole("button", { name: /unsubscribe one example/i }),
+    ).toBeVisible();
     expect(
       collapsed.queryByText("Timeout contacting origin"),
     ).not.toBeVisible();
