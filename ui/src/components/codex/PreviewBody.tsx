@@ -147,6 +147,7 @@ export function PreviewBody({
                   {field.label}
                   {field.label_conflict ? (
                     <span
+                      role="img"
                       aria-label={LABEL_CONFLICT_DESCRIPTION}
                       title={LABEL_CONFLICT_DESCRIPTION}
                       className="ml-1 font-bold text-hot"
@@ -156,6 +157,7 @@ export function PreviewBody({
                   ) : null}
                   {field.schema_conflict ? (
                     <span
+                      role="img"
                       aria-label={SCHEMA_CONFLICT_DESCRIPTION}
                       title={SCHEMA_CONFLICT_DESCRIPTION}
                       className="ml-1 font-bold text-hot"
