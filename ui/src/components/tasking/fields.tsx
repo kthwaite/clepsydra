@@ -44,13 +44,10 @@ export function EdField({
   );
 }
 
-// ── input / select classes ────────────────────────────────────────────────────
+// ── input classes ─────────────────────────────────────────────────────────────
 
 export const INPUT_CLS =
   "cl-mono w-full border border-[var(--rule)] bg-transparent px-[9px] py-[7px] text-[var(--fs-s)] text-[var(--ink)] tracking-[0.04em] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)]";
-
-export const SELECT_CLS =
-  "cl-mono w-full border border-[var(--rule)] bg-[var(--bg-2)] px-[9px] py-[7px] text-[var(--fs-s)] text-[var(--ink)] tracking-[0.04em] outline-none cursor-pointer focus:border-[var(--hot)]";
 
 // ── radio-row classes / styles ────────────────────────────────────────────────
 

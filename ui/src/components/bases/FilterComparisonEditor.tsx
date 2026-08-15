@@ -1,5 +1,12 @@
-import { useEffect, useId, useState } from "react";
+import { type Ref, useEffect, useId, useState } from "react";
+import type { Key } from "react-aria-components";
 import type { BaseFilter, FilterOp, PropertyType } from "#/api/bases";
+import { Header } from "#/components/ui/list-box";
+import {
+  Select,
+  SelectItem,
+  SelectSection,
+} from "#/components/ui/select";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -58,6 +65,81 @@ function defaultValue(capability: FieldCapability, op: FilterOp): unknown {
   if (op === "in") return [];
   if (capability.type === "bool") return true;
   return capability.options?.[0] ?? "";
+}
+interface SelectChoice {
+  id: string;
+  label: string;
+}
+const BOOLEAN_CHOICES: readonly SelectChoice[] = [
+  { id: "true", label: "True" },
+  { id: "false", label: "False" },
+];
+
+
+interface ConditionalValueSelectProps {
+  ariaLabel: string;
+  ariaDescribedBy?: string;
+  isInvalid: boolean;
+  isMultiple: boolean;
+  selectedValues: string[];
+  choices: readonly SelectChoice[];
+  triggerRef: Ref<HTMLButtonElement>;
+  onSingleChange(value: string): void;
+  onMultipleChange(values: string[]): void;
+}
+
+function ConditionalValueSelect({
+  ariaLabel,
+  ariaDescribedBy,
+  isInvalid,
+  isMultiple,
+  selectedValues,
+  choices,
+  triggerRef,
+  onSingleChange,
+  onMultipleChange,
+}: ConditionalValueSelectProps) {
+  const items = choices.map(({ id, label }) => (
+    <SelectItem key={id} id={id}>
+      {label}
+    </SelectItem>
+  ));
+
+  if (isMultiple) {
+    return (
+      <Select
+        label="Value"
+        aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
+        isInvalid={isInvalid}
+        selectionMode="multiple"
+        value={selectedValues}
+        triggerRef={triggerRef}
+        onChange={(keys: Key[]) => {
+          onMultipleChange(keys.map(String));
+        }}
+      >
+        {items}
+      </Select>
+    );
+  }
+
+  return (
+    <Select
+      label="Value"
+      aria-label={ariaLabel}
+      aria-describedby={ariaDescribedBy}
+      isInvalid={isInvalid}
+      value={selectedValues[0] ?? ""}
+      triggerRef={triggerRef}
+      onChange={(key: Key | null) => {
+        if (key == null) return;
+        onSingleChange(String(key));
+      }}
+    >
+      {items}
+    </Select>
+  );
 }
 
 interface FilterComparisonEditorProps {
@@ -211,24 +293,25 @@ export function FilterComparisonEditor({
 
   return (
     <div className="grid grid-cols-[repeat(auto-fit,minmax(8rem,1fr))] gap-3">
-      <label className="flex min-w-0 flex-col">
-        <span className={labelClass}>Field</span>
-        <select
-          ref={(element) =>
+      <div className="min-w-0">
+        <Select
+          label="Field"
+          aria-label={`Field for condition ${position}`}
+          triggerRef={(element) =>
             registerFocus(
               diagnosticPath(diagnosticRoot, path, "field"),
               element,
             )
           }
-          aria-label={`Field for condition ${position}`}
           value={filterValue.field}
-          aria-invalid={fieldInvalid || undefined}
+          isInvalid={fieldInvalid}
           aria-describedby={
             fieldDiagnostics.length > 0 ? fieldErrorId : undefined
           }
-          onChange={(event) => {
+          onChange={(key) => {
+            if (key == null) return;
             const nextCapability = fields.find(
-              (field) => field.key === event.target.value,
+              (field) => field.key === String(key),
             );
             if (!nextCapability) return;
             const nextOperator = operatorsFor(nextCapability.type)[0];
@@ -240,30 +323,34 @@ export function FilterComparisonEditor({
               ),
             );
           }}
-          className={controlClass}
         >
           {!knownCapability && (
-            <option value={filterValue.field}>
+            <SelectItem
+              id={filterValue.field}
+              textValue={`${filterValue.field} (undeclared)`}
+            >
               {filterValue.field} (undeclared)
-            </option>
+            </SelectItem>
           )}
-          <optgroup label="Page fields">
+          <SelectSection>
+            <Header>Page fields</Header>
             {SYSTEM_FIELDS.map((field) => (
-              <option key={field.key} value={field.key}>
+              <SelectItem key={field.key} id={field.key}>
                 {field.label}
-              </option>
+              </SelectItem>
             ))}
-          </optgroup>
+          </SelectSection>
           {declaredFields.length > 0 && (
-            <optgroup label="Declared properties">
+            <SelectSection>
+              <Header>Declared properties</Header>
               {declaredFields.map((field) => (
-                <option key={field.key} value={field.key}>
+                <SelectItem key={field.key} id={field.key}>
                   {field.label}
-                </option>
+                </SelectItem>
               ))}
-            </optgroup>
+            </SelectSection>
           )}
-        </select>
+        </Select>
         {fieldDiagnostics.length > 0 ? (
           <span
             id={fieldErrorId}
@@ -273,23 +360,23 @@ export function FilterComparisonEditor({
             {fieldDiagnostics.map((diagnostic) => diagnostic.message).join(" ")}
           </span>
         ) : null}
-      </label>
+      </div>
 
-      <label className="flex min-w-0 flex-col">
-        <span className={labelClass}>Operator</span>
-        <select
-          ref={(element) =>
+      <div className="min-w-0">
+        <Select
+          label="Operator"
+          aria-label={`Operator for condition ${position}`}
+          triggerRef={(element) =>
             registerFocus(diagnosticPath(diagnosticRoot, path, "op"), element)
           }
-          aria-label={`Operator for condition ${position}`}
-          aria-invalid={operatorInvalid || undefined}
+          isInvalid={operatorInvalid}
           aria-describedby={
             operatorDiagnostics.length > 0 ? operatorErrorId : undefined
           }
           value={activeOperator}
-          onChange={(event) => {
+          onChange={(key) => {
             const nextOperator = operatorOptions.find(
-              (operator) => operator === event.target.value,
+              (operator) => operator === key,
             );
             if (!nextOperator) return;
             const nextValue =
@@ -306,16 +393,15 @@ export function FilterComparisonEditor({
                     defaultValue(capability, nextOperator));
             onChange(comparison(filterValue.field, nextOperator, nextValue));
           }}
-          className={controlClass}
         >
           {operatorOptions.map((operator) => (
-            <option key={operator} value={operator}>
+            <SelectItem key={operator} id={operator}>
               {operators.includes(operator)
                 ? operator.replace("_", " ")
                 : `${operator} (unsupported)`}
-            </option>
+            </SelectItem>
           ))}
-        </select>
+        </Select>
         {operatorDiagnostics.length > 0 ? (
           <span
             id={operatorErrorId}
@@ -327,103 +413,98 @@ export function FilterComparisonEditor({
               .join(" ")}
           </span>
         ) : null}
-      </label>
+      </div>
 
       {hasValue && (
-        <label className="flex min-w-0 flex-col">
-          <span className={labelClass}>Value</span>
+        <div className="min-w-0">
           {capability.type === "bool" ? (
-            <select
-              ref={(element) =>
+            <ConditionalValueSelect
+              ariaLabel={`Value for condition ${position}`}
+              ariaDescribedBy={
+                valueDiagnostics.length > 0 ? valueErrorId : undefined
+              }
+              isInvalid={valueInvalid}
+              isMultiple={activeOperator === "in"}
+              selectedValues={
+                activeOperator === "in"
+                  ? Array.isArray(filterValue.value)
+                    ? filterValue.value.map(String)
+                    : []
+                  : [filterValue.value === false ? "false" : "true"]
+              }
+              choices={BOOLEAN_CHOICES}
+              triggerRef={(element) =>
                 registerFocus(
                   diagnosticPath(diagnosticRoot, path, "value"),
                   element,
                 )
               }
-              aria-label={`Value for condition ${position}`}
-              aria-invalid={valueInvalid || undefined}
-              aria-describedby={
-                valueDiagnostics.length > 0 ? valueErrorId : undefined
-              }
-              multiple={activeOperator === "in"}
-              value={
-                activeOperator === "in"
-                  ? Array.isArray(filterValue.value)
-                    ? filterValue.value.map(String)
-                    : []
-                  : filterValue.value === false
-                    ? "false"
-                    : "true"
-              }
-              onChange={(event) =>
+              onSingleChange={(selectedValue) =>
                 onChange(
                   comparison(
                     filterValue.field,
                     activeOperator,
-                    activeOperator === "in"
-                      ? Array.from(
-                          event.target.selectedOptions,
-                          (option) => option.value === "true",
-                        )
-                      : event.target.value === "true",
+                    selectedValue === "true",
                   ),
                 )
               }
-              className={controlClass}
-            >
-              <option value="true">True</option>
-              <option value="false">False</option>
-            </select>
+              onMultipleChange={(selectedValues) =>
+                onChange(
+                  comparison(
+                    filterValue.field,
+                    activeOperator,
+                    selectedValues.map((selectedValue) => selectedValue === "true"),
+                  ),
+                )
+              }
+            />
           ) : declaredOptions.length > 0 ? (
-            <select
-              ref={(element) =>
+            <ConditionalValueSelect
+              ariaLabel={`Value for condition ${position}`}
+              ariaDescribedBy={
+                valueDiagnostics.length > 0 ? valueErrorId : undefined
+              }
+              isInvalid={valueInvalid}
+              isMultiple={activeOperator === "in"}
+              selectedValues={selectedOptionValues}
+              choices={[
+                ...declaredOptions.map((option) => ({
+                  id: option,
+                  label: option,
+                })),
+                ...missingOptions.map((option) => ({
+                  id: option,
+                  label: `${option} (not declared)`,
+                })),
+              ]}
+              triggerRef={(element) =>
                 registerFocus(
                   diagnosticPath(diagnosticRoot, path, "value"),
                   element,
                 )
               }
-              aria-label={`Value for condition ${position}`}
-              aria-invalid={valueInvalid || undefined}
-              aria-describedby={
-                valueDiagnostics.length > 0 ? valueErrorId : undefined
-              }
-              multiple={activeOperator === "in"}
-              value={
-                activeOperator === "in"
-                  ? Array.isArray(filterValue.value)
-                    ? filterValue.value.map(String)
-                    : []
-                  : valueText
-              }
-              onChange={(event) =>
+              onSingleChange={(selectedValue) =>
                 onChange(
                   comparison(
                     filterValue.field,
                     activeOperator,
-                    activeOperator === "in"
-                      ? Array.from(
-                          event.target.selectedOptions,
-                          (option) => option.value,
-                        )
-                      : event.target.value,
+                    selectedValue,
                   ),
                 )
               }
-              className={controlClass}
-            >
-              {declaredOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-              {missingOptions.map((option) => (
-                <option key={option} value={option}>
-                  {option} (not declared)
-                </option>
-              ))}
-            </select>
+              onMultipleChange={(selectedValues) =>
+                onChange(
+                  comparison(
+                    filterValue.field,
+                    activeOperator,
+                    selectedValues,
+                  ),
+                )
+              }
+            />
           ) : (
-            <>
+            <label className="flex min-w-0 flex-col">
+              <span className={labelClass}>Value</span>
               <input
                 ref={(element) =>
                   registerFocus(
@@ -470,7 +551,7 @@ export function FilterComparisonEditor({
                   ))}
                 </datalist>
               )}
-            </>
+            </label>
           )}
           {valueDiagnostics.length > 0 ? (
             <span
@@ -483,7 +564,7 @@ export function FilterComparisonEditor({
                 .join(" ")}
             </span>
           ) : null}
-        </label>
+        </div>
       )}
     </div>
   );

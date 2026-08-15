@@ -179,10 +179,12 @@ async function fillMemberDraft(user: UserEvent) {
   await user.click(
     screen.getByRole("button", { name: "Edit New member — Status" }),
   );
-  await user.selectOptions(
-    screen.getByRole("combobox", { name: "New member — Status" }),
-    "reading",
+  await user.click(
+    screen.getByRole("button", {
+      name: /—.*New member — Status/,
+    }),
   );
+  await user.click(screen.getByRole("option", { name: "reading" }));
   await user.click(
     screen.getByRole("button", { name: "Edit New member — Rating" }),
   );
@@ -591,21 +593,21 @@ describe("BaseTable member creation", () => {
         name: "Edit New member — Optional Status",
       }),
     );
-    await user.selectOptions(
-      screen.getByRole("combobox", {
-        name: "New member — Optional Status",
+    await user.click(
+      screen.getByRole("button", {
+        name: /—.*New member — Optional Status/,
       }),
-      "one",
     );
+    await user.click(screen.getByRole("option", { name: "one" }));
     await user.click(
       screen.getByRole("button", { name: "Edit New member — Optional Status" }),
     );
-    await user.selectOptions(
-      screen.getByRole("combobox", {
-        name: "New member — Optional Status",
+    await user.click(
+      screen.getByRole("button", {
+        name: /one.*New member — Optional Status/,
       }),
-      "",
     );
+    await user.click(screen.getByRole("option", { name: "—" }));
 
     await user.click(screen.getByRole("button", { name: "Save new member" }));
     await waitFor(() => expect(mocks.createMember).toHaveBeenCalledOnce());

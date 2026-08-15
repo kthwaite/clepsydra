@@ -1,4 +1,5 @@
-import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+import { Select, SelectItem } from "#/components/ui/select";
+import type { CellEditorProps } from "./types";
 
 export function SelectCell({
   value,
@@ -12,41 +13,57 @@ export function SelectCell({
 }: CellEditorProps) {
   const current = typeof value === "string" ? value : "";
   const options = definition.options ?? [];
+  const values = [
+    ...options,
+    ...(current !== "" && !options.includes(current) ? [current] : []),
+  ];
+  const choices = [
+    { id: "unset", value: null, label: "—" },
+    ...values.map((option, index) => ({
+      id: `option-${index}`,
+      value: option,
+      label: option,
+    })),
+  ];
+  const selectedKey =
+    current === ""
+      ? "unset"
+      : (choices.find((choice) => choice.value === current)?.id ?? "unset");
+
   return (
-    <select
-      autoFocus
-      aria-label={ariaLabel ?? "Edit select"}
-      aria-describedby={ariaDescribedBy}
-      className={CELL_INPUT_CLASS}
-      value={current}
-      onChange={(e) => {
-        const v = e.target.value;
-        onCommit(v === "" ? null : v);
-      }}
-      onBlur={onCancel}
-      onKeyDown={(e) => {
-        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
-          e.preventDefault();
-          e.stopPropagation();
+    <div
+      onKeyDownCapture={(event) => {
+        if (!commitOnBlur && event.key === "Tab" && !event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
           onCommitNext(current === "" ? null : current);
           return;
         }
-        if (e.key === "Escape") {
-          e.preventDefault();
+        if (event.key === "Escape") {
+          event.preventDefault();
           onCancel();
         }
       }}
     >
-      <option value="">—</option>
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-      {/* Open vocabulary keeps the current novel value selectable. */}
-      {current !== "" && !options.includes(current) && (
-        <option value={current}>{current}</option>
-      )}
-    </select>
+      <Select
+        autoFocus
+        aria-label={ariaLabel ?? "Edit select"}
+        aria-describedby={ariaDescribedBy}
+        value={selectedKey}
+        onChange={(key) => {
+          const next = choices.find((choice) => choice.id === key)?.value;
+          onCommit(
+            next === null || next === undefined || next === "" ? null : next,
+          );
+        }}
+        onBlur={onCancel}
+      >
+        {choices.map((choice) => (
+          <SelectItem key={choice.id} id={choice.id}>
+            {choice.label}
+          </SelectItem>
+        ))}
+      </Select>
+    </div>
   );
 }

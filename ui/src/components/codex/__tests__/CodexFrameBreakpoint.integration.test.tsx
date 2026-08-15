@@ -366,7 +366,11 @@ describe("CodexFrame real breakpoint transitions", () => {
       </CodexFrame>,
     );
 
-    await user.selectOptions(screen.getByLabelText("Anchor page"), "alpha-id");
+    const anchorTrigger = screen.getByRole("button", { name: /Anchor page/ });
+    await user.click(anchorTrigger);
+    await user.click(
+      screen.getByRole("option", { name: "Alpha · notes/alpha.md" }),
+    );
     await user.click(screen.getByRole("switch", { name: "Hide journals" }));
 
     act(() => matchMediaController.setMatches(false));
@@ -375,7 +379,9 @@ describe("CodexFrame real breakpoint transitions", () => {
     ).toBeVisible();
     act(() => matchMediaController.setMatches(true));
 
-    expect(screen.getByLabelText("Anchor page")).toHaveValue("alpha-id");
+    expect(screen.getByRole("button", { name: /Anchor page/ })).toHaveTextContent(
+      "Alpha · notes/alpha.md",
+    );
     expect(screen.getByRole("switch", { name: "Hide journals" })).toBeChecked();
   });
 

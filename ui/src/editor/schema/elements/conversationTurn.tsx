@@ -1,4 +1,5 @@
 import { ReactEditor, useReadOnly, useSlateStatic } from "slate-react";
+import { Select, SelectItem } from "#/components/ui/select";
 import {
   type ConversationMarker,
   type ConversationRole,
@@ -81,20 +82,24 @@ function ConversationTurn({
           participantLabel
         ) : (
           <>
-            <select
+            <Select
               aria-label="Change participant"
+              className="ai-conversation-turn__participant-select"
               value={element.role}
-              onChange={(event) =>
+              onChange={(key) => {
+                if (key === null) return;
                 setConversationRole(
                   editor,
                   ReactEditor.findPath(editor, element),
-                  event.currentTarget.value as ConversationRole,
-                )
-              }
+                  String(key) as ConversationRole,
+                );
+              }}
             >
-              <option value="user">You</option>
-              <option value="assistant">{assistantLabel}</option>
-            </select>
+              <SelectItem id="user">You</SelectItem>
+              <SelectItem id="assistant" textValue={assistantLabel}>
+                {assistantLabel}
+              </SelectItem>
+            </Select>
             <div className="ai-conversation-turn__actions">
               <button
                 type="button"

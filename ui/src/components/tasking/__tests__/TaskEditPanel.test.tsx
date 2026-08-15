@@ -255,42 +255,47 @@ describe("TaskEditPanel — render", () => {
     expect(startInput).toHaveAttribute("type", "date");
   });
 
-  it("omits slug-less operations from the OPERATION dropdown", () => {
+  it("omits slug-less operations from the OPERATION dropdown", async () => {
     wrap({ operations: [...operations, NO_SLUG_OP] });
-    const opSelect = screen.getByTestId("edit-panel-operation");
-    expect(opSelect).toHaveTextContent("OPS-1");
-    expect(opSelect).not.toHaveTextContent("OPS-3");
+    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
+    expect(screen.getByRole("option", { name: "OPS-1" })).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "OPS-3" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("omits CLOSED cycles from the CYCLE dropdown when task is not in that cycle", () => {
+  it("omits CLOSED cycles from the CYCLE dropdown when task is not in that cycle", async () => {
     // FULL_TASK is in C-01, not C-00 (CLOSED)
     wrap({
       task: FULL_TASK,
       operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
       cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
     });
-    const cycleSelect =
-      screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
-    // C-01 and C-02 should be present
-    expect(cycleSelect).toHaveTextContent("C-01");
-    expect(cycleSelect).toHaveTextContent("C-02");
-    // C-00 (CLOSED) should NOT be present
-    expect(cycleSelect).not.toHaveTextContent("C-00");
+    await userEvent.click(screen.getByRole("button", { name: /Cycle/ }));
+    expect(
+      screen.getByRole("option", { name: "C-01 (ACTIVE)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "C-02 (PLANNED)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "C-00 (CLOSED)" }),
+    ).not.toBeInTheDocument();
   });
 
-  it("includes CLOSED cycle in dropdown when task is currently assigned to it", () => {
+  it("includes CLOSED cycle in dropdown when task is currently assigned to it", async () => {
     // SEALED_IN_CLOSED_CYCLE_TASK is in C-00 (CLOSED), and it must stay representable
     wrap({
       task: SEALED_IN_CLOSED_CYCLE_TASK,
       operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
       cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
     });
-    const cycleSelect =
-      screen.getByTestId<HTMLSelectElement>("edit-panel-cycle");
-    // C-00 (CLOSED) should be present because the task is in it
-    expect(cycleSelect).toHaveTextContent("C-00");
-    // Verify it's selected
-    expect(cycleSelect.value).toBe("C-00");
+    const trigger = screen.getByRole("button", { name: /Cycle/ });
+    expect(trigger).toHaveTextContent("C-00 (CLOSED)");
+    await userEvent.click(trigger);
+    expect(
+      screen.getByRole("option", { name: "C-00 (CLOSED)" }),
+    ).toBeInTheDocument();
   });
 });
 
@@ -388,10 +393,8 @@ describe("TaskEditPanel — immediate patches", () => {
     // Task has cycle C-01 so selecting BACKLOG is a change
     wrap({ task: FULL_TASK, fetchStub: stub, seedBoard: true });
 
-    await userEvent.selectOptions(
-      screen.getByTestId("edit-panel-cycle"),
-      "BACKLOG",
-    );
+    await userEvent.click(screen.getByRole("button", { name: /Cycle/ }));
+    await userEvent.click(screen.getByRole("option", { name: "BACKLOG" }));
 
     await waitFor(() => {
       const patchCalls = stub.mock.calls.filter(
@@ -410,10 +413,8 @@ describe("TaskEditPanel — immediate patches", () => {
     const stub = makeStub();
     wrap({ task: FULL_TASK, fetchStub: stub, seedBoard: true });
 
-    await userEvent.selectOptions(
-      screen.getByTestId("edit-panel-operation"),
-      "",
-    );
+    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
+    await userEvent.click(screen.getByRole("option", { name: "UNFILED" }));
 
     await waitFor(() => {
       const patchCalls = stub.mock.calls.filter(
@@ -741,10 +742,8 @@ describe("TaskEditPanel — archive two-step", () => {
     useBoardStore.setState({ editTaskId: FULL_TASK.id });
     wrap({ fetchStub: stub, seedBoard: true });
 
-    await userEvent.selectOptions(
-      screen.getByTestId("edit-panel-operation"),
-      "beta",
-    );
+    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
+    await userEvent.click(screen.getByRole("option", { name: "OPS-2" }));
     await waitFor(() => {
       expect(
         stub.mock.calls.filter(([, opts]) => opts?.method === "PATCH"),

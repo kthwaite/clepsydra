@@ -328,13 +328,13 @@ describe("FolioProperties", () => {
       key: string;
       type: PropertyType;
       definition?: Partial<PropertyDefinition>;
-      tag: "INPUT" | "SELECT";
+      tag: "INPUT" | "BUTTON";
       inputType?: string;
     }> = [
       { key: "title_override", type: "text", tag: "INPUT" },
       { key: "source", type: "url", tag: "INPUT" },
       { key: "rating", type: "number", tag: "INPUT", inputType: "number" },
-      { key: "finished", type: "bool", tag: "SELECT" },
+      { key: "finished", type: "bool", tag: "BUTTON" },
       { key: "started", type: "date", tag: "INPUT", inputType: "date" },
       {
         key: "reviewed_at",
@@ -346,13 +346,13 @@ describe("FolioProperties", () => {
         key: "status",
         type: "select",
         definition: { options: ["reading"] },
-        tag: "SELECT",
+        tag: "BUTTON",
       },
       {
         key: "genres",
         type: "multi_select",
         definition: { options: ["fiction"] },
-        tag: "SELECT",
+        tag: "BUTTON",
       },
       { key: "author", type: "relation", tag: "INPUT" },
     ];

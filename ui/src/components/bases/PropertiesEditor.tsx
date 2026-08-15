@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
+import { Select, SelectItem } from "#/components/ui/select";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -300,22 +301,22 @@ export function PropertiesEditor({
               className="mt-1 block w-full border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
             />
           </label>
-          <label className="text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            New property type
-            <select
-              value={newType}
-              onChange={(event) =>
-                setNewType(event.target.value as PropertyType)
-              }
-              className="mt-1 block w-full border border-input bg-background px-3 py-2 text-sm font-normal normal-case tracking-normal text-foreground outline-none focus:border-ring focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
-            >
-              {PROPERTY_TYPES.map((type) => (
-                <option key={type} value={type}>
-                  {TYPE_LABELS[type]}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="New property type"
+            value={newType}
+            onChange={(key) => {
+              if (key == null) return;
+              const type = String(key) as PropertyType;
+              if (!PROPERTY_TYPES.includes(type)) return;
+              setNewType(type);
+            }}
+          >
+            {PROPERTY_TYPES.map((type) => (
+              <SelectItem key={type} id={type}>
+                {TYPE_LABELS[type]}
+              </SelectItem>
+            ))}
+          </Select>
           <Button variant="primary" onPress={addProperty}>
             Add property
           </Button>

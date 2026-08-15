@@ -10,6 +10,7 @@ const routeMocks = vi.hoisted(() => ({
   search: {
     view: "saved" as "unread" | "all" | "saved",
     group: "Engineering" as string | undefined,
+    ungrouped: false,
     feed: 7 as number | undefined,
     tag: "rust" as string | undefined,
     manage: false,
@@ -108,6 +109,44 @@ vi.mock("#/api/feeds", () => ({
             },
           ],
         },
+        {
+          name: "",
+          feeds: [
+            {
+              id: 8,
+              title: "Unfiled Example",
+              title_override: "Loose Source",
+              url: "https://loose.example/feed.xml",
+              fetch_url: "https://loose.example/feed.xml",
+              site_url: "https://loose.example",
+              group: "",
+              tags: [],
+              last_fetch_at: null,
+              next_fetch_at: null,
+              error_count: 0,
+              last_error: null,
+            },
+          ],
+        },
+        {
+          name: "__ungrouped__",
+          feeds: [
+            {
+              id: 9,
+              title: "Literal Sentinel Example",
+              title_override: "Literal Sentinel Source",
+              url: "https://literal.example/feed.xml",
+              fetch_url: "https://literal.example/feed.xml",
+              site_url: "https://literal.example",
+              group: "__ungrouped__",
+              tags: [],
+              last_fetch_at: null,
+              next_fetch_at: null,
+              error_count: 0,
+              last_error: null,
+            },
+          ],
+        },
       ],
     },
   }),
@@ -140,15 +179,18 @@ vi.mock("#/components/codex/Card", () => ({
 
 vi.mock("#/components/codex/FeedRiver", () => ({
   FeedRiver: ({
+    filters,
     selectedEntryId,
     onSelectEntry,
   }: {
+    filters: { group?: string };
     selectedEntryId?: number;
     onSelectEntry?: (id: number) => void;
   }) => (
     <section
       aria-label="Feed river fixture"
       data-selected-entry={selectedEntryId}
+      data-group={filters.group ?? "__all__"}
     >
       {routeMocks.riverHasSelected ? (
         <button
@@ -179,6 +221,7 @@ beforeEach(() => {
   vi.stubGlobal("fetch", routeMocks.fetchMock);
   routeMocks.search.view = "saved";
   routeMocks.search.group = "Engineering";
+  routeMocks.search.ungrouped = false;
   routeMocks.search.feed = 7;
   routeMocks.search.tag = "rust";
   routeMocks.search.manage = false;
@@ -207,6 +250,99 @@ describe("feeds route controls", () => {
     expect(validateSearch({} as any)).toMatchObject({ view: "all" });
     expect(validateSearch({ view: "not-a-view" } as any)).toMatchObject({
       view: "all",
+    });
+  });
+
+  it("keeps Ungrouped, All groups, and a real sentinel-like name distinct", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+    const validateSearch = Route.options.validateSearch as (
+      search: Record<string, unknown>,
+    ) => { group?: string; ungrouped: boolean };
+    expect(validateSearch({ ungrouped: true })).toMatchObject({
+      group: undefined,
+      ungrouped: true,
+    });
+    expect(validateSearch({ group: "__ungrouped__" })).toMatchObject({
+      group: "__ungrouped__",
+      ungrouped: false,
+    });
+
+    const user = userEvent.setup();
+    const page = render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /Group/ }));
+    await user.click(screen.getByRole("option", { name: "Ungrouped" }));
+
+    const ungroupedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    const ungroupedSearch = ungroupedNavigation.search(routeMocks.search);
+    expect(ungroupedSearch).toMatchObject({
+      group: undefined,
+      ungrouped: true,
+      feed: undefined,
+    });
+
+    Object.assign(routeMocks.search, ungroupedSearch);
+    page.rerender(<FeedsPage />);
+    expect(screen.getByRole("button", { name: /Group/ })).toHaveTextContent(
+      "Ungrouped",
+    );
+    expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
+      "data-group",
+      "",
+    );
+
+    await user.click(screen.getByRole("button", { name: /Feed/ }));
+    expect(
+      screen.getByRole("option", { name: "Loose Source" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Literal Sentinel Source" }),
+    ).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: /Group/ }));
+    await user.click(screen.getByRole("option", { name: "__ungrouped__" }));
+    const namedNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    const namedSearch = namedNavigation.search(routeMocks.search);
+    expect(namedSearch).toMatchObject({
+      group: "__ungrouped__",
+      ungrouped: false,
+      feed: undefined,
+    });
+
+    Object.assign(routeMocks.search, namedSearch);
+    page.rerender(<FeedsPage />);
+    expect(screen.getByRole("button", { name: /Group/ })).toHaveTextContent(
+      "__ungrouped__",
+    );
+    expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
+      "data-group",
+      "__ungrouped__",
+    );
+    await user.click(screen.getByRole("button", { name: /Feed/ }));
+    expect(
+      screen.getByRole("option", { name: "Literal Sentinel Source" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: "Loose Source" }),
+    ).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByRole("button", { name: /Group/ }));
+    await user.click(screen.getByRole("option", { name: "All groups" }));
+    const allGroupsNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(allGroupsNavigation.search(routeMocks.search)).toMatchObject({
+      group: undefined,
+      ungrouped: false,
     });
   });
 

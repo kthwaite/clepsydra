@@ -108,15 +108,34 @@ describe("cell editors", () => {
       options: ["queued", "reading", "finished"],
     });
     await user.click(screen.getByRole("button", { name: "queued" }));
-    const select = screen.getByRole("combobox", { name: "Edit select" });
-    const labels = Array.from(select.querySelectorAll("option")).map(
-      (o) => o.value,
-    );
-    expect(labels).toContain("reading");
-    expect(labels).toContain("finished");
+    const trigger = screen.getByRole("button", { name: /Edit select/ });
+    await user.click(trigger);
+    expect(screen.getByRole("option", { name: "reading" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "finished" }),
+    ).toBeInTheDocument();
 
-    await user.selectOptions(select, "reading");
+    await user.click(screen.getByRole("option", { name: "reading" }));
     expect(onCommit).toHaveBeenCalledWith("reading", undefined);
+  });
+
+  it("select cell keeps a novel value and its null sentinel selectable", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell("archived", {
+      type: "select",
+      options: ["queued", "reading"],
+    });
+    await user.click(screen.getByRole("button", { name: "archived" }));
+    const trigger = screen.getByRole("button", { name: /Edit select/ });
+    expect(trigger).toHaveFocus();
+
+    await user.click(trigger);
+    expect(
+      screen.getByRole("option", { name: "archived" }),
+    ).toHaveAttribute("aria-selected", "true");
+    await user.click(screen.getByRole("option", { name: "—" }));
+
+    expect(onCommit).toHaveBeenCalledWith(null, undefined);
   });
 
   it("date cell commits the ISO value with a types hint", async () => {
@@ -150,9 +169,13 @@ describe("cell editors", () => {
       options: ["memory", "identity", "style", "grief"],
     });
     await user.click(screen.getByRole("button", { name: "memory, identity" }));
-    const select = screen.getByRole("listbox", { name: "Edit multi-select" });
+    const trigger = screen.getByRole("button", {
+      name: /Edit multi-select/,
+    });
+    await user.click(trigger);
+    const style = await screen.findByRole("option", { name: "style" });
     // Toggle a third option on; the original two must survive the commit.
-    await user.selectOptions(select, "style");
+    await user.click(style);
     await user.keyboard("{Enter}");
     expect(onCommit).toHaveBeenCalledTimes(1);
     const [committed] = onCommit.mock.calls[0];
@@ -160,6 +183,62 @@ describe("cell editors", () => {
       expect.arrayContaining(["memory", "identity", "style"]),
     );
     expect(committed).toHaveLength(3);
+  });
+
+  it("multi-select commits the complete latest selection on blur when enabled", async () => {
+    const user = userEvent.setup();
+    const onCommit = vi.fn();
+    render(
+      <>
+        <EditableCell
+          value={["memory", "identity"]}
+          definition={{
+            type: "multi_select",
+            options: ["memory", "identity", "style"],
+          }}
+          commitOnBlur
+          onCommit={onCommit}
+        />
+        <button type="button" data-testid="outside-focus">
+          Outside
+        </button>
+      </>,
+    );
+    await user.click(screen.getByRole("button", { name: "memory, identity" }));
+    const trigger = screen.getByRole("button", {
+      name: /Edit multi-select/,
+    });
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: "style" }));
+
+    screen.getByTestId("outside-focus").focus();
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith(
+      ["memory", "identity", "style"],
+      undefined,
+    );
+  });
+
+  it("multi-select cancels a changed selection with Escape", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell(["memory", "identity"], {
+      type: "multi_select",
+      options: ["memory", "identity", "style"],
+    });
+    await user.click(screen.getByRole("button", { name: "memory, identity" }));
+    const trigger = screen.getByRole("button", {
+      name: /Edit multi-select/,
+    });
+    await user.click(trigger);
+    await user.click(await screen.findByRole("option", { name: "style" }));
+
+    await user.keyboard("{Escape}");
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "memory, identity" }),
+    ).toBeInTheDocument();
   });
 
   it("datetime edit preserves the time component and zone suffix", async () => {
@@ -222,9 +301,9 @@ describe("cell editors", () => {
     const user = userEvent.setup();
     const { onCommit, onCommitNext } = renderCell(true, { type: "bool" });
     await user.click(screen.getByRole("button", { name: "true" }));
-    const select = screen.getByRole("combobox", { name: "Edit boolean" });
+    const trigger = screen.getByRole("button", { name: /Edit boolean/ });
 
-    fireEvent.keyDown(select, { key: "Tab" });
+    fireEvent.keyDown(trigger, { key: "Tab" });
 
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCommitNext).toHaveBeenCalledWith(true, undefined);
@@ -237,12 +316,29 @@ describe("cell editors", () => {
       options: ["queued", "reading"],
     });
     await user.click(screen.getByRole("button", { name: "queued" }));
-    const select = screen.getByRole("combobox", { name: "Edit select" });
+    const trigger = screen.getByRole("button", { name: /Edit select/ });
 
-    fireEvent.keyDown(select, { key: "Tab" });
+    fireEvent.keyDown(trigger, { key: "Tab" });
 
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCommitNext).toHaveBeenCalledWith("queued", undefined);
+  });
+
+  it("select cell cancels from an open popover with Escape", async () => {
+    const user = userEvent.setup();
+    const { onCommit } = renderCell("queued", {
+      type: "select",
+      options: ["queued", "reading"],
+    });
+    await user.click(screen.getByRole("button", { name: "queued" }));
+    const trigger = screen.getByRole("button", { name: /Edit select/ });
+    await user.click(trigger);
+    const option = await screen.findByRole("option", { name: "reading" });
+
+    fireEvent.keyDown(option, { key: "Escape" });
+
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "queued" })).toBeInTheDocument();
   });
 
   it("date cell commits its draft and type hint with Tab through onCommitNext", async () => {
@@ -286,10 +382,14 @@ describe("cell editors", () => {
       options: ["memory", "identity", "style"],
     });
     await user.click(screen.getByRole("button", { name: "memory, identity" }));
-    const select = screen.getByRole("listbox", { name: "Edit multi-select" });
-    await user.selectOptions(select, "style");
+    const trigger = screen.getByRole("button", {
+      name: /Edit multi-select/,
+    });
+    await user.click(trigger);
+    const style = await screen.findByRole("option", { name: "style" });
+    await user.click(style);
 
-    fireEvent.keyDown(select, { key: "Tab" });
+    fireEvent.keyDown(style, { key: "Tab" });
 
     expect(onCommit).not.toHaveBeenCalled();
     expect(onCommitNext).toHaveBeenCalledWith(

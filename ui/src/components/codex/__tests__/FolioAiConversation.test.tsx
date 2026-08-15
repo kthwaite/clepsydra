@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createEditor, type Descendant, type Editor, Node } from "slate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./FolioProperties.mock";
+import { Select, SelectItem } from "#/components/ui/select";
 import { useConversationPresentation } from "#/editor/conversation/presentation";
 import { markdownToSlate, slateToMarkdown } from "#/editor/convert";
 import type { CustomEditor } from "#/editor/types";
@@ -186,13 +187,28 @@ vi.mock("#/editor/SlateEditor", () => ({
                     <span>{role === "user" ? "You" : assistant}</span>
                     {!readOnly ? (
                       <div>
-                        <select
+                        <Select
                           aria-label="Change participant"
-                          defaultValue={role}
+                          value={role}
+                          onChange={(key) => {
+                            if (key === null) return;
+                            const next = [...editor.children] as Descendant[];
+                            next[index] = {
+                              ...node,
+                              role: String(key) as "user" | "assistant",
+                            };
+                            editor.children = next;
+                            editor.onChange();
+                          }}
                         >
-                          <option value="user">You</option>
-                          <option value="assistant">{assistant}</option>
-                        </select>
+                          <SelectItem id="user">You</SelectItem>
+                          <SelectItem
+                            id="assistant"
+                            textValue={assistant}
+                          >
+                            {assistant}
+                          </SelectItem>
+                        </Select>
                         <button type="button" aria-label="Add turn after">
                           +
                         </button>
@@ -424,7 +440,7 @@ describe("Folio AI conversation presentation", () => {
     const user = userEvent.setup();
     renderFolio(pageEditor());
     expect(
-      screen.queryAllByRole("combobox", { name: "Change participant" }),
+      screen.queryAllByRole("button", { name: /Change participant/ }),
     ).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.getByTestId("slate-editor")).toHaveAttribute(
@@ -432,7 +448,7 @@ describe("Folio AI conversation presentation", () => {
       "false",
     );
     expect(
-      screen.getAllByRole("combobox", { name: "Change participant" }),
+      screen.getAllByRole("button", { name: /Change participant/ }),
     ).toHaveLength(2);
     expect(
       screen.getAllByRole("button", { name: "Add turn after" }),
@@ -572,7 +588,7 @@ describe("Folio AI conversation presentation", () => {
       screen.queryByRole("group", { name: "Conversation mode" }),
     ).toBeNull();
     expect(
-      screen.queryByRole("combobox", { name: "Change participant" }),
+      screen.queryByRole("button", { name: /Change participant/ }),
     ).toBeNull();
     expect(screen.queryByText("You")).toBeNull();
     expect(

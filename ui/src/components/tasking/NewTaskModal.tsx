@@ -29,6 +29,7 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { BoardCycle, BoardOperation } from "#/api/board";
 import { useCreateTask } from "#/api/board";
+import { Select, SelectItem } from "#/components/ui/select";
 import { useBoardStore } from "#/store/board";
 import {
   BOARD_MODAL_WIDTHS,
@@ -41,7 +42,6 @@ import {
   EdField,
   INPUT_CLS,
   PriorityRow,
-  SELECT_CLS,
 } from "./fields";
 
 // ── NewTaskModal ──────────────────────────────────────────────────────────────
@@ -214,34 +214,46 @@ export function NewTaskModal({
         {/* OPERATION + CYCLE */}
         <div className="grid grid-cols-2 gap-[12px]">
           <EdField label="OPERATION">
-            <select
-              className={SELECT_CLS}
+            <Select
+              aria-label="Operation"
               value={project}
-              onChange={(e) => setProject(e.target.value)}
+              onChange={(key) =>
+                setProject(key === null ? "" : String(key))
+              }
               data-testid="new-task-operation"
             >
-              <option value="">UNFILED / NONE</option>
+              <SelectItem id="">UNFILED / NONE</SelectItem>
               {assignableOps.map((op) => (
-                <option key={op.id} value={opKey(op)}>
+                <SelectItem
+                  key={op.id}
+                  id={opKey(op)}
+                  textValue={`${op.code} — ${op.name}`}
+                >
                   {op.code} — {op.name}
-                </option>
+                </SelectItem>
               ))}
-            </select>
+            </Select>
           </EdField>
           <EdField label="CYCLE">
-            <select
-              className={SELECT_CLS}
+            <Select
+              aria-label="Cycle"
               value={cycle}
-              onChange={(e) => setCycle(e.target.value)}
+              onChange={(key) =>
+                setCycle(key === null ? "BACKLOG" : String(key))
+              }
               data-testid="new-task-cycle"
             >
-              <option value="BACKLOG">BACKLOG / UNSCHEDULED</option>
+              <SelectItem id="BACKLOG">BACKLOG / UNSCHEDULED</SelectItem>
               {selectableCycles.map((c) => (
-                <option key={c.id} value={c.code}>
+                <SelectItem
+                  key={c.id}
+                  id={c.code}
+                  textValue={`${c.code} · ${c.label} (${c.state})`}
+                >
                   {c.code} · {c.label} ({c.state})
-                </option>
+                </SelectItem>
               ))}
-            </select>
+            </Select>
           </EdField>
         </div>
 

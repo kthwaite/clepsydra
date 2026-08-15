@@ -167,20 +167,29 @@ describe("Select", () => {
       { id: "b", name: "Beta" },
     ];
     render(
-      <Select
-        label="Letter"
-        items={items}
-        description="Pick one"
-        isInvalid
-        errorMessage="Required"
-        onSelectionChange={onSelectionChange}
-      >
-        {(item) => <SelectItem id={item.id}>{item.name}</SelectItem>}
-      </Select>,
+      <>
+        <p id="help">Choose a letter</p>
+        <Select
+          aria-describedby="help"
+          label="Letter"
+          items={items}
+          description="Pick one"
+          isInvalid
+          errorMessage="Required"
+          onSelectionChange={onSelectionChange}
+        >
+          {(item) => <SelectItem id={item.id}>{item.name}</SelectItem>}
+        </Select>
+      </>,
     );
 
     const trigger = screen.getByRole("button", { name: /Letter/ });
-    expect(trigger).toHaveAccessibleDescription("Pick one Required");
+    expect(trigger.getAttribute("aria-describedby")?.split(" ")).toContain(
+      "help",
+    );
+    expect(trigger).toHaveAccessibleDescription(/Choose a letter/);
+    expect(trigger).toHaveAccessibleDescription(/Pick one/);
+    expect(trigger).toHaveAccessibleDescription(/Required/);
 
     await user.click(trigger);
     expect(screen.getByRole("option", { name: "Alpha" })).toBeInTheDocument();
