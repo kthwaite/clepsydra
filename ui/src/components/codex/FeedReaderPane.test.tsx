@@ -1,4 +1,11 @@
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "#/api/schema";
@@ -98,6 +105,39 @@ const storedEntry: FeedEntry = {
   tags: ["systems", "reading"],
 };
 
+const capturedJournal = {
+  path: "journals/2026-08-15.md",
+  canonical_name: "2026-08-15",
+  revision: "rev-captured",
+  body: "",
+  meta: { id: "journal-id", title: "2026-08-15" },
+};
+
+const secondEntry: FeedEntry = {
+  ...storedEntry,
+  id: 102,
+  guid: "entry-102",
+  title: "Second dispatch",
+  url: "https://source.example/posts/second",
+};
+
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
+}
+
+function rejectCaptureOnce(error: unknown) {
+  paneMocks.captureAsync.mockImplementationOnce(async () => {
+    paneMocks.captureState.error = error;
+    throw error;
+  });
+}
+
 function renderPane(
   selectedEntryId: number | null = 101,
   overrides: Partial<{
@@ -131,13 +171,11 @@ beforeEach(() => {
   paneMocks.patchState.error = null;
   paneMocks.captureState.isPending = false;
   paneMocks.captureState.error = null;
-  paneMocks.captureAsync.mockResolvedValue({
-    path: "journals/2026-08-15.md",
-    canonical_name: "2026-08-15",
-    revision: "rev-captured",
-    body: "",
-    meta: { id: "journal-id", title: "2026-08-15" },
+  paneMocks.captureState.reset.mockImplementation(() => {
+    paneMocks.captureState.isPending = false;
+    paneMocks.captureState.error = null;
   });
+  paneMocks.captureAsync.mockResolvedValue(capturedJournal);
   paneMocks.patchEntryAsync.mockResolvedValue(storedEntry);
   paneMocks.copyState.copied = false;
 });
@@ -318,6 +356,31 @@ describe("FeedReaderPane", () => {
     expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);
   });
 
+  it("locks same-turn capture submissions before pending rerender", async () => {
+    const user = userEvent.setup();
+    const pendingCapture = deferred<typeof capturedJournal>();
+    paneMocks.captureAsync.mockReturnValue(pendingCapture.promise);
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    const form = draft.closest("form");
+    expect(form).not.toBeNull();
+
+    act(() => {
+      form!.requestSubmit();
+      form!.requestSubmit();
+    });
+
+    expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);
+    await act(async () => pendingCapture.resolve(capturedJournal));
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Captured in today’s journal.",
+    );
+  });
+
   it("settles capture in the reader and explicitly opens today's journal", async () => {
     const user = userEvent.setup();
     renderPane();
@@ -346,9 +409,7 @@ describe("FeedReaderPane", () => {
 
   it("preserves an exact failed draft and retries its trimmed content", async () => {
     const user = userEvent.setup();
-    paneMocks.captureAsync.mockRejectedValueOnce(
-      new Error("journal unavailable"),
-    );
+    rejectCaptureOnce(new Error("journal unavailable"));
     renderPane();
 
     await user.click(
@@ -380,6 +441,58 @@ describe("FeedReaderPane", () => {
     );
   });
 
+  it("clears a persisted capture error when canceling and reopening", async () => {
+    const user = userEvent.setup();
+    rejectCaptureOnce(new Error("journal unavailable"));
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "journal unavailable",
+    );
+    expect(paneMocks.captureState.error).toEqual(
+      new Error("journal unavailable"),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(paneMocks.captureState.error).toBeNull();
+    paneMocks.captureState.error = new Error("stale mutation error");
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    expect(paneMocks.captureState.error).toBeNull();
+
+    expect(
+      screen.getByRole("textbox", { name: "Journal entry" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("shows fallback copy for an empty mutation error", async () => {
+    const user = userEvent.setup();
+    const page = renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    paneMocks.captureState.error = "";
+    page.rerender(
+      <FeedReaderPane
+        selectedEntryId={101}
+        feedName="Source Ledger"
+        onBack={vi.fn()}
+        onMissing={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Capture failed. Try again.",
+    );
+  });
+
   it("cancels and regenerates the journal draft without submitting", async () => {
     const user = userEvent.setup();
     renderPane();
@@ -407,9 +520,7 @@ describe("FeedReaderPane", () => {
 
   it("resets capture editing and settlement state between entries", async () => {
     const user = userEvent.setup();
-    paneMocks.captureAsync.mockRejectedValueOnce(
-      new Error("journal unavailable"),
-    );
+    rejectCaptureOnce(new Error("journal unavailable"));
     const page = renderPane();
 
     await user.click(
@@ -423,13 +534,7 @@ describe("FeedReaderPane", () => {
       "journal unavailable",
     );
 
-    paneMocks.query.data = {
-      ...storedEntry,
-      id: 102,
-      guid: "entry-102",
-      title: "Second dispatch",
-      url: "https://source.example/posts/second",
-    };
+    paneMocks.query.data = secondEntry;
     page.rerender(
       <FeedReaderPane
         selectedEntryId={102}
@@ -438,6 +543,7 @@ describe("FeedReaderPane", () => {
         onMissing={vi.fn()}
       />,
     );
+    expect(paneMocks.captureState.error).toBeNull();
 
     expect(
       screen.queryByRole("textbox", { name: "Journal entry" }),
@@ -453,6 +559,7 @@ describe("FeedReaderPane", () => {
     expect(screen.getByRole("textbox", { name: "Journal entry" })).toHaveValue(
       "- [Second dispatch](https://source.example/posts/second)",
     );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Capture" }));
     expect(
       await screen.findByText("Captured in today’s journal."),
@@ -476,6 +583,78 @@ describe("FeedReaderPane", () => {
     expect(
       screen.queryByText("Captured in today’s journal."),
     ).not.toBeInTheDocument();
+  });
+
+  it("ignores deferred capture success after selecting another entry", async () => {
+    const user = userEvent.setup();
+    const pendingCapture = deferred<typeof capturedJournal>();
+    paneMocks.captureAsync.mockReturnValueOnce(pendingCapture.promise);
+    const page = renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+
+    paneMocks.query.data = secondEntry;
+    page.rerender(
+      <FeedReaderPane
+        selectedEntryId={102}
+        feedName="Source Ledger"
+        onBack={vi.fn()}
+        onMissing={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const secondDraft = screen.getByRole("textbox", {
+      name: "Journal entry",
+    });
+    expect(secondDraft).toHaveValue(
+      "- [Second dispatch](https://source.example/posts/second)",
+    );
+
+    await act(async () => pendingCapture.resolve(capturedJournal));
+
+    expect(secondDraft).toBeVisible();
+    expect(
+      screen.queryByText("Captured in today’s journal."),
+    ).not.toBeInTheDocument();
+  });
+
+  it("ignores deferred capture failure after selecting another entry", async () => {
+    const user = userEvent.setup();
+    const pendingCapture = deferred<typeof capturedJournal>();
+    paneMocks.captureAsync.mockReturnValueOnce(pendingCapture.promise);
+    const page = renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+
+    paneMocks.query.data = secondEntry;
+    page.rerender(
+      <FeedReaderPane
+        selectedEntryId={102}
+        feedName="Source Ledger"
+        onBack={vi.fn()}
+        onMissing={vi.fn()}
+      />,
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+
+    await act(async () =>
+      pendingCapture.reject(new Error("old journal unavailable")),
+    );
+
+    expect(
+      screen.getByRole("textbox", { name: "Journal entry" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("resolves the source label from the loaded entry feed id when no name is supplied", () => {

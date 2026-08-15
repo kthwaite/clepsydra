@@ -27,6 +27,7 @@ export function FeedReaderPane({
   const patchEntry = usePatchFeedEntry();
   const { copied, copy } = useCopyToClipboard();
   const captureMutation = useQuickCapture();
+  const resetCaptureMutation = captureMutation.reset;
   const openTodayJournal = useOpenTodayJournal();
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
@@ -36,6 +37,8 @@ export function FeedReaderPane({
   const [captureError, setCaptureError] = useState<unknown>(null);
   const [captured, setCaptured] = useState(false);
   const reportedMissingId = useRef<number | undefined>(undefined);
+  const captureGenerationRef = useRef(0);
+  const captureInFlightRef = useRef(false);
   const entry =
     entryQuery.data?.id === selectedEntryId ? entryQuery.data : undefined;
   const markdownLink = entry
@@ -58,6 +61,9 @@ export function FeedReaderPane({
   }, [entry, feedsQuery.data]);
 
   useEffect(() => {
+    captureGenerationRef.current += 1;
+    captureInFlightRef.current = false;
+    resetCaptureMutation?.();
     setIsEditingTags(false);
     setTagDraft("");
     setLocalMutationError(null);
@@ -66,7 +72,7 @@ export function FeedReaderPane({
     setCaptureError(null);
     setCaptured(false);
     if (selectedEntryId === undefined) reportedMissingId.current = undefined;
-  }, [selectedEntryId]);
+  }, [resetCaptureMutation, selectedEntryId]);
 
   useEffect(() => {
     if (
@@ -99,16 +105,31 @@ export function FeedReaderPane({
 
   const submitCapture = async () => {
     const content = captureDraft.trim();
-    if (!content || captureMutation.isPending) return;
-    captureMutation.reset?.();
+    if (
+      !content ||
+      captureMutation.isPending ||
+      captureInFlightRef.current
+    ) {
+      return;
+    }
+    captureGenerationRef.current += 1;
+    const generation = captureGenerationRef.current;
+    captureInFlightRef.current = true;
+    resetCaptureMutation?.();
     setCaptureError(null);
     try {
       await captureMutation.mutateAsync(content);
+      if (captureGenerationRef.current !== generation) return;
       setIsCapturing(false);
       setCaptureDraft("");
       setCaptured(true);
     } catch (error) {
+      if (captureGenerationRef.current !== generation) return;
       setCaptureError(error);
+    } finally {
+      if (captureGenerationRef.current === generation) {
+        captureInFlightRef.current = false;
+      }
     }
   };
 
@@ -187,13 +208,19 @@ export function FeedReaderPane({
           onOpenTodayJournal={openTodayJournal}
           onCaptureDraftChange={setCaptureDraft}
           onOpenCapture={() => {
-            if (!markdownLink) return;
+            if (!markdownLink || captureInFlightRef.current) return;
+            captureGenerationRef.current += 1;
+            captureInFlightRef.current = false;
+            resetCaptureMutation?.();
             setCaptureDraft(`- ${markdownLink}`);
             setCaptureError(null);
             setCaptured(false);
             setIsCapturing(true);
           }}
           onCancelCapture={() => {
+            captureGenerationRef.current += 1;
+            captureInFlightRef.current = false;
+            resetCaptureMutation?.();
             setIsCapturing(false);
             setCaptureDraft("");
             setCaptureError(null);
@@ -287,6 +314,10 @@ function ReaderArticle({
   const originalUrl = safeFeedEntryUrl(entry.url);
   const timestamp = entry.published_at ?? entry.fetched_at;
   const captureDraftRef = useRef<HTMLTextAreaElement>(null);
+  const captureFailure = captureError ?? captureMutationError;
+  const hasCaptureFailure =
+    captureError !== null ||
+    (captureMutationError !== null && captureMutationError !== undefined);
 
   useEffect(() => {
     if (isCapturing) captureDraftRef.current?.focus();
@@ -424,15 +455,12 @@ function ReaderArticle({
               Cancel
             </Button>
           </div>
-          {captureError ?? captureMutationError ? (
+          {hasCaptureFailure ? (
             <div
               role="alert"
               className="border border-hot px-3 py-2 text-[12px] text-hot sm:col-span-2"
             >
-              {errorMessage(
-                captureError ?? captureMutationError,
-                "Capture failed. Try again.",
-              )}
+              {errorMessage(captureFailure, "Capture failed. Try again.")}
             </div>
           ) : null}
         </form>
