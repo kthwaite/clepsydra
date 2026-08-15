@@ -72,13 +72,18 @@ export function PreviewPropertiesEditor({
   const [announcement, setAnnouncement] = useState("");
   const [focusRequest, setFocusRequest] = useState<
     | { kind: "move"; id: string; direction: "up" | "down" }
+    | { kind: "field"; id: string }
     | { kind: "label"; id: string }
     | { kind: "selector" }
   >();
   const rowActions = useRef(new Map<string, HTMLLIElement>());
+  const fieldSelectors = useRef(new Map<string, HTMLSelectElement>());
   const labelInputs = useRef(new Map<string, HTMLInputElement>());
   const selector = useRef<HTMLSelectElement>(null);
-  const choices = useMemo(() => presentationFieldChoices(properties), [properties]);
+  const choices = useMemo(
+    () => presentationFieldChoices(properties),
+    [properties],
+  );
   const selectedIdentities = useMemo(
     () =>
       new Set(
@@ -93,6 +98,8 @@ export function PreviewPropertiesEditor({
     if (!focusRequest) return;
     if (focusRequest.kind === "selector") {
       selector.current?.focus();
+    } else if (focusRequest.kind === "field") {
+      fieldSelectors.current.get(focusRequest.id)?.focus();
     } else if (focusRequest.kind === "label") {
       labelInputs.current.get(focusRequest.id)?.focus();
     } else {
@@ -124,6 +131,12 @@ export function PreviewPropertiesEditor({
       `Moved ${row.field} to position ${to + 1} of ${preview.length}.`,
     );
   }
+
+  const fieldToAddIdentity = presentationFieldIdentity(fieldToAdd);
+  const canAddField =
+    fieldToAdd.length > 0 &&
+    (fieldToAddIdentity === undefined ||
+      !selectedIdentities.has(fieldToAddIdentity));
 
   return (
     <section aria-labelledby="preview-properties-heading">
@@ -158,16 +171,75 @@ export function PreviewPropertiesEditor({
               }}
               className="grid gap-3 border-b border-border py-3 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto] sm:items-end"
             >
-              <div>
-                <span className={labelClass}>Property {index + 1}</span>
-                <span
-                  ref={(element) => registerFocus(fieldPath, element)}
-                  tabIndex={-1}
-                  className="mt-1 block border border-border bg-muted/30 px-3 py-2 font-mono text-sm text-foreground outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2"
+              <label className={labelClass}>
+                Property {index + 1}
+                <select
+                  ref={(element) => {
+                    registerFocus(fieldPath, element);
+                    if (element) fieldSelectors.current.set(row.id, element);
+                    else fieldSelectors.current.delete(row.id);
+                  }}
+                  className={controlClass}
+                  value={row.field}
+                  aria-label={`Field for preview property ${row.field}`}
+                  aria-invalid={invalid || undefined}
+                  onChange={(event) => {
+                    const field = event.target.value;
+                    if (field === row.field) return;
+                    const identity = presentationFieldIdentity(field);
+                    if (
+                      identity !== undefined &&
+                      preview.some(
+                        (current) =>
+                          current.id !== row.id &&
+                          presentationFieldIdentity(current.field) === identity,
+                      )
+                    ) {
+                      return;
+                    }
+                    setFocusRequest({ kind: "field", id: row.id });
+                    onChange(
+                      preview.map((current) =>
+                        current.id === row.id
+                          ? { ...current, field }
+                          : current,
+                      ),
+                    );
+                  }}
                 >
-                  {row.field}
-                </span>
-              </div>
+                  {choices.some(
+                    (choice) => choice.field === row.field,
+                  ) ? null : (
+                    <option value={row.field}>{row.field}</option>
+                  )}
+                  {choices.map((choice) => {
+                    const identity = presentationFieldIdentity(choice.field);
+                    const selectedElsewhere =
+                      identity !== undefined &&
+                      preview.some(
+                        (current) =>
+                          current.id !== row.id &&
+                          presentationFieldIdentity(current.field) === identity,
+                      );
+                    const description = [
+                      choice.description,
+                      selectedElsewhere ? "Already added" : undefined,
+                    ]
+                      .filter(Boolean)
+                      .join(" — ");
+                    return (
+                      <option
+                        key={choice.field}
+                        value={choice.field}
+                        disabled={selectedElsewhere}
+                      >
+                        {choice.label}
+                        {description ? ` — ${description}` : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+              </label>
               <label className={labelClass}>
                 Label for {row.field}
                 <input
@@ -286,9 +358,9 @@ export function PreviewPropertiesEditor({
         <Button
           size="sm"
           variant="secondary"
-          isDisabled={!fieldToAdd}
+          isDisabled={!canAddField}
           onPress={() => {
-            if (!fieldToAdd) return;
+            if (!canAddField) return;
             const added = {
               id: crypto.randomUUID(),
               field: fieldToAdd,

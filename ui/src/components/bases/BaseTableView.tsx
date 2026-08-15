@@ -35,7 +35,10 @@ import { BaseMemberDraft } from "./BaseMemberDraft";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
-import { asciiCaseFold } from "./local-validation";
+import {
+  asciiCaseFold,
+  presentationFieldIdentity,
+} from "./local-validation";
 import type {
   BaseMemberDraftField,
   BaseMemberDraftValue,
@@ -209,6 +212,20 @@ export const BaseTableView = forwardRef<
   );
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
+  const displayLabelsByIdentity = useMemo(() => {
+    const result = new Map<string, string>();
+    for (const [field, label] of Object.entries(view?.labels ?? {})) {
+      const identity = presentationFieldIdentity(field);
+      if (identity !== undefined) result.set(identity, label);
+    }
+    return result;
+  }, [view?.labels]);
+  const displayLabelForColumn = (column: string): string => {
+    const identity = presentationFieldIdentity(column);
+    return identity === undefined
+      ? column
+      : (displayLabelsByIdentity.get(identity) ?? column);
+  };
   const properties = useMemo(
     () =>
       new Map(
@@ -571,7 +588,7 @@ export const BaseTableView = forwardRef<
             >
               {({ sortDirection }) => (
                 <span className="inline-flex items-center gap-1">
-                  {column}
+                  {displayLabelForColumn(column)}
                   {sortDirection && (
                     <span aria-hidden="true">
                       {sortDirection === "ascending" ? "▲" : "▼"}

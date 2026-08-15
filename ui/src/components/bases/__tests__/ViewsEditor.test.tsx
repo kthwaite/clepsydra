@@ -1045,6 +1045,97 @@ describe("ViewsEditor", () => {
     expect(screen.getByLabelText("Field to label")).toBeEnabled();
   });
 
+  it("moves one display-label mapping by canonical field identity while preserving its value, siblings, and focus", async () => {
+    const user = userEvent.setup();
+    const initial = view({
+      id: "view-all",
+      labels: {
+        "sys.title": "Headline",
+        "prop.title": "Custom title",
+        "prop.prop.title": "Prefixed custom",
+        "prop.sys.custom": "System-like custom",
+        body: "Summary",
+      },
+    });
+    const onChange = renderViews({
+      views: [initial],
+      properties: [
+        ...draft().properties,
+        property("title", "text"),
+        property("prop.title", "text"),
+        property("sys.custom", "text"),
+      ],
+    });
+
+    const addField = screen.getByLabelText("Field to label");
+    expect(
+      within(addField).getByRole("option", {
+        name: /System title.*already labelled/i,
+      }),
+    ).toBeDisabled();
+    expect(
+      within(addField).getByRole("option", {
+        name: /Property title.*already labelled/i,
+      }),
+    ).toBeDisabled();
+    expect(
+      within(addField).getByRole("option", {
+        name: /prop\.title.*already labelled/i,
+      }),
+    ).toBeDisabled();
+    expect(
+      within(addField).getByRole("option", {
+        name: /sys\.custom.*already labelled/i,
+      }),
+    ).toBeDisabled();
+    expect(
+      within(addField).getByRole("option", {
+        name: /body.*already labelled/i,
+      }),
+    ).toBeDisabled();
+
+    const field = screen.getByLabelText("Field for display label sys.title");
+    expect(screen.getByLabelText("Stored label key sys.title")).toHaveTextContent(
+      "sys.title",
+    );
+    expect(
+      within(field).getByRole("option", { name: /Property title/ }),
+    ).toBeDisabled();
+    expect(
+      within(field).getByRole("option", { name: /^prop\.title/ }),
+    ).toBeDisabled();
+    expect(
+      within(field).getByRole("option", { name: /sys\.custom/ }),
+    ).toBeDisabled();
+    expect(
+      within(field).getByRole("option", { name: /body/ }),
+    ).toBeDisabled();
+
+    await user.selectOptions(field, "rating");
+
+    expect(
+      screen.getByLabelText("Field for display label rating"),
+    ).toHaveFocus();
+    expect(screen.getByLabelText("Stored label key rating")).toHaveTextContent(
+      "rating",
+    );
+    expect(screen.getByLabelText("Display label for rating")).toHaveValue(
+      "Headline",
+    );
+    expect(onChange).toHaveBeenLastCalledWith([
+      {
+        ...initial,
+        labels: {
+          "prop.title": "Custom title",
+          "prop.prop.title": "Prefixed custom",
+          "prop.sys.custom": "System-like custom",
+          body: "Summary",
+          rating: "Headline",
+        },
+      },
+    ]);
+  });
+
   it("registers exact view label diagnostic controls", () => {
     const registerFocus = vi.fn();
     renderViews({

@@ -91,6 +91,44 @@ describe("PreviewPropertiesEditor", () => {
     expect(screen.getByText(/markdown body is read-only/i)).toBeInTheDocument();
   });
 
+  it("changes a row field in place, preserves its metadata and focus, and disables canonical duplicates", async () => {
+    const user = userEvent.setup();
+    const changes = renderEditor([
+      {
+        id: "preview-system-title",
+        field: "sys.title",
+        label: "Headline",
+      },
+      { id: "preview-qualified-body", field: "prop.body", label: "Excerpt" },
+    ]);
+
+    const field = screen.getByLabelText(
+      "Field for preview property sys.title",
+    );
+    expect(
+      within(field).getByRole("option", { name: /body.*already added/i }),
+    ).toBeDisabled();
+    expect(
+      within(field).getByRole("option", { name: "Property title" }),
+    ).toBeEnabled();
+
+    await user.selectOptions(field, "status");
+
+    const changedField = screen.getByLabelText(
+      "Field for preview property status",
+    );
+    expect(changedField).toHaveFocus();
+    expect(changes).toHaveBeenLastCalledWith([
+      {
+        id: "preview-system-title",
+        field: "status",
+        label: "Headline",
+      },
+      { id: "preview-qualified-body", field: "prop.body", label: "Excerpt" },
+    ]);
+    expect(screen.getByLabelText("Label for status")).toHaveValue("Headline");
+  });
+
   it("adds, labels, reorders, announces, preserves focus, and removes preview rows", async () => {
     const user = userEvent.setup();
     const changes = renderEditor();

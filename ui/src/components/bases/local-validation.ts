@@ -105,6 +105,15 @@ export function validateBaseDraftStructure(
       });
     }
     const path = `preview[${previewIndex}].field`;
+    if (preview.field.trim().length === 0) {
+      diagnostics.push({
+        slug,
+        severity: "error",
+        path,
+        message: "Preview field must not be empty.",
+      });
+      continue;
+    }
     const { diagnostic, identity } = validatePresentationField(
       slug,
       preview.field,

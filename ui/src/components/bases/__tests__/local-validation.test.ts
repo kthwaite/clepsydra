@@ -145,6 +145,25 @@ describe("validateBaseDraftStructure", () => {
     );
   });
 
+  it.each(["", " \t"])(
+    "rejects blank preview field %j at the exact field path",
+    (field) => {
+      const diagnostics = validateBaseDraftStructure(
+        "reading-log",
+        draft({ preview: [{ id: "blank", field }] }),
+      );
+
+      expect(diagnostics).toEqual([
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "preview[0].field",
+          message: "Preview field must not be empty.",
+        },
+      ]);
+    },
+  );
+
   it("reports duplicate canonical preview identities at the repeated field", () => {
     const diagnostics = validateBaseDraftStructure(
       "reading-log",
