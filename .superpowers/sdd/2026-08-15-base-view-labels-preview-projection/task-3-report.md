@@ -67,16 +67,16 @@ Final focused backend commands:
 
 ```text
 cargo test --test property_patch get_ -- --nocapture
-# 6 passed; 0 failed; 8 filtered out
+# 7 passed; 0 failed; 8 filtered out
 
 cargo test api::openapi::tests -- --nocapture
-# 13 passed; 0 failed; 1949 filtered out
+# 13 passed; 0 failed; 1950 filtered out
 
 cargo test vault::query::tests -- --nocapture
-# 41 passed; 0 failed; 1921 filtered out
+# 41 passed; 0 failed; 1922 filtered out
 ```
 
-The integration coverage includes empty projections for no matches/no configuration, slug/list order, canonical de-duplication, agreed canonical and conflicting labels, provenance, schema-conflicted raw arrays, false, zero, non-finite-to-null, missing values, Markdown body excerpts, protected-page suppression, four-field cap, exact remainder, and unchanged existing properties/blockers/compatibility/read-after-PATCH assertions.
+The integration coverage includes empty projections for no matches/no configuration, slug/list order, canonical de-duplication, distinct system/shadowed-property wire keys, agreed canonical and conflicting labels, provenance, schema-conflicted raw arrays, false, zero, non-finite-to-null, missing values, Markdown body excerpts, protected-page suppression, four-field cap, exact remainder, and unchanged existing properties/blockers/compatibility/read-after-PATCH assertions.
 
 ## Generated TypeScript contract
 
@@ -114,6 +114,42 @@ src/components/codex/__tests__/FolioProperties.test.tsx(77,3): TS2741
 - Confirmed reserved metadata and protected content cannot enter preview serialization; existing property projection and PATCH code were not changed.
 - Confirmed OpenAPI requiredness matches serialization and the generated file was changed only by generation.
 - `git diff --check` passed. No formatter, linter, build, or project-wide suite was run, per the task constraint.
+
+## Review correction
+
+The first self-review follow-up found that distinct canonical identities could
+emit the same wire key when a custom property shadowed a system field. A new
+integration regression configured `title`/`sys.title` and `prop.title` across
+two matching Bases, including equivalent-spelling de-duplication for each
+identity.
+
+RED:
+
+```text
+cargo test --test property_patch get_keeps_shadowed_system_and_property_preview_identities_distinct -- --nocapture
+# exit 101
+# left: [\"title\", \"title\"]
+# right: [\"title\", \"prop.title\"]
+# 0 passed; 1 failed; 14 filtered out
+```
+
+GREEN after adding deterministic canonical wire keys:
+
+```text
+cargo test --test property_patch get_keeps_shadowed_system_and_property_preview_identities_distinct -- --nocapture
+# 1 passed; 0 failed; 14 filtered out
+
+cargo test --test property_patch get_projects_authoritative_membership_values_provenance_and_privacy -- --nocapture
+# 1 passed; 0 failed; 14 filtered out
+```
+
+System identities retain their bare key. Custom identities retain a bare key
+unless it collides with `SYSTEM_FIELDS`, in which case they emit
+`prop.<key>`. The same wire key drives default/effective-label agreement and
+conflict fallback. The cross-Base agreement fixture now proves that an omitted
+source label and an explicit canonical-key label agree without conflict while
+preserving source provenance. The DTO/OpenAPI shape did not change, so the
+generated TypeScript schema was intentionally not regenerated.
 
 ## Remaining concerns
 

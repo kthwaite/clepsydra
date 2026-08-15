@@ -284,6 +284,9 @@ struct MergedPreviewField {
 fn projection_key(identity: &ProjectionFieldIdentity) -> String {
     match identity {
         ProjectionFieldIdentity::System(field) => field.as_str().to_string(),
+        ProjectionFieldIdentity::Property(key) if SYSTEM_FIELDS.contains(&key.as_str()) => {
+            format!("prop.{key}")
+        }
         ProjectionFieldIdentity::Property(key) => key.clone(),
         ProjectionFieldIdentity::Body => BODY_COLUMN.to_string(),
     }

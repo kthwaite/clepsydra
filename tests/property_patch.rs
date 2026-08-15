@@ -285,6 +285,7 @@ async fn unknown_page_is_404() {
 const EMPTY_DECLARATIONS_ID: &str = "0190f8a0-0000-7000-8000-0000000000f2";
 const ENCRYPTED_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f3";
 const PREVIEW_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f4";
+const SHADOW_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f5";
 
 fn projection_property<'a>(response: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
     response["properties"]
@@ -343,11 +344,18 @@ PRIVATE BODY SENTINEL
     )
     .unwrap();
     fs::write(
+        root.join("shadow-title.md"),
+        format!(
+            "+++\nid = \"{SHADOW_PAGE_ID}\"\ntitle = \"System title\"\ntype = \"CODE\"\n+++\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
         root.join("bases/a-reader.base.toml"),
         r#"name = "Alpha Reader"
 filter = { field = "kind", op = "eq", value = "BOOK" }
 preview = [
-    { field = "rating", label = "rating" },
+    { field = "rating", label = "" },
     { field = "featured", label = "Featured" },
     { field = "conflict_relation", label = "Series" },
     { field = "non_finite", label = "Non-finite" },
@@ -421,6 +429,34 @@ note = { type = "text" }
 "#,
     )
     .unwrap();
+    fs::write(
+        root.join("bases/e-shadow-alpha.base.toml"),
+        r#"name = "Shadow Alpha"
+filter = { field = "kind", op = "eq", value = "CODE" }
+preview = [
+    { field = "title", label = "" },
+    { field = "prop.title", label = "" },
+]
+
+[properties]
+title = { type = "text" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("bases/f-shadow-beta.base.toml"),
+        r#"name = "Shadow Beta"
+filter = { field = "kind", op = "eq", value = "CODE" }
+preview = [
+    { field = "sys.title", label = "title" },
+    { field = "prop.title", label = "prop.title" },
+]
+
+[properties]
+title = { type = "text" }
+"#,
+    )
+    .unwrap();
 }
 
 #[tokio::test]
@@ -472,8 +508,7 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
             "label_conflict": false,
             "sources": [
                 {
-                    "base": { "slug": "a-reader", "name": "Alpha Reader" },
-                    "label": "rating"
+                    "base": { "slug": "a-reader", "name": "Alpha Reader" }
                 },
                 {
                     "base": { "slug": "b-linked", "name": "Linked Reader" },
@@ -699,6 +734,72 @@ async fn get_projects_body_excerpt_and_missing_custom_value() {
                 "base": { "slug": "d-preview-note", "name": "Project Preview" },
                 "label": "Note"
             }]
+        })
+    );
+}
+
+#[tokio::test]
+async fn get_keeps_shadowed_system_and_property_preview_identities_distinct() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{SHADOW_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let fields = body["preview"]["fields"].as_array().unwrap();
+
+    assert_eq!(body["preview"]["remaining_count"], 0);
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field["key"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["title", "prop.title"]
+    );
+    assert_eq!(
+        fields[0],
+        serde_json::json!({
+            "key": "title",
+            "label": "title",
+            "present": true,
+            "value": "System title",
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "e-shadow-alpha", "name": "Shadow Alpha" }
+                },
+                {
+                    "base": { "slug": "f-shadow-beta", "name": "Shadow Beta" },
+                    "label": "title"
+                }
+            ]
+        })
+    );
+    assert_eq!(
+        fields[1],
+        serde_json::json!({
+            "key": "prop.title",
+            "label": "prop.title",
+            "present": false,
+            "value": null,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "e-shadow-alpha", "name": "Shadow Alpha" }
+                },
+                {
+                    "base": { "slug": "f-shadow-beta", "name": "Shadow Beta" },
+                    "label": "prop.title"
+                }
+            ]
         })
     );
 }
