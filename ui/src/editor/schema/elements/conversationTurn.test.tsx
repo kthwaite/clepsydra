@@ -94,7 +94,7 @@ describe("conversation turn presentation", () => {
     const label = screen.getByText("Claude");
     expect(label.closest("aside")).toHaveAttribute("contenteditable", "false");
     expect(
-      screen.queryByRole("combobox", { name: "Change participant" }),
+      screen.queryByRole("button", { name: /Change participant/ }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Move turn up" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Move turn down" })).toBeNull();
@@ -156,7 +156,7 @@ describe("conversation turn presentation", () => {
       screen.getByText("turn 1").closest("blockquote"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("combobox", { name: "Change participant" }),
+      screen.queryByRole("button", { name: /Change participant/ }),
     ).toBeNull();
   });
 
@@ -176,7 +176,7 @@ describe("conversation turn presentation", () => {
     ).toBeVisible();
     expect(screen.queryByText("You")).toBeNull();
     expect(
-      screen.queryByRole("combobox", { name: "Change participant" }),
+      screen.queryByRole("button", { name: /Change participant/ }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Add turn after" })).toBeNull();
   });
@@ -189,8 +189,13 @@ describe("conversation turn presentation", () => {
       original,
     ]);
 
-    const select = screen.getByRole("combobox", { name: "Change participant" });
-    expect(select).toHaveValue("assistant");
+    const participantTrigger = screen.getByRole("button", {
+      name: /Change participant/,
+    });
+    expect(participantTrigger).toHaveTextContent("ChatGPT");
+    expect(participantTrigger.parentElement).toHaveClass(
+      "ai-conversation-turn__participant-select",
+    );
     expect(
       screen.getByRole("button", { name: "Move turn up" }),
     ).toBeInTheDocument();
@@ -203,9 +208,13 @@ describe("conversation turn presentation", () => {
     expect(
       screen.getByRole("button", { name: "Remove turn" }),
     ).toBeInTheDocument();
-    expect(select.closest("aside")).toHaveAttribute("contenteditable", "false");
+    expect(participantTrigger.closest("aside")).toHaveAttribute(
+      "contenteditable",
+      "false",
+    );
 
-    await user.selectOptions(select, "user");
+    await user.click(participantTrigger);
+    await user.click(screen.getByRole("option", { name: "You" }));
 
     const corrected = editor.children[0] as ConversationTurnElement;
     expect(corrected).toEqual({ ...original, role: "user" });
@@ -343,7 +352,7 @@ describe("SlateEditor read-only contract", () => {
     );
 
     expect(
-      screen.queryByRole("combobox", { name: "Change participant" }),
+      screen.queryByRole("button", { name: /Change participant/ }),
     ).toBeNull();
     expect(screen.queryByRole("button", { name: "Move turn up" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Move turn down" })).toBeNull();

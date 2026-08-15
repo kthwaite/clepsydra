@@ -12,6 +12,7 @@ import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import type { Aggregate, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
+import { Select, SelectItem } from "#/components/ui/select";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -62,6 +63,13 @@ const labelClass =
   "text-xs font-bold uppercase tracking-widest text-muted-foreground";
 const headingClass =
   "font-mono text-xs font-semibold uppercase tracking-widest text-foreground";
+const AGGREGATE_FUNCTION_OPTIONS = [
+  "count",
+  "sum",
+  "avg",
+  "min",
+  "max",
+] as const satisfies readonly AggregateFunction[];
 
 interface ViewDefinitionEditorProps {
   view: DraftView;
@@ -388,18 +396,18 @@ export function ViewDefinitionEditor({
           ) : null}
         </div>
         <div>
-          <label className={labelClass} htmlFor={`view-layout-${viewIndex}`}>
-            Layout
-          </label>
-          <select
+          <Select
             id={`view-layout-${viewIndex}`}
-            ref={(element) => registerFocus(`${viewPath}.layout`, element)}
-            className={controlClass}
-            value={view.layout}
-            onChange={(event) =>
-              onChange({ ...view, layout: event.target.value })
+            label="Layout"
+            triggerRef={(element) =>
+              registerFocus(`${viewPath}.layout`, element)
             }
-            aria-invalid={layoutInvalid || undefined}
+            value={view.layout}
+            onChange={(key) => {
+              if (key == null) return;
+              onChange({ ...view, layout: String(key) });
+            }}
+            isInvalid={layoutInvalid}
             aria-describedby={
               layoutDiagnostics.length > 0
                 ? `view-layout-error-${viewIndex}`
@@ -407,10 +415,10 @@ export function ViewDefinitionEditor({
             }
           >
             {unsupportedLayout ? (
-              <option value={view.layout as string}>{view.layout}</option>
+              <SelectItem id={view.layout as string}>{view.layout}</SelectItem>
             ) : null}
-            <option value="table">Table</option>
-          </select>
+            <SelectItem id="table">Table</SelectItem>
+          </Select>
           {layoutDiagnostics.length > 0 ? (
             <span
               id={`view-layout-error-${viewIndex}`}
@@ -501,21 +509,20 @@ export function ViewDefinitionEditor({
           {moveAnnouncement}
         </p>
         <div className="mt-3 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-          <label className={labelClass}>
-            Column to add
-            <select
-              className={controlClass}
-              value={columnToAdd}
-              onChange={(event) => setColumnToAdd(event.target.value)}
-            >
-              <option value="">Choose a field</option>
-              {unselectedColumns.map(({ key }) => (
-                <option key={key} value={key}>
-                  {key}
-                </option>
-              ))}
-            </select>
-          </label>
+          <Select
+            label="Column to add"
+            value={columnToAdd}
+            onChange={(key) =>
+              setColumnToAdd(key == null ? "" : String(key))
+            }
+          >
+            <SelectItem id="">Choose a field</SelectItem>
+            {unselectedColumns.map(({ key }) => (
+              <SelectItem key={key} id={key}>
+                {key}
+              </SelectItem>
+            ))}
+          </Select>
           <Button
             size="sm"
             variant="secondary"
@@ -571,27 +578,27 @@ export function ViewDefinitionEditor({
         <h4 id={`${view.id}-group-heading`} className={headingClass}>
           Grouping
         </h4>
-        <label className={`${labelClass} mt-3 block`}>
-          Group by
-          <select
-            ref={(element) => registerFocus(`${viewPath}.group_by`, element)}
-            className={controlClass}
-            value={view.group_by ?? ""}
-            onChange={(event) =>
-              onChange({
-                ...view,
-                group_by: event.target.value || undefined,
-              })
-            }
-          >
-            <option value="">No grouping</option>
-            {groupFields.map(({ key }) => (
-              <option key={key} value={key}>
-                {key}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Select
+          className="mt-3"
+          label="Group by"
+          triggerRef={(element) =>
+            registerFocus(`${viewPath}.group_by`, element)
+          }
+          value={view.group_by ?? ""}
+          onChange={(key) =>
+            onChange({
+              ...view,
+              group_by: key == null || key === "" ? undefined : String(key),
+            })
+          }
+        >
+          <SelectItem id="">No grouping</SelectItem>
+          {groupFields.map(({ key }) => (
+            <SelectItem key={key} id={key}>
+              {key}
+            </SelectItem>
+          ))}
+        </Select>
       </section>
 
       <section
@@ -614,73 +621,69 @@ export function ViewDefinitionEditor({
                 key={index}
                 className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[10rem_minmax(0,1fr)_auto]"
               >
-                <label className={labelClass}>
-                  Aggregate function {index + 1}
-                  <select
-                    ref={(element) => {
+                <Select
+                  label={`Aggregate function ${index + 1}`}
+                  triggerRef={(element) => {
+                    registerFocus(
+                      `${viewPath}.aggregates[${index}]`,
+                      element,
+                    );
+                    registerFocus(
+                      `${viewPath}.aggregates[${index}].fn`,
+                      element,
+                    );
+                  }}
+                  value={fn}
+                  onChange={(key) => {
+                    const nextFn = AGGREGATE_FUNCTION_OPTIONS.find(
+                      (option) => option === key,
+                    );
+                    if (!nextFn) return;
+                    if (nextFn === "count") {
+                      replaceAggregate(index, { fn: "count" });
+                      return;
+                    }
+                    const first = fields.find(({ type }) =>
+                      aggregateFunctions(
+                        type === "system-multi" ? undefined : type,
+                      ).includes(nextFn),
+                    );
+                    replaceAggregate(index, {
+                      fn: nextFn,
+                      field: first?.key,
+                    });
+                  }}
+                >
+                  {AGGREGATE_FUNCTION_OPTIONS.map((option) => (
+                    <SelectItem key={option} id={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </Select>
+                {fn !== "count" ? (
+                  <Select
+                    label={`Aggregate field ${index + 1}`}
+                    triggerRef={(element) =>
                       registerFocus(
-                        `${viewPath}.aggregates[${index}]`,
+                        `${viewPath}.aggregates[${index}].field`,
                         element,
-                      );
-                      registerFocus(
-                        `${viewPath}.aggregates[${index}].fn`,
-                        element,
-                      );
-                    }}
-                    className={controlClass}
-                    value={fn}
-                    onChange={(event) => {
-                      const nextFn = event.target.value as AggregateFunction;
-                      if (nextFn === "count") {
-                        replaceAggregate(index, { fn: "count" });
-                        return;
-                      }
-                      const first = fields.find(({ type }) =>
-                        aggregateFunctions(
-                          type === "system-multi" ? undefined : type,
-                        ).includes(nextFn),
-                      );
+                      )
+                    }
+                    value={aggregate.field ?? ""}
+                    onChange={(key) => {
+                      if (key == null) return;
                       replaceAggregate(index, {
-                        fn: nextFn,
-                        field: first?.key,
+                        fn,
+                        field: String(key),
                       });
                     }}
                   >
-                    {(["count", "sum", "avg", "min", "max"] as const).map(
-                      (option) => (
-                        <option key={option} value={option}>
-                          {option}
-                        </option>
-                      ),
-                    )}
-                  </select>
-                </label>
-                {fn !== "count" ? (
-                  <label className={labelClass}>
-                    Aggregate field {index + 1}
-                    <select
-                      ref={(element) =>
-                        registerFocus(
-                          `${viewPath}.aggregates[${index}].field`,
-                          element,
-                        )
-                      }
-                      className={controlClass}
-                      value={aggregate.field ?? ""}
-                      onChange={(event) =>
-                        replaceAggregate(index, {
-                          fn,
-                          field: event.target.value,
-                        })
-                      }
-                    >
-                      {eligibleFields.map(({ key }) => (
-                        <option key={key} value={key}>
-                          {key}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
+                    {eligibleFields.map(({ key }) => (
+                      <SelectItem key={key} id={key}>
+                        {key}
+                      </SelectItem>
+                    ))}
+                  </Select>
                 ) : (
                   <span />
                 )}

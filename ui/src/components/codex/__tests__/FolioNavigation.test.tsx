@@ -949,9 +949,12 @@ describe("mobile Folio Back", () => {
     });
     const router = renderNavigation("/workspace");
 
-    await user.selectOptions(
-      await screen.findByLabelText("Anchor page"),
-      "alpha-id",
+    const anchorTrigger = await screen.findByRole("button", {
+      name: /Anchor page/,
+    });
+    await user.click(anchorTrigger);
+    await user.click(
+      screen.getByRole("option", { name: "Alpha · notes/alpha.md" }),
     );
     await user.click(screen.getByRole("button", { name: "Depth 2" }));
     await user.click(screen.getByRole("switch", { name: "Hide journals" }));
@@ -975,7 +978,9 @@ describe("mobile Folio Back", () => {
       expect(router.state.location.pathname).toBe("/workspace"),
     );
     expect(useWorkspaceStore.getState().activeTabId).toBe("graph");
-    expect(screen.getByLabelText("Anchor page")).toHaveValue("alpha-id");
+    expect(screen.getByRole("button", { name: /Anchor page/ })).toHaveTextContent(
+      "Alpha · notes/alpha.md",
+    );
     expect(screen.getByRole("button", { name: "Depth 2" })).toHaveAttribute(
       "aria-pressed",
       "true",

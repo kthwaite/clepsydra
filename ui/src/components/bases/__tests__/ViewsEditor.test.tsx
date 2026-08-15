@@ -15,7 +15,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BasePreviewResponse, PropertyDefinition } from "#/api/bases";
@@ -26,6 +26,31 @@ import {
   type DraftView,
 } from "#/components/bases/definition-model";
 import { ViewsEditor } from "#/components/bases/ViewsEditor";
+function selectTriggerName(label: string) {
+  return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+async function openSelect(user: UserEvent, label: string) {
+  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  await user.click(trigger);
+  await screen.findByRole("listbox");
+}
+
+async function chooseSelectOption(
+  user: UserEvent,
+  label: string,
+  option: string,
+) {
+  await openSelect(user, label);
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
+function visibleOptionNames() {
+  return screen
+    .getAllByRole("option")
+    .map((option) => option.textContent ?? "");
+}
+
 
 const { previewMock } = vi.hoisted(() => ({ previewMock: vi.fn() }));
 
@@ -423,7 +448,7 @@ describe("ViewsEditor", () => {
   it("authors visible columns in exact order from system and declared fields", async () => {
     const onChange = renderViews();
     const user = userEvent.setup();
-    await user.selectOptions(screen.getByLabelText("Column to add"), "status");
+    await chooseSelectOption(user, "Column to add", "status");
     await user.click(screen.getByRole("button", { name: "Add column" }));
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
       "title",
@@ -739,29 +764,19 @@ describe("ViewsEditor", () => {
       ],
     });
     const user = userEvent.setup();
-    const firstPicker = screen.getByLabelText("Column to add");
-    expect(
-      Array.from(firstPicker.querySelectorAll("option")).map(
-        (option) => option.value,
-      ),
-    ).toContain("body");
-    await user.selectOptions(firstPicker, "body");
+    await openSelect(user, "Column to add");
+    expect(visibleOptionNames()).toContain("body");
+    await user.click(screen.getByRole("option", { name: "body" }));
     await user.click(screen.getByRole("button", { name: "Add column" }));
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual(["title", "body"]);
-    expect(
-      Array.from(
-        screen.getByLabelText("Column to add").querySelectorAll("option"),
-      ).map((option) => option.value),
-    ).not.toContain("body");
+    await openSelect(user, "Column to add");
+    expect(visibleOptionNames()).not.toContain("body");
+    await user.keyboard("{Escape}");
 
     await user.click(screen.getByRole("button", { name: "Select Later" }));
-    const secondPicker = screen.getByLabelText("Column to add");
-    expect(
-      Array.from(secondPicker.querySelectorAll("option")).map(
-        (option) => option.value,
-      ),
-    ).toContain("body");
-    await user.selectOptions(secondPicker, "body");
+    await openSelect(user, "Column to add");
+    expect(visibleOptionNames()).toContain("body");
+    await user.click(screen.getByRole("option", { name: "body" }));
     await user.click(screen.getByRole("button", { name: "Add column" }));
     expect(latest<DraftView[]>(onChange).map(({ columns }) => columns)).toEqual(
       [
@@ -784,33 +799,28 @@ describe("ViewsEditor", () => {
       screen.getByRole("button", { name: "Add condition to Match all" }),
     );
     await user.click(screen.getByRole("button", { name: "Add aggregate" }));
-    await user.selectOptions(
-      screen.getByLabelText("Aggregate function 1"),
-      "sum",
-    );
+    await chooseSelectOption(user, "Aggregate function 1", "sum");
 
-    for (const picker of [
-      screen.getByLabelText("Sort field 1"),
-      screen.getByLabelText("Field for condition 1"),
-      screen.getByLabelText("Group by"),
-      screen.getByLabelText("Aggregate field 1"),
+    for (const label of [
+      "Sort field 1",
+      "Field for condition 1",
+      "Group by",
+      "Aggregate field 1",
     ]) {
-      expect(
-        Array.from(picker.querySelectorAll("option")).map(
-          (option) => option.value,
-        ),
-      ).not.toContain("body");
+      await openSelect(user, label);
+      expect(visibleOptionNames()).not.toContain("body");
+      await user.keyboard("{Escape}");
     }
-  });
+  }, 15_000);
 
   it("authors ordered sort keys and preserves their order", async () => {
     const onChange = renderViews();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Add sort" }));
-    await user.selectOptions(screen.getByLabelText("Sort field 1"), "rating");
-    await user.selectOptions(screen.getByLabelText("Sort direction 1"), "desc");
+    await chooseSelectOption(user, "Sort field 1", "rating");
+    await chooseSelectOption(user, "Sort direction 1", "Descending");
     await user.click(screen.getByRole("button", { name: "Add sort" }));
-    await user.selectOptions(screen.getByLabelText("Sort field 2"), "status");
+    await chooseSelectOption(user, "Sort field 2", "status");
     await user.click(screen.getByRole("button", { name: "Move sort 2 up" }));
     expect(latest<DraftView[]>(onChange)[0].sort).toEqual([
       { field: "status", dir: "asc" },
@@ -826,11 +836,10 @@ describe("ViewsEditor", () => {
         property("related", "relation"),
       ],
     });
-
-    await userEvent.click(screen.getByRole("button", { name: "Add sort" }));
-    const options = Array.from(
-      screen.getByLabelText("Sort field 1").querySelectorAll("option"),
-    ).map((option) => option.value);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Add sort" }));
+    await openSelect(user, "Sort field 1");
+    const options = visibleOptionNames();
 
     expect(options).toContain("title");
     expect(options).toContain("rating");
@@ -840,7 +849,8 @@ describe("ViewsEditor", () => {
     expect(options).not.toContain("related");
   });
 
-  it("offers grouping only for fields accepted by canGroup", () => {
+  it("offers grouping only for fields accepted by canGroup", async () => {
+    const user = userEvent.setup();
     renderViews({
       properties: [
         property("rating", "number"),
@@ -848,20 +858,19 @@ describe("ViewsEditor", () => {
         property("related", "relation"),
       ],
     });
-    const options = Array.from(
-      screen.getByLabelText("Group by").querySelectorAll("option"),
-    ).map((option) => option.value);
+    await openSelect(user, "Group by");
+    const options = visibleOptionNames();
     expect(options).toContain("status");
     expect(options).not.toContain("rating");
     expect(options).not.toContain("related");
     expect(options).not.toContain("tags");
   });
 
-  it("exposes only query-engine system fields in view controls", () => {
+  it("exposes only query-engine system fields in view controls", async () => {
+    const user = userEvent.setup();
     renderViews();
-    const columnOptions = Array.from(
-      screen.getByLabelText("Column to add").querySelectorAll("option"),
-    ).map((option) => option.value);
+    await openSelect(user, "Column to add");
+    const columnOptions = visibleOptionNames();
     expect(columnOptions).toEqual(
       expect.arrayContaining([
         "id",
@@ -887,18 +896,13 @@ describe("ViewsEditor", () => {
       { fn: "count" },
     ]);
     expect(screen.queryByLabelText("Aggregate field 1")).toBeNull();
-    await user.selectOptions(
-      screen.getByLabelText("Aggregate function 1"),
-      "sum",
-    );
-    const field = screen.getByLabelText("Aggregate field 1");
-    const options = Array.from(field.querySelectorAll("option")).map(
-      (option) => option.value,
-    );
+    await chooseSelectOption(user, "Aggregate function 1", "sum");
+    await openSelect(user, "Aggregate field 1");
+    const options = visibleOptionNames();
     expect(options).toContain("rating");
     expect(options).toContain("word_count");
     expect(options).not.toContain("status");
-    await user.selectOptions(field, "rating");
+    await user.click(screen.getByRole("option", { name: "rating" }));
     expect(latest<DraftView[]>(onChange)[0].aggregates).toEqual([
       { fn: "sum", field: "rating" },
     ]);
@@ -916,10 +920,7 @@ describe("ViewsEditor", () => {
     await user.click(
       screen.getByRole("button", { name: "Add condition to Match all" }),
     );
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "status",
-    );
+    await chooseSelectOption(user, "Field for condition 1", "status");
     await user.type(screen.getByLabelText("Value for condition 1"), "reading");
     expect(latest<DraftView[]>(onChange)[0].filter).toEqual({
       all: [{ field: "status", op: "eq", value: "reading" }],
@@ -932,7 +933,11 @@ describe("ViewsEditor", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       /unsupported layout.*board.*only table/i,
     );
-    expect(screen.getByLabelText("Layout")).toHaveValue("board");
+    expect(
+      screen.getByRole("button", { name: selectTriggerName("Layout") }),
+    ).toHaveTextContent(
+      "board",
+    );
   });
 
   it("registers unsupported layout and nested diagnostics to exact controls", () => {

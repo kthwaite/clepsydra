@@ -73,7 +73,12 @@ describe("MobileConstellation", () => {
     const user = userEvent.setup();
     render(<Harness />);
 
-    await user.selectOptions(screen.getByLabelText("Anchor page"), "alpha-id");
+    const anchorTrigger = screen.getByRole("button", { name: /Anchor page/ });
+    expect(anchorTrigger.parentElement).toHaveClass("[&>button]:min-h-11");
+    await user.click(anchorTrigger);
+    await user.click(
+      screen.getByRole("option", { name: "Alpha · notes/alpha.md" }),
+    );
 
     await waitFor(async () => {
       expect((await graphTitles()).sort()).toEqual(["Alpha", "Beta"]);
@@ -83,6 +88,20 @@ describe("MobileConstellation", () => {
     await waitFor(async () => {
       expect((await graphTitles()).sort()).toEqual(["Alpha", "Beta", "Gamma"]);
     });
+  });
+
+  it("selects a composite anchor label with keyboard typeahead", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    const anchorTrigger = screen.getByRole("button", { name: /Anchor page/ });
+    anchorTrigger.focus();
+    expect(anchorTrigger).toHaveFocus();
+    await user.keyboard("g");
+
+    await waitFor(() =>
+      expect(anchorTrigger).toHaveTextContent("Gamma · notes/gamma.md"),
+    );
   });
 
   it("exposes the chart's complete visible node set as a sorted semantic list", async () => {
@@ -114,7 +133,10 @@ describe("MobileConstellation", () => {
     const onOpen = vi.fn();
     render(<Harness onOpen={onOpen} />);
 
-    await user.selectOptions(screen.getByLabelText("Anchor page"), "alpha-id");
+    await user.click(screen.getByRole("button", { name: /Anchor page/ }));
+    await user.click(
+      screen.getByRole("option", { name: "Alpha · notes/alpha.md" }),
+    );
     await user.click(screen.getByRole("button", { name: "List view" }));
     await user.click(screen.getByRole("button", { name: "Open Alpha" }));
 

@@ -172,14 +172,16 @@ describe("NewTaskModal — render", () => {
 
   it("presets CYCLE select to preset cycle code", () => {
     wrap(undefined, { cycle: "C-01" });
-    const cycleSelect = screen.getByTestId<HTMLSelectElement>("new-task-cycle");
-    expect(cycleSelect.value).toBe("C-01");
+    expect(screen.getByRole("button", { name: /Cycle/ })).toHaveTextContent(
+      "C-01 · Cycle 01 (ACTIVE)",
+    );
   });
 
   it("defaults CYCLE to BACKLOG when no cycle preset", () => {
     wrap();
-    const cycleSelect = screen.getByTestId<HTMLSelectElement>("new-task-cycle");
-    expect(cycleSelect.value).toBe("BACKLOG");
+    expect(screen.getByRole("button", { name: /Cycle/ })).toHaveTextContent(
+      "BACKLOG / UNSCHEDULED",
+    );
   });
 
   it("defaults PRIORITY to P2 and supports arrow-key selection", async () => {
@@ -213,21 +215,31 @@ describe("NewTaskModal — render", () => {
     expect(within(priority).getByRole("radio", { name: "P1" })).toBeChecked();
   });
 
-  it("lists all operations in the OPERATION select", () => {
+  it("lists all operations in the OPERATION select", async () => {
     wrap();
-    const opSelect = screen.getByTestId("new-task-operation");
-    expect(opSelect).toHaveTextContent("OPS-1");
-    expect(opSelect).toHaveTextContent("OPS-2");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Operation/ }));
+    expect(
+      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "OPS-2 — Operation Beta" }),
+    ).toBeInTheDocument();
   });
 
-  it("lists all cycles in the CYCLE select", () => {
+  it("lists all cycles in the CYCLE select", async () => {
     wrap();
-    const cycleSelect = screen.getByTestId("new-task-cycle");
-    expect(cycleSelect).toHaveTextContent("C-01");
-    expect(cycleSelect).toHaveTextContent("C-02");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Cycle/ }));
+    expect(
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "C-02 · Cycle 02 (PLANNED)" }),
+    ).toBeInTheDocument();
   });
 
-  it("omits CLOSED cycles from the CYCLE dropdown", () => {
+  it("omits CLOSED cycles from the CYCLE dropdown", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -241,12 +253,17 @@ describe("NewTaskModal — render", () => {
         />
       </QueryClientProvider>,
     );
-    const cycleSelect = screen.getByTestId("new-task-cycle");
-    // C-01 (ACTIVE) and C-02 (PLANNED) should be present
-    expect(cycleSelect).toHaveTextContent("C-01");
-    expect(cycleSelect).toHaveTextContent("C-02");
-    // C-00 (CLOSED) should NOT be present
-    expect(cycleSelect).not.toHaveTextContent("C-00");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Cycle/ }));
+    expect(
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "C-02 · Cycle 02 (PLANNED)" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /C-00/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("DUE input is a date field", () => {
@@ -261,7 +278,7 @@ describe("NewTaskModal — render", () => {
     expect(startInput).toHaveAttribute("type", "date");
   });
 
-  it("omits slug-less operations from the OPERATION dropdown", () => {
+  it("omits slug-less operations from the OPERATION dropdown", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     });
@@ -275,9 +292,14 @@ describe("NewTaskModal — render", () => {
         />
       </QueryClientProvider>,
     );
-    const opSelect = screen.getByTestId("new-task-operation");
-    expect(opSelect).toHaveTextContent("OPS-1");
-    expect(opSelect).not.toHaveTextContent("OPS-3");
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Operation/ }));
+    expect(
+      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("option", { name: /OPS-3/ }),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -297,10 +319,15 @@ describe("NewTaskModal — submit payload", () => {
     await user.type(screen.getByTestId("new-task-title"), "My Task");
 
     // Select operation "alpha" (OPS-1)
-    await user.selectOptions(screen.getByTestId("new-task-operation"), "alpha");
+    await user.click(screen.getByRole("button", { name: /Operation/ }));
+    await user.click(
+      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
+    );
 
-    // Select cycle C-01
-    await user.selectOptions(screen.getByTestId("new-task-cycle"), "C-01");
+    await user.click(screen.getByRole("button", { name: /Cycle/ }));
+    await user.click(
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+    );
 
     // Set status to FIELD
     await user.click(screen.getByTestId("new-task-status-FIELD"));
@@ -408,7 +435,8 @@ describe("NewTaskModal — submit payload", () => {
     await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
 
     // Select UNFILED (default empty)
-    await userEvent.selectOptions(screen.getByTestId("new-task-operation"), "");
+    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
+    await userEvent.click(screen.getByRole("option", { name: "UNFILED / NONE" }));
     await userEvent.click(screen.getByTestId("new-task-commit"));
 
     await waitFor(() => {

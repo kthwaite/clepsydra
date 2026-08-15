@@ -1,3 +1,4 @@
+import { ChevronRight, Pencil, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   Button,
@@ -16,6 +17,7 @@ import {
   useSubscribeFeed,
   useUpdateFeed,
 } from "#/api/feeds";
+import { IconButton } from "#/components/ui/icon-button";
 import { formatRelativeTime } from "#/lib/time";
 import {
   type FeedDisclosurePreferences,
@@ -235,9 +237,12 @@ export function FeedManagement() {
                       <Button
                         slot="trigger"
                         aria-label={`${groupName} group, ${group.feeds.length} ${group.feeds.length === 1 ? "feed" : "feeds"}`}
-                        className="cl-mono flex w-full items-center gap-3 bg-transparent text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        className="cl-mono flex w-full items-center gap-2 bg-transparent text-left outline-none focus-visible:ring-2 focus-visible:ring-accent"
                       >
-                        <span aria-hidden="true">›</span>
+                        <ChevronRight
+                          aria-hidden="true"
+                          className={`h-3 w-3 shrink-0 motion-safe:transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                        />
                         <span className="shrink-0">{groupName}</span>
                         <span className="shrink-0">
                           {group.feeds.length}{" "}
@@ -473,60 +478,67 @@ function FeedRow({
   return (
     <li className="border-b border-rule">
       <Disclosure isExpanded={isExpanded} onExpandedChange={onExpandedChange}>
-        <Heading level={4} className="m-0">
-          <Button
-            slot="trigger"
-            aria-label={summaryLabel}
-            className="grid w-full min-w-0 gap-3 bg-transparent px-2.5 py-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent md:px-3.5"
-          >
-            <span className="min-w-0">
-              <span className="flex min-w-0 items-start gap-2">
-                <span
-                  aria-hidden="true"
-                  className={`mt-1.5 h-[7px] w-[7px] shrink-0 ${unhealthy ? "bg-hot" : "bg-cool"}`}
-                />
-                <span className="min-w-0">
-                  <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
-                    {title}
+        <div className="flex min-w-0 items-stretch">
+          <Heading level={4} className="m-0 min-w-0 flex-1">
+            <Button
+              slot="trigger"
+              aria-label={summaryLabel}
+              className="flex h-full w-full min-w-0 items-start gap-1.5 bg-transparent px-2 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-accent md:px-3"
+            >
+              <ChevronRight
+                aria-hidden="true"
+                className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-mute motion-safe:transition-transform ${isExpanded ? "rotate-90" : ""}`}
+              />
+              <span
+                aria-hidden="true"
+                className={`mt-1.5 h-[7px] w-[7px] shrink-0 ${unhealthy ? "bg-hot" : "bg-cool"}`}
+              />
+              <span className="min-w-0 flex-1">
+                <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
+                  {title}
+                </span>
+                <span className="cl-mono mt-0.5 block break-all text-[9px] tracking-[0.08em] text-ink-mute">
+                  {feed.url}
+                </span>
+                <span className="cl-mono mt-1.5 flex flex-wrap gap-x-2.5 gap-y-0.5 text-[9px] uppercase tracking-[0.1em] text-ink-mute">
+                  <span>Last fetch · {lastFetch}</span>
+                  <span>Next fetch · {nextFetch}</span>
+                  <span className={unhealthy ? "text-hot" : "text-cool"}>
+                    {errorSummary}
                   </span>
-                  <span className="cl-mono mt-1 block break-all text-[9px] tracking-[0.08em] text-ink-mute">
-                    {feed.url}
-                  </span>
+                  {feed.tags.map((tag) => (
+                    <span key={tag}>#{tag}</span>
+                  ))}
                 </span>
               </span>
-              <span className="cl-mono mt-2 flex flex-wrap gap-x-3 gap-y-1 pl-[15px] text-[9px] uppercase tracking-[0.1em] text-ink-mute">
-                <span>Last fetch · {lastFetch}</span>
-                <span>Next fetch · {nextFetch}</span>
-                <span className={unhealthy ? "text-hot" : "text-cool"}>
-                  {errorSummary}
-                </span>
-                {feed.tags.map((tag) => (
-                  <span key={tag}>#{tag}</span>
-                ))}
-              </span>
-            </span>
-          </Button>
-        </Heading>
-        <DisclosurePanel className="px-2.5 pb-3 md:px-3.5">
+            </Button>
+          </Heading>
+          <div className="flex shrink-0 items-start gap-0.5 py-1.5 pr-1.5 md:pr-2.5">
+            <IconButton
+              variant="ghost"
+              aria-label={`Edit ${title}`}
+              onPress={onEdit}
+            >
+              <Pencil aria-hidden="true" />
+            </IconButton>
+            <IconButton
+              variant="ghost"
+              aria-label={`Unsubscribe ${title}`}
+              className="text-hot hover:bg-hot/10 hover:text-hot data-[hovered]:bg-hot/10 data-[hovered]:text-hot"
+              onPress={onDelete}
+            >
+              <Trash2 aria-hidden="true" />
+            </IconButton>
+          </div>
+        </div>
+        <DisclosurePanel
+          className={feed.last_error ? "px-8 pb-2 md:px-10" : undefined}
+        >
           {feed.last_error ? (
-            <p className="mb-2 border-l-2 border-hot pl-2 text-[11px] text-hot">
+            <p className="border-l-2 border-hot pl-2 text-[11px] text-hot">
               {feed.last_error}
             </p>
           ) : null}
-          <div className="flex flex-wrap gap-2 md:justify-end">
-            <Button
-              className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-              onPress={onEdit}
-            >
-              Edit {title}
-            </Button>
-            <Button
-              className="cl-btn border-hot text-hot outline-none focus-visible:ring-2 focus-visible:ring-hot"
-              onPress={onDelete}
-            >
-              Unsubscribe {title}
-            </Button>
-          </div>
         </DisclosurePanel>
       </Disclosure>
     </li>

@@ -1,4 +1,5 @@
-import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+import { Select, SelectItem } from "#/components/ui/select";
+import type { CellEditorProps } from "./types";
 
 export function BoolCell({
   value,
@@ -11,33 +12,38 @@ export function BoolCell({
 }: CellEditorProps) {
   const current = value === true ? "true" : value === false ? "false" : "";
   return (
-    <select
-      autoFocus
-      aria-label={ariaLabel ?? "Edit boolean"}
-      aria-describedby={ariaDescribedBy}
-      className={CELL_INPUT_CLASS}
-      value={current}
-      onChange={(e) => {
-        const v = e.target.value;
-        onCommit(v === "" ? null : v === "true");
-      }}
-      onBlur={onCancel}
-      onKeyDown={(e) => {
-        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
-          e.preventDefault();
-          e.stopPropagation();
+    <div
+      onKeyDownCapture={(event) => {
+        if (!commitOnBlur && event.key === "Tab" && !event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
           onCommitNext(current === "" ? null : current === "true");
           return;
         }
-        if (e.key === "Escape") {
-          e.preventDefault();
+        if (event.key === "Escape") {
+          event.preventDefault();
           onCancel();
         }
       }}
     >
-      <option value="">—</option>
-      <option value="true">true</option>
-      <option value="false">false</option>
-    </select>
+      <Select
+        autoFocus
+        aria-label={ariaLabel ?? "Edit boolean"}
+        aria-describedby={ariaDescribedBy}
+        value={current === "" ? "unset" : current}
+        onChange={(key) => {
+          if (key === null || key === "unset") {
+            onCommit(null);
+            return;
+          }
+          onCommit(key === "true");
+        }}
+        onBlur={onCancel}
+      >
+        <SelectItem id="unset">—</SelectItem>
+        <SelectItem id="true">true</SelectItem>
+        <SelectItem id="false">false</SelectItem>
+      </Select>
+    </div>
   );
 }

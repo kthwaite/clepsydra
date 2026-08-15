@@ -1,10 +1,24 @@
 import { render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { BaseFilter } from "#/api/bases";
 import { CreateBaseDialog } from "#/components/bases/CreateBaseDialog";
 import type { DraftProperty } from "#/components/bases/definition-model";
 import { MembershipEditor } from "#/components/bases/MembershipEditor";
+function selectTriggerName(label: string) {
+  return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+async function chooseSelectOption(
+  user: UserEvent,
+  label: string,
+  option: string,
+) {
+  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 
 const navigateMock = vi.fn();
 
@@ -66,14 +80,8 @@ describe("MembershipEditor", () => {
 
     expect(screen.getByText("All pages")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add condition" }));
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "kind",
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Operator for condition 1"),
-      "eq",
-    );
+    await chooseSelectOption(user, "Field for condition 1", "Kind");
+    await chooseSelectOption(user, "Operator for condition 1", "eq");
     await user.type(screen.getByLabelText("Value for condition 1"), "BOOK");
 
     expect(latest(onChange)).toEqual({
@@ -201,65 +209,51 @@ describe("MembershipEditor", () => {
       op: "contains",
       value: "research",
     });
-    expect(screen.getByRole("option", { name: "ID" })).toHaveAttribute(
-      "value",
-      "id",
-    );
+    const field = screen.getByRole("button", { name: selectTriggerName("Field for condition 1") });
+    await user.click(field);
+    expect(await screen.findByRole("option", { name: "ID" })).toBeInTheDocument();
+    expect(screen.getByText("Page fields")).toBeInTheDocument();
+    expect(screen.getByText("Declared properties")).toBeInTheDocument();
+    await user.keyboard("{Escape}");
 
-    const operator = screen.getByLabelText("Operator for condition 1");
+    const operator = screen.getByRole("button", { name: selectTriggerName("Operator for condition 1") });
+    await user.click(operator);
     expect(
-      within(operator)
-        .getAllByRole("option")
-        .map((option) => option.getAttribute("value")),
-    ).toEqual(["contains", "in", "is_empty", "not_empty"]);
-    await user.selectOptions(operator, "is_empty");
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["contains", "in", "is empty", "not empty"]);
+    await user.click(screen.getByRole("option", { name: "is empty" }));
     expect(latest(onChange)).toEqual({ field: "tags", op: "is_empty" });
     expect(screen.queryByLabelText("Value for condition 1")).toBeNull();
 
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "source",
+    await chooseSelectOption(user, "Field for condition 1", "source");
+    await user.click(
+      screen.getByRole("button", { name: selectTriggerName("Operator for condition 1") }),
     );
     expect(
-      within(screen.getByLabelText("Operator for condition 1"))
-        .getAllByRole("option")
-        .map((option) => option.getAttribute("value")),
-    ).toEqual(["eq", "ne", "links_to", "is_empty", "not_empty"]);
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["eq", "ne", "links to", "is empty", "not empty"]);
   });
 
   it("uses declared option, boolean, numeric, and relation value affordances", async () => {
     const user = userEvent.setup();
     renderEditor({ field: "status", op: "eq", value: "queued" });
 
-    expect(screen.getByLabelText("Value for condition 1")).toHaveRole(
-      "combobox",
-    );
-    expect(screen.getByLabelText("Value for condition 1")).toHaveValue(
-      "queued",
-    );
+    expect(
+      screen.getByRole("button", { name: selectTriggerName("Value for condition 1") }),
+    ).toHaveTextContent("queued");
 
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "published",
-    );
-    expect(screen.getByLabelText("Value for condition 1")).toHaveRole(
-      "combobox",
-    );
-    expect(screen.getByLabelText("Value for condition 1")).toHaveValue("true");
+    await chooseSelectOption(user, "Field for condition 1", "published");
+    expect(
+      screen.getByRole("button", { name: selectTriggerName("Value for condition 1") }),
+    ).toHaveTextContent("True");
 
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "rating",
-    );
+    await chooseSelectOption(user, "Field for condition 1", "rating");
     expect(screen.getByLabelText("Value for condition 1")).toHaveAttribute(
       "type",
       "number",
     );
 
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "source",
-    );
+    await chooseSelectOption(user, "Field for condition 1", "source");
     expect(screen.getByLabelText("Value for condition 1")).toHaveAttribute(
       "list",
     );
@@ -273,27 +267,20 @@ describe("MembershipEditor", () => {
       value: true,
     });
 
-    await user.selectOptions(
-      screen.getByLabelText("Operator for condition 1"),
-      "in",
-    );
-    const boolValues = screen.getByLabelText("Value for condition 1");
-    expect(boolValues).toHaveRole("listbox");
-    await user.selectOptions(boolValues, ["true", "false"]);
+    await chooseSelectOption(user, "Operator for condition 1", "in");
+    const boolValues = screen.getByRole("button", { name: selectTriggerName("Value for condition 1") });
+    await user.click(boolValues);
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    await user.click(screen.getByRole("option", { name: "False" }));
     expect(latest(onChange)).toEqual({
       field: "published",
       op: "in",
       value: [true, false],
     });
 
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "tags",
-    );
-    await user.selectOptions(
-      screen.getByLabelText("Operator for condition 1"),
-      "in",
-    );
+    await user.keyboard("{Escape}");
+    await chooseSelectOption(user, "Field for condition 1", "Tags");
+    await chooseSelectOption(user, "Operator for condition 1", "in");
     const freeform = screen.getByLabelText("Value for condition 1");
     await user.clear(freeform);
     await user.type(freeform, "alpha, beta");
@@ -311,27 +298,30 @@ describe("MembershipEditor", () => {
     });
   });
 
-  it("keeps unsupported wire fields, operators, and option values visible", () => {
+  it("keeps unsupported wire fields, operators, and option values visible", async () => {
+    const user = userEvent.setup();
     const view = renderEditor({
       field: "prop.legacy_relation",
       op: "links_to",
       value: "Old Page",
     });
 
-    expect(screen.getByLabelText("Field for condition 1")).toHaveValue(
-      "prop.legacy_relation",
-    );
+    const field = screen.getByRole("button", { name: selectTriggerName("Field for condition 1") });
+    expect(field).toHaveTextContent("prop.legacy_relation (undeclared)");
+    await user.click(field);
     expect(
-      screen.getByRole("option", {
+      await screen.findByRole("option", {
         name: "prop.legacy_relation (undeclared)",
       }),
-    ).toHaveValue("prop.legacy_relation");
-    expect(screen.getByLabelText("Operator for condition 1")).toHaveValue(
-      "links_to",
-    );
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    const operator = screen.getByRole("button", { name: selectTriggerName("Operator for condition 1") });
+    expect(operator).toHaveTextContent("links_to (unsupported)");
+    await user.click(operator);
     expect(
-      screen.getByRole("option", { name: "links_to (unsupported)" }),
-    ).toHaveValue("links_to");
+      await screen.findByRole("option", { name: "links_to (unsupported)" }),
+    ).toBeInTheDocument();
 
     view.unmount();
     const removedOption = renderEditor({
@@ -339,12 +329,12 @@ describe("MembershipEditor", () => {
       op: "eq",
       value: "retired",
     });
-    expect(screen.getByLabelText("Value for condition 1")).toHaveValue(
-      "retired",
-    );
+    const removedValue = screen.getByRole("button", { name: selectTriggerName("Value for condition 1") });
+    expect(removedValue).toHaveTextContent("retired (not declared)");
+    await user.click(removedValue);
     expect(
-      screen.getByRole("option", { name: "retired (not declared)" }),
-    ).toHaveValue("retired");
+      await screen.findByRole("option", { name: "retired (not declared)" }),
+    ).toBeInTheDocument();
 
     removedOption.unmount();
     renderEditor({
@@ -352,17 +342,17 @@ describe("MembershipEditor", () => {
       op: "in",
       value: ["craft", "lost", "other"],
     });
-    expect(screen.getByLabelText("Value for condition 1")).toHaveValue([
-      "craft",
-      "lost",
-      "other",
-    ]);
-    expect(
-      screen.getByRole("option", { name: "lost (not declared)" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("option", { name: "other (not declared)" }),
-    ).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: selectTriggerName("Value for condition 1") }),
+    );
+    const lost = await screen.findByRole("option", {
+      name: "lost (not declared)",
+    });
+    const other = screen.getByRole("option", {
+      name: "other (not declared)",
+    });
+    expect(lost).toHaveAttribute("aria-selected", "true");
+    expect(other).toHaveAttribute("aria-selected", "true");
   });
 
   it("registers exact recursive diagnostic focus paths", () => {
@@ -410,10 +400,7 @@ describe("MembershipEditor", () => {
 
     await user.type(screen.getByLabelText("Name"), "Books");
     await user.click(screen.getByRole("button", { name: "Add condition" }));
-    await user.selectOptions(
-      screen.getByLabelText("Field for condition 1"),
-      "kind",
-    );
+    await chooseSelectOption(user, "Field for condition 1", "Kind");
     await user.type(screen.getByLabelText("Value for condition 1"), "BOOK");
     await user.click(screen.getByRole("button", { name: "Create base" }));
 

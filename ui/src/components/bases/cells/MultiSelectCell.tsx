@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+import { Select, SelectItem } from "#/components/ui/select";
+import type { CellEditorProps } from "./types";
 
 function currentValues(value: CellEditorProps["value"]): string[] {
   if (typeof value === "string") return value === "" ? [] : [value];
@@ -35,50 +36,60 @@ export function MultiSelectCell({
     ...(definition.options ?? []),
     ...initial.filter((v) => !(definition.options ?? []).includes(v)),
   ];
+  const choices = options.map((option, index) => ({
+    id: `option-${index}`,
+    value: option,
+  }));
+  const selectedIds = choices
+    .filter((choice) => selected.includes(choice.value))
+    .map((choice) => choice.id);
 
   return (
-    <select
-      autoFocus
-      multiple
-      aria-label={ariaLabel ?? "Edit multi-select"}
-      aria-describedby={ariaDescribedBy}
-      size={Math.min(6, Math.max(2, options.length))}
-      className={CELL_INPUT_CLASS}
-      value={selected}
-      onChange={(e) =>
-        setSelected(
-          Array.from(e.target.selectedOptions).map((option) => option.value),
-        )
-      }
-      onBlur={() => {
-        if (commitOnBlur) {
-          onCommit(selected.length === 0 ? null : selected);
-        } else {
-          onCancel();
-        }
-      }}
-      onKeyDown={(e) => {
-        if (!commitOnBlur && e.key === "Tab" && !e.shiftKey) {
-          e.preventDefault();
-          e.stopPropagation();
+    <div
+      onKeyDownCapture={(event) => {
+        if (!commitOnBlur && event.key === "Tab" && !event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
           commit(onCommitNext);
           return;
         }
-        if (e.key === "Enter" && !e.metaKey && !e.ctrlKey) {
-          e.preventDefault();
+        if (event.key === "Enter" && !event.metaKey && !event.ctrlKey) {
+          event.preventDefault();
           commit();
         }
-        if (e.key === "Escape") {
-          e.preventDefault();
+        if (event.key === "Escape") {
+          event.preventDefault();
           onCancel();
         }
       }}
     >
-      {options.map((option) => (
-        <option key={option} value={option}>
-          {option}
-        </option>
-      ))}
-    </select>
+      <Select
+        autoFocus
+        selectionMode="multiple"
+        aria-label={ariaLabel ?? "Edit multi-select"}
+        aria-describedby={ariaDescribedBy}
+        value={selectedIds}
+        onChange={(keys) => {
+          setSelected(
+            choices
+              .filter((choice) => keys.includes(choice.id))
+              .map((choice) => choice.value),
+          );
+        }}
+        onBlur={() => {
+          if (commitOnBlur) {
+            commit();
+          } else {
+            onCancel();
+          }
+        }}
+      >
+        {choices.map((choice) => (
+          <SelectItem key={choice.id} id={choice.id}>
+            {choice.value}
+          </SelectItem>
+        ))}
+      </Select>
+    </div>
   );
 }

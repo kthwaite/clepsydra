@@ -1,8 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useState } from "react";
+import { createRef, useState } from "react";
+import type { ComponentType, PropsWithChildren } from "react";
 import type { Key } from "react-aria-components/Select";
 import { describe, expect, it, vi } from "vitest";
+import { Header } from "#/components/ui/list-box";
+import * as SelectModule from "#/components/ui/select";
 import {
   Select,
   SelectItem,
@@ -101,6 +104,61 @@ describe("Select", () => {
     expect(trigger).toHaveTextContent("Unread");
   });
 
+  it("exposes its focusable trigger through triggerRef", () => {
+    const triggerRef = createRef<HTMLButtonElement>();
+    render(
+      <Select label="Status" triggerRef={triggerRef}>
+        <SelectItem id="done">Done</SelectItem>
+      </Select>,
+    );
+
+    const trigger = screen.getByRole("button", { name: /Status/ });
+    expect(triggerRef.current).toBe(trigger);
+
+    triggerRef.current?.focus();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("exports SelectSection as an interactive grouped-options primitive", async () => {
+    const user = userEvent.setup();
+    const selectSection = (SelectModule as Record<string, unknown>)
+      .SelectSection;
+    expect(selectSection).toBeTypeOf("function");
+    const SelectSection = selectSection as ComponentType<
+      PropsWithChildren<{ className?: string }>
+    >;
+
+    render(
+      <Select label="Person">
+        <SelectSection className="caller-section">
+          <Header>Team</Header>
+          <SelectItem id="ada">Ada</SelectItem>
+        </SelectSection>
+      </Select>,
+    );
+
+    const trigger = screen.getByRole("button", { name: /Person/ });
+    await user.click(trigger);
+    const group = screen.getByRole("group", { name: "Team" });
+    expect(group).toHaveClass(
+      "caller-section",
+      "py-1",
+      "first:pt-0",
+      "last:pb-0",
+      "[&>header]:px-2",
+      "[&>header]:py-1",
+      "[&>header]:text-xs",
+      "[&>header]:font-bold",
+      "[&>header]:uppercase",
+      "[&>header]:tracking-widest",
+      "[&>header]:text-muted-foreground",
+    );
+    const ada = within(group).getByRole("option", { name: "Ada" });
+
+    await user.click(ada);
+    expect(trigger).toHaveTextContent("Ada");
+  });
+
   it("renders and selects dynamic items with field messaging", async () => {
     const user = userEvent.setup();
     const onSelectionChange = vi.fn();
@@ -109,20 +167,29 @@ describe("Select", () => {
       { id: "b", name: "Beta" },
     ];
     render(
-      <Select
-        label="Letter"
-        items={items}
-        description="Pick one"
-        isInvalid
-        errorMessage="Required"
-        onSelectionChange={onSelectionChange}
-      >
-        {(item) => <SelectItem id={item.id}>{item.name}</SelectItem>}
-      </Select>,
+      <>
+        <p id="help">Choose a letter</p>
+        <Select
+          aria-describedby="help"
+          label="Letter"
+          items={items}
+          description="Pick one"
+          isInvalid
+          errorMessage="Required"
+          onSelectionChange={onSelectionChange}
+        >
+          {(item) => <SelectItem id={item.id}>{item.name}</SelectItem>}
+        </Select>
+      </>,
     );
 
     const trigger = screen.getByRole("button", { name: /Letter/ });
-    expect(trigger).toHaveAccessibleDescription("Pick one Required");
+    expect(trigger.getAttribute("aria-describedby")?.split(" ")).toContain(
+      "help",
+    );
+    expect(trigger).toHaveAccessibleDescription(/Choose a letter/);
+    expect(trigger).toHaveAccessibleDescription(/Pick one/);
+    expect(trigger).toHaveAccessibleDescription(/Required/);
 
     await user.click(trigger);
     expect(screen.getByRole("option", { name: "Alpha" })).toBeInTheDocument();

@@ -754,7 +754,7 @@ ul {
 
 .ai-conversation-controls button:focus-visible,
 .ai-conversation-warning button:focus-visible,
-.ai-conversation-turn select:focus-visible,
+.ai-conversation-turn__participant-select > button:focus-visible,
 .ai-conversation-turn button:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: 2px;
@@ -817,7 +817,7 @@ ul {
     border-block-start: 1px solid var(--rule-soft);
 }
 
-.ai-conversation--edit .ai-conversation-turn__participant select {
+.ai-conversation--edit .ai-conversation-turn__participant-select > button {
     width: 100%;
     border: 1px solid var(--rule);
     padding: calc(var(--space-pad) / 2);
@@ -857,7 +857,7 @@ ul {
     .ai-conversation-controls button,
     .ai-conversation-warning button,
     .ai-conversation-turn__actions button,
-    .ai-conversation--edit .ai-conversation-turn__participant select {
+    .ai-conversation--edit .ai-conversation-turn__participant-select > button {
         min-block-size: 44px;
     }
 

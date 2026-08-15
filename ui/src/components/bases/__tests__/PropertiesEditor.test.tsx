@@ -8,7 +8,7 @@ import type {
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import type { attachClosestEdge as attachClosestEdgeAdapter } from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
 import { act, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type {
   BaseDetailResponse,
@@ -21,6 +21,32 @@ import {
   PropertiesEditor,
   type PropertiesEditorProps,
 } from "#/components/bases/PropertiesEditor";
+const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
+  text: "Text",
+  number: "Number",
+  bool: "Boolean",
+  date: "Date",
+  datetime: "Date and time",
+  select: "Select",
+  multi_select: "Multi-select",
+  url: "URL",
+  relation: "Relation",
+};
+
+function selectTriggerName(label: string) {
+  return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+}
+
+async function chooseSelectOption(
+  user: UserEvent,
+  label: string,
+  option: string,
+) {
+  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  await user.click(trigger);
+  await user.click(await screen.findByRole("option", { name: option }));
+}
+
 
 const { updateMock } = vi.hoisted(() => ({ updateMock: vi.fn() }));
 
@@ -293,7 +319,11 @@ async function addProperty(key: string, type: PropertyType) {
   const keyInput = screen.getByLabelText("New property key");
   await user.clear(keyInput);
   if (key) await user.type(keyInput, key);
-  await user.selectOptions(screen.getByLabelText("New property type"), type);
+  await chooseSelectOption(
+    user,
+    "New property type",
+    PROPERTY_TYPE_LABELS[type],
+  );
   await user.click(screen.getByRole("button", { name: "Add property" }));
   return user;
 }
@@ -400,7 +430,9 @@ describe("PropertiesEditor", () => {
     await user.click(
       within(table).getByRole("button", { name: "Edit status" }),
     );
-    expect(screen.getByLabelText("Type for status")).toHaveValue("select");
+    expect(screen.getByRole("button", { name: selectTriggerName("Type for status") })).toHaveTextContent(
+      "Select",
+    );
     expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
   });
 
@@ -584,10 +616,7 @@ describe("PropertiesEditor", () => {
     const { onChange, rerender, props } = renderProperties({ properties });
 
     await editProperty("alpha");
-    await user.selectOptions(
-      screen.getByLabelText("Type for alpha"),
-      "relation",
-    );
+    await chooseSelectOption(user, "Type for alpha", "Relation");
     const typed = latest(onChange);
     expect(typed[0]).toEqual({
       id: "id-alpha",
@@ -666,10 +695,7 @@ describe("PropertiesEditor", () => {
     await user.click(screen.getByRole("button", { name: "Edit status" }));
     expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
     expect(screen.queryByLabelText("New option for title_note")).toBeNull();
-    await user.selectOptions(
-      screen.getByLabelText("Type for status"),
-      "number",
-    );
+    await chooseSelectOption(user, "Type for status", "Number");
     expect(latest(onChange)[0].definition).toEqual({ type: "number" });
   });
 
@@ -685,10 +711,7 @@ describe("PropertiesEditor", () => {
     });
     await user.click(screen.getByRole("button", { name: "Edit parent" }));
     expect(screen.getByText(/cardinality is advisory/i)).toBeInTheDocument();
-    await user.selectOptions(
-      screen.getByLabelText("Cardinality for parent"),
-      "one",
-    );
+    await chooseSelectOption(user, "Cardinality for parent", "One page");
     expect(latest(onChange)[0].definition).toEqual({
       type: "relation",
       many: false,
@@ -1038,10 +1061,7 @@ describe("properties workspace integration", () => {
     render(<BaseDefinitionWorkspace slug="reading-log" />);
     await user.click(screen.getByRole("button", { name: "Properties" }));
     await user.click(screen.getByRole("button", { name: "Edit status" }));
-    await user.selectOptions(
-      screen.getByLabelText("Type for status"),
-      "number",
-    );
+    await chooseSelectOption(user, "Type for status", "Number");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
 
     await user.click(screen.getByRole("button", { name: "Rename status" }));
