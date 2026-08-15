@@ -37,6 +37,8 @@ const paneMocks = vi.hoisted(() => ({
     error: null as unknown,
     reset: vi.fn(),
   },
+  copy: vi.fn().mockResolvedValue(undefined),
+  copyState: { copied: false },
 }));
 
 vi.mock("#/api/feeds", () => ({
@@ -51,7 +53,17 @@ vi.mock("#/api/feeds", () => ({
   }),
 }));
 
-import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
+vi.mock("#/hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({
+    copy: paneMocks.copy,
+    copied: paneMocks.copyState.copied,
+  }),
+}));
+
+import {
+  FeedReaderPane,
+  feedEntryMarkdownLink,
+} from "#/components/codex/FeedReaderPane";
 
 const storedEntry: FeedEntry = {
   id: 101,
@@ -100,6 +112,7 @@ beforeEach(() => {
   paneMocks.patchState.isPending = false;
   paneMocks.patchState.error = null;
   paneMocks.patchEntryAsync.mockResolvedValue(storedEntry);
+  paneMocks.copyState.copied = false;
 });
 
 describe("FeedReaderPane", () => {
@@ -181,6 +194,28 @@ describe("FeedReaderPane", () => {
     expect(article.querySelector("iframe")).not.toBeInTheDocument();
   });
 
+  it("copies the safe entry as Markdown and shows settled clipboard state", async () => {
+    const page = renderPane();
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Copy link" }));
+    expect(paneMocks.copy).toHaveBeenCalledWith(
+      "[Stored dispatch](https://source.example/posts/stored)",
+    );
+
+    paneMocks.copyState.copied = true;
+    page.rerender(
+      <FeedReaderPane
+        selectedEntryId={101}
+        feedName="Source Ledger"
+        onBack={vi.fn()}
+        onMissing={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Copied" })).toBeVisible();
+  });
+
   it("resolves the source label from the loaded entry feed id when no name is supplied", () => {
     renderPane(101, { feedName: null });
 
@@ -235,6 +270,9 @@ describe("FeedReaderPane", () => {
     expect(
       screen.queryByRole("link", { name: /open original/i }),
     ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /copy link/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("patches read, bookmark, and normalized tags while preserving a failed tag draft", async () => {
@@ -281,5 +319,30 @@ describe("FeedReaderPane", () => {
       .setup()
       .click(screen.getByRole("button", { name: "Back to entries" }));
     expect(onBack).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("feedEntryMarkdownLink", () => {
+  it("builds safe Markdown entry links with escaped titles and validated URLs", () => {
+    expect(
+      feedEntryMarkdownLink(
+        "Stored dispatch",
+        "https://source.example/posts/stored",
+      ),
+    ).toBe("[Stored dispatch](https://source.example/posts/stored)");
+    expect(
+      feedEntryMarkdownLink(
+        "A [bracket]",
+        "http://source.example/plain",
+      ),
+    ).toBe(String.raw`[A \[bracket\]](http://source.example/plain)`);
+    expect(
+      feedEntryMarkdownLink(
+        String.raw`A \ B`,
+        "https://source.example/slash",
+      ),
+    ).toBe(String.raw`[A \\ B](https://source.example/slash)`);
+    expect(feedEntryMarkdownLink("Unsafe", "javascript:alert(1)")).toBeNull();
+    expect(feedEntryMarkdownLink("Missing", null)).toBeNull();
   });
 });

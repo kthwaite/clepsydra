@@ -6,6 +6,7 @@ import {
   useFeeds,
   usePatchFeedEntry,
 } from "#/api/feeds";
+import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
 import { formatFeedTime } from "#/lib/time";
 
 export function FeedReaderPane({
@@ -22,12 +23,16 @@ export function FeedReaderPane({
   const entryQuery = useFeedEntry(selectedEntryId);
   const feedsQuery = useFeeds();
   const patchEntry = usePatchFeedEntry();
+  const { copied, copy } = useCopyToClipboard();
   const [isEditingTags, setIsEditingTags] = useState(false);
   const [tagDraft, setTagDraft] = useState("");
   const [localMutationError, setLocalMutationError] = useState<unknown>(null);
   const reportedMissingId = useRef<number | undefined>(undefined);
   const entry =
     entryQuery.data?.id === selectedEntryId ? entryQuery.data : undefined;
+  const markdownLink = entry
+    ? feedEntryMarkdownLink(entry.title, entry.url)
+    : null;
   const missing =
     typeof entryQuery.error === "object" &&
     entryQuery.error !== null &&
@@ -143,6 +148,9 @@ export function FeedReaderPane({
         <ReaderArticle
           entry={entry}
           feedName={manifestFeedName ?? feedName}
+          markdownLink={markdownLink}
+          copied={copied}
+          copy={copy}
           isEditingTags={isEditingTags}
           tagDraft={tagDraft}
           isPatchPending={patchEntry.isPending}
@@ -175,6 +183,9 @@ export function FeedReaderPane({
 function ReaderArticle({
   entry,
   feedName,
+  markdownLink,
+  copied,
+  copy,
   isEditingTags,
   tagDraft,
   isPatchPending,
@@ -188,6 +199,9 @@ function ReaderArticle({
 }: {
   entry: FeedEntry;
   feedName?: string;
+  markdownLink: string | null;
+  copied: boolean;
+  copy: (text: string) => Promise<void>;
   isEditingTags: boolean;
   tagDraft: string;
   isPatchPending: boolean;
@@ -260,6 +274,14 @@ function ReaderArticle({
           >
             Open original ↗
           </a>
+        ) : null}
+        {markdownLink ? (
+          <Button
+            className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            onPress={() => void copy(markdownLink)}
+          >
+            {copied ? "Copied" : "Copy link"}
+          </Button>
         ) : null}
         <Button
           className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
@@ -336,6 +358,19 @@ export function safeFeedEntryUrl(
   } catch {
     return null;
   }
+}
+
+export function feedEntryMarkdownLink(
+  title: string,
+  url: string | null | undefined,
+): string | null {
+  const safeUrl = safeFeedEntryUrl(url);
+  if (!safeUrl) return null;
+  const label = title
+    .replaceAll("\\", "\\\\")
+    .replaceAll("[", "\\[")
+    .replaceAll("]", "\\]");
+  return `[${label}](${safeUrl})`;
 }
 
 export function normalizeFeedEntryTags(value: string) {
