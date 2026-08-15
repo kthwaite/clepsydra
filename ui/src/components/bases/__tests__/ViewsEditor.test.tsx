@@ -1019,6 +1019,8 @@ describe("ViewsEditor", () => {
       within(select).getByRole("option", { name: "sys.custom" }),
     ).toHaveValue("prop.sys.custom");
     await user.click(screen.getByRole("button", { name: "Add label" }));
+    expect(screen.getByLabelText("Display label for status")).toHaveFocus();
+    expect(screen.getByLabelText("Display label for status")).toBeEnabled();
     await user.clear(screen.getByLabelText("Display label for status"));
     await user.type(
       screen.getByLabelText("Display label for status"),

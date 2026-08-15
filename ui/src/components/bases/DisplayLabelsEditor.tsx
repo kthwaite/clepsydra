@@ -38,15 +38,22 @@ export function DisplayLabelsEditor({
   registerFocus,
 }: DisplayLabelsEditorProps) {
   const [fieldToAdd, setFieldToAdd] = useState("");
-  const [focusSelector, setFocusSelector] = useState(false);
+  const [focusRequest, setFocusRequest] = useState<
+    { kind: "label"; field: string } | { kind: "selector" }
+  >();
+  const labelInputs = useRef(new Map<string, HTMLInputElement>());
   const selector = useRef<HTMLSelectElement>(null);
   const choices = useMemo(() => presentationFieldChoices(properties), [properties]);
 
   useEffect(() => {
-    if (!focusSelector) return;
-    selector.current?.focus();
-    setFocusSelector(false);
-  }, [focusSelector, labels]);
+    if (!focusRequest) return;
+    if (focusRequest.kind === "label") {
+      labelInputs.current.get(focusRequest.field)?.focus();
+    } else {
+      selector.current?.focus();
+    }
+    setFocusRequest(undefined);
+  }, [focusRequest, labels]);
 
   return (
     <section
@@ -81,7 +88,11 @@ export function DisplayLabelsEditor({
               <label className={labelClass}>
                 Display label for {field}
                 <input
-                  ref={(element) => registerFocus(path, element)}
+                  ref={(element) => {
+                    registerFocus(path, element);
+                    if (element) labelInputs.current.set(field, element);
+                    else labelInputs.current.delete(field);
+                  }}
                   className={controlClass}
                   value={label}
                   aria-invalid={invalid || undefined}
@@ -95,7 +106,7 @@ export function DisplayLabelsEditor({
                 variant="ghost"
                 onPress={() => {
                   const { [field]: _removed, ...remaining } = labels;
-                  setFocusSelector(true);
+                  setFocusRequest({ kind: "selector" });
                   onChange(remaining);
                 }}
               >
@@ -155,6 +166,7 @@ export function DisplayLabelsEditor({
           onPress={() => {
             const choice = choices.find(({ field }) => field === fieldToAdd);
             if (!choice) return;
+            setFocusRequest({ kind: "label", field: fieldToAdd });
             onChange({ ...labels, [fieldToAdd]: defaultLabel(choice) });
             setFieldToAdd("");
           }}

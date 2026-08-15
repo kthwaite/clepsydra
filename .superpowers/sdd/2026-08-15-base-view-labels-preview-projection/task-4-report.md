@@ -121,3 +121,29 @@ bun run test -- src/components/bases/__tests__/ViewsEditor.test.tsx
 bun run test -- src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
 # 34 passed; 0 failed
 ```
+
+## Re-review correction
+
+Re-review found that Display-label Add cleared the selector and disabled the
+still-focused Add button instead of moving focus into the new row.
+
+RED:
+
+```text
+bun run test -- src/components/bases/__tests__/ViewsEditor.test.tsx
+# exit 1; 1 failed, 33 passed
+# the newly rendered “Display label for status” input was enabled but did not
+# receive focus; the disabled Add label button retained focus.
+```
+
+`DisplayLabelsEditor` now records the added field as a focus request, maintains
+field-keyed input refs with callback cleanup, and focuses the enabled input only
+after the controlled `labels` update has committed. Reset continues to focus
+the stable selector through the same request mechanism.
+
+GREEN:
+
+```text
+bun run test -- src/components/bases/__tests__/ViewsEditor.test.tsx
+# 34 passed; 0 failed
+```
