@@ -156,6 +156,91 @@ describe("BaseTableView", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders canonical labels from the selected view without replacing column, sort, query, or edit keys", async () => {
+    const user = userEvent.setup();
+    const labelledDefinition: BaseDetailResponse = {
+      ...definition,
+      properties: [
+        ...(definition.properties ?? []),
+        { key: "title", definition: { type: "text" } },
+      ],
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "author", "prop.title", "body"],
+          labels: {
+            "sys.title": "Work",
+            author: "Writer",
+            "prop.title": "Custom title",
+            "sys.body": "Summary",
+          },
+        },
+        {
+          name: "Shelf",
+          layout: "table",
+          columns: ["title", "author", "prop.title", "body"],
+          labels: {
+            title: "Book",
+            author: "Creator",
+            "prop.title": "Personal title",
+            body: "Excerpt",
+          },
+        },
+      ],
+    };
+    const props = renderView({
+      definition: labelledDefinition,
+      output: {
+        shape: "flat",
+        total: 1,
+        rows: [
+          {
+            ...row,
+            columns: {
+              ...row.columns,
+              "prop.title": "Shadow title",
+              body: "Projected excerpt",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(screen.getByRole("columnheader", { name: "Work" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Writer" })).toBeVisible();
+    expect(
+      screen.getByRole("columnheader", { name: "Custom title" }),
+    ).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Summary" })).toBeVisible();
+    expect(screen.getByText("Shadow title")).toBeVisible();
+
+    await user.click(screen.getByRole("columnheader", { name: "Work" }));
+    expect(props.onSortChange).toHaveBeenCalledWith([
+      { field: "title", dir: "asc" },
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Gene Wolfe" }));
+    const input = screen.getByRole("textbox", { name: "Edit text" });
+    await user.clear(input);
+    await user.type(input, "Ursula Le Guin{Enter}");
+    expect(props.onCommitCell).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "01" }),
+      "author",
+      "Ursula Le Guin",
+      undefined,
+    );
+
+    props.rerender({ activeView: "Shelf" });
+    expect(screen.getByRole("columnheader", { name: "Book" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Creator" })).toBeVisible();
+    expect(
+      screen.getByRole("columnheader", { name: "Personal title" }),
+    ).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: "Excerpt" })).toBeVisible();
+    expect(screen.queryByRole("columnheader", { name: "Work" })).toBeNull();
+  });
+
   it("links to the definition workspace from a saved base", () => {
     renderView({});
     const configure = screen.getByRole("link", {

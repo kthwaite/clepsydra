@@ -25,6 +25,7 @@ import {
   type DraftView,
   moveItem,
 } from "./definition-model";
+import { DisplayLabelsEditor } from "./DisplayLabelsEditor";
 import { MembershipEditor } from "./MembershipEditor";
 import { OrderedSortEditor } from "./OrderedSortEditor";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
@@ -542,6 +543,15 @@ export function ViewDefinitionEditor({
           </Button>
         </div>
       </section>
+
+      <DisplayLabelsEditor
+        labels={view.labels}
+        properties={properties}
+        diagnostics={diagnostics}
+        diagnosticRoot={`${viewPath}.labels`}
+        onChange={(labels) => onChange({ ...view, labels })}
+        registerFocus={registerFocus}
+      />
 
       <section
         className="mt-6 border-t border-border pt-4"

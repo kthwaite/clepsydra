@@ -1,0 +1,243 @@
+# Task 3 Report: Authoritative page preview projection and generated wire contract
+
+## Status
+
+DONE
+
+## RED evidence
+
+### Current-page field projection helper
+
+Command:
+
+```text
+cargo test page_field_projection -- --nocapture
+```
+
+Observed exit 101 before production implementation:
+
+```text
+error[E0425]: cannot find function `project_page_field_value` in this scope
+  --> src/vault/query.rs:1365:17
+error[E0425]: cannot find function `project_page_field_value` in this scope
+  --> src/vault/query.rs:1383:17
+error[E0425]: cannot find function `project_page_field_value` in this scope
+  --> src/vault/query.rs:1392:13
+error[E0425]: cannot find function `project_page_field_value` in this scope
+  --> src/vault/query.rs:1407:13
+error: could not compile `clepsydra` (lib test) due to 4 previous errors
+```
+
+This was the intended missing-helper failure. The tests already covered every system shape, effective inferred kind/tags, custom scalar/array/false/zero/non-finite values, missing custom values, and the Unicode-safe body excerpt.
+
+### Required page preview response
+
+Command:
+
+```text
+cargo test --test property_patch get_projects_authoritative_membership_values_provenance_and_privacy -- --nocapture
+```
+
+Observed exit 101 before DTO/merge implementation:
+
+```text
+running 1 test
+thread 'get_projects_authoritative_membership_values_provenance_and_privacy' panicked at tests/property_patch.rs:454:5:
+assertion `left == right` failed
+  left: Null
+ right: 3
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 13 filtered out
+```
+
+The missing `preview` object made the expected exact remainder count unavailable, proving the new wire contract was absent.
+
+## Implementation
+
+- Added one read-only `project_page_field_value` domain helper. It projects canonical system, custom, and body identities from one already-read `Page`, uses effective kind/tags and the indexed journal-date/word-count semantics, converts TOML through `toml_value_to_json`, and borrows the body until `body_excerpt` is requested. It performs no SQL.
+- Added `PagePreviewSource`, `PagePreviewField`, and `PagePreviewProjection`; `PageBasePropertiesResponse.preview` is required.
+- Matching Bases are sorted by slug. Their configured lists merge in order through a canonical-identity position map; later occurrences add provenance without moving the field. Effective-label disagreement falls back to the canonical key. Values resolve once per returned merged identity.
+- Existing declaration compatibility is indexed by custom key. Schema-conflicted values remain conservatively readable and marked. Undeclared/reserved custom references remain absent, preserving the endpoint's existing metadata-privacy boundary.
+- Protected pages return `{ fields: [], remaining_count: 0 }` while existing matching Base/property projection and encrypted response behavior remain unchanged.
+- Responses retain the first four canonical fields and count every remaining merged field exactly.
+- Registered all new schemas and added a focused nested required-field OpenAPI contract test.
+
+## GREEN evidence
+
+Final focused backend commands:
+
+```text
+cargo test --test property_patch get_ -- --nocapture
+# 7 passed; 0 failed; 8 filtered out
+
+cargo test api::openapi::tests -- --nocapture
+# 13 passed; 0 failed; 1950 filtered out
+
+cargo test vault::query::tests -- --nocapture
+# 41 passed; 0 failed; 1922 filtered out
+```
+
+The integration coverage includes empty projections for no matches/no configuration, slug/list order, canonical de-duplication, distinct system/shadowed-property wire keys, agreed canonical and conflicting labels, provenance, schema-conflicted raw arrays, false, zero, non-finite-to-null, missing values, Markdown body excerpts, protected-page suppression, four-field cap, exact remainder, and unchanged existing properties/blockers/compatibility/read-after-PATCH assertions.
+
+## Generated TypeScript contract
+
+A disposable vault was initialized under `/tmp/clepsydra-task3.1BBYg9` with a temporary `XDG_CONFIG_HOME`; `ui/dist` already existed. Port 3000 was occupied by unrelated managed and user servers, so the first managed launch correctly exited with `Address already in use`. The coordinator ruled that unrelated processes must remain untouched and authorized port 3001 plus the pinned generator command.
+
+Managed server `task3-openapi-3001` reached both the `listening (HTTP)` log and `127.0.0.1:3001` readiness. From `ui/`:
+
+```text
+bunx openapi-typescript http://127.0.0.1:3001/api/openapi.json -o src/api/schema.d.ts
+✨ openapi-typescript 7.13.0
+🚀 http://127.0.0.1:3001/api/openapi.json → src/api/schema.d.ts [100.5ms]
+```
+
+The server was then stopped through the process manager. Generated inspection confirmed:
+
+- `BaseFilePayload.preview?: PreviewFieldDefinition[]`;
+- `ViewDefinition.labels?: { [key: string]: string }`;
+- required `PageBasePropertiesResponse.preview`;
+- required `PagePreviewField.present`, `value`, `schema_conflict`, and `label_conflict`;
+- named projection/field/source schemas.
+- optional `PreviewFieldDefinition.label?: string | null`.
+
+`bun run typecheck` exited 2 with exactly four expected generated-contract consumer failures, all for missing required `preview` and intentionally left for Tasks 4/5:
+
+```text
+src/api/bases.test.ts(372,7): TS1360
+src/api/bases.test.ts(520,7): TS1360
+src/api/bases.test.ts(526,7): TS1360
+src/components/codex/__tests__/FolioProperties.test.tsx(77,3): TS2741
+```
+
+## Self-review
+
+- Confirmed no per-field SQL, no page-body clone, no schema/property declaration rescan per preview row, and no value resolution per source occurrence.
+- Confirmed canonical system/property/body identities, first-position retention, deterministic source order, total handling of invalid presentation references, and exact cap arithmetic.
+- Confirmed reserved metadata and protected content cannot enter preview serialization; existing property projection and PATCH code were not changed.
+- Confirmed OpenAPI requiredness matches serialization and the generated file was changed only by generation.
+- `git diff --check` passed. No formatter, linter, build, or project-wide suite was run, per the task constraint.
+
+## Review correction
+
+The first self-review follow-up found that distinct canonical identities could
+emit the same wire key when a custom property shadowed a system field. A new
+integration regression configured `title`/`sys.title` and `prop.title` across
+two matching Bases, including equivalent-spelling de-duplication for each
+identity.
+
+RED:
+
+```text
+cargo test --test property_patch get_keeps_shadowed_system_and_property_preview_identities_distinct -- --nocapture
+# exit 101
+# left: [\"title\", \"title\"]
+# right: [\"title\", \"prop.title\"]
+# 0 passed; 1 failed; 14 filtered out
+```
+
+GREEN after adding deterministic canonical wire keys:
+
+```text
+cargo test --test property_patch get_keeps_shadowed_system_and_property_preview_identities_distinct -- --nocapture
+# 1 passed; 0 failed; 14 filtered out
+
+cargo test --test property_patch get_projects_authoritative_membership_values_provenance_and_privacy -- --nocapture
+# 1 passed; 0 failed; 14 filtered out
+```
+
+System identities retain their bare key. Custom identities retain a bare key
+unless it collides with `SYSTEM_FIELDS`, in which case they emit
+`prop.<key>`. The same wire key drives default/effective-label agreement and
+conflict fallback. The cross-Base agreement fixture now proves that an omitted
+source label and an explicit canonical-key label agree without conflict while
+preserving source provenance. The DTO/OpenAPI shape did not change, so the
+generated TypeScript schema was intentionally not regenerated.
+
+## Re-review corrections
+
+Re-review exposed two deeper contract faults: wire-key encoding also collided
+when a custom key already began with `prop.`, and the Task 1 model had made
+the approved optional preview label required.
+
+### RED
+
+The optional-label model test was written first:
+
+```text
+cargo test vault::base::tests::presentation_fields_round_trip_references_without_reordering_preview -- --nocapture
+# exit 101
+# E0599: no method named `as_deref` found for `String`
+# E0599: no method named `is_none` found for `String`
+```
+
+After adding the third canonical identity (`prop.prop.title`) to the
+integration fixture, the regression was mutation-checked against the
+system-name-only prefix rule:
+
+```text
+cargo test --test property_patch get_keeps_shadowed_system_and_property_preview_identities_distinct -- --nocapture
+# exit 101
+# left: [\"title\", \"prop.title\", \"prop.title\"]
+# right: [\"title\", \"prop.title\", \"prop.prop.title\"]
+# 0 passed; 1 failed; 14 filtered out
+```
+
+### Correction
+
+- `PreviewFieldDefinition.label` is now `Option<String>` with serde default
+  and empty omission. Validation rejects only an explicitly present blank
+  label. Base model tests cover omission/round-trip and the persistence suite
+  proves an unlabeled preview entry is written without a synthetic label.
+- Source provenance now carries the configured option directly. An omitted
+  source label and an explicit canonical wire-key label agree through the
+  effective-label fallback without conflict.
+- Wire keys remain bare for system/body and ordinary custom keys. Custom keys
+  are prefixed with `prop.` when they collide with a system name or already
+  start with `prop.`, making the encoding injective for the resolver grammar.
+  The integration fixture proves three distinct identities, positions,
+  values/presence, per-identity de-duplication, and fallback labels.
+- The OpenAPI test now asserts `PreviewFieldDefinition.field` is required and
+  `label` is optional.
+
+### Final focused GREEN
+
+```text
+cargo test vault::base::tests -- --nocapture
+# 38 passed; 0 failed; 1925 filtered out
+
+cargo test vault::base_document::tests -- --nocapture
+# 35 passed; 0 failed; 1928 filtered out
+
+cargo test vault::query::tests -- --nocapture
+# 41 passed; 0 failed; 1922 filtered out
+
+cargo test --test property_patch get_ -- --nocapture
+# 7 passed; 0 failed; 8 filtered out
+
+cargo test api::openapi::tests -- --nocapture
+# 13 passed; 0 failed; 1950 filtered out
+```
+
+The final restored injective rule was also rerun directly: one passed, zero
+failed, fourteen filtered out.
+
+### Schema regeneration and TypeScript
+
+A new disposable initialized vault and temporary `XDG_CONFIG_HOME` backed the
+managed `task3-openapi-rereview` server on the coordinator-authorized
+`127.0.0.1:3001`. From `ui/`:
+
+```text
+bunx openapi-typescript http://127.0.0.1:3001/api/openapi.json -o src/api/schema.d.ts
+✨ openapi-typescript 7.13.0
+🚀 http://127.0.0.1:3001/api/openapi.json → src/api/schema.d.ts [145ms]
+```
+
+The managed server was stopped and the disposable vault removed. Generated
+TypeScript now contains `label?: string | null`. `bun run typecheck` still
+reports exactly the same four expected downstream missing-`preview` consumer
+failures at `bases.test.ts:372,520,526` and
+`FolioProperties.test.tsx:77`; no new optional-label consumer failure exists.
+
+## Remaining concerns
+
+The four TypeScript consumer fixtures must add the required projection in Tasks 4/5. No backend concern remains from the focused scope.

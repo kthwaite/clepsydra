@@ -1,4 +1,5 @@
 import { createPortal } from "react-dom";
+import { usePageBaseProperties } from "#/api/bases";
 import { useBacklinks } from "#/api/index";
 import { usePage } from "#/api/pages";
 import { PreviewBody } from "#/components/codex/PreviewBody";
@@ -20,6 +21,7 @@ type TabPreviewCardProps = {
 export function TabPreviewCard({ path, rect }: TabPreviewCardProps) {
   const { data: page } = usePage(path);
   const { data: backlinks } = useBacklinks(path);
+  const projection = usePageBaseProperties(page?.meta.id ?? "");
 
   if (typeof document === "undefined") return null;
 
@@ -35,6 +37,9 @@ export function TabPreviewCard({ path, rect }: TabPreviewCardProps) {
         path={path}
         page={page}
         backlinks={backlinks}
+        preview={projection.data?.preview}
+        previewPending={projection.isPending}
+        previewError={projection.isError}
         showTags={false}
       />
     </div>,

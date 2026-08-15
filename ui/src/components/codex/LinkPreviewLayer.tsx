@@ -1,6 +1,7 @@
 import { Maximize2, Minus, Pin, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { usePageBaseProperties } from "#/api/bases";
 import { useBacklinks } from "#/api/index";
 import { usePage } from "#/api/pages";
 import { shortFolio } from "#/components/codex/folio-utils";
@@ -37,6 +38,7 @@ export function LinkPreviewLayer() {
 function PreviewWindow({ win }: { win: PW }) {
   const { data: page } = usePage(win.path);
   const { data: backlinks } = useBacklinks(win.path);
+  const projection = usePageBaseProperties(page?.meta.id ?? "");
   const openTab = useOpenTab();
   const pin = usePreviewStore((state) => state.pin);
   const minimize = usePreviewStore((state) => state.minimize);
@@ -139,7 +141,15 @@ function PreviewWindow({ win }: { win: PW }) {
       </div>
 
       {/* body */}
-      <PreviewBody path={win.path} page={page} backlinks={backlinks} showTags />
+      <PreviewBody
+        path={win.path}
+        page={page}
+        backlinks={backlinks}
+        preview={projection.data?.preview}
+        previewPending={projection.isPending}
+        previewError={projection.isError}
+        showTags
+      />
     </div>
   );
 }

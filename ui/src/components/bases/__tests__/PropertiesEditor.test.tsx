@@ -906,6 +906,7 @@ describe("properties workspace integration", () => {
           name: "Reading Log",
           description: undefined,
           filter: undefined,
+          preview: [],
           properties: [
             {
               key: "priority",

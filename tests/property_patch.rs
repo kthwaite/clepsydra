@@ -3,6 +3,7 @@ mod support;
 use std::fs;
 use std::path::Path;
 
+use clepsydra::vault::query::{ProjectionFieldIdentity, resolve_projection_field};
 use support::ApiFixture;
 
 const PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f1";
@@ -284,6 +285,10 @@ async fn unknown_page_is_404() {
 
 const EMPTY_DECLARATIONS_ID: &str = "0190f8a0-0000-7000-8000-0000000000f2";
 const ENCRYPTED_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f3";
+const PREVIEW_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f4";
+const SHADOW_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f5";
+const EMPTY_BODY_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f6";
+const WIRE_KEY_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f7";
 
 fn projection_property<'a>(response: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
     response["properties"]
@@ -292,6 +297,15 @@ fn projection_property<'a>(response: &'a serde_json::Value, key: &str) -> &'a se
         .iter()
         .find(|property| property["key"] == key)
         .unwrap_or_else(|| panic!("missing projected property `{key}` in {response}"))
+}
+
+fn preview_field<'a>(response: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
+    response["preview"]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|field| field["key"] == key)
+        .unwrap_or_else(|| panic!("missing preview field `{key}` in {response}"))
 }
 
 fn seed_projection(root: &Path) {
@@ -326,9 +340,39 @@ PRIVATE BODY SENTINEL
     )
     .unwrap();
     fs::write(
+        root.join("preview-note.md"),
+        format!(
+            "+++\nid = \"{PREVIEW_PAGE_ID}\"\ntitle = \"Preview Note\"\ntype = \"PROJECT\"\n+++\n# Heading\n\nA [link](https://example.com) and **bold** body.\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("empty-preview-note.md"),
+        format!(
+            "+++\nid = \"{EMPTY_BODY_PAGE_ID}\"\ntitle = \"Empty Preview Note\"\ntype = \"PROJECT\"\n+++\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("shadow-title.md"),
+        format!(
+            "+++\nid = \"{SHADOW_PAGE_ID}\"\ntitle = \"System title\"\ntype = \"CODE\"\n\"prop.title\" = \"Nested custom\"\n+++\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
         root.join("bases/a-reader.base.toml"),
         r#"name = "Alpha Reader"
 filter = { field = "kind", op = "eq", value = "BOOK" }
+preview = [
+    { field = "rating" },
+    { field = "featured", label = "Featured" },
+    { field = "conflict_relation", label = "Series" },
+    { field = "non_finite", label = "Non-finite" },
+    { field = "body", label = "Summary" },
+    { field = "note", label = "Note" },
+]
+
 
 [properties]
 status = { type = "select", options = ["queued", "reading"] }
@@ -353,6 +397,14 @@ conversation = { type = "text" }
         root.join("bases/b-linked.base.toml"),
         r#"name = "Linked Reader"
 filter = { field = "series", op = "links_to", value = "Solar Cycle" }
+preview = [
+    { field = "featured", label = "Spotlight" },
+    { field = "prop.rating", label = "rating" },
+    { field = "conflict_relation", label = "Series" },
+    { field = "sys.title", label = "Title" },
+    { field = "body", label = "Summary" },
+]
+
 
 [properties]
 status = { type = "select", options = ["queued", "reading"] }
@@ -370,6 +422,52 @@ filter = { field = "kind", op = "eq", value = "NOTE" }
 
 [properties]
 excluded = { type = "text" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("bases/d-preview-note.base.toml"),
+        r#"name = "Project Preview"
+filter = { field = "kind", op = "eq", value = "PROJECT" }
+preview = [
+    { field = "body", label = "Summary" },
+    { field = "note", label = "Note" },
+]
+
+[properties]
+note = { type = "text" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("bases/e-shadow-alpha.base.toml"),
+        r#"name = "Shadow Alpha"
+filter = { field = "kind", op = "eq", value = "CODE" }
+preview = [
+    { field = "title" },
+    { field = "prop.title" },
+    { field = "prop.prop.title" },
+]
+
+[properties]
+title = { type = "text" }
+"prop.title" = { type = "text" }
+"#,
+    )
+    .unwrap();
+    fs::write(
+        root.join("bases/f-shadow-beta.base.toml"),
+        r#"name = "Shadow Beta"
+filter = { field = "kind", op = "eq", value = "CODE" }
+preview = [
+    { field = "sys.title", label = "title" },
+    { field = "prop.title", label = "prop.title" },
+    { field = "prop.prop.title", label = "prop.prop.title" },
+]
+
+[properties]
+title = { type = "text" }
+"prop.title" = { type = "text" }
 "#,
     )
     .unwrap();
@@ -403,6 +501,69 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
             { "slug": "b-linked", "name": "Linked Reader" }
         ])
     );
+    assert_eq!(body["preview"]["remaining_count"], 3);
+    assert_eq!(
+        body["preview"]["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|field| field["key"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["rating", "featured", "conflict_relation", "non_finite"]
+    );
+    assert_eq!(
+        preview_field(&body, "rating"),
+        &serde_json::json!({
+            "key": "rating",
+            "label": "rating",
+            "present": true,
+            "value": 0,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "a-reader", "name": "Alpha Reader" }
+                },
+                {
+                    "base": { "slug": "b-linked", "name": "Linked Reader" },
+                    "label": "rating"
+                }
+            ]
+        })
+    );
+    let featured_preview = preview_field(&body, "featured");
+    assert_eq!(featured_preview["label"], "featured");
+    assert_eq!(featured_preview["present"], true);
+    assert_eq!(featured_preview["value"], false);
+    assert_eq!(featured_preview["schema_conflict"], false);
+    assert_eq!(featured_preview["label_conflict"], true);
+    assert_eq!(
+        featured_preview["sources"],
+        serde_json::json!([
+            {
+                "base": { "slug": "a-reader", "name": "Alpha Reader" },
+                "label": "Featured"
+            },
+            {
+                "base": { "slug": "b-linked", "name": "Linked Reader" },
+                "label": "Spotlight"
+            }
+        ])
+    );
+    let conflicted_preview = preview_field(&body, "conflict_relation");
+    assert_eq!(conflicted_preview["label"], "Series");
+    assert_eq!(conflicted_preview["present"], true);
+    assert_eq!(
+        conflicted_preview["value"],
+        serde_json::json!(["[[Solar Cycle]]"])
+    );
+    assert_eq!(conflicted_preview["schema_conflict"], true);
+    assert_eq!(conflicted_preview["label_conflict"], false);
+    let non_finite_preview = preview_field(&body, "non_finite");
+    assert_eq!(non_finite_preview["present"], true);
+    assert_eq!(non_finite_preview["value"], serde_json::Value::Null);
+    assert_eq!(non_finite_preview["schema_conflict"], false);
+    assert_eq!(non_finite_preview["label_conflict"], false);
     let keys = body["properties"]
         .as_array()
         .unwrap()
@@ -538,6 +699,256 @@ async fn get_projects_authoritative_membership_values_provenance_and_privacy() {
 }
 
 #[tokio::test]
+async fn get_projects_body_excerpt_and_missing_custom_value() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{PREVIEW_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(
+        body["matching_bases"],
+        serde_json::json!([
+            { "slug": "d-preview-note", "name": "Project Preview" }
+        ])
+    );
+    assert_eq!(body["preview"]["remaining_count"], 0);
+    assert_eq!(
+        preview_field(&body, "body"),
+        &serde_json::json!({
+            "key": "body",
+            "label": "Summary",
+            "present": true,
+            "value": "Heading A link and bold body.",
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [{
+                "base": { "slug": "d-preview-note", "name": "Project Preview" },
+                "label": "Summary"
+            }]
+        })
+    );
+    assert_eq!(
+        preview_field(&body, "note"),
+        &serde_json::json!({
+            "key": "note",
+            "label": "Note",
+            "present": false,
+            "value": null,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [{
+                "base": { "slug": "d-preview-note", "name": "Project Preview" },
+                "label": "Note"
+            }]
+        })
+    );
+}
+
+#[tokio::test]
+async fn get_projects_empty_body_excerpt_is_missing() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{EMPTY_BODY_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(
+        preview_field(&body, "body"),
+        &serde_json::json!({
+            "key": "body",
+            "label": "Summary",
+            "present": false,
+            "value": null,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [{
+                "base": { "slug": "d-preview-note", "name": "Project Preview" },
+                "label": "Summary"
+            }]
+        })
+    );
+}
+
+#[tokio::test]
+async fn get_keeps_shadowed_system_and_property_preview_identities_distinct() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{SHADOW_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let fields = body["preview"]["fields"].as_array().unwrap();
+
+    assert_eq!(body["preview"]["remaining_count"], 0);
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| field["key"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["title", "prop.title", "prop.prop.title"]
+    );
+    assert_eq!(
+        fields[0],
+        serde_json::json!({
+            "key": "title",
+            "label": "title",
+            "present": true,
+            "value": "System title",
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "e-shadow-alpha", "name": "Shadow Alpha" }
+                },
+                {
+                    "base": { "slug": "f-shadow-beta", "name": "Shadow Beta" },
+                    "label": "title"
+                }
+            ]
+        })
+    );
+    assert_eq!(
+        fields[1],
+        serde_json::json!({
+            "key": "prop.title",
+            "label": "prop.title",
+            "present": false,
+            "value": null,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "e-shadow-alpha", "name": "Shadow Alpha" }
+                },
+                {
+                    "base": { "slug": "f-shadow-beta", "name": "Shadow Beta" },
+                    "label": "prop.title"
+                }
+            ]
+        })
+    );
+    assert_eq!(
+        fields[2],
+        serde_json::json!({
+            "key": "prop.prop.title",
+            "label": "prop.prop.title",
+            "present": true,
+            "value": "Nested custom",
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [
+                {
+                    "base": { "slug": "e-shadow-alpha", "name": "Shadow Alpha" }
+                },
+                {
+                    "base": { "slug": "f-shadow-beta", "name": "Shadow Beta" },
+                    "label": "prop.prop.title"
+                }
+            ]
+        })
+    );
+}
+
+#[tokio::test]
+async fn get_projection_wire_keys_round_trip_every_custom_identity_class() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("bases")).unwrap();
+            fs::write(
+                root.join("wire-keys.md"),
+                format!(
+                    r#"+++
+id = "{WIRE_KEY_PAGE_ID}"
+title = "Wire keys"
+ordinary = "ordinary value"
+"prop.custom" = "prop-prefixed value"
+"sys.custom" = "sys-prefixed value"
++++
+"#
+                ),
+            )
+            .unwrap();
+            fs::write(
+                root.join("bases/wire-keys.base.toml"),
+                r#"name = "Wire Keys"
+filter = { field = "kind", op = "eq", value = "NOTE" }
+preview = [
+    { field = "ordinary" },
+    { field = "prop.title" },
+    { field = "prop.prop.custom" },
+    { field = "prop.sys.custom" },
+]
+
+[properties]
+ordinary = { type = "text" }
+title = { type = "text" }
+"prop.custom" = { type = "text" }
+"sys.custom" = { type = "text" }
+"#,
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{WIRE_KEY_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let fields = body["preview"]["fields"].as_array().unwrap();
+    let expected = [
+        (
+            "ordinary",
+            ProjectionFieldIdentity::Property("ordinary".to_string()),
+        ),
+        (
+            "prop.title",
+            ProjectionFieldIdentity::Property("title".to_string()),
+        ),
+        (
+            "prop.prop.custom",
+            ProjectionFieldIdentity::Property("prop.custom".to_string()),
+        ),
+        (
+            "prop.sys.custom",
+            ProjectionFieldIdentity::Property("sys.custom".to_string()),
+        ),
+    ];
+
+    assert_eq!(fields.len(), expected.len());
+    assert_eq!(body["preview"]["remaining_count"], 0);
+    for (field, (expected_key, expected_identity)) in fields.iter().zip(expected) {
+        let key = field["key"].as_str().unwrap();
+        assert_eq!(key, expected_key);
+        assert_eq!(resolve_projection_field(key).unwrap(), expected_identity);
+    }
+}
+
+#[tokio::test]
 async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(|root| {
@@ -565,6 +976,10 @@ async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
         .json();
     assert_eq!(no_matches["matching_bases"], serde_json::json!([]));
     assert_eq!(no_matches["properties"], serde_json::json!([]));
+    assert_eq!(
+        no_matches["preview"],
+        serde_json::json!({ "fields": [], "remaining_count": 0 })
+    );
 
     let no_declarations: serde_json::Value = server
         .get(&format!(
@@ -577,6 +992,10 @@ async fn get_distinguishes_no_matching_bases_from_bases_without_properties() {
         serde_json::json!([{ "slug": "empty", "name": "Empty Base" }])
     );
     assert_eq!(no_declarations["properties"], serde_json::json!([]));
+    assert_eq!(
+        no_declarations["preview"],
+        serde_json::json!({ "fields": [], "remaining_count": 0 })
+    );
 }
 
 #[tokio::test]
@@ -594,7 +1013,7 @@ async fn get_reports_encryption_without_exposing_the_page_body() {
             .unwrap();
             fs::write(
                 root.join("bases/protected.base.toml"),
-                "name = \"Protected Metadata\"\nfilter = { field = \"kind\", op = \"eq\", value = \"NOTE\" }\n\n[properties]\nstatus = { type = \"text\" }\n",
+                "name = \"Protected Metadata\"\nfilter = { field = \"kind\", op = \"eq\", value = \"NOTE\" }\npreview = [\n    { field = \"status\", label = \"Status\" },\n    { field = \"body\", label = \"Summary\" },\n]\n\n[properties]\nstatus = { type = \"text\" }\n",
             )
             .unwrap();
         })
@@ -610,6 +1029,10 @@ async fn get_reports_encryption_without_exposing_the_page_body() {
     let body: serde_json::Value = response.json();
     assert_eq!(body["encrypted"], true);
     assert_eq!(projection_property(&body, "status")["value"], "private");
+    assert_eq!(
+        body["preview"],
+        serde_json::json!({ "fields": [], "remaining_count": 0 })
+    );
     let serialized = serde_json::to_string(&body).unwrap();
     assert!(
         !serialized.contains("BEGIN AGE ENCRYPTED FILE"),

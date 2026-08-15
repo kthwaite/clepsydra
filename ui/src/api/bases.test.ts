@@ -368,6 +368,7 @@ describe("Base member API", () => {
       revision: "page-rev-1",
       encrypted: false,
       matching_bases: [{ slug: "reading", name: "Reading" }],
+      preview: { fields: [], remaining_count: 0 },
       properties: [status],
     } satisfies PageBasePropertiesResponse;
     const get = vi.spyOn(fetchClient, "GET").mockResolvedValueOnce({
@@ -388,6 +389,54 @@ describe("Base member API", () => {
         params: { path: { uuid: "page-alpha" } },
       }),
     );
+  });
+
+  it("shares the generated projection cache and disables empty page identities", async () => {
+    const queryClient = freshQueryClient();
+    const response = {
+      id: "page-alpha",
+      path: "books/dune.md",
+      revision: "page-rev-1",
+      encrypted: false,
+      matching_bases: [],
+      preview: { fields: [], remaining_count: 0 },
+      properties: [],
+    } satisfies PageBasePropertiesResponse;
+    const get = vi.spyOn(fetchClient, "GET").mockResolvedValue({
+      data: response,
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    } as never);
+
+    const { result } = renderHook(
+      () => ({
+        first: usePageBaseProperties("page-alpha"),
+        second: usePageBaseProperties("page-alpha"),
+        empty: usePageBaseProperties(""),
+      }),
+      { wrapper: wrapper(queryClient) },
+    );
+
+    await waitFor(() => {
+      expect(result.current.first.data).toEqual(response);
+      expect(result.current.second.data).toEqual(response);
+    });
+    expect(result.current.empty.fetchStatus).toBe("idle");
+    expect(get).toHaveBeenCalledTimes(1);
+    expect(
+      queryClient
+        .getQueryCache()
+        .findAll({
+          predicate: (query) =>
+            query.queryKey[1] ===
+              "/api/vault/pages/by-id/{uuid}/properties" &&
+            (
+              query.queryKey[2] as
+                | { params?: { path?: { uuid?: string } } }
+                | undefined
+            )?.params?.path?.uuid === "page-alpha",
+        }),
+    ).toHaveLength(1);
   });
 
 
@@ -516,12 +565,14 @@ describe("Base member API", () => {
       revision: "page-rev-7",
       encrypted: false,
       matching_bases: [{ slug: "reading", name: "Reading" }],
+      preview: { fields: [], remaining_count: 0 },
       properties: [status],
     } satisfies PageBasePropertiesResponse;
     const droppedProjection = {
       ...retainedProjection,
       revision: "page-rev-8",
       matching_bases: [],
+      preview: { fields: [], remaining_count: 0 },
       properties: [],
     } satisfies PageBasePropertiesResponse;
     const get = vi

@@ -23,7 +23,8 @@ use super::query::redact_conversation_columns;
 use crate::api::events::SyncNotification;
 use crate::vault::base::{
     BaseDefinition, BaseDiagnostic, BaseDiagnosticSeverity, BaseFile, BaseRegistry, Filter,
-    PropertyDefinition, SortDir, SortKey, ViewDefinition, validate_definition,
+    PreviewFieldDefinition, PropertyDefinition, SortDir, SortKey, ViewDefinition,
+    validate_definition,
 };
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
@@ -71,6 +72,8 @@ pub struct BaseFilePayload {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<PreviewFieldDefinition>,
     #[serde(default)]
     pub properties: Vec<BasePropertyEntry>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -83,6 +86,7 @@ impl From<BaseFile> for BaseFilePayload {
             name: file.name,
             description: file.description,
             filter: file.filter,
+            preview: file.preview,
             properties: file
                 .properties
                 .into_iter()
@@ -99,6 +103,7 @@ impl From<BaseFilePayload> for BaseFile {
             name: payload.name,
             description: payload.description,
             filter: payload.filter,
+            preview: payload.preview,
             properties: payload
                 .properties
                 .into_iter()
@@ -800,8 +805,10 @@ mod tests {
                     description: None,
                     filter: None,
                     properties: Vec::new(),
+                    preview: Vec::new(),
                     views: vec![ViewDefinition {
                         name: "Configured View".to_string(),
+                        labels: Default::default(),
                         layout: "table".to_string(),
                         filter: None,
                         sort: Vec::new(),

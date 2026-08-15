@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseDetailResponse, BaseMutationResponse } from "#/api/bases";
 import { BaseDefinitionWorkspace } from "#/components/bases/BaseDefinitionWorkspace";
 function selectTriggerName(label: string) {
@@ -55,12 +55,14 @@ const detail = {
   description: "Books in progress",
   filter: undefined,
   properties: [],
+  preview: [],
   views: [
     {
       name: "All",
       layout: "table",
       sort: [],
       aggregates: [],
+      labels: {},
       columns: ["title"],
     },
   ],
@@ -115,6 +117,10 @@ beforeEach(() => {
   };
 });
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
 describe("BaseDefinitionWorkspace", () => {
   it("renders a named loading status before hydration", () => {
     baseState.data = undefined;
@@ -139,6 +145,170 @@ describe("BaseDefinitionWorkspace", () => {
       screen.getByRole("button", { name: "Copy base file path" }),
     ).toBeInTheDocument();
     expect(screen.getByText("Saved")).toBeInTheDocument();
+  });
+  it("places Preview properties immediately after Properties in definition navigation", () => {
+    renderWorkspace();
+
+    expect(
+      within(screen.getByRole("navigation", { name: "Definition sections" }))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["General", "Filter", "Properties", "Preview properties", "Views"]);
+  });
+
+  it("keeps presentation edits local until Save and sends both additions", async () => {
+    const user = userEvent.setup();
+    updateMock.mockResolvedValue(
+      mutationResponse({
+        preview: [{ field: "body", label: "Excerpt" }],
+        views: [
+          {
+            ...detail.views[0],
+            labels: { body: "Excerpt" },
+          },
+        ],
+        revision: "revision-2",
+      }),
+    );
+    renderWorkspace();
+
+    await user.click(
+      screen.getByRole("button", { name: "Preview properties" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Preview property to add"),
+      "body",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add preview property" }),
+    );
+    await user.type(screen.getByLabelText("Label for body"), "Excerpt");
+
+    await user.click(screen.getByRole("button", { name: "Views" }));
+    await user.selectOptions(screen.getByLabelText("Field to label"), "body");
+    await user.click(screen.getByRole("button", { name: "Add label" }));
+    await user.clear(screen.getByLabelText("Display label for body"));
+    await user.type(screen.getByLabelText("Display label for body"), "Excerpt");
+
+    expect(updateMock).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(updateMock).toHaveBeenCalledWith({
+      params: { path: { slug: "reading-log" } },
+      body: {
+        expected_revision: "revision-1",
+        definition: expect.objectContaining({
+          preview: [{ field: "body", label: "Excerpt" }],
+          views: [
+            expect.objectContaining({
+              name: "All",
+              labels: { body: "Excerpt" },
+            }),
+          ],
+        }),
+        view_origins: [{ kind: "existing", name: "All" }],
+      },
+    });
+  });
+
+  it("restores presentation metadata on Discard without mutating the server fixture", async () => {
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(
+      screen.getByRole("button", { name: "Preview properties" }),
+    );
+    await user.selectOptions(
+      screen.getByLabelText("Preview property to add"),
+      "body",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Add preview property" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+
+    expect(screen.queryByLabelText("Label for body")).toBeNull();
+    expect(detail.preview).toEqual([]);
+    expect(detail.views[0].labels).toEqual({});
+    expect(updateMock).not.toHaveBeenCalled();
+  });
+
+  it("focuses exact preview and view label controls from server diagnostics", async () => {
+    baseState.data = {
+      ...detail,
+      preview: [{ field: "body", label: "Excerpt" }],
+      views: [{ ...detail.views[0], labels: { body: "Excerpt" } }],
+      diagnostics: [
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "preview[0].label",
+          message: "preview label is invalid",
+        },
+        {
+          slug: "reading-log",
+          severity: "error",
+          path: "views[0].labels.body",
+          message: "view label is invalid",
+        },
+      ],
+    };
+    const user = userEvent.setup();
+    renderWorkspace();
+
+    await user.click(
+      screen.getByRole("button", { name: /preview label is invalid/i }),
+    );
+    expect(screen.getByLabelText("Label for body")).toHaveFocus();
+
+    await user.click(
+      screen.getByRole("button", { name: /^view label is invalid/i }),
+    );
+    expect(screen.getByLabelText("Display label for body")).toHaveFocus();
+  });
+
+
+  it("retains deterministic preview row identity across a successful save response", async () => {
+    const initialPreviewId =
+      "00000000-0000-4000-8000-000000000001" as `${string}-${string}-${string}-${string}-${string}`;
+    const initialViewId =
+      "00000000-0000-4000-8000-000000000002" as `${string}-${string}-${string}-${string}-${string}`;
+    const responsePreviewId =
+      "00000000-0000-4000-8000-000000000003" as `${string}-${string}-${string}-${string}-${string}`;
+    const responseViewId =
+      "00000000-0000-4000-8000-000000000004" as `${string}-${string}-${string}-${string}-${string}`;
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce(initialPreviewId)
+      .mockReturnValueOnce(initialViewId)
+      .mockReturnValueOnce(responsePreviewId)
+      .mockReturnValueOnce(responseViewId);
+    baseState.data = {
+      ...detail,
+      preview: [{ field: "body" }],
+    };
+    updateMock.mockResolvedValue(
+      mutationResponse({
+        preview: [{ field: "body", label: "Excerpt" }],
+        revision: "revision-2",
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(
+      screen.getByRole("button", { name: "Preview properties" }),
+    );
+    const originalLabel = screen.getByLabelText("Label for body");
+    const originalRow = originalLabel.closest("li");
+    await user.type(originalLabel, "Excerpt");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+
+    expect(screen.getByLabelText("Label for body")).toBe(originalLabel);
+    expect(screen.getByLabelText("Label for body").closest("li")).toBe(
+      originalRow,
+    );
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(4);
   });
 
   it("keeps body out of the property declaration flow", async () => {

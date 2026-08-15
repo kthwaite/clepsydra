@@ -45,6 +45,9 @@ export type PageBaseIdentity = components["schemas"]["PageBaseIdentity"];
 export type PageBasePropertiesResponse =
   components["schemas"]["PageBasePropertiesResponse"];
 export type PageBaseProperty = components["schemas"]["PageBaseProperty"];
+export type PagePreviewField = components["schemas"]["PagePreviewField"];
+export type PagePreviewProjection =
+  components["schemas"]["PagePreviewProjection"];
 export type PagePropertyBlocker =
   components["schemas"]["PagePropertyBlocker"];
 export type PagePropertyCompatibility =

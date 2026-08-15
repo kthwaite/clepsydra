@@ -26,14 +26,15 @@ definition format and each authoring path.
 
 Open `/bases` from the **Bases** header item or run **Open Bases** in the command palette. The index lists saved bases and files that need repair. Choose **Create base**, or run **Create Base** in the command palette, to open guided creation. Enter a name and slug, optionally define the first membership rule, and create the base. Clepsydra opens `/bases/<slug>/edit` with an `All` table view and `title` column ready to configure.
 
-The Configure workspace has four sections:
+The Configure workspace has five sections:
 
 - **General** changes the displayed name and description.
 - **Filter** builds base membership from comparison, all, any, and not rules.
 - **Properties** declares ordered advisory property schemas and their options.
-- **Views** configures ordered table views, their extra filters, columns, sorts, grouping, and aggregates.
+- **Preview properties** chooses the ordered, optionally labelled fields used by generic page previews.
+- **Views** configures ordered table views, their extra filters, columns, display labels, sorts, grouping, and aggregates.
 
-Changes remain a local draft until you choose **Save**. **Discard** restores the last loaded revision. Leaving with unsaved changes opens a confirmation, and closing the browser is guarded by the browser's unsaved-change prompt. Every Save includes the revision that was loaded: if the file changed in another editor or Clepsydra session, Save preserves the draft and reports a conflict instead of overwriting the newer file. Review the draft, or deliberately reload the file and discard it.
+Changes remain a local draft until you explicitly choose **Save**; there is no autosave. **Discard** restores the last loaded revision. Leaving with unsaved changes opens a confirmation, and closing the browser is guarded by the browser's unsaved-change prompt. Every Save includes the revision that was loaded. If the file changed in another editor or Clepsydra session, Save retains the local draft and reports a conflict instead of overwriting the newer file. Reload the changed definition before deliberately reapplying or discarding the draft.
 
 The live preview evaluates the unsaved membership or selected view after a 250 ms pause. It is read-only, returns at most 100 preview rows, retains real totals in group headings, and does not move keyboard focus when results refresh. Structural, evaluation, and network failures are shown beside the preview; a preview network failure alone does not disable Save.
 
@@ -60,6 +61,11 @@ The guided editor writes this base file. For reference—and as an advanced manu
 # <vault>/bases/reading.base.toml
 name = "Reading Log"
 description = "Books in flight and their wake."
+preview = [
+  { field = "title", label = "Book" },
+  { field = "author" },
+  { field = "body", label = "Excerpt" },
+]
 
 [filter]
 field = "kind"
@@ -78,9 +84,10 @@ layout = "table"
 filter = { field = "status", op = "eq", value = "reading" }
 sort = [{ field = "started", dir = "desc" }]
 columns = ["title", "author", "rating", "started"]
+labels = { title = "Book", author = "Writer" }
 ```
 
-The filename `reading.base.toml` gives the base the slug `reading`, so its web UI is `/bases/reading`. The base membership filter selects books, and the saved view adds the `status = "reading"` filter. The base owns no pages; deleting `reading.base.toml` deletes neither the matching pages nor their properties.
+The filename `reading.base.toml` gives the base the slug `reading`, so its web UI is `/bases/reading`. The base membership filter selects books, and the saved view adds the `status = "reading"` filter. The root `preview` list supplies generic link and inactive-tab previews; its `author` entry demonstrates that `label` is optional. The view's `labels` table changes only its rendered column headings. The base owns no pages; deleting `reading.base.toml` deletes neither the matching pages nor their properties.
 
 ## File location and slug
 
@@ -92,7 +99,7 @@ Base definitions live at:
 
 Only files ending in `.base.toml` in that directory are loaded. The filename stem is the API and UI identity: `deep-work.base.toml` has slug `deep-work` and UI path `/bases/deep-work`.
 
-A base requires `name`. `description`, `filter`, `properties`, and `views` are optional, although the web UI needs at least one view to display a table. With no membership `filter`, the base matches every indexed page.
+A base requires `name`. `description`, `filter`, `properties`, `preview`, and `views` are optional, although the web UI needs at least one view to display a table. With no membership `filter`, the base matches every indexed page.
 
 ## Page properties and advisory schemas
 
@@ -129,6 +136,42 @@ They can all be used in columns and with their supported filter operators withou
 If a page has an extra key whose name collides with a system field, address it as `prop.<name>`. Declaring that colliding key in `[properties]` produces a shadowing diagnostic.
 
 The system `kind` comes from the page's `type` frontmatter key, or from its top-level folder when `type` is absent. This is why the minimal example under `books/` matches `field = "kind"` even though its extra `kind` property is not the system field.
+
+## Presentation labels and generic page previews
+
+Presentation metadata changes what readers see, never the identity or stored value of a field. The two presentation controls are independent:
+
+- A view's `columns` chooses the fields in that saved table. Its `labels` map overrides headings for that view wherever the table is rendered, including Base embeds. A label can be configured before its field is added to `columns`, but it appears only when that field is rendered. It does not rename the column, its sort/query/edit key, or the corresponding page-frontmatter key.
+- The root `preview` array is an ordered projection for generic page previews opened from path-backed links and inactive Folio tabs. It neither adds columns to a saved view nor inherits a selected view's columns or labels.
+
+This is the exact TOML shape:
+
+```toml
+preview = [
+  { field = "title", label = "Book" },
+  { field = "author" }, # label is optional
+  { field = "body", label = "Excerpt" },
+]
+
+[[views]]
+name = "Continues"
+columns = ["title", "author", "status"]
+labels = { title = "Book", author = "Writer", status = "Reading state" }
+```
+
+Omitting a preview row's `label` uses that field's canonical output key as its display label. Do not write an empty string instead: a blank `preview.field`, an explicitly present blank or whitespace-only preview label, and a blank or whitespace-only `views.labels` value are validation errors.
+
+Presentation references use the same system-first identity rules as other Base fields. `title` and `sys.title` identify the same system field, while `prop.title` identifies a custom page property named `title`. An ordinary non-system key such as `author` is already a custom property. If a custom key itself starts with the reserved `prop.` or `sys.` grammar prefix, add an explicit `prop.` qualification: `prop.prop.title` identifies a custom key literally named `prop.title`, and `prop.sys.custom` identifies one literally named `sys.custom`. Quote dotted keys in a TOML label map, for example `labels = { "prop.title" = "Frontmatter title" }`.
+
+Equivalent spellings share one canonical identity. A `preview` list cannot repeat one identity—for example, it cannot contain both `title` and `sys.title`. Labels are resolved by identity when rendered, but the configured column and property keys remain unchanged. The guided editor disables duplicate choices and writes the required explicit qualification rather than guessing.
+
+`body` is a reserved, read-only presentation field, not a declarable property. Use the canonical spelling `body`; its accepted presentation aliases resolve to the same identity. It cannot be filtered, sorted, grouped, aggregated, or edited. Generic previews show a normalized, bounded Markdown excerpt (up to 240 Unicode characters and clamped to two lines); an empty normalized excerpt is missing.
+
+For a page that matches more than one Base, Clepsydra sorts those Bases by slug, then walks each Base's `preview` rows in their configured order. The first occurrence of a canonical identity fixes its position. Later occurrences add source provenance without moving or duplicating the field. System and body keys remain bare; a custom key is explicitly `prop.`-qualified in the merged output when it shadows a system name or starts with `prop.` or `sys.`, so distinct identities never collapse.
+
+An omitted preview label falls back to that canonical output key. If every contributing Base has the same effective label, the merged field uses it. If they disagree, the card falls back to the canonical key and shows `!` for the label conflict. If matching Bases declare incompatible schemas for a custom property, its current raw value remains readable in this read-only projection and the card shows `≠`; no editor schema is chosen. An absent value renders as an em dash (`—`). Only the first four merged fields render, in deterministic order, followed by `+N more` for the exact remainder.
+
+Protected pages return an empty Base preview projection. Link and tab cards suppress the whole projected-property region—including cached values, conflict markers, remainder counts, and projection-error copy—and show the protected-page state instead.
 
 ## Membership and saved-view filters
 
@@ -194,6 +237,7 @@ Each `[[views]]` entry is a saved view. Its fields are:
 - `layout`: `table` is the only shipped layout and is the default.
 - `filter`: an optional additional filter, ANDed with base membership.
 - `columns`: field names in display order. The web UI falls back to `title` when this is empty.
+- `labels`: per-field display headings for this view. Dotted field keys must be quoted in TOML. Labels do not change `columns` or any data key.
 - `sort`: an ordered list of `{ field, dir }` keys. Directions are `asc` and `desc`; omitted `dir` defaults to `asc`. Equal values use page path as a stable tie-breaker.
 - `group_by`: a grouping field.
 - `aggregates`: aggregate calculations shown with grouped results.
@@ -217,7 +261,7 @@ columns = ["title", "author", "rating", "started"]
 
 ## Web UI, saved tables, and inline editing
 
-Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
+Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, resolves the active view's display labels by canonical field identity while retaining the original field keys, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
 
 System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions.
 
@@ -269,7 +313,7 @@ The embed is one Slate block with explicit keyboard boundaries:
 - Press <kbd>Backspace</kbd> or <kbd>Delete</kbd> to remove the selected block only while the Folio editor owns focus. Focus moves to the following text point, or the preceding point when necessary.
 - Cancelling or pressing <kbd>Escape</kbd> in the inspector returns focus to **Edit embed** for an existing block.
 
-The structured editor is the normal authoring path, but the TOML format remains public and editable. Manual TOML is useful for advanced changes or recovery. If a definition cannot be parsed, `/bases` reports it under **Base files needing repair** and provides its path. Repair that file in a text editor, then reload; Clepsydra never fabricates a replacement draft over an unparseable file.
+The structured editor is the normal authoring path, but the TOML format remains public and editable. Manual TOML is useful for advanced changes or recovery; use the exact `preview`/`labels` shapes and qualification rules above. Guided saves structurally merge managed presentation nodes, preserve comments and unknown keys when they can be retained safely, and reject a removal that would silently discard an attached comment. A valid manual edit made while Configure is open changes the file revision, so the next Save reports a conflict and preserves the local draft; reload before reapplying it. If a definition cannot be parsed, `/bases` reports it under **Base files needing repair** and provides its path. Repair that file in a text editor, then reload; Clepsydra never fabricates a replacement draft over an unparseable file.
 
 ## Neovim/LSP completions and warnings
 
@@ -291,7 +335,8 @@ Base files are parsed independently so one broken file does not poison the regis
 
 - Invalid TOML prevents that base from being evaluated. `/bases` still reports a diagnostic and the file path so you can repair it manually and reload.
 - An invalid property declaration is dropped, while valid declarations and the rest of the base remain available with a diagnostic.
-- Other validation findings are advisory. Examples include a property shadowing a system field, an undeclared filter property, a non-orderable comparison, duplicate view names, an unsupported layout, or an aggregate missing its field.
+- Presentation entries with a blank field, a present blank label, a blank view-label value, or a repeated canonical preview identity are errors at their addressed paths. Unavailable custom properties and unknown explicit `sys.` references remain warnings.
+- Other structural or type-invalid definitions produce addressed errors—for example, duplicate view names, an unsupported layout, a non-orderable comparison, or an aggregate without a compatible field. Property shadowing and undeclared-property references remain warnings.
 - Some semantic errors are detected only when a view is evaluated. The saved table replaces its grid with the view error; the unsaved preview shows the error without discarding the draft.
 
 If a base does not appear, check that it is directly under `<vault>/bases/`, ends in `.base.toml`, contains `name`, and has valid TOML. If `/bases/<slug>` says the base has no views, add at least one `[[views]]` entry. If date or number comparisons behave unexpectedly, verify the page uses native TOML values rather than quoted strings and that the property has the corresponding declaration.
@@ -313,6 +358,8 @@ remains available to Bases, including title, kind, project, declared
 properties, and relations, because protected-page encryption covers the body
 rather than frontmatter. Do not place secrets in Base definitions or
 frontmatter and assume body protection hides them.
+
+Protected-page frontmatter can still participate in Base membership and saved tables, but the generic link/tab Base projection is suppressed in full. This prevents even otherwise plaintext projected frontmatter from appearing in a protected page's passive preview card.
 
 ## Related
 
