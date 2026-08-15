@@ -128,17 +128,17 @@ function FeedsPage() {
 
   return (
     <div className="mx-auto grid w-full max-w-[1200px] auto-rows-min gap-3.5 px-2 py-2 md:h-full md:grid-rows-[auto_auto_minmax(0,1fr)] md:contain-paint md:overflow-hidden md:px-4 md:py-4">
-      <section className="cl-grid-texture border border-rule bg-paper-2 px-4 py-4 md:px-6 md:py-5">
-        <div className="cl-mono flex flex-wrap items-center gap-3 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
+      <section className="cl-grid-texture border border-rule bg-paper-2 px-3 py-2.5 md:px-4 md:py-3">
+        <div className="cl-mono flex flex-wrap items-center gap-2 text-[9px] uppercase tracking-[0.24em] text-ink-mute">
           <span aria-hidden="true" className="h-[7px] w-[7px] bg-accent" />
           <span>Codex / incoming ledger</span>
         </div>
-        <div className="mt-3 flex min-w-0 flex-col justify-between gap-3 md:flex-row md:items-end">
+        <div className="mt-1.5 flex min-w-0 flex-col justify-between gap-2 md:flex-row md:items-end">
           <div className="min-w-0">
-            <h1 className="font-sans text-[clamp(32px,5vw,52px)] font-black leading-none tracking-[-0.02em] text-ink">
+            <h1 className="font-sans text-[clamp(26px,4vw,38px)] font-black leading-none tracking-[-0.02em] text-ink">
               Feeds
             </h1>
-            <p className="cl-marg mt-2 max-w-2xl">
+            <p className="cl-marg mt-1 max-w-2xl">
               A chronological river from the subscriptions maintained in
               feeds.md.
             </p>
