@@ -993,7 +993,15 @@ describe("ViewsEditor", () => {
       filter: { field: "status", op: "eq", value: "reading" },
       aggregates: [{ fn: "avg", field: "rating" }],
     });
-    const onChange = renderViews({ views: [initial] });
+    const onChange = renderViews({
+      views: [initial],
+      properties: [
+        ...draft().properties,
+        property("prop.title", "text"),
+        property("sys.title", "text"),
+        property("sys.custom", "text"),
+      ],
+    });
 
     const select = screen.getByLabelText("Field to label");
     expect(within(select).getByRole("option", { name: "status" })).toBeEnabled();
@@ -1001,6 +1009,15 @@ describe("ViewsEditor", () => {
       within(select).getByRole("option", { name: /body.*read-only/i }),
     ).toBeEnabled();
     await user.selectOptions(select, "status");
+    expect(
+      within(select).getByRole("option", { name: "prop.title" }),
+    ).toHaveValue("prop.prop.title");
+    expect(
+      within(select).getByRole("option", { name: "sys.title" }),
+    ).toHaveValue("prop.sys.title");
+    expect(
+      within(select).getByRole("option", { name: "sys.custom" }),
+    ).toHaveValue("prop.sys.custom");
     await user.click(screen.getByRole("button", { name: "Add label" }));
     await user.clear(screen.getByLabelText("Display label for status"));
     await user.type(
@@ -1022,6 +1039,8 @@ describe("ViewsEditor", () => {
 
     await user.click(screen.getByRole("button", { name: "Reset label status" }));
     expect(onChange).toHaveBeenLastCalledWith([{ ...initial, labels: {} }]);
+    expect(screen.getByLabelText("Field to label")).toHaveFocus();
+    expect(screen.getByLabelText("Field to label")).toBeEnabled();
   });
 
   it("registers exact view label diagnostic controls", () => {

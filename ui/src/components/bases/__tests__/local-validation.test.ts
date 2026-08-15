@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { BaseDraft } from "#/components/bases/definition-model";
-import { validateBaseDraftStructure } from "#/components/bases/local-validation";
+import {
+  presentationFieldIdentity,
+  validateBaseDraftStructure,
+} from "#/components/bases/local-validation";
 
 function draft(overrides: Partial<BaseDraft> = {}): BaseDraft {
   return {
@@ -212,6 +215,17 @@ describe("validateBaseDraftStructure", () => {
     );
   });
 
+  it("resolves bare sys grammar and explicitly qualified sys-prefixed properties", () => {
+    expect(presentationFieldIdentity("sys.title")).toBe("system:title");
+    expect(presentationFieldIdentity("sys.custom")).toBeUndefined();
+    expect(presentationFieldIdentity("prop.sys.title")).toBe(
+      "property:sys.title",
+    );
+    expect(presentationFieldIdentity("prop.sys.custom")).toBe(
+      "property:sys.custom",
+    );
+  });
+
   it("accepts body and qualified shadow presentation references", () => {
     const diagnostics = validateBaseDraftStructure(
       "reading-log",
@@ -227,12 +241,24 @@ describe("validateBaseDraftStructure", () => {
             key: "prop.title",
             definition: { type: "text" },
           },
+          {
+            id: "system-prefixed-title-property",
+            key: "sys.title",
+            definition: { type: "text" },
+          },
+          {
+            id: "system-prefixed-custom-property",
+            key: "sys.custom",
+            definition: { type: "text" },
+          },
         ],
         preview: [
           { id: "body", field: "body" },
           { id: "system-title", field: "sys.title" },
           { id: "property-title", field: "prop.title" },
           { id: "prefixed-property", field: "prop.prop.title" },
+          { id: "system-prefixed-title", field: "prop.sys.title" },
+          { id: "system-prefixed-custom", field: "prop.sys.custom" },
         ],
         views: [
           {
@@ -242,6 +268,8 @@ describe("validateBaseDraftStructure", () => {
               "sys.title": "System title",
               "prop.title": "Custom title",
               "prop.prop.title": "Prefixed title",
+              "prop.sys.title": "Custom system-like title",
+              "prop.sys.custom": "Custom system-like field",
             },
           },
         ],

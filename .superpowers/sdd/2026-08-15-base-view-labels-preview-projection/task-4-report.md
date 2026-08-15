@@ -52,7 +52,7 @@ Each RED was observed before its corresponding production implementation.
 
 ```text
 bun run test -- src/components/bases/__tests__/definition-model.test.ts src/components/bases/__tests__/local-validation.test.ts src/components/bases/__tests__/PreviewPropertiesEditor.test.tsx src/components/bases/__tests__/ViewsEditor.test.tsx src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
-# 5 files passed; 92 tests passed; 0 failed
+# 5 files passed; 95 tests passed; 0 failed
 ```
 
 ## TypeScript boundary
@@ -76,3 +76,48 @@ No Task 4 production or owned-test diagnostic remains. These are the four Task 3
 ## Remaining concerns
 
 Only the four expected cross-task required-page-preview fixture errors above remain. No Task 4 concern remains.
+
+## Review corrections
+
+Review found that custom keys beginning with `sys.` were emitted bare and that
+post-mutation focus could remain on a disabled or detached button.
+
+Review RED:
+
+```text
+bun run test -- src/components/bases/__tests__/PreviewPropertiesEditor.test.tsx src/components/bases/__tests__/ViewsEditor.test.tsx src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx src/components/bases/__tests__/local-validation.test.ts
+# exit 1; 4 failed
+# Preview: sys-prefixed choices were not qualified; Add and sole-row Remove
+# did not restore focus.
+# Display labels: sys-prefixed custom keys were not qualified.
+```
+
+Corrections:
+
+- Custom keys beginning with either reserved grammar prefix now emit
+  `prop.prop.*` or `prop.sys.*`. Tests cover Preview and Display-label choices
+  for `prop.title`, `sys.title`, and `sys.custom`. Direct resolution coverage
+  proves bare `sys.title` is system, bare unknown `sys.custom` is invalid
+  system grammar, and explicitly qualified `prop.sys.*` keys are properties.
+- Preview Add focuses the new label input; Move focuses an enabled action on
+  the moved logical row and falls back to the opposite direction at either
+  boundary; Remove focuses the next/previous row label or the selector.
+  Element and input maps use callback-ref deletion on unmount rather than
+  caching whichever button happened to receive focus.
+- Display-label Reset focuses the stable enabled field selector.
+- A deterministic `crypto.randomUUID` successful-save regression proves the
+  original preview row input and DOM row survive response hydration rather
+  than receiving the response draft's fresh row identity.
+
+Focused correction GREEN:
+
+```text
+bun run test -- src/components/bases/__tests__/PreviewPropertiesEditor.test.tsx
+# 4 passed; 0 failed
+
+bun run test -- src/components/bases/__tests__/ViewsEditor.test.tsx
+# 34 passed; 0 failed
+
+bun run test -- src/components/bases/__tests__/BaseDefinitionWorkspace.test.tsx
+# 34 passed; 0 failed
+```

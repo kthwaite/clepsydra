@@ -1,6 +1,6 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseDetailResponse, BaseMutationResponse } from "#/api/bases";
 import { BaseDefinitionWorkspace } from "#/components/bases/BaseDefinitionWorkspace";
 
@@ -101,6 +101,10 @@ beforeEach(() => {
     error: null,
     refetch: vi.fn(),
   };
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe("BaseDefinitionWorkspace", () => {
@@ -249,6 +253,49 @@ describe("BaseDefinitionWorkspace", () => {
     expect(screen.getByLabelText("Display label for body")).toHaveFocus();
   });
 
+
+  it("retains deterministic preview row identity across a successful save response", async () => {
+    const initialPreviewId =
+      "00000000-0000-4000-8000-000000000001" as `${string}-${string}-${string}-${string}-${string}`;
+    const initialViewId =
+      "00000000-0000-4000-8000-000000000002" as `${string}-${string}-${string}-${string}-${string}`;
+    const responsePreviewId =
+      "00000000-0000-4000-8000-000000000003" as `${string}-${string}-${string}-${string}-${string}`;
+    const responseViewId =
+      "00000000-0000-4000-8000-000000000004" as `${string}-${string}-${string}-${string}-${string}`;
+    vi.spyOn(crypto, "randomUUID")
+      .mockReturnValueOnce(initialPreviewId)
+      .mockReturnValueOnce(initialViewId)
+      .mockReturnValueOnce(responsePreviewId)
+      .mockReturnValueOnce(responseViewId);
+    baseState.data = {
+      ...detail,
+      preview: [{ field: "body" }],
+    };
+    updateMock.mockResolvedValue(
+      mutationResponse({
+        preview: [{ field: "body", label: "Excerpt" }],
+        revision: "revision-2",
+      }),
+    );
+    const user = userEvent.setup();
+    renderWorkspace();
+    await user.click(
+      screen.getByRole("button", { name: "Preview properties" }),
+    );
+    const originalLabel = screen.getByLabelText("Label for body");
+    const originalRow = originalLabel.closest("li");
+    await user.type(originalLabel, "Excerpt");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(screen.getByText("Saved")).toBeInTheDocument());
+
+    expect(screen.getByLabelText("Label for body")).toBe(originalLabel);
+    expect(screen.getByLabelText("Label for body").closest("li")).toBe(
+      originalRow,
+    );
+    expect(crypto.randomUUID).toHaveBeenCalledTimes(4);
+  });
 
   it("keeps body out of the property declaration flow", async () => {
     renderWorkspace();

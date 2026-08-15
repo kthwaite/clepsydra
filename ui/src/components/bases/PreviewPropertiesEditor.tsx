@@ -33,7 +33,8 @@ export function presentationFieldChoices(
     }),
     ...properties.map(({ key }) => {
       const shadowed = systemKeys.has(key);
-      const qualified = shadowed || key.startsWith("prop.");
+      const qualified =
+        shadowed || key.startsWith("prop.") || key.startsWith("sys.");
       return {
         field: qualified ? `prop.${key}` : key,
         label: shadowed ? `Property ${key}` : key,
@@ -69,8 +70,14 @@ export function PreviewPropertiesEditor({
 }: PreviewPropertiesEditorProps) {
   const [fieldToAdd, setFieldToAdd] = useState("");
   const [announcement, setAnnouncement] = useState("");
-  const [focusRowId, setFocusRowId] = useState<string>();
-  const moveButtons = useRef(new Map<string, HTMLButtonElement>());
+  const [focusRequest, setFocusRequest] = useState<
+    | { kind: "move"; id: string; direction: "up" | "down" }
+    | { kind: "label"; id: string }
+    | { kind: "selector" }
+  >();
+  const rowActions = useRef(new Map<string, HTMLLIElement>());
+  const labelInputs = useRef(new Map<string, HTMLInputElement>());
+  const selector = useRef<HTMLSelectElement>(null);
   const choices = useMemo(() => presentationFieldChoices(properties), [properties]);
   const selectedIdentities = useMemo(
     () =>
@@ -83,15 +90,35 @@ export function PreviewPropertiesEditor({
   );
 
   useEffect(() => {
-    if (!focusRowId) return;
-    moveButtons.current.get(focusRowId)?.focus();
-    setFocusRowId(undefined);
-  }, [focusRowId, preview]);
+    if (!focusRequest) return;
+    if (focusRequest.kind === "selector") {
+      selector.current?.focus();
+    } else if (focusRequest.kind === "label") {
+      labelInputs.current.get(focusRequest.id)?.focus();
+    } else {
+      const actions = rowActions.current.get(focusRequest.id);
+      const preferred = actions?.querySelector<HTMLButtonElement>(
+        `button[data-preview-move-direction="${focusRequest.direction}"]`,
+      );
+      const fallbackDirection =
+        focusRequest.direction === "up" ? "down" : "up";
+      const fallback = actions?.querySelector<HTMLButtonElement>(
+        `button[data-preview-move-direction="${fallbackDirection}"]`,
+      );
+      const target = preferred?.disabled ? fallback : preferred;
+      if (target && !target.disabled) target.focus();
+    }
+    setFocusRequest(undefined);
+  }, [focusRequest, preview]);
 
   function move(from: number, to: number) {
     const row = preview[from];
     if (!row || to < 0 || to >= preview.length || from === to) return;
-    setFocusRowId(row.id);
+    setFocusRequest({
+      kind: "move",
+      id: row.id,
+      direction: to < from ? "up" : "down",
+    });
     onChange(moveItem(preview, from, to));
     setAnnouncement(
       `Moved ${row.field} to position ${to + 1} of ${preview.length}.`,
@@ -125,6 +152,10 @@ export function PreviewPropertiesEditor({
           return (
             <li
               key={row.id}
+              ref={(element) => {
+                if (element) rowActions.current.set(row.id, element);
+                else rowActions.current.delete(row.id);
+              }}
               className="grid gap-3 border-b border-border py-3 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto] sm:items-end"
             >
               <div>
@@ -140,7 +171,11 @@ export function PreviewPropertiesEditor({
               <label className={labelClass}>
                 Label for {row.field}
                 <input
-                  ref={(element) => registerFocus(labelPath, element)}
+                  ref={(element) => {
+                    registerFocus(labelPath, element);
+                    if (element) labelInputs.current.set(row.id, element);
+                    else labelInputs.current.delete(row.id);
+                  }}
                   className={controlClass}
                   value={row.label ?? ""}
                   placeholder="Use the field name"
@@ -160,11 +195,7 @@ export function PreviewPropertiesEditor({
               </label>
               <div className="flex flex-wrap justify-end gap-1">
                 <Button
-                  onFocus={(event) => {
-                    if (event.currentTarget instanceof HTMLButtonElement) {
-                      moveButtons.current.set(row.id, event.currentTarget);
-                    }
-                  }}
+                  data-preview-move-direction="up"
                   size="sm"
                   variant="ghost"
                   isDisabled={index === 0}
@@ -173,11 +204,7 @@ export function PreviewPropertiesEditor({
                   Move {row.field} up
                 </Button>
                 <Button
-                  onFocus={(event) => {
-                    if (event.currentTarget instanceof HTMLButtonElement) {
-                      moveButtons.current.set(row.id, event.currentTarget);
-                    }
-                  }}
+                  data-preview-move-direction="down"
                   size="sm"
                   variant="ghost"
                   isDisabled={index === preview.length - 1}
@@ -188,9 +215,18 @@ export function PreviewPropertiesEditor({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onPress={() =>
-                    onChange(preview.filter((current) => current.id !== row.id))
-                  }
+                  onPress={() => {
+                    const remaining = preview.filter(
+                      (current) => current.id !== row.id,
+                    );
+                    const next = remaining[Math.min(index, remaining.length - 1)];
+                    setFocusRequest(
+                      next
+                        ? { kind: "label", id: next.id }
+                        : { kind: "selector" },
+                    );
+                    onChange(remaining);
+                  }}
                 >
                   Remove preview property {row.field}
                 </Button>
@@ -218,6 +254,7 @@ export function PreviewPropertiesEditor({
         <label className={labelClass}>
           Preview property to add
           <select
+            ref={selector}
             className={controlClass}
             value={fieldToAdd}
             onChange={(event) => setFieldToAdd(event.target.value)}
@@ -252,10 +289,12 @@ export function PreviewPropertiesEditor({
           isDisabled={!fieldToAdd}
           onPress={() => {
             if (!fieldToAdd) return;
-            onChange([
-              ...preview,
-              { id: crypto.randomUUID(), field: fieldToAdd },
-            ]);
+            const added = {
+              id: crypto.randomUUID(),
+              field: fieldToAdd,
+            };
+            setFocusRequest({ kind: "label", id: added.id });
+            onChange([...preview, added]);
             setFieldToAdd("");
           }}
         >

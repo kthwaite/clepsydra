@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "#/components/ui/button";
 import type {
   BaseDiagnostic,
@@ -38,7 +38,15 @@ export function DisplayLabelsEditor({
   registerFocus,
 }: DisplayLabelsEditorProps) {
   const [fieldToAdd, setFieldToAdd] = useState("");
+  const [focusSelector, setFocusSelector] = useState(false);
+  const selector = useRef<HTMLSelectElement>(null);
   const choices = useMemo(() => presentationFieldChoices(properties), [properties]);
+
+  useEffect(() => {
+    if (!focusSelector) return;
+    selector.current?.focus();
+    setFocusSelector(false);
+  }, [focusSelector, labels]);
 
   return (
     <section
@@ -87,6 +95,7 @@ export function DisplayLabelsEditor({
                 variant="ghost"
                 onPress={() => {
                   const { [field]: _removed, ...remaining } = labels;
+                  setFocusSelector(true);
                   onChange(remaining);
                 }}
               >
@@ -112,6 +121,7 @@ export function DisplayLabelsEditor({
         <label className={labelClass}>
           Field to label
           <select
+            ref={selector}
             className={controlClass}
             value={fieldToAdd}
             onChange={(event) => setFieldToAdd(event.target.value)}
