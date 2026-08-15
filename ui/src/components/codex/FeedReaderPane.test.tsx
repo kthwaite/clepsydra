@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { components } from "#/api/schema";
@@ -37,6 +37,13 @@ const paneMocks = vi.hoisted(() => ({
     error: null as unknown,
     reset: vi.fn(),
   },
+  captureAsync: vi.fn(),
+  captureState: {
+    isPending: false,
+    error: null as unknown,
+    reset: vi.fn(),
+  },
+  openTodayJournal: vi.fn(),
   copy: vi.fn().mockResolvedValue(undefined),
   copyState: { copied: false },
 }));
@@ -51,6 +58,17 @@ vi.mock("#/api/feeds", () => ({
     mutateAsync: paneMocks.patchEntryAsync,
     ...paneMocks.patchState,
   }),
+}));
+
+vi.mock("#/api/journal", () => ({
+  useQuickCapture: () => ({
+    mutateAsync: paneMocks.captureAsync,
+    ...paneMocks.captureState,
+  }),
+}));
+
+vi.mock("#/hooks/useOpenTodayJournal", () => ({
+  useOpenTodayJournal: () => paneMocks.openTodayJournal,
 }));
 
 vi.mock("#/hooks/useCopyToClipboard", () => ({
@@ -111,6 +129,15 @@ beforeEach(() => {
   paneMocks.query.error = null;
   paneMocks.patchState.isPending = false;
   paneMocks.patchState.error = null;
+  paneMocks.captureState.isPending = false;
+  paneMocks.captureState.error = null;
+  paneMocks.captureAsync.mockResolvedValue({
+    path: "journals/2026-08-15.md",
+    canonical_name: "2026-08-15",
+    revision: "rev-captured",
+    body: "",
+    meta: { id: "journal-id", title: "2026-08-15" },
+  });
   paneMocks.patchEntryAsync.mockResolvedValue(storedEntry);
   paneMocks.copyState.copied = false;
 });
@@ -217,6 +244,240 @@ describe("FeedReaderPane", () => {
     expect(screen.getByRole("button", { name: "Copied" })).toBeVisible();
   });
 
+  it("opens a focused journal composer", async () => {
+    renderPane();
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Capture in journal" }));
+
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    expect(draft).toHaveValue(
+      "- [Stored dispatch](https://source.example/posts/stored)",
+    );
+    expect(draft).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeVisible();
+    expect(paneMocks.captureAsync).not.toHaveBeenCalled();
+  });
+
+  it("submits edited journal text with only edge whitespace trimmed", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    fireEvent.change(draft, {
+      target: {
+        value:
+          "  - [Stored dispatch](https://source.example/posts/stored)\nFollow-up note  ",
+      },
+    });
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+
+    await waitFor(() =>
+      expect(paneMocks.captureAsync).toHaveBeenCalledWith(
+        "- [Stored dispatch](https://source.example/posts/stored)\nFollow-up note",
+      ),
+    );
+  });
+
+  it("isolates capture pending state from feed entry actions", async () => {
+    const user = userEvent.setup();
+    paneMocks.captureAsync.mockReturnValue(Promise.race<never>([]));
+    const page = renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+    expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);
+
+    paneMocks.captureState.isPending = true;
+    page.rerender(
+      <FeedReaderPane
+        selectedEntryId={101}
+        feedName="Source Ledger"
+        onBack={vi.fn()}
+        onMissing={vi.fn()}
+      />,
+    );
+
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    expect(draft).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Capturing…" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Mark read" })).toBeEnabled();
+
+    const form = draft.closest("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);
+  });
+
+  it("settles capture in the reader and explicitly opens today's journal", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+
+    expect(
+      await screen.findByRole("status"),
+    ).toHaveTextContent("Captured in today’s journal.");
+    expect(
+      screen.queryByRole("textbox", { name: "Journal entry" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("article", { name: "Stored dispatch" }),
+    ).toBeVisible();
+    expect(paneMocks.patchEntryAsync).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: "Open today’s journal" }),
+    );
+    expect(paneMocks.openTodayJournal).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves an exact failed draft and retries its trimmed content", async () => {
+    const user = userEvent.setup();
+    paneMocks.captureAsync.mockRejectedValueOnce(
+      new Error("journal unavailable"),
+    );
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    await user.clear(draft);
+    await user.type(draft, "  - custom note\nsecond line  ");
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "journal unavailable",
+    );
+    expect(draft).toHaveValue("  - custom note\nsecond line  ");
+    expect(paneMocks.captureAsync).toHaveBeenNthCalledWith(
+      1,
+      "- custom note\nsecond line",
+    );
+
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+    expect(paneMocks.captureAsync).toHaveBeenNthCalledWith(
+      2,
+      "- custom note\nsecond line",
+    );
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("textbox", { name: "Journal entry" }),
+      ).not.toBeInTheDocument(),
+    );
+  });
+
+  it("cancels and regenerates the journal draft without submitting", async () => {
+    const user = userEvent.setup();
+    renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    await user.clear(draft);
+    await user.type(draft, "discard this draft");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(
+      screen.queryByRole("textbox", { name: "Journal entry" }),
+    ).not.toBeInTheDocument();
+    expect(paneMocks.captureAsync).not.toHaveBeenCalled();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    expect(screen.getByRole("textbox", { name: "Journal entry" })).toHaveValue(
+      "- [Stored dispatch](https://source.example/posts/stored)",
+    );
+  });
+
+  it("resets capture editing and settlement state between entries", async () => {
+    const user = userEvent.setup();
+    paneMocks.captureAsync.mockRejectedValueOnce(
+      new Error("journal unavailable"),
+    );
+    const page = renderPane();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    const draft = screen.getByRole("textbox", { name: "Journal entry" });
+    await user.clear(draft);
+    await user.type(draft, "entry 101 draft");
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "journal unavailable",
+    );
+
+    paneMocks.query.data = {
+      ...storedEntry,
+      id: 102,
+      guid: "entry-102",
+      title: "Second dispatch",
+      url: "https://source.example/posts/second",
+    };
+    page.rerender(
+      <FeedReaderPane
+        selectedEntryId={102}
+        feedName="Source Ledger"
+        onBack={vi.fn()}
+        onMissing={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("textbox", { name: "Journal entry" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Captured in today’s journal."),
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "Capture in journal" }),
+    );
+    expect(screen.getByRole("textbox", { name: "Journal entry" })).toHaveValue(
+      "- [Second dispatch](https://source.example/posts/second)",
+    );
+    await user.click(screen.getByRole("button", { name: "Capture" }));
+    expect(
+      await screen.findByText("Captured in today’s journal."),
+    ).toBeVisible();
+
+    paneMocks.query.data = {
+      ...storedEntry,
+      id: 103,
+      guid: "entry-103",
+      title: "Third dispatch",
+      url: "https://source.example/posts/third",
+    };
+    page.rerender(
+      <FeedReaderPane
+        selectedEntryId={103}
+        feedName="Source Ledger"
+        onBack={vi.fn()}
+        onMissing={vi.fn()}
+      />,
+    );
+    expect(
+      screen.queryByText("Captured in today’s journal."),
+    ).not.toBeInTheDocument();
+  });
+
   it("resolves the source label from the loaded entry feed id when no name is supplied", () => {
     renderPane(101, { feedName: null });
 
@@ -273,6 +534,9 @@ describe("FeedReaderPane", () => {
     ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: /copy link/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /capture in journal/i }),
     ).not.toBeInTheDocument();
   });
 
