@@ -22,7 +22,14 @@ use super::base::{
     validate_definition,
 };
 
-const MANAGED_KEYS: &[&str] = &["name", "description", "filter", "properties", "views"];
+const MANAGED_KEYS: &[&str] = &[
+    "name",
+    "description",
+    "filter",
+    "preview",
+    "properties",
+    "views",
+];
 static BASE_DOCUMENT_WRITER: Mutex<()> = Mutex::new(());
 
 #[derive(Debug)]
@@ -328,7 +335,14 @@ fn merge_document(
     for key in MANAGED_KEYS {
         let current_item = current.as_table().get(key);
         let desired_item = desired.as_table().get(key);
-        if *key == "views" {
+        if *key == "preview" {
+            merge_preview_key(
+                document.as_table_mut(),
+                key,
+                current_item,
+                desired_item,
+            )?;
+        } else if *key == "views" {
             merge_views_key(
                 document.as_table_mut(),
                 key,
@@ -447,6 +461,117 @@ fn merge_table_key(
             }
         },
     }
+}
+
+fn merge_preview_key(
+    raw: &mut Table,
+    key: &str,
+    current: Option<&Item>,
+    desired: Option<&Item>,
+) -> Result<(), BaseDocumentError> {
+    match (raw.get_mut(key), current, desired) {
+        (
+            Some(Item::Value(Value::Array(raw_preview))),
+            Some(Item::Value(Value::Array(current_preview))),
+            Some(Item::Value(Value::Array(desired_preview))),
+        ) => merge_preview_array(raw_preview, current_preview, desired_preview, key),
+        _ => merge_table_key(raw, key, current, desired, key),
+    }
+}
+
+fn merge_preview_array(
+    raw: &mut Array,
+    current: &Array,
+    desired: &Array,
+    path: &str,
+) -> Result<(), BaseDocumentError> {
+    if raw.len() != current.len() {
+        return Err(unsupported(
+            path,
+            "the current array shape is not safely addressable",
+        ));
+    }
+
+    let current_fields = preview_fields(current, path)?;
+    let desired_fields = preview_fields(desired, path)?;
+    let mut claimed = vec![false; current.len()];
+    let mapping = desired_fields
+        .iter()
+        .map(|desired_field| {
+            current_fields
+                .iter()
+                .enumerate()
+                .find(|(index, current_field)| {
+                    !claimed[*index] && *current_field == desired_field
+                })
+                .map(|(index, _)| {
+                    claimed[index] = true;
+                    index
+                })
+        })
+        .collect::<Vec<_>>();
+    let structurally_changed = mapping.len() != current.len()
+        || mapping
+            .iter()
+            .enumerate()
+            .any(|(desired_index, current_index)| *current_index != Some(desired_index));
+    if !structurally_changed {
+        return merge_array(raw, current, desired, path);
+    }
+
+    let decor = raw.decor().clone();
+    let trailing = raw.trailing().clone();
+    let trailing_comma = raw.trailing_comma();
+    let mut source = std::mem::take(raw)
+        .into_iter()
+        .map(Some)
+        .collect::<Vec<_>>();
+    let mut merged = Vec::with_capacity(desired.len());
+    for (desired_index, current_index) in mapping.into_iter().enumerate() {
+        let desired_value = desired.get(desired_index).expect("mapping follows desired");
+        let raw_value = match current_index {
+            Some(current_index) => {
+                let mut raw_value = source[current_index].take().expect("identity is unique");
+                merge_value(
+                    &mut raw_value,
+                    current.get(current_index).expect("field collected"),
+                    desired_value,
+                    &format!("{path}[{desired_index}]"),
+                )?;
+                raw_value
+            }
+            None => desired_value.clone(),
+        };
+        merged.push(raw_value);
+    }
+    for (current_index, raw_value) in source.into_iter().enumerate() {
+        if let Some(raw_value) = raw_value {
+            ensure_value_removable(
+                &raw_value,
+                current.get(current_index).expect("source follows current"),
+                &format!("{path}[{current_index}]"),
+            )?;
+        }
+    }
+
+    *raw = merged.into_iter().collect();
+    *raw.decor_mut() = decor;
+    raw.set_trailing(trailing);
+    raw.set_trailing_comma(trailing_comma);
+    Ok(())
+}
+
+fn preview_fields<'a>(preview: &'a Array, path: &str) -> Result<Vec<&'a str>, BaseDocumentError> {
+    preview
+        .iter()
+        .map(|value| {
+            value
+                .as_inline_table()
+                .and_then(|entry| entry.get("field"))
+                .and_then(Value::as_str)
+                .ok_or_else(|| unsupported(path, "a preview entry has no string field identity"))
+        })
+        .collect()
 }
 
 fn merge_views_key(
@@ -1347,7 +1472,9 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
-    use crate::vault::base::{BaseFile, PropertyDefinition, PropertyType};
+    use crate::vault::base::{
+        BaseFile, PreviewFieldDefinition, PropertyDefinition, PropertyType,
+    };
     use std::sync::mpsc;
     use std::thread;
 
@@ -1473,6 +1600,296 @@ mod tests {
         assert_eq!(stored.definition.slug, "reading");
         assert_eq!(stored.definition.file.name, "Reading");
         assert_eq!(stored.revision, revision(MINIMAL_BASE));
+    }
+
+    #[test]
+    fn create_serializes_ordered_preview_entries_and_view_labels() {
+        let root = tempfile::tempdir().unwrap();
+        let file: BaseFile = toml::from_str(
+            r#"
+name = "Reading"
+preview = [
+    { field = "body", label = "Excerpt" },
+    { field = "title", label = "Headline" },
+]
+properties = {}
+
+[[views]]
+name = "All"
+labels = { title = "Headline", body = "Excerpt" }
+layout = "table"
+"#,
+        )
+        .unwrap();
+
+        let stored = create(root.path(), "reading", &file).unwrap();
+        let raw = fs::read_to_string(root.path().join("bases/reading.base.toml")).unwrap();
+
+        assert!(
+            raw.find(r#"field = "body""#).unwrap() < raw.find(r#"field = "title""#).unwrap()
+        );
+        assert!(raw.contains(r#"labels = { body = "Excerpt", title = "Headline" }"#));
+        assert_eq!(stored.revision, revision(&raw));
+    }
+
+    #[test]
+    fn preview_updates_preserve_root_comments_unknown_keys_and_order() {
+        let fixture = fixture_base(
+            "# owner note\nname = \"Reading\"\nplugin_key = \"keep\"\nproperties = {}\n",
+        );
+        let mut stored = load_for_test(fixture.root(), "reading");
+
+        stored.definition.file.preview = vec![
+            PreviewFieldDefinition {
+                field: "body".into(),
+                label: "Excerpt".into(),
+            },
+            PreviewFieldDefinition {
+                field: "title".into(),
+                label: "Headline".into(),
+            },
+        ];
+        stored = update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &[],
+        )
+        .unwrap();
+        let added = fs::read_to_string(fixture.path()).unwrap();
+        assert_eq!(stored.revision, revision(&added));
+        assert!(added.starts_with("# owner note\n"));
+        assert!(added.contains("plugin_key = \"keep\""));
+        assert!(added.contains(r#"field = "body""#), "{added}");
+        assert!(added.contains(r#"field = "title""#), "{added}");
+        assert!(
+            added.find(r#"field = "body""#).unwrap()
+                < added.find(r#"field = "title""#).unwrap()
+        );
+
+        stored.definition.file.preview[0].label = "Summary".into();
+        stored.definition.file.preview.swap(0, 1);
+        stored = update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &[],
+        )
+        .unwrap();
+        let edited = fs::read_to_string(fixture.path()).unwrap();
+        assert_eq!(stored.revision, revision(&edited));
+        assert!(edited.starts_with("# owner note\n"));
+        assert!(edited.contains("plugin_key = \"keep\""));
+        assert!(edited.contains(r#"label = "Summary""#));
+        assert!(
+            edited.find(r#"field = "title""#).unwrap()
+                < edited.find(r#"field = "body""#).unwrap()
+        );
+
+        stored.definition.file.preview.remove(0);
+        stored = update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &[],
+        )
+        .unwrap();
+        let removed = fs::read_to_string(fixture.path()).unwrap();
+        assert!(removed.starts_with("# owner note\n"));
+        assert!(removed.contains("plugin_key = \"keep\""));
+        assert!(!removed.contains(r#"field = "title""#));
+        assert!(removed.contains(r#"field = "body""#));
+
+        stored.definition.file.preview.clear();
+        update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &[],
+        )
+        .unwrap();
+        let emptied = fs::read_to_string(fixture.path()).unwrap();
+        assert!(emptied.starts_with("# owner note\n"));
+        assert!(emptied.contains("plugin_key = \"keep\""));
+        assert!(!emptied.contains("preview"));
+    }
+
+    #[test]
+    fn view_label_updates_preserve_view_comments_and_unknown_keys() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\nproperties = {}\n\n# saved view\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"keep\"\n",
+        );
+        let mut stored = load_for_test(fixture.root(), "reading");
+        let origins = [ViewOrigin::Existing { name: "All".into() }];
+
+        stored.definition.file.views[0]
+            .labels
+            .insert("title".into(), "Headline".into());
+        stored = update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &origins,
+        )
+        .unwrap();
+        let added = fs::read_to_string(fixture.path()).unwrap();
+        assert_eq!(stored.revision, revision(&added));
+        assert!(added.contains("# saved view\n[[views]]"));
+        assert!(added.contains("plugin_view = \"keep\""));
+        assert!(added.contains(r#"labels = { title = "Headline" }"#));
+
+        stored.definition.file.views[0]
+            .labels
+            .insert("title".into(), "Display title".into());
+        stored = update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &origins,
+        )
+        .unwrap();
+        let edited = fs::read_to_string(fixture.path()).unwrap();
+        assert_eq!(stored.revision, revision(&edited));
+        assert!(edited.contains("# saved view\n[[views]]"));
+        assert!(edited.contains("plugin_view = \"keep\""));
+        assert!(edited.contains(r#"labels = { title = "Display title" }"#));
+
+        stored.definition.file.views[0].labels.clear();
+        update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &origins,
+        )
+        .unwrap();
+        let removed = fs::read_to_string(fixture.path()).unwrap();
+        assert!(removed.contains("# saved view\n[[views]]"));
+        assert!(removed.contains("plugin_view = \"keep\""));
+        assert!(!removed.contains("labels"));
+    }
+
+    #[test]
+    fn reordered_and_renamed_view_label_edits_follow_view_origins() {
+        let fixture = fixture_base(
+            "name = \"Reading\"\nproperties = {}\n\n# logical a\n[[views]]\nname = \"A\"\nlabels = { title = \"A title\" }\nlayout = \"table\"\nplugin_view = \"for-a\"\n\n# logical b\n[[views]]\nname = \"B\"\nlabels = { title = \"B title\" }\nlayout = \"table\"\nplugin_view = \"for-b\"\n",
+        );
+        let mut stored = load_for_test(fixture.root(), "reading");
+        stored.definition.file.views.swap(0, 1);
+        stored.definition.file.views[0].name = "B renamed".into();
+        stored.definition.file.views[0]
+            .labels
+            .insert("title".into(), "B updated".into());
+        stored.definition.file.views[1].name = "A renamed".into();
+        stored.definition.file.views[1]
+            .labels
+            .insert("title".into(), "A updated".into());
+
+        update(
+            fixture.root(),
+            "reading",
+            &stored.revision,
+            &stored.definition.file,
+            &[
+                ViewOrigin::Existing { name: "B".into() },
+                ViewOrigin::Existing { name: "A".into() },
+            ],
+        )
+        .unwrap();
+        let after = fs::read_to_string(fixture.path()).unwrap();
+
+        let b = after.find("# logical b").unwrap();
+        let a = after.find("# logical a").unwrap();
+        assert!(b < a);
+        assert!(after[b..a].contains("name = \"B renamed\""));
+        assert!(after[b..a].contains(r#"labels = { title = "B updated" }"#));
+        assert!(after[b..a].contains("plugin_view = \"for-b\""));
+        assert!(after[a..].contains("name = \"A renamed\""));
+        assert!(after[a..].contains(r#"labels = { title = "A updated" }"#));
+        assert!(after[a..].contains("plugin_view = \"for-a\""));
+    }
+
+    #[test]
+    fn commented_presentation_node_removal_is_rejected_without_touching_bytes() {
+        let preview_fixture = fixture_base(
+            "name = \"Reading\"\npreview = [{ field = \"body\", label = \"Excerpt\" }] # keep preview context\nproperties = {}\n",
+        );
+        let preview_before = fs::read(preview_fixture.path()).unwrap();
+        let preview_stored = load_for_test(preview_fixture.root(), "reading");
+        let mut preview_next = preview_stored.definition.file;
+        preview_next.preview.clear();
+
+        let preview_error = update(
+            preview_fixture.root(),
+            "reading",
+            &preview_stored.revision,
+            &preview_next,
+            &[],
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            preview_error,
+            BaseDocumentError::UnsupportedDocument(_)
+        ));
+        assert_eq!(fs::read(preview_fixture.path()).unwrap(), preview_before);
+
+        let labels_fixture = fixture_base(
+            "name = \"Reading\"\nproperties = {}\n\n[[views]]\nname = \"All\"\nlabels = { title = \"Headline\" } # keep labels context\nlayout = \"table\"\n",
+        );
+        let labels_before = fs::read(labels_fixture.path()).unwrap();
+        let labels_stored = load_for_test(labels_fixture.root(), "reading");
+        let mut labels_next = labels_stored.definition.file;
+        labels_next.views[0].labels.clear();
+
+        let labels_error = update(
+            labels_fixture.root(),
+            "reading",
+            &labels_stored.revision,
+            &labels_next,
+            &[ViewOrigin::Existing { name: "All".into() }],
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            labels_error,
+            BaseDocumentError::UnsupportedDocument(_)
+        ));
+        assert_eq!(fs::read(labels_fixture.path()).unwrap(), labels_before);
+    }
+
+    #[test]
+    fn stale_presentation_update_preserves_exact_bytes() {
+        let fixture = fixture_base(
+            "# owner note\nname = \"Reading\"\nproperties = {}\n\n[[views]]\nname = \"All\"\nlayout = \"table\"\nplugin_view = \"keep\"\n",
+        );
+        let before = fs::read(fixture.path()).unwrap();
+        let mut next = load_for_test(fixture.root(), "reading").definition.file;
+        next.preview.push(PreviewFieldDefinition {
+            field: "body".into(),
+            label: "Excerpt".into(),
+        });
+        next.views[0]
+            .labels
+            .insert("title".into(), "Headline".into());
+
+        let error = update(
+            fixture.root(),
+            "reading",
+            "stale",
+            &next,
+            &[ViewOrigin::Existing { name: "All".into() }],
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, BaseDocumentError::Conflict { .. }));
+        assert_eq!(fs::read(fixture.path()).unwrap(), before);
     }
 
     #[test]
