@@ -349,8 +349,8 @@ describe("FeedReaderPane", () => {
     expect(screen.getByRole("button", { name: "Mark read" })).toBeEnabled();
 
     const form = draft.closest("form");
-    expect(form).not.toBeNull();
-    fireEvent.submit(form!);
+    if (form === null) throw new Error("Journal capture form was not rendered");
+    fireEvent.submit(form);
     expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);
   });
 
@@ -365,11 +365,11 @@ describe("FeedReaderPane", () => {
     );
     const draft = screen.getByRole("textbox", { name: "Journal entry" });
     const form = draft.closest("form");
-    expect(form).not.toBeNull();
+    if (form === null) throw new Error("Journal capture form was not rendered");
 
     act(() => {
-      form!.requestSubmit();
-      form!.requestSubmit();
+      form.requestSubmit();
+      form.requestSubmit();
     });
 
     expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);
@@ -390,15 +390,15 @@ describe("FeedReaderPane", () => {
     );
     const draft = screen.getByRole("textbox", { name: "Journal entry" });
     const form = draft.closest("form");
-    expect(form).not.toBeNull();
+    if (form === null) throw new Error("Journal capture form was not rendered");
     const cancel = screen.getByRole("button", { name: "Cancel" });
     const open = screen.getByRole("button", { name: "Capture in journal" });
 
     act(() => {
-      form!.requestSubmit();
+      form.requestSubmit();
       fireEvent.click(cancel);
       fireEvent.click(open);
-      form!.requestSubmit();
+      form.requestSubmit();
     });
 
     expect(paneMocks.captureAsync).toHaveBeenCalledTimes(1);

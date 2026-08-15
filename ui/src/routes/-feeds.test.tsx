@@ -34,6 +34,13 @@ const routeMocks = vi.hoisted(() => ({
     error: null as unknown,
     reset: vi.fn(),
   },
+  captureAsync: vi.fn(),
+  captureState: {
+    isPending: false,
+    error: null as unknown,
+    reset: vi.fn(),
+  },
+  openTodayJournal: vi.fn(),
 }));
 
 const directEntry: FeedEntry = {
@@ -114,6 +121,17 @@ vi.mock("#/api/feeds", () => ({
   }),
 }));
 
+vi.mock("#/api/journal", () => ({
+  useQuickCapture: () => ({
+    mutateAsync: routeMocks.captureAsync,
+    ...routeMocks.captureState,
+  }),
+}));
+
+vi.mock("#/hooks/useOpenTodayJournal", () => ({
+  useOpenTodayJournal: () => routeMocks.openTodayJournal,
+}));
+
 vi.mock("#/components/codex/Card", () => ({
   Card: ({ label, children }: { label: string; children: ReactNode }) => (
     <section aria-label={label}>{children}</section>
@@ -175,6 +193,9 @@ beforeEach(() => {
   routeMocks.patchState.isPending = false;
   routeMocks.patchState.error = null;
   routeMocks.patchEntryAsync.mockResolvedValue(directEntry);
+  routeMocks.captureState.isPending = false;
+  routeMocks.captureState.error = null;
+  routeMocks.captureAsync.mockResolvedValue({ path: "journals/20260815.md" });
 });
 
 describe("feeds route controls", () => {
