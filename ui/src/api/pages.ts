@@ -70,8 +70,12 @@ export function useArchivePage() {
 export function useUpdatePage() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/vault/pages/{path}", {
-    onSuccess: (_data, variables) =>
-      invalidatePageContent(qc, variables.params.path.path),
+    onSuccess: (data, variables) =>
+      invalidatePageContent(
+        qc,
+        variables.params.path.path,
+        data.meta.id,
+      ),
   });
 }
 

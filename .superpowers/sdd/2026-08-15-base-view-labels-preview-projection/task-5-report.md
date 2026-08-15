@@ -50,3 +50,42 @@ git diff --check
 ## Remaining concerns
 
 No implementation concern found. Visual inspection remains unobserved because the browser device could not open the locally reachable Storybook server.
+
+## Review correction: page mutation projection invalidation
+
+Review found that scoped page-content invalidation excluded the new UUID-keyed property projection, leaving active generic previews stale after ordinary updates and page protection transitions.
+
+Correction RED:
+
+```text
+bun run test -- src/api/pages.test.ts src/api/encryption.test.tsx
+# exit 1; 2 files failed; 2 new cache-level tests failed
+# active projection observers retained the pre-update/pre-protection response
+```
+
+Correction:
+
+- Extended the existing central `invalidatePageContent` convention rather than adding a parallel invalidator. Scoped mutations now invalidate the exact generated property-projection key when a reliable UUID is supplied and the projection path prefix otherwise; existing page-detail/list scoping and aggregate invalidation remain unchanged.
+- `useUpdatePage` supplies the successful response UUID. Protect and unprotect supply the request UUID while retaining block-plaintext clearing and folder invalidation.
+- Because journal and block mutations already use `invalidatePageContent(path)` without a reliable UUID at their boundary, they automatically receive safe property-projection prefix invalidation.
+- Added active `QueryObserver` regressions proving body update refetches current projected body data and protect/unprotect refetch empty protected state followed by restored authoritative values.
+
+Correction GREEN:
+
+```text
+bun run test -- src/api/pages.test.ts src/api/encryption.test.tsx
+# 2 files passed; 5 tests passed; 0 failed
+
+bun run typecheck
+# exit 0
+```
+
+Final combined focused verification:
+
+```text
+bun run test -- src/api/bases.test.ts src/api/pages.test.ts src/api/encryption.test.tsx src/components/codex/__tests__/PreviewBody.test.tsx src/components/codex/__tests__/LinkPreviewLayer.test.tsx src/components/codex/__tests__/TabPreviewCard.test.tsx
+# 6 files passed; 29 tests passed; 0 failed
+
+bun run typecheck
+# exit 0
+```

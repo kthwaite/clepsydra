@@ -115,6 +115,31 @@ function pageDetailKeyPath(queryKey: readonly unknown[]): string | undefined {
   return params?.params?.path?.path;
 }
 
+/** Pull the UUID param out of a generated page-property projection key. */
+function pagePropertyProjectionKeyUuid(
+  queryKey: readonly unknown[],
+): string | undefined {
+  const params = queryKey[2] as
+    | { params?: { path?: { uuid?: string } } }
+    | undefined;
+  return params?.params?.path?.uuid;
+}
+
+function invalidatePagePropertyProjection(
+  qc: QueryClient,
+  uuid?: string,
+): void {
+  if (!uuid) {
+    invalidateByPath(qc, queryKeys.pages.propertyProjectionPath);
+    return;
+  }
+  qc.invalidateQueries({
+    predicate: (query) =>
+      query.queryKey[1] === queryKeys.pages.propertyProjectionPath &&
+      pagePropertyProjectionKeyUuid(query.queryKey) === uuid,
+  });
+}
+
 /**
  * Invalidate every cache derived from a page body — both openapi-react-query
  * paths (pages, index) and the hand-rolled key trees (blocks, tasks, agenda,
@@ -122,11 +147,16 @@ function pageDetailKeyPath(queryKey: readonly unknown[]): string | undefined {
  *
  * Pass `path` (the edited page) to scope the page-body invalidation to just
  * that folio plus the page list, instead of marking *every* cached page body
- * stale. The index tree and the aggregate views (blocks/tasks/agenda/journal)
- * always stay broad: links are bidirectional, so editing one page can change
- * another's backlinks, and those views span the whole vault.
+ * stale. Pass `uuid` when the successful mutation identifies it so the
+ * authoritative Base projection can be invalidated exactly; otherwise all
+ * page-property projections are invalidated. The index tree and aggregate
+ * views stay broad because their data spans the vault.
  */
-export function invalidatePageContent(qc: QueryClient, path?: string) {
+export function invalidatePageContent(
+  qc: QueryClient,
+  path?: string,
+  uuid?: string,
+) {
   if (path) {
     const detailTemplate = `${queryKeys.pages.pathPrefix}/{path}`;
     qc.invalidateQueries({
@@ -138,6 +168,7 @@ export function invalidatePageContent(qc: QueryClient, path?: string) {
         return false;
       },
     });
+    invalidatePagePropertyProjection(qc, uuid);
   } else {
     invalidateByPath(qc, queryKeys.pages.pathPrefix);
   }
