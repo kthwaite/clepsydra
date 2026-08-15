@@ -4,6 +4,14 @@ import webExtension from "vite-plugin-web-extension";
 
 const target = process.env.TARGET || "chrome";
 const isFirefox = target === "firefox";
+// Safari consumes the same MV3 manifest as Chromium, but builds into its own
+// directory: the generated Xcode wrapper project references dist-safari/ in
+// place, so `bun run dev`'s watch build must never write over it.
+const outDir = isFirefox
+	? "../dist-firefox"
+	: target === "safari"
+		? "../dist-safari"
+		: "../dist";
 
 export default defineConfig({
 	root: "src",
@@ -50,7 +58,7 @@ export default defineConfig({
 		},
 	},
 	build: {
-		outDir: isFirefox ? "../dist-firefox" : "../dist",
+		outDir,
 		emptyOutDir: true,
 	},
 });
