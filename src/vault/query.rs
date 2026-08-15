@@ -26,7 +26,7 @@ use super::link::normalize_links_to_target;
 // ---------------------------------------------------------------------------
 
 /// A system field backed by the `pages` table (or `tags`/`canonical_names`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SysField {
     Id,
     Path,
@@ -117,6 +117,18 @@ impl SysField {
     }
 }
 
+/// Canonical identity for fields that may be projected for presentation.
+///
+/// Identity intentionally excludes spelling: bare system references and
+/// `sys.` references compare equal, while explicitly qualified properties
+/// remain distinct from shadowed system fields.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ProjectionFieldIdentity {
+    System(SysField),
+    Property(String),
+    Body,
+}
+
 /// A field reference resolved against the query context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolvedField {
@@ -172,31 +184,42 @@ pub enum QueryError {
     Sqlite(#[from] rusqlite::Error),
 }
 
-/// Resolve a field reference. Bare names bind system-first; `sys.<name>` /
-/// `prop.<name>` disambiguate.
-pub fn resolve_field(field: &str, ctx: &QueryContext) -> Result<ResolvedField, QueryError> {
+/// Resolve a presentation field to its canonical identity. Bare names bind
+/// system-first; `sys.<name>` / `prop.<name>` disambiguate. All accepted body
+/// spellings resolve to the projection-only body identity.
+pub fn resolve_projection_field(
+    field: &str,
+) -> Result<ProjectionFieldIdentity, QueryError> {
     if is_body_field_reference(field) {
-        return Err(QueryError::ProjectionOnlyBody);
+        return Ok(ProjectionFieldIdentity::Body);
     }
     if let Some(name) = field.strip_prefix("sys.") {
         return SysField::from_name(name)
-            .map(ResolvedField::Sys)
+            .map(ProjectionFieldIdentity::System)
             .ok_or_else(|| QueryError::UnknownSystemField(name.to_string()));
     }
     if let Some(name) = field.strip_prefix("prop.") {
-        return Ok(ResolvedField::Prop {
-            key: name.to_string(),
-            ty: ctx.property_type(name),
-        });
+        return Ok(ProjectionFieldIdentity::Property(name.to_string()));
     }
     if let Some(sys) = SysField::from_name(field) {
-        return Ok(ResolvedField::Sys(sys));
+        return Ok(ProjectionFieldIdentity::System(sys));
     }
-    Ok(ResolvedField::Prop {
-        key: field.to_string(),
-        ty: ctx.property_type(field),
-    })
+    Ok(ProjectionFieldIdentity::Property(field.to_string()))
 }
+
+/// Resolve a general query field. Presentation-only `body` remains rejected
+/// for filter, sort, group, and aggregate callers.
+pub fn resolve_field(field: &str, ctx: &QueryContext) -> Result<ResolvedField, QueryError> {
+    match resolve_projection_field(field)? {
+        ProjectionFieldIdentity::System(sys) => Ok(ResolvedField::Sys(sys)),
+        ProjectionFieldIdentity::Property(key) => {
+            let ty = ctx.property_type(&key);
+            Ok(ResolvedField::Prop { key, ty })
+        }
+        ProjectionFieldIdentity::Body => Err(QueryError::ProjectionOnlyBody),
+    }
+}
+
 
 // ---------------------------------------------------------------------------
 // Filter compilation
@@ -1239,6 +1262,36 @@ mod tests {
         assert!(matches!(
             resolve_field("sys.bogus", &ctx),
             Err(QueryError::UnknownSystemField(_))
+        ));
+    }
+
+    #[test]
+    fn projection_field_resolution_has_canonical_system_property_and_body_identities() {
+        assert_eq!(
+            resolve_projection_field("title").unwrap(),
+            ProjectionFieldIdentity::System(SysField::Title)
+        );
+        assert_eq!(
+            resolve_projection_field("sys.title").unwrap(),
+            ProjectionFieldIdentity::System(SysField::Title)
+        );
+        assert_eq!(
+            resolve_projection_field("prop.title").unwrap(),
+            ProjectionFieldIdentity::Property("title".to_string())
+        );
+        assert_eq!(
+            resolve_projection_field("custom").unwrap(),
+            ProjectionFieldIdentity::Property("custom".to_string())
+        );
+        for field in ["body", "sys.body", "prop.body"] {
+            assert_eq!(
+                resolve_projection_field(field).unwrap(),
+                ProjectionFieldIdentity::Body
+            );
+        }
+        assert!(matches!(
+            resolve_projection_field("sys.missing"),
+            Err(QueryError::UnknownSystemField(field)) if field == "missing"
         ));
     }
 

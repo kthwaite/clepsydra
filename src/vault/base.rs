@@ -8,7 +8,7 @@
 
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     path::Path,
 };
 
@@ -194,10 +194,20 @@ pub enum AggregateFn {
     Max,
 }
 
+/// One field shown in a Base's default preview, in configured order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct PreviewFieldDefinition {
+    pub field: String,
+    pub label: String,
+}
+
 /// A saved view: layout, optional extra filter, sort, grouping, columns.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ViewDefinition {
     pub name: String,
+    /// Per-field display labels. A sorted map makes wire serialization stable.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
     #[serde(default = "default_layout")]
     pub layout: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -224,6 +234,8 @@ pub struct BaseFile {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub preview: Vec<PreviewFieldDefinition>,
     /// Declared properties in file order (serialized as a key → definition map).
     #[serde(default, with = "property_map")]
     pub properties: Vec<(String, PropertyDefinition)>,
@@ -241,6 +253,8 @@ struct RawBaseFile {
     description: Option<String>,
     #[serde(default)]
     filter: Option<Filter>,
+    #[serde(default)]
+    preview: Vec<PreviewFieldDefinition>,
     #[serde(default)]
     properties: toml::Table,
     #[serde(default)]
@@ -972,6 +986,7 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
         name: raw.name,
         description: raw.description,
         filter: raw.filter,
+        preview: raw.preview,
         properties,
         views: raw.views,
     };
@@ -1016,6 +1031,32 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
         }
     }
 
+    let mut preview_fields = HashSet::new();
+    for (preview_index, definition) in base.file.preview.iter().enumerate() {
+        if definition.label.trim().is_empty() {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(format!("preview[{preview_index}].label")),
+                "preview label must not be empty".to_string(),
+            );
+        }
+        let path = format!("preview[{preview_index}].field");
+        if let Some(identity) = validate_projection_field(
+            base,
+            &definition.field,
+            &path,
+            "preview",
+            &mut push,
+        ) && !preview_fields.insert(identity)
+        {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path),
+                format!("duplicate preview field `{}`", definition.field),
+            );
+        }
+    }
+
     // Filter fields referencing undeclared properties are a warning (the
     // vault may legitimately carry keys the base doesn't declare); op/type
     // mismatches are hard facts.
@@ -1049,6 +1090,23 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                     "view `{}` uses unsupported layout `{}` (v1 supports `table`)",
                     view.name, view.layout
                 ),
+            );
+        }
+        for (field, label) in &view.labels {
+            let path = format!("views[{view_index}].labels.{field}");
+            if label.trim().is_empty() {
+                push(
+                    BaseDiagnosticSeverity::Error,
+                    Some(path.clone()),
+                    format!("view `{}` label for `{field}` must not be empty", view.name),
+                );
+            }
+            validate_projection_field(
+                base,
+                field,
+                &path,
+                &format!("view `{}` label", view.name),
+                &mut push,
             );
         }
         let mut body_seen = false;
@@ -1159,6 +1217,41 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                     ),
                 );
             }
+        }
+    }
+}
+
+fn validate_projection_field(
+    base: &BaseDefinition,
+    field: &str,
+    path: &str,
+    context: &str,
+    push: &mut impl FnMut(BaseDiagnosticSeverity, Option<String>, String),
+) -> Option<crate::vault::query::ProjectionFieldIdentity> {
+    use crate::vault::query::{ProjectionFieldIdentity, resolve_projection_field};
+
+    match resolve_projection_field(field) {
+        Ok(identity) => {
+            if let ProjectionFieldIdentity::Property(key) = &identity
+                && base.property(key).is_none()
+            {
+                push(
+                    BaseDiagnosticSeverity::Warning,
+                    Some(path.to_string()),
+                    format!(
+                        "{context}: property `{key}` is not declared in [properties] and is unavailable"
+                    ),
+                );
+            }
+            Some(identity)
+        }
+        Err(error) => {
+            push(
+                BaseDiagnosticSeverity::Warning,
+                Some(path.to_string()),
+                format!("{context}: {error}"),
+            );
+            None
         }
     }
 }
@@ -1362,11 +1455,13 @@ columns = ["title", "author", "rating", "finished"]
             description: None,
             filter: None,
             properties: Vec::new(),
+            preview: Vec::new(),
             views: names
                 .into_iter()
                 .map(|name| ViewDefinition {
                     name: name.to_string(),
                     layout: default_layout(),
+                    labels: BTreeMap::new(),
                     filter: None,
                     sort: Vec::new(),
                     group_by: None,
@@ -1463,6 +1558,202 @@ layout = "table"
     fn structured_base_defaults_omitted_properties() {
         let file: BaseFile = toml::from_str("name = \"Reading\"\n").unwrap();
         assert!(file.properties.is_empty());
+    }
+
+    #[test]
+    fn legacy_toml_defaults_presentation_fields_to_empty() {
+        let file: BaseFile =
+            toml::from_str("name = \"Reading\"\n\n[[views]]\nname = \"All\"\n").unwrap();
+
+        assert!(file.preview.is_empty());
+        assert!(file.views[0].labels.is_empty());
+    }
+
+    #[test]
+    fn presentation_fields_round_trip_references_without_reordering_preview() {
+        let source = r#"
+name = "Reading"
+preview = [
+    { field = "body", label = "Excerpt" },
+    { field = "title", label = "Title" },
+    { field = "sys.kind", label = "Kind" },
+    { field = "prop.kind", label = "Custom kind" },
+]
+
+[[views]]
+name = "All"
+labels = { body = "Excerpt", title = "Title", "sys.kind" = "Kind", "prop.kind" = "Custom kind" }
+"#;
+
+        let file: BaseFile = toml::from_str(source).unwrap();
+        assert_eq!(
+            file.preview
+                .iter()
+                .map(|definition| (definition.field.as_str(), definition.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("body", "Excerpt"),
+                ("title", "Title"),
+                ("sys.kind", "Kind"),
+                ("prop.kind", "Custom kind"),
+            ]
+        );
+        assert_eq!(file.views[0].labels["body"], "Excerpt");
+        assert_eq!(file.views[0].labels["title"], "Title");
+        assert_eq!(file.views[0].labels["sys.kind"], "Kind");
+        assert_eq!(file.views[0].labels["prop.kind"], "Custom kind");
+
+        let serialized = toml::to_string(&file).unwrap();
+        let round_tripped: BaseFile = toml::from_str(&serialized).unwrap();
+        assert_eq!(
+            round_tripped
+                .preview
+                .iter()
+                .map(|definition| definition.field.as_str())
+                .collect::<Vec<_>>(),
+            vec!["body", "title", "sys.kind", "prop.kind"]
+        );
+        assert_eq!(round_tripped.views[0].labels, file.views[0].labels);
+    }
+
+    #[test]
+    fn empty_presentation_collections_are_omitted_on_serialization() {
+        let file: BaseFile =
+            toml::from_str("name = \"Reading\"\n\n[[views]]\nname = \"All\"\n").unwrap();
+
+        let serialized = toml::to_string(&file).unwrap();
+        assert!(!serialized.contains("preview"));
+        assert!(!serialized.contains("labels"));
+    }
+
+    #[test]
+    fn presentation_labels_reject_whitespace_only_values_at_addressed_paths() {
+        let content = r#"
+name = "Reading"
+preview = [{ field = "title", label = "   " }]
+
+[[views]]
+name = "All"
+labels = { title = "\t" }
+"#;
+
+        let (_, diagnostics) = parse_base(&path("bases/reading.base.toml"), content);
+
+        for expected_path in ["preview[0].label", "views[0].labels.title"] {
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Error
+                    && diagnostic.path.as_deref() == Some(expected_path)
+            }));
+        }
+    }
+
+    #[test]
+    fn duplicate_preview_canonical_identities_are_errors_at_later_rows() {
+        let content = r#"
+name = "Reading"
+preview = [
+    { field = "title", label = "Title" },
+    { field = "sys.title", label = "System title" },
+    { field = "prop.title", label = "Custom title" },
+    { field = "body", label = "Excerpt" },
+    { field = "sys.body", label = "Duplicate excerpt" },
+]
+
+[properties]
+title = { type = "text" }
+"#;
+
+        let (_, diagnostics) = parse_base(&path("bases/reading.base.toml"), content);
+        let duplicate_paths = diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Error
+                    && diagnostic.message.contains("duplicate preview field")
+            })
+            .filter_map(|diagnostic| diagnostic.path.as_deref())
+            .collect::<Vec<_>>();
+
+        assert_eq!(duplicate_paths, vec!["preview[1].field", "preview[4].field"]);
+        assert!(!duplicate_paths.contains(&"preview[2].field"));
+    }
+
+    #[test]
+    fn unknown_presentation_references_are_addressed_warnings() {
+        let content = r#"
+name = "Reading"
+preview = [
+    { field = "sys.missing", label = "Unknown system" },
+    { field = "prop.missing", label = "Unknown property" },
+]
+
+[[views]]
+name = "All"
+labels = { "sys.also_missing" = "Unknown system", missing = "Unknown property" }
+"#;
+
+        let (_, diagnostics) = parse_base(&path("bases/reading.base.toml"), content);
+
+        for expected_path in [
+            "preview[0].field",
+            "preview[1].field",
+            "views[0].labels.missing",
+            "views[0].labels.sys.also_missing",
+        ] {
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Warning
+                    && diagnostic.path.as_deref() == Some(expected_path)
+            }));
+        }
+    }
+
+    #[test]
+    fn body_is_valid_for_presentation_but_reserved_for_properties() {
+        let content = r#"
+name = "Reading"
+preview = [{ field = "body", label = "Excerpt" }]
+
+[properties]
+body = { type = "text" }
+
+[[views]]
+name = "All"
+labels = { body = "Excerpt" }
+"#;
+
+        let (_, diagnostics) = parse_base(&path("bases/reading.base.toml"), content);
+
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Error
+                && diagnostic.path.as_deref() == Some("properties.body")
+        }));
+        assert!(!diagnostics.iter().any(|diagnostic| {
+            diagnostic
+                .path
+                .as_deref()
+                .is_some_and(|path| path.starts_with("preview") || path.contains(".labels."))
+        }));
+    }
+
+    #[test]
+    fn qualified_shadowed_system_and_property_fields_are_distinct() {
+        let content = r#"
+name = "Reading"
+preview = [
+    { field = "sys.title", label = "System title" },
+    { field = "prop.title", label = "Custom title" },
+]
+
+[properties]
+title = { type = "text" }
+
+[[views]]
+name = "All"
+labels = { "sys.title" = "System title", "prop.title" = "Custom title" }
+"#;
+
+        let (_, diagnostics) = parse_base(&path("bases/reading.base.toml"), content);
+
+        assert!(diagnostics.is_empty(), "{diagnostics:?}");
     }
 
     #[test]

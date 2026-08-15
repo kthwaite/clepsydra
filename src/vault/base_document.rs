@@ -1382,6 +1382,7 @@ mod tests {
             name: "Reading".into(),
             description: None,
             filter: None,
+            preview: Vec::new(),
             properties: Vec::new(),
             views: Vec::new(),
         }

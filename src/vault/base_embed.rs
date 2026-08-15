@@ -540,6 +540,7 @@ mod tests {
                 name: "Reading".to_string(),
                 description: None,
                 filter: None,
+                preview: Vec::new(),
                 properties,
                 views: Vec::new(),
             },
@@ -572,6 +573,7 @@ mod tests {
     fn view() -> ViewDefinition {
         ViewDefinition {
             name: "Continues".into(),
+            labels: Default::default(),
             layout: "table".into(),
             filter: Some(cmp("status", Op::Eq, json!("reading"))),
             sort: vec![SortKey {
