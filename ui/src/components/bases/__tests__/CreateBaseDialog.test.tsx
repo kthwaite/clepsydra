@@ -58,6 +58,7 @@ describe("CreateBaseDialog", () => {
         description: undefined,
         filter: undefined,
         properties: [],
+        preview: [],
         views: [
           {
             name: "All",
