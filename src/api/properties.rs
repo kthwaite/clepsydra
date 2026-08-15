@@ -285,7 +285,9 @@ fn projection_key(identity: &ProjectionFieldIdentity) -> String {
     match identity {
         ProjectionFieldIdentity::System(field) => field.as_str().to_string(),
         ProjectionFieldIdentity::Property(key)
-            if SYSTEM_FIELDS.contains(&key.as_str()) || key.starts_with("prop.") =>
+            if SYSTEM_FIELDS.contains(&key.as_str())
+                || key.starts_with("prop.")
+                || key.starts_with("sys.") =>
         {
             format!("prop.{key}")
         }

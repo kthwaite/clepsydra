@@ -318,10 +318,12 @@ pub fn project_page_field_value(
             if page.is_encrypted() {
                 (false, None)
             } else {
-                (
-                    true,
-                    Some(serde_json::Value::String(body_excerpt(&page.body))),
-                )
+                let excerpt = body_excerpt(&page.body);
+                if excerpt.is_empty() {
+                    (false, None)
+                } else {
+                    (true, Some(serde_json::Value::String(excerpt)))
+                }
             }
         }
     }
@@ -1517,6 +1519,16 @@ mod tests {
                 &page,
                 &ProjectionFieldIdentity::Property("missing".to_string())
             ),
+            (false, None)
+        );
+    }
+
+    #[test]
+    fn page_field_projection_treats_an_empty_body_excerpt_as_missing() {
+        let page = projection_page("notes/empty.md", String::new());
+
+        assert_eq!(
+            project_page_field_value(&page, &ProjectionFieldIdentity::Body),
             (false, None)
         );
     }

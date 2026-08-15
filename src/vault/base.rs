@@ -1046,6 +1046,14 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             );
         }
         let path = format!("preview[{preview_index}].field");
+        if definition.field.trim().is_empty() {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some(path),
+                "preview field must not be empty".to_string(),
+            );
+            continue;
+        }
         if let Some(identity) =
             validate_projection_field(base, &definition.field, &path, "preview", &mut push)
             && !preview_fields.insert(identity)
@@ -1629,6 +1637,37 @@ labels = { body = "Excerpt", title = "Title", "sys.kind" = "Kind", "prop.kind" =
         let serialized = toml::to_string(&file).unwrap();
         assert!(!serialized.contains("preview"));
         assert!(!serialized.contains("labels"));
+    }
+
+    #[test]
+    fn preview_fields_reject_blank_references_before_resolution() {
+        let content = r#"
+name = "Reading"
+preview = [
+    { field = "" },
+    { field = "   " },
+    { field = "missing" },
+]
+"#;
+
+        let (_, diagnostics) = parse_base(&path("bases/reading.base.toml"), content);
+
+        for expected_path in ["preview[0].field", "preview[1].field"] {
+            assert!(diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Error
+                    && diagnostic.path.as_deref() == Some(expected_path)
+                    && diagnostic.message == "preview field must not be empty"
+            }));
+            assert!(!diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Warning
+                    && diagnostic.path.as_deref() == Some(expected_path)
+            }));
+        }
+        assert!(diagnostics.iter().any(|diagnostic| {
+            diagnostic.severity == BaseDiagnosticSeverity::Warning
+                && diagnostic.path.as_deref() == Some("preview[2].field")
+                && diagnostic.message.contains("unavailable")
+        }));
     }
 
     #[test]

@@ -3,6 +3,7 @@ mod support;
 use std::fs;
 use std::path::Path;
 
+use clepsydra::vault::query::{ProjectionFieldIdentity, resolve_projection_field};
 use support::ApiFixture;
 
 const PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f1";
@@ -286,6 +287,8 @@ const EMPTY_DECLARATIONS_ID: &str = "0190f8a0-0000-7000-8000-0000000000f2";
 const ENCRYPTED_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f3";
 const PREVIEW_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f4";
 const SHADOW_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f5";
+const EMPTY_BODY_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f6";
+const WIRE_KEY_PAGE_ID: &str = "0190f8a0-0000-7000-8000-0000000000f7";
 
 fn projection_property<'a>(response: &'a serde_json::Value, key: &str) -> &'a serde_json::Value {
     response["properties"]
@@ -340,6 +343,13 @@ PRIVATE BODY SENTINEL
         root.join("preview-note.md"),
         format!(
             "+++\nid = \"{PREVIEW_PAGE_ID}\"\ntitle = \"Preview Note\"\ntype = \"PROJECT\"\n+++\n# Heading\n\nA [link](https://example.com) and **bold** body.\n"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        root.join("empty-preview-note.md"),
+        format!(
+            "+++\nid = \"{EMPTY_BODY_PAGE_ID}\"\ntitle = \"Empty Preview Note\"\ntype = \"PROJECT\"\n+++\n"
         ),
     )
     .unwrap();
@@ -743,6 +753,38 @@ async fn get_projects_body_excerpt_and_missing_custom_value() {
 }
 
 #[tokio::test]
+async fn get_projects_empty_body_excerpt_is_missing() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_projection)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{EMPTY_BODY_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(
+        preview_field(&body, "body"),
+        &serde_json::json!({
+            "key": "body",
+            "label": "Summary",
+            "present": false,
+            "value": null,
+            "schema_conflict": false,
+            "label_conflict": false,
+            "sources": [{
+                "base": { "slug": "d-preview-note", "name": "Project Preview" },
+                "label": "Summary"
+            }]
+        })
+    );
+}
+
+#[tokio::test]
 async fn get_keeps_shadowed_system_and_property_preview_identities_distinct() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(seed_projection)
@@ -826,6 +868,84 @@ async fn get_keeps_shadowed_system_and_property_preview_identities_distinct() {
             ]
         })
     );
+}
+
+#[tokio::test]
+async fn get_projection_wire_keys_round_trip_every_custom_identity_class() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            fs::create_dir_all(root.join("bases")).unwrap();
+            fs::write(
+                root.join("wire-keys.md"),
+                format!(
+                    r#"+++
+id = "{WIRE_KEY_PAGE_ID}"
+title = "Wire keys"
+ordinary = "ordinary value"
+"prop.custom" = "prop-prefixed value"
+"sys.custom" = "sys-prefixed value"
++++
+"#
+                ),
+            )
+            .unwrap();
+            fs::write(
+                root.join("bases/wire-keys.base.toml"),
+                r#"name = "Wire Keys"
+filter = { field = "kind", op = "eq", value = "NOTE" }
+preview = [
+    { field = "ordinary" },
+    { field = "prop.title" },
+    { field = "prop.prop.custom" },
+    { field = "prop.sys.custom" },
+]
+
+[properties]
+ordinary = { type = "text" }
+title = { type = "text" }
+"prop.custom" = { type = "text" }
+"sys.custom" = { type = "text" }
+"#,
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get(&format!(
+            "/api/vault/pages/by-id/{WIRE_KEY_PAGE_ID}/properties"
+        ))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let fields = body["preview"]["fields"].as_array().unwrap();
+    let expected = [
+        (
+            "ordinary",
+            ProjectionFieldIdentity::Property("ordinary".to_string()),
+        ),
+        (
+            "prop.title",
+            ProjectionFieldIdentity::Property("title".to_string()),
+        ),
+        (
+            "prop.prop.custom",
+            ProjectionFieldIdentity::Property("prop.custom".to_string()),
+        ),
+        (
+            "prop.sys.custom",
+            ProjectionFieldIdentity::Property("sys.custom".to_string()),
+        ),
+    ];
+
+    assert_eq!(fields.len(), expected.len());
+    assert_eq!(body["preview"]["remaining_count"], 0);
+    for (field, (expected_key, expected_identity)) in fields.iter().zip(expected) {
+        let key = field["key"].as_str().unwrap();
+        assert_eq!(key, expected_key);
+        assert_eq!(resolve_projection_field(key).unwrap(), expected_identity);
+    }
 }
 
 #[tokio::test]
