@@ -24,6 +24,12 @@ export interface CaptureStatus {
 	/** Monotonic epoch milliseconds for this status revision. */
 	updatedAt: number;
 	additionalTags: string[];
+	/** Chunk-assembly progress; present only while phase is "processing". */
+	chunksReceived?: number;
+	chunksTotal?: number;
+	/** Where the capture landed; present on done/duplicate/conflict. */
+	vaultPath?: string;
+	pageId?: string;
 }
 
 export interface BadgeAppearance {

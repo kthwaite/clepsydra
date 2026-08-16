@@ -128,6 +128,7 @@ async function processCapture(
 				attemptId,
 				"duplicate",
 				`${metadata.title} was already archived.`,
+				{ vaultPath: response.vault_path, pageId: response.page_id },
 			);
 			if (applied && settings.notify_on_duplicate) {
 				showNotification(
@@ -141,6 +142,7 @@ async function processCapture(
 				attemptId,
 				"done",
 				`${metadata.title} was archived to ${response.vault_path}.`,
+				{ vaultPath: response.vault_path, pageId: response.page_id },
 			);
 			if (applied && settings.notify_on_success) {
 				showNotification(
@@ -152,7 +154,13 @@ async function processCapture(
 	} catch (err) {
 		if (err instanceof ArchiveConflictError) {
 			const detail = describeConflict(metadata.title, err);
-			if (await reportPhase(tabId, attemptId, "conflict", detail)) {
+			const conflictDetail = err.detail as ArchiveConflictDetail | undefined;
+			if (
+				await reportPhase(tabId, attemptId, "conflict", detail, {
+					vaultPath: conflictDetail?.vault_path,
+					pageId: conflictDetail?.page_id,
+				})
+			) {
 				showNotification("Content Changed", detail);
 			}
 		} else {
@@ -273,8 +281,15 @@ function isCapturePhase(value: unknown): value is CapturePhase {
 	}
 }
 
-type StoredCaptureStatus = Omit<CaptureStatus, "additionalTags"> & {
+type StoredCaptureStatus = Omit<
+	CaptureStatus,
+	"additionalTags" | "chunksReceived" | "chunksTotal" | "vaultPath" | "pageId"
+> & {
 	additionalTags?: unknown;
+	chunksReceived?: unknown;
+	chunksTotal?: unknown;
+	vaultPath?: unknown;
+	pageId?: unknown;
 };
 
 function isCaptureStatus(value: unknown): value is StoredCaptureStatus {
@@ -294,6 +309,11 @@ function isCaptureStatus(value: unknown): value is StoredCaptureStatus {
 		Number.isFinite(value.updatedAt)
 	);
 }
+
+const optionalString = (v: unknown): v is string | undefined =>
+	v === undefined || typeof v === "string";
+const optionalCount = (v: unknown): v is number | undefined =>
+	v === undefined || (typeof v === "number" && Number.isFinite(v) && v >= 0);
 
 async function rehydrateStatuses(): Promise<void> {
 	if (!sessionStatusStorage) return;
@@ -323,6 +343,34 @@ async function rehydrateStatuses(): Promise<void> {
 			updatedAt: rawStatus.updatedAt,
 			additionalTags,
 		};
+		if (optionalCount(rawStatus.chunksReceived)) {
+			if (rawStatus.chunksReceived !== undefined) {
+				status.chunksReceived = rawStatus.chunksReceived;
+			}
+		} else {
+			repaired = true;
+		}
+		if (optionalCount(rawStatus.chunksTotal)) {
+			if (rawStatus.chunksTotal !== undefined) {
+				status.chunksTotal = rawStatus.chunksTotal;
+			}
+		} else {
+			repaired = true;
+		}
+		if (optionalString(rawStatus.vaultPath)) {
+			if (rawStatus.vaultPath !== undefined) {
+				status.vaultPath = rawStatus.vaultPath;
+			}
+		} else {
+			repaired = true;
+		}
+		if (optionalString(rawStatus.pageId)) {
+			if (rawStatus.pageId !== undefined) {
+				status.pageId = rawStatus.pageId;
+			}
+		} else {
+			repaired = true;
+		}
 		if (status.phase === "processing" || status.phase === "uploading") {
 			status = {
 				...status,
@@ -330,6 +378,8 @@ async function rehydrateStatuses(): Promise<void> {
 				detail: INTERRUPTED_CAPTURE_DETAIL,
 				updatedAt: Math.max(Date.now(), status.updatedAt + 1),
 			};
+			status.chunksReceived = undefined;
+			status.chunksTotal = undefined;
 			repaired = true;
 		}
 		statuses.set(tabId, status);
@@ -461,11 +511,16 @@ function claimAttempt(
 	return { status, started: true, persisted: persistStatuses() };
 }
 
+type CaptureStatusExtra = Partial<
+	Pick<CaptureStatus, "chunksReceived" | "chunksTotal" | "vaultPath" | "pageId">
+>;
+
 async function reportPhase(
 	tabId: number | undefined,
 	attemptId: string,
 	phase: CapturePhase,
 	detail: string = describePhase(phase),
+	extra: CaptureStatusExtra = {},
 ): Promise<boolean> {
 	if (tabId === undefined) return false;
 	const current = statuses.get(tabId);
@@ -473,10 +528,15 @@ async function reportPhase(
 
 	const status: CaptureStatus = {
 		...current,
+		...extra,
 		phase,
 		detail,
 		updatedAt: nextStatusTimestamp(current),
 	};
+	if (phase !== "processing") {
+		status.chunksReceived = undefined;
+		status.chunksTotal = undefined;
+	}
 	statuses.set(tabId, status);
 	applyBadge(tabId, status);
 	await persistStatuses();
@@ -705,10 +765,16 @@ async function handleWorkerMessage(
 			}
 			return undefined;
 		}
-		if (
-			completed === null ||
-			statuses.get(tabId ?? -1)?.attemptId !== attemptId
-		) {
+		if (completed === null) {
+			if (statuses.get(tabId ?? -1)?.attemptId === attemptId) {
+				void reportPhase(tabId, attemptId, "processing", undefined, {
+					chunksReceived: workerMessage.index + 1,
+					chunksTotal: workerMessage.total,
+				});
+			}
+			return undefined;
+		}
+		if (statuses.get(tabId ?? -1)?.attemptId !== attemptId) {
 			return undefined;
 		}
 
