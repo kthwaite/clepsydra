@@ -196,8 +196,7 @@ function KanbanDropColumn({
       style={{
         ...(isDropTarget
           ? {
-              background:
-                "color-mix(in oklab, var(--accent) 7%, transparent)",
+              background: "color-mix(in oklab, var(--accent) 7%, transparent)",
             }
           : undefined),
         ...(width ? { flex: `0 0 ${width}px` } : {}),
@@ -248,7 +247,10 @@ export function KanbanView({
     [patchTask],
   );
 
-  const visible = useMemo(() => visibleInKanban(tasks, cycles), [tasks, cycles]);
+  const visible = useMemo(
+    () => visibleInKanban(tasks, cycles),
+    [tasks, cycles],
+  );
   const taskStatusById = useMemo(
     () => new Map(visible.map((task) => [task.id, task.status])),
     [visible],
