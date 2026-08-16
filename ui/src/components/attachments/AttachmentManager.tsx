@@ -49,6 +49,28 @@ export function AttachmentManager({
     useState<PendingAttachmentAction | null>(null);
   const pendingActionInFlight = useRef<PendingAttachmentAction | null>(null);
   const [isPendingAction, setIsPendingAction] = useState(false);
+  const scopedToPage = pageMarkdown !== undefined;
+  const referencedPaths = useMemo(
+    () =>
+      new Set(
+        attachmentReferences(pageMarkdown ?? "").map(
+          (reference) => reference.path,
+        ),
+      ),
+    [pageMarkdown],
+  );
+  const [showAll, setShowAll] = useState(false);
+  const referencedAttachments = useMemo(
+    () =>
+      (attachments ?? []).filter((attachment) =>
+        referencedPaths.has(canonicalAttachmentPath(attachment.path)),
+      ),
+    [attachments, referencedPaths],
+  );
+  const visibleAttachments = useMemo(() => {
+    if (!attachments || !scopedToPage || showAll) return attachments;
+    return referencedAttachments;
+  }, [attachments, referencedAttachments, scopedToPage, showAll]);
   const missingReferences = useMemo(() => {
     if (!protectedPage || isLoading || error || !attachments) return [];
     const attachmentPaths = new Set(
@@ -174,6 +196,17 @@ export function AttachmentManager({
           {actionError}
         </p>
       ) : null}
+      {scopedToPage && attachments?.length ? (
+        <button
+          type="button"
+          onClick={() => setShowAll((current) => !current)}
+          className="mb-1.5 cursor-pointer uppercase tracking-[0.08em] text-ink-mute hover:text-accent"
+        >
+          {showAll
+            ? `Show referenced attachments (${referencedAttachments.length})`
+            : `Show all attachments (${attachments.length})`}
+        </button>
+      ) : null}
       {error ? (
         <p role="alert" className="text-danger">
           {formatApiError(error, "Could not load attachments.")}
@@ -182,9 +215,11 @@ export function AttachmentManager({
         <p className="text-ink-mute">Loading attachments…</p>
       ) : !attachments?.length ? (
         <p className="text-ink-mute">No attachments in this vault.</p>
+      ) : !visibleAttachments?.length ? (
+        <p className="text-ink-mute">No attachments referenced by this page.</p>
       ) : (
         <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
-          {attachments.map((attachment) => {
+          {visibleAttachments.map((attachment) => {
             const markdown = attachmentMarkdown(attachment);
             const pendingDelete = deletePath === attachment.path;
             const Icon = isImage(attachment) ? Image : File;
