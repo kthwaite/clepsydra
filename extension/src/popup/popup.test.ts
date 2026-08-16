@@ -163,6 +163,7 @@ async function openRealPopup(
 		tabTitle?: string;
 		scriptingResult?: unknown[];
 		scriptingRejects?: boolean;
+		status?: CaptureStatus;
 	} = {},
 ) {
 	const markup = readFileSync(new URL("./popup.html", import.meta.url), "utf8");
@@ -185,7 +186,11 @@ async function openRealPopup(
 		},
 		tabs: { query: vi.fn(async () => tabs) },
 		runtime: {
-			sendMessage: vi.fn(async () => ({ status: null })),
+			sendMessage: vi.fn(async (message: unknown) => ({
+				status: messageHasType(message, "capture_status")
+					? (options.status ?? null)
+					: null,
+			})),
 			openOptionsPage: vi.fn(),
 		},
 		scripting: { executeScript },
@@ -1146,6 +1151,26 @@ describe("popup suggested tags", () => {
 		expect(
 			popup.document.querySelector<HTMLElement>("#suggested-tags")?.hidden,
 		).toBe(false);
+	});
+
+	it("disables suggested chips while a capture is in progress", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{ result: { title: "Rust", description: "", keywords: [] } },
+				],
+				status: captureStatus("processing", "building the snapshot…"),
+			},
+		);
+
+		const chip = popup.document.querySelector<HTMLButtonElement>(
+			"#suggested-tags .tag-suggested",
+		);
+		expect(chip).not.toBeNull();
+		expect(chip?.disabled).toBe(true);
 	});
 
 	it("gives the suggested-tags row and its chips accessible names", async () => {

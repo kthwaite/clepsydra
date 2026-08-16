@@ -187,23 +187,30 @@ function init(): void {
 	// (see below), which is why this is a mutable `let` rather than `const`.
 	let client = new ClepsydraClient(DEFAULT_SETTINGS.server_url);
 	let suggestedTagPool: string[] = [];
+	let suggestedChips: HTMLButtonElement[] = [];
+	let captureActive = false;
 
 	const refreshSuggestedTags = (): void => {
 		const currentTags = new Set(picker.getTags());
 		const visible = suggestedTagPool.filter((tag) => !currentTags.has(tag));
 		suggestedTags.replaceChildren();
+		suggestedChips = [];
 		for (const tag of visible) {
 			const chip = document.createElement("button") as HTMLButtonElement;
 			chip.type = "button";
 			chip.className = "tag tag-suggested";
 			chip.textContent = tag;
 			chip.setAttribute("aria-label", `Add tag ${tag}`);
+			// The picker's add paths no-op while disabled, so the chip must not
+			// present as clickable during a capture.
+			chip.disabled = captureActive;
 			chip.addEventListener("click", () => {
 				// addTag triggers onTagsChanged, which already calls
 				// refreshSuggestedTags — no need to call it again here.
 				picker.addTag(tag);
 			});
 			suggestedTags.append(chip);
+			suggestedChips.push(chip);
 		}
 		suggestedTags.hidden = visible.length === 0;
 	};
@@ -265,6 +272,10 @@ function init(): void {
 		panel.style.display = "block";
 		button.disabled = active;
 		picker.setDisabled(active);
+		captureActive = active;
+		for (const chip of suggestedChips) {
+			chip.disabled = active;
+		}
 		// A prior terminal status's outcome link must not survive into whatever
 		// phase renders next; renderStatus below re-shows it only once it has
 		// confirmed the new status is itself terminal and has a vaultPath.
