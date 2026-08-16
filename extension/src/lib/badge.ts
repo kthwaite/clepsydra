@@ -27,7 +27,10 @@ export interface CaptureStatus {
 	/** Chunk-assembly progress; present only while phase is "processing". */
 	chunksReceived?: number;
 	chunksTotal?: number;
-	/** Where the capture landed; present on done/duplicate/conflict. */
+	/**
+	 * Where the capture landed; present on done, and on duplicate/conflict
+	 * when the server identified the existing page.
+	 */
 	vaultPath?: string;
 	pageId?: string;
 }
