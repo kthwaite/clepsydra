@@ -237,6 +237,42 @@ describe("ClepsydraClient", () => {
 		});
 	});
 
+	describe("listTags", () => {
+		it("fetches the full tag list and maps to {tag, count}", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify([
+						{ tag: "rust", count: 12, computed_count: 4 },
+						{ tag: "cooking", count: 9, computed_count: 0 },
+					]),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+			const result = await client.listTags();
+
+			expect(result).toEqual([
+				{ tag: "rust", count: 12 },
+				{ tag: "cooking", count: 9 },
+			]);
+			expect(fetchSpy).toHaveBeenCalledWith(`${BASE_URL}/api/vault/index/tags`);
+		});
+
+		it("throws ArchiveError on non-OK status", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response("Internal Server Error", { status: 500 }),
+			);
+
+			try {
+				await client.listTags();
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expect(e).toBeInstanceOf(ArchiveError);
+				expect((e as ArchiveError).message).toBe("Tag list failed: 500");
+			}
+		});
+	});
+
 	describe("isReachable", () => {
 		it("returns true when server responds", async () => {
 			const statusResponse: ArchiveStatusResponse = {

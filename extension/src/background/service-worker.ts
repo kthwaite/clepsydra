@@ -8,7 +8,11 @@ import {
 	isTerminal,
 } from "#/lib/badge";
 import { CaptureQueue } from "#/lib/capture-queue";
-import { mergeCaptureTags, normalizeCaptureTags } from "#/lib/capture-tags";
+import {
+	currentMonthTag,
+	mergeCaptureTags,
+	normalizeCaptureTags,
+} from "#/lib/capture-tags";
 import {
 	CAPTURE_ABORT,
 	CAPTURE_CHUNK,
@@ -48,14 +52,6 @@ function extractDomain(url: string): string {
 	} catch {
 		return "unknown";
 	}
-}
-
-/** Format current month as YYYY-MM */
-function currentMonthTag(): string {
-	const now = new Date();
-	const year = now.getFullYear();
-	const month = String(now.getMonth() + 1).padStart(2, "0");
-	return `${year}-${month}`;
 }
 
 interface LegacyToolbarActionApi {

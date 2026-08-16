@@ -23,6 +23,7 @@ const client = vi.hoisted(() => ({
 	lookupArchive: vi.fn(
 		async (): Promise<ArchiveLookupResponse> => ({ status: "none" }),
 	),
+	listTags: vi.fn(async (): Promise<{ tag: string; count: number }[]> => []),
 }));
 
 vi.mock("#/lib/api-client", () => ({
@@ -30,6 +31,7 @@ vi.mock("#/lib/api-client", () => ({
 		isReachable = client.isReachable;
 		lookupArchive = client.lookupArchive;
 		suggestTags = vi.fn().mockResolvedValue([]);
+		listTags = client.listTags;
 	},
 }));
 
@@ -152,13 +154,24 @@ function deferred<T>() {
 
 async function openRealPopup(
 	settings: Record<string, unknown>,
-	options: { tabUrl?: string | null } = {},
+	options: {
+		tabUrl?: string | null;
+		tabTitle?: string;
+		scriptingResult?: unknown[];
+		scriptingRejects?: boolean;
+	} = {},
 ) {
 	const markup = readFileSync(new URL("./popup.html", import.meta.url), "utf8");
 	const parsed = parseHTML(markup);
 	const storageSet = vi.fn();
 	const tabUrl = options.tabUrl ?? null;
-	const tabs = tabUrl === null ? [] : [{ id: 7, url: tabUrl }];
+	const tabs =
+		tabUrl === null
+			? []
+			: [{ id: 7, url: tabUrl, title: options.tabTitle ?? "" }];
+	const executeScript = options.scriptingRejects
+		? vi.fn().mockRejectedValue(new Error("executeScript failed"))
+		: vi.fn().mockResolvedValue(options.scriptingResult ?? []);
 	const api = {
 		storage: {
 			sync: {
@@ -171,7 +184,7 @@ async function openRealPopup(
 			sendMessage: vi.fn(async () => ({ status: null })),
 			openOptionsPage: vi.fn(),
 		},
-		scripting: { executeScript: vi.fn() },
+		scripting: { executeScript },
 	};
 	vi.stubGlobal("document", parsed.document);
 	vi.stubGlobal("window", parsed.window);
@@ -184,6 +197,7 @@ async function openRealPopup(
 		document: parsed.document,
 		storageSet,
 		sendMessage: api.runtime.sendMessage,
+		scripting: executeScript,
 	};
 }
 
@@ -226,6 +240,7 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 		"selected-tags",
 		"tag-suggestions",
 		"captured-indicator",
+		"suggested-tags",
 	];
 	const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement()]));
 	const messages: unknown[] = [];
@@ -306,6 +321,7 @@ beforeEach(() => {
 	vi.useRealTimers();
 	client.isReachable.mockClear().mockResolvedValue(true);
 	client.lookupArchive.mockClear().mockResolvedValue({ status: "none" });
+	client.listTags.mockClear().mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -640,6 +656,10 @@ describe("popup capture feedback", () => {
 
 	it("starts capture through the worker and keeps the popup open", async () => {
 		const popup = await openPopup();
+		// Suggested-tag collection already called scripting.executeScript during
+		// init; capture itself must not trigger another call — injection is the
+		// background worker's job (executeCaptureScript), not the popup's.
+		const scriptingCallsBeforeCapture = popup.scripting.mock.calls.length;
 
 		await popup.elements["capture-btn"].emit("click");
 
@@ -648,7 +668,7 @@ describe("popup capture feedback", () => {
 			tabId: 7,
 			additionalTags: [],
 		});
-		expect(popup.scripting).not.toHaveBeenCalled();
+		expect(popup.scripting.mock.calls.length).toBe(scriptingCallsBeforeCapture);
 		expect(popup.close).not.toHaveBeenCalled();
 		expect(popup.elements["capture-btn"].disabled).toBe(true);
 		expect(popup.elements["capture-status"].textContent).toBe(
@@ -1019,5 +1039,218 @@ describe("popup captured indicator", () => {
 			"#captured-indicator",
 		);
 		expect(indicator?.hidden).toBe(true);
+		expect(popup.scripting).not.toHaveBeenCalled();
+		const suggested =
+			popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(suggested?.hidden).toBe(true);
+	});
+});
+
+describe("popup suggested tags", () => {
+	it("renders ranked, capped suggestion chips from page tokens matched against vault tags", async () => {
+		client.listTags.mockResolvedValueOnce([
+			{ tag: "alpha", count: 8 },
+			{ tag: "beta", count: 7 },
+			{ tag: "gamma", count: 6 },
+			{ tag: "delta", count: 5 },
+			{ tag: "epsilon", count: 4 },
+			{ tag: "zeta", count: 3 },
+			{ tag: "eta", count: 2 },
+			{ tag: "theta", count: 1 },
+		]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+
+		const chips = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(chips).toEqual([
+			"alpha",
+			"beta",
+			"gamma",
+			"delta",
+			"epsilon",
+			"zeta",
+		]);
+		expect(
+			popup.document.querySelector<HTMLElement>("#suggested-tags")?.hidden,
+		).toBe(false);
+	});
+
+	it("never suggests the implicit archive, domain, current-month, or default tags even when they match a token", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 7, 14, 12));
+		try {
+			client.listTags.mockResolvedValueOnce([
+				{ tag: "archive", count: 99 },
+				{ tag: "localhost", count: 10 },
+				{ tag: "2026-08", count: 40 },
+				{ tag: "research", count: 50 },
+				{ tag: "programming", count: 5 },
+			]);
+			const popup = await openRealPopup(
+				{ default_tags: ["research"] },
+				{
+					tabUrl: "http://localhost/notes",
+					scriptingResult: [
+						{
+							result: {
+								title: "Localhost Archive Research 2026-08 Programming",
+								description: "",
+								keywords: [],
+							},
+						},
+					],
+				},
+			);
+
+			const chips = Array.from(
+				popup.document.querySelectorAll<HTMLButtonElement>(
+					"#suggested-tags .tag-suggested",
+				),
+				(chip) => chip.textContent,
+			);
+			expect(chips).toEqual(["programming"]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("clicking a suggestion adds it via the tag picker and hides only that chip", async () => {
+		client.listTags.mockResolvedValueOnce([
+			{ tag: "rust", count: 10 },
+			{ tag: "programming", count: 5 },
+		]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Rust Programming",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+
+		const rustChip = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+		).find((chip) => chip.textContent === "rust");
+		if (!rustChip) throw new Error("expected a rust suggestion chip");
+		rustChip.dispatchEvent(new linkedom.Event("click"));
+		await settle();
+
+		const remaining = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(remaining).toEqual(["programming"]);
+		const selected = Array.from(
+			popup.document.querySelectorAll<HTMLElement>(
+				"#selected-tags .tag > span",
+			),
+			(label) => label.textContent,
+		);
+		expect(selected).toContain("rust");
+	});
+
+	it("hides a suggestion once its tag is committed by typing, via the picker's onTagsChanged", async () => {
+		client.listTags.mockResolvedValueOnce([
+			{ tag: "rust", count: 10 },
+			{ tag: "programming", count: 5 },
+		]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Rust Programming",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+		const input =
+			popup.document.querySelector<HTMLInputElement>("#additional-tags");
+		if (!input) throw new Error("popup markup missing the additions input");
+
+		input.value = "programming";
+		input.dispatchEvent(keyEvent("Enter"));
+		await settle();
+
+		const remaining = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(remaining).toEqual(["rust"]);
+	});
+
+	it("falls back to tab-title-only signals when executeScript throws", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				tabTitle: "Rust Programming",
+				scriptingRejects: true,
+			},
+		);
+
+		const chips = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(chips).toEqual(["rust"]);
+	});
+
+	it("renders no suggestions and never calls scripting for a restricted tab", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "chrome://settings",
+				scriptingResult: [
+					{ result: { title: "Rust", description: "", keywords: [] } },
+				],
+			},
+		);
+
+		expect(popup.scripting).not.toHaveBeenCalled();
+		expect(client.listTags).not.toHaveBeenCalled();
+		const suggested =
+			popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(suggested?.hidden).toBe(true);
 	});
 });
