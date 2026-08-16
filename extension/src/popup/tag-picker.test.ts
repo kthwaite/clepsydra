@@ -370,6 +370,16 @@ describe("setTags / addTag / commitInput", () => {
 		expect(picker.getTags()).toEqual(["research", "reading"]);
 		expect(input.value).toBe("");
 	});
+
+	it("splits a pasted comma-separated list into individual chips on commitInput()", () => {
+		const { input, picker } = setup();
+		input.value = "Research, reading";
+
+		picker.commitInput();
+
+		expect(picker.getTags()).toEqual(["Research", "reading"]);
+		expect(input.value).toBe("");
+	});
 });
 
 describe("destroy", () => {
