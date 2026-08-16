@@ -4,9 +4,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { CapturePhase, CaptureStatus } from "#/lib/badge";
 import type { ArchiveLookupResponse } from "#/lib/types";
-const parseHTML = createRequire(import.meta.url)("linkedom").parseHTML as (
-	markup: string,
-) => { document: Document; window: Window };
+const linkedom = createRequire(import.meta.url)("linkedom") as {
+	parseHTML: (markup: string) => { document: Document; window: Window };
+	Event: typeof globalThis.Event;
+};
+const parseHTML = linkedom.parseHTML;
+
+function keyEvent(key: string): Event {
+	const event = new linkedom.Event("keydown", { cancelable: true }) as Event & {
+		key: string;
+	};
+	event.key = key;
+	return event;
+}
 
 const client = vi.hoisted(() => ({
 	isReachable: vi.fn(async () => true),
@@ -169,7 +179,11 @@ async function openRealPopup(
 
 	await import("./popup");
 	await settle();
-	return { document: parsed.document, storageSet };
+	return {
+		document: parsed.document,
+		storageSet,
+		sendMessage: api.runtime.sendMessage,
+	};
 }
 
 function messageHasType(message: unknown, type: string): boolean {
@@ -177,6 +191,18 @@ function messageHasType(message: unknown, type: string): boolean {
 		return false;
 	}
 	return message.type === type;
+}
+
+/**
+ * Each rendered chip is `span.tag > (span label, button.tag-remove)`; read
+ * the label leaf directly rather than the chip's own `textContent`, which
+ * FakeElement.append recomputes from children and would otherwise fold in
+ * the remove button's glyph too.
+ */
+function chipLabels(popup: PopupHarness): (string | undefined)[] {
+	return popup.elements["selected-tags"].children.map(
+		(chip) => chip.children[0]?.textContent,
+	);
 }
 
 async function settle() {
@@ -196,6 +222,8 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 		"options-link",
 		"default-tags",
 		"additional-tags",
+		"selected-tags",
+		"tag-suggestions",
 		"captured-indicator",
 	];
 	const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement()]));
@@ -303,6 +331,48 @@ describe("popup tag controls", () => {
 		expect(document.body.textContent).toMatch(/only to this capture/i);
 	});
 
+	it("ships the tag picker's combobox and listbox markup in the real popup", () => {
+		const markup = readFileSync(
+			new URL("./popup.html", import.meta.url),
+			"utf8",
+		);
+		const { document } = parseHTML(markup);
+		const input = document.querySelector<HTMLInputElement>("#additional-tags");
+		const listbox = document.querySelector("#tag-suggestions");
+
+		expect(input?.getAttribute("role")).toBe("combobox");
+		expect(input?.getAttribute("aria-expanded")).toBe("false");
+		expect(input?.getAttribute("aria-controls")).toBe("tag-suggestions");
+		expect(listbox?.getAttribute("role")).toBe("listbox");
+		expect(listbox?.hasAttribute("hidden")).toBe(true);
+		expect(document.querySelector("#selected-tags")).not.toBeNull();
+	});
+
+	it("sends chips committed via Enter plus trailing uncommitted text on capture", async () => {
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+		const input =
+			popup.document.querySelector<HTMLInputElement>("#additional-tags");
+		const button =
+			popup.document.querySelector<HTMLButtonElement>("#capture-btn");
+		if (!input || !button) throw new Error("popup markup missing controls");
+
+		input.value = "research";
+		input.dispatchEvent(keyEvent("Enter"));
+		input.value = "reading";
+		button.dispatchEvent(new linkedom.Event("click"));
+		await settle();
+
+		expect(popup.sendMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "capture_start",
+				additionalTags: ["research", "reading"],
+			}),
+		);
+	});
+
 	it("renders immutable normalized defaults outside the additions input", async () => {
 		const popup = await openRealPopup({
 			default_tags: [" #archive ", "research", "archive"],
@@ -324,20 +394,20 @@ describe("popup tag controls", () => {
 		).toBeNull();
 	});
 
-	it("normalizes one-capture additions into the capture_start message", async () => {
+	it("commits uncommitted input text into the capture_start message", async () => {
 		const popup = await openPopup();
-		popup.elements["additional-tags"].value = " #reading, research, reading ";
+		popup.elements["additional-tags"].value = "  Reading  ";
 
 		await popup.elements["capture-btn"].emit("click");
 
 		expect(popup.messages).toContainEqual({
 			type: "capture_start",
 			tabId: 7,
-			additionalTags: ["reading", "research"],
+			additionalTags: ["Reading"],
 		});
 		expect(popup.storageSet).not.toHaveBeenCalled();
 	});
-	it("shows attempt-owned tags when start acknowledges an existing capture", async () => {
+	it("shows attempt-owned tags as chips when start acknowledges an existing capture", async () => {
 		const popup = await openPopup({
 			starts: [
 				{
@@ -354,11 +424,11 @@ describe("popup tag controls", () => {
 
 		await popup.elements["capture-btn"].emit("click");
 
-		expect(popup.elements["additional-tags"].value).toBe("attempt-owned");
+		expect(chipLabels(popup)).toEqual(["attempt-owned"]);
 		expect(popup.elements["additional-tags"].disabled).toBe(true);
 	});
 
-	it("restores active additions and disables editing", async () => {
+	it("restores active additions as chips and disables editing", async () => {
 		const popup = await openPopup({
 			status: [
 				{
@@ -372,11 +442,11 @@ describe("popup tag controls", () => {
 			],
 		});
 
-		expect(popup.elements["additional-tags"].value).toBe("research, reading");
+		expect(chipLabels(popup)).toEqual(["research", "reading"]);
 		expect(popup.elements["additional-tags"].disabled).toBe(true);
 	});
 
-	it("does not restore additions from terminal status", async () => {
+	it("clears chips for a terminal status", async () => {
 		const popup = await openPopup({
 			status: [
 				{
@@ -385,7 +455,7 @@ describe("popup tag controls", () => {
 			],
 		});
 
-		expect(popup.elements["additional-tags"].value).toBe("");
+		expect(chipLabels(popup)).toEqual([]);
 		expect(popup.elements["additional-tags"].disabled).toBe(false);
 	});
 
@@ -417,11 +487,11 @@ describe("popup tag controls", () => {
 				{ status: captureStatus("done", "Archived.", "active", ["research"]) },
 			],
 		});
-		expect(popup.elements["additional-tags"].value).toBe("research");
+		expect(chipLabels(popup)).toEqual(["research"]);
 
 		await vi.advanceTimersByTimeAsync(250);
 
-		expect(popup.elements["additional-tags"].value).toBe("");
+		expect(chipLabels(popup)).toEqual([]);
 		expect(popup.elements["additional-tags"].disabled).toBe(false);
 	});
 

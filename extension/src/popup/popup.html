@@ -82,6 +82,17 @@
       color: var(--color-ink);
       overflow-wrap: anywhere;
     }
+    .tag-remove {
+      width: auto;
+      min-height: 0;
+      margin-left: var(--space-1);
+      padding: 0;
+      border: none;
+      background: none;
+      color: var(--color-muted);
+      font: inherit;
+      cursor: pointer;
+    }
     #additional-tags {
       box-sizing: border-box;
       width: 100%;
@@ -104,6 +115,24 @@
       color: var(--color-muted);
       cursor: not-allowed;
       opacity: 0.7;
+    }
+    .tag-suggestions {
+      margin: 0;
+      padding: 0;
+      border: var(--border-width) solid var(--color-muted);
+      border-top: none;
+      background: var(--color-canvas);
+      list-style: none;
+      max-height: 132px;
+      overflow-y: auto;
+    }
+    .tag-suggestions [role="option"] {
+      padding: var(--space-1) var(--space-2);
+      cursor: pointer;
+    }
+    .tag-suggestions [role="option"][aria-selected="true"],
+    .tag-suggestions [role="option"]:hover {
+      background: var(--color-hover);
     }
     .field-help {
       margin: var(--space-1) 0 0;
@@ -196,9 +225,12 @@
     <div id="capture-tags-label" class="field-label">Defaults</div>
     <div id="default-tags" class="tag-list" aria-live="polite">Loading…</div>
     <label class="field-label" for="additional-tags">Additional tags</label>
-    <input id="additional-tags" type="text" autocomplete="off"
+    <div id="selected-tags" class="tag-list" aria-live="polite"></div>
+    <input id="additional-tags" type="text" autocomplete="off" role="combobox"
+           aria-expanded="false" aria-controls="tag-suggestions" aria-autocomplete="list"
            placeholder="research, reading" aria-describedby="additional-tags-help">
-    <p id="additional-tags-help" class="field-help">Applies only to this capture.</p>
+    <ul id="tag-suggestions" class="tag-suggestions" role="listbox" hidden></ul>
+    <p id="additional-tags-help" class="field-help">Applies only to this capture. Type to search vault tags.</p>
   </section>
   <button id="capture-btn">Capture This Page</button>
   <div class="capture-progress" id="capture-progress" hidden

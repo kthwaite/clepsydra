@@ -13,6 +13,7 @@ import {
 	type ExtensionSettings,
 } from "#/lib/types";
 import { webext } from "#/lib/webext";
+import { createTagPicker } from "#/popup/tag-picker";
 
 const POLL_INTERVAL_MS = 250;
 const STATUS_TRANSPORT_ERROR =
@@ -115,6 +116,10 @@ function init(): void {
 	const additionalInput = document.getElementById(
 		"additional-tags",
 	) as HTMLInputElement;
+	const selectedTags = document.getElementById("selected-tags") as HTMLElement;
+	const tagSuggestions = document.getElementById(
+		"tag-suggestions",
+	) as HTMLElement;
 	const optionsLink = document.getElementById(
 		"options-link",
 	) as HTMLAnchorElement;
@@ -127,6 +132,17 @@ function init(): void {
 	let captureUiGeneration = 0;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
 	let settings: ExtensionSettings = DEFAULT_SETTINGS;
+	// Constructed synchronously so the picker's fetchSuggestions closure has
+	// something to call immediately; reassigned once stored settings resolve
+	// (see below), which is why this is a mutable `let` rather than `const`.
+	let client = new ClepsydraClient(DEFAULT_SETTINGS.server_url);
+
+	const picker = createTagPicker({
+		input: additionalInput,
+		chipList: selectedTags,
+		suggestionList: tagSuggestions,
+		fetchSuggestions: (query) => client.suggestTags(query),
+	});
 
 	const clearError = () => {
 		error.textContent = "";
@@ -168,14 +184,14 @@ function init(): void {
 		panel.dataset.tone = statusTone(phase);
 		panel.style.display = "block";
 		button.disabled = active;
-		additionalInput.disabled = active;
+		picker.setDisabled(active);
 		renderProgress(active, null);
 	};
 	const renderStatus = (status: CaptureStatus) => {
 		if (isInProgress(status.phase)) {
-			additionalInput.value = status.additionalTags.join(", ");
+			picker.setTags(status.additionalTags);
 		} else {
-			additionalInput.value = "";
+			picker.setTags([]);
 		}
 		renderPhase(status.phase, status.detail);
 		renderProgress(isInProgress(status.phase), progressPercent(status));
@@ -217,7 +233,7 @@ function init(): void {
 	const showStatusTransportError = () => {
 		showError(STATUS_TRANSPORT_ERROR);
 		button.disabled = false;
-		additionalInput.disabled = false;
+		picker.setDisabled(false);
 	};
 	const showAbsentStatus = () => {
 		clearError();
@@ -252,9 +268,8 @@ function init(): void {
 	window.addEventListener("unload", stopPolling);
 	button.addEventListener("click", async () => {
 		if (stopped || startPending || button.disabled) return;
-		const additionalTags = normalizeCaptureTags(
-			additionalInput.value.split(","),
-		);
+		picker.commitInput();
+		const additionalTags = picker.getTags();
 		startPending = true;
 		captureUiGeneration += 1;
 		clearError();
@@ -311,7 +326,7 @@ function init(): void {
 			if (stopped) return;
 			defaultTags.textContent = "Defaults unavailable";
 		}
-		const client = new ClepsydraClient(settings.server_url);
+		client = new ClepsydraClient(settings.server_url);
 
 		// Reachability is informational. It never gates capture interaction or
 		// mutates capture feedback.
