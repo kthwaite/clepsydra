@@ -194,8 +194,9 @@ function init(): void {
 			chip.className = "tag tag-suggested";
 			chip.textContent = tag;
 			chip.addEventListener("click", () => {
+				// addTag triggers onTagsChanged, which already calls
+				// refreshSuggestedTags — no need to call it again here.
 				picker.addTag(tag);
-				refreshSuggestedTags();
 			});
 			suggestedTags.append(chip);
 		}
