@@ -273,6 +273,10 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 		destroy(): void {
 			if (debounceTimer !== undefined) clearTimeout(debounceTimer);
 			debounceTimer = undefined;
+			// Invalidate any in-flight fetch so a late resolution can't mutate
+			// torn-down DOM — same generation-counter guard runFetch's
+			// callbacks already check.
+			fetchGeneration += 1;
 			input.removeEventListener("input", onInput);
 			input.removeEventListener("keydown", onKeyDown);
 		},
