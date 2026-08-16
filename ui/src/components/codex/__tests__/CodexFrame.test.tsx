@@ -241,7 +241,6 @@ function StatefulRouteProbe({
   );
 }
 
-
 describe("CodexFrame destination integration", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -259,7 +258,7 @@ describe("CodexFrame destination integration", () => {
 
       const docsButton = within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /09.*DOCS/i });
+      ).getByRole("button", { name: /08.*DOCS/i });
       expect(docsButton).toHaveAttribute("aria-current", "page");
       expect(
         screen.queryByRole("button", { name: /09.*STATUS/i }),
@@ -278,12 +277,14 @@ describe("CodexFrame destination integration", () => {
       const nav = within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
       );
-      expect(nav.getByRole("button", { name: /00.*ATRIUM/i })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
       expect(
-        nav.getByRole("button", { name: /09.*DOCS/i }),
+        nav.queryByRole("button", { name: /ATRIUM/i }),
+      ).not.toBeInTheDocument();
+      for (const button of nav.getAllByRole("button")) {
+        expect(button).not.toHaveAttribute("aria-current", "page");
+      }
+      expect(
+        nav.getByRole("button", { name: /08.*DOCS/i }),
       ).not.toHaveAttribute("aria-current");
     },
   );
@@ -296,7 +297,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /09.*DOCS/i }),
+      ).getByRole("button", { name: /08.*DOCS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({
@@ -312,11 +313,13 @@ describe("CodexFrame destination integration", () => {
     const nav = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
     );
+    const folioButton = nav.getByRole("button", { name: /00.*FOLIO/i });
     const gazetteerButton = nav.getByRole("button", {
-      name: /02.*GAZETTEER/i,
+      name: /01.*GAZETTEER/i,
     });
-    const statsButton = nav.getByRole("button", { name: /03.*STATS/i });
+    const statsButton = nav.getByRole("button", { name: /02.*STATS/i });
 
+    expect(folioButton).toBeVisible();
     expect(statsButton).toBeVisible();
     expect(statsButton).toHaveAttribute("aria-current", "page");
     expect(
@@ -335,7 +338,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /03.*STATS/i }),
+      ).getByRole("button", { name: /02.*STATS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/stats" });
@@ -348,8 +351,8 @@ describe("CodexFrame destination integration", () => {
     const nav = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
     );
-    const feedsButton = nav.getByRole("button", { name: /08.*FEEDS/i });
-    const docsButton = nav.getByRole("button", { name: /09.*DOCS/i });
+    const feedsButton = nav.getByRole("button", { name: /07.*FEEDS/i });
+    const docsButton = nav.getByRole("button", { name: /08.*DOCS/i });
 
     expect(feedsButton).toHaveAttribute("aria-current", "page");
     expect(
@@ -371,7 +374,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /08.*FEEDS/i }),
+      ).getByRole("button", { name: /07.*FEEDS/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/feeds" });
@@ -388,7 +391,7 @@ describe("CodexFrame destination integration", () => {
 
     const basesButton = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /07.*BASES/i });
+    ).getByRole("button", { name: /06.*BASES/i });
     expect(basesButton).toHaveAttribute("aria-current", "page");
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
     expect(screen.getByText(/FILE BASES.*VIEW BASES/)).toBeInTheDocument();
@@ -404,12 +407,14 @@ describe("CodexFrame destination integration", () => {
         screen.getByRole("navigation", { name: "Primary navigation" }),
       );
       expect(
-        nav.getByRole("button", { name: /07.*BASES/i }),
+        nav.getByRole("button", { name: /06.*BASES/i }),
       ).not.toHaveAttribute("aria-current");
-      expect(nav.getByRole("button", { name: /00.*ATRIUM/i })).toHaveAttribute(
-        "aria-current",
-        "page",
-      );
+      expect(
+        nav.queryByRole("button", { name: /ATRIUM/i }),
+      ).not.toBeInTheDocument();
+      for (const button of nav.getAllByRole("button")) {
+        expect(button).not.toHaveAttribute("aria-current", "page");
+      }
     },
   );
 
@@ -421,7 +426,7 @@ describe("CodexFrame destination integration", () => {
     await user.click(
       within(
         screen.getByRole("navigation", { name: "Primary navigation" }),
-      ).getByRole("button", { name: /07.*BASES/i }),
+      ).getByRole("button", { name: /06.*BASES/i }),
     );
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/bases" });
@@ -435,7 +440,7 @@ describe("CodexFrame destination integration", () => {
 
     const academic = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /06.*ACADEMIC/i });
+    ).getByRole("button", { name: /05.*ACADEMIC/i });
     expect(academic).toHaveAttribute("aria-current", "page");
     expect(screen.getByText(/FILE ACADEMIC.*VIEW ACADEMIC/)).toBeVisible();
     expect(screen.queryByTestId("sheaf")).not.toBeInTheDocument();
@@ -455,7 +460,7 @@ describe("CodexFrame destination integration", () => {
 
     const folioButton = within(
       screen.getByRole("navigation", { name: "Primary navigation" }),
-    ).getByRole("button", { name: /01.*FOLIO/i });
+    ).getByRole("button", { name: /00.*FOLIO/i });
     expect(folioButton).toHaveAttribute("aria-current", "page");
   });
 
@@ -639,7 +644,7 @@ describe("CodexFrame responsive shell", () => {
       name: "Primary navigation",
     });
     const feeds = within(primary).getByRole("button", {
-      name: /08.*feeds/i,
+      name: /07.*feeds/i,
     });
 
     expect(header).toHaveClass("min-w-0");
