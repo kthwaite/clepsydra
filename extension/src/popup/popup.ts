@@ -7,7 +7,11 @@ import {
 import { normalizeCaptureTags } from "#/lib/capture-tags";
 import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
 import { pageUrl } from "#/lib/page-url";
-import { DEFAULT_SETTINGS, type ExtensionSettings } from "#/lib/types";
+import {
+	type ArchiveLookupResponse,
+	DEFAULT_SETTINGS,
+	type ExtensionSettings,
+} from "#/lib/types";
 import { webext } from "#/lib/webext";
 
 const POLL_INTERVAL_MS = 250;
@@ -72,6 +76,11 @@ function progressPercent(status: CaptureStatus): number | null {
 	return null;
 }
 
+function formatCapturedDate(iso: string): string {
+	const parsed = new Date(iso);
+	return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleDateString();
+}
+
 function statusTone(phase: CapturePhase): string {
 	switch (phase) {
 		case "capturing":
@@ -109,6 +118,9 @@ function init(): void {
 	const optionsLink = document.getElementById(
 		"options-link",
 	) as HTMLAnchorElement;
+	const capturedIndicator = document.getElementById(
+		"captured-indicator",
+	) as HTMLElement;
 
 	let stopped = false;
 	let startPending = false;
@@ -173,6 +185,29 @@ function init(): void {
 		} else {
 			link.hidden = true;
 		}
+	};
+	const renderCapturedIndicator = (lookup: ArchiveLookupResponse) => {
+		if (lookup.status === "none") return;
+		capturedIndicator.replaceChildren();
+		if (lookup.status === "rubbish") {
+			capturedIndicator.textContent =
+				"A previous capture of this page is in the Rubbish Bin.";
+			capturedIndicator.hidden = false;
+			return;
+		}
+		const prefix = lookup.captured_at
+			? `Captured ${formatCapturedDate(lookup.captured_at)} — `
+			: "Captured previously — ";
+		capturedIndicator.append(document.createTextNode(prefix));
+		if (lookup.vault_path) {
+			const view = document.createElement("a");
+			view.textContent = "View";
+			view.href = pageUrl(settings.server_url, lookup.vault_path);
+			view.target = "_blank";
+			view.setAttribute("rel", "noopener");
+			capturedIndicator.append(view);
+		}
+		capturedIndicator.hidden = false;
 	};
 	const stopPolling = () => {
 		stopped = true;
@@ -300,6 +335,18 @@ function init(): void {
 			return;
 		}
 		if (tab?.id === undefined) return;
+
+		if (tab.url && /^https?:/i.test(tab.url)) {
+			void client
+				.lookupArchive(tab.url)
+				.then((lookup) => {
+					if (stopped || captureUiGeneration !== openingGeneration) return;
+					renderCapturedIndicator(lookup);
+				})
+				.catch(() => {
+					// The indicator is best-effort; capture stays available.
+				});
+		}
 
 		try {
 			const status = await requestCaptureStatus(tab.id);

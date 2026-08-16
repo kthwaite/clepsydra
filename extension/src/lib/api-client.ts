@@ -1,4 +1,5 @@
 import type {
+	ArchiveLookupResponse,
 	ArchiveManifest,
 	ArchiveResponse,
 	ArchiveStatusResponse,
@@ -30,6 +31,16 @@ export class ClepsydraClient {
 		const res = await fetch(`${this.baseUrl}/api/vault/archive/status`);
 		if (!res.ok) {
 			throw new ArchiveError(`Status check failed: ${res.status}`);
+		}
+		return res.json();
+	}
+
+	async lookupArchive(url: string): Promise<ArchiveLookupResponse> {
+		const res = await fetch(
+			`${this.baseUrl}/api/vault/archive/lookup?url=${encodeURIComponent(url)}`,
+		);
+		if (!res.ok) {
+			throw new ArchiveError(`Lookup failed: ${res.status}`);
 		}
 		return res.json();
 	}

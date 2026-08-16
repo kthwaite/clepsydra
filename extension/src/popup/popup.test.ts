@@ -3,15 +3,22 @@ import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { CapturePhase, CaptureStatus } from "#/lib/badge";
+import type { ArchiveLookupResponse } from "#/lib/types";
 const parseHTML = createRequire(import.meta.url)("linkedom").parseHTML as (
 	markup: string,
 ) => { document: Document; window: Window };
 
-const client = vi.hoisted(() => ({ isReachable: vi.fn(async () => true) }));
+const client = vi.hoisted(() => ({
+	isReachable: vi.fn(async () => true),
+	lookupArchive: vi.fn(
+		async (): Promise<ArchiveLookupResponse> => ({ status: "none" }),
+	),
+}));
 
 vi.mock("#/lib/api-client", () => ({
 	ClepsydraClient: class {
 		isReachable = client.isReachable;
+		lookupArchive = client.lookupArchive;
 	},
 }));
 
@@ -132,10 +139,15 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-async function openRealPopup(settings: Record<string, unknown>) {
+async function openRealPopup(
+	settings: Record<string, unknown>,
+	options: { tabUrl?: string | null } = {},
+) {
 	const markup = readFileSync(new URL("./popup.html", import.meta.url), "utf8");
 	const parsed = parseHTML(markup);
 	const storageSet = vi.fn();
+	const tabUrl = options.tabUrl ?? null;
+	const tabs = tabUrl === null ? [] : [{ id: 7, url: tabUrl }];
 	const api = {
 		storage: {
 			sync: {
@@ -143,9 +155,9 @@ async function openRealPopup(settings: Record<string, unknown>) {
 				set: storageSet,
 			},
 		},
-		tabs: { query: vi.fn(async () => []) },
+		tabs: { query: vi.fn(async () => tabs) },
 		runtime: {
-			sendMessage: vi.fn(),
+			sendMessage: vi.fn(async () => ({ status: null })),
 			openOptionsPage: vi.fn(),
 		},
 		scripting: { executeScript: vi.fn() },
@@ -184,6 +196,7 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 		"options-link",
 		"default-tags",
 		"additional-tags",
+		"captured-indicator",
 	];
 	const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement()]));
 	const messages: unknown[] = [];
@@ -263,6 +276,7 @@ beforeEach(() => {
 	vi.resetModules();
 	vi.useRealTimers();
 	client.isReachable.mockClear().mockResolvedValue(true);
+	client.lookupArchive.mockClear().mockResolvedValue({ status: "none" });
 });
 
 afterEach(() => {
@@ -844,5 +858,95 @@ describe("popup progress and outcome link", () => {
 
 		expect(popup.elements["capture-progress"].hidden).toBe(true);
 		expect(popup.elements["capture-link"].hidden).toBe(true);
+	});
+});
+
+describe("popup captured indicator", () => {
+	it("shows a formatted date and a View link for an active capture", async () => {
+		client.lookupArchive.mockResolvedValueOnce({
+			status: "active",
+			vault_path: "archive/example.com/x.md",
+			captured_at: "2026-08-13T12:00:00Z",
+		});
+		const popup = await openRealPopup(
+			{ server_url: "http://localhost:3000" },
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+		const link = popup.document.querySelector<HTMLAnchorElement>(
+			"#captured-indicator a",
+		);
+
+		expect(indicator?.hidden).toBe(false);
+		expect(indicator?.textContent).toContain(
+			new Date("2026-08-13T12:00:00Z").toLocaleDateString(),
+		);
+		expect(link?.textContent).toBe("View");
+		expect(link?.getAttribute("href")).toBe(
+			"http://localhost:3000/pages/archive/example.com/x.md",
+		);
+		expect(link?.getAttribute("target")).toBe("_blank");
+		expect(link?.getAttribute("rel")).toBe("noopener");
+	});
+
+	it("shows the Rubbish Bin message for a rubbish capture", async () => {
+		client.lookupArchive.mockResolvedValueOnce({ status: "rubbish" });
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+
+		expect(indicator?.hidden).toBe(false);
+		expect(indicator?.textContent).toBe(
+			"A previous capture of this page is in the Rubbish Bin.",
+		);
+	});
+
+	it("leaves the indicator hidden when there is no prior capture", async () => {
+		client.lookupArchive.mockResolvedValueOnce({ status: "none" });
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+
+		expect(indicator?.hidden).toBe(true);
+	});
+
+	it("leaves the indicator hidden and capture enabled when the lookup rejects", async () => {
+		client.lookupArchive.mockRejectedValueOnce(new Error("network error"));
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+		const button =
+			popup.document.querySelector<HTMLButtonElement>("#capture-btn");
+
+		expect(indicator?.hidden).toBe(true);
+		expect(button?.disabled).toBe(false);
+	});
+
+	it("performs no lookup fetch for a non-http tab URL", async () => {
+		const popup = await openRealPopup({}, { tabUrl: "ftp://example.com/file" });
+
+		expect(client.lookupArchive).not.toHaveBeenCalled();
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+		expect(indicator?.hidden).toBe(true);
 	});
 });
