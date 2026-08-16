@@ -1075,4 +1075,146 @@ describe("service-worker capture feedback", () => {
 			}),
 		);
 	});
+
+	it("reports chunk progress while a transfer assembles", async () => {
+		const worker = await loadWorker();
+		await worker.dispatch({ type: "capture_start", tabId: 7 });
+		await worker.dispatch(
+			{ type: "capture_meta", captureId: "chunked", metadata },
+			{ tab: { id: 7 } },
+		);
+
+		await worker.dispatch(
+			{
+				type: "capture_chunk",
+				captureId: "chunked",
+				index: 0,
+				total: 2,
+				text: "first half",
+			},
+			{ tab: { id: 7 } },
+		);
+
+		expect(await currentStatus(worker)).toEqual(
+			expect.objectContaining({
+				phase: "processing",
+				chunksReceived: 1,
+				chunksTotal: 2,
+			}),
+		);
+	});
+
+	it("done status carries the created page location", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			page_id: "pid-1",
+			vault_path: "archive/example.com/x.md",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+			status: "created",
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+
+		await vi.waitFor(async () => {
+			expect(await currentStatus(worker)).toEqual(
+				expect.objectContaining({
+					phase: "done",
+					vaultPath: "archive/example.com/x.md",
+					pageId: "pid-1",
+				}),
+			);
+		});
+	});
+
+	it("duplicate status carries the existing page location", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "already_exists",
+			page_id: "pid-2",
+			vault_path: "archive/example.com/y.md",
+			blobs_stored: 0,
+			blobs_deduped: 1,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+
+		await vi.waitFor(async () => {
+			expect(await currentStatus(worker)).toEqual(
+				expect.objectContaining({
+					phase: "duplicate",
+					vaultPath: "archive/example.com/y.md",
+					pageId: "pid-2",
+				}),
+			);
+		});
+	});
+
+	it("conflict status carries the existing page location", async () => {
+		dependencies.ingestArchive.mockRejectedValueOnce(
+			new ArchiveConflictError({
+				vault_path: "archive/example.com/z.md",
+				page_id: "pid-3",
+			}),
+		);
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+
+		await vi.waitFor(async () => {
+			expect(await currentStatus(worker)).toEqual(
+				expect.objectContaining({
+					phase: "conflict",
+					vaultPath: "archive/example.com/z.md",
+					pageId: "pid-3",
+				}),
+			);
+		});
+	});
+
+	it("rehydration keeps outcome fields and drops malformed ones", async () => {
+		const session = createSessionArea({
+			captureStatuses: {
+				"7": {
+					phase: "done",
+					detail: "A useful page was archived to archive/example.com/kept.md.",
+					attemptId: "attempt-outcome-kept",
+					startedAt: 10,
+					updatedAt: 20,
+					additionalTags: [],
+					vaultPath: "archive/example.com/kept.md",
+					pageId: "pid-kept",
+				},
+				"8": {
+					phase: "done",
+					detail: "A useful page was archived to archive/example.com/still.md.",
+					attemptId: "attempt-outcome-malformed",
+					startedAt: 10,
+					updatedAt: 20,
+					additionalTags: [],
+					chunksTotal: "two",
+					vaultPath: "archive/example.com/still.md",
+					pageId: "pid-still",
+				},
+			},
+		});
+
+		const worker = await loadWorker({ session });
+
+		expect(await currentStatus(worker, 7)).toEqual(
+			expect.objectContaining({
+				phase: "done",
+				vaultPath: "archive/example.com/kept.md",
+				pageId: "pid-kept",
+			}),
+		);
+		expect(await currentStatus(worker, 8)).toEqual(
+			expect.objectContaining({
+				phase: "done",
+				vaultPath: "archive/example.com/still.md",
+				pageId: "pid-still",
+			}),
+		);
+		expect((await currentStatus(worker, 8))?.chunksTotal).toBeUndefined();
+	});
 });

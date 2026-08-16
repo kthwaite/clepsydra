@@ -22,6 +22,7 @@ export interface ArchiveManifest {
 export interface ArchiveResponse {
 	page_id: string;
 	vault_path: string;
+	rubbish_item_id?: string;
 	blobs_stored: number;
 	blobs_deduped: number;
 	status: "created" | "already_exists" | "content_changed";
