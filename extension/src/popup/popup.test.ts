@@ -1235,6 +1235,35 @@ describe("popup suggested tags", () => {
 		expect(chips).toEqual(["rust"]);
 	});
 
+	it("keeps the suggested-tags row hidden and the rest of the popup unaffected when listTags rejects", async () => {
+		client.listTags.mockRejectedValueOnce(new Error("network error"));
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Rust Programming",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+
+		const suggested =
+			popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(suggested?.hidden).toBe(true);
+		expect(suggested?.children.length ?? 0).toBe(0);
+		const button =
+			popup.document.querySelector<HTMLButtonElement>("#capture-btn");
+		expect(button?.disabled).toBe(false);
+		const errorEl = popup.document.querySelector<HTMLElement>("#error-msg");
+		expect(errorEl?.style.display).not.toBe("block");
+	});
+
 	it("renders no suggestions and never calls scripting for a restricted tab", async () => {
 		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
 		const popup = await openRealPopup(

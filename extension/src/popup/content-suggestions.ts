@@ -68,7 +68,11 @@ export function tokenizeSignals(signals: PageSignals): string[] {
 	return tokens;
 }
 
-/** Vault tags the page's own words point at, ranked by vault usage. */
+/**
+ * Vault tags the page's own words point at, ranked by vault usage. Tokens
+ * are lowercased but vault tag names are matched verbatim, so a mixed-case
+ * vault tag never matches and is silently skipped.
+ */
 export function suggestFromVaultTags(
 	tokens: readonly string[],
 	vaultTags: readonly { tag: string; count: number }[],
