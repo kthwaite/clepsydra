@@ -4,10 +4,21 @@ import {
 	type CaptureStatus,
 	isInProgress,
 } from "#/lib/badge";
-import { normalizeCaptureTags } from "#/lib/capture-tags";
+import { currentMonthTag, normalizeCaptureTags } from "#/lib/capture-tags";
 import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
-import { DEFAULT_SETTINGS } from "#/lib/types";
+import { pageUrl } from "#/lib/page-url";
+import {
+	type ArchiveLookupResponse,
+	DEFAULT_SETTINGS,
+	type ExtensionSettings,
+} from "#/lib/types";
 import { webext } from "#/lib/webext";
+import {
+	type PageSignals,
+	suggestFromVaultTags,
+	tokenizeSignals,
+} from "#/popup/content-suggestions";
+import { createTagPicker } from "#/popup/tag-picker";
 
 const POLL_INTERVAL_MS = 250;
 const STATUS_TRANSPORT_ERROR =
@@ -54,6 +65,32 @@ async function requestCaptureStart(
 	return response.status;
 }
 
+/**
+ * Percent for the determinate span; null renders the indeterminate slide.
+ * "uploading" is deliberately indeterminate (decision 3) — the upload POST
+ * can be the longest span for a large snapshot, and a frozen determinate bar
+ * reads as stalled.
+ */
+function progressPercent(status: CaptureStatus): number | null {
+	if (status.phase === "processing") {
+		const { chunksReceived, chunksTotal } = status;
+		if (
+			chunksReceived === undefined ||
+			chunksTotal === undefined ||
+			chunksTotal <= 0
+		) {
+			return null;
+		}
+		return 15 + Math.round(65 * Math.min(1, chunksReceived / chunksTotal));
+	}
+	return null;
+}
+
+function formatCapturedDate(iso: string): string {
+	const parsed = new Date(iso);
+	return Number.isNaN(parsed.getTime()) ? iso : parsed.toLocaleDateString();
+}
+
 function statusTone(phase: CapturePhase): string {
 	switch (phase) {
 		case "capturing":
@@ -71,24 +108,124 @@ function statusTone(phase: CapturePhase): string {
 	}
 }
 
+/** `new URL(url).hostname`, mirroring the worker's own domain extraction. */
+function extractDomainFromUrl(url: string): string {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return "unknown";
+	}
+}
+
+async function collectPageSignals(
+	tabId: number,
+	fallbackTitle: string,
+): Promise<PageSignals> {
+	const fallback = { title: fallbackTitle, description: "", keywords: [] };
+	const scripting = webext.scripting;
+	if (!scripting?.executeScript) return fallback;
+	try {
+		const [result] = await scripting.executeScript({
+			target: { tabId },
+			func: () => ({
+				title: document.title,
+				description:
+					document
+						.querySelector('meta[name="description"]')
+						?.getAttribute("content") ?? "",
+				keywords: (
+					document
+						.querySelector('meta[name="keywords"]')
+						?.getAttribute("content") ?? ""
+				).split(","),
+			}),
+		});
+		return (result?.result as PageSignals | undefined) ?? fallback;
+	} catch {
+		return fallback;
+	}
+}
+
 function init(): void {
 	const dot = document.getElementById("status-dot") as HTMLElement;
 	const text = document.getElementById("status-text") as HTMLElement;
 	const error = document.getElementById("error-msg") as HTMLElement;
 	const button = document.getElementById("capture-btn") as HTMLButtonElement;
 	const panel = document.getElementById("capture-status") as HTMLElement;
+	const progressBar = document.getElementById(
+		"capture-progress",
+	) as HTMLElement;
+	const progressFill = document.getElementById(
+		"capture-progress-fill",
+	) as HTMLElement;
+	const link = document.getElementById("capture-link") as HTMLAnchorElement;
 	const defaultTags = document.getElementById("default-tags") as HTMLElement;
 	const additionalInput = document.getElementById(
 		"additional-tags",
 	) as HTMLInputElement;
+	const selectedTags = document.getElementById("selected-tags") as HTMLElement;
+	const tagSuggestions = document.getElementById(
+		"tag-suggestions",
+	) as HTMLElement;
 	const optionsLink = document.getElementById(
 		"options-link",
 	) as HTMLAnchorElement;
+	const capturedIndicator = document.getElementById(
+		"captured-indicator",
+	) as HTMLElement;
+	const suggestedTags = document.getElementById(
+		"suggested-tags",
+	) as HTMLElement;
 
 	let stopped = false;
 	let startPending = false;
 	let captureUiGeneration = 0;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
+	let settings: ExtensionSettings = DEFAULT_SETTINGS;
+	// Constructed synchronously so the picker's fetchSuggestions closure has
+	// something to call immediately; reassigned once stored settings resolve
+	// (see below), which is why this is a mutable `let` rather than `const`.
+	let client = new ClepsydraClient(DEFAULT_SETTINGS.server_url);
+	let suggestedTagPool: string[] = [];
+	let suggestedChips: HTMLButtonElement[] = [];
+	let captureActive = false;
+
+	const refreshSuggestedTags = (): void => {
+		const currentTags = new Set(picker.getTags());
+		const visible = suggestedTagPool.filter((tag) => !currentTags.has(tag));
+		suggestedTags.replaceChildren();
+		suggestedChips = [];
+		for (const tag of visible) {
+			const chip = document.createElement("button") as HTMLButtonElement;
+			chip.type = "button";
+			chip.className = "tag tag-suggested";
+			chip.textContent = tag;
+			chip.setAttribute("aria-label", `Add tag ${tag}`);
+			// The picker's add paths no-op while disabled, so the chip must not
+			// present as clickable during a capture.
+			chip.disabled = captureActive;
+			chip.addEventListener("click", () => {
+				// addTag triggers onTagsChanged, which already calls
+				// refreshSuggestedTags — no need to call it again here.
+				picker.addTag(tag);
+			});
+			suggestedTags.append(chip);
+			suggestedChips.push(chip);
+		}
+		suggestedTags.hidden = visible.length === 0;
+	};
+	const renderSuggestedTags = (tags: string[]): void => {
+		suggestedTagPool = tags;
+		refreshSuggestedTags();
+	};
+
+	const picker = createTagPicker({
+		input: additionalInput,
+		chipList: selectedTags,
+		suggestionList: tagSuggestions,
+		fetchSuggestions: (query) => client.suggestTags(query),
+		onTagsChanged: () => refreshSuggestedTags(),
+	});
 
 	const clearError = () => {
 		error.textContent = "";
@@ -111,21 +248,76 @@ function init(): void {
 			defaultTags.append(chip);
 		}
 	};
-	const renderPhase = (phase: CapturePhase, detail: string) => {
+	const renderProgress = (active: boolean, percent: number | null) => {
+		progressBar.hidden = !active;
+		if (!active) return;
+		if (percent === null) {
+			progressFill.classList.add("indeterminate");
+			progressFill.style.width = "";
+			progressBar.removeAttribute("aria-valuenow");
+		} else {
+			progressFill.classList.remove("indeterminate");
+			progressFill.style.width = `${percent}%`;
+			progressBar.setAttribute("aria-valuenow", String(percent));
+		}
+	};
+	const renderPhase = (
+		phase: CapturePhase,
+		detail: string,
+		percent: number | null = null,
+	) => {
 		const active = isInProgress(phase);
 		panel.textContent = detail;
 		panel.dataset.tone = statusTone(phase);
 		panel.style.display = "block";
 		button.disabled = active;
-		additionalInput.disabled = active;
+		picker.setDisabled(active);
+		captureActive = active;
+		for (const chip of suggestedChips) {
+			chip.disabled = active;
+		}
+		// A prior terminal status's outcome link must not survive into whatever
+		// phase renders next; renderStatus below re-shows it only once it has
+		// confirmed the new status is itself terminal and has a vaultPath.
+		link.hidden = true;
+		renderProgress(active, percent);
 	};
 	const renderStatus = (status: CaptureStatus) => {
 		if (isInProgress(status.phase)) {
-			additionalInput.value = status.additionalTags.join(", ");
+			picker.setTags(status.additionalTags);
 		} else {
-			additionalInput.value = "";
+			picker.setTags([]);
 		}
-		renderPhase(status.phase, status.detail);
+		renderPhase(status.phase, status.detail, progressPercent(status));
+		if (!isInProgress(status.phase) && status.vaultPath) {
+			link.href = pageUrl(settings.server_url, status.vaultPath);
+			link.hidden = false;
+		} else {
+			link.hidden = true;
+		}
+	};
+	const renderCapturedIndicator = (lookup: ArchiveLookupResponse) => {
+		if (lookup.status === "none") return;
+		capturedIndicator.replaceChildren();
+		if (lookup.status === "rubbish") {
+			capturedIndicator.textContent =
+				"A previous capture of this page is in the Rubbish Bin.";
+			capturedIndicator.hidden = false;
+			return;
+		}
+		const prefix = lookup.captured_at
+			? `Captured ${formatCapturedDate(lookup.captured_at)} — `
+			: "Captured previously — ";
+		capturedIndicator.append(document.createTextNode(prefix));
+		if (lookup.vault_path) {
+			const view = document.createElement("a");
+			view.textContent = "View";
+			view.href = pageUrl(settings.server_url, lookup.vault_path);
+			view.target = "_blank";
+			view.setAttribute("rel", "noopener");
+			capturedIndicator.append(view);
+		}
+		capturedIndicator.hidden = false;
 	};
 	const stopPolling = () => {
 		stopped = true;
@@ -135,7 +327,7 @@ function init(): void {
 	const showStatusTransportError = () => {
 		showError(STATUS_TRANSPORT_ERROR);
 		button.disabled = false;
-		additionalInput.disabled = false;
+		picker.setDisabled(false);
 	};
 	const showAbsentStatus = () => {
 		clearError();
@@ -167,12 +359,14 @@ function init(): void {
 
 	// All interaction and teardown hooks are installed before initialization can
 	// wait on storage, tab lookup, worker rehydration, or server reachability.
-	window.addEventListener("unload", stopPolling);
+	window.addEventListener("unload", () => {
+		stopPolling();
+		picker.destroy();
+	});
 	button.addEventListener("click", async () => {
 		if (stopped || startPending || button.disabled) return;
-		const additionalTags = normalizeCaptureTags(
-			additionalInput.value.split(","),
-		);
+		picker.commitInput();
+		const additionalTags = picker.getTags();
 		startPending = true;
 		captureUiGeneration += 1;
 		clearError();
@@ -214,7 +408,6 @@ function init(): void {
 
 	void (async () => {
 		const openingGeneration = captureUiGeneration;
-		let settings = DEFAULT_SETTINGS;
 		try {
 			const stored = await webext.storage.sync.get("settings");
 			if (stopped) return;
@@ -230,7 +423,7 @@ function init(): void {
 			if (stopped) return;
 			defaultTags.textContent = "Defaults unavailable";
 		}
-		const client = new ClepsydraClient(settings.server_url);
+		client = new ClepsydraClient(settings.server_url);
 
 		// Reachability is informational. It never gates capture interaction or
 		// mutates capture feedback.
@@ -254,6 +447,46 @@ function init(): void {
 			return;
 		}
 		if (tab?.id === undefined) return;
+
+		if (tab.url && /^https?:/i.test(tab.url)) {
+			void client
+				.lookupArchive(tab.url)
+				.then((lookup) => {
+					if (stopped || captureUiGeneration !== openingGeneration) return;
+					renderCapturedIndicator(lookup);
+				})
+				.catch(() => {
+					// The indicator is best-effort; capture stays available.
+				});
+
+			const tabId = tab.id;
+			const tabUrl = tab.url;
+			void Promise.all([
+				collectPageSignals(tabId, tab.title ?? ""),
+				client.listTags(),
+			])
+				.then(([signals, vaultTags]) => {
+					if (stopped || captureUiGeneration !== openingGeneration) return;
+					const implicit = new Set(
+						normalizeCaptureTags([
+							"archive",
+							extractDomainFromUrl(tabUrl),
+							currentMonthTag(),
+							...settings.default_tags,
+						]),
+					);
+					renderSuggestedTags(
+						suggestFromVaultTags(
+							tokenizeSignals(signals),
+							vaultTags,
+							new Set([...implicit, ...picker.getTags()]),
+						),
+					);
+				})
+				.catch(() => {
+					// Suggestions are best-effort; capture stays available.
+				});
+		}
 
 		try {
 			const status = await requestCaptureStatus(tab.id);

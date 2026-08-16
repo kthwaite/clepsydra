@@ -3,15 +3,35 @@ import { createRequire } from "node:module";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Mock } from "vitest";
 import type { CapturePhase, CaptureStatus } from "#/lib/badge";
-const parseHTML = createRequire(import.meta.url)("linkedom").parseHTML as (
-	markup: string,
-) => { document: Document; window: Window };
+import type { ArchiveLookupResponse } from "#/lib/types";
+const linkedom = createRequire(import.meta.url)("linkedom") as {
+	parseHTML: (markup: string) => { document: Document; window: Window };
+	Event: typeof globalThis.Event;
+};
+const parseHTML = linkedom.parseHTML;
 
-const client = vi.hoisted(() => ({ isReachable: vi.fn(async () => true) }));
+function keyEvent(key: string): Event {
+	const event = new linkedom.Event("keydown", { cancelable: true }) as Event & {
+		key: string;
+	};
+	event.key = key;
+	return event;
+}
+
+const client = vi.hoisted(() => ({
+	isReachable: vi.fn(async () => true),
+	lookupArchive: vi.fn(
+		async (): Promise<ArchiveLookupResponse> => ({ status: "none" }),
+	),
+	listTags: vi.fn(async (): Promise<{ tag: string; count: number }[]> => []),
+}));
 
 vi.mock("#/lib/api-client", () => ({
 	ClepsydraClient: class {
 		isReachable = client.isReachable;
+		lookupArchive = client.lookupArchive;
+		suggestTags = vi.fn().mockResolvedValue([]);
+		listTags = client.listTags;
 	},
 }));
 
@@ -37,19 +57,41 @@ class FakeElement {
 	disabled = false;
 	value = "";
 	className = "";
-	style = { display: "" };
+	href = "";
+	hidden = false;
+	style: Record<string, string> = { display: "" };
 	dataset: Record<string, string> = {};
 	readonly children: FakeElement[] = [];
 	readonly classes = new Set<string>();
+	private readonly attributes = new Map<string, string>();
 	private readonly listeners = new Map<string, Listener>();
 	readonly classList = {
 		add: (...names: string[]) => {
 			for (const name of names) this.classes.add(name);
 		},
+		remove: (...names: string[]) => {
+			for (const name of names) this.classes.delete(name);
+		},
 	};
 
 	addEventListener(type: string, listener: Listener) {
 		this.listeners.set(type, listener);
+	}
+
+	removeEventListener(type: string) {
+		this.listeners.delete(type);
+	}
+
+	setAttribute(name: string, value: string) {
+		this.attributes.set(name, value);
+	}
+
+	removeAttribute(name: string) {
+		this.attributes.delete(name);
+	}
+
+	getAttribute(name: string): string | null {
+		return this.attributes.get(name) ?? null;
 	}
 
 	replaceChildren() {
@@ -114,10 +156,27 @@ function deferred<T>() {
 	return { promise, resolve, reject };
 }
 
-async function openRealPopup(settings: Record<string, unknown>) {
+async function openRealPopup(
+	settings: Record<string, unknown>,
+	options: {
+		tabUrl?: string | null;
+		tabTitle?: string;
+		scriptingResult?: unknown[];
+		scriptingRejects?: boolean;
+		status?: CaptureStatus;
+	} = {},
+) {
 	const markup = readFileSync(new URL("./popup.html", import.meta.url), "utf8");
 	const parsed = parseHTML(markup);
 	const storageSet = vi.fn();
+	const tabUrl = options.tabUrl ?? null;
+	const tabs =
+		tabUrl === null
+			? []
+			: [{ id: 7, url: tabUrl, title: options.tabTitle ?? "" }];
+	const executeScript = options.scriptingRejects
+		? vi.fn().mockRejectedValue(new Error("executeScript failed"))
+		: vi.fn().mockResolvedValue(options.scriptingResult ?? []);
 	const api = {
 		storage: {
 			sync: {
@@ -125,12 +184,16 @@ async function openRealPopup(settings: Record<string, unknown>) {
 				set: storageSet,
 			},
 		},
-		tabs: { query: vi.fn(async () => []) },
+		tabs: { query: vi.fn(async () => tabs) },
 		runtime: {
-			sendMessage: vi.fn(),
+			sendMessage: vi.fn(async (message: unknown) => ({
+				status: messageHasType(message, "capture_status")
+					? (options.status ?? null)
+					: null,
+			})),
 			openOptionsPage: vi.fn(),
 		},
-		scripting: { executeScript: vi.fn() },
+		scripting: { executeScript },
 	};
 	vi.stubGlobal("document", parsed.document);
 	vi.stubGlobal("window", parsed.window);
@@ -139,7 +202,12 @@ async function openRealPopup(settings: Record<string, unknown>) {
 
 	await import("./popup");
 	await settle();
-	return { document: parsed.document, storageSet };
+	return {
+		document: parsed.document,
+		storageSet,
+		sendMessage: api.runtime.sendMessage,
+		scripting: executeScript,
+	};
 }
 
 function messageHasType(message: unknown, type: string): boolean {
@@ -147,6 +215,18 @@ function messageHasType(message: unknown, type: string): boolean {
 		return false;
 	}
 	return message.type === type;
+}
+
+/**
+ * Each rendered chip is `span.tag > (span label, button.tag-remove)`; read
+ * the label leaf directly rather than the chip's own `textContent`, which
+ * FakeElement.append recomputes from children and would otherwise fold in
+ * the remove button's glyph too.
+ */
+function chipLabels(popup: PopupHarness): (string | undefined)[] {
+	return popup.elements["selected-tags"].children.map(
+		(chip) => chip.children[0]?.textContent,
+	);
 }
 
 async function settle() {
@@ -160,9 +240,16 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 		"error-msg",
 		"capture-btn",
 		"capture-status",
+		"capture-progress",
+		"capture-progress-fill",
+		"capture-link",
 		"options-link",
 		"default-tags",
 		"additional-tags",
+		"selected-tags",
+		"tag-suggestions",
+		"captured-indicator",
+		"suggested-tags",
 	];
 	const elements = Object.fromEntries(ids.map((id) => [id, new FakeElement()]));
 	const messages: unknown[] = [];
@@ -242,6 +329,8 @@ beforeEach(() => {
 	vi.resetModules();
 	vi.useRealTimers();
 	client.isReachable.mockClear().mockResolvedValue(true);
+	client.lookupArchive.mockClear().mockResolvedValue({ status: "none" });
+	client.listTags.mockClear().mockResolvedValue([]);
 });
 
 afterEach(() => {
@@ -268,6 +357,48 @@ describe("popup tag controls", () => {
 		expect(document.body.textContent).toMatch(/only to this capture/i);
 	});
 
+	it("ships the tag picker's combobox and listbox markup in the real popup", () => {
+		const markup = readFileSync(
+			new URL("./popup.html", import.meta.url),
+			"utf8",
+		);
+		const { document } = parseHTML(markup);
+		const input = document.querySelector<HTMLInputElement>("#additional-tags");
+		const listbox = document.querySelector("#tag-suggestions");
+
+		expect(input?.getAttribute("role")).toBe("combobox");
+		expect(input?.getAttribute("aria-expanded")).toBe("false");
+		expect(input?.getAttribute("aria-controls")).toBe("tag-suggestions");
+		expect(listbox?.getAttribute("role")).toBe("listbox");
+		expect(listbox?.hasAttribute("hidden")).toBe(true);
+		expect(document.querySelector("#selected-tags")).not.toBeNull();
+	});
+
+	it("sends chips committed via Enter plus trailing uncommitted text on capture", async () => {
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+		const input =
+			popup.document.querySelector<HTMLInputElement>("#additional-tags");
+		const button =
+			popup.document.querySelector<HTMLButtonElement>("#capture-btn");
+		if (!input || !button) throw new Error("popup markup missing controls");
+
+		input.value = "research";
+		input.dispatchEvent(keyEvent("Enter"));
+		input.value = "reading";
+		button.dispatchEvent(new linkedom.Event("click"));
+		await settle();
+
+		expect(popup.sendMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "capture_start",
+				additionalTags: ["research", "reading"],
+			}),
+		);
+	});
+
 	it("renders immutable normalized defaults outside the additions input", async () => {
 		const popup = await openRealPopup({
 			default_tags: [" #archive ", "research", "archive"],
@@ -289,20 +420,20 @@ describe("popup tag controls", () => {
 		).toBeNull();
 	});
 
-	it("normalizes one-capture additions into the capture_start message", async () => {
+	it("commits uncommitted input text into the capture_start message", async () => {
 		const popup = await openPopup();
-		popup.elements["additional-tags"].value = " #reading, research, reading ";
+		popup.elements["additional-tags"].value = "  Reading  ";
 
 		await popup.elements["capture-btn"].emit("click");
 
 		expect(popup.messages).toContainEqual({
 			type: "capture_start",
 			tabId: 7,
-			additionalTags: ["reading", "research"],
+			additionalTags: ["Reading"],
 		});
 		expect(popup.storageSet).not.toHaveBeenCalled();
 	});
-	it("shows attempt-owned tags when start acknowledges an existing capture", async () => {
+	it("shows attempt-owned tags as chips when start acknowledges an existing capture", async () => {
 		const popup = await openPopup({
 			starts: [
 				{
@@ -319,11 +450,11 @@ describe("popup tag controls", () => {
 
 		await popup.elements["capture-btn"].emit("click");
 
-		expect(popup.elements["additional-tags"].value).toBe("attempt-owned");
+		expect(chipLabels(popup)).toEqual(["attempt-owned"]);
 		expect(popup.elements["additional-tags"].disabled).toBe(true);
 	});
 
-	it("restores active additions and disables editing", async () => {
+	it("restores active additions as chips and disables editing", async () => {
 		const popup = await openPopup({
 			status: [
 				{
@@ -337,11 +468,11 @@ describe("popup tag controls", () => {
 			],
 		});
 
-		expect(popup.elements["additional-tags"].value).toBe("research, reading");
+		expect(chipLabels(popup)).toEqual(["research", "reading"]);
 		expect(popup.elements["additional-tags"].disabled).toBe(true);
 	});
 
-	it("does not restore additions from terminal status", async () => {
+	it("clears chips for a terminal status", async () => {
 		const popup = await openPopup({
 			status: [
 				{
@@ -350,7 +481,7 @@ describe("popup tag controls", () => {
 			],
 		});
 
-		expect(popup.elements["additional-tags"].value).toBe("");
+		expect(chipLabels(popup)).toEqual([]);
 		expect(popup.elements["additional-tags"].disabled).toBe(false);
 	});
 
@@ -382,11 +513,11 @@ describe("popup tag controls", () => {
 				{ status: captureStatus("done", "Archived.", "active", ["research"]) },
 			],
 		});
-		expect(popup.elements["additional-tags"].value).toBe("research");
+		expect(chipLabels(popup)).toEqual(["research"]);
 
 		await vi.advanceTimersByTimeAsync(250);
 
-		expect(popup.elements["additional-tags"].value).toBe("");
+		expect(chipLabels(popup)).toEqual([]);
 		expect(popup.elements["additional-tags"].disabled).toBe(false);
 	});
 
@@ -534,6 +665,10 @@ describe("popup capture feedback", () => {
 
 	it("starts capture through the worker and keeps the popup open", async () => {
 		const popup = await openPopup();
+		// Suggested-tag collection already called scripting.executeScript during
+		// init; capture itself must not trigger another call — injection is the
+		// background worker's job (executeCaptureScript), not the popup's.
+		const scriptingCallsBeforeCapture = popup.scripting.mock.calls.length;
 
 		await popup.elements["capture-btn"].emit("click");
 
@@ -542,7 +677,7 @@ describe("popup capture feedback", () => {
 			tabId: 7,
 			additionalTags: [],
 		});
-		expect(popup.scripting).not.toHaveBeenCalled();
+		expect(popup.scripting.mock.calls.length).toBe(scriptingCallsBeforeCapture);
 		expect(popup.close).not.toHaveBeenCalled();
 		expect(popup.elements["capture-btn"].disabled).toBe(true);
 		expect(popup.elements["capture-status"].textContent).toBe(
@@ -741,5 +876,512 @@ describe("popup capture feedback", () => {
 		expect(markup).toMatch(
 			/#status-text[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/s,
 		);
+		expect(markup).toMatch(
+			/id="capture-progress"[^>]*role="progressbar"[^>]*aria-valuemin="0"[^>]*aria-valuemax="100"/,
+		);
+		expect(markup).toMatch(
+			/<a[^>]*id="capture-link"[^>]*hidden[^>]*target="_blank"[^>]*rel="noopener"[^>]*>View in Clepsydra<\/a>/,
+		);
+	});
+});
+
+describe("popup progress and outcome link", () => {
+	it("renders a determinate progress bar from chunk counts", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: {
+						...captureStatus("processing", "building the snapshot…"),
+						chunksReceived: 3,
+						chunksTotal: 4,
+					},
+				},
+			],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(false);
+		expect(popup.elements["capture-progress-fill"].classes).not.toContain(
+			"indeterminate",
+		);
+		expect(
+			popup.elements["capture-progress"].getAttribute("aria-valuenow"),
+		).toBe("64");
+	});
+
+	it("renders an indeterminate progress bar while capturing", async () => {
+		const popup = await openPopup({
+			status: [{ status: captureStatus("capturing", "reading the page…") }],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(false);
+		expect(popup.elements["capture-progress-fill"].classes).toContain(
+			"indeterminate",
+		);
+		expect(
+			popup.elements["capture-progress"].getAttribute("aria-valuenow"),
+		).toBeNull();
+	});
+
+	it("hides the progress bar and shows the outcome link for a terminal done status", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: {
+						...captureStatus(
+							"done",
+							"A useful page was archived to archive/example.com/a b.md.",
+						),
+						vaultPath: "archive/example.com/a b.md",
+					},
+				},
+			],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(true);
+		expect(popup.elements["capture-link"].hidden).toBe(false);
+		expect(popup.elements["capture-link"].href).toBe(
+			"http://localhost:3000/pages/archive/example.com/a%20b.md",
+		);
+	});
+
+	it("leaves the outcome link hidden for a terminal status without a vault path", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: captureStatus(
+						"error",
+						"Capture could not start: access denied",
+					),
+				},
+			],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(true);
+		expect(popup.elements["capture-link"].hidden).toBe(true);
+	});
+
+	it("leaves the outcome link hidden for a duplicate capture in the Rubbish Bin", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: captureStatus(
+						"duplicate",
+						"A useful page is already archived, in the Rubbish Bin.",
+					),
+				},
+			],
+		});
+
+		expect(popup.elements["capture-link"].hidden).toBe(true);
+	});
+
+	it("hides a stale outcome link once a new capture attempt fails to start", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: {
+						...captureStatus(
+							"done",
+							"A useful page was archived to archive/example.com/a.md.",
+						),
+						vaultPath: "archive/example.com/a.md",
+					},
+				},
+			],
+			starts: [new Error("worker unavailable")],
+		});
+		expect(popup.elements["capture-link"].hidden).toBe(false);
+
+		await popup.elements["capture-btn"].emit("click");
+
+		expect(popup.elements["capture-link"].hidden).toBe(true);
+	});
+
+	it("renders an indeterminate progress bar while uploading", async () => {
+		const popup = await openPopup({
+			status: [{ status: captureStatus("uploading", "sending to the vault…") }],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(false);
+		expect(popup.elements["capture-progress-fill"].classes).toContain(
+			"indeterminate",
+		);
+		expect(
+			popup.elements["capture-progress"].getAttribute("aria-valuenow"),
+		).toBeNull();
+	});
+});
+
+describe("popup captured indicator", () => {
+	it("shows a formatted date and a View link for an active capture", async () => {
+		client.lookupArchive.mockResolvedValueOnce({
+			status: "active",
+			vault_path: "archive/example.com/x.md",
+			captured_at: "2026-08-13T12:00:00Z",
+		});
+		const popup = await openRealPopup(
+			{ server_url: "http://localhost:3000" },
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+		const link = popup.document.querySelector<HTMLAnchorElement>(
+			"#captured-indicator a",
+		);
+
+		expect(indicator?.hidden).toBe(false);
+		expect(indicator?.textContent).toContain(
+			new Date("2026-08-13T12:00:00Z").toLocaleDateString(),
+		);
+		expect(link?.textContent).toBe("View");
+		expect(link?.getAttribute("href")).toBe(
+			"http://localhost:3000/pages/archive/example.com/x.md",
+		);
+		expect(link?.getAttribute("target")).toBe("_blank");
+		expect(link?.getAttribute("rel")).toBe("noopener");
+	});
+
+	it("shows the Rubbish Bin message for a rubbish capture", async () => {
+		client.lookupArchive.mockResolvedValueOnce({ status: "rubbish" });
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+
+		expect(indicator?.hidden).toBe(false);
+		expect(indicator?.textContent).toBe(
+			"A previous capture of this page is in the Rubbish Bin.",
+		);
+	});
+
+	it("leaves the indicator hidden when there is no prior capture", async () => {
+		client.lookupArchive.mockResolvedValueOnce({ status: "none" });
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+
+		expect(indicator?.hidden).toBe(true);
+	});
+
+	it("leaves the indicator hidden and capture enabled when the lookup rejects", async () => {
+		client.lookupArchive.mockRejectedValueOnce(new Error("network error"));
+		const popup = await openRealPopup(
+			{},
+			{ tabUrl: "https://example.com/article" },
+		);
+
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+		const button =
+			popup.document.querySelector<HTMLButtonElement>("#capture-btn");
+
+		expect(indicator?.hidden).toBe(true);
+		expect(button?.disabled).toBe(false);
+	});
+
+	it("performs no lookup fetch for a non-http tab URL", async () => {
+		const popup = await openRealPopup({}, { tabUrl: "ftp://example.com/file" });
+
+		expect(client.lookupArchive).not.toHaveBeenCalled();
+		const indicator = popup.document.querySelector<HTMLElement>(
+			"#captured-indicator",
+		);
+		expect(indicator?.hidden).toBe(true);
+		expect(popup.scripting).not.toHaveBeenCalled();
+		const suggested =
+			popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(suggested?.hidden).toBe(true);
+	});
+});
+
+describe("popup suggested tags", () => {
+	it("renders ranked, capped suggestion chips from page tokens matched against vault tags", async () => {
+		client.listTags.mockResolvedValueOnce([
+			{ tag: "alpha", count: 8 },
+			{ tag: "beta", count: 7 },
+			{ tag: "gamma", count: 6 },
+			{ tag: "delta", count: 5 },
+			{ tag: "epsilon", count: 4 },
+			{ tag: "zeta", count: 3 },
+			{ tag: "eta", count: 2 },
+			{ tag: "theta", count: 1 },
+		]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+
+		const chips = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(chips).toEqual([
+			"alpha",
+			"beta",
+			"gamma",
+			"delta",
+			"epsilon",
+			"zeta",
+		]);
+		expect(
+			popup.document.querySelector<HTMLElement>("#suggested-tags")?.hidden,
+		).toBe(false);
+	});
+
+	it("disables suggested chips while a capture is in progress", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{ result: { title: "Rust", description: "", keywords: [] } },
+				],
+				status: captureStatus("processing", "building the snapshot…"),
+			},
+		);
+
+		const chip = popup.document.querySelector<HTMLButtonElement>(
+			"#suggested-tags .tag-suggested",
+		);
+		expect(chip).not.toBeNull();
+		expect(chip?.disabled).toBe(true);
+	});
+
+	it("gives the suggested-tags row and its chips accessible names", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{ result: { title: "Rust", description: "", keywords: [] } },
+				],
+			},
+		);
+
+		const group = popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(group?.getAttribute("role")).toBe("group");
+		expect(group?.getAttribute("aria-label")).toBe("Suggested from this page");
+
+		const chip = popup.document.querySelector<HTMLButtonElement>(
+			"#suggested-tags .tag-suggested",
+		);
+		expect(chip?.getAttribute("aria-label")).toBe("Add tag rust");
+	});
+
+	it("never suggests the implicit archive, domain, current-month, or default tags even when they match a token", async () => {
+		vi.useFakeTimers();
+		vi.setSystemTime(new Date(2026, 7, 14, 12));
+		try {
+			client.listTags.mockResolvedValueOnce([
+				{ tag: "archive", count: 99 },
+				{ tag: "localhost", count: 10 },
+				{ tag: "2026-08", count: 40 },
+				{ tag: "research", count: 50 },
+				{ tag: "programming", count: 5 },
+			]);
+			const popup = await openRealPopup(
+				{ default_tags: ["research"] },
+				{
+					tabUrl: "http://localhost/notes",
+					scriptingResult: [
+						{
+							result: {
+								title: "Localhost Archive Research 2026-08 Programming",
+								description: "",
+								keywords: [],
+							},
+						},
+					],
+				},
+			);
+
+			const chips = Array.from(
+				popup.document.querySelectorAll<HTMLButtonElement>(
+					"#suggested-tags .tag-suggested",
+				),
+				(chip) => chip.textContent,
+			);
+			expect(chips).toEqual(["programming"]);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("clicking a suggestion adds it via the tag picker and hides only that chip", async () => {
+		client.listTags.mockResolvedValueOnce([
+			{ tag: "rust", count: 10 },
+			{ tag: "programming", count: 5 },
+		]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Rust Programming",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+
+		const rustChip = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+		).find((chip) => chip.textContent === "rust");
+		if (!rustChip) throw new Error("expected a rust suggestion chip");
+		rustChip.dispatchEvent(new linkedom.Event("click"));
+		await settle();
+
+		const remaining = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(remaining).toEqual(["programming"]);
+		const selected = Array.from(
+			popup.document.querySelectorAll<HTMLElement>(
+				"#selected-tags .tag > span",
+			),
+			(label) => label.textContent,
+		);
+		expect(selected).toContain("rust");
+	});
+
+	it("hides a suggestion once its tag is committed by typing, via the picker's onTagsChanged", async () => {
+		client.listTags.mockResolvedValueOnce([
+			{ tag: "rust", count: 10 },
+			{ tag: "programming", count: 5 },
+		]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Rust Programming",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+		const input =
+			popup.document.querySelector<HTMLInputElement>("#additional-tags");
+		if (!input) throw new Error("popup markup missing the additions input");
+
+		input.value = "programming";
+		input.dispatchEvent(keyEvent("Enter"));
+		await settle();
+
+		const remaining = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(remaining).toEqual(["rust"]);
+	});
+
+	it("falls back to tab-title-only signals when executeScript throws", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				tabTitle: "Rust Programming",
+				scriptingRejects: true,
+			},
+		);
+
+		const chips = Array.from(
+			popup.document.querySelectorAll<HTMLButtonElement>(
+				"#suggested-tags .tag-suggested",
+			),
+			(chip) => chip.textContent,
+		);
+		expect(chips).toEqual(["rust"]);
+	});
+
+	it("keeps the suggested-tags row hidden and the rest of the popup unaffected when listTags rejects", async () => {
+		client.listTags.mockRejectedValueOnce(new Error("network error"));
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{
+						result: {
+							title: "Rust Programming",
+							description: "",
+							keywords: [],
+						},
+					},
+				],
+			},
+		);
+
+		const suggested =
+			popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(suggested?.hidden).toBe(true);
+		expect(suggested?.children.length ?? 0).toBe(0);
+		const button =
+			popup.document.querySelector<HTMLButtonElement>("#capture-btn");
+		expect(button?.disabled).toBe(false);
+		const errorEl = popup.document.querySelector<HTMLElement>("#error-msg");
+		expect(errorEl?.style.display).not.toBe("block");
+	});
+
+	it("renders no suggestions and never calls scripting for a restricted tab", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "chrome://settings",
+				scriptingResult: [
+					{ result: { title: "Rust", description: "", keywords: [] } },
+				],
+			},
+		);
+
+		expect(popup.scripting).not.toHaveBeenCalled();
+		expect(client.listTags).not.toHaveBeenCalled();
+		const suggested =
+			popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(suggested?.hidden).toBe(true);
 	});
 });

@@ -22,6 +22,7 @@ export interface ArchiveManifest {
 export interface ArchiveResponse {
 	page_id: string;
 	vault_path: string;
+	rubbish_item_id?: string;
 	blobs_stored: number;
 	blobs_deduped: number;
 	status: "created" | "already_exists" | "content_changed";
@@ -39,6 +40,15 @@ export interface ArchiveConflictDetail {
 	new_hash?: string;
 	page_id?: string;
 	vault_path?: string;
+}
+
+export type ArchiveLookupStatus = "active" | "rubbish" | "none";
+
+export interface ArchiveLookupResponse {
+	status: ArchiveLookupStatus;
+	page_id?: string;
+	vault_path?: string;
+	captured_at?: string;
 }
 
 export interface ExtensionSettings {

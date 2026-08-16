@@ -8,7 +8,11 @@ import {
 	isTerminal,
 } from "#/lib/badge";
 import { CaptureQueue } from "#/lib/capture-queue";
-import { mergeCaptureTags, normalizeCaptureTags } from "#/lib/capture-tags";
+import {
+	currentMonthTag,
+	mergeCaptureTags,
+	normalizeCaptureTags,
+} from "#/lib/capture-tags";
 import {
 	CAPTURE_ABORT,
 	CAPTURE_CHUNK,
@@ -18,6 +22,7 @@ import {
 import { sha256String } from "#/lib/hasher";
 import { executeCaptureScript } from "#/lib/inject-capture";
 import { describeInjectionFailure } from "#/lib/injection";
+import { pageUrl } from "#/lib/page-url";
 import {
 	CAPTURE_INACTIVITY_TIMEOUT_MS,
 	type CompletedTransfer,
@@ -47,14 +52,6 @@ function extractDomain(url: string): string {
 	} catch {
 		return "unknown";
 	}
-}
-
-/** Format current month as YYYY-MM */
-function currentMonthTag(): string {
-	const now = new Date();
-	const year = now.getFullYear();
-	const month = String(now.getMonth() + 1).padStart(2, "0");
-	return `${year}-${month}`;
 }
 
 interface LegacyToolbarActionApi {
@@ -123,17 +120,36 @@ async function processCapture(
 		const response = await client.ingestArchive(manifest);
 
 		if (response.status === "already_exists") {
-			const applied = await reportPhase(
-				tabId,
-				attemptId,
-				"duplicate",
-				`${metadata.title} was already archived.`,
-			);
-			if (applied && settings.notify_on_duplicate) {
-				showNotification(
-					"Already Archived",
-					`${metadata.title} was already saved.`,
+			// A 409 conflict can only come from an active owner, so only this
+			// branch needs to check for a binned prior capture: the server still
+			// reports the (now nonexistent) original path, and neither the status
+			// panel nor the notification may link to it.
+			if (response.rubbish_item_id) {
+				const detail = `${metadata.title} is already archived, in the Rubbish Bin.`;
+				const applied = await reportPhase(
+					tabId,
+					attemptId,
+					"duplicate",
+					detail,
 				);
+				if (applied && settings.notify_on_duplicate) {
+					showNotification("Already Archived", detail);
+				}
+			} else {
+				const applied = await reportPhase(
+					tabId,
+					attemptId,
+					"duplicate",
+					`${metadata.title} was already archived.`,
+					{ vaultPath: response.vault_path, pageId: response.page_id },
+				);
+				if (applied && settings.notify_on_duplicate) {
+					showNotification(
+						"Already Archived",
+						`${metadata.title} was already saved.`,
+						pageUrl(settings.server_url, response.vault_path),
+					);
+				}
 			}
 		} else {
 			const applied = await reportPhase(
@@ -141,19 +157,33 @@ async function processCapture(
 				attemptId,
 				"done",
 				`${metadata.title} was archived to ${response.vault_path}.`,
+				{ vaultPath: response.vault_path, pageId: response.page_id },
 			);
 			if (applied && settings.notify_on_success) {
 				showNotification(
 					"Page Archived",
 					`${metadata.title} → ${response.vault_path}`,
+					pageUrl(settings.server_url, response.vault_path),
 				);
 			}
 		}
 	} catch (err) {
 		if (err instanceof ArchiveConflictError) {
 			const detail = describeConflict(metadata.title, err);
-			if (await reportPhase(tabId, attemptId, "conflict", detail)) {
-				showNotification("Content Changed", detail);
+			const conflictDetail = err.detail as ArchiveConflictDetail | undefined;
+			if (
+				await reportPhase(tabId, attemptId, "conflict", detail, {
+					vaultPath: conflictDetail?.vault_path,
+					pageId: conflictDetail?.page_id,
+				})
+			) {
+				showNotification(
+					"Content Changed",
+					detail,
+					conflictDetail?.vault_path
+						? pageUrl(settings.server_url, conflictDetail.vault_path)
+						: undefined,
+				);
 			}
 		} else {
 			const detail = String(err);
@@ -177,28 +207,56 @@ function describeConflict(title: string, err: ArchiveConflictError): string {
 		: `${title} has changed since last capture. The existing page was left untouched.`;
 }
 
-function showNotification(title: string, message: string): void {
+let notificationSequence = 0;
+
+/**
+ * The MV3 worker is terminated after ~30s idle; a click on a notification
+ * that outlived that can wake a fresh worker whose module scope has no
+ * memory of what was shown. Rather than persist a lookup table through that
+ * restart, the id itself carries the target URL, so `onClicked` below can
+ * decode it with no state at all. A url-derived id also means re-capturing a
+ * page replaces its earlier notification instead of stacking a new one.
+ */
+function showNotification(
+	title: string,
+	message: string,
+	targetUrl?: string,
+): void {
 	const notifications = webext.notifications;
 	if (!notifications?.create) return;
+	let notificationId: string;
+	if (targetUrl) {
+		notificationId = `clepsydra:${encodeURIComponent(targetUrl)}`;
+	} else {
+		notificationSequence += 1;
+		notificationId = `clepsydra:seq:${notificationSequence}`;
+	}
 
 	try {
 		// The worker lives at /background/, so a relative icon path resolves to
 		// /background/icons/... and Chrome rejects the whole notification with
 		// "Unable to download all specified images". Always use an extension URL.
 		void Promise.resolve(
-			notifications.create({
+			notifications.create(notificationId, {
 				type: "basic",
 				iconUrl: webext.runtime.getURL("icons/icon-128.png"),
 				title,
 				message,
 			}),
 		).catch(() => {
-			// Notifications are best-effort; the badge is the reliable signal.
+			// The id carries no separate state, so there is nothing to clean up.
 		});
 	} catch {
 		// Some notification implementations throw before returning a promise.
 	}
 }
+
+webext.notifications?.onClicked?.addListener((notificationId: string) => {
+	if (!notificationId.startsWith("clepsydra:")) return;
+	if (notificationId.startsWith("clepsydra:seq:")) return;
+	const url = decodeURIComponent(notificationId.slice("clepsydra:".length));
+	void webext.tabs.create({ url });
+});
 
 const legacyWebext = webext as typeof chrome & {
 	browserAction?: LegacyToolbarActionApi;
@@ -273,8 +331,15 @@ function isCapturePhase(value: unknown): value is CapturePhase {
 	}
 }
 
-type StoredCaptureStatus = Omit<CaptureStatus, "additionalTags"> & {
+type StoredCaptureStatus = Omit<
+	CaptureStatus,
+	"additionalTags" | "chunksReceived" | "chunksTotal" | "vaultPath" | "pageId"
+> & {
 	additionalTags?: unknown;
+	chunksReceived?: unknown;
+	chunksTotal?: unknown;
+	vaultPath?: unknown;
+	pageId?: unknown;
 };
 
 function isCaptureStatus(value: unknown): value is StoredCaptureStatus {
@@ -294,6 +359,11 @@ function isCaptureStatus(value: unknown): value is StoredCaptureStatus {
 		Number.isFinite(value.updatedAt)
 	);
 }
+
+const optionalString = (v: unknown): v is string | undefined =>
+	v === undefined || typeof v === "string";
+const optionalCount = (v: unknown): v is number | undefined =>
+	v === undefined || (typeof v === "number" && Number.isFinite(v) && v >= 0);
 
 async function rehydrateStatuses(): Promise<void> {
 	if (!sessionStatusStorage) return;
@@ -323,6 +393,34 @@ async function rehydrateStatuses(): Promise<void> {
 			updatedAt: rawStatus.updatedAt,
 			additionalTags,
 		};
+		if (optionalCount(rawStatus.chunksReceived)) {
+			if (rawStatus.chunksReceived !== undefined) {
+				status.chunksReceived = rawStatus.chunksReceived;
+			}
+		} else {
+			repaired = true;
+		}
+		if (optionalCount(rawStatus.chunksTotal)) {
+			if (rawStatus.chunksTotal !== undefined) {
+				status.chunksTotal = rawStatus.chunksTotal;
+			}
+		} else {
+			repaired = true;
+		}
+		if (optionalString(rawStatus.vaultPath)) {
+			if (rawStatus.vaultPath !== undefined) {
+				status.vaultPath = rawStatus.vaultPath;
+			}
+		} else {
+			repaired = true;
+		}
+		if (optionalString(rawStatus.pageId)) {
+			if (rawStatus.pageId !== undefined) {
+				status.pageId = rawStatus.pageId;
+			}
+		} else {
+			repaired = true;
+		}
 		if (status.phase === "processing" || status.phase === "uploading") {
 			status = {
 				...status,
@@ -330,6 +428,8 @@ async function rehydrateStatuses(): Promise<void> {
 				detail: INTERRUPTED_CAPTURE_DETAIL,
 				updatedAt: Math.max(Date.now(), status.updatedAt + 1),
 			};
+			status.chunksReceived = undefined;
+			status.chunksTotal = undefined;
 			repaired = true;
 		}
 		statuses.set(tabId, status);
@@ -461,11 +561,16 @@ function claimAttempt(
 	return { status, started: true, persisted: persistStatuses() };
 }
 
+type CaptureStatusExtra = Partial<
+	Pick<CaptureStatus, "chunksReceived" | "chunksTotal" | "vaultPath" | "pageId">
+>;
+
 async function reportPhase(
 	tabId: number | undefined,
 	attemptId: string,
 	phase: CapturePhase,
 	detail: string = describePhase(phase),
+	extra: CaptureStatusExtra = {},
 ): Promise<boolean> {
 	if (tabId === undefined) return false;
 	const current = statuses.get(tabId);
@@ -473,10 +578,19 @@ async function reportPhase(
 
 	const status: CaptureStatus = {
 		...current,
+		...extra,
 		phase,
 		detail,
 		updatedAt: nextStatusTimestamp(current),
 	};
+	if (phase !== "processing") {
+		status.chunksReceived = undefined;
+		status.chunksTotal = undefined;
+	}
+	if (phase !== "done" && phase !== "duplicate" && phase !== "conflict") {
+		if (extra.vaultPath === undefined) status.vaultPath = undefined;
+		if (extra.pageId === undefined) status.pageId = undefined;
+	}
 	statuses.set(tabId, status);
 	applyBadge(tabId, status);
 	await persistStatuses();
@@ -705,10 +819,16 @@ async function handleWorkerMessage(
 			}
 			return undefined;
 		}
-		if (
-			completed === null ||
-			statuses.get(tabId ?? -1)?.attemptId !== attemptId
-		) {
+		if (completed === null) {
+			if (statuses.get(tabId ?? -1)?.attemptId === attemptId) {
+				void reportPhase(tabId, attemptId, "processing", undefined, {
+					chunksReceived: workerMessage.index + 1,
+					chunksTotal: workerMessage.total,
+				});
+			}
+			return undefined;
+		}
+		if (statuses.get(tabId ?? -1)?.attemptId !== attemptId) {
 			return undefined;
 		}
 

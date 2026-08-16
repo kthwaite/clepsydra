@@ -13,6 +13,7 @@ import {
 	ClepsydraClient,
 } from "../api-client";
 import type {
+	ArchiveLookupResponse,
 	ArchiveManifest,
 	ArchiveResponse,
 	ArchiveStatusResponse,
@@ -133,6 +134,141 @@ describe("ClepsydraClient", () => {
 				expect((e as ArchiveError).message).toBe(
 					"Server returned 500: Internal Server Error",
 				);
+			}
+		});
+	});
+
+	describe("lookupArchive", () => {
+		it("fetches the lookup endpoint and returns the parsed body", async () => {
+			const lookupResponse: ArchiveLookupResponse = {
+				status: "active",
+				page_id: "page-1",
+				vault_path: "archive/example.com/x.md",
+				captured_at: "2026-08-13T12:00:00Z",
+			};
+
+			fetchSpy.mockResolvedValueOnce(
+				new Response(JSON.stringify(lookupResponse), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			);
+
+			const result = await client.lookupArchive(
+				"https://example.com/article?x=1",
+			);
+			expect(result).toEqual(lookupResponse);
+			expect(fetchSpy).toHaveBeenCalledWith(
+				`${BASE_URL}/api/vault/archive/lookup?url=${encodeURIComponent(
+					"https://example.com/article?x=1",
+				)}`,
+			);
+		});
+
+		it("throws ArchiveError on non-OK status", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response("Bad Request", { status: 400 }),
+			);
+
+			try {
+				await client.lookupArchive("not-a-url");
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expect(e).toBeInstanceOf(ArchiveError);
+				expect((e as ArchiveError).message).toBe("Lookup failed: 400");
+			}
+		});
+	});
+
+	describe("suggestTags", () => {
+		it("fetches the tag suggestion endpoint and maps to tag names", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify([
+						{ tag: "research", count: 5, computed_count: 1 },
+						{ tag: "reading", count: 2, computed_count: 0 },
+					]),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+			const result = await client.suggestTags("Res");
+
+			expect(result).toEqual(["research", "reading"]);
+			expect(fetchSpy).toHaveBeenCalledWith(
+				`${BASE_URL}/api/vault/index/tags?q=res&limit=8`,
+			);
+		});
+
+		it("resolves an empty array without fetching for an empty or whitespace query", async () => {
+			const result = await client.suggestTags("   ");
+
+			expect(result).toEqual([]);
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+
+		it("respects a custom limit", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response(JSON.stringify([]), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			);
+
+			await client.suggestTags("re", 3);
+
+			expect(fetchSpy).toHaveBeenCalledWith(
+				`${BASE_URL}/api/vault/index/tags?q=re&limit=3`,
+			);
+		});
+
+		it("throws ArchiveError on non-OK status", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response("Bad Request", { status: 400 }),
+			);
+
+			try {
+				await client.suggestTags("re");
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expect(e).toBeInstanceOf(ArchiveError);
+				expect((e as ArchiveError).message).toBe("Tag suggestions failed: 400");
+			}
+		});
+	});
+
+	describe("listTags", () => {
+		it("fetches the full tag list and maps to {tag, count}", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify([
+						{ tag: "rust", count: 12, computed_count: 4 },
+						{ tag: "cooking", count: 9, computed_count: 0 },
+					]),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+			const result = await client.listTags();
+
+			expect(result).toEqual([
+				{ tag: "rust", count: 12 },
+				{ tag: "cooking", count: 9 },
+			]);
+			expect(fetchSpy).toHaveBeenCalledWith(`${BASE_URL}/api/vault/index/tags`);
+		});
+
+		it("throws ArchiveError on non-OK status", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response("Internal Server Error", { status: 500 }),
+			);
+
+			try {
+				await client.listTags();
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expect(e).toBeInstanceOf(ArchiveError);
+				expect((e as ArchiveError).message).toBe("Tag list failed: 500");
 			}
 		});
 	});

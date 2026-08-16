@@ -42,9 +42,12 @@ interface WorkerEndpoint {
 	removeTab: (tabId?: number) => void;
 	clickToolbar: (tab?: ToolbarTab) => void;
 	runCommand: (command?: string) => void;
-	notifications: Array<{ title: string; message: string }>;
+	clickNotification: (notificationId: string) => void;
+	notifications: Array<{ id: string; title: string; message: string }>;
 	badgeText: Mock;
 	title: Mock;
+	tabsCreate: Mock;
+	listenerNames: string[];
 }
 
 interface SessionArea {
@@ -102,9 +105,13 @@ async function loadWorker(
 	let onRemoved: (tabId: number) => void = () => undefined;
 	let onToolbarClicked: (tab: ToolbarTab) => void = () => undefined;
 	let onCommand: (command: string) => void = () => undefined;
-	const notifications: Array<{ title: string; message: string }> = [];
+	let onNotificationClicked: (notificationId: string) => void = () => undefined;
+	const notifications: Array<{ id: string; title: string; message: string }> =
+		[];
+	const listenerNames: string[] = [];
 	const badgeText = vi.fn();
 	const title = vi.fn();
+	const tabsCreate = vi.fn(async () => ({}));
 	const session = options.session ?? createSessionArea();
 	const tabsGet =
 		options.tabsGet ??
@@ -122,15 +129,18 @@ async function loadWorker(
 		...options.settings,
 	};
 	const createNotification = vi.fn(
-		(notification: { title: string; message: string }) => {
-			notifications.push(notification);
+		(
+			notificationId: string,
+			notification: { title: string; message: string },
+		) => {
+			notifications.push({ id: notificationId, ...notification });
 			if (options.notifications === "throws") {
 				throw new Error("notification create threw");
 			}
 			if (options.notifications === "rejects") {
 				return Promise.reject(new Error("notification create rejected"));
 			}
-			return Promise.resolve();
+			return Promise.resolve(notificationId);
 		},
 	);
 
@@ -138,10 +148,15 @@ async function loadWorker(
 		runtime: {
 			onMessage: {
 				addListener: (next: WorkerListener) => {
+					listenerNames.push("runtime.onMessage");
 					listener = next;
 				},
 			},
-			onConnect: { addListener: vi.fn() },
+			onConnect: {
+				addListener: () => {
+					listenerNames.push("runtime.onConnect");
+				},
+			},
 			getManifest: () => ({ manifest_version: 3 }),
 			getPlatformInfo: vi.fn(async () => ({})),
 			getURL: (path: string) => `chrome-extension://test/${path}`,
@@ -152,13 +167,25 @@ async function loadWorker(
 		},
 		...(options.notifications === "absent"
 			? {}
-			: { notifications: { create: createNotification } }),
+			: {
+					notifications: {
+						create: createNotification,
+						onClicked: {
+							addListener: (next: (notificationId: string) => void) => {
+								listenerNames.push("notifications.onClicked");
+								onNotificationClicked = next;
+							},
+						},
+					},
+				}),
 		tabs: {
 			get: tabsGet,
 			query: vi.fn(async () => [{ id: 7, url: "https://example.com/article" }]),
 			sendMessage: vi.fn(async () => ({})),
+			create: tabsCreate,
 			onRemoved: {
 				addListener: (next: (tabId: number) => void) => {
+					listenerNames.push("tabs.onRemoved");
 					onRemoved = next;
 				},
 			},
@@ -169,6 +196,7 @@ async function loadWorker(
 			setTitle: title,
 			onClicked: {
 				addListener: (next: (tab: ToolbarTab) => void) => {
+					listenerNames.push("action.onClicked");
 					onToolbarClicked = next;
 				},
 			},
@@ -176,6 +204,7 @@ async function loadWorker(
 		commands: {
 			onCommand: {
 				addListener: (next: (command: string) => void) => {
+					listenerNames.push("commands.onCommand");
 					onCommand = next;
 				},
 			},
@@ -216,9 +245,13 @@ async function loadWorker(
 		clickToolbar: (tab = { id: 7, url: "https://example.com/article" }) =>
 			onToolbarClicked(tab),
 		runCommand: (command = "capture-page") => onCommand(command),
+		clickNotification: (notificationId: string) =>
+			onNotificationClicked(notificationId),
 		notifications,
 		badgeText,
 		title,
+		tabsCreate,
+		listenerNames,
 	};
 }
 
@@ -1073,6 +1106,266 @@ describe("service-worker capture feedback", () => {
 				title: "Archive Failed",
 				message: "Error: vault offline",
 			}),
+		);
+	});
+
+	it("reports chunk progress while a transfer assembles", async () => {
+		const worker = await loadWorker();
+		await worker.dispatch({ type: "capture_start", tabId: 7 });
+		await worker.dispatch(
+			{ type: "capture_meta", captureId: "chunked", metadata },
+			{ tab: { id: 7 } },
+		);
+
+		await worker.dispatch(
+			{
+				type: "capture_chunk",
+				captureId: "chunked",
+				index: 0,
+				total: 2,
+				text: "first half",
+			},
+			{ tab: { id: 7 } },
+		);
+
+		expect(await currentStatus(worker)).toEqual(
+			expect.objectContaining({
+				phase: "processing",
+				chunksReceived: 1,
+				chunksTotal: 2,
+			}),
+		);
+	});
+
+	it("done status carries the created page location", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			page_id: "pid-1",
+			vault_path: "archive/example.com/x.md",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+			status: "created",
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+
+		await vi.waitFor(async () => {
+			expect(await currentStatus(worker)).toEqual(
+				expect.objectContaining({
+					phase: "done",
+					vaultPath: "archive/example.com/x.md",
+					pageId: "pid-1",
+				}),
+			);
+		});
+	});
+
+	it("duplicate status carries the existing page location", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "already_exists",
+			page_id: "pid-2",
+			vault_path: "archive/example.com/y.md",
+			blobs_stored: 0,
+			blobs_deduped: 1,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+
+		await vi.waitFor(async () => {
+			expect(await currentStatus(worker)).toEqual(
+				expect.objectContaining({
+					phase: "duplicate",
+					vaultPath: "archive/example.com/y.md",
+					pageId: "pid-2",
+				}),
+			);
+		});
+	});
+
+	it("a rubbish duplicate carries no vault location and no click-through link", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "already_exists",
+			page_id: "pid-4",
+			vault_path: "archive/example.com/binned.md",
+			rubbish_item_id: "rubbish-1",
+			blobs_stored: 0,
+			blobs_deduped: 1,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+
+		await vi.waitFor(async () => {
+			expect(await currentStatus(worker)).toEqual(
+				expect.objectContaining({
+					phase: "duplicate",
+					detail: "A useful page is already archived, in the Rubbish Bin.",
+				}),
+			);
+		});
+		const status = await currentStatus(worker);
+		expect(status?.vaultPath).toBeUndefined();
+		expect(status?.pageId).toBeUndefined();
+
+		await vi.waitFor(() => expect(worker.notifications).toHaveLength(1));
+		const notificationId = worker.notifications[0]?.id;
+		expect(notificationId).toBeTruthy();
+
+		worker.clickNotification(notificationId as string);
+
+		expect(worker.tabsCreate).not.toHaveBeenCalled();
+	});
+
+	it("conflict status carries the existing page location", async () => {
+		dependencies.ingestArchive.mockRejectedValueOnce(
+			new ArchiveConflictError({
+				vault_path: "archive/example.com/z.md",
+				page_id: "pid-3",
+			}),
+		);
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+
+		await vi.waitFor(async () => {
+			expect(await currentStatus(worker)).toEqual(
+				expect.objectContaining({
+					phase: "conflict",
+					vaultPath: "archive/example.com/z.md",
+					pageId: "pid-3",
+				}),
+			);
+		});
+	});
+
+	it("rehydration keeps outcome fields and drops malformed ones", async () => {
+		const session = createSessionArea({
+			captureStatuses: {
+				"7": {
+					phase: "done",
+					detail: "A useful page was archived to archive/example.com/kept.md.",
+					attemptId: "attempt-outcome-kept",
+					startedAt: 10,
+					updatedAt: 20,
+					additionalTags: [],
+					vaultPath: "archive/example.com/kept.md",
+					pageId: "pid-kept",
+				},
+				"8": {
+					phase: "done",
+					detail: "A useful page was archived to archive/example.com/still.md.",
+					attemptId: "attempt-outcome-malformed",
+					startedAt: 10,
+					updatedAt: 20,
+					additionalTags: [],
+					chunksTotal: "two",
+					vaultPath: "archive/example.com/still.md",
+					pageId: "pid-still",
+				},
+			},
+		});
+
+		const worker = await loadWorker({ session });
+
+		expect(await currentStatus(worker, 7)).toEqual(
+			expect.objectContaining({
+				phase: "done",
+				vaultPath: "archive/example.com/kept.md",
+				pageId: "pid-kept",
+			}),
+		);
+		expect(await currentStatus(worker, 8)).toEqual(
+			expect.objectContaining({
+				phase: "done",
+				vaultPath: "archive/example.com/still.md",
+				pageId: "pid-still",
+			}),
+		);
+		expect((await currentStatus(worker, 8))?.chunksTotal).toBeUndefined();
+	});
+
+	it("clicking a success notification opens the archived page once", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "created",
+			vault_path: "archive/example.com/x.md",
+			page_id: "page-1",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+		await vi.waitFor(() => expect(worker.notifications).toHaveLength(1));
+		const notificationId = worker.notifications[0]?.id;
+		expect(notificationId).toBeTruthy();
+
+		worker.clickNotification(notificationId as string);
+
+		expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+		expect(worker.tabsCreate).toHaveBeenCalledWith({
+			url: "http://localhost:3500/pages/archive/example.com/x.md",
+		});
+	});
+
+	it("notification click-through survives the worker restarting first", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "created",
+			vault_path: "archive/example.com/x.md",
+			page_id: "page-1",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+		await vi.waitFor(() => expect(worker.notifications).toHaveLength(1));
+		const notificationId = worker.notifications[0]?.id;
+		expect(notificationId).toBeTruthy();
+
+		// The id is self-describing, so a fresh worker module — with no memory
+		// of the notification it never created — can still resolve the click.
+		vi.resetModules();
+		const restartedWorker = await loadWorker();
+
+		restartedWorker.clickNotification(notificationId as string);
+
+		expect(restartedWorker.tabsCreate).toHaveBeenCalledTimes(1);
+		expect(restartedWorker.tabsCreate).toHaveBeenCalledWith({
+			url: "http://localhost:3500/pages/archive/example.com/x.md",
+		});
+	});
+
+	it("ignores a click for a notification id it never created", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "created",
+			vault_path: "archive/example.com/x.md",
+			page_id: "page-1",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+		await vi.waitFor(() => expect(worker.notifications).toHaveLength(1));
+
+		worker.clickNotification("clepsydra-unknown");
+
+		expect(worker.tabsCreate).not.toHaveBeenCalled();
+	});
+
+	it("registers no click listener and does not throw when notifications are absent", async () => {
+		const worker = await loadWorker({ notifications: "absent" });
+
+		expect(worker.listenerNames).not.toContain("notifications.onClicked");
+		expect(worker.listenerNames).toEqual(
+			expect.arrayContaining([
+				"runtime.onMessage",
+				"runtime.onConnect",
+				"action.onClicked",
+				"commands.onCommand",
+				"tabs.onRemoved",
+			]),
 		);
 	});
 });

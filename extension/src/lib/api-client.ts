@@ -1,4 +1,5 @@
 import type {
+	ArchiveLookupResponse,
 	ArchiveManifest,
 	ArchiveResponse,
 	ArchiveStatusResponse,
@@ -32,6 +33,38 @@ export class ClepsydraClient {
 			throw new ArchiveError(`Status check failed: ${res.status}`);
 		}
 		return res.json();
+	}
+
+	async lookupArchive(url: string): Promise<ArchiveLookupResponse> {
+		const res = await fetch(
+			`${this.baseUrl}/api/vault/archive/lookup?url=${encodeURIComponent(url)}`,
+		);
+		if (!res.ok) {
+			throw new ArchiveError(`Lookup failed: ${res.status}`);
+		}
+		return res.json();
+	}
+
+	async suggestTags(query: string, limit = 8): Promise<string[]> {
+		const q = query.trim().toLowerCase();
+		if (q === "") return [];
+		const res = await fetch(
+			`${this.baseUrl}/api/vault/index/tags?q=${encodeURIComponent(q)}&limit=${limit}`,
+		);
+		if (!res.ok) {
+			throw new ArchiveError(`Tag suggestions failed: ${res.status}`);
+		}
+		const tags: { tag: string }[] = await res.json();
+		return tags.map((entry) => entry.tag);
+	}
+
+	async listTags(): Promise<{ tag: string; count: number }[]> {
+		const res = await fetch(`${this.baseUrl}/api/vault/index/tags`);
+		if (!res.ok) {
+			throw new ArchiveError(`Tag list failed: ${res.status}`);
+		}
+		const tags: { tag: string; count: number }[] = await res.json();
+		return tags.map(({ tag, count }) => ({ tag, count }));
 	}
 
 	async isReachable(): Promise<boolean> {

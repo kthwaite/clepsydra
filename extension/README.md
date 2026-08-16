@@ -15,6 +15,8 @@ The extension expects these endpoints to be available:
 
 - `GET /api/vault/archive/status`
 - `POST /api/vault/archive`
+- `GET /api/vault/archive/lookup` (pre-capture check)
+- `GET /api/vault/index/tags` (tag suggestions)
 
 ## Build
 
