@@ -65,7 +65,12 @@ async function requestCaptureStart(
 	return response.status;
 }
 
-/** Percent for the determinate span; null renders the indeterminate slide. */
+/**
+ * Percent for the determinate span; null renders the indeterminate slide.
+ * "uploading" is deliberately indeterminate (decision 3) — the upload POST
+ * can be the longest span for a large snapshot, and a frozen determinate bar
+ * reads as stalled.
+ */
 function progressPercent(status: CaptureStatus): number | null {
 	if (status.phase === "processing") {
 		const { chunksReceived, chunksTotal } = status;
@@ -78,7 +83,6 @@ function progressPercent(status: CaptureStatus): number | null {
 		}
 		return 15 + Math.round(65 * Math.min(1, chunksReceived / chunksTotal));
 	}
-	if (status.phase === "uploading") return 85;
 	return null;
 }
 
@@ -193,6 +197,7 @@ function init(): void {
 			chip.type = "button";
 			chip.className = "tag tag-suggested";
 			chip.textContent = tag;
+			chip.setAttribute("aria-label", `Add tag ${tag}`);
 			chip.addEventListener("click", () => {
 				// addTag triggers onTagsChanged, which already calls
 				// refreshSuggestedTags — no need to call it again here.
@@ -249,14 +254,22 @@ function init(): void {
 			progressBar.setAttribute("aria-valuenow", String(percent));
 		}
 	};
-	const renderPhase = (phase: CapturePhase, detail: string) => {
+	const renderPhase = (
+		phase: CapturePhase,
+		detail: string,
+		percent: number | null = null,
+	) => {
 		const active = isInProgress(phase);
 		panel.textContent = detail;
 		panel.dataset.tone = statusTone(phase);
 		panel.style.display = "block";
 		button.disabled = active;
 		picker.setDisabled(active);
-		renderProgress(active, null);
+		// A prior terminal status's outcome link must not survive into whatever
+		// phase renders next; renderStatus below re-shows it only once it has
+		// confirmed the new status is itself terminal and has a vaultPath.
+		link.hidden = true;
+		renderProgress(active, percent);
 	};
 	const renderStatus = (status: CaptureStatus) => {
 		if (isInProgress(status.phase)) {
@@ -264,8 +277,7 @@ function init(): void {
 		} else {
 			picker.setTags([]);
 		}
-		renderPhase(status.phase, status.detail);
-		renderProgress(isInProgress(status.phase), progressPercent(status));
+		renderPhase(status.phase, status.detail, progressPercent(status));
 		if (!isInProgress(status.phase) && status.vaultPath) {
 			link.href = pageUrl(settings.server_url, status.vaultPath);
 			link.hidden = false;
@@ -336,7 +348,10 @@ function init(): void {
 
 	// All interaction and teardown hooks are installed before initialization can
 	// wait on storage, tab lookup, worker rehydration, or server reachability.
-	window.addEventListener("unload", stopPolling);
+	window.addEventListener("unload", () => {
+		stopPolling();
+		picker.destroy();
+	});
 	button.addEventListener("click", async () => {
 		if (stopped || startPending || button.disabled) return;
 		picker.commitInput();

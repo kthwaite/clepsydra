@@ -83,6 +83,7 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 	};
 
 	const addNormalized = (raw: string): void => {
+		if (disabled) return;
 		const [normalized] = normalizeCaptureTags([raw]);
 		if (!normalized || tags.includes(normalized)) return;
 		tags.push(normalized);
@@ -94,6 +95,7 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 	// the placeholder's own "research, reading" — so it's split and
 	// normalized as a batch, unlike a single selected suggestion.
 	const addAllNormalized = (raw: string): void => {
+		if (disabled) return;
 		const normalized = normalizeCaptureTags(raw.split(","));
 		let changed = false;
 		for (const tag of normalized) {
@@ -232,6 +234,10 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 			}
 			case "Escape": {
 				if (suggestions.length === 0) return;
+				// The popup's default Escape action closes the whole action popup;
+				// without this the list closing is invisible because the popup
+				// vanishes with it, taking any uncommitted chips along.
+				event.preventDefault();
 				closeList();
 				return;
 			}
@@ -255,7 +261,19 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 			return tags.slice();
 		},
 		setTags(newTags: readonly string[]): void {
-			tags = normalizeCaptureTags(newTags);
+			// The polling loop calls this every 250ms with the same
+			// server-reported tags for the duration of a capture, and
+			// `#selected-tags` is an `aria-live` region — re-rendering it on no
+			// actual change would re-announce the same list to a screen reader
+			// several times a second.
+			const next = normalizeCaptureTags(newTags);
+			if (
+				tags.length === next.length &&
+				tags.every((tag, i) => tag === next[i])
+			) {
+				return;
+			}
+			tags = next;
 			renderChips();
 			notify();
 		},
@@ -269,6 +287,9 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 			disabled = value;
 			input.disabled = value;
 			for (const button of removeButtons) button.disabled = value;
+			// An already-open list would otherwise stay visible over a disabled
+			// combobox, and its mousedown handlers don't check `disabled`.
+			if (value) closeList();
 		},
 		destroy(): void {
 			if (debounceTimer !== undefined) clearTimeout(debounceTimer);

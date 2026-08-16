@@ -78,6 +78,10 @@ class FakeElement {
 		this.listeners.set(type, listener);
 	}
 
+	removeEventListener(type: string) {
+		this.listeners.delete(type);
+	}
+
 	setAttribute(name: string, value: string) {
 		this.attributes.set(name, value);
 	}
@@ -950,6 +954,57 @@ describe("popup progress and outcome link", () => {
 		expect(popup.elements["capture-progress"].hidden).toBe(true);
 		expect(popup.elements["capture-link"].hidden).toBe(true);
 	});
+
+	it("leaves the outcome link hidden for a duplicate capture in the Rubbish Bin", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: captureStatus(
+						"duplicate",
+						"A useful page is already archived, in the Rubbish Bin.",
+					),
+				},
+			],
+		});
+
+		expect(popup.elements["capture-link"].hidden).toBe(true);
+	});
+
+	it("hides a stale outcome link once a new capture attempt fails to start", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: {
+						...captureStatus(
+							"done",
+							"A useful page was archived to archive/example.com/a.md.",
+						),
+						vaultPath: "archive/example.com/a.md",
+					},
+				},
+			],
+			starts: [new Error("worker unavailable")],
+		});
+		expect(popup.elements["capture-link"].hidden).toBe(false);
+
+		await popup.elements["capture-btn"].emit("click");
+
+		expect(popup.elements["capture-link"].hidden).toBe(true);
+	});
+
+	it("renders an indeterminate progress bar while uploading", async () => {
+		const popup = await openPopup({
+			status: [{ status: captureStatus("uploading", "sending to the vault…") }],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(false);
+		expect(popup.elements["capture-progress-fill"].classes).toContain(
+			"indeterminate",
+		);
+		expect(
+			popup.elements["capture-progress"].getAttribute("aria-valuenow"),
+		).toBeNull();
+	});
 });
 
 describe("popup captured indicator", () => {
@@ -1091,6 +1146,28 @@ describe("popup suggested tags", () => {
 		expect(
 			popup.document.querySelector<HTMLElement>("#suggested-tags")?.hidden,
 		).toBe(false);
+	});
+
+	it("gives the suggested-tags row and its chips accessible names", async () => {
+		client.listTags.mockResolvedValueOnce([{ tag: "rust", count: 5 }]);
+		const popup = await openRealPopup(
+			{},
+			{
+				tabUrl: "https://example.com/article",
+				scriptingResult: [
+					{ result: { title: "Rust", description: "", keywords: [] } },
+				],
+			},
+		);
+
+		const group = popup.document.querySelector<HTMLElement>("#suggested-tags");
+		expect(group?.getAttribute("role")).toBe("group");
+		expect(group?.getAttribute("aria-label")).toBe("Suggested from this page");
+
+		const chip = popup.document.querySelector<HTMLButtonElement>(
+			"#suggested-tags .tag-suggested",
+		);
+		expect(chip?.getAttribute("aria-label")).toBe("Add tag rust");
 	});
 
 	it("never suggests the implicit archive, domain, current-month, or default tags even when they match a token", async () => {

@@ -120,19 +120,36 @@ async function processCapture(
 		const response = await client.ingestArchive(manifest);
 
 		if (response.status === "already_exists") {
-			const applied = await reportPhase(
-				tabId,
-				attemptId,
-				"duplicate",
-				`${metadata.title} was already archived.`,
-				{ vaultPath: response.vault_path, pageId: response.page_id },
-			);
-			if (applied && settings.notify_on_duplicate) {
-				showNotification(
-					"Already Archived",
-					`${metadata.title} was already saved.`,
-					pageUrl(settings.server_url, response.vault_path),
+			// A 409 conflict can only come from an active owner, so only this
+			// branch needs to check for a binned prior capture: the server still
+			// reports the (now nonexistent) original path, and neither the status
+			// panel nor the notification may link to it.
+			if (response.rubbish_item_id) {
+				const detail = `${metadata.title} is already archived, in the Rubbish Bin.`;
+				const applied = await reportPhase(
+					tabId,
+					attemptId,
+					"duplicate",
+					detail,
 				);
+				if (applied && settings.notify_on_duplicate) {
+					showNotification("Already Archived", detail);
+				}
+			} else {
+				const applied = await reportPhase(
+					tabId,
+					attemptId,
+					"duplicate",
+					`${metadata.title} was already archived.`,
+					{ vaultPath: response.vault_path, pageId: response.page_id },
+				);
+				if (applied && settings.notify_on_duplicate) {
+					showNotification(
+						"Already Archived",
+						`${metadata.title} was already saved.`,
+						pageUrl(settings.server_url, response.vault_path),
+					);
+				}
 			}
 		} else {
 			const applied = await reportPhase(
@@ -190,9 +207,16 @@ function describeConflict(title: string, err: ArchiveConflictError): string {
 		: `${title} has changed since last capture. The existing page was left untouched.`;
 }
 
-const notificationUrls = new Map<string, string>();
 let notificationSequence = 0;
 
+/**
+ * The MV3 worker is terminated after ~30s idle; a click on a notification
+ * that outlived that can wake a fresh worker whose module scope has no
+ * memory of what was shown. Rather than persist a lookup table through that
+ * restart, the id itself carries the target URL, so `onClicked` below can
+ * decode it with no state at all. A url-derived id also means re-capturing a
+ * page replaces its earlier notification instead of stacking a new one.
+ */
 function showNotification(
 	title: string,
 	message: string,
@@ -200,9 +224,13 @@ function showNotification(
 ): void {
 	const notifications = webext.notifications;
 	if (!notifications?.create) return;
-	notificationSequence += 1;
-	const notificationId = `clepsydra-${notificationSequence.toString(36)}`;
-	if (targetUrl) notificationUrls.set(notificationId, targetUrl);
+	let notificationId: string;
+	if (targetUrl) {
+		notificationId = `clepsydra:${encodeURIComponent(targetUrl)}`;
+	} else {
+		notificationSequence += 1;
+		notificationId = `clepsydra:seq:${notificationSequence}`;
+	}
 
 	try {
 		// The worker lives at /background/, so a relative icon path resolves to
@@ -216,18 +244,17 @@ function showNotification(
 				message,
 			}),
 		).catch(() => {
-			notificationUrls.delete(notificationId);
+			// The id carries no separate state, so there is nothing to clean up.
 		});
 	} catch {
 		// Some notification implementations throw before returning a promise.
-		notificationUrls.delete(notificationId);
 	}
 }
 
 webext.notifications?.onClicked?.addListener((notificationId: string) => {
-	const url = notificationUrls.get(notificationId);
-	if (!url) return;
-	notificationUrls.delete(notificationId);
+	if (!notificationId.startsWith("clepsydra:")) return;
+	if (notificationId.startsWith("clepsydra:seq:")) return;
+	const url = decodeURIComponent(notificationId.slice("clepsydra:".length));
 	void webext.tabs.create({ url });
 });
 
@@ -559,6 +586,10 @@ async function reportPhase(
 	if (phase !== "processing") {
 		status.chunksReceived = undefined;
 		status.chunksTotal = undefined;
+	}
+	if (phase !== "done" && phase !== "duplicate" && phase !== "conflict") {
+		if (extra.vaultPath === undefined) status.vaultPath = undefined;
+		if (extra.pageId === undefined) status.pageId = undefined;
 	}
 	statuses.set(tabId, status);
 	applyBadge(tabId, status);

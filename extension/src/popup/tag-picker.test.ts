@@ -226,11 +226,24 @@ describe("suggestion fetching", () => {
 		await Promise.resolve();
 		expect(suggestionList.hidden).toBe(false);
 
-		input.dispatchEvent(keyEvent("Escape"));
+		const escapeEvent = keyEvent("Escape");
+		input.dispatchEvent(escapeEvent);
 
 		expect(suggestionList.hidden).toBe(true);
 		expect(picker.getTags()).toEqual([]);
 		expect(input.value).toBe("re");
+		// The popup's default Escape action closes the whole action popup, so
+		// without this the list closing would be invisible to the user.
+		expect(escapeEvent.defaultPrevented).toBe(true);
+	});
+
+	it("does not prevent Escape's default action when there is no list to close", () => {
+		const { input } = setup();
+
+		const escapeEvent = keyEvent("Escape");
+		input.dispatchEvent(escapeEvent);
+
+		expect(escapeEvent.defaultPrevented).toBe(false);
 	});
 
 	it("commits an option on mousedown, preventing default so the input keeps focus", async () => {
@@ -326,16 +339,41 @@ describe("disabled state", () => {
 		).toBe(true);
 	});
 
-	it("disables remove buttons for chips rendered after setDisabled(true)", () => {
+	it("ignores an attempted commit via Enter while disabled", () => {
 		const { input, chipList, picker } = setup();
 		picker.setDisabled(true);
 
 		input.value = "research";
 		input.dispatchEvent(keyEvent("Enter"));
 
-		expect(
-			chipList.querySelector<HTMLButtonElement>(".tag-remove")?.disabled,
-		).toBe(true);
+		expect(picker.getTags()).toEqual([]);
+		expect(chipList.querySelectorAll(".tag")).toHaveLength(0);
+	});
+
+	it("ignores addTag while disabled", () => {
+		const { picker } = setup();
+		picker.setDisabled(true);
+
+		picker.addTag("research");
+
+		expect(picker.getTags()).toEqual([]);
+	});
+
+	it("closes an open suggestion list when disabled", async () => {
+		vi.useFakeTimers();
+		const { input, suggestionList, picker, fetchSuggestions } = setup();
+		fetchSuggestions.mockResolvedValue(["research"]);
+		input.value = "re";
+		input.dispatchEvent(new linkedom.Event("input"));
+		await vi.advanceTimersByTimeAsync(200);
+		await Promise.resolve();
+		await Promise.resolve();
+		expect(suggestionList.hidden).toBe(false);
+
+		picker.setDisabled(true);
+
+		expect(suggestionList.hidden).toBe(true);
+		expect(input.getAttribute("aria-expanded")).toBe("false");
 	});
 });
 
@@ -379,6 +417,21 @@ describe("setTags / addTag / commitInput", () => {
 
 		expect(picker.getTags()).toEqual(["Research", "reading"]);
 		expect(input.value).toBe("");
+	});
+
+	it("is a no-op when setTags is called with the tags it already has", () => {
+		const { chipList, onTagsChanged, picker } = setup();
+		picker.setTags(["research", "reading"]);
+		onTagsChanged.mockClear();
+		const replaceChildren = vi.spyOn(chipList, "replaceChildren");
+
+		// The popup's polling loop calls setTags every 250ms for the duration
+		// of a capture; #selected-tags is an aria-live region, so a rebuild on
+		// no actual change would re-announce the same chip list repeatedly.
+		picker.setTags(["research", "reading"]);
+
+		expect(onTagsChanged).not.toHaveBeenCalled();
+		expect(replaceChildren).not.toHaveBeenCalled();
 	});
 });
 
