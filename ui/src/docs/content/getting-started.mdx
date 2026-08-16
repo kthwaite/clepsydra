@@ -273,6 +273,53 @@ groups every active binding by workflow. Notes such as “outside the editor”
 identify scope. Press <kbd>Escape</kbd> or dismiss the modal to return to the
 current surface.
 
+## Pips and status colours
+
+Small square “pips” carry status throughout the Vessel chrome. They draw
+from four signal tokens — **orange** (accent), **cyan** (cool), **amber**
+(warn), **red** (hot) — plus the grey ink ramp for neutral states.
+
+### Kind pips
+
+Every page kind has a fixed pip colour, shown in Gazetteer, Constellation,
+Sheaf tabs, link previews, and the Folio rails:
+
+| Colour | Kinds |
+| --- | --- |
+| Orange (accent) | PROJECT |
+| Deep orange | BOOK, RECIPE |
+| Cyan (cool) | JOURNAL, PERSON, CAPTURE, AI CONVERSATION |
+| Amber (warn) | TODO, QUOTE |
+| Red (hot) | TASK |
+| Ink / greys | CODE (bright), CYCLE, NOTE, ARCHIVE (progressively muted) |
+
+### Board pips (TASKING)
+
+| Pip | Meaning |
+| --- | --- |
+| Faint grey | INTAKE or SEALED column |
+| Grey | TRIAGE column |
+| Cyan | IN-FIELD column |
+| Amber | REVIEW column |
+
+Cycle pips: outlined box = PLANNED, blinking cyan = ACTIVE, amber =
+BACKLOG, faint grey = CLOSED. Operation health dots: cyan = green, amber =
+attention, blinking red = critical. Priority chips: P0 red, P1 amber, P2
+cyan, P3 grey.
+
+### Dashboard card pips (Atrium)
+
+Card headers carry a pip: pulsing cyan = live and healthy, pulsing orange =
+needs attention (for example the Feed river after fetch diagnostics),
+static grey = inactive.
+
+### Footer telemetry pips
+
+The VESSEL footer strip shows two pips: the connection pip (cyan =
+connected, amber = connecting, red = disconnected from the event stream)
+and the write pip, which pulses orange while changes are being sent to the
+server.
+
 ## Wikilinks
 
 Type `[[` to search for a page, then press Enter or Tab to insert the selected
