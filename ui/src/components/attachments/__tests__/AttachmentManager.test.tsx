@@ -427,6 +427,26 @@ describe("AttachmentManager", () => {
       ).toBeVisible();
     });
 
+    it("reveals a freshly uploaded attachment by switching to show-all", async () => {
+      const uploaded = { name: "c.txt", path: "c.txt", size: 10 };
+      mocks.upload.mockResolvedValueOnce(uploaded);
+      const pageMarkdown = `![shot](${attachmentUrl("a.png")})`;
+      render(<AttachmentManager pageMarkdown={pageMarkdown} />);
+
+      expect(screen.queryByText("b.pdf")).not.toBeInTheDocument();
+
+      chooseFile(new File(["text"], "c.txt", { type: "text/plain" }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", {
+            name: /show referenced attachments \(1\)/i,
+          }),
+        ).toBeVisible(),
+      );
+      expect(screen.getByText("b.pdf")).toBeVisible();
+    });
+
     it("scoped empty state", () => {
       const pageMarkdown = "No attachment references here.";
       render(<AttachmentManager pageMarkdown={pageMarkdown} />);

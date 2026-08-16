@@ -114,7 +114,11 @@ describe("KanbanView — column resize", () => {
       fireEvent.pointerCancel(separator, { pointerId: 1 });
       // A stray pointermove after cancel must not resize the column — the
       // move/up/cancel listeners should already have been torn down.
-      fireEvent.pointerMove(separator, { clientX: 300, pointerId: 1 });
+      fireEvent.pointerMove(separator, {
+        clientX: 300,
+        pointerId: 1,
+        buttons: 1,
+      });
 
       expect(useBoardStore.getState().columnWidths.INTAKE).toBeUndefined();
     } finally {

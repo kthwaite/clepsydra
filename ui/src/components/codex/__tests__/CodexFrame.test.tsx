@@ -286,6 +286,7 @@ describe("CodexFrame destination integration", () => {
       expect(
         nav.getByRole("button", { name: /08.*DOCS/i }),
       ).not.toHaveAttribute("aria-current");
+      expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
     },
   );
 
@@ -415,6 +416,7 @@ describe("CodexFrame destination integration", () => {
       for (const button of nav.getAllByRole("button")) {
         expect(button).not.toHaveAttribute("aria-current", "page");
       }
+      expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
     },
   );
 

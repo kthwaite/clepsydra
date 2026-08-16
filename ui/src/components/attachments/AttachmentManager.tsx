@@ -84,7 +84,9 @@ export function AttachmentManager({
   const uploadFile = async (file: File): Promise<AttachmentInfo | null> => {
     setActionError(null);
     try {
-      return await upload.mutateAsync({ file });
+      const attachment = await upload.mutateAsync({ file });
+      setShowAll(true);
+      return attachment;
     } catch (uploadError) {
       setActionError(
         formatApiError(uploadError, `Could not upload ${file.name}.`),
