@@ -7,7 +7,7 @@ use std::task::{Context, Poll};
 use axum::Json;
 use axum::Router;
 use axum::body::Body;
-use axum::extract::{Extension, Path, State};
+use axum::extract::{Extension, Path, Query, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -15,7 +15,7 @@ use bytes::Bytes;
 use http_body::{Frame, SizeHint};
 use serde::{Deserialize, Serialize};
 use url::{Host, Url};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 
 use super::AppState;
 use super::error::ApiError;
@@ -87,6 +87,32 @@ pub struct ArchiveStatsResponse {
     pub enabled: bool,
     pub blob_count: u64,
     pub total_size_bytes: u64,
+}
+
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ArchiveLookupQuery {
+    /// http(s) source URL to look up.
+    pub url: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ArchiveLookupResponse {
+    pub status: ArchiveLookupStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub page_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub vault_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub captured_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ArchiveLookupStatus {
+    Active,
+    Rubbish,
+    None,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -320,6 +346,7 @@ pub fn router_with_body_limit(
             post(ingest_archive).layer(axum::extract::DefaultBodyLimit::max(max_bytes)),
         )
         .route("/status", get(archive_status))
+        .route("/lookup", get(lookup_archive))
         .route(
             "/view/{snapshot_hash}",
             get(view_snapshot).head(head_snapshot),
@@ -1121,6 +1148,73 @@ pub async fn archive_status(
         blob_count: stats.blob_count,
         total_size_bytes: stats.total_size_bytes,
     }))
+}
+
+/// Capture ownership for a source URL.
+///
+/// Read-only companion to `POST /archive`: the extension calls it before a
+/// capture to say whether this URL already lives in the vault (or its
+/// Rubbish Bin) without sending a snapshot.
+#[utoipa::path(
+    get,
+    path = "/archive/lookup",
+    context_path = "/api/vault",
+    tag = "Archive",
+    params(ArchiveLookupQuery),
+    responses(
+        (status = 200, description = "Capture ownership for the URL", body = ArchiveLookupResponse),
+        (status = 400, description = "Invalid url parameter", body = ApiError),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn lookup_archive(
+    State(state): State<Arc<AppState>>,
+    Query(query): Query<ArchiveLookupQuery>,
+) -> Result<Json<ArchiveLookupResponse>, ApiError> {
+    validate_http_url("url", &query.url)?;
+
+    let url = query.url.clone();
+    let owner = state
+        .index
+        .with_index(move |index, _vault| index.find_by_archive_url(&url))
+        .await
+        .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?
+        .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?;
+
+    let response = match owner {
+        None => ArchiveLookupResponse {
+            status: ArchiveLookupStatus::None,
+            page_id: None,
+            vault_path: None,
+            captured_at: None,
+        },
+        Some(ArchiveUrlOwner::Active { page_id, path, .. }) => {
+            let id = page_id.clone();
+            let captured_at = state
+                .index
+                .with_index(move |index, _vault| index.archive_captured_at(&id))
+                .await
+                .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?
+                .map_err(|e| ApiError::internal(format!("index lookup: {e}")))?;
+            ArchiveLookupResponse {
+                status: ArchiveLookupStatus::Active,
+                page_id: Some(page_id),
+                vault_path: Some(path),
+                captured_at,
+            }
+        }
+        Some(ArchiveUrlOwner::Rubbish {
+            page_id,
+            original_path,
+            ..
+        }) => ArchiveLookupResponse {
+            status: ArchiveLookupStatus::Rubbish,
+            page_id: Some(page_id),
+            vault_path: Some(original_path),
+            captured_at: None,
+        },
+    };
+    Ok(Json(response))
 }
 
 #[utoipa::path(

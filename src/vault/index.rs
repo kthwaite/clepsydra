@@ -1715,6 +1715,21 @@ impl VaultIndex {
             )
             .optional()?)
     }
+
+    /// `archive.captured_at` for an indexed page, if the page exists and
+    /// carries archive frontmatter.
+    pub fn archive_captured_at(&self, page_id: &str) -> Result<Option<String>, IndexError> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT json_extract(meta_json, '$.archive.captured_at')
+                 FROM pages WHERE id = ?1",
+                params![page_id],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten())
+    }
 }
 
 /// Pass 1: resolve this page's outgoing wikilinks against canonical_names.

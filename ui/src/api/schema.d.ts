@@ -212,6 +212,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/archive/lookup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Capture ownership for a source URL.
+         * @description Read-only companion to `POST /archive`: the extension calls it before a
+         *     capture to say whether this URL already lives in the vault (or its
+         *     Rubbish Bin) without sending a snapshot.
+         */
+        get: operations["lookup_archive"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/archive/status": {
         parameters: {
             query?: never;
@@ -1584,6 +1606,14 @@ export interface components {
             /** Format: int32 */
             status: number;
         };
+        ArchiveLookupResponse: {
+            captured_at?: string | null;
+            page_id?: string | null;
+            status: components["schemas"]["ArchiveLookupStatus"];
+            vault_path?: string | null;
+        };
+        /** @enum {string} */
+        ArchiveLookupStatus: "active" | "rubbish" | "none";
         /** @description OpenAPI schema for the flattened `[archive]` frontmatter table. */
         ArchiveMetaResponse: {
             blobs?: string[] | null;
@@ -3779,6 +3809,47 @@ export interface operations {
             };
             /** @description Archive content conflict */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    lookup_archive: {
+        parameters: {
+            query: {
+                /** @description http(s) source URL to look up. */
+                url: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Capture ownership for the URL */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchiveLookupResponse"];
+                };
+            };
+            /** @description Invalid url parameter */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

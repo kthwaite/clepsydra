@@ -155,6 +155,7 @@ impl Modify for SchemaOverrides {
         // Archive / CAS
         crate::api::archive::ingest_archive,
         crate::api::archive::archive_status,
+        crate::api::archive::lookup_archive,
         crate::api::archive::view_snapshot,
         crate::api::archive::head_snapshot,
         crate::api::archive::serve_blob,
@@ -370,6 +371,8 @@ impl Modify for SchemaOverrides {
             crate::api::archive::ArchiveResponse,
             crate::api::archive::ArchiveStatus,
             crate::api::archive::ArchiveStatsResponse,
+            crate::api::archive::ArchiveLookupResponse,
+            crate::api::archive::ArchiveLookupStatus,
             // Conversations
             crate::api::conversations::ConversationRoleRequest,
             crate::api::conversations::CaptureConversationTurnRequest,
