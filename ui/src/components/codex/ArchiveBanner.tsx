@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { useState } from "react";
 import type { components } from "#/api/schema";
 
 type ArchiveMeta = components["schemas"]["ArchiveMetaResponse"];
@@ -7,6 +8,24 @@ export interface ArchiveBannerProps {
   title: string;
   path: string;
   archive: ArchiveMeta;
+}
+
+const COLLAPSE_KEY = "clepsydra.archive-banner-collapsed";
+
+function readCollapsed(): boolean {
+  try {
+    return localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeCollapsed(collapsed: boolean): void {
+  try {
+    localStorage.setItem(COLLAPSE_KEY, collapsed ? "1" : "0");
+  } catch {
+    // Private-mode storage failures degrade to session-only state.
+  }
 }
 
 function ProvenanceField({
@@ -47,70 +66,100 @@ function isSafeLiveUrl(value: string): boolean {
  * Clepsydra's dossier headers without presenting the snapshot as a workspace
  * folio or dashboard card. */
 export function ArchiveBanner({ title, path, archive }: ArchiveBannerProps) {
+  const [collapsed, setCollapsed] = useState(readCollapsed);
+
+  function toggle() {
+    setCollapsed((current) => {
+      const next = !current;
+      writeCollapsed(next);
+      return next;
+    });
+  }
+
   return (
     <header className="shrink-0 border-b border-rule bg-paper-2 text-ink">
       <div className="cl-mono flex items-center justify-between gap-4 border-b border-rule px-4 py-2">
-        <span className="text-[9px] uppercase tracking-[0.22em] text-accent">
+        <span className="shrink-0 text-[9px] uppercase tracking-[0.22em] text-accent">
           Captured record
         </span>
-        <Link
-          to="/pages/$"
-          params={{ _splat: path }}
-          className="text-[9px] uppercase tracking-[0.16em] text-ink-mute underline decoration-rule underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
-        >
-          ← Back to vault page
-        </Link>
-      </div>
-
-      <div className="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)] md:items-end">
-        <div className="min-w-0">
-          <p className="cl-mono mb-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-            Archive / {archive.domain}
-          </p>
-          <h1 className="font-sans text-xl font-black leading-tight tracking-tight text-ink md:text-2xl">
+        {collapsed ? (
+          <span className="min-w-0 truncate font-sans text-[11px] font-bold text-ink">
             {title}
-          </h1>
-          {isSafeLiveUrl(archive.url) ? (
-            <a
-              href={archive.url}
-              target="_blank"
-              rel="noreferrer"
-              className="cl-mono mt-2 block truncate text-[10px] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
-              aria-label={`Open live page: ${archive.url}`}
-            >
-              {archive.url} ↗
-            </a>
-          ) : (
-            <p className="cl-mono mt-2 text-[10px] text-hot">
-              <span className="mr-2 uppercase tracking-[0.12em]">
-                Invalid archive URL metadata
-              </span>
-              <span className="break-all">{archive.url}</span>
-            </p>
-          )}
-        </div>
-
-        <div className="cl-mono grid min-w-0 gap-x-4 gap-y-2 border-l border-rule pl-4 sm:grid-cols-2">
-          <ProvenanceField
-            label="Captured"
-            value={archive.captured_at}
-            dateTime={archive.captured_at}
-          />
-          {archive.site_name ? (
-            <ProvenanceField label="Site" value={archive.site_name} />
-          ) : null}
-          {archive.byline ? (
-            <ProvenanceField label="Byline" value={archive.byline} />
-          ) : null}
-          {archive.published_time ? (
-            <ProvenanceField
-              label="Published"
-              value={archive.published_time}
-              dateTime={archive.published_time}
-            />
-          ) : null}
+          </span>
+        ) : null}
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={toggle}
+            aria-expanded={!collapsed}
+            aria-label={
+              collapsed ? "Expand archive banner" : "Collapse archive banner"
+            }
+            className="cl-mono shrink-0 cursor-pointer border border-rule px-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute hover:border-accent hover:text-accent"
+          >
+            [{collapsed ? "+" : "–"}]
+          </button>
+          <Link
+            to="/pages/$"
+            params={{ _splat: path }}
+            className="text-[9px] uppercase tracking-[0.16em] text-ink-mute underline decoration-rule underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+          >
+            ← Back to vault page
+          </Link>
         </div>
       </div>
+
+      {collapsed ? null : (
+        <div className="grid gap-4 px-4 py-4 md:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)] md:items-end">
+          <div className="min-w-0">
+            <p className="cl-mono mb-2 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+              Archive / {archive.domain}
+            </p>
+            <h1 className="font-sans text-xl font-black leading-tight tracking-tight text-ink md:text-2xl">
+              {title}
+            </h1>
+            {isSafeLiveUrl(archive.url) ? (
+              <a
+                href={archive.url}
+                target="_blank"
+                rel="noreferrer"
+                className="cl-mono mt-2 block truncate text-[10px] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+                aria-label={`Open live page: ${archive.url}`}
+              >
+                {archive.url} ↗
+              </a>
+            ) : (
+              <p className="cl-mono mt-2 text-[10px] text-hot">
+                <span className="mr-2 uppercase tracking-[0.12em]">
+                  Invalid archive URL metadata
+                </span>
+                <span className="break-all">{archive.url}</span>
+              </p>
+            )}
+          </div>
+
+          <div className="cl-mono grid min-w-0 gap-x-4 gap-y-2 border-l border-rule pl-4 sm:grid-cols-2">
+            <ProvenanceField
+              label="Captured"
+              value={archive.captured_at}
+              dateTime={archive.captured_at}
+            />
+            {archive.site_name ? (
+              <ProvenanceField label="Site" value={archive.site_name} />
+            ) : null}
+            {archive.byline ? (
+              <ProvenanceField label="Byline" value={archive.byline} />
+            ) : null}
+            {archive.published_time ? (
+              <ProvenanceField
+                label="Published"
+                value={archive.published_time}
+                dateTime={archive.published_time}
+              />
+            ) : null}
+          </div>
+        </div>
+      )}
     </header>
   );
 }

@@ -1,10 +1,10 @@
 import type { useNavigate } from "@tanstack/react-router";
 import type { CodexView } from "#/components/codex/useCodexView";
+import { DEFAULT_DOC_SLUG } from "#/docs/constants";
 import type {
   ActivateTabWithFolioHistory,
   LeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
-import { DEFAULT_DOC_SLUG } from "#/docs/constants";
 import {
   type OpenTabTarget,
   type TabType,
@@ -180,7 +180,6 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
 
 /** Header rail order with diegetic index = position (pad2). */
 export const DESKTOP_NAV: readonly CodexView[] = [
-  "atrium",
   "folio",
   "gazetteer",
   "stats",

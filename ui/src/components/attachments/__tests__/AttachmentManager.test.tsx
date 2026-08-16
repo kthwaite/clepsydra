@@ -8,6 +8,7 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { attachmentUrl } from "#/api/attachments";
 import { AttachmentManager } from "#/components/attachments/AttachmentManager";
 
 const mocks = vi.hoisted(() => ({
@@ -374,5 +375,116 @@ describe("AttachmentManager", () => {
   it("warns when used from a protected note", () => {
     render(<AttachmentManager protectedPage />);
     expect(screen.getByText(/attachments are not encrypted/i)).toBeVisible();
+  });
+
+  describe("scoping to the current page", () => {
+    const twoAttachments = [
+      { name: "a.png", path: "a.png", size: 100 },
+      { name: "b.pdf", path: "b.pdf", size: 200 },
+    ];
+
+    beforeEach(() => {
+      mocks.useAttachments.mockReturnValue({
+        data: twoAttachments,
+        isLoading: false,
+        error: null,
+      });
+    });
+
+    it("defaults to attachments referenced by the page", () => {
+      const pageMarkdown = `![shot](${attachmentUrl("a.png")})`;
+      render(<AttachmentManager pageMarkdown={pageMarkdown} />);
+
+      expect(screen.getByText("a.png")).toBeVisible();
+      expect(screen.queryByText("b.pdf")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /show all attachments \(2\)/i }),
+      ).toBeVisible();
+    });
+
+    it("show-all toggle reveals the vault-wide list", async () => {
+      const user = userEvent.setup();
+      const pageMarkdown = `![shot](${attachmentUrl("a.png")})`;
+      render(<AttachmentManager pageMarkdown={pageMarkdown} />);
+
+      await user.click(
+        screen.getByRole("button", { name: /show all attachments \(2\)/i }),
+      );
+
+      expect(screen.getByText("a.png")).toBeVisible();
+      expect(screen.getByText("b.pdf")).toBeVisible();
+      const toggle = screen.getByRole("button", {
+        name: /show referenced attachments \(1\)/i,
+      });
+      expect(toggle).toBeVisible();
+
+      await user.click(toggle);
+
+      expect(screen.getByText("a.png")).toBeVisible();
+      expect(screen.queryByText("b.pdf")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: /show all attachments \(2\)/i }),
+      ).toBeVisible();
+    });
+
+    it("reveals a freshly uploaded attachment by switching to show-all", async () => {
+      const uploaded = { name: "c.txt", path: "c.txt", size: 10 };
+      mocks.upload.mockResolvedValueOnce(uploaded);
+      const pageMarkdown = `![shot](${attachmentUrl("a.png")})`;
+      render(<AttachmentManager pageMarkdown={pageMarkdown} />);
+
+      expect(screen.queryByText("b.pdf")).not.toBeInTheDocument();
+
+      chooseFile(new File(["text"], "c.txt", { type: "text/plain" }));
+
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", {
+            name: /show referenced attachments \(1\)/i,
+          }),
+        ).toBeVisible(),
+      );
+      expect(screen.getByText("b.pdf")).toBeVisible();
+    });
+
+    it("scoped empty state", () => {
+      const pageMarkdown = "No attachment references here.";
+      render(<AttachmentManager pageMarkdown={pageMarkdown} />);
+
+      expect(
+        screen.getByText("No attachments referenced by this page."),
+      ).toBeVisible();
+      expect(
+        screen.getByRole("button", { name: /show all attachments \(2\)/i }),
+      ).toBeVisible();
+    });
+
+    it("vault-wide empty state unchanged", () => {
+      mocks.useAttachments.mockReturnValue({
+        data: [],
+        isLoading: false,
+        error: null,
+      });
+      const pageMarkdown = "No attachments anywhere.";
+      render(<AttachmentManager pageMarkdown={pageMarkdown} />);
+
+      expect(screen.getByText("No attachments in this vault.")).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: /show all attachments/i }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("no pageMarkdown prop behaves as show-all", () => {
+      render(<AttachmentManager />);
+
+      expect(screen.getByText("a.png")).toBeVisible();
+      expect(screen.getByText("b.pdf")).toBeVisible();
+      expect(
+        screen.queryByRole("button", { name: /show all attachments/i }),
+      ).not.toBeInTheDocument();
+      expect(
+        screen.queryByRole("button", { name: /show referenced attachments/i }),
+      ).not.toBeInTheDocument();
+    });
   });
 });

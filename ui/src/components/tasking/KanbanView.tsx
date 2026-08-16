@@ -22,7 +22,12 @@ import {
 import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
-import { useBoardStore } from "#/store/board";
+import {
+  KANBAN_COL_DEFAULT,
+  KANBAN_COL_MAX,
+  KANBAN_COL_MIN,
+  useBoardStore,
+} from "#/store/board";
 import { type ColLabelFn, PRI_ORDER } from "./board-constants";
 import { QuickAddRow } from "./QuickAddRow";
 import { TaskCard } from "./TaskCard";
@@ -78,8 +83,72 @@ function getTaskCardDragData(
   };
 }
 
+// ── column resize handle ─────────────────────────────────────────────────────
+
+function ColumnResizeHandle({
+  status,
+  label,
+}: {
+  status: string;
+  label: string;
+}) {
+  const setColumnWidth = useBoardStore((s) => s.setColumnWidth);
+  const resetColumnWidth = useBoardStore((s) => s.resetColumnWidth);
+  const width = useBoardStore((s) => s.columnWidths[status]);
+  const current = width ?? KANBAN_COL_DEFAULT;
+
+  const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const handle = event.currentTarget;
+    const column = handle.parentElement;
+    const startX = event.clientX;
+    const startWidth = column?.getBoundingClientRect().width ?? current;
+    handle.setPointerCapture(event.pointerId);
+    const onMove = (move: PointerEvent) => {
+      if (move.buttons === 0) return; // defense in depth: button already released
+      setColumnWidth(status, startWidth + (move.clientX - startX));
+    };
+    const onEnd = () => {
+      handle.removeEventListener("pointermove", onMove);
+      handle.removeEventListener("pointerup", onEnd);
+      handle.removeEventListener("pointercancel", onEnd);
+      handle.removeEventListener("lostpointercapture", onEnd);
+    };
+    handle.addEventListener("pointermove", onMove);
+    handle.addEventListener("pointerup", onEnd);
+    handle.addEventListener("pointercancel", onEnd);
+    handle.addEventListener("lostpointercapture", onEnd);
+  };
+
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: <hr> can't be focusable or carry drag/keyboard handlers — this is the ARIA APG focusable-separator (splitter) pattern
+    <div
+      role="separator"
+      aria-orientation="vertical"
+      aria-label={`Resize ${label} column`}
+      aria-valuemin={KANBAN_COL_MIN}
+      aria-valuemax={KANBAN_COL_MAX}
+      aria-valuenow={current}
+      tabIndex={0}
+      onPointerDown={onPointerDown}
+      onDoubleClick={() => resetColumnWidth(status)}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          setColumnWidth(status, current + 16);
+        } else if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          setColumnWidth(status, current - 16);
+        }
+      }}
+      className="absolute right-0 top-0 z-[3] h-full w-[5px] cursor-col-resize outline-none hover:bg-[color-mix(in_oklab,var(--accent)_35%,transparent)] focus-visible:bg-[color-mix(in_oklab,var(--accent)_35%,transparent)]"
+    />
+  );
+}
+
 interface KanbanDropColumnProps {
   status: string;
+  label: string;
   onMoveTask: (taskId: string, status: string) => void;
   taskStatusById: ReadonlyMap<string, string>;
   children: ReactNode;
@@ -87,12 +156,14 @@ interface KanbanDropColumnProps {
 
 function KanbanDropColumn({
   status,
+  label,
   onMoveTask,
   taskStatusById,
   children,
 }: KanbanDropColumnProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [isDropTarget, setIsDropTarget] = useState(false);
+  const width = useBoardStore((s) => s.columnWidths[status]);
 
   useEffect(() => {
     const element = ref.current;
@@ -121,18 +192,19 @@ function KanbanDropColumn({
   return (
     <div
       ref={ref}
-      className="flex min-h-0 flex-[1_0_282px] flex-col border-r border-[var(--rule)] last:border-r-0"
-      style={
-        isDropTarget
+      className="relative flex min-h-0 flex-[1_0_282px] flex-col border-r border-[var(--rule)] last:border-r-0"
+      style={{
+        ...(isDropTarget
           ? {
-              background:
-                "color-mix(in oklab, var(--accent) 7%, transparent)",
+              background: "color-mix(in oklab, var(--accent) 7%, transparent)",
             }
-          : undefined
-      }
+          : undefined),
+        ...(width ? { flex: `0 0 ${width}px` } : {}),
+      }}
       data-testid={`kb-col-${status}`}
     >
       {children}
+      <ColumnResizeHandle status={status} label={label} />
     </div>
   );
 }
@@ -175,7 +247,10 @@ export function KanbanView({
     [patchTask],
   );
 
-  const visible = useMemo(() => visibleInKanban(tasks, cycles), [tasks, cycles]);
+  const visible = useMemo(
+    () => visibleInKanban(tasks, cycles),
+    [tasks, cycles],
+  );
   const taskStatusById = useMemo(
     () => new Map(visible.map((task) => [task.id, task.status])),
     [visible],
@@ -200,6 +275,7 @@ export function KanbanView({
           <KanbanDropColumn
             key={col.id}
             status={col.id}
+            label={col.label}
             onMoveTask={moveTask}
             taskStatusById={taskStatusById}
           >

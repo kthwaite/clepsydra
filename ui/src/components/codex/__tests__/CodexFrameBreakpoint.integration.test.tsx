@@ -290,10 +290,10 @@ describe("CodexFrame real breakpoint transitions", () => {
         name: "Primary navigation",
       });
       expect(
-        within(primary).getByRole("button", { name: /03.*stats/i }),
+        within(primary).getByRole("button", { name: /02.*stats/i }),
       ).toBeVisible();
       expect(
-        within(primary).getByRole("button", { name: /08.*feeds/i }),
+        within(primary).getByRole("button", { name: /07.*feeds/i }),
       ).toBeVisible();
       expect(
         screen.queryByRole("navigation", { name: "Mobile roots" }),
@@ -379,9 +379,9 @@ describe("CodexFrame real breakpoint transitions", () => {
     ).toBeVisible();
     act(() => matchMediaController.setMatches(true));
 
-    expect(screen.getByRole("button", { name: /Anchor page/ })).toHaveTextContent(
-      "Alpha · notes/alpha.md",
-    );
+    expect(
+      screen.getByRole("button", { name: /Anchor page/ }),
+    ).toHaveTextContent("Alpha · notes/alpha.md");
     expect(screen.getByRole("switch", { name: "Hide journals" })).toBeChecked();
   });
 
