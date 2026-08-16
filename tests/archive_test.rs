@@ -2164,3 +2164,86 @@ async fn request_above_base64_only_allowance_reaches_archive_validation() {
 
     assert_eq!(status, StatusCode::CREATED);
 }
+
+// ---------------------------------------------------------------------------
+// Archive lookup tests
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn archive_lookup_reports_absent_url() {
+    let (server, _tmp, _state) = setup_server();
+    let response = server
+        .get("/api/vault/archive/lookup")
+        .add_query_param("url", "https://example.com/never-captured")
+        .await;
+    response.assert_status(StatusCode::OK);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], "none");
+    assert!(body.get("page_id").is_none());
+    assert!(body.get("vault_path").is_none());
+    assert!(body.get("captured_at").is_none());
+}
+
+#[tokio::test]
+async fn archive_lookup_reports_active_capture_with_captured_at() {
+    let (server, _tmp, _state) = setup_server();
+    let url = "https://example.com/lookup-active";
+    server
+        .post("/api/vault/archive")
+        .json(&archive_url_payload(url, None))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let response = server
+        .get("/api/vault/archive/lookup")
+        .add_query_param("url", url)
+        .await;
+    response.assert_status(StatusCode::OK);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], "active");
+    assert!(body["page_id"].as_str().is_some());
+    assert!(
+        body["vault_path"]
+            .as_str()
+            .unwrap()
+            .starts_with("archive/example.com/")
+    );
+    // archive_url_payload declares this capture timestamp verbatim.
+    assert_eq!(body["captured_at"], "2026-08-13T12:00:00Z");
+}
+
+#[tokio::test]
+async fn archive_lookup_reports_rubbish_capture() {
+    const ITEM_ID: &str = "00000000-0000-4000-8000-000000000051";
+    const PAGE_ID: &str = "10000000-0000-4000-8000-000000000051";
+    const ORIGINAL_PATH: &str = "archive/example.com/binned-lookup.md";
+    const URL: &str = "https://example.com/binned-lookup";
+
+    let (server, _tmp, _state) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            publish_rubbish_archive(root, ITEM_ID, PAGE_ID, ORIGINAL_PATH, URL);
+        })
+        .build()
+        .into_parts();
+
+    let response = server
+        .get("/api/vault/archive/lookup")
+        .add_query_param("url", URL)
+        .await;
+    response.assert_status(StatusCode::OK);
+    let body: serde_json::Value = response.json();
+    assert_eq!(body["status"], "rubbish");
+    assert_eq!(body["page_id"], PAGE_ID);
+    assert_eq!(body["vault_path"], ORIGINAL_PATH);
+    assert!(body.get("captured_at").is_none());
+}
+
+#[tokio::test]
+async fn archive_lookup_rejects_non_http_url() {
+    let (server, _tmp, _state) = setup_server();
+    let response = server
+        .get("/api/vault/archive/lookup")
+        .add_query_param("url", "clepsydra://pages/notes/x.md")
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+}

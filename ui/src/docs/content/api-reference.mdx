@@ -104,6 +104,8 @@ Get the seven-day agenda. Responses: `200` Seven-day agenda; `500` Internal serv
 Ingest archive. Responses: `200` Archive already exists; `201` Archive created; `400` Invalid archive payload; `403` Archiving disabled; `409` Archive content conflict; `500` Internal server error.
 ### `GET /api/vault/archive/status`
 Get archive status. Responses: `200` Archive service status; `500` Internal server error.
+### `GET /api/vault/archive/lookup`
+Capture ownership for a source URL. Responses: `200` Capture ownership for the URL; `400` Invalid url parameter; `500` Internal server error.
 ### `GET /api/vault/archive/view/{snapshot_hash}`
 Serve a sandboxed archived HTML snapshot for framing. Responses: `200` Sandboxed archived HTML snapshot; `404` Snapshot blob not found; `415` Blob is not an HTML snapshot; `500` Internal server error.
 ### `HEAD /api/vault/archive/view/{snapshot_hash}`
