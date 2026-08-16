@@ -25,6 +25,7 @@ const expectedListeners = [
 	"action.onClicked",
 	"commands.onCommand",
 	"tabs.onRemoved",
+	"notifications.onClicked",
 ];
 
 function listenerStub(name, listeners) {
@@ -48,7 +49,10 @@ function createApi(listeners) {
 		},
 		scripting: { executeScript: async () => [] },
 		storage: { sync: { get: async () => ({}), set: async () => {} } },
-		notifications: { create: () => {} },
+		notifications: {
+			create: () => {},
+			onClicked: listenerStub("notifications.onClicked", listeners),
+		},
 	};
 }
 
@@ -93,7 +97,7 @@ for (const namespaceCase of namespaceCases) {
 		expectedListeners.some((name) => !listenerNames.includes(name))
 	) {
 		failures.push(
-			`${namespaceCase.name}: expected exactly five worker listeners ` +
+			`${namespaceCase.name}: expected exactly six worker listeners ` +
 				`(${expectedListeners.join(", ")}), got ${listenerNames.length} ` +
 				`(${listenerNames.join(", ")})`,
 		);

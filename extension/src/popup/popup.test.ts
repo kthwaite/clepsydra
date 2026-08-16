@@ -37,19 +37,37 @@ class FakeElement {
 	disabled = false;
 	value = "";
 	className = "";
-	style = { display: "" };
+	href = "";
+	hidden = false;
+	style: Record<string, string> = { display: "" };
 	dataset: Record<string, string> = {};
 	readonly children: FakeElement[] = [];
 	readonly classes = new Set<string>();
+	private readonly attributes = new Map<string, string>();
 	private readonly listeners = new Map<string, Listener>();
 	readonly classList = {
 		add: (...names: string[]) => {
 			for (const name of names) this.classes.add(name);
 		},
+		remove: (...names: string[]) => {
+			for (const name of names) this.classes.delete(name);
+		},
 	};
 
 	addEventListener(type: string, listener: Listener) {
 		this.listeners.set(type, listener);
+	}
+
+	setAttribute(name: string, value: string) {
+		this.attributes.set(name, value);
+	}
+
+	removeAttribute(name: string) {
+		this.attributes.delete(name);
+	}
+
+	getAttribute(name: string): string | null {
+		return this.attributes.get(name) ?? null;
 	}
 
 	replaceChildren() {
@@ -160,6 +178,9 @@ async function openPopup(options: PopupOptions = {}): Promise<PopupHarness> {
 		"error-msg",
 		"capture-btn",
 		"capture-status",
+		"capture-progress",
+		"capture-progress-fill",
+		"capture-link",
 		"options-link",
 		"default-tags",
 		"additional-tags",
@@ -741,5 +762,87 @@ describe("popup capture feedback", () => {
 		expect(markup).toMatch(
 			/#status-text[^}]*min-width:\s*0[^}]*overflow-wrap:\s*anywhere/s,
 		);
+		expect(markup).toMatch(
+			/id="capture-progress"[^>]*role="progressbar"[^>]*aria-valuemin="0"[^>]*aria-valuemax="100"/,
+		);
+		expect(markup).toMatch(
+			/<a[^>]*id="capture-link"[^>]*hidden[^>]*target="_blank"[^>]*rel="noopener"[^>]*>View in Clepsydra<\/a>/,
+		);
+	});
+});
+
+describe("popup progress and outcome link", () => {
+	it("renders a determinate progress bar from chunk counts", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: {
+						...captureStatus("processing", "building the snapshot…"),
+						chunksReceived: 3,
+						chunksTotal: 4,
+					},
+				},
+			],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(false);
+		expect(popup.elements["capture-progress-fill"].classes).not.toContain(
+			"indeterminate",
+		);
+		expect(
+			popup.elements["capture-progress"].getAttribute("aria-valuenow"),
+		).toBe("64");
+	});
+
+	it("renders an indeterminate progress bar while capturing", async () => {
+		const popup = await openPopup({
+			status: [{ status: captureStatus("capturing", "reading the page…") }],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(false);
+		expect(popup.elements["capture-progress-fill"].classes).toContain(
+			"indeterminate",
+		);
+		expect(
+			popup.elements["capture-progress"].getAttribute("aria-valuenow"),
+		).toBeNull();
+	});
+
+	it("hides the progress bar and shows the outcome link for a terminal done status", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: {
+						...captureStatus(
+							"done",
+							"A useful page was archived to archive/example.com/a b.md.",
+						),
+						vaultPath: "archive/example.com/a b.md",
+					},
+				},
+			],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(true);
+		expect(popup.elements["capture-link"].hidden).toBe(false);
+		expect(popup.elements["capture-link"].href).toBe(
+			"http://localhost:3000/pages/archive/example.com/a%20b.md",
+		);
+	});
+
+	it("leaves the outcome link hidden for a terminal status without a vault path", async () => {
+		const popup = await openPopup({
+			status: [
+				{
+					status: captureStatus(
+						"error",
+						"Capture could not start: access denied",
+					),
+				},
+			],
+		});
+
+		expect(popup.elements["capture-progress"].hidden).toBe(true);
+		expect(popup.elements["capture-link"].hidden).toBe(true);
 	});
 });
