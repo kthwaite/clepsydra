@@ -6,7 +6,8 @@ import {
 } from "#/lib/badge";
 import { normalizeCaptureTags } from "#/lib/capture-tags";
 import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
-import { DEFAULT_SETTINGS } from "#/lib/types";
+import { pageUrl } from "#/lib/page-url";
+import { DEFAULT_SETTINGS, type ExtensionSettings } from "#/lib/types";
 import { webext } from "#/lib/webext";
 
 const POLL_INTERVAL_MS = 250;
@@ -54,6 +55,23 @@ async function requestCaptureStart(
 	return response.status;
 }
 
+/** Percent for the determinate span; null renders the indeterminate slide. */
+function progressPercent(status: CaptureStatus): number | null {
+	if (status.phase === "processing") {
+		const { chunksReceived, chunksTotal } = status;
+		if (
+			chunksReceived === undefined ||
+			chunksTotal === undefined ||
+			chunksTotal <= 0
+		) {
+			return null;
+		}
+		return 15 + Math.round(65 * Math.min(1, chunksReceived / chunksTotal));
+	}
+	if (status.phase === "uploading") return 85;
+	return null;
+}
+
 function statusTone(phase: CapturePhase): string {
 	switch (phase) {
 		case "capturing":
@@ -77,6 +95,13 @@ function init(): void {
 	const error = document.getElementById("error-msg") as HTMLElement;
 	const button = document.getElementById("capture-btn") as HTMLButtonElement;
 	const panel = document.getElementById("capture-status") as HTMLElement;
+	const progressBar = document.getElementById(
+		"capture-progress",
+	) as HTMLElement;
+	const progressFill = document.getElementById(
+		"capture-progress-fill",
+	) as HTMLElement;
+	const link = document.getElementById("capture-link") as HTMLAnchorElement;
 	const defaultTags = document.getElementById("default-tags") as HTMLElement;
 	const additionalInput = document.getElementById(
 		"additional-tags",
@@ -89,6 +114,7 @@ function init(): void {
 	let startPending = false;
 	let captureUiGeneration = 0;
 	let pollTimer: ReturnType<typeof setTimeout> | undefined;
+	let settings: ExtensionSettings = DEFAULT_SETTINGS;
 
 	const clearError = () => {
 		error.textContent = "";
@@ -111,6 +137,19 @@ function init(): void {
 			defaultTags.append(chip);
 		}
 	};
+	const renderProgress = (active: boolean, percent: number | null) => {
+		progressBar.hidden = !active;
+		if (!active) return;
+		if (percent === null) {
+			progressFill.classList.add("indeterminate");
+			progressFill.style.width = "";
+			progressBar.removeAttribute("aria-valuenow");
+		} else {
+			progressFill.classList.remove("indeterminate");
+			progressFill.style.width = `${percent}%`;
+			progressBar.setAttribute("aria-valuenow", String(percent));
+		}
+	};
 	const renderPhase = (phase: CapturePhase, detail: string) => {
 		const active = isInProgress(phase);
 		panel.textContent = detail;
@@ -118,6 +157,7 @@ function init(): void {
 		panel.style.display = "block";
 		button.disabled = active;
 		additionalInput.disabled = active;
+		renderProgress(active, null);
 	};
 	const renderStatus = (status: CaptureStatus) => {
 		if (isInProgress(status.phase)) {
@@ -126,6 +166,13 @@ function init(): void {
 			additionalInput.value = "";
 		}
 		renderPhase(status.phase, status.detail);
+		renderProgress(isInProgress(status.phase), progressPercent(status));
+		if (!isInProgress(status.phase) && status.vaultPath) {
+			link.href = pageUrl(settings.server_url, status.vaultPath);
+			link.hidden = false;
+		} else {
+			link.hidden = true;
+		}
 	};
 	const stopPolling = () => {
 		stopped = true;
@@ -214,7 +261,6 @@ function init(): void {
 
 	void (async () => {
 		const openingGeneration = captureUiGeneration;
-		let settings = DEFAULT_SETTINGS;
 		try {
 			const stored = await webext.storage.sync.get("settings");
 			if (stopped) return;

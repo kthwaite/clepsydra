@@ -42,9 +42,11 @@ interface WorkerEndpoint {
 	removeTab: (tabId?: number) => void;
 	clickToolbar: (tab?: ToolbarTab) => void;
 	runCommand: (command?: string) => void;
-	notifications: Array<{ title: string; message: string }>;
+	clickNotification: (notificationId: string) => void;
+	notifications: Array<{ id: string; title: string; message: string }>;
 	badgeText: Mock;
 	title: Mock;
+	tabsCreate: Mock;
 }
 
 interface SessionArea {
@@ -102,9 +104,12 @@ async function loadWorker(
 	let onRemoved: (tabId: number) => void = () => undefined;
 	let onToolbarClicked: (tab: ToolbarTab) => void = () => undefined;
 	let onCommand: (command: string) => void = () => undefined;
-	const notifications: Array<{ title: string; message: string }> = [];
+	let onNotificationClicked: (notificationId: string) => void = () => undefined;
+	const notifications: Array<{ id: string; title: string; message: string }> =
+		[];
 	const badgeText = vi.fn();
 	const title = vi.fn();
+	const tabsCreate = vi.fn(async () => ({}));
 	const session = options.session ?? createSessionArea();
 	const tabsGet =
 		options.tabsGet ??
@@ -122,15 +127,18 @@ async function loadWorker(
 		...options.settings,
 	};
 	const createNotification = vi.fn(
-		(notification: { title: string; message: string }) => {
-			notifications.push(notification);
+		(
+			notificationId: string,
+			notification: { title: string; message: string },
+		) => {
+			notifications.push({ id: notificationId, ...notification });
 			if (options.notifications === "throws") {
 				throw new Error("notification create threw");
 			}
 			if (options.notifications === "rejects") {
 				return Promise.reject(new Error("notification create rejected"));
 			}
-			return Promise.resolve();
+			return Promise.resolve(notificationId);
 		},
 	);
 
@@ -152,11 +160,21 @@ async function loadWorker(
 		},
 		...(options.notifications === "absent"
 			? {}
-			: { notifications: { create: createNotification } }),
+			: {
+					notifications: {
+						create: createNotification,
+						onClicked: {
+							addListener: (next: (notificationId: string) => void) => {
+								onNotificationClicked = next;
+							},
+						},
+					},
+				}),
 		tabs: {
 			get: tabsGet,
 			query: vi.fn(async () => [{ id: 7, url: "https://example.com/article" }]),
 			sendMessage: vi.fn(async () => ({})),
+			create: tabsCreate,
 			onRemoved: {
 				addListener: (next: (tabId: number) => void) => {
 					onRemoved = next;
@@ -216,9 +234,12 @@ async function loadWorker(
 		clickToolbar: (tab = { id: 7, url: "https://example.com/article" }) =>
 			onToolbarClicked(tab),
 		runCommand: (command = "capture-page") => onCommand(command),
+		clickNotification: (notificationId: string) =>
+			onNotificationClicked(notificationId),
 		notifications,
 		badgeText,
 		title,
+		tabsCreate,
 	};
 }
 
@@ -1216,5 +1237,52 @@ describe("service-worker capture feedback", () => {
 			}),
 		);
 		expect((await currentStatus(worker, 8))?.chunksTotal).toBeUndefined();
+	});
+
+	it("clicking a success notification opens the archived page once", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "created",
+			vault_path: "archive/example.com/x.md",
+			page_id: "page-1",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+		await vi.waitFor(() => expect(worker.notifications).toHaveLength(1));
+		const notificationId = worker.notifications[0]?.id;
+		expect(notificationId).toBeTruthy();
+
+		worker.clickNotification(notificationId as string);
+
+		expect(worker.tabsCreate).toHaveBeenCalledTimes(1);
+		expect(worker.tabsCreate).toHaveBeenCalledWith({
+			url: "http://localhost:3500/pages/archive/example.com/x.md",
+		});
+	});
+
+	it("ignores a click for a notification id it never created", async () => {
+		dependencies.ingestArchive.mockResolvedValueOnce({
+			status: "created",
+			vault_path: "archive/example.com/x.md",
+			page_id: "page-1",
+			blobs_stored: 1,
+			blobs_deduped: 0,
+		});
+		const worker = await loadWorker();
+
+		await startTransfer(worker);
+		await vi.waitFor(() => expect(worker.notifications).toHaveLength(1));
+
+		worker.clickNotification("clepsydra-unknown");
+
+		expect(worker.tabsCreate).not.toHaveBeenCalled();
+	});
+
+	it("registers no click listener and does not throw when notifications are absent", async () => {
+		await expect(
+			loadWorker({ notifications: "absent" }),
+		).resolves.toBeDefined();
 	});
 });

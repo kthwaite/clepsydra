@@ -18,6 +18,7 @@ import {
 import { sha256String } from "#/lib/hasher";
 import { executeCaptureScript } from "#/lib/inject-capture";
 import { describeInjectionFailure } from "#/lib/injection";
+import { pageUrl } from "#/lib/page-url";
 import {
 	CAPTURE_INACTIVITY_TIMEOUT_MS,
 	type CompletedTransfer,
@@ -134,6 +135,7 @@ async function processCapture(
 				showNotification(
 					"Already Archived",
 					`${metadata.title} was already saved.`,
+					pageUrl(settings.server_url, response.vault_path),
 				);
 			}
 		} else {
@@ -148,6 +150,7 @@ async function processCapture(
 				showNotification(
 					"Page Archived",
 					`${metadata.title} → ${response.vault_path}`,
+					pageUrl(settings.server_url, response.vault_path),
 				);
 			}
 		}
@@ -161,7 +164,13 @@ async function processCapture(
 					pageId: conflictDetail?.page_id,
 				})
 			) {
-				showNotification("Content Changed", detail);
+				showNotification(
+					"Content Changed",
+					detail,
+					conflictDetail?.vault_path
+						? pageUrl(settings.server_url, conflictDetail.vault_path)
+						: undefined,
+				);
 			}
 		} else {
 			const detail = String(err);
@@ -185,28 +194,46 @@ function describeConflict(title: string, err: ArchiveConflictError): string {
 		: `${title} has changed since last capture. The existing page was left untouched.`;
 }
 
-function showNotification(title: string, message: string): void {
+const notificationUrls = new Map<string, string>();
+let notificationSequence = 0;
+
+function showNotification(
+	title: string,
+	message: string,
+	targetUrl?: string,
+): void {
 	const notifications = webext.notifications;
 	if (!notifications?.create) return;
+	notificationSequence += 1;
+	const notificationId = `clepsydra-${notificationSequence.toString(36)}`;
+	if (targetUrl) notificationUrls.set(notificationId, targetUrl);
 
 	try {
 		// The worker lives at /background/, so a relative icon path resolves to
 		// /background/icons/... and Chrome rejects the whole notification with
 		// "Unable to download all specified images". Always use an extension URL.
 		void Promise.resolve(
-			notifications.create({
+			notifications.create(notificationId, {
 				type: "basic",
 				iconUrl: webext.runtime.getURL("icons/icon-128.png"),
 				title,
 				message,
 			}),
 		).catch(() => {
-			// Notifications are best-effort; the badge is the reliable signal.
+			notificationUrls.delete(notificationId);
 		});
 	} catch {
 		// Some notification implementations throw before returning a promise.
+		notificationUrls.delete(notificationId);
 	}
 }
+
+webext.notifications?.onClicked?.addListener((notificationId: string) => {
+	const url = notificationUrls.get(notificationId);
+	if (!url) return;
+	notificationUrls.delete(notificationId);
+	void webext.tabs.create({ url });
+});
 
 const legacyWebext = webext as typeof chrome & {
 	browserAction?: LegacyToolbarActionApi;

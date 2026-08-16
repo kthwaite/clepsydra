@@ -140,6 +140,32 @@
     .capture-status[data-tone="success"] { color: var(--color-success); }
     .capture-status[data-tone="conflict"] { color: var(--color-conflict); }
     .capture-status[data-tone="error"] { color: var(--color-danger); }
+    .capture-progress {
+      height: 4px;
+      margin-top: var(--space-2);
+      border: var(--border-width) solid var(--color-subtle);
+      background: var(--color-canvas);
+    }
+    .capture-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: var(--color-processing);
+      transition: width 150ms ease-out;
+    }
+    .capture-progress-fill.indeterminate {
+      width: 30%;
+      animation: capture-progress-slide 1.2s ease-in-out infinite alternate;
+    }
+    @keyframes capture-progress-slide {
+      from { margin-left: 0; }
+      to { margin-left: 70%; }
+    }
+    .capture-link {
+      display: inline-block;
+      margin-top: var(--space-1);
+      font-size: var(--font-size-meta);
+      color: var(--color-ink);
+    }
     .footer {
       margin-top: var(--space-3);
       color: var(--color-muted);
@@ -167,7 +193,13 @@
     <p id="additional-tags-help" class="field-help">Applies only to this capture.</p>
   </section>
   <button id="capture-btn">Capture This Page</button>
+  <div class="capture-progress" id="capture-progress" hidden
+       role="progressbar" aria-label="Capture progress"
+       aria-valuemin="0" aria-valuemax="100">
+    <div class="capture-progress-fill" id="capture-progress-fill"></div>
+  </div>
   <div class="capture-status" id="capture-status" role="status" aria-live="polite" aria-atomic="true"></div>
+  <a class="capture-link" id="capture-link" hidden target="_blank" rel="noopener">View in Clepsydra</a>
   <div class="error" id="error-msg" role="alert"></div>
   <div class="footer">
     <a class="settings-link" href="#" id="options-link">Settings</a>
