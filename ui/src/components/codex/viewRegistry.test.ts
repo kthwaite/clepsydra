@@ -30,7 +30,6 @@ const deps = (): ViewNavDeps & {
 describe("VIEW_REGISTRY", () => {
   it("preserves today's nav rail order and labels", () => {
     expect(DESKTOP_NAV).toEqual([
-      "atrium",
       "folio",
       "gazetteer",
       "stats",
@@ -43,7 +42,6 @@ describe("VIEW_REGISTRY", () => {
       "rubbish",
     ]);
     expect(DESKTOP_NAV.map((v) => VIEW_REGISTRY[v].label)).toEqual([
-      "ATRIUM",
       "FOLIO",
       "GAZETTEER",
       "STATS",
