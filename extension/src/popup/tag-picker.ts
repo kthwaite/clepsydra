@@ -90,6 +90,23 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 		notify();
 	};
 
+	// Free text (typed or pasted) may itself contain commas — e.g. pasting
+	// the placeholder's own "research, reading" — so it's split and
+	// normalized as a batch, unlike a single selected suggestion.
+	const addAllNormalized = (raw: string): void => {
+		const normalized = normalizeCaptureTags(raw.split(","));
+		let changed = false;
+		for (const tag of normalized) {
+			if (tags.includes(tag)) continue;
+			tags.push(tag);
+			changed = true;
+		}
+		if (changed) {
+			renderChips();
+			notify();
+		}
+	};
+
 	const closeList = (): void => {
 		suggestions = [];
 		optionElements = [];
@@ -128,7 +145,7 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 			option.textContent = tag;
 			option.addEventListener("mousedown", (event) => {
 				event.preventDefault();
-				commit(tag);
+				commitOption(tag);
 			});
 			suggestionList.append(option);
 			return option;
@@ -138,8 +155,17 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 		input.removeAttribute("aria-activedescendant");
 	};
 
-	const commit = (raw: string): void => {
-		addNormalized(raw);
+	// Commits a single, already-known suggestion (never contains a comma).
+	const commitOption = (tag: string): void => {
+		addNormalized(tag);
+		input.value = "";
+		closeList();
+	};
+
+	// Commits whatever the user typed or pasted, which may be a
+	// comma-separated list.
+	const commitFreeText = (raw: string): void => {
+		addAllNormalized(raw);
 		input.value = "";
 		closeList();
 	};
@@ -181,15 +207,15 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 			case "Enter": {
 				event.preventDefault();
 				if (activeIndex >= 0 && activeIndex < suggestions.length) {
-					commit(suggestions[activeIndex]);
+					commitOption(suggestions[activeIndex]);
 				} else {
-					commit(input.value);
+					commitFreeText(input.value);
 				}
 				return;
 			}
 			case ",": {
 				event.preventDefault();
-				commit(input.value);
+				commitFreeText(input.value);
 				return;
 			}
 			case "ArrowDown": {
@@ -237,7 +263,7 @@ export function createTagPicker(options: TagPickerOptions): TagPicker {
 			addNormalized(tag);
 		},
 		commitInput(): void {
-			commit(input.value);
+			commitFreeText(input.value);
 		},
 		setDisabled(value: boolean): void {
 			disabled = value;
