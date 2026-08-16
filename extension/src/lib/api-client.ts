@@ -58,6 +58,15 @@ export class ClepsydraClient {
 		return tags.map((entry) => entry.tag);
 	}
 
+	async listTags(): Promise<{ tag: string; count: number }[]> {
+		const res = await fetch(`${this.baseUrl}/api/vault/index/tags`);
+		if (!res.ok) {
+			throw new ArchiveError(`Tag list failed: ${res.status}`);
+		}
+		const tags: { tag: string; count: number }[] = await res.json();
+		return tags.map(({ tag, count }) => ({ tag, count }));
+	}
+
 	async isReachable(): Promise<boolean> {
 		try {
 			await this.getStatus();

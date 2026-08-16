@@ -4,7 +4,7 @@ import {
 	type CaptureStatus,
 	isInProgress,
 } from "#/lib/badge";
-import { normalizeCaptureTags } from "#/lib/capture-tags";
+import { currentMonthTag, normalizeCaptureTags } from "#/lib/capture-tags";
 import { describeInjectionFailure, isRestrictedUrl } from "#/lib/injection";
 import { pageUrl } from "#/lib/page-url";
 import {
@@ -13,6 +13,11 @@ import {
 	type ExtensionSettings,
 } from "#/lib/types";
 import { webext } from "#/lib/webext";
+import {
+	type PageSignals,
+	suggestFromVaultTags,
+	tokenizeSignals,
+} from "#/popup/content-suggestions";
 import { createTagPicker } from "#/popup/tag-picker";
 
 const POLL_INTERVAL_MS = 250;
@@ -99,6 +104,44 @@ function statusTone(phase: CapturePhase): string {
 	}
 }
 
+/** `new URL(url).hostname`, mirroring the worker's own domain extraction. */
+function extractDomainFromUrl(url: string): string {
+	try {
+		return new URL(url).hostname;
+	} catch {
+		return "unknown";
+	}
+}
+
+async function collectPageSignals(
+	tabId: number,
+	fallbackTitle: string,
+): Promise<PageSignals> {
+	const fallback = { title: fallbackTitle, description: "", keywords: [] };
+	const scripting = webext.scripting;
+	if (!scripting?.executeScript) return fallback;
+	try {
+		const [result] = await scripting.executeScript({
+			target: { tabId },
+			func: () => ({
+				title: document.title,
+				description:
+					document
+						.querySelector('meta[name="description"]')
+						?.getAttribute("content") ?? "",
+				keywords: (
+					document
+						.querySelector('meta[name="keywords"]')
+						?.getAttribute("content") ?? ""
+				).split(","),
+			}),
+		});
+		return (result?.result as PageSignals | undefined) ?? fallback;
+	} catch {
+		return fallback;
+	}
+}
+
 function init(): void {
 	const dot = document.getElementById("status-dot") as HTMLElement;
 	const text = document.getElementById("status-text") as HTMLElement;
@@ -126,6 +169,9 @@ function init(): void {
 	const capturedIndicator = document.getElementById(
 		"captured-indicator",
 	) as HTMLElement;
+	const suggestedTags = document.getElementById(
+		"suggested-tags",
+	) as HTMLElement;
 
 	let stopped = false;
 	let startPending = false;
@@ -136,12 +182,36 @@ function init(): void {
 	// something to call immediately; reassigned once stored settings resolve
 	// (see below), which is why this is a mutable `let` rather than `const`.
 	let client = new ClepsydraClient(DEFAULT_SETTINGS.server_url);
+	let suggestedTagPool: string[] = [];
+
+	const refreshSuggestedTags = (): void => {
+		const currentTags = new Set(picker.getTags());
+		const visible = suggestedTagPool.filter((tag) => !currentTags.has(tag));
+		suggestedTags.replaceChildren();
+		for (const tag of visible) {
+			const chip = document.createElement("button") as HTMLButtonElement;
+			chip.type = "button";
+			chip.className = "tag tag-suggested";
+			chip.textContent = tag;
+			chip.addEventListener("click", () => {
+				picker.addTag(tag);
+				refreshSuggestedTags();
+			});
+			suggestedTags.append(chip);
+		}
+		suggestedTags.hidden = visible.length === 0;
+	};
+	const renderSuggestedTags = (tags: string[]): void => {
+		suggestedTagPool = tags;
+		refreshSuggestedTags();
+	};
 
 	const picker = createTagPicker({
 		input: additionalInput,
 		chipList: selectedTags,
 		suggestionList: tagSuggestions,
 		fetchSuggestions: (query) => client.suggestTags(query),
+		onTagsChanged: () => refreshSuggestedTags(),
 	});
 
 	const clearError = () => {
@@ -360,6 +430,34 @@ function init(): void {
 				})
 				.catch(() => {
 					// The indicator is best-effort; capture stays available.
+				});
+
+			const tabId = tab.id;
+			const tabUrl = tab.url;
+			void Promise.all([
+				collectPageSignals(tabId, tab.title ?? ""),
+				client.listTags(),
+			])
+				.then(([signals, vaultTags]) => {
+					if (stopped || captureUiGeneration !== openingGeneration) return;
+					const implicit = new Set(
+						normalizeCaptureTags([
+							"archive",
+							extractDomainFromUrl(tabUrl),
+							currentMonthTag(),
+							...settings.default_tags,
+						]),
+					);
+					renderSuggestedTags(
+						suggestFromVaultTags(
+							tokenizeSignals(signals),
+							vaultTags,
+							new Set([...implicit, ...picker.getTags()]),
+						),
+					);
+				})
+				.catch(() => {
+					// Suggestions are best-effort; capture stays available.
 				});
 		}
 
