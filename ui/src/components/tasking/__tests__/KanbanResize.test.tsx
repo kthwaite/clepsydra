@@ -6,7 +6,7 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { KanbanView } from "../KanbanView";
 import { BOARD_FIXTURE, FIXTURE_COL_LABEL } from "./fixtures";
@@ -95,5 +95,30 @@ describe("KanbanView — column resize", () => {
 
     fireEvent.doubleClick(separator);
     expect(useBoardStore.getState().columnWidths.INTAKE).toBeUndefined();
+  });
+
+  it("stops responding to pointermove once a pointercancel has fired", () => {
+    // jsdom has no real pointer-capture implementation; stub it minimally so
+    // onPointerDown doesn't throw. This test targets listener cleanup only —
+    // real drag distance/layout is manually-verifiable (see task report).
+    const original = Element.prototype.setPointerCapture;
+    Element.prototype.setPointerCapture = vi.fn();
+
+    try {
+      renderKanban();
+      const separator = screen.getByRole("separator", {
+        name: /resize intake column/i,
+      });
+
+      fireEvent.pointerDown(separator, { clientX: 100, pointerId: 1 });
+      fireEvent.pointerCancel(separator, { pointerId: 1 });
+      // A stray pointermove after cancel must not resize the column — the
+      // move/up/cancel listeners should already have been torn down.
+      fireEvent.pointerMove(separator, { clientX: 300, pointerId: 1 });
+
+      expect(useBoardStore.getState().columnWidths.INTAKE).toBeUndefined();
+    } finally {
+      Element.prototype.setPointerCapture = original;
+    }
   });
 });

@@ -104,14 +104,20 @@ function ColumnResizeHandle({
     const startX = event.clientX;
     const startWidth = column?.getBoundingClientRect().width ?? current;
     handle.setPointerCapture(event.pointerId);
-    const onMove = (move: PointerEvent) =>
+    const onMove = (move: PointerEvent) => {
+      if (move.buttons === 0) return; // defense in depth: button already released
       setColumnWidth(status, startWidth + (move.clientX - startX));
-    const onUp = () => {
+    };
+    const onEnd = () => {
       handle.removeEventListener("pointermove", onMove);
-      handle.removeEventListener("pointerup", onUp);
+      handle.removeEventListener("pointerup", onEnd);
+      handle.removeEventListener("pointercancel", onEnd);
+      handle.removeEventListener("lostpointercapture", onEnd);
     };
     handle.addEventListener("pointermove", onMove);
-    handle.addEventListener("pointerup", onUp);
+    handle.addEventListener("pointerup", onEnd);
+    handle.addEventListener("pointercancel", onEnd);
+    handle.addEventListener("lostpointercapture", onEnd);
   };
 
   return (
