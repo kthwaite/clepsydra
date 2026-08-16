@@ -180,6 +180,63 @@ describe("ClepsydraClient", () => {
 		});
 	});
 
+	describe("suggestTags", () => {
+		it("fetches the tag suggestion endpoint and maps to tag names", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response(
+					JSON.stringify([
+						{ tag: "research", count: 5, computed_count: 1 },
+						{ tag: "reading", count: 2, computed_count: 0 },
+					]),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				),
+			);
+
+			const result = await client.suggestTags("Res");
+
+			expect(result).toEqual(["research", "reading"]);
+			expect(fetchSpy).toHaveBeenCalledWith(
+				`${BASE_URL}/api/vault/index/tags?q=res&limit=8`,
+			);
+		});
+
+		it("resolves an empty array without fetching for an empty or whitespace query", async () => {
+			const result = await client.suggestTags("   ");
+
+			expect(result).toEqual([]);
+			expect(fetchSpy).not.toHaveBeenCalled();
+		});
+
+		it("respects a custom limit", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response(JSON.stringify([]), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			);
+
+			await client.suggestTags("re", 3);
+
+			expect(fetchSpy).toHaveBeenCalledWith(
+				`${BASE_URL}/api/vault/index/tags?q=re&limit=3`,
+			);
+		});
+
+		it("throws ArchiveError on non-OK status", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response("Bad Request", { status: 400 }),
+			);
+
+			try {
+				await client.suggestTags("re");
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expect(e).toBeInstanceOf(ArchiveError);
+				expect((e as ArchiveError).message).toBe("Tag suggestions failed: 400");
+			}
+		});
+	});
+
 	describe("isReachable", () => {
 		it("returns true when server responds", async () => {
 			const statusResponse: ArchiveStatusResponse = {

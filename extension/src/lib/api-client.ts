@@ -45,6 +45,19 @@ export class ClepsydraClient {
 		return res.json();
 	}
 
+	async suggestTags(query: string, limit = 8): Promise<string[]> {
+		const q = query.trim().toLowerCase();
+		if (q === "") return [];
+		const res = await fetch(
+			`${this.baseUrl}/api/vault/index/tags?q=${encodeURIComponent(q)}&limit=${limit}`,
+		);
+		if (!res.ok) {
+			throw new ArchiveError(`Tag suggestions failed: ${res.status}`);
+		}
+		const tags: { tag: string }[] = await res.json();
+		return tags.map((entry) => entry.tag);
+	}
+
 	async isReachable(): Promise<boolean> {
 		try {
 			await this.getStatus();
