@@ -29,6 +29,7 @@ vi.mock("#/lib/api-client", () => ({
 	ClepsydraClient: class {
 		isReachable = client.isReachable;
 		lookupArchive = client.lookupArchive;
+		suggestTags = vi.fn().mockResolvedValue([]);
 	},
 }));
 

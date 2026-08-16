@@ -398,4 +398,29 @@ describe("destroy", () => {
 		input.dispatchEvent(keyEvent("Enter"));
 		expect(picker.getTags()).toEqual([]);
 	});
+
+	it("ignores an in-flight fetch that resolves after destroy()", async () => {
+		vi.useFakeTimers();
+		const { input, suggestionList, fetchSuggestions, picker } = setup();
+		let resolveFetch!: (value: string[]) => void;
+		fetchSuggestions.mockImplementationOnce(
+			() =>
+				new Promise((resolve) => {
+					resolveFetch = resolve;
+				}),
+		);
+		input.value = "re";
+		input.dispatchEvent(new linkedom.Event("input"));
+		await vi.advanceTimersByTimeAsync(200);
+		expect(fetchSuggestions).toHaveBeenCalledTimes(1);
+
+		picker.destroy();
+		resolveFetch(["research", "reading"]);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		expect(suggestionList.hidden).toBe(true);
+		expect(suggestionList.querySelectorAll('[role="option"]')).toHaveLength(0);
+		expect(input.getAttribute("aria-expanded")).toBe("false");
+	});
 });
