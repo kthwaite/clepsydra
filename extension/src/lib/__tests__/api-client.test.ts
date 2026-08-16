@@ -13,6 +13,7 @@ import {
 	ClepsydraClient,
 } from "../api-client";
 import type {
+	ArchiveLookupResponse,
 	ArchiveManifest,
 	ArchiveResponse,
 	ArchiveStatusResponse,
@@ -133,6 +134,48 @@ describe("ClepsydraClient", () => {
 				expect((e as ArchiveError).message).toBe(
 					"Server returned 500: Internal Server Error",
 				);
+			}
+		});
+	});
+
+	describe("lookupArchive", () => {
+		it("fetches the lookup endpoint and returns the parsed body", async () => {
+			const lookupResponse: ArchiveLookupResponse = {
+				status: "active",
+				page_id: "page-1",
+				vault_path: "archive/example.com/x.md",
+				captured_at: "2026-08-13T12:00:00Z",
+			};
+
+			fetchSpy.mockResolvedValueOnce(
+				new Response(JSON.stringify(lookupResponse), {
+					status: 200,
+					headers: { "Content-Type": "application/json" },
+				}),
+			);
+
+			const result = await client.lookupArchive(
+				"https://example.com/article?x=1",
+			);
+			expect(result).toEqual(lookupResponse);
+			expect(fetchSpy).toHaveBeenCalledWith(
+				`${BASE_URL}/api/vault/archive/lookup?url=${encodeURIComponent(
+					"https://example.com/article?x=1",
+				)}`,
+			);
+		});
+
+		it("throws ArchiveError on non-OK status", async () => {
+			fetchSpy.mockResolvedValueOnce(
+				new Response("Bad Request", { status: 400 }),
+			);
+
+			try {
+				await client.lookupArchive("not-a-url");
+				expect.unreachable("should have thrown");
+			} catch (e) {
+				expect(e).toBeInstanceOf(ArchiveError);
+				expect((e as ArchiveError).message).toBe("Lookup failed: 400");
 			}
 		});
 	});

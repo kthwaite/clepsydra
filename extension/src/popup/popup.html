@@ -52,6 +52,13 @@
     .dot.connected { background: var(--color-success); }
     .dot.disconnected { background: var(--color-danger); }
     #status-text { min-width: 0; overflow-wrap: anywhere; }
+    .captured-indicator {
+      margin-bottom: var(--space-2);
+      color: var(--color-muted);
+      font-size: var(--font-size-caption);
+      line-height: var(--line-height-copy);
+    }
+    .captured-indicator a { color: var(--color-ink); }
     .capture-tags { margin-bottom: var(--space-3); }
     .field-label {
       display: block;
@@ -184,6 +191,7 @@
     <div class="dot" id="status-dot"></div>
     <span id="status-text" role="status" aria-live="polite" aria-atomic="true">Checking…</span>
   </div>
+  <div class="captured-indicator" id="captured-indicator" hidden></div>
   <section class="capture-tags" aria-labelledby="capture-tags-label">
     <div id="capture-tags-label" class="field-label">Defaults</div>
     <div id="default-tags" class="tag-list" aria-live="polite">Loading…</div>

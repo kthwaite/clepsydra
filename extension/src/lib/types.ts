@@ -42,6 +42,15 @@ export interface ArchiveConflictDetail {
 	vault_path?: string;
 }
 
+export type ArchiveLookupStatus = "active" | "rubbish" | "none";
+
+export interface ArchiveLookupResponse {
+	status: ArchiveLookupStatus;
+	page_id?: string;
+	vault_path?: string;
+	captured_at?: string;
+}
+
 export interface ExtensionSettings {
 	server_url: string;
 	default_tags: string[];
