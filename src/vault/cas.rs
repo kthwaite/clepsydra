@@ -1,4 +1,5 @@
 //! Content-addressed storage for blobs, with reference counting and garbage collection.
+use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
@@ -107,27 +108,38 @@ const LOCK_FILE_NAME: &str = "cas.lock";
 
 struct ExclusiveLockGuard<'a> {
     file: &'a File,
+    held: &'a Cell<bool>,
 }
 
 impl<'a> ExclusiveLockGuard<'a> {
-    fn acquire(file: &'a File) -> io::Result<Self> {
-        fs4::FileExt::lock(file)?;
-        Ok(Self { file })
+    fn acquire(file: &'a File, held: &'a Cell<bool>) -> io::Result<Self> {
+        if held.replace(true) {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "CAS mutation lock is already held by this content store",
+            ));
+        }
+        if let Err(error) = fs4::FileExt::lock(file) {
+            held.set(false);
+            return Err(error);
+        }
+        Ok(Self { file, held })
     }
 }
 
 impl Drop for ExclusiveLockGuard<'_> {
     fn drop(&mut self) {
         let _ = fs4::FileExt::unlock(self.file);
+        self.held.set(false);
     }
 }
 
-/// A verified CAS blob held open for a backup archive.
+/// Metadata for a verified CAS blob in a backup snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackupBlob {
     hash: String,
     relative_path: PathBuf,
     size: u64,
-    file: File,
 }
 
 impl BackupBlob {
@@ -142,11 +154,6 @@ impl BackupBlob {
     pub fn size(&self) -> u64 {
         self.size
     }
-
-    /// Clone the already-verified backing-file handle without reopening its path.
-    pub fn try_clone_file(&self) -> io::Result<File> {
-        self.file.try_clone()
-    }
 }
 
 /// A consistent SQLite snapshot and its authoritative, verified blob set.
@@ -155,6 +162,7 @@ impl BackupBlob {
 pub struct BackupSnapshot<'a> {
     database: tempfile::NamedTempFile,
     blobs: Vec<BackupBlob>,
+    canonical_root: PathBuf,
     _lock: ExclusiveLockGuard<'a>,
 }
 
@@ -165,6 +173,28 @@ impl BackupSnapshot<'_> {
 
     pub fn blobs(&self) -> &[BackupBlob] {
         &self.blobs
+    }
+
+    /// Open and revalidate one authoritative blob for the duration of a callback.
+    ///
+    /// The descriptor owned by this method is closed before it returns, so
+    /// normal archive traversal uses one blob descriptor at a time.
+    pub fn with_blob_file(
+        &self,
+        blob: &BackupBlob,
+        use_file: impl FnOnce(&mut File) -> io::Result<()>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.blobs.contains(blob) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "blob does not belong to this CAS backup snapshot",
+            )
+            .into());
+        }
+        let stored_size = i64::try_from(blob.size)?;
+        let (_, mut file) =
+            ContentStore::verified_backup_blob(&self.canonical_root, blob.hash.clone(), stored_size)?;
+        use_file(&mut file).map_err(Into::into)
     }
 }
 
@@ -177,6 +207,7 @@ pub struct ContentStore {
     root: PathBuf,
     db: Connection,
     lock_file: File,
+    lock_held: Cell<bool>,
 }
 
 impl ContentStore {
@@ -189,7 +220,8 @@ impl ContentStore {
             .create(true)
             .truncate(false)
             .open(root.join(LOCK_FILE_NAME))?;
-        let lock = ExclusiveLockGuard::acquire(&lock_file)?;
+        let lock_held = Cell::new(false);
+        let lock = ExclusiveLockGuard::acquire(&lock_file, &lock_held)?;
         let db_path = root.join("cas.db");
         let db = Connection::open(&db_path)?;
         db.execute_batch(
@@ -210,6 +242,7 @@ impl ContentStore {
             root: root.to_path_buf(),
             db,
             lock_file,
+            lock_held,
         })
     }
 
@@ -245,11 +278,10 @@ impl ContentStore {
     }
 
     fn verified_backup_blob(
-        &self,
         canonical_root: &Path,
         hash: String,
         stored_size: i64,
-    ) -> Result<BackupBlob, CasError> {
+    ) -> Result<(BackupBlob, File), CasError> {
         let hex = Self::validate_hash(&hash).map_err(|error| CasError::InvalidHash {
             hash: hash.clone(),
             message: error.to_string(),
@@ -259,7 +291,7 @@ impl ContentStore {
             size: stored_size,
         })?;
         let relative_path = PathBuf::from(&hex[..2]).join(hex);
-        let path = self.root.join(&relative_path);
+        let path = canonical_root.join(&relative_path);
         let path_metadata = fs::symlink_metadata(&path).map_err(|error| CasError::BackingBlob {
             hash: hash.clone(),
             message: error.to_string(),
@@ -331,18 +363,20 @@ impl ContentStore {
                 message: error.to_string(),
             })?;
 
-        Ok(BackupBlob {
-            hash,
-            relative_path,
-            size: expected_size,
+        Ok((
+            BackupBlob {
+                hash,
+                relative_path,
+                size: expected_size,
+            },
             file,
-        })
+        ))
     }
 
     /// Create a consistent backup snapshot and hold the CAS mutation lock until
     /// the returned guard is dropped.
     pub fn backup_snapshot(&self) -> Result<BackupSnapshot<'_>, Box<dyn std::error::Error>> {
-        let lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
+        let lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
         let database = tempfile::NamedTempFile::new()?;
         let mut snapshot_db = Connection::open(database.path())?;
         {
@@ -361,14 +395,17 @@ impl ContentStore {
         drop(snapshot_db);
 
         let canonical_root = fs::canonicalize(&self.root)?;
-        let blobs = rows
-            .into_iter()
-            .map(|(hash, size)| self.verified_backup_blob(&canonical_root, hash, size))
-            .collect::<Result<Vec<_>, _>>()?;
+        let mut blobs = Vec::with_capacity(rows.len());
+        for (hash, size) in rows {
+            let (blob, file) = Self::verified_backup_blob(&canonical_root, hash, size)?;
+            drop(file);
+            blobs.push(blob);
+        }
 
         Ok(BackupSnapshot {
             database,
             blobs,
+            canonical_root,
             _lock: lock,
         })
     }
@@ -445,7 +482,7 @@ impl ContentStore {
         item_id: Uuid,
         hashes: &BTreeSet<String>,
     ) -> Result<ReleaseOutcome, CasError> {
-        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
         let item_id = item_id.to_string();
         if Self::rubbish_release_completed(&self.db, &item_id)? {
             return Ok(ReleaseOutcome::AlreadyCompleted);
@@ -486,7 +523,7 @@ impl ContentStore {
         data: &[u8],
         content_type: &str,
     ) -> Result<StoreResult, Box<dyn std::error::Error>> {
-        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
         let hash = Self::hash_bytes(data);
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -655,7 +692,7 @@ impl ContentStore {
 
     /// Increment the reference count for a blob.
     pub fn increment_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
         Self::validate_hash(hash)?;
         self.db.execute(
             "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
@@ -666,7 +703,7 @@ impl ContentStore {
 
     /// Decrement the reference count for a blob.
     pub fn decrement_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
-        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
         Self::validate_hash(hash)?;
         self.db.execute(
             "UPDATE blobs SET ref_count = ref_count - 1 WHERE hash = ?1",
@@ -678,7 +715,7 @@ impl ContentStore {
     /// Remove blobs with ref_count <= 0 that are older than `min_age`.
     /// Returns the number of blobs pruned.
     pub fn gc(&self, min_age: std::time::Duration) -> Result<u32, Box<dyn std::error::Error>> {
-        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
         let cutoff = (chrono::Utc::now() - chrono::Duration::from_std(min_age)?).to_rfc3339();
         let mut stmt = self
             .db
@@ -1136,9 +1173,12 @@ mod tests {
         assert_eq!(snapshot.blobs().len(), 1);
         assert_eq!(snapshot.blobs()[0].hash(), stored.hash);
         assert_eq!(snapshot.blobs()[0].size(), 20);
-        let mut file = snapshot.blobs()[0].try_clone_file().unwrap();
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).unwrap();
+        snapshot
+            .with_blob_file(&snapshot.blobs()[0], |file| {
+                file.read_to_end(&mut bytes).map(|_| ())
+            })
+            .unwrap();
         assert_eq!(bytes, b"committed in the wal");
     }
 
@@ -1249,5 +1289,77 @@ mod tests {
 
         assert!(store.backup_snapshot().is_err());
         assert!(tmp.path().join("cas.db").exists());
+    }
+
+    #[test]
+    fn nested_same_store_mutation_cannot_release_snapshot_lock() {
+        let (store, tmp) = test_store();
+        let stored = store.store(b"nested lock", "text/plain").unwrap();
+        let other_store = ContentStore::open(tmp.path()).unwrap();
+        let snapshot = store.backup_snapshot().unwrap();
+
+        assert!(
+            store.increment_ref(&stored.hash).is_err(),
+            "same-store mutation must not reacquire and release the snapshot lock"
+        );
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let hash = stored.hash.clone();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            other_store.increment_ref(&hash).unwrap();
+            finished_tx.send(()).unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(
+            finished_rx
+                .recv_timeout(std::time::Duration::from_millis(150))
+                .is_err(),
+            "nested acquisition released the outer snapshot lock"
+        );
+        drop(snapshot);
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(store.ref_count(&stored.hash).unwrap(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_uses_bounded_file_descriptors() {
+        let (store, tmp) = test_store();
+        for index in 0..128 {
+            store
+                .store(format!("descriptor-{index}").as_bytes(), "text/plain")
+                .unwrap();
+        }
+        let descriptor_directory = if Path::new("/proc/self/fd").is_dir() {
+            Path::new("/proc/self/fd")
+        } else {
+            Path::new("/dev/fd")
+        };
+        let canonical_root = fs::canonicalize(tmp.path()).unwrap();
+        let count_store_descriptors = || {
+            fs::read_dir(descriptor_directory)
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter_map(|entry| fs::read_link(entry.path()).ok())
+                .filter_map(|target| fs::canonicalize(target).ok())
+                .filter(|target| target.starts_with(&canonical_root))
+                .count()
+        };
+        let before = count_store_descriptors();
+
+        let snapshot = store.backup_snapshot().unwrap();
+        let after = count_store_descriptors();
+
+        assert_eq!(snapshot.blobs().len(), 128);
+        assert_eq!(
+            after, before,
+            "snapshot retained blob descriptors beneath the CAS root"
+        );
     }
 }
