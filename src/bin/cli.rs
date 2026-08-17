@@ -440,6 +440,16 @@ mod cli_tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
         init_vault(&root).unwrap();
+        let cas = root.join(".clepsydra/cas");
+        std::fs::write(
+            root.join(".clepsydra/config.toml"),
+            format!(
+                "[vault]\n\n[archive]\ncas_path = {:?}\n",
+                cas.display().to_string()
+            ),
+        )
+        .unwrap();
+        drop(clepsydra::vault::cas::ContentStore::open(&cas).unwrap());
         std::fs::write(
             root.join("config.toml"),
             format!("[vault]\nroot = \"{}\"\n", root.display()),

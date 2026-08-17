@@ -1,10 +1,15 @@
 //! Content-addressed storage for blobs, with reference counting and garbage collection.
+use std::cell::Cell;
 use std::collections::BTreeSet;
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom};
+#[cfg(all(unix, not(target_vendor = "apple")))]
+use std::os::fd::AsRawFd;
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, backup::Backup, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -37,6 +42,8 @@ pub enum CasError {
     ReferenceChanged(String),
     #[error(transparent)]
     Database(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 /// Metadata for a CAS blob whose database row and backing file agree.
@@ -101,6 +108,303 @@ impl OpenBlob {
         Ok((data, self.content_type))
     }
 }
+const LOCK_FILE_NAME: &str = "cas.lock";
+
+#[cfg(test)]
+type TestBarrierMap =
+    std::collections::BTreeMap<(&'static str, PathBuf), std::sync::Arc<std::sync::Barrier>>;
+
+#[cfg(test)]
+static TEST_PATH_BARRIERS: std::sync::LazyLock<parking_lot::Mutex<TestBarrierMap>> =
+    std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
+
+#[cfg(test)]
+static BACKUP_BLOB_VERIFICATION_PASSES: std::sync::LazyLock<
+    parking_lot::Mutex<std::collections::BTreeMap<String, usize>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
+
+#[cfg(all(test, unix))]
+type TestLockIdentity = (u64, u64);
+
+#[cfg(all(test, unix))]
+static TEST_BLOCKED_LOCK_BARRIERS: std::sync::LazyLock<
+    parking_lot::Mutex<
+        std::collections::BTreeMap<TestLockIdentity, std::sync::Arc<std::sync::Barrier>>,
+    >,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
+
+#[cfg(test)]
+fn normalized_test_path(path: &Path) -> PathBuf {
+    if let Ok(path) = fs::canonicalize(path) {
+        return path;
+    }
+    let Some(filename) = path.file_name() else {
+        return path.to_path_buf();
+    };
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::canonicalize(parent)
+        .map(|parent| parent.join(filename))
+        .unwrap_or_else(|_| path.to_path_buf())
+}
+
+#[cfg(test)]
+fn install_test_path_barrier(
+    event: &'static str,
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    let key = (event, normalized_test_path(&path));
+    let prior = TEST_PATH_BARRIERS.lock().insert(key, barrier);
+    assert!(
+        prior.is_none(),
+        "CAS test path barrier was already installed"
+    );
+}
+
+#[cfg(test)]
+fn pause_at_test_path_barrier(event: &'static str, path: &Path) {
+    let key = (event, normalized_test_path(path));
+    let barrier = TEST_PATH_BARRIERS.lock().remove(&key);
+    if let Some(barrier) = barrier {
+        barrier.wait();
+        barrier.wait();
+    }
+}
+
+#[cfg(test)]
+fn install_after_root_path_resolved_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier("root-resolved", path, barrier);
+}
+
+#[cfg(test)]
+fn install_after_database_path_resolved_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier("database-resolved", path, barrier);
+}
+
+#[cfg(all(test, target_vendor = "apple"))]
+pub(crate) fn install_before_backup_database_open_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier("before-backup-database-open", path, barrier);
+}
+
+#[cfg(test)]
+fn install_after_blob_ancestor_path_resolved_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier("blob-ancestor-resolved", path, barrier);
+}
+
+#[cfg(test)]
+pub(crate) fn install_before_backup_blob_use_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier("before-blob-use", path, barrier);
+}
+
+#[cfg(test)]
+pub(crate) fn reset_backup_blob_verification_passes(hash: &str) {
+    BACKUP_BLOB_VERIFICATION_PASSES.lock().remove(hash);
+}
+
+#[cfg(test)]
+pub(crate) fn backup_blob_verification_passes(hash: &str) -> usize {
+    BACKUP_BLOB_VERIFICATION_PASSES
+        .lock()
+        .get(hash)
+        .copied()
+        .unwrap_or(0)
+}
+
+#[cfg(all(test, unix))]
+fn retained_lock_identity(file: &File) -> io::Result<TestLockIdentity> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(all(test, unix))]
+fn install_blocked_lock_barrier(file: &File, barrier: std::sync::Arc<std::sync::Barrier>) {
+    let identity = retained_lock_identity(file).expect("inspect retained CAS test lock");
+    let prior = TEST_BLOCKED_LOCK_BARRIERS.lock().insert(identity, barrier);
+    assert!(
+        prior.is_none(),
+        "CAS blocked-lock test barrier was already installed"
+    );
+}
+
+#[cfg(all(test, unix))]
+fn pause_after_confirming_lock_contention(file: &File) -> io::Result<()> {
+    let identity = retained_lock_identity(file)?;
+    let barrier = TEST_BLOCKED_LOCK_BARRIERS.lock().remove(&identity);
+    let Some(barrier) = barrier else {
+        return Ok(());
+    };
+    match fs4::FileExt::try_lock(file) {
+        Err(fs4::TryLockError::WouldBlock) => {
+            barrier.wait();
+            barrier.wait();
+            Ok(())
+        }
+        Err(fs4::TryLockError::Error(error)) => Err(error),
+        Ok(()) => {
+            fs4::FileExt::unlock(file)?;
+            Err(io::Error::other(
+                "CAS blocked-lock test barrier reached an uncontended lock",
+            ))
+        }
+    }
+}
+
+struct ExclusiveLockGuard<'a> {
+    file: &'a File,
+    held: &'a Cell<bool>,
+}
+
+impl<'a> ExclusiveLockGuard<'a> {
+    fn acquire(file: &'a File, held: &'a Cell<bool>) -> io::Result<Self> {
+        if held.replace(true) {
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "CAS mutation lock is already held by this content store",
+            ));
+        }
+        #[cfg(all(test, unix))]
+        if let Err(error) = pause_after_confirming_lock_contention(file) {
+            held.set(false);
+            return Err(error);
+        }
+        if let Err(error) = fs4::FileExt::lock(file) {
+            held.set(false);
+            return Err(error);
+        }
+        Ok(Self { file, held })
+    }
+}
+
+impl Drop for ExclusiveLockGuard<'_> {
+    fn drop(&mut self) {
+        let _ = fs4::FileExt::unlock(self.file);
+        self.held.set(false);
+    }
+}
+
+/// Metadata for a verified CAS blob in a backup snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupBlob {
+    hash: String,
+    relative_path: PathBuf,
+    size: u64,
+}
+
+impl BackupBlob {
+    pub fn hash(&self) -> &str {
+        &self.hash
+    }
+
+    pub fn relative_path(&self) -> &Path {
+        &self.relative_path
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+}
+
+/// A consistent SQLite snapshot and its authoritative, verified blob set.
+///
+/// The CAS mutation lock remains held until this guard is dropped.
+pub struct BackupSnapshot<'a> {
+    database: tempfile::NamedTempFile,
+    blobs: Vec<BackupBlob>,
+    canonical_root: PathBuf,
+    #[cfg(unix)]
+    root_directory: &'a OwnedFd,
+    #[cfg(windows)]
+    root_directory: &'a File,
+    #[cfg(test)]
+    membership_comparisons: Cell<usize>,
+    _lock: ExclusiveLockGuard<'a>,
+}
+
+impl BackupSnapshot<'_> {
+    pub fn database_path(&self) -> &Path {
+        self.database.path()
+    }
+
+    pub fn blobs(&self) -> &[BackupBlob] {
+        &self.blobs
+    }
+
+    fn authoritative_blob(&self, blob: &BackupBlob) -> Option<&BackupBlob> {
+        #[cfg(test)]
+        self.membership_comparisons.set(0);
+        let index = self
+            .blobs
+            .binary_search_by(|candidate| {
+                #[cfg(test)]
+                self.membership_comparisons
+                    .set(self.membership_comparisons.get() + 1);
+                candidate.hash.cmp(&blob.hash)
+            })
+            .ok()?;
+        let candidate = &self.blobs[index];
+        (candidate == blob).then_some(candidate)
+    }
+
+    #[cfg(test)]
+    fn membership_comparisons(&self) -> usize {
+        self.membership_comparisons.get()
+    }
+
+    /// Open and revalidate one authoritative blob for the duration of a callback.
+    ///
+    /// The descriptor owned by this method is closed before it returns, so
+    /// normal archive traversal uses one blob descriptor at a time.
+    pub fn with_blob_file(
+        &self,
+        blob: &BackupBlob,
+        use_file: impl FnOnce(&mut File) -> io::Result<()>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.authoritative_blob(blob).is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "blob does not belong to this CAS backup snapshot",
+            )
+            .into());
+        }
+        let stored_size = i64::try_from(blob.size)?;
+        let (_, mut file) = ContentStore::verified_backup_blob(
+            &self.canonical_root,
+            #[cfg(unix)]
+            self.root_directory,
+            #[cfg(windows)]
+            self.root_directory,
+            blob.hash.clone(),
+            stored_size,
+            false,
+        )?;
+        #[cfg(test)]
+        pause_at_test_path_barrier(
+            "before-blob-use",
+            &self.canonical_root.join(blob.relative_path()),
+        );
+        use_file(&mut file).map_err(Into::into)
+    }
+}
 
 /// Content-addressed blob store.
 ///
@@ -109,32 +413,419 @@ impl OpenBlob {
 /// tracked in a SQLite table.
 pub struct ContentStore {
     root: PathBuf,
-    db: Connection,
+    db: Option<Connection>,
+    _database_file: File,
+    lock_file: File,
+    #[cfg(unix)]
+    root_directory: OwnedFd,
+    #[cfg(windows)]
+    root_directory: File,
+    lock_held: Cell<bool>,
+}
+
+#[cfg(unix)]
+fn open_cas_root_directory(path: &Path) -> io::Result<OwnedFd> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, open};
+
+    let directory = open(
+        path,
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+        Mode::empty(),
+    )
+    .map_err(io::Error::from)?;
+    let metadata = fstat(&directory).map_err(io::Error::from)?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::Directory {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not a CAS directory", path.display()),
+        ));
+    }
+    Ok(directory)
+}
+
+#[cfg(unix)]
+fn open_or_create_regular_cas_file(
+    directory: &OwnedFd,
+    filename: &str,
+    display_path: &Path,
+    create: bool,
+) -> io::Result<File> {
+    use rustix::fs::{FileType, Mode, OFlags, fchmod, fstat, openat};
+    use rustix::io::Errno;
+
+    let create_flags = OFlags::RDWR
+        | OFlags::CREATE
+        | OFlags::EXCL
+        | OFlags::CLOEXEC
+        | OFlags::NOFOLLOW
+        | OFlags::NONBLOCK;
+    let existing_flags = OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK;
+    let (file, created) = if create {
+        match openat(directory, filename, create_flags, Mode::RUSR | Mode::WUSR) {
+            Ok(file) => (file, true),
+            Err(Errno::EXIST) => (
+                openat(directory, filename, existing_flags, Mode::empty())
+                    .map_err(io::Error::from)?,
+                false,
+            ),
+            Err(error) => return Err(error.into()),
+        }
+    } else {
+        (
+            openat(directory, filename, existing_flags, Mode::empty()).map_err(io::Error::from)?,
+            false,
+        )
+    };
+    if created {
+        fchmod(&file, Mode::RUSR | Mode::WUSR).map_err(io::Error::from)?;
+    }
+    let metadata = fstat(&file).map_err(io::Error::from)?;
+    if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not a regular CAS file", display_path.display()),
+        ));
+    }
+    Ok(file.into())
+}
+
+#[cfg(unix)]
+fn verify_retained_cas_file_identity(
+    directory: &OwnedFd,
+    filename: &str,
+    file: &File,
+    display_path: &Path,
+) -> io::Result<()> {
+    use rustix::fs::{AtFlags, FileType, fstat, statat};
+
+    let file_metadata = fstat(file).map_err(io::Error::from)?;
+    let path_metadata =
+        statat(directory, filename, AtFlags::SYMLINK_NOFOLLOW).map_err(io::Error::from)?;
+    if FileType::from_raw_mode(file_metadata.st_mode) != FileType::RegularFile
+        || FileType::from_raw_mode(path_metadata.st_mode) != FileType::RegularFile
+        || file_metadata.st_dev != path_metadata.st_dev
+        || file_metadata.st_ino != path_metadata.st_ino
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} changed identity after it was opened",
+                display_path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn create_private_cas_database_copy(
+    directory: &OwnedFd,
+    database_file: &File,
+    source_path: &Path,
+) -> io::Result<(tempfile::TempDir, PathBuf)> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, openat};
+    use rustix::io::Errno;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    fn copy_file(source: &File, destination: &mut File) -> io::Result<()> {
+        let mut source = source.try_clone()?;
+        source.seek(SeekFrom::Start(0))?;
+        io::copy(&mut source, destination)?;
+        destination.sync_all()
+    }
+
+    let private_directory = tempfile::tempdir()?;
+    let private_path = fs::canonicalize(private_directory.path())?;
+    let database_path = private_path.join("cas.db");
+    let mut database_destination = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&database_path)?;
+    copy_file(database_file, &mut database_destination)?;
+
+    match openat(
+        directory,
+        "cas.db-wal",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    ) {
+        Ok(wal) => {
+            let metadata = fstat(&wal).map_err(io::Error::from)?;
+            if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{}-wal is not a regular CAS file", source_path.display()),
+                ));
+            }
+            let mut wal_destination = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(private_path.join("cas.db-wal"))?;
+            copy_file(&File::from(wal), &mut wal_destination)?;
+        }
+        Err(Errno::NOENT) => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok((private_directory, database_path))
+}
+
+#[cfg(unix)]
+fn sqlite_path_in_open_directory(directory: &OwnedFd, filename: &str) -> io::Result<PathBuf> {
+    #[cfg(target_vendor = "apple")]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt as _;
+
+        let directory_path = rustix::fs::getpath(directory).map_err(io::Error::from)?;
+        Ok(PathBuf::from(OsStr::from_bytes(directory_path.to_bytes())).join(filename))
+    }
+    #[cfg(not(target_vendor = "apple"))]
+    {
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        let descriptor_root = Path::new("/proc/self/fd");
+        #[cfg(not(any(target_os = "linux", target_os = "android")))]
+        let descriptor_root = Path::new("/dev/fd");
+        Ok(descriptor_root
+            .join(directory.as_raw_fd().to_string())
+            .join(filename))
+    }
+}
+
+#[cfg(windows)]
+fn open_cas_root_directory(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let directory = OpenOptions::new()
+        .read(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(path)?;
+    let metadata = directory.metadata()?;
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{} is not a non-reparse CAS directory", path.display()),
+        ));
+    }
+    Ok(directory)
+}
+
+#[cfg(windows)]
+fn open_or_create_regular_cas_file(
+    _directory: &File,
+    _filename: &str,
+    display_path: &Path,
+    create: bool,
+) -> io::Result<File> {
+    use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+    use windows_sys::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        FILE_SHARE_WRITE,
+    };
+
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(create)
+        .truncate(false)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+        .open(display_path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} is not a non-reparse regular CAS file",
+                display_path.display()
+            ),
+        ));
+    }
+    Ok(file)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn open_or_create_regular_cas_file(display_path: &Path, create: bool) -> io::Result<File> {
+    match fs::symlink_metadata(display_path) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "{} is not a non-symlink regular CAS file",
+                    display_path.display()
+                ),
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(create)
+        .truncate(false)
+        .open(display_path)
 }
 
 impl ContentStore {
     /// Open or create a content store at the given root directory.
     pub fn open(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
-        fs::create_dir_all(root)?;
-        let db_path = root.join("cas.db");
-        let db = Connection::open(&db_path)?;
-        db.execute_batch(
-            "CREATE TABLE IF NOT EXISTS blobs (
-                hash         TEXT PRIMARY KEY,
-                size         INTEGER NOT NULL,
-                content_type TEXT NOT NULL,
-                created_at   TEXT NOT NULL,
-                ref_count    INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE TABLE IF NOT EXISTS rubbish_archive_releases (
-                item_id      TEXT PRIMARY KEY,
-                completed_at TEXT NOT NULL
-            );",
+        Self::open_with_root_policy(root, true)
+    }
+
+    pub(crate) fn open_existing(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::open_with_root_policy(root, false)
+    }
+
+    fn open_with_root_policy(
+        root: &Path,
+        create_root: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        if create_root {
+            fs::create_dir_all(root)?;
+        }
+        let root = fs::canonicalize(root)?;
+        #[cfg(test)]
+        pause_at_test_path_barrier("root-resolved", &root);
+        #[cfg(unix)]
+        let root_directory = open_cas_root_directory(&root)?;
+        #[cfg(windows)]
+        let root_directory = open_cas_root_directory(&root)?;
+
+        let lock_path = root.join(LOCK_FILE_NAME);
+        #[cfg(any(unix, windows))]
+        let lock_file = open_or_create_regular_cas_file(
+            &root_directory,
+            LOCK_FILE_NAME,
+            &lock_path,
+            create_root,
         )?;
+        #[cfg(not(any(unix, windows)))]
+        let lock_file = open_or_create_regular_cas_file(&lock_path, create_root)?;
+        #[cfg(unix)]
+        verify_retained_cas_file_identity(&root_directory, LOCK_FILE_NAME, &lock_file, &lock_path)?;
+        let lock_held = Cell::new(false);
+        let lock = ExclusiveLockGuard::acquire(&lock_file, &lock_held)?;
+
+        #[cfg(unix)]
+        verify_retained_cas_file_identity(&root_directory, LOCK_FILE_NAME, &lock_file, &lock_path)?;
+        let database_path = root.join("cas.db");
+        #[cfg(test)]
+        pause_at_test_path_barrier("database-resolved", &database_path);
+        #[cfg(any(unix, windows))]
+        let database_file = open_or_create_regular_cas_file(
+            &root_directory,
+            "cas.db",
+            &database_path,
+            create_root,
+        )?;
+        #[cfg(not(any(unix, windows)))]
+        let database_file = open_or_create_regular_cas_file(&database_path, create_root)?;
+        #[cfg(unix)]
+        let db = if create_root {
+            let connection_path = sqlite_path_in_open_directory(&root_directory, "cas.db")?;
+            let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
+            Some(Connection::open_with_flags(&connection_path, flags)?)
+        } else {
+            None
+        };
+        #[cfg(not(unix))]
+        let db = {
+            let access = if create_root {
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+            } else {
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            };
+            let flags = access
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
+            Some(Connection::open_with_flags(&database_path, flags)?)
+        };
+        #[cfg(unix)]
+        verify_retained_cas_file_identity(
+            &root_directory,
+            "cas.db",
+            &database_file,
+            &database_path,
+        )?;
+        if create_root {
+            db.as_ref()
+                .expect("a writable CAS open has a database connection")
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS blobs (
+                        hash         TEXT PRIMARY KEY,
+                        size         INTEGER NOT NULL,
+                        content_type TEXT NOT NULL,
+                        created_at   TEXT NOT NULL,
+                        ref_count    INTEGER NOT NULL DEFAULT 1
+                    );
+                    CREATE TABLE IF NOT EXISTS rubbish_archive_releases (
+                        item_id      TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL
+                    );",
+                )?;
+        }
+        drop(lock);
         Ok(Self {
-            root: root.to_path_buf(),
+            root,
             db,
+            _database_file: database_file,
+            lock_file,
+            #[cfg(unix)]
+            root_directory,
+            #[cfg(windows)]
+            root_directory,
+            lock_held,
         })
+    }
+
+    pub(crate) fn root(&self) -> &Path {
+        &self.root
+    }
+
+    fn database(&self) -> &Connection {
+        self.db
+            .as_ref()
+            .expect("normal CAS operations require a live database connection")
+    }
+
+    fn verify_storage_identities(&self) -> io::Result<()> {
+        #[cfg(unix)]
+        {
+            verify_retained_cas_file_identity(
+                &self.root_directory,
+                LOCK_FILE_NAME,
+                &self.lock_file,
+                &self.root.join(LOCK_FILE_NAME),
+            )?;
+            verify_retained_cas_file_identity(
+                &self.root_directory,
+                "cas.db",
+                &self._database_file,
+                &self.root.join("cas.db"),
+            )?;
+        }
+        Ok(())
+    }
+
+    fn acquire_exclusive_lock(&self) -> io::Result<ExclusiveLockGuard<'_>> {
+        let lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
+        if let Err(error) = self.verify_storage_identities() {
+            drop(lock);
+            return Err(error);
+        }
+        Ok(lock)
     }
 
     /// Compute the SHA-256 hash of data, returning "sha256:<hex>".
@@ -149,7 +840,11 @@ impl ContentStore {
         let hex = hash
             .strip_prefix("sha256:")
             .ok_or("hash must start with 'sha256:'")?;
-        if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        if hex.len() != 64
+            || !hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
             return Err(
                 format!("invalid hash format: expected 64 hex chars, got '{}'", hex).into(),
             );
@@ -162,6 +857,290 @@ impl ContentStore {
         let hex = Self::validate_hash(hash)?;
         let prefix = &hex[..2];
         Ok(self.root.join(prefix).join(hex))
+    }
+
+    fn verified_backup_blob(
+        canonical_root: &Path,
+        #[cfg(unix)] root_directory: &OwnedFd,
+        #[cfg(windows)] root_directory: &File,
+        hash: String,
+        stored_size: i64,
+        verify_content: bool,
+    ) -> Result<(BackupBlob, File), CasError> {
+        let hex = Self::validate_hash(&hash).map_err(|error| CasError::InvalidHash {
+            hash: hash.clone(),
+            message: error.to_string(),
+        })?;
+        let expected_size = u64::try_from(stored_size).map_err(|_| CasError::InvalidSize {
+            hash: hash.clone(),
+            size: stored_size,
+        })?;
+        let relative_path = PathBuf::from(&hex[..2]).join(hex);
+        let path = canonical_root.join(&relative_path);
+        let prefix_path = path
+            .parent()
+            .expect("CAS blob path always has a fan-out directory");
+        #[cfg(test)]
+        pause_at_test_path_barrier("blob-ancestor-resolved", prefix_path);
+
+        #[cfg(unix)]
+        let mut file = {
+            use rustix::fs::{FileType, Mode, OFlags, fstat, openat};
+
+            let directory = openat(
+                root_directory,
+                &hex[..2],
+                OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC | OFlags::NOFOLLOW,
+                Mode::empty(),
+            )
+            .map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?;
+            let metadata = fstat(&directory).map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?;
+            if FileType::from_raw_mode(metadata.st_mode) != FileType::Directory {
+                return Err(CasError::BackingBlob {
+                    hash,
+                    message: format!("{} is not a regular directory", prefix_path.display()),
+                });
+            }
+            let file = openat(
+                &directory,
+                hex,
+                OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+                Mode::empty(),
+            )
+            .map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?;
+            File::from(file)
+        };
+
+        #[cfg(windows)]
+        let mut file = {
+            use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
+            use windows_sys::Win32::Storage::FileSystem::{
+                FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
+                FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            };
+
+            let _retained_root_identity = root_directory;
+            let directory = OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(prefix_path)
+                .map_err(|error| CasError::BackingBlob {
+                    hash: hash.clone(),
+                    message: error.to_string(),
+                })?;
+            let directory_metadata =
+                directory
+                    .metadata()
+                    .map_err(|error| CasError::BackingBlob {
+                        hash: hash.clone(),
+                        message: error.to_string(),
+                    })?;
+            if !directory_metadata.is_dir()
+                || directory_metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            {
+                return Err(CasError::BackingBlob {
+                    hash,
+                    message: format!("{} is not a non-reparse directory", prefix_path.display()),
+                });
+            }
+            let file = OpenOptions::new()
+                .read(true)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(&path)
+                .map_err(|error| CasError::BackingBlob {
+                    hash: hash.clone(),
+                    message: error.to_string(),
+                })?;
+            let metadata = file.metadata().map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?;
+            if metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                return Err(CasError::BackingBlob {
+                    hash,
+                    message: format!("{} is a reparse point", path.display()),
+                });
+            }
+            file
+        };
+
+        #[cfg(not(any(unix, windows)))]
+        let mut file = {
+            let path_metadata =
+                fs::symlink_metadata(&path).map_err(|error| CasError::BackingBlob {
+                    hash: hash.clone(),
+                    message: error.to_string(),
+                })?;
+            if !path_metadata.file_type().is_file() {
+                return Err(CasError::BackingBlob {
+                    hash,
+                    message: format!("{} is not a regular file", path.display()),
+                });
+            }
+            let canonical_path =
+                fs::canonicalize(&path).map_err(|error| CasError::BackingBlob {
+                    hash: hash.clone(),
+                    message: error.to_string(),
+                })?;
+            if !canonical_path.starts_with(canonical_root) {
+                return Err(CasError::BackingBlob {
+                    hash,
+                    message: format!("{} escapes the CAS root", path.display()),
+                });
+            }
+            File::open(&canonical_path).map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?
+        };
+
+        let file_metadata = file.metadata().map_err(|error| CasError::BackingBlob {
+            hash: hash.clone(),
+            message: error.to_string(),
+        })?;
+        if !file_metadata.is_file() {
+            return Err(CasError::BackingBlob {
+                hash,
+                message: format!("{} is not a regular file", path.display()),
+            });
+        }
+        if file_metadata.len() != expected_size {
+            return Err(CasError::BackingBlob {
+                hash,
+                message: format!(
+                    "size mismatch: expected {expected_size}, got {}",
+                    file_metadata.len()
+                ),
+            });
+        }
+
+        if verify_content {
+            let mut digest = Sha256::new();
+            let mut buffer = [0_u8; 64 * 1024];
+            loop {
+                let read = file
+                    .read(&mut buffer)
+                    .map_err(|error| CasError::BackingBlob {
+                        hash: hash.clone(),
+                        message: error.to_string(),
+                    })?;
+                if read == 0 {
+                    break;
+                }
+                digest.update(&buffer[..read]);
+            }
+            let actual_hash = format!("sha256:{:x}", digest.finalize());
+            if actual_hash != hash {
+                return Err(CasError::BackingBlob {
+                    hash,
+                    message: format!("content hash mismatch: got {actual_hash}"),
+                });
+            }
+            #[cfg(test)]
+            {
+                *BACKUP_BLOB_VERIFICATION_PASSES
+                    .lock()
+                    .entry(hash.clone())
+                    .or_default() += 1;
+            }
+            file.seek(SeekFrom::Start(0))
+                .map_err(|error| CasError::BackingBlob {
+                    hash: hash.clone(),
+                    message: error.to_string(),
+                })?;
+        }
+
+        Ok((
+            BackupBlob {
+                hash,
+                relative_path,
+                size: expected_size,
+            },
+            file,
+        ))
+    }
+
+    /// Create a consistent backup snapshot and hold the CAS mutation lock until
+    /// the returned guard is dropped.
+    pub fn backup_snapshot(&self) -> Result<BackupSnapshot<'_>, Box<dyn std::error::Error>> {
+        let lock = self.acquire_exclusive_lock()?;
+        #[cfg(unix)]
+        let (_working_directory, working_database_path) = create_private_cas_database_copy(
+            &self.root_directory,
+            &self._database_file,
+            &self.root.join("cas.db"),
+        )?;
+        #[cfg(all(test, target_vendor = "apple"))]
+        pause_at_test_path_barrier("before-backup-database-open", &self.root.join("cas.db"));
+        #[cfg(unix)]
+        let source_database = Connection::open_with_flags(
+            &working_database_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        #[cfg(unix)]
+        let source_database = &source_database;
+        #[cfg(not(unix))]
+        let source_database = self.database();
+
+        let database = tempfile::NamedTempFile::new()?;
+        let mut snapshot_db = Connection::open(database.path())?;
+        {
+            let backup = Backup::new(source_database, &mut snapshot_db)?;
+            backup.run_to_completion(128, std::time::Duration::from_millis(1), None)?;
+        }
+
+        let rows = {
+            let mut statement =
+                snapshot_db.prepare("SELECT hash, size FROM blobs ORDER BY hash")?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        drop(snapshot_db);
+
+        let mut blobs = Vec::with_capacity(rows.len());
+        for (hash, size) in rows {
+            let (blob, file) = Self::verified_backup_blob(
+                &self.root,
+                #[cfg(unix)]
+                &self.root_directory,
+                #[cfg(windows)]
+                &self.root_directory,
+                hash,
+                size,
+                true,
+            )?;
+            drop(file);
+            blobs.push(blob);
+        }
+
+        Ok(BackupSnapshot {
+            database,
+            blobs,
+            canonical_root: self.root.clone(),
+            #[cfg(unix)]
+            root_directory: &self.root_directory,
+            #[cfg(windows)]
+            root_directory: &self.root_directory,
+            #[cfg(test)]
+            membership_comparisons: Cell::new(0),
+            _lock: lock,
+        })
     }
 
     fn rubbish_release_completed(db: &Connection, item_id: &str) -> Result<bool, rusqlite::Error> {
@@ -177,7 +1156,7 @@ impl ContentStore {
     /// Return whether this rubbish item's captured-archive references have
     /// already been durably released for permanent deletion.
     pub fn rubbish_archive_refs_released(&self, item_id: Uuid) -> Result<bool, CasError> {
-        Self::rubbish_release_completed(&self.db, &item_id.to_string()).map_err(Into::into)
+        Self::rubbish_release_completed(self.database(), &item_id.to_string()).map_err(Into::into)
     }
 
     fn prevalidate_rubbish_archive_ref(&self, hash: &str) -> Result<(), CasError> {
@@ -186,7 +1165,7 @@ impl ContentStore {
             message: error.to_string(),
         })?;
         let row: Option<(i64, i64)> = self
-            .db
+            .database()
             .query_row(
                 "SELECT size, ref_count FROM blobs WHERE hash = ?1",
                 params![hash],
@@ -236,8 +1215,13 @@ impl ContentStore {
         item_id: Uuid,
         hashes: &BTreeSet<String>,
     ) -> Result<ReleaseOutcome, CasError> {
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
+        if let Err(error) = self.verify_storage_identities() {
+            drop(_lock);
+            return Err(error.into());
+        }
         let item_id = item_id.to_string();
-        if Self::rubbish_release_completed(&self.db, &item_id)? {
+        if Self::rubbish_release_completed(self.database(), &item_id)? {
             return Ok(ReleaseOutcome::AlreadyCompleted);
         }
 
@@ -245,7 +1229,11 @@ impl ContentStore {
             self.prevalidate_rubbish_archive_ref(hash)?;
         }
 
-        let transaction = self.db.transaction()?;
+        let transaction = self
+            .db
+            .as_mut()
+            .expect("normal CAS operations require a live database connection")
+            .transaction()?;
         if Self::rubbish_release_completed(&transaction, &item_id)? {
             return Ok(ReleaseOutcome::AlreadyCompleted);
         }
@@ -276,6 +1264,7 @@ impl ContentStore {
         data: &[u8],
         content_type: &str,
     ) -> Result<StoreResult, Box<dyn std::error::Error>> {
+        let _lock = self.acquire_exclusive_lock()?;
         let hash = Self::hash_bytes(data);
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -283,14 +1272,14 @@ impl ContentStore {
         // Note: we don't use a full transaction here because we also interact with the filesystem.
         // Instead, we use the primary key constraint to detect existence.
 
-        let res = self.db.execute(
+        let res = self.database().execute(
             "INSERT OR IGNORE INTO blobs (hash, size, content_type, created_at, ref_count) VALUES (?1, ?2, ?3, ?4, 1)",
             params![hash, data.len() as i64, content_type, now],
         )?;
 
         if res == 0 {
             // Already existed in DB, just increment ref count
-            self.db.execute(
+            self.database().execute(
                 "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
                 params![hash],
             )?;
@@ -306,7 +1295,7 @@ impl ContentStore {
             }
             if let Err(e) = fs::write(&path, data) {
                 // Roll back DB insert if filesystem write fails
-                self.db
+                self.database()
                     .execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
                 return Err(e.into());
             }
@@ -321,7 +1310,7 @@ impl ContentStore {
     /// Retrieve a blob's data and content type.
     pub fn retrieve(&self, hash: &str) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let content_type: String = self.db.query_row(
+        let content_type: String = self.database().query_row(
             "SELECT content_type FROM blobs WHERE hash = ?1",
             params![hash],
             |row| row.get(0),
@@ -347,7 +1336,7 @@ impl ContentStore {
         Self::validate_hash(hash)
             .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
         let (stored_size, content_type): (i64, String) = self
-            .db
+            .database()
             .query_row(
                 "SELECT size, content_type FROM blobs WHERE hash = ?1",
                 params![hash],
@@ -406,7 +1395,7 @@ impl ContentStore {
     /// reported as corruption rather than as an available blob.
     pub fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let (stored_size, content_type): (i64, String) = self.db.query_row(
+        let (stored_size, content_type): (i64, String) = self.database().query_row(
             "SELECT size, content_type FROM blobs WHERE hash = ?1",
             params![hash],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -434,7 +1423,7 @@ impl ContentStore {
     /// Check whether a blob exists in the store.
     pub fn exists(&self, hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let count: i64 = self.db.query_row(
+        let count: i64 = self.database().query_row(
             "SELECT COUNT(*) FROM blobs WHERE hash = ?1",
             params![hash],
             |row| row.get(0),
@@ -444,8 +1433,9 @@ impl ContentStore {
 
     /// Increment the reference count for a blob.
     pub fn increment_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let _lock = self.acquire_exclusive_lock()?;
         Self::validate_hash(hash)?;
-        self.db.execute(
+        self.database().execute(
             "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
             params![hash],
         )?;
@@ -454,8 +1444,9 @@ impl ContentStore {
 
     /// Decrement the reference count for a blob.
     pub fn decrement_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let _lock = self.acquire_exclusive_lock()?;
         Self::validate_hash(hash)?;
-        self.db.execute(
+        self.database().execute(
             "UPDATE blobs SET ref_count = ref_count - 1 WHERE hash = ?1",
             params![hash],
         )?;
@@ -465,9 +1456,10 @@ impl ContentStore {
     /// Remove blobs with ref_count <= 0 that are older than `min_age`.
     /// Returns the number of blobs pruned.
     pub fn gc(&self, min_age: std::time::Duration) -> Result<u32, Box<dyn std::error::Error>> {
+        let _lock = self.acquire_exclusive_lock()?;
         let cutoff = (chrono::Utc::now() - chrono::Duration::from_std(min_age)?).to_rfc3339();
         let mut stmt = self
-            .db
+            .database()
             .prepare("SELECT hash FROM blobs WHERE ref_count <= 0 AND created_at < ?1")?;
         let hashes: Vec<String> = stmt
             .query_map(params![cutoff], |row| row.get(0))?
@@ -479,7 +1471,7 @@ impl ContentStore {
             if path.exists() {
                 fs::remove_file(&path)?;
             }
-            self.db
+            self.database()
                 .execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
             pruned += 1;
         }
@@ -490,7 +1482,7 @@ impl ContentStore {
     #[cfg(test)]
     pub(crate) fn ref_count(&self, hash: &str) -> Result<i64, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let count: i64 = self.db.query_row(
+        let count: i64 = self.database().query_row(
             "SELECT ref_count FROM blobs WHERE hash = ?1",
             params![hash],
             |row| row.get(0),
@@ -500,11 +1492,11 @@ impl ContentStore {
 
     /// Return summary stats for the store.
     pub fn stats(&self) -> Result<CasStats, Box<dyn std::error::Error>> {
-        let blob_count: i64 = self
-            .db
-            .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))?;
+        let blob_count: i64 =
+            self.database()
+                .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))?;
         let total_size: i64 =
-            self.db
+            self.database()
                 .query_row("SELECT COALESCE(SUM(size), 0) FROM blobs", [], |row| {
                     row.get(0)
                 })?;
@@ -717,7 +1709,7 @@ mod tests {
     fn rubbish_cleanup_open_creates_an_item_keyed_completion_ledger() {
         let (store, _tmp) = test_store();
         let columns = store
-            .db
+            .database()
             .prepare("PRAGMA table_info(rubbish_archive_releases)")
             .unwrap()
             .query_map([], |row| {
@@ -753,7 +1745,7 @@ mod tests {
         assert_eq!(store.ref_count(&first.hash).unwrap(), 1);
         assert_eq!(store.ref_count(&second.hash).unwrap(), 1);
         let recorded: String = store
-            .db
+            .database()
             .query_row(
                 "SELECT item_id FROM rubbish_archive_releases WHERE item_id = ?1",
                 params![item_id.to_string()],
@@ -789,7 +1781,7 @@ mod tests {
         assert_eq!(store.ref_count(&valid.hash).unwrap(), 2);
         assert_eq!(
             store
-                .db
+                .database()
                 .query_row(
                     "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
                     params![item_id.to_string()],
@@ -824,7 +1816,7 @@ mod tests {
         let blob = store.store(b"transactional blob", "image/png").unwrap();
         store.store(b"transactional blob", "image/png").unwrap();
         store
-            .db
+            .database()
             .execute_batch(
                 "CREATE TRIGGER fail_rubbish_cleanup_completion
                  BEFORE INSERT ON rubbish_archive_releases
@@ -892,6 +1884,370 @@ mod tests {
             store.ref_count(&blob.hash).unwrap(),
             1,
             "retry after item-removal failure must not release CAS refs twice"
+        );
+    }
+    #[test]
+    fn backup_snapshot_sees_committed_wal_state() {
+        let (store, tmp) = test_store();
+        store
+            .database()
+            .pragma_update(None, "journal_mode", "WAL")
+            .unwrap();
+        store
+            .database()
+            .pragma_update(None, "wal_autocheckpoint", 0)
+            .unwrap();
+        let stored = store.store(b"committed in the wal", "text/plain").unwrap();
+        assert!(tmp.path().join("cas.db-wal").exists());
+
+        let snapshot = store.backup_snapshot().unwrap();
+        let snapshot_db = Connection::open(snapshot.database_path()).unwrap();
+        let rows = snapshot_db
+            .query_row(
+                "SELECT hash, size FROM blobs WHERE hash = ?1",
+                params![stored.hash],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(rows, (stored.hash.clone(), 20));
+        assert_eq!(snapshot.blobs().len(), 1);
+        assert_eq!(snapshot.blobs()[0].hash(), stored.hash);
+        assert_eq!(snapshot.blobs()[0].size(), 20);
+        let mut bytes = Vec::new();
+        snapshot
+            .with_blob_file(&snapshot.blobs()[0], |file| {
+                file.read_to_end(&mut bytes).map(|_| ())
+            })
+            .unwrap();
+        assert_eq!(bytes, b"committed in the wal");
+    }
+
+    #[test]
+    fn backup_snapshot_blocks_mutation_until_guard_drop() {
+        let (store, tmp) = test_store();
+        let stored = store.store(b"locked blob", "text/plain").unwrap();
+        let other_store = ContentStore::open(tmp.path()).unwrap();
+        let snapshot = store.backup_snapshot().unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let hash = stored.hash.clone();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            other_store.increment_ref(&hash).unwrap();
+            finished_tx.send(()).unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(
+            finished_rx
+                .recv_timeout(std::time::Duration::from_millis(150))
+                .is_err(),
+            "mutation completed while the snapshot guard held the lock"
+        );
+        drop(snapshot);
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(store.ref_count(&stored.hash).unwrap(), 2);
+    }
+
+    #[test]
+    fn retrieval_remains_usable_during_backup_snapshot() {
+        let (store, _tmp) = test_store();
+        let stored = store
+            .store(b"read while snapshotted", "text/plain")
+            .unwrap();
+        let snapshot = store.backup_snapshot().unwrap();
+
+        let retrieved = store.retrieve(&stored.hash).unwrap();
+
+        assert_eq!(
+            retrieved,
+            (b"read while snapshotted".to_vec(), "text/plain".to_string())
+        );
+        drop(snapshot);
+    }
+
+    #[test]
+    fn backup_snapshot_rejects_missing_size_mismatched_or_corrupt_backing_state() {
+        let (missing_store, _missing_tmp) = test_store();
+        let missing = missing_store.store(b"missing", "text/plain").unwrap();
+        fs::remove_file(missing_store.blob_path(&missing.hash).unwrap()).unwrap();
+        assert!(missing_store.backup_snapshot().is_err());
+
+        let (mismatch_store, _mismatch_tmp) = test_store();
+        let mismatch = mismatch_store
+            .store(b"expected bytes", "text/plain")
+            .unwrap();
+        fs::write(mismatch_store.blob_path(&mismatch.hash).unwrap(), b"short").unwrap();
+        assert!(mismatch_store.backup_snapshot().is_err());
+
+        let (corrupt_store, _corrupt_tmp) = test_store();
+        let corrupt = corrupt_store
+            .store(b"expected bytes", "text/plain")
+            .unwrap();
+        fs::write(
+            corrupt_store.blob_path(&corrupt.hash).unwrap(),
+            b"xxxxxxxxxxxxxx",
+        )
+        .unwrap();
+        assert!(corrupt_store.backup_snapshot().is_err());
+    }
+
+    #[test]
+    fn backup_snapshot_rejects_malformed_hash_and_non_regular_backing_state() {
+        let (malformed_store, _malformed_tmp) = test_store();
+        malformed_store
+            .database()
+            .execute(
+                "INSERT INTO blobs (hash, size, content_type, created_at, ref_count)
+                 VALUES ('sha256:not-a-hash', 0, 'text/plain', ?1, 1)",
+                params![chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        assert!(malformed_store.backup_snapshot().is_err());
+
+        let (directory_store, _directory_tmp) = test_store();
+        let directory = directory_store
+            .store(b"replace with directory", "text/plain")
+            .unwrap();
+        let path = directory_store.blob_path(&directory.hash).unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(directory_store.backup_snapshot().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_rejects_path_escaped_backing_state() {
+        let (store, tmp) = test_store();
+        let stored = store.store(b"escaped", "text/plain").unwrap();
+
+        let path = store.blob_path(&stored.hash).unwrap();
+        let prefix = path.parent().unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(prefix).unwrap();
+
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join(path.file_name().unwrap()), b"escaped").unwrap();
+        std::os::unix::fs::symlink(outside.path(), prefix).unwrap();
+
+        assert!(store.backup_snapshot().is_err());
+        assert!(tmp.path().join("cas.db").exists());
+    }
+    #[cfg(unix)]
+    #[test]
+    fn opening_cas_rejects_root_replacement_after_path_resolution() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("cas");
+        drop(ContentStore::open(&root).unwrap());
+        let attacker = temp.path().join("attacker-cas");
+        drop(ContentStore::open(&attacker).unwrap());
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_after_root_path_resolved_barrier(root.clone(), barrier.clone());
+        let worker_root = root.clone();
+        let worker = std::thread::spawn(move || {
+            ContentStore::open(&worker_root)
+                .map(drop)
+                .map_err(|error| error.to_string())
+        });
+
+        barrier.wait();
+        let retained = temp.path().join("retained-cas");
+        fs::rename(&root, &retained).unwrap();
+        std::os::unix::fs::symlink(&attacker, &root).unwrap();
+        barrier.wait();
+
+        assert!(
+            worker.join().unwrap().is_err(),
+            "opening CAS followed a root replaced after path resolution"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_cas_rejects_database_replacement_after_path_resolution() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("cas");
+        drop(ContentStore::open(&root).unwrap());
+        let attacker = temp.path().join("attacker-cas");
+        drop(ContentStore::open(&attacker).unwrap());
+        let database = root.join("cas.db");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_after_database_path_resolved_barrier(database.clone(), barrier.clone());
+        let worker_root = root.clone();
+        let worker = std::thread::spawn(move || {
+            ContentStore::open(&worker_root)
+                .map(drop)
+                .map_err(|error| error.to_string())
+        });
+
+        barrier.wait();
+        fs::rename(&database, root.join("retained-cas.db")).unwrap();
+        std::os::unix::fs::symlink(attacker.join("cas.db"), &database).unwrap();
+        barrier.wait();
+
+        assert!(
+            worker.join().unwrap().is_err(),
+            "opening CAS followed a database replaced after path resolution"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_rejects_blob_ancestor_replacement_after_path_resolution() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("cas");
+        let store = ContentStore::open(&root).unwrap();
+        let bytes = b"descriptor-bound blob";
+        let stored = store.store(bytes, "text/plain").unwrap();
+        let blob = store.blob_path(&stored.hash).unwrap();
+        let prefix = blob.parent().unwrap().to_path_buf();
+        let outside = temp.path().join("outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join(blob.file_name().unwrap()), bytes).unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_after_blob_ancestor_path_resolved_barrier(prefix.clone(), barrier.clone());
+        let worker = std::thread::spawn(move || {
+            store
+                .backup_snapshot()
+                .map(|snapshot| snapshot.blobs().len())
+                .map_err(|error| error.to_string())
+        });
+
+        barrier.wait();
+        fs::rename(&prefix, root.join("retained-prefix")).unwrap();
+        std::os::unix::fs::symlink(&outside, &prefix).unwrap();
+        barrier.wait();
+
+        assert!(
+            worker.join().unwrap().is_err(),
+            "snapshot followed a blob ancestor replaced after path resolution"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_rejects_lock_replacement_while_acquisition_is_blocked() {
+        let (holder, tmp) = test_store();
+        let stored = holder.store(b"lock identity", "text/plain").unwrap();
+        let waiter = ContentStore::open(tmp.path()).unwrap();
+        let snapshot = holder.backup_snapshot().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_blocked_lock_barrier(&waiter.lock_file, barrier.clone());
+        let worker = std::thread::spawn(move || {
+            waiter
+                .backup_snapshot()
+                .map(|snapshot| snapshot.blobs().len())
+                .map_err(|error| error.to_string())
+        });
+
+        barrier.wait();
+        let lock_path = tmp.path().join(LOCK_FILE_NAME);
+        fs::rename(&lock_path, tmp.path().join("retained-cas.lock")).unwrap();
+        File::create(&lock_path).unwrap();
+        let replacement_store = ContentStore::open(tmp.path()).unwrap();
+        replacement_store.increment_ref(&stored.hash).unwrap();
+        barrier.wait();
+        drop(snapshot);
+
+        assert!(
+            worker.join().unwrap().is_err(),
+            "snapshot proceeded on the retained lock after cas.lock was replaced"
+        );
+    }
+
+    #[test]
+    fn nested_same_store_mutation_cannot_release_snapshot_lock() {
+        let (store, tmp) = test_store();
+        let stored = store.store(b"nested lock", "text/plain").unwrap();
+        let other_store = ContentStore::open(tmp.path()).unwrap();
+        let snapshot = store.backup_snapshot().unwrap();
+
+        assert!(
+            store.increment_ref(&stored.hash).is_err(),
+            "same-store mutation must not reacquire and release the snapshot lock"
+        );
+
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let hash = stored.hash.clone();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            other_store.increment_ref(&hash).unwrap();
+            finished_tx.send(()).unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(
+            finished_rx
+                .recv_timeout(std::time::Duration::from_millis(150))
+                .is_err(),
+            "nested acquisition released the outer snapshot lock"
+        );
+        drop(snapshot);
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(store.ref_count(&stored.hash).unwrap(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_uses_bounded_file_descriptors() {
+        let (store, tmp) = test_store();
+        for index in 0..128 {
+            store
+                .store(format!("descriptor-{index}").as_bytes(), "text/plain")
+                .unwrap();
+        }
+        let descriptor_directory = if Path::new("/proc/self/fd").is_dir() {
+            Path::new("/proc/self/fd")
+        } else {
+            Path::new("/dev/fd")
+        };
+        let canonical_root = fs::canonicalize(tmp.path()).unwrap();
+        let count_store_descriptors = || {
+            fs::read_dir(descriptor_directory)
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter_map(|entry| fs::read_link(entry.path()).ok())
+                .filter_map(|target| fs::canonicalize(target).ok())
+                .filter(|target| target.starts_with(&canonical_root))
+                .count()
+        };
+        let before = count_store_descriptors();
+
+        let snapshot = store.backup_snapshot().unwrap();
+        let after = count_store_descriptors();
+
+        assert_eq!(snapshot.blobs().len(), 128);
+        assert_eq!(
+            after, before,
+            "snapshot retained blob descriptors beneath the CAS root"
+        );
+    }
+
+    #[test]
+    fn backup_blob_membership_lookup_is_sublinear() {
+        let (store, _tmp) = test_store();
+        for index in 0..256 {
+            store
+                .store(format!("membership-{index}").as_bytes(), "text/plain")
+                .unwrap();
+        }
+        let snapshot = store.backup_snapshot().unwrap();
+        let blob = snapshot.blobs().last().unwrap().clone();
+
+        snapshot.with_blob_file(&blob, |_| Ok(())).unwrap();
+
+        assert!(
+            snapshot.membership_comparisons() <= 10,
+            "membership lookup made {} comparisons for 256 blobs",
+            snapshot.membership_comparisons()
         );
     }
 }
