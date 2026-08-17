@@ -200,12 +200,16 @@ export function FilterBar({
           field.kind === "flag"
             ? field.label
             : `${field.label}: ${optionLabel}`;
+        const removeLabel =
+          field.kind === "flag"
+            ? `Remove filter ${field.label}`
+            : `Remove filter ${field.label}: ${optionLabel}`;
         return (
           <button
             key={`${field.id}-${value}`}
             type="button"
             data-testid={`filter-bar-chip-${field.id}-${value}`}
-            aria-label={`Remove filter ${field.label}: ${value}`}
+            aria-label={removeLabel}
             className="cl-mono border border-[var(--hot)] bg-[var(--hot)] px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--paper)] transition-colors"
             onClick={() => onChange(removeFacetValue(state, field.id, value))}
           >
