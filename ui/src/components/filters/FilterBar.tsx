@@ -7,6 +7,7 @@ import {
   clearFilter,
   type FilterField,
   type FilterState,
+  FLAG_ON,
   isFilterActive,
   removeFacetValue,
   setText,
@@ -21,6 +22,8 @@ interface FilterBarProps {
   /** default true; feeds has no text search */
   showText?: boolean;
   textPlaceholder?: string;
+  /** accessible name for the text input; falls back to "Filter" */
+  textAriaLabel?: string;
   /** id for the text input (the board passes "tasking-filter" for the / shortcut) */
   textInputId?: string;
   filteredCount?: number;
@@ -43,6 +46,7 @@ export function FilterBar({
   onChange,
   showText = true,
   textPlaceholder = "FILTER…",
+  textAriaLabel = "Filter",
   textInputId,
   filteredCount,
   totalCount,
@@ -107,6 +111,7 @@ export function FilterBar({
           id={textInputId}
           data-testid="filter-bar-input"
           type="text"
+          aria-label={textAriaLabel}
           placeholder={textPlaceholder}
           className={inputClasses}
           value={state.text}
@@ -143,6 +148,7 @@ export function FilterBar({
                   <input
                     data-testid="filter-bar-option-filter"
                     type="text"
+                    aria-label="Filter options"
                     placeholder="FILTER OPTIONS…"
                     className={inputClasses}
                     value={optionFilter}
@@ -158,6 +164,7 @@ export function FilterBar({
                       key={option.value}
                       type="button"
                       data-testid={`filter-bar-option-${activeField.id}-${option.value}`}
+                      aria-pressed={selected}
                       className={cn(
                         "cl-mono flex items-center justify-between gap-[8px] px-[6px] py-[4px] text-left text-[var(--fs-xs)] uppercase tracking-[0.1em] transition-colors",
                         selected
@@ -181,6 +188,11 @@ export function FilterBar({
                     key={field.id}
                     type="button"
                     data-testid={`filter-bar-field-${field.id}`}
+                    aria-pressed={
+                      field.kind === "flag"
+                        ? (state.facets[field.id] ?? []).includes(FLAG_ON)
+                        : undefined
+                    }
                     className="cl-mono px-[6px] py-[4px] text-left text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-2)] transition-colors hover:bg-[var(--paper-edge)]"
                     onClick={() => handleFieldClick(field)}
                   >

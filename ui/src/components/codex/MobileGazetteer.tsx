@@ -253,6 +253,7 @@ export function MobileGazetteer({
                 state={filterState}
                 onChange={onFilterChange}
                 textPlaceholder="Title, path, description, or tag"
+                textAriaLabel="Search pages"
                 className="flex-wrap"
               />
 

@@ -291,6 +291,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
           state={filterState}
           onChange={onFilterChange}
           textPlaceholder="grep…"
+          textAriaLabel="Search pages"
           filteredCount={filteredCount}
           totalCount={totalCount}
           className="flex-wrap"
