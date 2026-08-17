@@ -14,7 +14,7 @@ import {
 } from "#/lib/filters/model";
 import { pad2 } from "#/lib/time";
 
-export interface FilterBarProps {
+interface FilterBarProps {
   fields: readonly FilterField[];
   state: FilterState;
   onChange: (next: FilterState) => void;

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   applyClientFilter,
-  clearAllFacets,
   clearFilter,
   EMPTY_FILTER_STATE,
   FLAG_ON,
@@ -51,12 +50,11 @@ describe("filter state helpers", () => {
     expect("hold" in s.facets).toBe(false);
   });
 
-  it("removeFacetValue and clear helpers behave", () => {
+  it("removeFacetValue and clearFilter behave", () => {
     let s = toggleFacetValue(EMPTY_FILTER_STATE, multi, "a");
     s = setText(s, "q");
     s = removeFacetValue(s, "tags", "a");
     expect("tags" in s.facets).toBe(false);
-    expect(clearAllFacets(s).text).toBe("q");
     expect(isFilterActive(clearFilter(s))).toBe(false);
   });
 });
