@@ -184,13 +184,12 @@ pub fn create_backup(
     let cas_snapshot = cas_store
         .backup_snapshot()
         .map_err(|source| cas_error("snapshot", &cas_root, source))?;
-    let resolved_source_path =
-        cas_root
-            .to_str()
-            .ok_or_else(|| BackupError::UnsafeCasStorage {
-                path: cas_root.clone(),
-                expected: "UTF-8 path representable in the backup manifest",
-            })?;
+    let resolved_source_path = cas_root
+        .to_str()
+        .ok_or_else(|| BackupError::UnsafeCasStorage {
+            path: cas_root.clone(),
+            expected: "UTF-8 path representable in the backup manifest",
+        })?;
     let manifest = BackupManifest {
         format_version: BACKUP_FORMAT_VERSION,
         created_at: timestamp.to_rfc3339_opts(SecondsFormat::Secs, true),
@@ -293,10 +292,7 @@ pub fn create_backup(
         )
     })?;
     builder
-        .append_file(
-            Path::new(CAS_DATABASE_ARCHIVE_PATH),
-            &mut snapshot_database,
-        )
+        .append_file(Path::new(CAS_DATABASE_ARCHIVE_PATH), &mut snapshot_database)
         .map_err(|source| {
             io_error(
                 "append CAS database snapshot",
@@ -642,12 +638,12 @@ mod tests {
     use serde_json::json;
     use tempfile::TempDir;
 
+    #[cfg(target_vendor = "apple")]
+    use crate::vault::cas::install_before_backup_database_open_barrier;
     use crate::vault::cas::{
         ContentStore, backup_blob_verification_passes, install_before_backup_blob_use_barrier,
         reset_backup_blob_verification_passes,
     };
-    #[cfg(target_vendor = "apple")]
-    use crate::vault::cas::install_before_backup_database_open_barrier;
 
     use super::*;
 
@@ -693,25 +689,19 @@ mod tests {
         fs::create_dir_all(vault.join(".clepsydra")).unwrap();
         fs::write(
             vault.join(".clepsydra/config.toml"),
-            format!(
-                "[vault]\n\n[archive]\ncas_path = {:?}\n",
-                configured_path
-            ),
+            format!("[vault]\n\n[archive]\ncas_path = {:?}\n", configured_path),
         )
         .unwrap();
     }
 
     fn stable_blob_path(hash: &str) -> PathBuf {
         let hex = hash.strip_prefix("sha256:").unwrap();
-        Path::new(".clepsydra/cas")
-            .join(&hex[..2])
-            .join(hex)
+        Path::new(".clepsydra/cas").join(&hex[..2]).join(hex)
     }
 
     fn backup_output_paths(destination: &Path) -> (PathBuf, PathBuf) {
         let final_path = destination.join("clepsydra-backup-20260808T123456Z.tar");
-        let partial_path =
-            destination.join("clepsydra-backup-20260808T123456Z.tar.partial");
+        let partial_path = destination.join("clepsydra-backup-20260808T123456Z.tar.partial");
         (final_path, partial_path)
     }
 
@@ -784,9 +774,7 @@ mod tests {
         let archived_blob = stable_blob_path(&stored.hash);
 
         assert!(
-            paths
-                .iter()
-                .all(|path| !path.starts_with(source_relative)),
+            paths.iter().all(|path| !path.starts_with(source_relative)),
             "live CAS subtree leaked into ordinary vault traversal"
         );
         assert_eq!(

@@ -3,11 +3,11 @@ use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
 #[cfg(all(unix, not(target_vendor = "apple")))]
 use std::os::fd::AsRawFd;
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
+use std::path::{Path, PathBuf};
 
 use rusqlite::{Connection, OptionalExtension, backup::Backup, params};
 use sha2::{Digest, Sha256};
@@ -111,10 +111,8 @@ impl OpenBlob {
 const LOCK_FILE_NAME: &str = "cas.lock";
 
 #[cfg(test)]
-type TestBarrierMap = std::collections::BTreeMap<
-    (&'static str, PathBuf),
-    std::sync::Arc<std::sync::Barrier>,
->;
+type TestBarrierMap =
+    std::collections::BTreeMap<(&'static str, PathBuf), std::sync::Arc<std::sync::Barrier>>;
 
 #[cfg(test)]
 static TEST_PATH_BARRIERS: std::sync::LazyLock<parking_lot::Mutex<TestBarrierMap>> =
@@ -133,9 +131,7 @@ static TEST_BLOCKED_LOCK_BARRIERS: std::sync::LazyLock<
     parking_lot::Mutex<
         std::collections::BTreeMap<TestLockIdentity, std::sync::Arc<std::sync::Barrier>>,
     >,
-> = std::sync::LazyLock::new(|| {
-    parking_lot::Mutex::new(std::collections::BTreeMap::new())
-});
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
 
 #[cfg(test)]
 fn normalized_test_path(path: &Path) -> PathBuf {
@@ -162,7 +158,10 @@ fn install_test_path_barrier(
 ) {
     let key = (event, normalized_test_path(&path));
     let prior = TEST_PATH_BARRIERS.lock().insert(key, barrier);
-    assert!(prior.is_none(), "CAS test path barrier was already installed");
+    assert!(
+        prior.is_none(),
+        "CAS test path barrier was already installed"
+    );
 }
 
 #[cfg(test)]
@@ -238,15 +237,13 @@ fn retained_lock_identity(file: &File) -> io::Result<TestLockIdentity> {
 }
 
 #[cfg(all(test, unix))]
-fn install_blocked_lock_barrier(
-    file: &File,
-    barrier: std::sync::Arc<std::sync::Barrier>,
-) {
+fn install_blocked_lock_barrier(file: &File, barrier: std::sync::Arc<std::sync::Barrier>) {
     let identity = retained_lock_identity(file).expect("inspect retained CAS test lock");
-    let prior = TEST_BLOCKED_LOCK_BARRIERS
-        .lock()
-        .insert(identity, barrier);
-    assert!(prior.is_none(), "CAS blocked-lock test barrier was already installed");
+    let prior = TEST_BLOCKED_LOCK_BARRIERS.lock().insert(identity, barrier);
+    assert!(
+        prior.is_none(),
+        "CAS blocked-lock test barrier was already installed"
+    );
 }
 
 #[cfg(all(test, unix))]
@@ -475,8 +472,7 @@ fn open_or_create_regular_cas_file(
         }
     } else {
         (
-            openat(directory, filename, existing_flags, Mode::empty())
-                .map_err(io::Error::from)?,
+            openat(directory, filename, existing_flags, Mode::empty()).map_err(io::Error::from)?,
             false,
         )
     };
@@ -512,7 +508,10 @@ fn verify_retained_cas_file_identity(
     {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} changed identity after it was opened", display_path.display()),
+            format!(
+                "{} changed identity after it was opened",
+                display_path.display()
+            ),
         ));
     }
     Ok(())
@@ -582,7 +581,7 @@ fn sqlite_path_in_open_directory(directory: &OwnedFd, filename: &str) -> io::Res
         use std::os::unix::ffi::OsStrExt as _;
 
         let directory_path = rustix::fs::getpath(directory).map_err(io::Error::from)?;
-        return Ok(PathBuf::from(OsStr::from_bytes(directory_path.to_bytes())).join(filename));
+        Ok(PathBuf::from(OsStr::from_bytes(directory_path.to_bytes())).join(filename))
     }
     #[cfg(not(target_vendor = "apple"))]
     {
@@ -600,8 +599,8 @@ fn sqlite_path_in_open_directory(directory: &OwnedFd, filename: &str) -> io::Res
 fn open_cas_root_directory(path: &Path) -> io::Result<File> {
     use std::os::windows::fs::{MetadataExt as _, OpenOptionsExt as _};
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS,
-        FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ, FILE_SHARE_WRITE,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
 
     let directory = OpenOptions::new()
@@ -610,9 +609,7 @@ fn open_cas_root_directory(path: &Path) -> io::Result<File> {
         .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
         .open(path)?;
     let metadata = directory.metadata()?;
-    if !metadata.is_dir()
-        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    {
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("{} is not a non-reparse CAS directory", path.display()),
@@ -643,12 +640,13 @@ fn open_or_create_regular_cas_file(
         .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
         .open(display_path)?;
     let metadata = file.metadata()?;
-    if !metadata.is_file()
-        || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
-    {
+    if !metadata.is_file() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("{} is not a non-reparse regular CAS file", display_path.display()),
+            format!(
+                "{} is not a non-reparse regular CAS file",
+                display_path.display()
+            ),
         ));
     }
     Ok(file)
@@ -660,7 +658,10 @@ fn open_or_create_regular_cas_file(display_path: &Path, create: bool) -> io::Res
         Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
-                format!("{} is not a non-symlink regular CAS file", display_path.display()),
+                format!(
+                    "{} is not a non-symlink regular CAS file",
+                    display_path.display()
+                ),
             ));
         }
         Ok(_) => {}
@@ -711,22 +712,12 @@ impl ContentStore {
         #[cfg(not(any(unix, windows)))]
         let lock_file = open_or_create_regular_cas_file(&lock_path, create_root)?;
         #[cfg(unix)]
-        verify_retained_cas_file_identity(
-            &root_directory,
-            LOCK_FILE_NAME,
-            &lock_file,
-            &lock_path,
-        )?;
+        verify_retained_cas_file_identity(&root_directory, LOCK_FILE_NAME, &lock_file, &lock_path)?;
         let lock_held = Cell::new(false);
         let lock = ExclusiveLockGuard::acquire(&lock_file, &lock_held)?;
 
         #[cfg(unix)]
-        verify_retained_cas_file_identity(
-            &root_directory,
-            LOCK_FILE_NAME,
-            &lock_file,
-            &lock_path,
-        )?;
+        verify_retained_cas_file_identity(&root_directory, LOCK_FILE_NAME, &lock_file, &lock_path)?;
         let database_path = root.join("cas.db");
         #[cfg(test)]
         pause_at_test_path_barrier("database-resolved", &database_path);
@@ -1038,10 +1029,12 @@ impl ContentStore {
             let mut digest = Sha256::new();
             let mut buffer = [0_u8; 64 * 1024];
             loop {
-                let read = file.read(&mut buffer).map_err(|error| CasError::BackingBlob {
-                    hash: hash.clone(),
-                    message: error.to_string(),
-                })?;
+                let read = file
+                    .read(&mut buffer)
+                    .map_err(|error| CasError::BackingBlob {
+                        hash: hash.clone(),
+                        message: error.to_string(),
+                    })?;
                 if read == 0 {
                     break;
                 }
@@ -1089,10 +1082,7 @@ impl ContentStore {
             &self.root.join("cas.db"),
         )?;
         #[cfg(all(test, target_vendor = "apple"))]
-        pause_at_test_path_barrier(
-            "before-backup-database-open",
-            &self.root.join("cas.db"),
-        );
+        pause_at_test_path_barrier("before-backup-database-open", &self.root.join("cas.db"));
         #[cfg(unix)]
         let source_database = Connection::open_with_flags(
             &working_database_path,
@@ -1113,7 +1103,8 @@ impl ContentStore {
         }
 
         let rows = {
-            let mut statement = snapshot_db.prepare("SELECT hash, size FROM blobs ORDER BY hash")?;
+            let mut statement =
+                snapshot_db.prepare("SELECT hash, size FROM blobs ORDER BY hash")?;
             statement
                 .query_map([], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
@@ -1173,7 +1164,8 @@ impl ContentStore {
             hash: hash.to_string(),
             message: error.to_string(),
         })?;
-        let row: Option<(i64, i64)> = self.database()
+        let row: Option<(i64, i64)> = self
+            .database()
             .query_row(
                 "SELECT size, ref_count FROM blobs WHERE hash = ?1",
                 params![hash],
@@ -1343,7 +1335,8 @@ impl ContentStore {
     ) -> Result<OpenBlob, RetrieveLimitedError> {
         Self::validate_hash(hash)
             .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
-        let (stored_size, content_type): (i64, String) = self.database()
+        let (stored_size, content_type): (i64, String) = self
+            .database()
             .query_row(
                 "SELECT size, content_type FROM blobs WHERE hash = ?1",
                 params![hash],
@@ -1465,7 +1458,8 @@ impl ContentStore {
     pub fn gc(&self, min_age: std::time::Duration) -> Result<u32, Box<dyn std::error::Error>> {
         let _lock = self.acquire_exclusive_lock()?;
         let cutoff = (chrono::Utc::now() - chrono::Duration::from_std(min_age)?).to_rfc3339();
-        let mut stmt = self.database()
+        let mut stmt = self
+            .database()
             .prepare("SELECT hash FROM blobs WHERE ref_count <= 0 AND created_at < ?1")?;
         let hashes: Vec<String> = stmt
             .query_map(params![cutoff], |row| row.get(0))?
@@ -1498,8 +1492,9 @@ impl ContentStore {
 
     /// Return summary stats for the store.
     pub fn stats(&self) -> Result<CasStats, Box<dyn std::error::Error>> {
-        let blob_count: i64 = self.database()
-            .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))?;
+        let blob_count: i64 =
+            self.database()
+                .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))?;
         let total_size: i64 =
             self.database()
                 .query_row("SELECT COALESCE(SUM(size), 0) FROM blobs", [], |row| {
@@ -1961,12 +1956,17 @@ mod tests {
     #[test]
     fn retrieval_remains_usable_during_backup_snapshot() {
         let (store, _tmp) = test_store();
-        let stored = store.store(b"read while snapshotted", "text/plain").unwrap();
+        let stored = store
+            .store(b"read while snapshotted", "text/plain")
+            .unwrap();
         let snapshot = store.backup_snapshot().unwrap();
 
         let retrieved = store.retrieve(&stored.hash).unwrap();
 
-        assert_eq!(retrieved, (b"read while snapshotted".to_vec(), "text/plain".to_string()));
+        assert_eq!(
+            retrieved,
+            (b"read while snapshotted".to_vec(), "text/plain".to_string())
+        );
         drop(snapshot);
     }
 
@@ -1978,16 +1978,16 @@ mod tests {
         assert!(missing_store.backup_snapshot().is_err());
 
         let (mismatch_store, _mismatch_tmp) = test_store();
-        let mismatch = mismatch_store.store(b"expected bytes", "text/plain").unwrap();
-        fs::write(
-            mismatch_store.blob_path(&mismatch.hash).unwrap(),
-            b"short",
-        )
-        .unwrap();
+        let mismatch = mismatch_store
+            .store(b"expected bytes", "text/plain")
+            .unwrap();
+        fs::write(mismatch_store.blob_path(&mismatch.hash).unwrap(), b"short").unwrap();
         assert!(mismatch_store.backup_snapshot().is_err());
 
         let (corrupt_store, _corrupt_tmp) = test_store();
-        let corrupt = corrupt_store.store(b"expected bytes", "text/plain").unwrap();
+        let corrupt = corrupt_store
+            .store(b"expected bytes", "text/plain")
+            .unwrap();
         fs::write(
             corrupt_store.blob_path(&corrupt.hash).unwrap(),
             b"xxxxxxxxxxxxxx",
