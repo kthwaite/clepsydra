@@ -2,11 +2,23 @@ import { useEffect, useMemo } from "react";
 import type { BoardOperation, BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
 import { useCycleBurndown, useTaskCompletionHistory } from "#/api/tasks";
+import {
+  applyClientFilter,
+  type ClientFilterConfig,
+  EMPTY_FILTER_STATE,
+  type FilterField,
+  type FilterState,
+  FLAG_ON,
+} from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
-import { type ColLabelFn, opKey } from "./board-constants";
-import { applyBoardFilter } from "./board-filter";
+import {
+  COL_ORDER,
+  type ColLabelFn,
+  opKey,
+  PRI_ORDER,
+} from "./board-constants";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
 import { NewCycleModal } from "./NewCycleModal";
@@ -50,20 +62,37 @@ export function filterTasks(
   return tasks.filter((t) => t.project === opFilter);
 }
 
+// ── shared FilterBar wiring ───────────────────────────────────────────────────
+
+/** Client-side facet/text predicate config for the shared FilterBar. */
+const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
+  textHay: (t) => [t.title, t.code, t.assignee ?? "", ...t.tags].join("\n"),
+  accessors: {
+    project: (t) => (t.project ? [t.project] : []),
+    tags: (t) => t.tags,
+    pri: (t) => [t.priority],
+    status: (t) => [t.status],
+    hold: (t) => (t.hold ? [FLAG_ON] : []),
+  },
+};
+
 // ── TaskingScreen ─────────────────────────────────────────────────────────────
 
 export function TaskingScreen({
   onOpenDossier,
   onOpenPage,
+  filterState = EMPTY_FILTER_STATE,
+  onFilterChange = () => {},
 }: {
   onOpenDossier?: (link: string) => void;
   onOpenPage?: (path: string) => void;
+  filterState?: FilterState;
+  onFilterChange?: (next: FilterState) => void;
 } = {}) {
   const { data, isLoading, isError, refetch } = useBoard();
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const opFilter = useBoardStore((s) => s.opFilter);
-  const filter = useBoardStore((s) => s.filter);
   const cycleSel = useBoardStore((s) => s.cycleSel);
   const railOpen = useBoardStore((s) => s.railOpen);
   const editTaskId = useBoardStore((s) => s.editTaskId);
@@ -104,7 +133,11 @@ export function TaskingScreen({
     }
 
     const opFiltered = filterTasks(data.tasks, data.operations, opFilter);
-    const filtered = applyBoardFilter(opFiltered, filter);
+    const filtered = applyClientFilter(
+      opFiltered,
+      filterState,
+      BOARD_FILTER_CONFIG,
+    );
     const active =
       opFilter !== "ALL" && opFilter !== "UNFILED"
         ? (data.operations.find((op) => opKey(op) === opFilter) ?? null)
@@ -121,7 +154,53 @@ export function TaskingScreen({
         ? (data.tasks.find((t) => t.id === editTaskId) ?? null)
         : null,
     };
-  }, [data, opFilter, filter, editTaskId]);
+  }, [data, opFilter, filterState, editTaskId]);
+
+  // Options are data-derived: unions of operation/task projects, task tags,
+  // and the fixed priority/status vocabularies.
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      {
+        id: "project",
+        kind: "multi",
+        label: "PROJECT",
+        options: [
+          ...new Set([
+            ...operations
+              .map((o) => o.project)
+              .filter((p): p is string => Boolean(p)),
+            ...tasks
+              .map((t) => t.project)
+              .filter((p): p is string => Boolean(p)),
+          ]),
+        ]
+          .sort()
+          .map((value) => ({ value })),
+      },
+      {
+        id: "tags",
+        kind: "multi",
+        label: "TAG",
+        options: [...new Set(tasks.flatMap((t) => t.tags))]
+          .sort()
+          .map((value) => ({ value })),
+      },
+      {
+        id: "pri",
+        kind: "multi",
+        label: "PRI",
+        options: PRI_ORDER.map((value) => ({ value })),
+      },
+      {
+        id: "status",
+        kind: "multi",
+        label: "STATUS",
+        options: COL_ORDER.map((value) => ({ value })),
+      },
+      { id: "hold", kind: "flag", label: "ON HOLD", options: [] },
+    ],
+    [operations, tasks],
+  );
 
   const telemetryProject = activeOp?.project ?? undefined;
   const telemetryUnfiled = opFilter === "UNFILED";
@@ -215,6 +294,9 @@ export function TaskingScreen({
             activeOp={activeOp}
             filteredCount={visibleTasks.length}
             opFilteredCount={opFilteredCount}
+            filterFields={filterFields}
+            filterState={filterState}
+            onFilterChange={onFilterChange}
             onOpenDossier={onOpenDossier}
             sealHistory={
               telemetryApplicable

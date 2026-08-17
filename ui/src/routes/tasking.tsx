@@ -1,8 +1,29 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useCallback } from "react";
+import {
+  createFileRoute,
+  type SearchSchemaInput,
+  useNavigate,
+} from "@tanstack/react-router";
+import { useCallback, useMemo } from "react";
 import { DesktopOnlyRoute } from "#/components/codex/DesktopOnlyRoute";
 import { TaskingScreen } from "#/components/tasking/TaskingScreen";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import type { FilterState } from "#/lib/filters/model";
+import {
+  type FilterUrlOptions,
+  filterStateToSearch,
+  parseFilterSearch,
+} from "#/lib/filters/url";
+
+/** Route-level filter field specs for the Tasking board's URL-backed filter. */
+export const TASKING_FILTER_URL: FilterUrlOptions = {
+  fields: [
+    { id: "project", kind: "multi" },
+    { id: "tags", kind: "multi" },
+    { id: "pri", kind: "multi", normalize: (v) => v.toUpperCase() },
+    { id: "status", kind: "multi", normalize: (v) => v.toUpperCase() },
+    { id: "hold", kind: "flag" },
+  ],
+};
 
 /**
  * Resolve a dossier canonical name to a vault path via the search index, then
@@ -24,6 +45,26 @@ async function resolveDossierPath(name: string): Promise<string | null> {
 
 function TaskingRoute() {
   const openTab = useOpenTab();
+  const search = Route.useSearch();
+  const navigate = useNavigate();
+
+  const filterState = useMemo(
+    () => parseFilterSearch(search, TASKING_FILTER_URL),
+    [search],
+  );
+
+  const onFilterChange = useCallback(
+    (next: FilterState) => {
+      navigate({
+        to: "/tasking",
+        search: (current) => ({
+          ...current,
+          ...filterStateToSearch(next, TASKING_FILTER_URL),
+        }),
+      });
+    },
+    [navigate],
+  );
 
   const onOpenPage = useCallback(
     (path: string) => {
@@ -43,12 +84,24 @@ function TaskingRoute() {
 
   return (
     <DesktopOnlyRoute name="Tasking">
-      <TaskingScreen onOpenPage={onOpenPage} onOpenDossier={onOpenDossier} />
+      <TaskingScreen
+        onOpenPage={onOpenPage}
+        onOpenDossier={onOpenDossier}
+        filterState={filterState}
+        onFilterChange={onFilterChange}
+      />
     </DesktopOnlyRoute>
   );
 }
 
 export const Route = createFileRoute("/tasking")({
   staticData: { codexView: "tasking" },
+  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) => ({
+    ...search,
+    ...filterStateToSearch(
+      parseFilterSearch(search, TASKING_FILTER_URL),
+      TASKING_FILTER_URL,
+    ),
+  }),
   component: TaskingRoute,
 });
