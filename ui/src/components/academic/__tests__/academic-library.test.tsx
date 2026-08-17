@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   AnnotationDetail,
@@ -9,6 +10,7 @@ import type {
 import { AcademicLibrary } from "#/components/academic/AcademicLibrary";
 import { ImportDialog } from "#/components/academic/ImportDialog";
 import { WorkDetail } from "#/components/academic/WorkDetail";
+import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
 
 const mocks = vi.hoisted(() => ({
   createAnnotation: vi.fn(),
@@ -124,6 +126,26 @@ async function chooseOption(
   await user.click(screen.getByRole("option", { name: option }));
 }
 
+/**
+ * Local stateful harness standing in for the /academic route: AcademicLibrary
+ * is a controlled component (filterState/onFilterChange are route-owned
+ * props), so filter-interaction tests need a real state round-trip the same
+ * way the route's useMemo/navigate wiring provides it in production.
+ */
+function ControlledAcademicLibrary({
+  initial = EMPTY_FILTER_STATE,
+}: {
+  initial?: FilterState;
+}) {
+  const [filterState, setFilterState] = useState<FilterState>(initial);
+  return (
+    <AcademicLibrary
+      filterState={filterState}
+      onFilterChange={setFilterState}
+    />
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.worksState.data = {
@@ -177,13 +199,13 @@ beforeEach(() => {
 describe("AcademicLibrary", () => {
   it("lists and searches works locally, then opens the selected detail", async () => {
     const user = userEvent.setup();
-    render(<AcademicLibrary />);
+    render(<ControlledAcademicLibrary />);
 
     expect(
       screen.getByRole("heading", { name: "Academic Library" }),
     ).toBeVisible();
     expect(screen.getByText("2 works")).toBeVisible();
-    const search = screen.getByRole("searchbox", { name: "Search works" });
+    const search = screen.getByTestId("filter-bar-input");
     await user.type(search, "turing");
     expect(screen.getByText(secondWork.title ?? "")).toBeVisible();
     expect(screen.queryByText(work.title)).not.toBeInTheDocument();
@@ -237,9 +259,117 @@ describe("AcademicLibrary", () => {
     if (mocks.worksState.data) mocks.worksState.data.total = 250;
     render(<AcademicLibrary />);
 
-    expect(mocks.worksFilters).toHaveBeenLastCalledWith({ limit: 200 });
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 200 }),
+    );
     await user.click(screen.getByRole("button", { name: "Load more works" }));
-    expect(mocks.worksFilters).toHaveBeenLastCalledWith({ limit: 250 });
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 250 }),
+    );
+  });
+});
+
+describe("AcademicLibrary — shared FilterBar composition", () => {
+  it("gives the text filter an accessible name of Search works", () => {
+    render(<ControlledAcademicLibrary />);
+    expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
+      "Search works",
+    );
+  });
+
+  it("adding a status facet issues the works request with status=<value>", async () => {
+    const user = userEvent.setup();
+    render(<ControlledAcademicLibrary />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-option-status-reading"));
+
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "reading" }),
+    );
+  });
+
+  it("narrows the rendered list client-side without changing the request when typing text", async () => {
+    const user = userEvent.setup();
+    render(<ControlledAcademicLibrary />);
+    const requestBefore = mocks.worksFilters.mock.calls.at(-1)?.[0];
+
+    await user.type(screen.getByTestId("filter-bar-input"), "turing");
+
+    expect(screen.getByText(secondWork.title ?? "")).toBeVisible();
+    expect(screen.queryByText(work.title)).not.toBeInTheDocument();
+    expect(mocks.worksFilters.mock.calls.at(-1)?.[0]).toEqual(requestBefore);
+  });
+
+  it("removing a facet chip restores the unfiltered works request", async () => {
+    const user = userEvent.setup();
+    render(<ControlledAcademicLibrary />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-option-status-reading"));
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: "reading" }),
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-status-reading"));
+
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ status: undefined }),
+    );
+  });
+
+  it("resets the load-more limit to PAGE_SIZE when a facet changes", async () => {
+    const user = userEvent.setup();
+    if (mocks.worksState.data) mocks.worksState.data.total = 250;
+    render(<ControlledAcademicLibrary />);
+
+    await user.click(screen.getByRole("button", { name: "Load more works" }));
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 250 }),
+    );
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-option-status-reading"));
+
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 200, status: "reading" }),
+    );
+  });
+
+  it("resets the load-more limit to PAGE_SIZE when a facet is removed", async () => {
+    const user = userEvent.setup();
+    if (mocks.worksState.data) mocks.worksState.data.total = 250;
+    render(<ControlledAcademicLibrary />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-option-status-reading"));
+    await user.click(screen.getByRole("button", { name: "Load more works" }));
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 250, status: "reading" }),
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-status-reading"));
+
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 200, status: undefined }),
+    );
+  });
+
+  it("renders a raw-value chip for an unparseable year and omits it from the works request", () => {
+    render(
+      <ControlledAcademicLibrary
+        initial={{ text: "", facets: { year: ["abc"] } }}
+      />,
+    );
+
+    expect(screen.getByTestId("filter-bar-chip-year-abc")).toBeVisible();
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ year: undefined }),
+    );
   });
 });
 

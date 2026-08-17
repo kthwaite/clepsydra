@@ -1,7 +1,9 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { RubbishBin } from "#/components/rubbish/RubbishBin";
+import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
 
 const api = vi.hoisted(() => ({
   list: vi.fn(),
@@ -84,6 +86,23 @@ function setDefaultHooks() {
   api.restore.mockReturnValue(mutation());
   api.purge.mockReturnValue(mutation());
   api.empty.mockReturnValue(mutation());
+}
+
+/**
+ * Local stateful harness standing in for the /rubbish route: RubbishBin is a
+ * controlled component (filterState/onFilterChange are route-owned props),
+ * so filter-interaction tests need a real state round-trip the same way the
+ * route's useMemo/navigate wiring provides it in production.
+ */
+function ControlledRubbishBin({
+  initial = EMPTY_FILTER_STATE,
+}: {
+  initial?: FilterState;
+} = {}) {
+  const [filterState, setFilterState] = useState<FilterState>(initial);
+  return (
+    <RubbishBin filterState={filterState} onFilterChange={setFilterState} />
+  );
 }
 
 beforeEach(() => {
@@ -424,5 +443,59 @@ describe("RubbishBin", () => {
     ).toBeDisabled();
     await user.keyboard("{Escape}");
     expect(screen.getByRole("dialog")).toBeVisible();
+  });
+});
+
+describe("RubbishBin — shared FilterBar composition", () => {
+  it("narrows the ledger to items of the selected kind", async () => {
+    const user = userEvent.setup();
+    render(<ControlledRubbishBin />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-kind"));
+    await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
+
+    expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Beta note/ })).toBeNull();
+  });
+
+  it("matches free text against both the title and the original path", async () => {
+    const user = userEvent.setup();
+    render(<ControlledRubbishBin />);
+    const input = screen.getByTestId("filter-bar-input");
+
+    // "dossier" only appears in Alpha's title, not either item's path.
+    await user.type(input, "dossier");
+    expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Beta note/ })).toBeNull();
+
+    // "notes" only appears in Beta's original_path, not either item's title.
+    await user.clear(input);
+    await user.type(input, "notes");
+    expect(screen.getByRole("button", { name: /Beta note/ })).toBeVisible();
+    expect(screen.queryByRole("button", { name: /Alpha dossier/ })).toBeNull();
+  });
+
+  it("renders an invalid entry normally with no filter, then hides it once any filter is active", async () => {
+    const user = userEvent.setup();
+    render(<ControlledRubbishBin />);
+
+    expect(screen.getByText("Invalid rubbish item")).toBeVisible();
+
+    await user.type(screen.getByTestId("filter-bar-input"), "alpha");
+
+    expect(screen.queryByText("Invalid rubbish item")).toBeNull();
+  });
+
+  it("shows the filtered-empty state when no item matches the filter", async () => {
+    const user = userEvent.setup();
+    render(<ControlledRubbishBin />);
+
+    await user.type(
+      screen.getByTestId("filter-bar-input"),
+      "no such retained page",
+    );
+
+    expect(screen.getByText(/no items match the filter/i)).toBeVisible();
   });
 });

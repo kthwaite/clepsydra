@@ -101,6 +101,21 @@ function makeContentEntry(index: number) {
   };
 }
 
+/** Builds a directly-passed `GazetteerFilters` prop for controller-mode tests. */
+function makeFilters(
+  overrides: Partial<Parameters<typeof Gazetteer>[0]["filters"]> = {},
+) {
+  return {
+    filterState: { text: "", facets: {} },
+    sort: "ts" as const,
+    page: 1,
+    onFilterChange: vi.fn(),
+    onSortChange: vi.fn(),
+    onPageChange: vi.fn(),
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   openTabMock.mockClear();
   layoutState.mobile = true;
@@ -123,6 +138,8 @@ beforeEach(() => {
   useGazetteerStore.setState({
     query: "",
     selectedTags: [],
+    kind: undefined,
+    project: undefined,
     sort: "ts",
     page: 1,
     routeTag: undefined,
@@ -155,17 +172,12 @@ describe("Gazetteer controller", () => {
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const filters = screen.getByRole("dialog", { name: "Gazetteer filters" });
-    await user.type(
-      within(filters).getByRole("searchbox", { name: "Search pages" }),
-      "Al",
-    );
-    const tagPicker = within(filters).getByRole("combobox", {
-      name: "Filter by tags",
-    });
-    await user.type(tagPicker, "res");
-    await user.click(
-      within(filters).getByRole("option", { name: "#research" }),
-    );
+    await user.type(within(filters).getByTestId("filter-bar-input"), "Al");
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-tags"));
+    await user.click(screen.getByTestId("filter-bar-option-tags-research"));
+    // multi-select keeps the add-filter popover open; close it explicitly.
+    await user.click(screen.getByTestId("filter-bar-add"));
     await user.click(within(filters).getByRole("radio", { name: "Title" }));
     await user.click(
       within(filters).getByRole("button", { name: "Close filters" }),
@@ -182,10 +194,10 @@ describe("Gazetteer controller", () => {
     const restored = screen.getByRole("dialog", {
       name: "Gazetteer filters",
     });
+    expect(within(restored).getByTestId("filter-bar-input")).toHaveValue("Al");
     expect(
-      within(restored).getByRole("searchbox", { name: "Search pages" }),
-    ).toHaveValue("Al");
-    expect(within(restored).getByText("#research")).toBeVisible();
+      within(restored).getByTestId("filter-bar-chip-tags-research"),
+    ).toBeVisible();
     expect(
       within(restored).getByRole("radio", { name: "Title" }),
     ).toBeChecked();
@@ -237,7 +249,7 @@ describe("Gazetteer controller", () => {
     await user.type(
       within(
         screen.getByRole("dialog", { name: "Gazetteer filters" }),
-      ).getByRole("searchbox", { name: "Search pages" }),
+      ).getByTestId("filter-bar-input"),
       "Alpha",
     );
     await user.click(
@@ -258,18 +270,7 @@ describe("Gazetteer controller", () => {
 
   it("retains a requested page until the authoritative query resolves", () => {
     const onPageChange = vi.fn();
-    const filters = {
-      query: "",
-      selectedTags: [],
-      sort: "ts" as const,
-      page: 2,
-      onQueryChange: vi.fn(),
-      onSelectedTagsChange: vi.fn(),
-      onKindChange: vi.fn(),
-      onProjectChange: vi.fn(),
-      onSortChange: vi.fn(),
-      onPageChange,
-    };
+    const filters = makeFilters({ page: 2, onPageChange });
     contentQueryState.data = undefined;
     contentQueryState.isSuccess = false;
 
@@ -294,189 +295,70 @@ describe("Gazetteer controller", () => {
     expect(onPageChange).toHaveBeenCalledOnce();
     expect(onPageChange).toHaveBeenCalledWith(1);
   });
-  it("offers the shared Kind and Project vocabularies through accessible desktop filters", async () => {
+
+  it("offers the shared Kind and Project vocabularies through the desktop FilterBar", async () => {
     const user = userEvent.setup();
     layoutState.mobile = false;
-    render(createElement(Gazetteer));
+    const onFilterChange = vi.fn();
+    render(
+      createElement(Gazetteer, { filters: makeFilters({ onFilterChange }) }),
+    );
 
-    await user.click(screen.getByRole("button", { name: "Filter by kind" }));
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-kind"));
     for (const kind of KINDS) {
       expect(
-        screen.getByRole("option", { name: kindLabel(kind) }),
-      ).toBeVisible();
+        screen.getByTestId(`filter-bar-option-kind-${kind}`),
+      ).toHaveTextContent(kindLabel(kind));
     }
-    await user.click(screen.getByRole("option", { name: "PROJECT" }));
-
-    const project = screen.getByRole("combobox", {
-      name: "Filter by project",
+    await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
+    expect(onFilterChange).toHaveBeenCalledWith({
+      text: "",
+      facets: { kind: ["PROJECT"] },
     });
-    await user.click(project);
-    expect(screen.getByRole("option", { name: "atlas" })).toBeVisible();
-    expect(screen.getByRole("option", { name: "clepsydra" })).toBeVisible();
-  });
 
-  it("renders one controlled desktop tag picker instead of the complete tag rail", async () => {
-    const user = userEvent.setup();
-    const onSelectedTagsChange = vi.fn();
-    layoutState.mobile = false;
-    render(
-      createElement(Gazetteer, {
-        filters: {
-          query: "",
-          selectedTags: [],
-          sort: "ts",
-          page: 1,
-          onQueryChange: vi.fn(),
-          onSelectedTagsChange,
-          onKindChange: vi.fn(),
-          onProjectChange: vi.fn(),
-          onSortChange: vi.fn(),
-          onPageChange: vi.fn(),
-        },
-      }),
-    );
-
-    const picker = screen.getByRole("combobox", { name: "Filter by tags" });
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-project"));
+    expect(screen.getByTestId("filter-bar-option-project-atlas")).toBeVisible();
     expect(
-      screen.getAllByRole("combobox", { name: "Filter by tags" }),
-    ).toHaveLength(1);
-    expect(
-      screen.queryByRole("button", { name: "Filter by research" }),
-    ).not.toBeInTheDocument();
-
-    await user.type(picker, "res");
-    await user.click(screen.getByRole("option", { name: "#research" }));
-    expect(onSelectedTagsChange).toHaveBeenCalledWith(["research"]);
+      screen.getByTestId("filter-bar-option-project-clepsydra"),
+    ).toBeVisible();
   });
 
-  it("layers tag suggestions above the sticky Gazetteer header", async () => {
+  it("adds a tag facet through the desktop FilterBar and reflects it as a chip", async () => {
     const user = userEvent.setup();
     layoutState.mobile = false;
-    render(createElement(Gazetteer));
-
-    await user.type(
-      screen.getByRole("combobox", { name: "Filter by tags" }),
-      "res",
+    const onFilterChange = vi.fn();
+    render(
+      createElement(Gazetteer, { filters: makeFilters({ onFilterChange }) }),
     );
 
-    const listbox = screen.getByRole("listbox", {
-      name: "Tag suggestions",
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-tags"));
+    await user.click(screen.getByTestId("filter-bar-option-tags-research"));
+    expect(onFilterChange).toHaveBeenCalledWith({
+      text: "",
+      facets: { tags: ["research"] },
     });
-    const stickyHeader = screen.getByRole("table").querySelector("thead");
-    const listboxLayer = [...listbox.classList]
-      .find((className) => /^z-\d+$/.test(className))
-      ?.slice(2);
-    const stickyHeaderLayer = [...(stickyHeader?.classList ?? [])]
-      .find((className) => /^z-\d+$/.test(className))
-      ?.slice(2);
-
-    expect(stickyHeader).toHaveClass("sticky", "z-10");
-    expect(Number(listboxLayer)).toBeGreaterThan(Number(stickyHeaderLayer));
   });
 
-  it("keeps unknown URL tags removable while rejecting unknown drafts", async () => {
+  it("shows an unknown URL tag as a removable chip", async () => {
     const user = userEvent.setup();
-    const onSelectedTagsChange = vi.fn();
+    const onFilterChange = vi.fn();
     layoutState.mobile = false;
     render(
       createElement(Gazetteer, {
-        filters: {
-          query: "",
-          selectedTags: ["legacy-url-tag"],
-          sort: "ts",
-          page: 1,
-          onQueryChange: vi.fn(),
-          onSelectedTagsChange,
-          onKindChange: vi.fn(),
-          onProjectChange: vi.fn(),
-          onSortChange: vi.fn(),
-          onPageChange: vi.fn(),
-        },
+        filters: makeFilters({
+          filterState: { text: "", facets: { tags: ["legacy-url-tag"] } },
+          onFilterChange,
+        }),
       }),
     );
 
-    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
-    await user.type(
-      screen.getByRole("combobox", { name: "Filter by tags" }),
-      "unknown{Enter}",
-    );
-    expect(onSelectedTagsChange).not.toHaveBeenCalled();
-
-    const selectedTags = screen.getByRole("grid", {
-      name: "Filter by tags",
-    });
-    await user.click(within(selectedTags).getByRole("button"));
-    expect(onSelectedTagsChange).toHaveBeenCalledWith([]);
-  });
-
-  it("retries failed tag suggestions without clearing selected route tags", async () => {
-    const user = userEvent.setup();
-    layoutState.mobile = false;
-    tagQueryState.error = new Error("offline");
-    render(
-      createElement(Gazetteer, {
-        filters: {
-          query: "",
-          selectedTags: ["research", "legacy-url-tag"],
-          sort: "ts",
-          page: 1,
-          onQueryChange: vi.fn(),
-          onSelectedTagsChange: vi.fn(),
-          onKindChange: vi.fn(),
-          onProjectChange: vi.fn(),
-          onSortChange: vi.fn(),
-          onPageChange: vi.fn(),
-        },
-      }),
-    );
-
-    await user.type(
-      screen.getByRole("combobox", { name: "Filter by tags" }),
-      "res",
-    );
-    const selectedTagGrid = screen.getByRole("grid", {
-      name: "Filter by tags",
-    });
-    expect(within(selectedTagGrid).getByText("#legacy-url-tag")).toBeVisible();
-    expect(within(selectedTagGrid).getByText("#research")).toBeVisible();
-    await user.click(
-      screen.getByRole("button", { name: "Retry tag suggestions" }),
-    );
-    expect(tagQueryState.refetch).toHaveBeenCalledOnce();
-    expect(within(selectedTagGrid).getByText("#legacy-url-tag")).toBeVisible();
-    expect(within(selectedTagGrid).getByText("#research")).toBeVisible();
-  });
-
-  it("announces loading tag suggestions without clearing selected route tags", async () => {
-    const user = userEvent.setup();
-    layoutState.mobile = false;
-    tagQueryState.isFetching = true;
-    render(
-      createElement(Gazetteer, {
-        filters: {
-          query: "",
-          selectedTags: ["legacy-url-tag"],
-          sort: "ts",
-          page: 1,
-          onQueryChange: vi.fn(),
-          onSelectedTagsChange: vi.fn(),
-          onKindChange: vi.fn(),
-          onProjectChange: vi.fn(),
-          onSortChange: vi.fn(),
-          onPageChange: vi.fn(),
-        },
-      }),
-    );
-
-    await user.type(
-      screen.getByRole("combobox", { name: "Filter by tags" }),
-      "res",
-    );
-    expect(screen.getByText("Loading tag suggestions…")).toHaveAttribute(
-      "role",
-      "status",
-    );
-    expect(screen.getByText("#legacy-url-tag")).toBeVisible();
+    const chip = screen.getByTestId("filter-bar-chip-tags-legacy-url-tag");
+    expect(chip).toBeVisible();
+    await user.click(chip);
+    expect(onFilterChange).toHaveBeenCalledWith({ text: "", facets: {} });
   });
 
   it("excludes quotation from bulk kind assignment", async () => {

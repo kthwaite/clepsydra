@@ -264,6 +264,40 @@ canonical paths; rows that failed remain selected so they can be retried. The
 mobile view keeps search, tags, sorting, pagination, and page opening, but does
 not expose the desktop bulk-assignment bar.
 
+## Filtering
+
+Tasking, Gazetteer, Feeds, the Academic Library, Rubbish, and Agenda share one
+filter bar. Where a screen has a text field, it narrows by case-insensitive
+substring; **+ FILTER** opens a popover to pick a field and then pick (or
+search) its options, and each selection becomes a removable chip. **CLEAR**
+resets the text and every facet together. When a screen supplies its total
+and currently-matching counts, the bar also shows a trailing **N OF M** once
+a filter is active.
+
+Filter state lives in the URL's search parameters, not local component state,
+so a filtered view is shareable as a link, restorable on reload, and moves
+with the browser's back and forward buttons like any other navigation.
+
+Each screen exposes its own fields over the shared bar:
+
+| Screen | Fields | Text search |
+| --- | --- | --- |
+| Tasking | Project, Tag, Pri (P0–P3), Status, On Hold | Yes |
+| Gazetteer | Kind, Project, Tag | Yes |
+| Feeds | Group (including Ungrouped), Feed (narrows to the selected group), Tag | No — use Hide read / Saved instead |
+| Academic Library | Type, Status, Year, Tag, queried server-side | Yes — matches title, author, and citation key against already-loaded works |
+| Rubbish | Kind | Yes |
+| Agenda | Status, Priority (A/B/C) | Yes |
+
+Multi-value Tag facets are not uniform across screens: Gazetteer's Tag filter
+is applied server-side with AND semantics (a page must carry every selected
+tag), while Tasking's Tag facet is a client-side OR (a task matches if it
+carries any one of the selected tags).
+
+Bases are excluded from this control: a Base's table views define their own
+membership and view filters in the Base's TOML definition rather than through
+the shared bar. See [Bases](/docs/bases).
+
 ## Keyboard shortcut help
 
 Press <kbd>Command</kbd>+<kbd>/</kbd> on macOS or

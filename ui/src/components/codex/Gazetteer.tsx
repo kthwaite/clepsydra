@@ -13,10 +13,11 @@ import type { BulkAssignResponse } from "#/api/types";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
-import { TagInput } from "#/components/ui/tag-input";
+import { FilterBar } from "#/components/filters/FilterBar";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
+import type { FilterField, FilterState } from "#/lib/filters/model";
 import {
   ASSIGNABLE_KINDS,
   KINDS,
@@ -45,17 +46,10 @@ export function toggleInSet<T>(set: Set<T>, value: T): Set<T> {
 export const MOBILE_GAZETTEER_PAGE_SIZE = 20;
 
 export interface GazetteerFilters {
-  query: string;
-  selectedTags: string[];
-  kind?: Kind;
-  queryKind?: string;
-  project?: string;
+  filterState: FilterState;
   sort: GazetteerSort;
   page: number;
-  onQueryChange: (query: string) => void;
-  onSelectedTagsChange: (tags: string[]) => void;
-  onKindChange: (kind?: Kind) => void;
-  onProjectChange: (project?: string) => void;
+  onFilterChange: (next: FilterState) => void;
   onSortChange: (sort: GazetteerSort) => void;
   onPageChange: (page: number) => void;
 }
@@ -67,17 +61,28 @@ type Props = {
 
 export function Gazetteer({ initialTag, filters }: Props) {
   const store = useGazetteerStore();
-  const query = filters?.query ?? store.query;
-  const selectedTags = filters?.selectedTags ?? store.selectedTags;
-  const kind = filters?.kind ?? store.kind;
-  const project = filters?.project ?? store.project;
+  const storeFilterState: FilterState = {
+    text: store.query,
+    facets: {
+      ...(store.selectedTags.length ? { tags: store.selectedTags } : {}),
+      ...(store.kind ? { kind: [store.kind] } : {}),
+      ...(store.project ? { project: [store.project] } : {}),
+    },
+  };
+  const storeOnFilterChange = (next: FilterState) => {
+    store.setQuery(next.text);
+    store.setSelectedTags(next.facets.tags ? [...next.facets.tags] : []);
+    store.setKind(next.facets.kind?.[0] as Kind | undefined);
+    store.setProject(next.facets.project?.[0]);
+  };
+  const filterState = filters?.filterState ?? storeFilterState;
+  const onFilterChange = filters?.onFilterChange ?? storeOnFilterChange;
+  const query = filterState.text;
+  const selectedTags = [...(filterState.facets.tags ?? [])];
+  const kind = filterState.facets.kind?.[0] as Kind | undefined;
+  const project = filterState.facets.project?.[0];
   const sort = filters?.sort ?? store.sort;
   const page = filters?.page ?? store.page;
-  const setQuery = filters?.onQueryChange ?? store.setQuery;
-  const setSelectedTags =
-    filters?.onSelectedTagsChange ?? store.setSelectedTags;
-  const setKind = filters?.onKindChange ?? store.setKind;
-  const setProject = filters?.onProjectChange ?? store.setProject;
   const setSort = filters?.onSortChange ?? store.setSort;
   const setPage = filters?.onPageChange ?? store.setPage;
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
@@ -88,14 +93,13 @@ export function Gazetteer({ initialTag, filters }: Props) {
 
   const tagsQuery = useTags();
   const tags = tagsQuery.data ?? [];
-  const tagSuggestions = tags.map((tag) => tag.tag);
   const requestedPage = Math.max(1, Math.floor(page));
   const contentQuery = useContentIndex(
     filters
       ? {
           q: query || undefined,
           tags: selectedTags.length > 0 ? selectedTags : undefined,
-          kind: filters.queryKind ?? kind,
+          kind,
           project,
           limit: MOBILE_GAZETTEER_PAGE_SIZE,
           offset: (requestedPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE,
@@ -107,16 +111,39 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const openTab = useOpenTab();
   const bulk = useAssignBulk();
   const projects = useProjects();
+  const filterFields = useMemo<FilterField[]>(
+    () => [
+      {
+        id: "kind",
+        kind: "single",
+        label: "KIND",
+        options: KINDS.map((k) => ({ value: k, label: kindLabel(k) })),
+      },
+      {
+        id: "project",
+        kind: "single",
+        label: "PROJECT",
+        options: projects.map((p) => ({ value: p })),
+      },
+      {
+        id: "tags",
+        kind: "multi",
+        label: "TAG",
+        options: tags.map((t) => ({ value: t.tag })),
+      },
+    ],
+    [projects, tags],
+  );
 
   const items = content?.items ?? [];
   const rowsForPage = useMemo(
     () =>
       filterAndSortRows(items, {
-        tags: filters ? [] : selectedTags,
+        tags: filters ? [] : [...(filterState.facets.tags ?? [])],
         query: filters ? "" : query,
         sort,
       }),
-    [filters, items, query, selectedTags, sort],
+    [filters, items, query, filterState.facets.tags, sort],
   );
   const filteredCount = filters ? (content?.total ?? 0) : rowsForPage.length;
   const totalCount = filters
@@ -142,7 +169,12 @@ export function Gazetteer({ initialTag, filters }: Props) {
 
   const applyResultTag = (tag: string) => {
     const nextTags = appendUniqueTag(selectedTags, tag);
-    if (nextTags !== selectedTags) setSelectedTags(nextTags);
+    if (nextTags !== selectedTags) {
+      onFilterChange({
+        ...filterState,
+        facets: { ...filterState.facets, tags: nextTags },
+      });
+    }
   };
 
   const toggleRow = (path: string) => {
@@ -207,25 +239,15 @@ export function Gazetteer({ initialTag, filters }: Props) {
   if (isMobile) {
     return (
       <MobileGazetteer
-        query={query}
-        selectedTags={selectedTags}
-        kind={kind}
-        project={project}
-        projects={projects}
+        filterState={filterState}
+        onFilterChange={onFilterChange}
+        filterFields={filterFields}
         sort={sort}
         rows={rows}
-        tags={tags}
-        tagsLoading={tagsQuery.isFetching}
-        tagsError={tagsQuery.error}
-        onRetryTags={() => void tagsQuery.refetch()}
         totalCount={totalCount}
         filteredCount={filteredCount}
         page={currentPage}
         pageCount={pageCount}
-        onQueryChange={setQuery}
-        onSelectedTagsChange={setSelectedTags}
-        onKindChange={setKind}
-        onProjectChange={setProject}
         onSortChange={setSort}
         onPageChange={setPage}
         onOpen={(path, title) => openTab("page", path, title)}
@@ -244,57 +266,6 @@ export function Gazetteer({ initialTag, filters }: Props) {
           {filteredCount} entries{tagSummary}
         </span>
         <div className="flex-1" />
-        <label className="flex items-center gap-2 border border-rule-soft px-2 py-1">
-          <span className="cl-mono text-accent">/</span>
-          <input
-            aria-label="Search pages"
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="grep…"
-            className="cl-mono w-[200px] bg-transparent text-[11px] text-ink outline-none placeholder:text-ink-mute"
-          />
-        </label>
-        <Select
-          aria-label="Filter by kind"
-          selectedKey={kind ?? "all"}
-          onSelectionChange={(key) =>
-            setKind(key === "all" ? undefined : (key as Kind))
-          }
-        >
-          <SelectButton className="cl-mono inline-flex cursor-pointer items-center border border-rule-soft px-2 py-1 text-[9px] uppercase tracking-[0.12em] text-ink-2 outline-none data-[hovered]:border-accent data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent">
-            {kind ? kindLabel(kind) : "All kinds"}
-          </SelectButton>
-          <Popover className="border border-rule bg-paper outline-none">
-            <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
-              <ListBoxItem
-                id="all"
-                className="cursor-pointer px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focused]:bg-highlight"
-              >
-                All kinds
-              </ListBoxItem>
-              {KINDS.map((option) => (
-                <ListBoxItem
-                  key={option}
-                  id={option}
-                  className="cursor-pointer px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focused]:bg-highlight"
-                >
-                  {kindLabel(option)}
-                </ListBoxItem>
-              ))}
-            </ListBox>
-          </Popover>
-        </Select>
-        <div className="w-[180px]">
-          <ProjectCombo
-            value={project ?? null}
-            options={projects}
-            ariaLabel="Filter by project"
-            menuTrigger="focus"
-            onAssign={setProject}
-            onClear={() => setProject(undefined)}
-          />
-        </div>
         <div className="cl-mono flex items-stretch border border-rule-soft text-[9px] uppercase tracking-[0.12em]">
           {(["ts", "id", "title", "words"] as GazetteerSort[]).map((s) => (
             <button
@@ -314,35 +285,17 @@ export function Gazetteer({ initialTag, filters }: Props) {
         </div>
       </div>
 
-      <div className="flex flex-shrink-0 items-center gap-2 border-b border-rule-soft px-5 py-2">
-        <TagInput
-          label="Tags"
-          ariaLabel="Filter by tags"
-          values={selectedTags}
-          suggestions={tagSuggestions}
-          suggestionsLoading={tagsQuery.isFetching}
-          suggestionsError={tagsQuery.error}
-          onRetrySuggestions={() => void tagsQuery.refetch()}
-          allowCreate={false}
-          onChange={setSelectedTags}
-          placeholder="filter tags…"
-          variant="codex"
-          valuePrefix="#"
-          maxSuggestions={8}
-          className="min-w-0 flex-1"
+      <div className="flex flex-shrink-0 items-center border-b border-rule-soft px-5 py-2">
+        <FilterBar
+          fields={filterFields}
+          state={filterState}
+          onChange={onFilterChange}
+          textPlaceholder="grep…"
+          textAriaLabel="Search pages"
+          filteredCount={filteredCount}
+          totalCount={totalCount}
+          className="flex-wrap"
         />
-        {selectedTags.length > 0 ? (
-          <button
-            type="button"
-            className="cl-btn"
-            onClick={() => setSelectedTags([])}
-          >
-            clear
-          </button>
-        ) : null}
-        <span className="cl-mono text-[9px] text-ink-mute">
-          all must match · {totalCount}
-        </span>
       </div>
 
       {/* bulk action bar — only when rows are selected */}

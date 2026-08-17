@@ -1,9 +1,5 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import {
-  type BoardFilter,
-  EMPTY_FILTER,
-} from "#/components/tasking/board-filter";
 
 export type BoardMode = "card" | "backlog" | "cycle" | "timeline";
 
@@ -30,7 +26,6 @@ interface BoardState {
     | { kind: "new" }
     | { kind: "open" | "seal"; cycleId: string }
     | null;
-  filter: BoardFilter;
 }
 
 interface BoardActions {
@@ -51,7 +46,6 @@ interface BoardActions {
     modal: { kind: "new" } | { kind: "open" | "seal"; cycleId: string },
   ) => void;
   closeCycleModal: () => void;
-  setFilter: (filter: BoardFilter) => void;
 }
 
 export const useBoardStore = create<BoardState & BoardActions>()(
@@ -67,7 +61,6 @@ export const useBoardStore = create<BoardState & BoardActions>()(
       editTaskId: null,
       taskModal: null,
       cycleModal: null,
-      filter: EMPTY_FILTER,
 
       setMode: (mode) => set({ mode }),
       setOpFilter: (opFilter) => set({ opFilter }),
@@ -90,7 +83,6 @@ export const useBoardStore = create<BoardState & BoardActions>()(
       closeTaskModal: () => set({ taskModal: null }),
       openCycleModal: (modal) => set({ cycleModal: modal }),
       closeCycleModal: () => set({ cycleModal: null }),
-      setFilter: (filter) => set({ filter }),
     }),
     {
       name: "clepsydra.board",
