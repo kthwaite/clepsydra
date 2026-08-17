@@ -1,10 +1,10 @@
 //! Content-addressed storage for blobs, with reference counting and garbage collection.
 use std::collections::BTreeSet;
-use std::fs::{self, File};
-use std::io::Read;
+use std::fs::{self, File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, backup::Backup, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -37,6 +37,8 @@ pub enum CasError {
     ReferenceChanged(String),
     #[error(transparent)]
     Database(#[from] rusqlite::Error),
+    #[error(transparent)]
+    Io(#[from] io::Error),
 }
 
 /// Metadata for a CAS blob whose database row and backing file agree.
@@ -101,6 +103,70 @@ impl OpenBlob {
         Ok((data, self.content_type))
     }
 }
+const LOCK_FILE_NAME: &str = "cas.lock";
+
+struct ExclusiveLockGuard<'a> {
+    file: &'a File,
+}
+
+impl<'a> ExclusiveLockGuard<'a> {
+    fn acquire(file: &'a File) -> io::Result<Self> {
+        fs4::FileExt::lock(file)?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for ExclusiveLockGuard<'_> {
+    fn drop(&mut self) {
+        let _ = fs4::FileExt::unlock(self.file);
+    }
+}
+
+/// A verified CAS blob held open for a backup archive.
+pub struct BackupBlob {
+    hash: String,
+    relative_path: PathBuf,
+    size: u64,
+    file: File,
+}
+
+impl BackupBlob {
+    pub fn hash(&self) -> &str {
+        &self.hash
+    }
+
+    pub fn relative_path(&self) -> &Path {
+        &self.relative_path
+    }
+
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    /// Clone the already-verified backing-file handle without reopening its path.
+    pub fn try_clone_file(&self) -> io::Result<File> {
+        self.file.try_clone()
+    }
+}
+
+/// A consistent SQLite snapshot and its authoritative, verified blob set.
+///
+/// The CAS mutation lock remains held until this guard is dropped.
+pub struct BackupSnapshot<'a> {
+    database: tempfile::NamedTempFile,
+    blobs: Vec<BackupBlob>,
+    _lock: ExclusiveLockGuard<'a>,
+}
+
+impl BackupSnapshot<'_> {
+    pub fn database_path(&self) -> &Path {
+        self.database.path()
+    }
+
+    pub fn blobs(&self) -> &[BackupBlob] {
+        &self.blobs
+    }
+}
 
 /// Content-addressed blob store.
 ///
@@ -110,12 +176,20 @@ impl OpenBlob {
 pub struct ContentStore {
     root: PathBuf,
     db: Connection,
+    lock_file: File,
 }
 
 impl ContentStore {
     /// Open or create a content store at the given root directory.
     pub fn open(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         fs::create_dir_all(root)?;
+        let lock_file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(root.join(LOCK_FILE_NAME))?;
+        let lock = ExclusiveLockGuard::acquire(&lock_file)?;
         let db_path = root.join("cas.db");
         let db = Connection::open(&db_path)?;
         db.execute_batch(
@@ -131,9 +205,11 @@ impl ContentStore {
                 completed_at TEXT NOT NULL
             );",
         )?;
+        drop(lock);
         Ok(Self {
             root: root.to_path_buf(),
             db,
+            lock_file,
         })
     }
 
@@ -149,7 +225,11 @@ impl ContentStore {
         let hex = hash
             .strip_prefix("sha256:")
             .ok_or("hash must start with 'sha256:'")?;
-        if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        if hex.len() != 64
+            || !hex
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
             return Err(
                 format!("invalid hash format: expected 64 hex chars, got '{}'", hex).into(),
             );
@@ -162,6 +242,135 @@ impl ContentStore {
         let hex = Self::validate_hash(hash)?;
         let prefix = &hex[..2];
         Ok(self.root.join(prefix).join(hex))
+    }
+
+    fn verified_backup_blob(
+        &self,
+        canonical_root: &Path,
+        hash: String,
+        stored_size: i64,
+    ) -> Result<BackupBlob, CasError> {
+        let hex = Self::validate_hash(&hash).map_err(|error| CasError::InvalidHash {
+            hash: hash.clone(),
+            message: error.to_string(),
+        })?;
+        let expected_size = u64::try_from(stored_size).map_err(|_| CasError::InvalidSize {
+            hash: hash.clone(),
+            size: stored_size,
+        })?;
+        let relative_path = PathBuf::from(&hex[..2]).join(hex);
+        let path = self.root.join(&relative_path);
+        let path_metadata = fs::symlink_metadata(&path).map_err(|error| CasError::BackingBlob {
+            hash: hash.clone(),
+            message: error.to_string(),
+        })?;
+        if !path_metadata.file_type().is_file() {
+            return Err(CasError::BackingBlob {
+                hash,
+                message: format!("{} is not a regular file", path.display()),
+            });
+        }
+        let canonical_path =
+            fs::canonicalize(&path).map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?;
+        if !canonical_path.starts_with(canonical_root) {
+            return Err(CasError::BackingBlob {
+                hash,
+                message: format!("{} escapes the CAS root", path.display()),
+            });
+        }
+
+        let mut file = File::open(&canonical_path).map_err(|error| CasError::BackingBlob {
+            hash: hash.clone(),
+            message: error.to_string(),
+        })?;
+        let file_metadata = file.metadata().map_err(|error| CasError::BackingBlob {
+            hash: hash.clone(),
+            message: error.to_string(),
+        })?;
+        if !file_metadata.is_file() {
+            return Err(CasError::BackingBlob {
+                hash,
+                message: format!("{} is not a regular file", path.display()),
+            });
+        }
+        if file_metadata.len() != expected_size {
+            return Err(CasError::BackingBlob {
+                hash,
+                message: format!(
+                    "size mismatch: expected {expected_size}, got {}",
+                    file_metadata.len()
+                ),
+            });
+        }
+
+        let mut digest = Sha256::new();
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer).map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?;
+            if read == 0 {
+                break;
+            }
+            digest.update(&buffer[..read]);
+        }
+        let actual_hash = format!("sha256:{:x}", digest.finalize());
+        if actual_hash != hash {
+            return Err(CasError::BackingBlob {
+                hash,
+                message: format!("content hash mismatch: got {actual_hash}"),
+            });
+        }
+        file.seek(SeekFrom::Start(0))
+            .map_err(|error| CasError::BackingBlob {
+                hash: hash.clone(),
+                message: error.to_string(),
+            })?;
+
+        Ok(BackupBlob {
+            hash,
+            relative_path,
+            size: expected_size,
+            file,
+        })
+    }
+
+    /// Create a consistent backup snapshot and hold the CAS mutation lock until
+    /// the returned guard is dropped.
+    pub fn backup_snapshot(&self) -> Result<BackupSnapshot<'_>, Box<dyn std::error::Error>> {
+        let lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
+        let database = tempfile::NamedTempFile::new()?;
+        let mut snapshot_db = Connection::open(database.path())?;
+        {
+            let backup = Backup::new(&self.db, &mut snapshot_db)?;
+            backup.run_to_completion(128, std::time::Duration::from_millis(1), None)?;
+        }
+
+        let rows = {
+            let mut statement = snapshot_db.prepare("SELECT hash, size FROM blobs ORDER BY hash")?;
+            statement
+                .query_map([], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+                })?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        drop(snapshot_db);
+
+        let canonical_root = fs::canonicalize(&self.root)?;
+        let blobs = rows
+            .into_iter()
+            .map(|(hash, size)| self.verified_backup_blob(&canonical_root, hash, size))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(BackupSnapshot {
+            database,
+            blobs,
+            _lock: lock,
+        })
     }
 
     fn rubbish_release_completed(db: &Connection, item_id: &str) -> Result<bool, rusqlite::Error> {
@@ -236,6 +445,7 @@ impl ContentStore {
         item_id: Uuid,
         hashes: &BTreeSet<String>,
     ) -> Result<ReleaseOutcome, CasError> {
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
         let item_id = item_id.to_string();
         if Self::rubbish_release_completed(&self.db, &item_id)? {
             return Ok(ReleaseOutcome::AlreadyCompleted);
@@ -276,6 +486,7 @@ impl ContentStore {
         data: &[u8],
         content_type: &str,
     ) -> Result<StoreResult, Box<dyn std::error::Error>> {
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
         let hash = Self::hash_bytes(data);
         let now = chrono::Utc::now().to_rfc3339();
 
@@ -444,6 +655,7 @@ impl ContentStore {
 
     /// Increment the reference count for a blob.
     pub fn increment_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
         Self::validate_hash(hash)?;
         self.db.execute(
             "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
@@ -454,6 +666,7 @@ impl ContentStore {
 
     /// Decrement the reference count for a blob.
     pub fn decrement_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
         Self::validate_hash(hash)?;
         self.db.execute(
             "UPDATE blobs SET ref_count = ref_count - 1 WHERE hash = ?1",
@@ -465,6 +678,7 @@ impl ContentStore {
     /// Remove blobs with ref_count <= 0 that are older than `min_age`.
     /// Returns the number of blobs pruned.
     pub fn gc(&self, min_age: std::time::Duration) -> Result<u32, Box<dyn std::error::Error>> {
+        let _lock = ExclusiveLockGuard::acquire(&self.lock_file)?;
         let cutoff = (chrono::Utc::now() - chrono::Duration::from_std(min_age)?).to_rfc3339();
         let mut stmt = self
             .db
@@ -893,5 +1107,147 @@ mod tests {
             1,
             "retry after item-removal failure must not release CAS refs twice"
         );
+    }
+    #[test]
+    fn backup_snapshot_sees_committed_wal_state() {
+        let (store, tmp) = test_store();
+        store
+            .db
+            .pragma_update(None, "journal_mode", "WAL")
+            .unwrap();
+        store
+            .db
+            .pragma_update(None, "wal_autocheckpoint", 0)
+            .unwrap();
+        let stored = store.store(b"committed in the wal", "text/plain").unwrap();
+        assert!(tmp.path().join("cas.db-wal").exists());
+
+        let snapshot = store.backup_snapshot().unwrap();
+        let snapshot_db = Connection::open(snapshot.database_path()).unwrap();
+        let rows = snapshot_db
+            .query_row(
+                "SELECT hash, size FROM blobs WHERE hash = ?1",
+                params![stored.hash],
+                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .unwrap();
+
+        assert_eq!(rows, (stored.hash.clone(), 20));
+        assert_eq!(snapshot.blobs().len(), 1);
+        assert_eq!(snapshot.blobs()[0].hash(), stored.hash);
+        assert_eq!(snapshot.blobs()[0].size(), 20);
+        let mut file = snapshot.blobs()[0].try_clone_file().unwrap();
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"committed in the wal");
+    }
+
+    #[test]
+    fn backup_snapshot_blocks_mutation_until_guard_drop() {
+        let (store, tmp) = test_store();
+        let stored = store.store(b"locked blob", "text/plain").unwrap();
+        let other_store = ContentStore::open(tmp.path()).unwrap();
+        let snapshot = store.backup_snapshot().unwrap();
+        let (started_tx, started_rx) = std::sync::mpsc::channel();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let hash = stored.hash.clone();
+        let worker = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            other_store.increment_ref(&hash).unwrap();
+            finished_tx.send(()).unwrap();
+        });
+
+        started_rx.recv().unwrap();
+        assert!(
+            finished_rx
+                .recv_timeout(std::time::Duration::from_millis(150))
+                .is_err(),
+            "mutation completed while the snapshot guard held the lock"
+        );
+        drop(snapshot);
+        finished_rx
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .unwrap();
+        worker.join().unwrap();
+        assert_eq!(store.ref_count(&stored.hash).unwrap(), 2);
+    }
+
+    #[test]
+    fn retrieval_remains_usable_during_backup_snapshot() {
+        let (store, _tmp) = test_store();
+        let stored = store.store(b"read while snapshotted", "text/plain").unwrap();
+        let snapshot = store.backup_snapshot().unwrap();
+
+        let retrieved = store.retrieve(&stored.hash).unwrap();
+
+        assert_eq!(retrieved, (b"read while snapshotted".to_vec(), "text/plain".to_string()));
+        drop(snapshot);
+    }
+
+    #[test]
+    fn backup_snapshot_rejects_missing_size_mismatched_or_corrupt_backing_state() {
+        let (missing_store, _missing_tmp) = test_store();
+        let missing = missing_store.store(b"missing", "text/plain").unwrap();
+        fs::remove_file(missing_store.blob_path(&missing.hash).unwrap()).unwrap();
+        assert!(missing_store.backup_snapshot().is_err());
+
+        let (mismatch_store, _mismatch_tmp) = test_store();
+        let mismatch = mismatch_store.store(b"expected bytes", "text/plain").unwrap();
+        fs::write(
+            mismatch_store.blob_path(&mismatch.hash).unwrap(),
+            b"short",
+        )
+        .unwrap();
+        assert!(mismatch_store.backup_snapshot().is_err());
+
+        let (corrupt_store, _corrupt_tmp) = test_store();
+        let corrupt = corrupt_store.store(b"expected bytes", "text/plain").unwrap();
+        fs::write(
+            corrupt_store.blob_path(&corrupt.hash).unwrap(),
+            b"xxxxxxxxxxxxxx",
+        )
+        .unwrap();
+        assert!(corrupt_store.backup_snapshot().is_err());
+    }
+
+    #[test]
+    fn backup_snapshot_rejects_malformed_hash_and_non_regular_backing_state() {
+        let (malformed_store, _malformed_tmp) = test_store();
+        malformed_store
+            .db
+            .execute(
+                "INSERT INTO blobs (hash, size, content_type, created_at, ref_count)
+                 VALUES ('sha256:not-a-hash', 0, 'text/plain', ?1, 1)",
+                params![chrono::Utc::now().to_rfc3339()],
+            )
+            .unwrap();
+        assert!(malformed_store.backup_snapshot().is_err());
+
+        let (directory_store, _directory_tmp) = test_store();
+        let directory = directory_store
+            .store(b"replace with directory", "text/plain")
+            .unwrap();
+        let path = directory_store.blob_path(&directory.hash).unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+        assert!(directory_store.backup_snapshot().is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn backup_snapshot_rejects_path_escaped_backing_state() {
+        let (store, tmp) = test_store();
+        let stored = store.store(b"escaped", "text/plain").unwrap();
+        let path = store.blob_path(&stored.hash).unwrap();
+        let prefix = path.parent().unwrap();
+        fs::remove_file(&path).unwrap();
+        fs::remove_dir(prefix).unwrap();
+
+        let outside = TempDir::new().unwrap();
+        fs::write(outside.path().join(path.file_name().unwrap()), b"escaped").unwrap();
+        std::os::unix::fs::symlink(outside.path(), prefix).unwrap();
+
+        assert!(store.backup_snapshot().is_err());
+        assert!(tmp.path().join("cas.db").exists());
     }
 }
