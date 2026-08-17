@@ -148,6 +148,13 @@ function FeedsPage() {
   };
   const onFilterChange = (next: FilterState) => {
     const nextGroup = next.facets.group?.[0];
+    // Any group change (set, changed, cleared, or the UNGROUPED sentinel
+    // toggled) drops the feed filter too — a stale feed id from a
+    // different group would otherwise silently zero-result the river
+    // once FEED's options narrow to the new group. Matches the old
+    // FilterSelect, which reset `feed: undefined` on every group change.
+    const groupChanged = nextGroup !== selectedGroupName;
+    const nextFeedValue = next.facets.feed?.[0];
     navigate({
       to: "/feeds",
       replace: true,
@@ -156,9 +163,9 @@ function FeedsPage() {
         group: nextGroup === UNGROUPED_GROUP_FACET ? undefined : nextGroup,
         ungrouped: nextGroup === UNGROUPED_GROUP_FACET,
         feed:
-          next.facets.feed?.[0] !== undefined
-            ? Number(next.facets.feed[0])
-            : undefined,
+          groupChanged || nextFeedValue === undefined
+            ? undefined
+            : Number(nextFeedValue),
         tag: next.facets.tag?.[0],
       }),
     });

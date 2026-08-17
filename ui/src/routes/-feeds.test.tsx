@@ -377,6 +377,51 @@ describe("feeds route controls", () => {
     expect(screen.getByTestId("filter-bar-option-feed-9")).toBeInTheDocument();
   });
 
+  it("clears an orphaned feed when a later group change no longer contains it, dropping the stale FEED chip", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    const page = render(<FeedsPage />);
+
+    // Select feed 8 ("Loose Source", group "") with no group filter active.
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-feed"));
+    await user.click(screen.getByTestId("filter-bar-option-feed-8"));
+    const feedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    const afterFeed = feedNavigation.search(routeMocks.search);
+    expect(afterFeed).toMatchObject({ feed: 8 });
+
+    Object.assign(routeMocks.search, afterFeed);
+    page.rerender(<FeedsPage />);
+    expect(screen.getByTestId("filter-bar-chip-feed-8")).toBeInTheDocument();
+
+    // Now pick a group that does NOT contain feed 8.
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-group"));
+    await user.click(screen.getByTestId("filter-bar-option-group-Engineering"));
+    const groupNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    const afterGroup = groupNavigation.search(routeMocks.search);
+    expect(afterGroup).toMatchObject({ group: "Engineering", feed: undefined });
+
+    Object.assign(routeMocks.search, afterGroup);
+    page.rerender(<FeedsPage />);
+    expect(
+      screen.queryByTestId("filter-bar-chip-feed-8"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
+      "data-feed",
+      "__all__",
+    );
+  });
+
   it("shows the UNGROUPED chip for a URL with ungrouped=true, selects it through the FilterBar, and clears it via the chip", async () => {
     routeMocks.search.view = "all";
     routeMocks.search.group = undefined;
