@@ -440,6 +440,42 @@ describe("feeds route controls", () => {
     expect(nextSearch.group).toBeUndefined();
   });
 
+  it("distinguishes picking the real group named __ungrouped__ from picking the UNGROUPED sentinel", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-group"));
+    await user.click(
+      screen.getByTestId("filter-bar-option-group-__ungrouped__"),
+    );
+    const namedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(namedNavigation.search(routeMocks.search)).toMatchObject({
+      group: "__ungrouped__",
+    });
+
+    routeMocks.navigate.mockClear();
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-group"));
+    await user.click(screen.getByTestId("filter-bar-option-group-"));
+    const sentinelNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(sentinelNavigation.search(routeMocks.search)).toMatchObject({
+      ungrouped: true,
+      group: undefined,
+    });
+  });
+
   it.each([23, "23"])("accepts positive integer entry %s", (entry) => {
     const validateSearch = Route.options.validateSearch as (
       search: Record<string, unknown>,
