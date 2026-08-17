@@ -8,14 +8,56 @@ import {
 } from "#/api/academic";
 import { ImportDialog } from "#/components/academic/ImportDialog";
 import { WorkDetail } from "#/components/academic/WorkDetail";
+import { FilterBar } from "#/components/filters/FilterBar";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
-import { SearchField } from "#/components/ui/search-field";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TextField } from "#/components/ui/text-field";
 import { cn } from "#/lib/cn";
+import {
+  EMPTY_FILTER_STATE,
+  type FilterField,
+  type FilterState,
+  isFilterActive,
+} from "#/lib/filters/model";
 
 const PAGE_SIZE = 200;
+
+/** WorkType union values (ui/src/api/schema.d.ts) — drive the work_type
+ * facet's options and validate URL-arriving values before they reach the
+ * server; `satisfies` fails loudly if the schema's union ever drifts. */
+const WORK_TYPES = [
+  "paper",
+  "book",
+  "thesis",
+  "report",
+  "other",
+] as const satisfies readonly WorkType[];
+
+/** ReadingStatus union values (ui/src/api/schema.d.ts) — same role as
+ * WORK_TYPES for the status facet. */
+const READING_STATUSES = [
+  "unread",
+  "reading",
+  "done",
+] as const satisfies readonly ReadingStatus[];
+
+/** Narrow a facet's raw string value against the known vocabulary rather than
+ * casting it blindly — an unrecognised value (e.g. a stale/hand-edited URL)
+ * is simply omitted from the works request. */
+function asWorkType(value: string | undefined): WorkType | undefined {
+  return value !== undefined &&
+    (WORK_TYPES as readonly string[]).includes(value)
+    ? (value as WorkType)
+    : undefined;
+}
+
+function asReadingStatus(value: string | undefined): ReadingStatus | undefined {
+  return value !== undefined &&
+    (READING_STATUSES as readonly string[]).includes(value)
+    ? (value as ReadingStatus)
+    : undefined;
+}
 
 function formatError(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message;
@@ -52,11 +94,43 @@ function matchesSearch(work: WorkSummary, query: string): boolean {
   ].some((value) => value?.toLowerCase().includes(normalized));
 }
 
-export function AcademicLibrary() {
+export function AcademicLibrary({
+  filterState = EMPTY_FILTER_STATE,
+  onFilterChange = () => {},
+}: {
+  filterState?: FilterState;
+  onFilterChange?: (next: FilterState) => void;
+} = {}) {
+  const facet = (id: string) => filterState.facets[id]?.[0];
+  const facetWorkType = facet("work_type");
+  const facetStatus = facet("status");
+  const facetYear = facet("year");
+  const facetTag = facet("tag");
+  const facetSignature = [facetWorkType, facetStatus, facetYear, facetTag].join(
+    " ",
+  );
+
   const [limit, setLimit] = useState(PAGE_SIZE);
-  const worksQuery = useWorks({ limit });
+  // The server result set changes whenever a facet changes, so the
+  // load-more cursor must restart from the first page. Adjusted during
+  // render (React's documented pattern for resetting state from a prop
+  // change) rather than a useEffect, since the reset itself doesn't read
+  // any of the facet values — only their identity as a change signal.
+  const [limitFacetSignature, setLimitFacetSignature] =
+    useState(facetSignature);
+  if (facetSignature !== limitFacetSignature) {
+    setLimitFacetSignature(facetSignature);
+    setLimit(PAGE_SIZE);
+  }
+
+  const worksQuery = useWorks({
+    limit,
+    work_type: asWorkType(facetWorkType),
+    status: asReadingStatus(facetStatus),
+    year: facetYear ? Number(facetYear) : undefined,
+    tag: facetTag,
+  });
   const createWork = useCreateWork();
-  const [query, setQuery] = useState("");
   const [selectedWorkId, setSelectedWorkId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
@@ -72,9 +146,51 @@ export function AcademicLibrary() {
   const items = worksQuery.data?.items ?? [];
   const total = worksQuery.data?.total ?? items.length;
   const hasMore = total > items.length;
+  const query = filterState.text;
+  const filterActive = isFilterActive(filterState);
   const filteredWorks = useMemo(
     () => items.filter((work) => matchesSearch(work, query)),
     [items, query],
+  );
+
+  const filterFields: FilterField[] = useMemo(
+    () => [
+      {
+        id: "work_type",
+        kind: "single",
+        label: "TYPE",
+        options: WORK_TYPES.map((value) => ({ value })),
+      },
+      {
+        id: "status",
+        kind: "single",
+        label: "STATUS",
+        options: READING_STATUSES.map((value) => ({ value })),
+      },
+      {
+        id: "year",
+        kind: "single",
+        label: "YEAR",
+        options: [
+          ...new Set(
+            items
+              .map((work) => work.year)
+              .filter((y): y is number => typeof y === "number"),
+          ),
+        ]
+          .sort((a, b) => b - a)
+          .map((value) => ({ value: String(value) })),
+      },
+      {
+        id: "tag",
+        kind: "single",
+        label: "TAG",
+        options: [...new Set(items.flatMap((work) => work.tags ?? []))]
+          .sort()
+          .map((value) => ({ value })),
+      },
+    ],
+    [items],
   );
 
   function openCreate() {
@@ -142,12 +258,12 @@ export function AcademicLibrary() {
       <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(260px,340px)_1fr]">
         <aside className="flex min-h-[280px] flex-col border-b border-rule md:min-h-0 md:border-r md:border-b-0">
           <div className="border-b border-rule-soft px-3 py-3">
-            <SearchField
-              aria-label="Search works"
-              value={query}
-              onChange={setQuery}
-              placeholder="Title, author, citation key…"
-              className="border border-input px-2 py-1.5"
+            <FilterBar
+              fields={filterFields}
+              state={filterState}
+              onChange={onFilterChange}
+              textPlaceholder="Title, author, citation key…"
+              className="flex-wrap"
             />
             <div className="cl-mono mt-2 flex justify-between text-[9px] uppercase tracking-[0.12em] text-ink-mute">
               <span>{worksQuery.data?.total ?? items.length} works</span>
@@ -167,7 +283,7 @@ export function AcademicLibrary() {
               </p>
             ) : filteredWorks.length === 0 ? (
               <p className="cl-marg p-4">
-                {query
+                {filterActive
                   ? hasMore
                     ? "No loaded works match this search. Load more to continue searching."
                     : "No works match this search."
