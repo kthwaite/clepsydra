@@ -172,10 +172,7 @@ describe("Gazetteer controller", () => {
 
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const filters = screen.getByRole("dialog", { name: "Gazetteer filters" });
-    await user.type(
-      within(filters).getByRole("searchbox", { name: "Search pages" }),
-      "Al",
-    );
+    await user.type(within(filters).getByTestId("filter-bar-input"), "Al");
     await user.click(screen.getByTestId("filter-bar-add"));
     await user.click(screen.getByTestId("filter-bar-field-tags"));
     await user.click(screen.getByTestId("filter-bar-option-tags-research"));
@@ -197,9 +194,7 @@ describe("Gazetteer controller", () => {
     const restored = screen.getByRole("dialog", {
       name: "Gazetteer filters",
     });
-    expect(
-      within(restored).getByRole("searchbox", { name: "Search pages" }),
-    ).toHaveValue("Al");
+    expect(within(restored).getByTestId("filter-bar-input")).toHaveValue("Al");
     expect(
       within(restored).getByTestId("filter-bar-chip-tags-research"),
     ).toBeVisible();
@@ -254,7 +249,7 @@ describe("Gazetteer controller", () => {
     await user.type(
       within(
         screen.getByRole("dialog", { name: "Gazetteer filters" }),
-      ).getByRole("searchbox", { name: "Search pages" }),
+      ).getByTestId("filter-bar-input"),
       "Alpha",
     );
     await user.click(
