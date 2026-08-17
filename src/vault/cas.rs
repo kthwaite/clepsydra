@@ -1,9 +1,7 @@
 //! Content-addressed storage for blobs, with reference counting and garbage collection.
 use std::cell::Cell;
 use std::collections::BTreeSet;
-use std::fs::{self, File};
-#[cfg(not(unix))]
-use std::fs::OpenOptions;
+use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 #[cfg(all(unix, not(target_vendor = "apple")))]
@@ -128,6 +126,11 @@ static BACKUP_BLOB_VERIFICATION_PASSES: std::sync::LazyLock<
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
 
 #[cfg(test)]
+static TEST_BLOCKED_LOCK_BARRIER: std::sync::LazyLock<
+    parking_lot::Mutex<Option<std::sync::Arc<std::sync::Barrier>>>,
+> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+
+#[cfg(test)]
 fn normalized_test_path(path: &Path) -> PathBuf {
     if let Ok(path) = fs::canonicalize(path) {
         return path;
@@ -181,6 +184,14 @@ fn install_after_database_path_resolved_barrier(
     install_test_path_barrier("database-resolved", path, barrier);
 }
 
+#[cfg(all(test, target_vendor = "apple"))]
+pub(crate) fn install_before_backup_database_open_barrier(
+    path: PathBuf,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    install_test_path_barrier("before-backup-database-open", path, barrier);
+}
+
 #[cfg(test)]
 fn install_after_blob_ancestor_path_resolved_barrier(
     path: PathBuf,
@@ -211,6 +222,34 @@ pub(crate) fn backup_blob_verification_passes(hash: &str) -> usize {
         .unwrap_or(0)
 }
 
+#[cfg(test)]
+fn install_blocked_lock_barrier(barrier: std::sync::Arc<std::sync::Barrier>) {
+    let prior = TEST_BLOCKED_LOCK_BARRIER.lock().replace(barrier);
+    assert!(prior.is_none(), "CAS blocked-lock test barrier was already installed");
+}
+
+#[cfg(test)]
+fn pause_after_confirming_lock_contention(file: &File) -> io::Result<()> {
+    let barrier = TEST_BLOCKED_LOCK_BARRIER.lock().take();
+    let Some(barrier) = barrier else {
+        return Ok(());
+    };
+    match fs4::FileExt::try_lock(file) {
+        Err(fs4::TryLockError::WouldBlock) => {
+            barrier.wait();
+            barrier.wait();
+            Ok(())
+        }
+        Err(fs4::TryLockError::Error(error)) => Err(error),
+        Ok(()) => {
+            fs4::FileExt::unlock(file)?;
+            Err(io::Error::other(
+                "CAS blocked-lock test barrier reached an uncontended lock",
+            ))
+        }
+    }
+}
+
 struct ExclusiveLockGuard<'a> {
     file: &'a File,
     held: &'a Cell<bool>,
@@ -223,6 +262,11 @@ impl<'a> ExclusiveLockGuard<'a> {
                 io::ErrorKind::WouldBlock,
                 "CAS mutation lock is already held by this content store",
             ));
+        }
+        #[cfg(test)]
+        if let Err(error) = pause_after_confirming_lock_contention(file) {
+            held.set(false);
+            return Err(error);
         }
         if let Err(error) = fs4::FileExt::lock(file) {
             held.set(false);
@@ -350,7 +394,7 @@ impl BackupSnapshot<'_> {
 /// tracked in a SQLite table.
 pub struct ContentStore {
     root: PathBuf,
-    db: Connection,
+    db: Option<Connection>,
     _database_file: File,
     lock_file: File,
     #[cfg(unix)]
@@ -450,6 +494,62 @@ fn verify_retained_cas_file_identity(
         ));
     }
     Ok(())
+}
+
+#[cfg(unix)]
+fn create_private_cas_database_copy(
+    directory: &OwnedFd,
+    database_file: &File,
+    source_path: &Path,
+) -> io::Result<(tempfile::TempDir, PathBuf)> {
+    use rustix::fs::{FileType, Mode, OFlags, fstat, openat};
+    use rustix::io::Errno;
+    use std::os::unix::fs::OpenOptionsExt as _;
+
+    fn copy_file(source: &File, destination: &mut File) -> io::Result<()> {
+        let mut source = source.try_clone()?;
+        source.seek(SeekFrom::Start(0))?;
+        io::copy(&mut source, destination)?;
+        destination.sync_all()
+    }
+
+    let private_directory = tempfile::tempdir()?;
+    let private_path = fs::canonicalize(private_directory.path())?;
+    let database_path = private_path.join("cas.db");
+    let mut database_destination = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&database_path)?;
+    copy_file(database_file, &mut database_destination)?;
+
+    match openat(
+        directory,
+        "cas.db-wal",
+        OFlags::RDONLY | OFlags::CLOEXEC | OFlags::NOFOLLOW | OFlags::NONBLOCK,
+        Mode::empty(),
+    ) {
+        Ok(wal) => {
+            let metadata = fstat(&wal).map_err(io::Error::from)?;
+            if FileType::from_raw_mode(metadata.st_mode) != FileType::RegularFile {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("{}-wal is not a regular CAS file", source_path.display()),
+                ));
+            }
+            let mut wal_destination = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(private_path.join("cas.db-wal"))?;
+            copy_file(&File::from(wal), &mut wal_destination)?;
+        }
+        Err(Errno::NOENT) => {}
+        Err(error) => return Err(error.into()),
+    }
+    Ok((private_directory, database_path))
 }
 
 #[cfg(unix)]
@@ -598,6 +698,13 @@ impl ContentStore {
         let lock_held = Cell::new(false);
         let lock = ExclusiveLockGuard::acquire(&lock_file, &lock_held)?;
 
+        #[cfg(unix)]
+        verify_retained_cas_file_identity(
+            &root_directory,
+            LOCK_FILE_NAME,
+            &lock_file,
+            &lock_path,
+        )?;
         let database_path = root.join("cas.db");
         #[cfg(test)]
         pause_at_test_path_barrier("database-resolved", &database_path);
@@ -611,13 +718,27 @@ impl ContentStore {
         #[cfg(not(any(unix, windows)))]
         let database_file = open_or_create_regular_cas_file(&database_path, create_root)?;
         #[cfg(unix)]
-        let connection_path = sqlite_path_in_open_directory(&root_directory, "cas.db")?;
+        let db = if create_root {
+            let connection_path = sqlite_path_in_open_directory(&root_directory, "cas.db")?;
+            let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
+            Some(Connection::open_with_flags(&connection_path, flags)?)
+        } else {
+            None
+        };
         #[cfg(not(unix))]
-        let connection_path = database_path;
-        let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-            | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
-        let db = Connection::open_with_flags(&connection_path, flags)?;
+        let db = {
+            let access = if create_root {
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+            } else {
+                rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            };
+            let flags = access
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
+            Some(Connection::open_with_flags(&database_path, flags)?)
+        };
         #[cfg(unix)]
         verify_retained_cas_file_identity(
             &root_directory,
@@ -625,19 +746,23 @@ impl ContentStore {
             &database_file,
             &database_path,
         )?;
-        db.execute_batch(
-            "CREATE TABLE IF NOT EXISTS blobs (
-                hash         TEXT PRIMARY KEY,
-                size         INTEGER NOT NULL,
-                content_type TEXT NOT NULL,
-                created_at   TEXT NOT NULL,
-                ref_count    INTEGER NOT NULL DEFAULT 1
-            );
-            CREATE TABLE IF NOT EXISTS rubbish_archive_releases (
-                item_id      TEXT PRIMARY KEY,
-                completed_at TEXT NOT NULL
-            );",
-        )?;
+        if create_root {
+            db.as_ref()
+                .expect("a writable CAS open has a database connection")
+                .execute_batch(
+                    "CREATE TABLE IF NOT EXISTS blobs (
+                        hash         TEXT PRIMARY KEY,
+                        size         INTEGER NOT NULL,
+                        content_type TEXT NOT NULL,
+                        created_at   TEXT NOT NULL,
+                        ref_count    INTEGER NOT NULL DEFAULT 1
+                    );
+                    CREATE TABLE IF NOT EXISTS rubbish_archive_releases (
+                        item_id      TEXT PRIMARY KEY,
+                        completed_at TEXT NOT NULL
+                    );",
+                )?;
+        }
         drop(lock);
         Ok(Self {
             root,
@@ -654,6 +779,12 @@ impl ContentStore {
 
     pub(crate) fn root(&self) -> &Path {
         &self.root
+    }
+
+    fn database(&self) -> &Connection {
+        self.db
+            .as_ref()
+            .expect("normal CAS operations require a live database connection")
     }
 
     fn verify_storage_identities(&self) -> io::Result<()> {
@@ -676,8 +807,12 @@ impl ContentStore {
     }
 
     fn acquire_exclusive_lock(&self) -> io::Result<ExclusiveLockGuard<'_>> {
-        self.verify_storage_identities()?;
-        ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)
+        let lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
+        if let Err(error) = self.verify_storage_identities() {
+            drop(lock);
+            return Err(error);
+        }
+        Ok(lock)
     }
 
     /// Compute the SHA-256 hash of data, returning "sha256:<hex>".
@@ -925,10 +1060,33 @@ impl ContentStore {
     /// the returned guard is dropped.
     pub fn backup_snapshot(&self) -> Result<BackupSnapshot<'_>, Box<dyn std::error::Error>> {
         let lock = self.acquire_exclusive_lock()?;
+        #[cfg(unix)]
+        let (_working_directory, working_database_path) = create_private_cas_database_copy(
+            &self.root_directory,
+            &self._database_file,
+            &self.root.join("cas.db"),
+        )?;
+        #[cfg(all(test, target_vendor = "apple"))]
+        pause_at_test_path_barrier(
+            "before-backup-database-open",
+            &self.root.join("cas.db"),
+        );
+        #[cfg(unix)]
+        let source_database = Connection::open_with_flags(
+            &working_database_path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW,
+        )?;
+        #[cfg(unix)]
+        let source_database = &source_database;
+        #[cfg(not(unix))]
+        let source_database = self.database();
+
         let database = tempfile::NamedTempFile::new()?;
         let mut snapshot_db = Connection::open(database.path())?;
         {
-            let backup = Backup::new(&self.db, &mut snapshot_db)?;
+            let backup = Backup::new(source_database, &mut snapshot_db)?;
             backup.run_to_completion(128, std::time::Duration::from_millis(1), None)?;
         }
 
@@ -985,7 +1143,7 @@ impl ContentStore {
     /// Return whether this rubbish item's captured-archive references have
     /// already been durably released for permanent deletion.
     pub fn rubbish_archive_refs_released(&self, item_id: Uuid) -> Result<bool, CasError> {
-        Self::rubbish_release_completed(&self.db, &item_id.to_string()).map_err(Into::into)
+        Self::rubbish_release_completed(self.database(), &item_id.to_string()).map_err(Into::into)
     }
 
     fn prevalidate_rubbish_archive_ref(&self, hash: &str) -> Result<(), CasError> {
@@ -993,8 +1151,7 @@ impl ContentStore {
             hash: hash.to_string(),
             message: error.to_string(),
         })?;
-        let row: Option<(i64, i64)> = self
-            .db
+        let row: Option<(i64, i64)> = self.database()
             .query_row(
                 "SELECT size, ref_count FROM blobs WHERE hash = ?1",
                 params![hash],
@@ -1044,10 +1201,13 @@ impl ContentStore {
         item_id: Uuid,
         hashes: &BTreeSet<String>,
     ) -> Result<ReleaseOutcome, CasError> {
-        self.verify_storage_identities()?;
         let _lock = ExclusiveLockGuard::acquire(&self.lock_file, &self.lock_held)?;
+        if let Err(error) = self.verify_storage_identities() {
+            drop(_lock);
+            return Err(error.into());
+        }
         let item_id = item_id.to_string();
-        if Self::rubbish_release_completed(&self.db, &item_id)? {
+        if Self::rubbish_release_completed(self.database(), &item_id)? {
             return Ok(ReleaseOutcome::AlreadyCompleted);
         }
 
@@ -1055,7 +1215,11 @@ impl ContentStore {
             self.prevalidate_rubbish_archive_ref(hash)?;
         }
 
-        let transaction = self.db.transaction()?;
+        let transaction = self
+            .db
+            .as_mut()
+            .expect("normal CAS operations require a live database connection")
+            .transaction()?;
         if Self::rubbish_release_completed(&transaction, &item_id)? {
             return Ok(ReleaseOutcome::AlreadyCompleted);
         }
@@ -1094,14 +1258,14 @@ impl ContentStore {
         // Note: we don't use a full transaction here because we also interact with the filesystem.
         // Instead, we use the primary key constraint to detect existence.
 
-        let res = self.db.execute(
+        let res = self.database().execute(
             "INSERT OR IGNORE INTO blobs (hash, size, content_type, created_at, ref_count) VALUES (?1, ?2, ?3, ?4, 1)",
             params![hash, data.len() as i64, content_type, now],
         )?;
 
         if res == 0 {
             // Already existed in DB, just increment ref count
-            self.db.execute(
+            self.database().execute(
                 "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
                 params![hash],
             )?;
@@ -1117,7 +1281,7 @@ impl ContentStore {
             }
             if let Err(e) = fs::write(&path, data) {
                 // Roll back DB insert if filesystem write fails
-                self.db
+                self.database()
                     .execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
                 return Err(e.into());
             }
@@ -1132,7 +1296,7 @@ impl ContentStore {
     /// Retrieve a blob's data and content type.
     pub fn retrieve(&self, hash: &str) -> Result<(Vec<u8>, String), Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let content_type: String = self.db.query_row(
+        let content_type: String = self.database().query_row(
             "SELECT content_type FROM blobs WHERE hash = ?1",
             params![hash],
             |row| row.get(0),
@@ -1157,8 +1321,7 @@ impl ContentStore {
     ) -> Result<OpenBlob, RetrieveLimitedError> {
         Self::validate_hash(hash)
             .map_err(|error| RetrieveLimitedError::Store(error.to_string()))?;
-        let (stored_size, content_type): (i64, String) = self
-            .db
+        let (stored_size, content_type): (i64, String) = self.database()
             .query_row(
                 "SELECT size, content_type FROM blobs WHERE hash = ?1",
                 params![hash],
@@ -1217,7 +1380,7 @@ impl ContentStore {
     /// reported as corruption rather than as an available blob.
     pub fn inspect(&self, hash: &str) -> Result<BlobMetadata, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let (stored_size, content_type): (i64, String) = self.db.query_row(
+        let (stored_size, content_type): (i64, String) = self.database().query_row(
             "SELECT size, content_type FROM blobs WHERE hash = ?1",
             params![hash],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1245,7 +1408,7 @@ impl ContentStore {
     /// Check whether a blob exists in the store.
     pub fn exists(&self, hash: &str) -> Result<bool, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let count: i64 = self.db.query_row(
+        let count: i64 = self.database().query_row(
             "SELECT COUNT(*) FROM blobs WHERE hash = ?1",
             params![hash],
             |row| row.get(0),
@@ -1257,7 +1420,7 @@ impl ContentStore {
     pub fn increment_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
         let _lock = self.acquire_exclusive_lock()?;
         Self::validate_hash(hash)?;
-        self.db.execute(
+        self.database().execute(
             "UPDATE blobs SET ref_count = ref_count + 1 WHERE hash = ?1",
             params![hash],
         )?;
@@ -1268,7 +1431,7 @@ impl ContentStore {
     pub fn decrement_ref(&self, hash: &str) -> Result<(), Box<dyn std::error::Error>> {
         let _lock = self.acquire_exclusive_lock()?;
         Self::validate_hash(hash)?;
-        self.db.execute(
+        self.database().execute(
             "UPDATE blobs SET ref_count = ref_count - 1 WHERE hash = ?1",
             params![hash],
         )?;
@@ -1280,8 +1443,7 @@ impl ContentStore {
     pub fn gc(&self, min_age: std::time::Duration) -> Result<u32, Box<dyn std::error::Error>> {
         let _lock = self.acquire_exclusive_lock()?;
         let cutoff = (chrono::Utc::now() - chrono::Duration::from_std(min_age)?).to_rfc3339();
-        let mut stmt = self
-            .db
+        let mut stmt = self.database()
             .prepare("SELECT hash FROM blobs WHERE ref_count <= 0 AND created_at < ?1")?;
         let hashes: Vec<String> = stmt
             .query_map(params![cutoff], |row| row.get(0))?
@@ -1293,7 +1455,7 @@ impl ContentStore {
             if path.exists() {
                 fs::remove_file(&path)?;
             }
-            self.db
+            self.database()
                 .execute("DELETE FROM blobs WHERE hash = ?1", params![hash])?;
             pruned += 1;
         }
@@ -1304,7 +1466,7 @@ impl ContentStore {
     #[cfg(test)]
     pub(crate) fn ref_count(&self, hash: &str) -> Result<i64, Box<dyn std::error::Error>> {
         Self::validate_hash(hash)?;
-        let count: i64 = self.db.query_row(
+        let count: i64 = self.database().query_row(
             "SELECT ref_count FROM blobs WHERE hash = ?1",
             params![hash],
             |row| row.get(0),
@@ -1314,11 +1476,10 @@ impl ContentStore {
 
     /// Return summary stats for the store.
     pub fn stats(&self) -> Result<CasStats, Box<dyn std::error::Error>> {
-        let blob_count: i64 = self
-            .db
+        let blob_count: i64 = self.database()
             .query_row("SELECT COUNT(*) FROM blobs", [], |row| row.get(0))?;
         let total_size: i64 =
-            self.db
+            self.database()
                 .query_row("SELECT COALESCE(SUM(size), 0) FROM blobs", [], |row| {
                     row.get(0)
                 })?;
@@ -1531,7 +1692,7 @@ mod tests {
     fn rubbish_cleanup_open_creates_an_item_keyed_completion_ledger() {
         let (store, _tmp) = test_store();
         let columns = store
-            .db
+            .database()
             .prepare("PRAGMA table_info(rubbish_archive_releases)")
             .unwrap()
             .query_map([], |row| {
@@ -1567,7 +1728,7 @@ mod tests {
         assert_eq!(store.ref_count(&first.hash).unwrap(), 1);
         assert_eq!(store.ref_count(&second.hash).unwrap(), 1);
         let recorded: String = store
-            .db
+            .database()
             .query_row(
                 "SELECT item_id FROM rubbish_archive_releases WHERE item_id = ?1",
                 params![item_id.to_string()],
@@ -1603,7 +1764,7 @@ mod tests {
         assert_eq!(store.ref_count(&valid.hash).unwrap(), 2);
         assert_eq!(
             store
-                .db
+                .database()
                 .query_row(
                     "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
                     params![item_id.to_string()],
@@ -1638,7 +1799,7 @@ mod tests {
         let blob = store.store(b"transactional blob", "image/png").unwrap();
         store.store(b"transactional blob", "image/png").unwrap();
         store
-            .db
+            .database()
             .execute_batch(
                 "CREATE TRIGGER fail_rubbish_cleanup_completion
                  BEFORE INSERT ON rubbish_archive_releases
@@ -1712,11 +1873,11 @@ mod tests {
     fn backup_snapshot_sees_committed_wal_state() {
         let (store, tmp) = test_store();
         store
-            .db
+            .database()
             .pragma_update(None, "journal_mode", "WAL")
             .unwrap();
         store
-            .db
+            .database()
             .pragma_update(None, "wal_autocheckpoint", 0)
             .unwrap();
         let stored = store.store(b"committed in the wal", "text/plain").unwrap();
@@ -1817,7 +1978,7 @@ mod tests {
     fn backup_snapshot_rejects_malformed_hash_and_non_regular_backing_state() {
         let (malformed_store, _malformed_tmp) = test_store();
         malformed_store
-            .db
+            .database()
             .execute(
                 "INSERT INTO blobs (hash, size, content_type, created_at, ref_count)
                  VALUES ('sha256:not-a-hash', 0, 'text/plain', ?1, 1)",
@@ -1942,6 +2103,36 @@ mod tests {
         assert!(
             worker.join().unwrap().is_err(),
             "snapshot followed a blob ancestor replaced after path resolution"
+        );
+    }
+
+    #[test]
+    fn backup_snapshot_rejects_lock_replacement_while_acquisition_is_blocked() {
+        let (holder, tmp) = test_store();
+        let stored = holder.store(b"lock identity", "text/plain").unwrap();
+        let waiter = ContentStore::open(tmp.path()).unwrap();
+        let snapshot = holder.backup_snapshot().unwrap();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_blocked_lock_barrier(barrier.clone());
+        let worker = std::thread::spawn(move || {
+            waiter
+                .backup_snapshot()
+                .map(|snapshot| snapshot.blobs().len())
+                .map_err(|error| error.to_string())
+        });
+
+        barrier.wait();
+        let lock_path = tmp.path().join(LOCK_FILE_NAME);
+        fs::rename(&lock_path, tmp.path().join("retained-cas.lock")).unwrap();
+        File::create(&lock_path).unwrap();
+        let replacement_store = ContentStore::open(tmp.path()).unwrap();
+        replacement_store.increment_ref(&stored.hash).unwrap();
+        barrier.wait();
+        drop(snapshot);
+
+        assert!(
+            worker.join().unwrap().is_err(),
+            "snapshot proceeded on the retained lock after cas.lock was replaced"
         );
     }
 
