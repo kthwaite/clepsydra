@@ -309,7 +309,7 @@ describe("feeds route controls", () => {
     });
   });
 
-  it("adds a feed facet through the shared FilterBar, keyed by id, labeled by title", async () => {
+  it("adds a feed facet through the shared FilterBar, keyed by id, labeled by its override title", async () => {
     routeMocks.search.view = "all";
     routeMocks.search.group = undefined;
     routeMocks.search.ungrouped = false;
@@ -331,12 +331,113 @@ describe("feeds route controls", () => {
     Object.assign(routeMocks.search, nextSearch);
     page.rerender(<FeedsPage />);
     expect(screen.getByTestId("filter-bar-chip-feed-7")).toHaveTextContent(
-      "FEED: One Example",
+      "FEED: Source Ledger",
     );
     expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
       "data-feed",
       "7",
     );
+  });
+
+  it("narrows the FEED field's options to the selected group's feeds", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = "Engineering";
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-feed"));
+
+    expect(screen.getByTestId("filter-bar-option-feed-7")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-option-feed-8"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-option-feed-9"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("offers every feed when no group is selected", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-feed"));
+
+    expect(screen.getByTestId("filter-bar-option-feed-7")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-option-feed-8")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-option-feed-9")).toBeInTheDocument();
+  });
+
+  it("shows the UNGROUPED chip for a URL with ungrouped=true, selects it through the FilterBar, and clears it via the chip", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = true;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    const page = render(<FeedsPage />);
+
+    expect(screen.getByTestId("filter-bar-chip-group-")).toHaveTextContent(
+      "GROUP: UNGROUPED",
+    );
+    expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
+      "data-group",
+      "",
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-group-"));
+    const clearedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(clearedNavigation.search(routeMocks.search)).toMatchObject({
+      group: undefined,
+      ungrouped: false,
+    });
+
+    routeMocks.search.ungrouped = false;
+    page.rerender(<FeedsPage />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-group"));
+    await user.click(screen.getByTestId("filter-bar-option-group-"));
+
+    const selectedNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(selectedNavigation.search(routeMocks.search)).toMatchObject({
+      group: undefined,
+      ungrouped: true,
+    });
+  });
+
+  it("never writes the ungrouped sentinel value to the URL", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-group"));
+    await user.click(screen.getByTestId("filter-bar-option-group-"));
+
+    const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    const nextSearch = navigation.search(routeMocks.search);
+    expect(nextSearch.group).not.toBe("");
+    expect(nextSearch.group).toBeUndefined();
   });
 
   it.each([23, "23"])("accepts positive integer entry %s", (entry) => {
