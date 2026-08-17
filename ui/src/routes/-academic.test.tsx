@@ -4,9 +4,18 @@ vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({ options }),
 }));
 
-import { Route } from "#/routes/academic";
+import { ACADEMIC_FILTER_URL, Route } from "#/routes/academic";
 
 describe("Academic route filters", () => {
+  it("exposes work_type/status/year/tag field ids matching the URL codec", () => {
+    expect(ACADEMIC_FILTER_URL.fields.map((f) => f.id)).toEqual([
+      "work_type",
+      "status",
+      "year",
+      "tag",
+    ]);
+  });
+
   it("normalises the shared filter search params, passing through unknown keys", () => {
     const validateSearch = Route.options.validateSearch;
     if (typeof validateSearch !== "function") {

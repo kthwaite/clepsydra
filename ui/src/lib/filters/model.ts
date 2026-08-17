@@ -90,6 +90,28 @@ export function clearFilter(_state: FilterState): FilterState {
   return EMPTY_FILTER_STATE;
 }
 
+/**
+ * Structural equality for facet maps: order-insensitive on keys, but
+ * order-sensitive on each key's value array (matching how toggleFacetValue
+ * appends/removes values in place). Used to decide history push vs. replace
+ * semantics — a text-only edit that leaves facets unchanged should replace
+ * the current history entry rather than push a new one.
+ */
+export function facetsEqual(
+  a: FilterState["facets"],
+  b: FilterState["facets"],
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  return aKeys.every((key) => {
+    const av = a[key] ?? [];
+    const bv = b[key];
+    if (!bv || av.length !== bv.length) return false;
+    return av.every((v, i) => v === bv[i]);
+  });
+}
+
 export type FacetAccessor<T> = (item: T) => readonly string[];
 
 export interface ClientFilterConfig<T> {

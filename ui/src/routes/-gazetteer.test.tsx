@@ -163,6 +163,13 @@ describe("Gazetteer route filters", () => {
     });
   });
 
+  it("gives the text filter an accessible name of Search pages", () => {
+    render(<GazetteerPage />);
+    expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
+      "Search pages",
+    );
+  });
+
   it("combines route filters in the authoritative paged query and follows history changes", () => {
     const view = render(<GazetteerPage />);
 
@@ -226,6 +233,24 @@ describe("Gazetteer route filters", () => {
       project: undefined,
       page: 1,
     });
+  });
+
+  it("replaces history on a text-only edit but pushes on a facet toggle", async () => {
+    const user = userEvent.setup();
+    render(<GazetteerPage />);
+
+    routeMocks.navigate.mockClear();
+    await user.type(screen.getByTestId("filter-bar-input"), "!");
+    expect(routeMocks.navigate).toHaveBeenLastCalledWith(
+      expect.objectContaining({ to: "/gazetteer", replace: true }),
+    );
+
+    routeMocks.navigate.mockClear();
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-kind"));
+    await user.click(screen.getByTestId("filter-bar-option-kind-NOTE"));
+    const call = routeMocks.navigate.mock.calls.at(-1)?.[0];
+    expect(call.replace).not.toBe(true);
   });
 
   it("composes a result tag into route search without opening the row or navigating twice", async () => {

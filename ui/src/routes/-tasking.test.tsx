@@ -4,7 +4,7 @@ vi.mock("@tanstack/react-router", () => ({
   createFileRoute: () => (options: Record<string, unknown>) => ({ options }),
 }));
 
-import { Route } from "#/routes/tasking";
+import { Route, TASKING_FILTER_URL } from "#/routes/tasking";
 
 describe("Tasking route filters", () => {
   it("normalises the shared filter search params, passing through unknown keys", () => {
@@ -23,5 +23,15 @@ describe("Tasking route filters", () => {
       status: undefined,
       q: undefined,
     });
+  });
+
+  it("exposes project/tags/pri/status/hold field ids matching the URL codec", () => {
+    expect(TASKING_FILTER_URL.fields.map((f) => f.id)).toEqual([
+      "project",
+      "tags",
+      "pri",
+      "status",
+      "hold",
+    ]);
   });
 });
