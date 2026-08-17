@@ -185,4 +185,86 @@ describe("FilterBar", () => {
     );
     expect(screen.queryByTestId("filter-bar-input")).not.toBeInTheDocument();
   });
+
+  it("exposes selected state on pane-2 options via aria-pressed", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={{ text: "", facets: { tags: ["rust"] } }} />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-tags"));
+    expect(screen.getByTestId("filter-bar-option-tags-rust")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("filter-bar-option-tags-ui")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("marks a selected pane-1 flag field aria-pressed=true", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={{ text: "", facets: { hold: ["1"] } }} />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    expect(screen.getByTestId("filter-bar-field-hold")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("marks an unselected pane-1 flag field aria-pressed=false", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    expect(screen.getByTestId("filter-bar-field-hold")).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+  });
+
+  it("defaults the text input's accessible name to Filter and allows override", () => {
+    const { rerender } = render(
+      <FilterBar
+        fields={FIELDS}
+        state={EMPTY_FILTER_STATE}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
+      "Filter",
+    );
+
+    rerender(
+      <FilterBar
+        fields={FIELDS}
+        state={EMPTY_FILTER_STATE}
+        onChange={() => {}}
+        textAriaLabel="Search pages"
+      />,
+    );
+    expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
+      "Search pages",
+    );
+  });
+
+  it("gives the pane-2 option-filter input a fixed accessible name", async () => {
+    const user = userEvent.setup();
+    const many: FilterField[] = [
+      {
+        id: "tags",
+        kind: "multi",
+        label: "TAG",
+        options: Array.from({ length: 12 }, (_, i) => ({ value: `tag-${i}` })),
+      },
+    ];
+    function ManyHarness() {
+      const [state, setState] = useState(EMPTY_FILTER_STATE);
+      return <FilterBar fields={many} state={state} onChange={setState} />;
+    }
+    render(<ManyHarness />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-tags"));
+    expect(screen.getByTestId("filter-bar-option-filter")).toHaveAccessibleName(
+      "Filter options",
+    );
+  });
 });

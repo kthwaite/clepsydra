@@ -270,6 +270,13 @@ describe("AcademicLibrary", () => {
 });
 
 describe("AcademicLibrary — shared FilterBar composition", () => {
+  it("gives the text filter an accessible name of Search works", () => {
+    render(<ControlledAcademicLibrary />);
+    expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
+      "Search works",
+    );
+  });
+
   it("adding a status facet issues the works request with status=<value>", async () => {
     const user = userEvent.setup();
     render(<ControlledAcademicLibrary />);

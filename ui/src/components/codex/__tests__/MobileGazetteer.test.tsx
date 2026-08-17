@@ -162,6 +162,9 @@ describe("MobileGazetteer", () => {
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
     expect(dialog).toBeVisible();
+    expect(within(dialog).getByTestId("filter-bar-input")).toHaveAccessibleName(
+      "Search pages",
+    );
 
     await user.type(within(dialog).getByTestId("filter-bar-input"), "a");
     expect(onFilterChange).toHaveBeenCalledWith({ text: "a", facets: {} });

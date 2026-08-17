@@ -274,6 +274,7 @@ export function AcademicLibrary({
               state={filterState}
               onChange={onFilterChange}
               textPlaceholder="Title, author, citation key…"
+              textAriaLabel="Search works"
               className="flex-wrap"
             />
             <div className="cl-mono mt-2 flex justify-between text-[9px] uppercase tracking-[0.12em] text-ink-mute">
