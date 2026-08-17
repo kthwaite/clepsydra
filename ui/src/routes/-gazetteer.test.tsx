@@ -174,9 +174,7 @@ describe("Gazetteer route filters", () => {
       limit: 20,
       offset: 20,
     });
-    expect(screen.getByRole("searchbox", { name: "Search pages" })).toHaveValue(
-      "atlas",
-    );
+    expect(screen.getByTestId("filter-bar-input")).toHaveValue("atlas");
 
     Object.assign(routeMocks.search, {
       q: "beta",

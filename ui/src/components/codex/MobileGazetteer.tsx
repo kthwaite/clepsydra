@@ -10,13 +10,11 @@ import type { ContentEntry } from "#/api/types";
 import { FilterBar } from "#/components/filters/FilterBar";
 import { Button } from "#/components/ui/button";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
-import { TextField } from "#/components/ui/text-field";
 import { cn } from "#/lib/cn";
 import {
   activeFacets,
   type FilterField,
   type FilterState,
-  setText,
 } from "#/lib/filters/model";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
@@ -250,21 +248,11 @@ export function MobileGazetteer({
             </div>
 
             <div className="cl-noscroll min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-              <TextField
-                label="Search pages"
-                type="search"
-                value={filterState.text}
-                onChange={(value) =>
-                  onFilterChange(setText(filterState, value))
-                }
-                placeholder="Title, path, description, or tag"
-              />
-
               <FilterBar
                 fields={filterFields}
                 state={filterState}
                 onChange={onFilterChange}
-                showText={false}
+                textPlaceholder="Title, path, description, or tag"
                 className="flex-wrap"
               />
 

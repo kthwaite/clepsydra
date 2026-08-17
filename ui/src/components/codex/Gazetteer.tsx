@@ -17,11 +17,7 @@ import { FilterBar } from "#/components/filters/FilterBar";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
-import {
-  type FilterField,
-  type FilterState,
-  setText,
-} from "#/lib/filters/model";
+import type { FilterField, FilterState } from "#/lib/filters/model";
 import {
   ASSIGNABLE_KINDS,
   KINDS,
@@ -270,19 +266,6 @@ export function Gazetteer({ initialTag, filters }: Props) {
           {filteredCount} entries{tagSummary}
         </span>
         <div className="flex-1" />
-        <label className="flex items-center gap-2 border border-rule-soft px-2 py-1">
-          <span className="cl-mono text-accent">/</span>
-          <input
-            aria-label="Search pages"
-            type="search"
-            value={query}
-            onChange={(e) =>
-              onFilterChange(setText(filterState, e.target.value))
-            }
-            placeholder="grep…"
-            className="cl-mono w-[200px] bg-transparent text-[11px] text-ink outline-none placeholder:text-ink-mute"
-          />
-        </label>
         <div className="cl-mono flex items-stretch border border-rule-soft text-[9px] uppercase tracking-[0.12em]">
           {(["ts", "id", "title", "words"] as GazetteerSort[]).map((s) => (
             <button
@@ -307,7 +290,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
           fields={filterFields}
           state={filterState}
           onChange={onFilterChange}
-          showText={false}
+          textPlaceholder="grep…"
           filteredCount={filteredCount}
           totalCount={totalCount}
           className="flex-wrap"
