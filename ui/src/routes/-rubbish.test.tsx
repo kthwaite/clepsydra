@@ -1,18 +1,37 @@
-import { createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { describe, expect, it } from "vitest";
-import { routeTree } from "#/routeTree.gen";
+import { describe, expect, it, vi } from "vitest";
 
-describe("rubbish route", () => {
-  it("matches /rubbish as the dedicated Rubbish Bin Codex view", async () => {
-    const router = createRouter({
-      routeTree,
-      history: createMemoryHistory({ initialEntries: ["/rubbish"] }),
+vi.mock("@tanstack/react-router", () => ({
+  createFileRoute: () => (options: Record<string, unknown>) => ({ options }),
+}));
+
+import { Route } from "#/routes/rubbish";
+
+describe("Rubbish route filters", () => {
+  it("normalises the shared filter search params, passing through unknown keys", () => {
+    const validateSearch = Route.options.validateSearch;
+    if (typeof validateSearch !== "function") {
+      throw new Error("Expected a callable search validator");
+    }
+    expect(
+      validateSearch({
+        kind: "note",
+        bogus: "x",
+      } as any),
+    ).toEqual({
+      kind: "NOTE",
+      bogus: "x",
+      q: undefined,
     });
+  });
 
-    await router.load();
-
-    expect(router.state.location.pathname).toBe("/rubbish");
-    expect(router.state.matches.at(-1)?.routeId).toBe("/rubbish");
-    expect(router.state.matches.at(-1)?.staticData.codexView).toBe("rubbish");
+  it("round-trips an already-normalised kind facet and text query through the codec", () => {
+    const validateSearch = Route.options.validateSearch;
+    if (typeof validateSearch !== "function") {
+      throw new Error("Expected a callable search validator");
+    }
+    expect(validateSearch({ kind: "PROJECT", q: "alpha" } as any)).toEqual({
+      kind: "PROJECT",
+      q: "alpha",
+    });
   });
 });

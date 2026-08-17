@@ -12,11 +12,20 @@ import {
   useRubbishList,
 } from "#/api/rubbish";
 import { PreviewMarkdown } from "#/components/codex/PreviewMarkdown";
+import { FilterBar } from "#/components/filters/FilterBar";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
+import {
+  applyClientFilter,
+  EMPTY_FILTER_STATE,
+  type FilterField,
+  type FilterState,
+  isFilterActive,
+} from "#/lib/filters/model";
+import { KINDS, type Kind, kindLabel } from "#/lib/kind";
 
 type Confirmation =
   | { kind: "purge"; item: RubbishItemSummary }
@@ -43,6 +52,17 @@ function formatDeletedAt(value: string): string {
   return Number.isNaN(timestamp.valueOf())
     ? "Deletion time unavailable"
     : deletedAtFormatter.format(timestamp);
+}
+
+/** Retained items store `kind` as a bare string, not the typed `Kind` union
+ * (see RubbishItemSummary in schema.d.ts). Guard against an unrecognised
+ * value — e.g. from a stale item predating a kind — rather than crashing
+ * `kindLabel`, mirroring the asWorkType/asReadingStatus narrowing pattern in
+ * AcademicLibrary. */
+function kindOptionLabel(kind: string): string {
+  return (KINDS as readonly string[]).includes(kind)
+    ? kindLabel(kind as Kind)
+    : kind;
 }
 
 function RubbishRow({
@@ -128,7 +148,13 @@ function DetailMetadata({ item }: { item: RubbishItemSummary }) {
   );
 }
 
-export function RubbishBin() {
+export function RubbishBin({
+  filterState = EMPTY_FILTER_STATE,
+  onFilterChange = () => {},
+}: {
+  filterState?: FilterState;
+  onFilterChange?: (next: FilterState) => void;
+} = {}) {
   const listQuery = useRubbishList();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [hiddenIds, setHiddenIds] = useState<ReadonlySet<string>>(
@@ -158,12 +184,40 @@ export function RubbishBin() {
   const entries = (listQuery.data ?? []).filter(
     (entry) => entry.status === "invalid" || !hiddenIds.has(entry.item.item_id),
   );
-  const validItems = entries.flatMap((entry) =>
-    entry.status === "valid" ? [entry.item] : [],
+  const validEntries = entries.filter(
+    (entry): entry is Extract<RubbishListEntry, { status: "valid" }> =>
+      entry.status === "valid",
   );
+  const validItems = validEntries.map((entry) => entry.item);
   const selectedSummary = selectedId
     ? (validItems.find((item) => item.item_id === selectedId) ?? null)
     : null;
+
+  const filterFields: FilterField[] = [
+    {
+      id: "kind",
+      kind: "single",
+      label: "KIND",
+      options: [...new Set(validItems.map((item) => item.kind))]
+        .sort()
+        .map((value) => ({ value, label: kindOptionLabel(value) })),
+    },
+  ];
+
+  const filterActive = isFilterActive(filterState);
+  const filteredValidEntries = applyClientFilter(validEntries, filterState, {
+    accessors: { kind: (entry) => [entry.item.kind] },
+    textHay: (entry) => `${entry.item.title}\n${entry.item.original_path}`,
+  });
+  // R7: an active filter drops invalid ledger entries from the render
+  // entirely (they carry no title/path/kind to match against); with no
+  // filter, rendering is unchanged — the mixed valid+invalid order from the
+  // API, minus optimistically hidden ids.
+  const visibleEntries: RubbishListEntry[] = filterActive
+    ? filteredValidEntries
+    : entries;
+  const hasAnyEntries = entries.length > 0;
+  const showFilteredEmpty = hasAnyEntries && visibleEntries.length === 0;
 
   useEffect(() => {
     if (!emptyOutcomes) return;
@@ -391,171 +445,192 @@ export function RubbishBin() {
             Try again
           </Button>
         </div>
-      ) : entries.length === 0 ? (
-        <div
-          role="status"
-          className="flex flex-1 items-center justify-center p-8 text-center"
-        >
-          <div>
-            <p className="text-sm font-semibold">Rubbish Bin is empty.</p>
-            <p className="mt-1 text-xs text-ink-mute">
-              Deleted pages retained for recovery will appear here.
-            </p>
-          </div>
-        </div>
       ) : (
-        <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(18rem,0.78fr)_minmax(24rem,1.22fr)]">
-          {!mobile || selectedId === null ? (
-            <section
-              aria-label="Rubbish ledger"
-              className="min-h-0 overflow-y-auto border-rule md:border-r"
-            >
-              <ul>
-                {entries.map((entry) => (
-                  <RubbishRow
-                    key={
-                      entry.status === "valid"
-                        ? entry.item.item_id
-                        : `invalid:${entry.item_id}`
-                    }
-                    entry={entry}
-                    selected={
-                      entry.status === "valid" &&
-                      entry.item.item_id === selectedId
-                    }
-                    onSelect={(itemId) => {
-                      setActionError(null);
-                      setRestoredPage(null);
-                      setSelectedId(itemId);
-                    }}
-                  />
-                ))}
-              </ul>
-            </section>
+        <>
+          {hasAnyEntries ? (
+            <div className="border-b border-rule-soft px-4 py-3 md:px-5">
+              <FilterBar
+                fields={filterFields}
+                state={filterState}
+                onChange={onFilterChange}
+                textPlaceholder="Title or original path…"
+              />
+            </div>
           ) : null}
-
-          {!mobile || selectedId !== null ? (
-            <section
-              aria-label="Rubbish item detail"
-              className="min-h-0 overflow-y-auto bg-paper"
+          {!hasAnyEntries ? (
+            <div
+              role="status"
+              className="flex flex-1 items-center justify-center p-8 text-center"
             >
-              {selectedId === null ? (
-                <div className="flex h-full min-h-64 items-center justify-center p-8 text-center">
-                  <div>
-                    <p className="text-sm font-semibold">
-                      Select a retained page.
-                    </p>
-                    <p className="mt-1 text-xs text-ink-mute">
-                      Inspect its stored metadata and read-only preview before
-                      acting.
-                    </p>
-                  </div>
-                </div>
-              ) : detailQuery.isPending ? (
-                <div
-                  role="status"
-                  className="cl-mono flex min-h-64 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+              <div>
+                <p className="text-sm font-semibold">Rubbish Bin is empty.</p>
+                <p className="mt-1 text-xs text-ink-mute">
+                  Deleted pages retained for recovery will appear here.
+                </p>
+              </div>
+            </div>
+          ) : showFilteredEmpty ? (
+            <div
+              role="status"
+              className="cl-mono flex flex-1 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+            >
+              No items match the filter
+            </div>
+          ) : (
+            <div className="grid min-h-0 flex-1 md:grid-cols-[minmax(18rem,0.78fr)_minmax(24rem,1.22fr)]">
+              {!mobile || selectedId === null ? (
+                <section
+                  aria-label="Rubbish ledger"
+                  className="min-h-0 overflow-y-auto border-rule md:border-r"
                 >
-                  Loading retained page…
-                </div>
-              ) : detailQuery.isError ? (
-                <div
-                  role="alert"
-                  className="flex min-h-64 items-center justify-center p-8 text-center text-sm text-hot"
-                >
-                  {formatApiError(
-                    detailQuery.error,
-                    "This retained page could not load.",
-                  )}
-                </div>
-              ) : detailQuery.data ? (
-                <article>
-                  <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-4 md:px-5">
-                    <div className="min-w-0">
-                      {mobile ? (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="mb-3"
-                          onPress={() => setSelectedId(null)}
-                        >
-                          <ArrowLeft aria-hidden /> Back to Rubbish Bin
-                        </Button>
-                      ) : null}
-                      <p className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-                        Retained page / read only
-                      </p>
-                      <h2 className="mt-1 break-words text-xl font-black tracking-tight">
-                        {detailQuery.data.item.title}
-                      </h2>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button
-                        size="sm"
-                        variant="secondary"
-                        isDisabled={lifecycleBusy}
-                        onPress={() => {
-                          if (!lifecycleBusy) void restoreSelected();
+                  <ul>
+                    {visibleEntries.map((entry) => (
+                      <RubbishRow
+                        key={
+                          entry.status === "valid"
+                            ? entry.item.item_id
+                            : `invalid:${entry.item_id}`
+                        }
+                        entry={entry}
+                        selected={
+                          entry.status === "valid" &&
+                          entry.item.item_id === selectedId
+                        }
+                        onSelect={(itemId) => {
+                          setActionError(null);
+                          setRestoredPage(null);
+                          setSelectedId(itemId);
                         }}
-                      >
-                        <RotateCcw aria-hidden /> Restore
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="danger"
-                        isDisabled={lifecycleBusy}
-                        onPress={() => {
-                          if (!lifecycleBusy) {
-                            setConfirmation({
-                              kind: "purge",
-                              item: detailQuery.data.item,
-                            });
-                          }
-                        }}
-                      >
-                        <Trash2 aria-hidden /> Delete permanently
-                      </Button>
-                    </div>
-                  </div>
-                  <DetailMetadata item={detailQuery.data.item} />
-                  <section
-                    aria-labelledby="stored-preview-heading"
-                    className="px-4 py-5 md:px-5"
-                  >
-                    <div className="flex flex-wrap items-baseline justify-between gap-2">
-                      <h3
-                        id="stored-preview-heading"
-                        className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]"
-                      >
-                        Stored body preview
-                      </h3>
-                      {detailQuery.data.preview.truncated ? (
-                        <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-warn">
-                          Preview is truncated
-                        </span>
-                      ) : null}
-                    </div>
-                    <section
-                      aria-label="Read-only stored body preview"
-                      className="mt-3 max-h-96 overflow-y-auto border-l-2 border-rule bg-paper-2 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                    >
-                      {detailQuery.data.preview.encrypted ? (
-                        <p className="text-xs text-ink-mute">
-                          This retained body is encrypted and is not disclosed
-                          in the preview.
-                        </p>
-                      ) : (
-                        <PreviewMarkdown
-                          content={detailQuery.data.preview.body}
-                        />
-                      )}
-                    </section>
-                  </section>
-                </article>
+                      />
+                    ))}
+                  </ul>
+                </section>
               ) : null}
-            </section>
-          ) : null}
-        </div>
+
+              {!mobile || selectedId !== null ? (
+                <section
+                  aria-label="Rubbish item detail"
+                  className="min-h-0 overflow-y-auto bg-paper"
+                >
+                  {selectedId === null ? (
+                    <div className="flex h-full min-h-64 items-center justify-center p-8 text-center">
+                      <div>
+                        <p className="text-sm font-semibold">
+                          Select a retained page.
+                        </p>
+                        <p className="mt-1 text-xs text-ink-mute">
+                          Inspect its stored metadata and read-only preview
+                          before acting.
+                        </p>
+                      </div>
+                    </div>
+                  ) : detailQuery.isPending ? (
+                    <div
+                      role="status"
+                      className="cl-mono flex min-h-64 items-center justify-center p-8 text-[11px] uppercase tracking-[0.18em] text-ink-mute"
+                    >
+                      Loading retained page…
+                    </div>
+                  ) : detailQuery.isError ? (
+                    <div
+                      role="alert"
+                      className="flex min-h-64 items-center justify-center p-8 text-center text-sm text-hot"
+                    >
+                      {formatApiError(
+                        detailQuery.error,
+                        "This retained page could not load.",
+                      )}
+                    </div>
+                  ) : detailQuery.data ? (
+                    <article>
+                      <div className="flex flex-wrap items-start justify-between gap-3 px-4 py-4 md:px-5">
+                        <div className="min-w-0">
+                          {mobile ? (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="mb-3"
+                              onPress={() => setSelectedId(null)}
+                            >
+                              <ArrowLeft aria-hidden /> Back to Rubbish Bin
+                            </Button>
+                          ) : null}
+                          <p className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+                            Retained page / read only
+                          </p>
+                          <h2 className="mt-1 break-words text-xl font-black tracking-tight">
+                            {detailQuery.data.item.title}
+                          </h2>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            isDisabled={lifecycleBusy}
+                            onPress={() => {
+                              if (!lifecycleBusy) void restoreSelected();
+                            }}
+                          >
+                            <RotateCcw aria-hidden /> Restore
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
+                            isDisabled={lifecycleBusy}
+                            onPress={() => {
+                              if (!lifecycleBusy) {
+                                setConfirmation({
+                                  kind: "purge",
+                                  item: detailQuery.data.item,
+                                });
+                              }
+                            }}
+                          >
+                            <Trash2 aria-hidden /> Delete permanently
+                          </Button>
+                        </div>
+                      </div>
+                      <DetailMetadata item={detailQuery.data.item} />
+                      <section
+                        aria-labelledby="stored-preview-heading"
+                        className="px-4 py-5 md:px-5"
+                      >
+                        <div className="flex flex-wrap items-baseline justify-between gap-2">
+                          <h3
+                            id="stored-preview-heading"
+                            className="cl-mono text-[10px] font-bold uppercase tracking-[0.16em]"
+                          >
+                            Stored body preview
+                          </h3>
+                          {detailQuery.data.preview.truncated ? (
+                            <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-warn">
+                              Preview is truncated
+                            </span>
+                          ) : null}
+                        </div>
+                        <section
+                          aria-label="Read-only stored body preview"
+                          className="mt-3 max-h-96 overflow-y-auto border-l-2 border-rule bg-paper-2 px-4 py-3 outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                        >
+                          {detailQuery.data.preview.encrypted ? (
+                            <p className="text-xs text-ink-mute">
+                              This retained body is encrypted and is not
+                              disclosed in the preview.
+                            </p>
+                          ) : (
+                            <PreviewMarkdown
+                              content={detailQuery.data.preview.body}
+                            />
+                          )}
+                        </section>
+                      </section>
+                    </article>
+                  ) : null}
+                </section>
+              ) : null}
+            </div>
+          )}
+        </>
       )}
 
       <Dialog
