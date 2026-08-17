@@ -79,7 +79,14 @@ function FeedsPage() {
   const readerRegionRef = useRef<HTMLDivElement>(null);
   const previousEntryId = useRef<number | undefined>(undefined);
   const mobileListScrollTop = useRef(0);
-  const selectedGroupName = search.ungrouped ? "" : search.group;
+  // "" can never be a real canonicalFeedGroups() value (it explicitly drops
+  // any group whose trimmed name is empty), so it's collision-free even
+  // against a real group literally named "__ungrouped__". UI-only — never
+  // written to the URL; onFilterChange maps it back to ungrouped: true.
+  const UNGROUPED_GROUP_FACET = "";
+  const selectedGroupName = search.ungrouped
+    ? UNGROUPED_GROUP_FACET
+    : search.group;
   const filters: FeedRiverFilters = {
     view: search.view,
     group: selectedGroupName,
@@ -101,17 +108,23 @@ function FeedsPage() {
       id: "group",
       kind: "single",
       label: "GROUP",
-      options: canonicalFeedGroups(groups.map((group) => group.name)).map(
-        (name) => ({ value: name, label: name }),
-      ),
+      options: [
+        ...canonicalFeedGroups(groups.map((group) => group.name)).map(
+          (name) => ({ value: name, label: name }),
+        ),
+        { value: UNGROUPED_GROUP_FACET, label: "UNGROUPED" },
+      ],
     },
     {
       id: "feed",
       kind: "single",
       label: "FEED",
-      options: feeds.map((feed) => ({
+      options: (selectedGroupName === undefined
+        ? feeds
+        : feeds.filter((feed) => feed.group === selectedGroupName)
+      ).map((feed) => ({
         value: String(feed.id),
-        label: feed.title,
+        label: feed.title_override || feed.title,
       })),
     },
     {
@@ -126,18 +139,22 @@ function FeedsPage() {
   const filterState: FilterState = {
     text: "",
     facets: {
-      ...(search.group ? { group: [search.group] } : {}),
+      ...(selectedGroupName !== undefined
+        ? { group: [selectedGroupName] }
+        : {}),
       ...(search.feed !== undefined ? { feed: [String(search.feed)] } : {}),
       ...(search.tag ? { tag: [search.tag] } : {}),
     },
   };
-  const onFilterChange = (next: FilterState) =>
+  const onFilterChange = (next: FilterState) => {
+    const nextGroup = next.facets.group?.[0];
     navigate({
       to: "/feeds",
       replace: true,
       search: (current) => ({
         ...current,
-        group: next.facets.group?.[0],
+        group: nextGroup === UNGROUPED_GROUP_FACET ? undefined : nextGroup,
+        ungrouped: nextGroup === UNGROUPED_GROUP_FACET,
         feed:
           next.facets.feed?.[0] !== undefined
             ? Number(next.facets.feed[0])
@@ -145,6 +162,7 @@ function FeedsPage() {
         tag: next.facets.tag?.[0],
       }),
     });
+  };
 
   useEffect(() => {
     let restoreFrame: number | undefined;
