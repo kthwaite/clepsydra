@@ -146,6 +146,34 @@ describe("FilterBar", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("chip aria-label uses the resolved option label, not the raw value", () => {
+    const labeled: FilterField[] = [
+      {
+        id: "status",
+        kind: "single",
+        label: "STATUS",
+        options: [{ value: "open", label: "Open Ticket" }],
+      },
+    ];
+    render(
+      <FilterBar
+        fields={labeled}
+        state={{ text: "", facets: { status: ["open"] } }}
+        onChange={() => {}}
+      />,
+    );
+    expect(
+      screen.getByTestId("filter-bar-chip-status-open"),
+    ).toHaveAccessibleName("Remove filter STATUS: Open Ticket");
+  });
+
+  it("flag chip aria-label omits the internal sentinel value", () => {
+    render(<Harness initial={{ text: "", facets: { hold: ["1"] } }} />);
+    expect(screen.getByTestId("filter-bar-chip-hold-1")).toHaveAccessibleName(
+      "Remove filter ON HOLD",
+    );
+  });
+
   it("hides the text input when showText is false", () => {
     render(
       <FilterBar
