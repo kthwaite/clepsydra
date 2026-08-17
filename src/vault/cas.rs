@@ -163,6 +163,8 @@ pub struct BackupSnapshot<'a> {
     database: tempfile::NamedTempFile,
     blobs: Vec<BackupBlob>,
     canonical_root: PathBuf,
+    #[cfg(test)]
+    membership_comparisons: Cell<usize>,
     _lock: ExclusiveLockGuard<'a>,
 }
 
@@ -175,6 +177,27 @@ impl BackupSnapshot<'_> {
         &self.blobs
     }
 
+    fn authoritative_blob(&self, blob: &BackupBlob) -> Option<&BackupBlob> {
+        #[cfg(test)]
+        self.membership_comparisons.set(0);
+        let index = self
+            .blobs
+            .binary_search_by(|candidate| {
+                #[cfg(test)]
+                self.membership_comparisons
+                    .set(self.membership_comparisons.get() + 1);
+                candidate.hash.cmp(&blob.hash)
+            })
+            .ok()?;
+        let candidate = &self.blobs[index];
+        (candidate == blob).then_some(candidate)
+    }
+
+    #[cfg(test)]
+    fn membership_comparisons(&self) -> usize {
+        self.membership_comparisons.get()
+    }
+
     /// Open and revalidate one authoritative blob for the duration of a callback.
     ///
     /// The descriptor owned by this method is closed before it returns, so
@@ -184,7 +207,7 @@ impl BackupSnapshot<'_> {
         blob: &BackupBlob,
         use_file: impl FnOnce(&mut File) -> io::Result<()>,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        if !self.blobs.contains(blob) {
+        if self.authoritative_blob(blob).is_none() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "blob does not belong to this CAS backup snapshot",
@@ -406,6 +429,8 @@ impl ContentStore {
             database,
             blobs,
             canonical_root,
+            #[cfg(test)]
+            membership_comparisons: Cell::new(0),
             _lock: lock,
         })
     }
@@ -1360,6 +1385,26 @@ mod tests {
         assert_eq!(
             after, before,
             "snapshot retained blob descriptors beneath the CAS root"
+        );
+    }
+
+    #[test]
+    fn backup_blob_membership_lookup_is_sublinear() {
+        let (store, _tmp) = test_store();
+        for index in 0..256 {
+            store
+                .store(format!("membership-{index}").as_bytes(), "text/plain")
+                .unwrap();
+        }
+        let snapshot = store.backup_snapshot().unwrap();
+        let blob = snapshot.blobs().last().unwrap().clone();
+
+        snapshot.with_blob_file(&blob, |_| Ok(())).unwrap();
+
+        assert!(
+            snapshot.membership_comparisons() <= 10,
+            "membership lookup made {} comparisons for 256 blobs",
+            snapshot.membership_comparisons()
         );
     }
 }
