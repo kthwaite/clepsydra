@@ -86,10 +86,6 @@ export function removeFacetValue(
   );
 }
 
-export function clearAllFacets(state: FilterState): FilterState {
-  return { ...state, facets: {} };
-}
-
 export function clearFilter(_state: FilterState): FilterState {
   return EMPTY_FILTER_STATE;
 }
