@@ -331,6 +331,39 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
       expect.objectContaining({ limit: 200, status: "reading" }),
     );
   });
+
+  it("resets the load-more limit to PAGE_SIZE when a facet is removed", async () => {
+    const user = userEvent.setup();
+    if (mocks.worksState.data) mocks.worksState.data.total = 250;
+    render(<ControlledAcademicLibrary />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-option-status-reading"));
+    await user.click(screen.getByRole("button", { name: "Load more works" }));
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 250, status: "reading" }),
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-status-reading"));
+
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ limit: 200, status: undefined }),
+    );
+  });
+
+  it("renders a raw-value chip for an unparseable year and omits it from the works request", () => {
+    render(
+      <ControlledAcademicLibrary
+        initial={{ text: "", facets: { year: ["abc"] } }}
+      />,
+    );
+
+    expect(screen.getByTestId("filter-bar-chip-year-abc")).toBeVisible();
+    expect(mocks.worksFilters).toHaveBeenLastCalledWith(
+      expect.objectContaining({ year: undefined }),
+    );
+  });
 });
 
 describe("WorkDetail", () => {

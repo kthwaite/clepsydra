@@ -59,6 +59,17 @@ function asReadingStatus(value: string | undefined): ReadingStatus | undefined {
     : undefined;
 }
 
+/** Parse a facet's raw string value as a year, mirroring the
+ * Number.isFinite guard used for numeric search params elsewhere
+ * (feeds.tsx's `feed` param, gazetteer.tsx's `page` param) — an
+ * unparseable value (e.g. `?year=abc`) is omitted rather than sent to the
+ * server as `NaN`, which the backend's `Option<i32>` deserializer rejects. */
+function asYear(value: string | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function formatError(error: unknown, fallback: string): string {
   if (error instanceof Error) return error.message;
   if (
@@ -127,7 +138,7 @@ export function AcademicLibrary({
     limit,
     work_type: asWorkType(facetWorkType),
     status: asReadingStatus(facetStatus),
-    year: facetYear ? Number(facetYear) : undefined,
+    year: asYear(facetYear),
     tag: facetTag,
   });
   const createWork = useCreateWork();
