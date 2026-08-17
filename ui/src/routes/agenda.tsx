@@ -18,6 +18,7 @@ import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 import {
   applyClientFilter,
   type ClientFilterConfig,
+  facetsEqual,
   type FilterField,
   type FilterState,
 } from "#/lib/filters/model";
@@ -84,9 +85,10 @@ function AgendaPage() {
           ...current,
           ...filterStateToSearch(next, AGENDA_FILTER_URL),
         }),
+        replace: facetsEqual(next.facets, filterState.facets),
       });
     },
-    [navigate],
+    [navigate, filterState],
   );
 
   return (

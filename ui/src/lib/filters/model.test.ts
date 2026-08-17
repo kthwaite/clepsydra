@@ -3,6 +3,7 @@ import {
   applyClientFilter,
   clearFilter,
   EMPTY_FILTER_STATE,
+  facetsEqual,
   FLAG_ON,
   isFilterActive,
   removeFacetValue,
@@ -56,6 +57,39 @@ describe("filter state helpers", () => {
     s = removeFacetValue(s, "tags", "a");
     expect("tags" in s.facets).toBe(false);
     expect(isFilterActive(clearFilter(s))).toBe(false);
+  });
+});
+
+describe("facetsEqual", () => {
+  it("treats two empty facet maps as equal", () => {
+    expect(facetsEqual({}, {})).toBe(true);
+  });
+
+  it("is insensitive to key order", () => {
+    expect(facetsEqual({ a: ["1"], b: ["2"] }, { b: ["2"], a: ["1"] })).toBe(
+      true,
+    );
+  });
+
+  it("is sensitive to value order within a key", () => {
+    expect(facetsEqual({ a: ["1", "2"] }, { a: ["2", "1"] })).toBe(false);
+  });
+
+  it("is unequal when a key is present on only one side", () => {
+    expect(facetsEqual({ a: ["1"] }, {})).toBe(false);
+    expect(facetsEqual({}, { a: ["1"] })).toBe(false);
+  });
+
+  it("is unequal when key sets differ in size", () => {
+    expect(facetsEqual({ a: ["1"] }, { a: ["1"], b: ["2"] })).toBe(false);
+  });
+
+  it("is equal for identical single-key single-value maps", () => {
+    expect(facetsEqual({ kind: ["NOTE"] }, { kind: ["NOTE"] })).toBe(true);
+  });
+
+  it("is unequal when a value differs", () => {
+    expect(facetsEqual({ kind: ["NOTE"] }, { kind: ["BOOK"] })).toBe(false);
   });
 });
 

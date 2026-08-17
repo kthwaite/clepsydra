@@ -5,7 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { AcademicLibrary } from "#/components/academic/AcademicLibrary";
-import type { FilterState } from "#/lib/filters/model";
+import { facetsEqual, type FilterState } from "#/lib/filters/model";
 import {
   type FilterUrlOptions,
   filterStateToSearch,
@@ -39,9 +39,10 @@ function AcademicRoute() {
           ...current,
           ...filterStateToSearch(next, ACADEMIC_FILTER_URL),
         }),
+        replace: facetsEqual(next.facets, filterState.facets),
       });
     },
-    [navigate],
+    [navigate, filterState],
   );
 
   return (

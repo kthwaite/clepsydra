@@ -5,7 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { RubbishBin } from "#/components/rubbish/RubbishBin";
-import type { FilterState } from "#/lib/filters/model";
+import { facetsEqual, type FilterState } from "#/lib/filters/model";
 import {
   type FilterUrlOptions,
   filterStateToSearch,
@@ -34,9 +34,10 @@ function RubbishRoute() {
           ...current,
           ...filterStateToSearch(next, RUBBISH_FILTER_URL),
         }),
+        replace: facetsEqual(next.facets, filterState.facets),
       });
     },
-    [navigate],
+    [navigate, filterState],
   );
 
   return (

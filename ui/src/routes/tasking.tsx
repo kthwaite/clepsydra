@@ -7,7 +7,7 @@ import { useCallback, useMemo } from "react";
 import { DesktopOnlyRoute } from "#/components/codex/DesktopOnlyRoute";
 import { TaskingScreen } from "#/components/tasking/TaskingScreen";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import type { FilterState } from "#/lib/filters/model";
+import { facetsEqual, type FilterState } from "#/lib/filters/model";
 import {
   type FilterUrlOptions,
   filterStateToSearch,
@@ -61,9 +61,10 @@ function TaskingRoute() {
           ...current,
           ...filterStateToSearch(next, TASKING_FILTER_URL),
         }),
+        replace: facetsEqual(next.facets, filterState.facets),
       });
     },
-    [navigate],
+    [navigate, filterState],
   );
 
   const onOpenPage = useCallback(

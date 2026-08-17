@@ -5,7 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { Gazetteer, type GazetteerFilters } from "#/components/codex/Gazetteer";
 import type { GazetteerSort } from "#/components/codex/gazetteer-filter";
-import type { FilterState } from "#/lib/filters/model";
+import { facetsEqual, type FilterState } from "#/lib/filters/model";
 
 export type GazetteerSearch = Record<string, unknown> & {
   q?: string;
@@ -77,7 +77,11 @@ export const Route = createFileRoute("/gazetteer")({
 function GazetteerPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
-  const updateSearch = (patch: GazetteerSearchPatch, resetPage = true) =>
+  const updateSearch = (
+    patch: GazetteerSearchPatch,
+    resetPage = true,
+    replace = false,
+  ) =>
     navigate({
       to: "/gazetteer",
       search: (current) => ({
@@ -93,6 +97,7 @@ function GazetteerPage() {
           : (patch.page ??
             (typeof current.page === "number" ? current.page : 1)),
       }),
+      replace,
     });
 
   const filterState: FilterState = {
@@ -104,12 +109,16 @@ function GazetteerPage() {
     },
   };
   const onFilterChange = (next: FilterState) =>
-    updateSearch({
-      q: next.text || undefined,
-      tags: next.facets.tags?.length ? [...next.facets.tags] : undefined,
-      kind: next.facets.kind?.[0],
-      project: next.facets.project?.[0],
-    }); // updateSearch already resets page to 1
+    updateSearch(
+      {
+        q: next.text || undefined,
+        tags: next.facets.tags?.length ? [...next.facets.tags] : undefined,
+        kind: next.facets.kind?.[0],
+        project: next.facets.project?.[0],
+      },
+      true, // updateSearch already resets page to 1
+      facetsEqual(next.facets, filterState.facets),
+    );
 
   const filters: GazetteerFilters = {
     filterState,
