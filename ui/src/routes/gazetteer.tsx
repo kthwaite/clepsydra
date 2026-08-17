@@ -5,7 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { Gazetteer, type GazetteerFilters } from "#/components/codex/Gazetteer";
 import type { GazetteerSort } from "#/components/codex/gazetteer-filter";
-import { KINDS, type Kind } from "#/lib/kind";
+import type { FilterState } from "#/lib/filters/model";
 
 export type GazetteerSearch = Record<string, unknown> & {
   q?: string;
@@ -95,23 +95,27 @@ function GazetteerPage() {
       }),
     });
 
-  const kind = KINDS.includes(search.kind as Kind)
-    ? (search.kind as Kind)
-    : undefined;
+  const filterState: FilterState = {
+    text: search.q ?? "",
+    facets: {
+      ...(search.tags?.length ? { tags: search.tags } : {}),
+      ...(search.kind ? { kind: [search.kind] } : {}),
+      ...(search.project ? { project: [search.project] } : {}),
+    },
+  };
+  const onFilterChange = (next: FilterState) =>
+    updateSearch({
+      q: next.text || undefined,
+      tags: next.facets.tags?.length ? [...next.facets.tags] : undefined,
+      kind: next.facets.kind?.[0],
+      project: next.facets.project?.[0],
+    }); // updateSearch already resets page to 1
 
   const filters: GazetteerFilters = {
-    query: search.q ?? "",
-    selectedTags: search.tags ?? [],
-    kind,
-    queryKind: search.kind,
-    project: search.project,
+    filterState,
     sort: search.sort,
     page: search.page,
-    onQueryChange: (q) => updateSearch({ q: q || undefined }),
-    onSelectedTagsChange: (tags) =>
-      updateSearch({ tags: tags.length > 0 ? tags : undefined }),
-    onKindChange: (kind) => updateSearch({ kind }),
-    onProjectChange: (project) => updateSearch({ project }),
+    onFilterChange,
     onSortChange: (sort) => updateSearch({ sort }),
     onPageChange: (page) => updateSearch({ page }, false),
   };

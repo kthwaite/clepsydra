@@ -3,50 +3,35 @@ import {
   Button as AriaButton,
   Dialog,
   Heading,
-  ListBox,
-  ListBoxItem,
   Modal,
   ModalOverlay,
-  Popover,
-  Select,
 } from "react-aria-components";
-import type { ContentEntry, TagCount } from "#/api/types";
-import { ProjectCombo } from "#/components/codex/ProjectCombo";
+import type { ContentEntry } from "#/api/types";
+import { FilterBar } from "#/components/filters/FilterBar";
 import { Button } from "#/components/ui/button";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
-import { TagInput } from "#/components/ui/tag-input";
 import { TextField } from "#/components/ui/text-field";
 import { cn } from "#/lib/cn";
 import {
-  KINDS,
-  type Kind,
-  kindColorVar,
-  kindLabel,
-  resolveKind,
-} from "#/lib/kind";
+  activeFacets,
+  type FilterField,
+  type FilterState,
+  setText,
+} from "#/lib/filters/model";
+import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { appendUniqueTag, type GazetteerSort } from "./gazetteer-filter";
 
 export interface MobileGazetteerProps {
-  query: string;
-  selectedTags: string[];
-  kind?: Kind;
-  project?: string;
-  projects: string[];
+  filterState: FilterState;
+  onFilterChange: (next: FilterState) => void;
+  filterFields: readonly FilterField[];
   sort: GazetteerSort;
   rows: ContentEntry[];
-  tags: TagCount[];
-  tagsLoading: boolean;
-  tagsError: unknown;
-  onRetryTags: () => void;
   totalCount: number;
   filteredCount: number;
   page: number;
   pageCount: number;
-  onQueryChange: (query: string) => void;
-  onSelectedTagsChange: (tags: string[]) => void;
-  onKindChange: (kind?: Kind) => void;
-  onProjectChange: (project?: string) => void;
   onSortChange: (sort: GazetteerSort) => void;
   onPageChange: (page: number) => void;
   onOpen: (path: string, title: string) => void;
@@ -63,37 +48,36 @@ const sheetButtonClass =
   "cl-mono inline-flex min-h-11 items-center justify-center px-4 text-[10px] uppercase tracking-[0.12em] text-ink-2 outline-none transition-colors data-[hovered]:bg-highlight data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent";
 
 export function MobileGazetteer({
-  query,
-  selectedTags,
-  kind,
-  project,
-  projects,
+  filterState,
+  onFilterChange,
+  filterFields,
   sort,
   rows,
-  tags,
-  tagsLoading,
-  tagsError,
-  onRetryTags,
   totalCount,
   filteredCount,
   page,
   pageCount,
-  onQueryChange,
-  onSelectedTagsChange,
-  onKindChange,
-  onProjectChange,
   onSortChange,
   onPageChange,
   onOpen,
 }: MobileGazetteerProps) {
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const selectedTags = [...(filterState.facets.tags ?? [])];
 
   const activeFilterCount =
-    selectedTags.length + (query ? 1 : 0) + (kind ? 1 : 0) + (project ? 1 : 0);
+    activeFacets(filterState).reduce(
+      (sum, [, values]) => sum + values.length,
+      0,
+    ) + (filterState.text ? 1 : 0);
 
   const applyResultTag = (tag: string) => {
     const nextTags = appendUniqueTag(selectedTags, tag);
-    if (nextTags !== selectedTags) onSelectedTagsChange(nextTags);
+    if (nextTags !== selectedTags) {
+      onFilterChange({
+        ...filterState,
+        facets: { ...filterState.facets, tags: nextTags },
+      });
+    }
   };
 
   return (
@@ -269,84 +253,20 @@ export function MobileGazetteer({
               <TextField
                 label="Search pages"
                 type="search"
-                value={query}
-                onChange={onQueryChange}
+                value={filterState.text}
+                onChange={(value) =>
+                  onFilterChange(setText(filterState, value))
+                }
                 placeholder="Title, path, description, or tag"
               />
-              <section
-                aria-label="Kind and Project filters"
-                className="grid gap-4 sm:grid-cols-2"
-              >
-                <Select
-                  aria-label="Filter by kind"
-                  selectedKey={kind ?? "all"}
-                  onSelectionChange={(key) =>
-                    onKindChange(key === "all" ? undefined : (key as Kind))
-                  }
-                >
-                  <AriaButton className="cl-mono flex min-h-11 w-full items-center border border-rule px-3 text-left text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focus-visible]:ring-2 data-[focus-visible]:ring-accent">
-                    {kind ? kindLabel(kind) : "All kinds"}
-                  </AriaButton>
-                  <Popover className="border border-rule bg-paper outline-none">
-                    <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
-                      <ListBoxItem
-                        id="all"
-                        className="cursor-pointer px-3 py-2 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focused]:bg-highlight"
-                      >
-                        All kinds
-                      </ListBoxItem>
-                      {KINDS.map((option) => (
-                        <ListBoxItem
-                          key={option}
-                          id={option}
-                          className="cursor-pointer px-3 py-2 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none data-[focused]:bg-highlight"
-                        >
-                          {kindLabel(option)}
-                        </ListBoxItem>
-                      ))}
-                    </ListBox>
-                  </Popover>
-                </Select>
-                <ProjectCombo
-                  value={project ?? null}
-                  options={projects}
-                  ariaLabel="Filter by project"
-                  menuTrigger="focus"
-                  onAssign={onProjectChange}
-                  onClear={() => onProjectChange(undefined)}
-                />
-              </section>
 
-              <section aria-labelledby="gazetteer-tags-heading">
-                <h2
-                  id="gazetteer-tags-heading"
-                  className="text-xs font-bold uppercase tracking-widest text-muted-foreground"
-                >
-                  Tags · all selected tags must match
-                </h2>
-                <div className="mt-2">
-                  <TagInput
-                    label="Tags"
-                    ariaLabel="Filter by tags"
-                    values={selectedTags}
-                    suggestions={tags.map((tag) => tag.tag)}
-                    suggestionsLoading={tagsLoading}
-                    suggestionsError={tagsError}
-                    onRetrySuggestions={onRetryTags}
-                    allowCreate={false}
-                    onChange={onSelectedTagsChange}
-                    placeholder="filter tags…"
-                    variant="codex"
-                    valuePrefix="#"
-                    maxSuggestions={8}
-                  />
-                  {selectedTags.length > 0 ? (
-                    <Button onPress={() => onSelectedTagsChange([])}>
-                      Clear tags
-                    </Button>
-                  ) : null}
-                </div>
-              </section>
+              <FilterBar
+                fields={filterFields}
+                state={filterState}
+                onChange={onFilterChange}
+                showText={false}
+                className="flex-wrap"
+              />
 
               <RadioGroup
                 aria-label="Sort pages"
