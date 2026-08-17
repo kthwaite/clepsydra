@@ -3,15 +3,17 @@ import {
   type SearchSchemaInput,
   useNavigate,
 } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { Button } from "react-aria-components";
 import { useFeeds } from "#/api/feeds";
 import { Card } from "#/components/codex/Card";
+import { canonicalFeedGroups } from "#/components/codex/FeedGroupComboBox";
 import { FeedManagement } from "#/components/codex/FeedManagement";
 import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
 import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
-import { Select, SelectItem } from "#/components/ui/select";
+import { FilterBar } from "#/components/filters/FilterBar";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
+import type { FilterField, FilterState } from "#/lib/filters/model";
 
 type FeedsSearch = FeedRiverFilters & {
   manage: boolean;
@@ -77,14 +79,7 @@ function FeedsPage() {
   const readerRegionRef = useRef<HTMLDivElement>(null);
   const previousEntryId = useRef<number | undefined>(undefined);
   const mobileListScrollTop = useRef(0);
-  const [tagDraft, setTagDraft] = useState(search.tag ?? "");
-  useEffect(() => setTagDraft(search.tag ?? ""), [search.tag]);
   const selectedGroupName = search.ungrouped ? "" : search.group;
-  const selectedGroupId = search.ungrouped
-    ? "group:"
-    : search.group !== undefined
-      ? `group:${search.group}`
-      : "all-groups";
   const filters: FeedRiverFilters = {
     view: search.view,
     group: selectedGroupName,
@@ -100,6 +95,56 @@ function FeedsPage() {
       search: (current) => ({ ...current, ...patch }),
     });
   };
+
+  const filterFields: FilterField[] = [
+    {
+      id: "group",
+      kind: "single",
+      label: "GROUP",
+      options: canonicalFeedGroups(groups.map((group) => group.name)).map(
+        (name) => ({ value: name, label: name }),
+      ),
+    },
+    {
+      id: "feed",
+      kind: "single",
+      label: "FEED",
+      options: feeds.map((feed) => ({
+        value: String(feed.id),
+        label: feed.title,
+      })),
+    },
+    {
+      id: "tag",
+      kind: "single",
+      label: "TAG",
+      options: [...new Set(feeds.flatMap((feed) => feed.tags))]
+        .sort()
+        .map((tag) => ({ value: tag })),
+    },
+  ];
+  const filterState: FilterState = {
+    text: "",
+    facets: {
+      ...(search.group ? { group: [search.group] } : {}),
+      ...(search.feed !== undefined ? { feed: [String(search.feed)] } : {}),
+      ...(search.tag ? { tag: [search.tag] } : {}),
+    },
+  };
+  const onFilterChange = (next: FilterState) =>
+    navigate({
+      to: "/feeds",
+      replace: true,
+      search: (current) => ({
+        ...current,
+        group: next.facets.group?.[0],
+        feed:
+          next.facets.feed?.[0] !== undefined
+            ? Number(next.facets.feed[0])
+            : undefined,
+        tag: next.facets.tag?.[0],
+      }),
+    });
 
   useEffect(() => {
     let restoreFrame: number | undefined;
@@ -170,8 +215,8 @@ function FeedsPage() {
       ) : (
         <>
           <Card label="River controls" caption="HIDE READ · SAVED" pip="dim">
-            <div className="grid min-w-0 gap-2 sm:grid-cols-3 lg:grid-cols-[auto_minmax(9rem,1fr)_minmax(11rem,1.5fr)_minmax(9rem,1fr)_auto] lg:items-end">
-              <fieldset className="min-w-0 sm:col-span-3 lg:col-span-1">
+            <div className="grid min-w-0 gap-2 sm:grid-cols-2 lg:grid-cols-[auto_1fr] lg:items-end">
+              <fieldset className="min-w-0 sm:col-span-2 lg:col-span-1">
                 <legend className="cl-mono mb-1 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
                   View
                 </legend>
@@ -201,100 +246,13 @@ function FeedsPage() {
                 </div>
               </fieldset>
 
-              <FilterSelect
-                label="Group"
-                value={selectedGroupId}
-                onChange={(selectionId) => {
-                  const groupName = selectionId.startsWith("group:")
-                    ? selectionId.slice("group:".length)
-                    : undefined;
-                  updateSearch({
-                    group: groupName || undefined,
-                    ungrouped: selectionId === "group:",
-                    feed: undefined,
-                  });
-                }}
-                options={[
-                  {
-                    id: "all-groups",
-                    value: "all-groups",
-                    label: "All groups",
-                  },
-                  ...groups.map((group) => ({
-                    id: `group:${group.name}`,
-                    value: `group:${group.name}`,
-                    label: group.name || "Ungrouped",
-                  })),
-                ]}
+              <FilterBar
+                fields={filterFields}
+                state={filterState}
+                onChange={onFilterChange}
+                showText={false}
+                className="flex-wrap"
               />
-
-              <FilterSelect
-                label="Feed"
-                value={search.feed === undefined ? "" : String(search.feed)}
-                onChange={(value) =>
-                  updateSearch({ feed: value ? Number(value) : undefined })
-                }
-                options={[
-                  { id: "all-feeds", value: "", label: "All feeds" },
-                  ...feeds
-                    .filter(
-                      (feed) =>
-                        (!search.ungrouped && search.group === undefined) ||
-                        feed.group === selectedGroupName,
-                    )
-                    .map((feed) => ({
-                      id: `feed:${feed.id}`,
-                      value: String(feed.id),
-                      label: feed.title_override || feed.title,
-                    })),
-                ]}
-              />
-
-              <form
-                className="min-w-0"
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void navigate({
-                    replace: true,
-                    search: (current) => ({
-                      ...current,
-                      tag: tagDraft.trim() || undefined,
-                    }),
-                  });
-                }}
-              >
-                <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-                  Tag
-                  <input
-                    value={tagDraft}
-                    onChange={(event) => setTagDraft(event.target.value)}
-                    placeholder="Any tag · press Enter"
-                    className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-1.5 text-[11px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-                  />
-                </label>
-              </form>
-
-              {search.group ||
-              search.ungrouped ||
-              search.feed !== undefined ||
-              search.tag ? (
-                <Button
-                  className="cl-btn justify-center outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  onPress={() => {
-                    setTagDraft("");
-                    updateSearch({
-                      group: undefined,
-                      ungrouped: false,
-                      feed: undefined,
-                      tag: undefined,
-                    });
-                  }}
-                >
-                  Clear filters
-                </Button>
-              ) : (
-                <span />
-              )}
             </div>
           </Card>
 
@@ -333,44 +291,5 @@ function FeedsPage() {
         </>
       )}
     </div>
-  );
-}
-
-interface FilterSelectOption {
-  id: string;
-  value: string;
-  label: string;
-}
-
-function FilterSelect({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  options: FilterSelectOption[];
-}) {
-  const selectedId =
-    options.find((option) => option.value === value)?.id ?? null;
-
-  return (
-    <Select
-      label={label}
-      value={selectedId}
-      onChange={(key) => {
-        const selected = options.find((option) => option.id === key);
-        if (selected) onChange(selected.value);
-      }}
-      className="cl-mono min-w-0"
-    >
-      {options.map((option) => (
-        <SelectItem key={option.id} id={option.id} textValue={option.label}>
-          {option.label}
-        </SelectItem>
-      ))}
-    </Select>
   );
 }
