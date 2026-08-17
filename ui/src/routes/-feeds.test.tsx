@@ -183,7 +183,7 @@ vi.mock("#/components/codex/FeedRiver", () => ({
     selectedEntryId,
     onSelectEntry,
   }: {
-    filters: { group?: string };
+    filters: { group?: string; feed?: number; tag?: string };
     selectedEntryId?: number;
     onSelectEntry?: (id: number) => void;
   }) => (
@@ -191,6 +191,8 @@ vi.mock("#/components/codex/FeedRiver", () => ({
       aria-label="Feed river fixture"
       data-selected-entry={selectedEntryId}
       data-group={filters.group ?? "__all__"}
+      data-feed={filters.feed ?? "__all__"}
+      data-tag={filters.tag ?? "__all__"}
     >
       {routeMocks.riverHasSelected ? (
         <button
@@ -253,12 +255,7 @@ describe("feeds route controls", () => {
     });
   });
 
-  it("keeps Ungrouped, All groups, and a real sentinel-like name distinct", async () => {
-    routeMocks.search.view = "all";
-    routeMocks.search.group = undefined;
-    routeMocks.search.ungrouped = false;
-    routeMocks.search.feed = undefined;
-    routeMocks.search.tag = undefined;
+  it("validateSearch keeps the ungrouped sentinel and a real __ungrouped__-named group distinct", () => {
     const validateSearch = Route.options.validateSearch as (
       search: Record<string, unknown>,
     ) => { group?: string; ungrouped: boolean };
@@ -270,80 +267,76 @@ describe("feeds route controls", () => {
       group: "__ungrouped__",
       ungrouped: false,
     });
+  });
+
+  it("selects a real sentinel-like group name through the shared FilterBar and clears it via its chip", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
 
     const user = userEvent.setup();
     const page = render(<FeedsPage />);
-    await user.click(screen.getByRole("button", { name: /Group/ }));
-    await user.click(screen.getByRole("option", { name: "Ungrouped" }));
-
-    const ungroupedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
-      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
-    };
-    const ungroupedSearch = ungroupedNavigation.search(routeMocks.search);
-    expect(ungroupedSearch).toMatchObject({
-      group: undefined,
-      ungrouped: true,
-      feed: undefined,
-    });
-
-    Object.assign(routeMocks.search, ungroupedSearch);
-    page.rerender(<FeedsPage />);
-    expect(screen.getByRole("button", { name: /Group/ })).toHaveTextContent(
-      "Ungrouped",
-    );
-    expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
-      "data-group",
-      "",
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-group"));
+    await user.click(
+      screen.getByTestId("filter-bar-option-group-__ungrouped__"),
     );
 
-    await user.click(screen.getByRole("button", { name: /Feed/ }));
-    expect(
-      screen.getByRole("option", { name: "Loose Source" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: "Literal Sentinel Source" }),
-    ).not.toBeInTheDocument();
-    await user.keyboard("{Escape}");
-
-    await user.click(screen.getByRole("button", { name: /Group/ }));
-    await user.click(screen.getByRole("option", { name: "__ungrouped__" }));
-    const namedNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+    const namedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
     const namedSearch = namedNavigation.search(routeMocks.search);
-    expect(namedSearch).toMatchObject({
-      group: "__ungrouped__",
-      ungrouped: false,
-      feed: undefined,
-    });
+    expect(namedSearch).toMatchObject({ group: "__ungrouped__" });
 
     Object.assign(routeMocks.search, namedSearch);
     page.rerender(<FeedsPage />);
-    expect(screen.getByRole("button", { name: /Group/ })).toHaveTextContent(
-      "__ungrouped__",
-    );
+    expect(
+      screen.getByTestId("filter-bar-chip-group-__ungrouped__"),
+    ).toHaveTextContent("GROUP: __ungrouped__");
     expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
       "data-group",
       "__ungrouped__",
     );
-    await user.click(screen.getByRole("button", { name: /Feed/ }));
-    expect(
-      screen.getByRole("option", { name: "Literal Sentinel Source" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("option", { name: "Loose Source" }),
-    ).not.toBeInTheDocument();
-    await user.keyboard("{Escape}");
 
-    await user.click(screen.getByRole("button", { name: /Group/ }));
-    await user.click(screen.getByRole("option", { name: "All groups" }));
-    const allGroupsNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+    await user.click(screen.getByTestId("filter-bar-chip-group-__ungrouped__"));
+    const clearedNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
-    expect(allGroupsNavigation.search(routeMocks.search)).toMatchObject({
+    expect(clearedNavigation.search(routeMocks.search)).toMatchObject({
       group: undefined,
-      ungrouped: false,
     });
+  });
+
+  it("adds a feed facet through the shared FilterBar, keyed by id, labeled by title", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    const page = render(<FeedsPage />);
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-feed"));
+    await user.click(screen.getByTestId("filter-bar-option-feed-7"));
+
+    const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    const nextSearch = navigation.search(routeMocks.search);
+    expect(nextSearch).toMatchObject({ feed: 7 });
+
+    Object.assign(routeMocks.search, nextSearch);
+    page.rerender(<FeedsPage />);
+    expect(screen.getByTestId("filter-bar-chip-feed-7")).toHaveTextContent(
+      "FEED: One Example",
+    );
+    expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
+      "data-feed",
+      "7",
+    );
   });
 
   it.each([23, "23"])("accepts positive integer entry %s", (entry) => {
@@ -704,23 +697,21 @@ describe("feeds route controls", () => {
     });
   });
 
-  it("keeps a local tag draft and navigates once only when Enter submits it", async () => {
+  it("offers tag facet options derived from loaded feed tags, deduped and sorted", async () => {
+    routeMocks.search.tag = undefined;
     const user = userEvent.setup();
     render(<FeedsPage />);
-    const tag = screen.getByRole("textbox", { name: /^tag$/i });
 
-    await user.clear(tag);
-    await user.type(tag, "  systems  ");
-    expect(routeMocks.navigate).not.toHaveBeenCalled();
-    await user.keyboard("{Enter}");
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-tag"));
+    await user.click(screen.getByTestId("filter-bar-option-tag-rust"));
 
-    expect(routeMocks.navigate).toHaveBeenCalledTimes(1);
     const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
-    expect(navigation.search(routeMocks.search)).toEqual(
-      expect.objectContaining({ tag: "systems" }),
-    );
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      tag: "rust",
+    });
   });
 
   it("composes inside the shell without adding a second main landmark", () => {
@@ -732,17 +723,17 @@ describe("feeds route controls", () => {
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
-  it("synchronizes the tag draft when browser history changes the URL search", () => {
-    const view = render(<FeedsPage />);
-    const tag = screen.getByRole("textbox", { name: /^tag$/i });
-    expect(tag).toHaveValue("rust");
+  it("removing the tag chip clears the tag param", async () => {
+    const user = userEvent.setup();
+    render(<FeedsPage />);
 
-    routeMocks.search.tag = "systems";
-    view.rerender(<FeedsPage />);
-    expect(tag).toHaveValue("systems");
+    await user.click(screen.getByTestId("filter-bar-chip-tag-rust"));
 
-    routeMocks.search.tag = undefined;
-    view.rerender(<FeedsPage />);
-    expect(tag).toHaveValue("");
+    const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      tag: undefined,
+    });
   });
 });
