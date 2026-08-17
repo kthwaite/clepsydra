@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use walkdir::WalkDir;
 
 #[cfg(not(unix))]
@@ -72,6 +73,13 @@ pub enum BackupError {
         cas_root: PathBuf,
         archive_path: PathBuf,
     },
+    #[error(
+        "unsafe in-vault CAS `{cas_root}` would suppress required backup source `{required_path}`"
+    )]
+    UnsafeCasPruning {
+        cas_root: PathBuf,
+        required_path: PathBuf,
+    },
     #[error("serialize backup manifest: {0}")]
     Manifest(#[from] serde_json::Error),
 }
@@ -116,36 +124,25 @@ pub fn create_backup(
 
     let config_path = vault_root.join(".clepsydra/config.toml");
     let vault_config = VaultConfig::load(&vault_root).map_err(|source| BackupError::Config {
-        path: config_path,
+        path: config_path.clone(),
         message: source.to_string(),
     })?;
     let configured_cas_path = vault_config.archive.cas_path;
     let unresolved_cas_path =
         expand_tilde(&configured_cas_path).unwrap_or_else(|| PathBuf::from(&configured_cas_path));
-    let cas_root = unresolved_cas_path
-        .canonicalize()
-        .map_err(|source| io_error("resolve configured CAS path", &unresolved_cas_path, source))?;
-    let cas_metadata = fs::metadata(&cas_root)
-        .map_err(|source| io_error("inspect configured CAS path", &cas_root, source))?;
-    if !cas_metadata.is_dir() {
-        return Err(BackupError::UnsafeCasStorage {
-            path: cas_root,
-            expected: "directory",
-        });
-    }
-    let cas_database = cas_root.join("cas.db");
-    let cas_database_metadata = fs::symlink_metadata(&cas_database)
-        .map_err(|source| io_error("inspect CAS database", &cas_database, source))?;
-    if cas_database_metadata.file_type().is_symlink() || !cas_database_metadata.is_file() {
-        return Err(BackupError::UnsafeCasStorage {
-            path: cas_database,
-            expected: "non-symlink regular file",
-        });
-    }
+    let cas_store = ContentStore::open_existing(&unresolved_cas_path)
+        .map_err(|source| cas_error("open", &unresolved_cas_path, source))?;
+    let cas_root = cas_store.root().to_path_buf();
     if cas_root == vault_root {
         return Err(BackupError::UnsafeCasOverlap {
             cas_root,
             archive_path: vault_root,
+        });
+    }
+    if cas_root.starts_with(&vault_root) && config_path.starts_with(&cas_root) {
+        return Err(BackupError::UnsafeCasPruning {
+            cas_root,
+            required_path: config_path,
         });
     }
     if final_path.starts_with(&cas_root) {
@@ -184,8 +181,6 @@ pub fn create_backup(
         None
     };
 
-    let cas_store = ContentStore::open(&cas_root)
-        .map_err(|source| cas_error("open", &cas_root, source))?;
     let cas_snapshot = cas_store
         .backup_snapshot()
         .map_err(|source| cas_error("snapshot", &cas_root, source))?;
@@ -322,7 +317,25 @@ pub fn create_backup(
         }
         let archive_path = Path::new(CAS_ARCHIVE_ROOT).join(blob.relative_path());
         cas_snapshot
-            .with_blob_file(blob, |file| builder.append_file(&archive_path, file))
+            .with_blob_file(blob, |file| {
+                let metadata = file.metadata()?;
+                let mut header = tar::Header::new_gnu();
+                header.set_metadata(&metadata);
+                header.set_size(blob.size());
+                let mut reader = HashingReader::new(file);
+                builder.append_data(&mut header, &archive_path, &mut reader)?;
+                let actual_hash = reader.finish();
+                if actual_hash != blob.hash() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        format!(
+                            "CAS blob {} changed while streaming to the archive: got {actual_hash}",
+                            blob.hash()
+                        ),
+                    ));
+                }
+                Ok(())
+            })
             .map_err(|source| cas_error("append blob snapshot", &cas_root, source))?;
     }
     append_generated_file(
@@ -347,6 +360,32 @@ struct BackupManifestCas<'a> {
     configured_path: &'a str,
     resolved_source_path: &'a str,
     archived_path: &'static str,
+}
+
+struct HashingReader<'a> {
+    inner: &'a mut File,
+    digest: Sha256,
+}
+
+impl<'a> HashingReader<'a> {
+    fn new(inner: &'a mut File) -> Self {
+        Self {
+            inner,
+            digest: Sha256::new(),
+        }
+    }
+
+    fn finish(self) -> String {
+        format!("sha256:{:x}", self.digest.finalize())
+    }
+}
+
+impl std::io::Read for HashingReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        let read = std::io::Read::read(self.inner, buffer)?;
+        self.digest.update(&buffer[..read]);
+        Ok(read)
+    }
 }
 
 fn append_generated_directory(
@@ -603,7 +642,10 @@ mod tests {
     use serde_json::json;
     use tempfile::TempDir;
 
-    use crate::vault::cas::ContentStore;
+    use crate::vault::cas::{
+        ContentStore, backup_blob_verification_passes, install_before_backup_blob_use_barrier,
+        reset_backup_blob_verification_passes,
+    };
 
     use super::*;
 
@@ -918,6 +960,66 @@ mod tests {
     }
 
     #[test]
+    fn backup_hashes_each_blob_once_before_streaming_it_to_tar() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("read-count-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let store = ContentStore::open(&cas).unwrap();
+        let stored = store
+            .store(b"unique archive read count bytes", "text/plain")
+            .unwrap();
+        reset_backup_blob_verification_passes(&stored.hash);
+        let destination = temp.path().join("backups");
+
+        let archive = create_backup(&vault, &destination, timestamp()).unwrap();
+
+        assert_eq!(
+            backup_blob_verification_passes(&stored.hash),
+            1,
+            "blob was fully hashed more than once before/during tar append"
+        );
+        assert_eq!(
+            archive_entry_bytes(&archive, &stable_blob_path(&stored.hash)),
+            b"unique archive read count bytes"
+        );
+    }
+
+    #[test]
+    fn same_size_blob_mutation_after_preappend_open_fails_without_archive_artifacts() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("archive-race-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let store = ContentStore::open(&cas).unwrap();
+        let original = b"original archive bytes";
+        let replacement = b"replaced archive bytes";
+        assert_eq!(original.len(), replacement.len());
+        let stored = store.store(original, "text/plain").unwrap();
+        let hex = stored.hash.strip_prefix("sha256:").unwrap();
+        let blob_path = cas.join(&hex[..2]).join(hex);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_before_backup_blob_use_barrier(blob_path.clone(), barrier.clone());
+        let destination = temp.path().join("backups");
+        let (final_path, partial_path) = backup_output_paths(&destination);
+        let worker_vault = vault.clone();
+        let worker_destination = destination.clone();
+        let worker = std::thread::spawn(move || {
+            create_backup(&worker_vault, &worker_destination, timestamp())
+                .map_err(|error| error.to_string())
+        });
+
+        barrier.wait();
+        fs::write(&blob_path, replacement).unwrap();
+        barrier.wait();
+
+        assert!(
+            worker.join().unwrap().is_err(),
+            "backup succeeded after blob contents changed following its pre-append validation"
+        );
+        assert!(!final_path.exists());
+        assert!(!partial_path.exists());
+    }
+
+    #[test]
     fn missing_configured_cas_fails_without_archive_artifacts() {
         let (temp, vault) = populated_vault();
         let cas = temp.path().join("missing-cas");
@@ -938,6 +1040,22 @@ mod tests {
         fs::create_dir_all(vault.join(".clepsydra")).unwrap();
         configure_cas(&vault, &vault.display().to_string());
         drop(ContentStore::open(&vault).unwrap());
+        let destination = temp.path().join("backups");
+        let (final_path, partial_path) = backup_output_paths(&destination);
+
+        assert!(create_backup(&vault, &destination, timestamp()).is_err());
+        assert!(!final_path.exists());
+        assert!(!partial_path.exists());
+    }
+
+    #[test]
+    fn rejects_in_vault_cas_ancestor_of_required_config_without_archive_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        let metadata = vault.join(".clepsydra");
+        fs::create_dir_all(&metadata).unwrap();
+        configure_cas(&vault, &metadata.display().to_string());
+        drop(ContentStore::open(&metadata).unwrap());
         let destination = temp.path().join("backups");
         let (final_path, partial_path) = backup_output_paths(&destination);
 
