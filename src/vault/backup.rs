@@ -3,7 +3,8 @@ use std::fs::{self, File, OpenOptions};
 use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
+use serde::Serialize;
 use walkdir::WalkDir;
 
 #[cfg(not(unix))]
@@ -15,6 +16,15 @@ use crate::feeds::store::{
 use crate::feeds::store::{
     lock_feed_generation_shared, open_feed_lock_file, snapshot_database_file,
 };
+
+use crate::expand_tilde;
+use crate::vault::cas::ContentStore;
+use crate::vault::config::VaultConfig;
+
+const CAS_ARCHIVE_ROOT: &str = ".clepsydra/cas";
+const CAS_DATABASE_ARCHIVE_PATH: &str = ".clepsydra/cas/cas.db";
+const BACKUP_MANIFEST_PATH: &str = ".clepsydra/backup-manifest.json";
+const BACKUP_FORMAT_VERSION: u32 = 1;
 
 #[derive(Debug, thiserror::Error)]
 pub enum BackupError {
@@ -44,6 +54,26 @@ pub enum BackupError {
     },
     #[error("no temporary directory outside vault `{root}` is available")]
     SnapshotLocation { root: PathBuf },
+    #[error("load vault configuration `{path}`: {message}")]
+    Config { path: PathBuf, message: String },
+    #[error("{operation} CAS `{path}`: {message}")]
+    Cas {
+        operation: &'static str,
+        path: PathBuf,
+        message: String,
+    },
+    #[error("unsafe CAS storage path `{path}`: expected {expected}")]
+    UnsafeCasStorage {
+        path: PathBuf,
+        expected: &'static str,
+    },
+    #[error("unsafe CAS/archive overlap between CAS `{cas_root}` and `{archive_path}`")]
+    UnsafeCasOverlap {
+        cas_root: PathBuf,
+        archive_path: PathBuf,
+    },
+    #[error("serialize backup manifest: {0}")]
+    Manifest(#[from] serde_json::Error),
 }
 
 pub fn create_backup(
@@ -72,6 +102,65 @@ pub fn create_backup(
         ));
     }
 
+    let filename = format!(
+        "clepsydra-backup-{}.tar",
+        timestamp.format("%Y%m%dT%H%M%SZ")
+    );
+    let final_path = destination.join(filename);
+    let mut partial_filename = final_path
+        .file_name()
+        .expect("backup filename is always present")
+        .to_os_string();
+    partial_filename.push(".partial");
+    let partial_path = destination.join(partial_filename);
+
+    let config_path = vault_root.join(".clepsydra/config.toml");
+    let vault_config = VaultConfig::load(&vault_root).map_err(|source| BackupError::Config {
+        path: config_path,
+        message: source.to_string(),
+    })?;
+    let configured_cas_path = vault_config.archive.cas_path;
+    let unresolved_cas_path =
+        expand_tilde(&configured_cas_path).unwrap_or_else(|| PathBuf::from(&configured_cas_path));
+    let cas_root = unresolved_cas_path
+        .canonicalize()
+        .map_err(|source| io_error("resolve configured CAS path", &unresolved_cas_path, source))?;
+    let cas_metadata = fs::metadata(&cas_root)
+        .map_err(|source| io_error("inspect configured CAS path", &cas_root, source))?;
+    if !cas_metadata.is_dir() {
+        return Err(BackupError::UnsafeCasStorage {
+            path: cas_root,
+            expected: "directory",
+        });
+    }
+    let cas_database = cas_root.join("cas.db");
+    let cas_database_metadata = fs::symlink_metadata(&cas_database)
+        .map_err(|source| io_error("inspect CAS database", &cas_database, source))?;
+    if cas_database_metadata.file_type().is_symlink() || !cas_database_metadata.is_file() {
+        return Err(BackupError::UnsafeCasStorage {
+            path: cas_database,
+            expected: "non-symlink regular file",
+        });
+    }
+    if cas_root == vault_root {
+        return Err(BackupError::UnsafeCasOverlap {
+            cas_root,
+            archive_path: vault_root,
+        });
+    }
+    if final_path.starts_with(&cas_root) {
+        return Err(BackupError::UnsafeCasOverlap {
+            cas_root,
+            archive_path: final_path,
+        });
+    }
+    if partial_path.starts_with(&cas_root) {
+        return Err(BackupError::UnsafeCasOverlap {
+            cas_root,
+            archive_path: partial_path,
+        });
+    }
+
     let feed_snapshot = if let Some(live_feed_database) = verified_feed_database(&vault_root)? {
         let temporary = snapshot_tempdir(&vault_root, &destination)?;
         let snapshot = temporary.path().join("feeds.db");
@@ -95,17 +184,30 @@ pub fn create_backup(
         None
     };
 
-    let filename = format!(
-        "clepsydra-backup-{}.tar",
-        timestamp.format("%Y%m%dT%H%M%SZ")
-    );
-    let final_path = destination.join(filename);
-    let mut partial_filename = final_path
-        .file_name()
-        .expect("backup filename is always present")
-        .to_os_string();
-    partial_filename.push(".partial");
-    let partial_path = destination.join(partial_filename);
+    let cas_store = ContentStore::open(&cas_root)
+        .map_err(|source| cas_error("open", &cas_root, source))?;
+    let cas_snapshot = cas_store
+        .backup_snapshot()
+        .map_err(|source| cas_error("snapshot", &cas_root, source))?;
+    let resolved_source_path =
+        cas_root
+            .to_str()
+            .ok_or_else(|| BackupError::UnsafeCasStorage {
+                path: cas_root.clone(),
+                expected: "UTF-8 path representable in the backup manifest",
+            })?;
+    let manifest = BackupManifest {
+        format_version: BACKUP_FORMAT_VERSION,
+        created_at: timestamp.to_rfc3339_opts(SecondsFormat::Secs, true),
+        cas: BackupManifestCas {
+            configured_path: &configured_cas_path,
+            resolved_source_path,
+            archived_path: CAS_ARCHIVE_ROOT,
+        },
+    };
+    let mut manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+    manifest_bytes.push(b'\n');
+
     let file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -122,9 +224,19 @@ pub fn create_backup(
         .expect("uncommitted archive has a builder")
         .follow_symlinks(false);
 
+    let cas_inside_vault = cas_root.starts_with(&vault_root);
+    let live_stable_cas = vault_root.join(CAS_ARCHIVE_ROOT);
+    let live_manifest = vault_root.join(BACKUP_MANIFEST_PATH);
     let mut entries = WalkDir::new(&vault_root)
         .follow_links(false)
         .into_iter()
+        .filter_entry(|entry| {
+            let path = entry.path();
+            path == vault_root
+                || !((cas_inside_vault && path.starts_with(&cas_root))
+                    || path.starts_with(&live_stable_cas)
+                    || path.starts_with(&live_manifest))
+        })
         .collect::<Result<Vec<_>, _>>()
         .map_err(|source| BackupError::Walk {
             root: vault_root.clone(),
@@ -173,9 +285,108 @@ pub fn create_backup(
             .map_err(|source| io_error("append feed database snapshot", snapshot, source))?;
     }
 
+    let builder = partial
+        .builder
+        .as_mut()
+        .expect("uncommitted archive has a builder");
+    append_generated_directory(builder, Path::new(CAS_ARCHIVE_ROOT))?;
+    let mut snapshot_database = File::open(cas_snapshot.database_path()).map_err(|source| {
+        io_error(
+            "open CAS database snapshot",
+            cas_snapshot.database_path(),
+            source,
+        )
+    })?;
+    builder
+        .append_file(
+            Path::new(CAS_DATABASE_ARCHIVE_PATH),
+            &mut snapshot_database,
+        )
+        .map_err(|source| {
+            io_error(
+                "append CAS database snapshot",
+                Path::new(CAS_DATABASE_ARCHIVE_PATH),
+                source,
+            )
+        })?;
+    let mut last_blob_directory = None;
+    for blob in cas_snapshot.blobs() {
+        let blob_directory = blob
+            .relative_path()
+            .parent()
+            .expect("CAS backup blob paths always have a fan-out directory");
+        if last_blob_directory.as_deref() != Some(blob_directory) {
+            let archive_directory = Path::new(CAS_ARCHIVE_ROOT).join(blob_directory);
+            append_generated_directory(builder, &archive_directory)?;
+            last_blob_directory = Some(blob_directory.to_path_buf());
+        }
+        let archive_path = Path::new(CAS_ARCHIVE_ROOT).join(blob.relative_path());
+        cas_snapshot
+            .with_blob_file(blob, |file| builder.append_file(&archive_path, file))
+            .map_err(|source| cas_error("append blob snapshot", &cas_root, source))?;
+    }
+    append_generated_file(
+        builder,
+        Path::new(BACKUP_MANIFEST_PATH),
+        &manifest_bytes,
+        timestamp,
+    )?;
+
     partial.commit(&final_path)
 }
 
+#[derive(Serialize)]
+struct BackupManifest<'a> {
+    format_version: u32,
+    created_at: String,
+    cas: BackupManifestCas<'a>,
+}
+
+#[derive(Serialize)]
+struct BackupManifestCas<'a> {
+    configured_path: &'a str,
+    resolved_source_path: &'a str,
+    archived_path: &'static str,
+}
+
+fn append_generated_directory(
+    builder: &mut tar::Builder<File>,
+    archive_path: &Path,
+) -> Result<(), BackupError> {
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Directory);
+    header.set_mode(0o755);
+    header.set_size(0);
+    header.set_mtime(0);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, archive_path, std::io::empty())
+        .map_err(|source| io_error("append generated backup directory", archive_path, source))
+}
+
+fn append_generated_file(
+    builder: &mut tar::Builder<File>,
+    archive_path: &Path,
+    bytes: &[u8],
+    timestamp: DateTime<Utc>,
+) -> Result<(), BackupError> {
+    let mtime = u64::try_from(timestamp.timestamp()).map_err(|source| {
+        io_error(
+            "encode generated backup entry timestamp",
+            archive_path,
+            std::io::Error::new(std::io::ErrorKind::InvalidInput, source),
+        )
+    })?;
+    let mut header = tar::Header::new_gnu();
+    header.set_entry_type(tar::EntryType::Regular);
+    header.set_mode(0o644);
+    header.set_size(bytes.len() as u64);
+    header.set_mtime(mtime);
+    header.set_cksum();
+    builder
+        .append_data(&mut header, archive_path, bytes)
+        .map_err(|source| io_error("append generated backup file", archive_path, source))
+}
 struct PartialArchive {
     path: PathBuf,
     builder: Option<tar::Builder<File>>,
@@ -351,6 +562,18 @@ fn io_error(operation: &'static str, path: &Path, source: std::io::Error) -> Bac
     }
 }
 
+fn cas_error(
+    operation: &'static str,
+    path: &Path,
+    source: Box<dyn std::error::Error>,
+) -> BackupError {
+    BackupError::Cas {
+        operation,
+        path: path.to_path_buf(),
+        message: source.to_string(),
+    }
+}
+
 fn snapshot_tempdir(
     vault_root: &Path,
     destination: &Path,
@@ -377,7 +600,10 @@ mod tests {
 
     use chrono::TimeZone;
     use rusqlite::Connection;
+    use serde_json::json;
     use tempfile::TempDir;
+
+    use crate::vault::cas::ContentStore;
 
     use super::*;
 
@@ -388,6 +614,15 @@ mod tests {
     }
 
     fn archive_paths(path: &Path) -> BTreeSet<PathBuf> {
+        let file = File::open(path).unwrap();
+        tar::Archive::new(file)
+            .entries()
+            .unwrap()
+            .map(|entry| entry.unwrap().path().unwrap().into_owned())
+            .collect()
+    }
+
+    fn archive_path_list(path: &Path) -> Vec<PathBuf> {
         let file = File::open(path).unwrap();
         tar::Archive::new(file)
             .entries()
@@ -410,6 +645,32 @@ mod tests {
         panic!("archive entry `{}` was absent", target.display());
     }
 
+    fn configure_cas(vault: &Path, configured_path: &str) {
+        fs::create_dir_all(vault.join(".clepsydra")).unwrap();
+        fs::write(
+            vault.join(".clepsydra/config.toml"),
+            format!(
+                "[vault]\n\n[archive]\ncas_path = {:?}\n",
+                configured_path
+            ),
+        )
+        .unwrap();
+    }
+
+    fn stable_blob_path(hash: &str) -> PathBuf {
+        let hex = hash.strip_prefix("sha256:").unwrap();
+        Path::new(".clepsydra/cas")
+            .join(&hex[..2])
+            .join(hex)
+    }
+
+    fn backup_output_paths(destination: &Path) -> (PathBuf, PathBuf) {
+        let final_path = destination.join("clepsydra-backup-20260808T123456Z.tar");
+        let partial_path =
+            destination.join("clepsydra-backup-20260808T123456Z.tar.partial");
+        (final_path, partial_path)
+    }
+
     fn populated_vault() -> (TempDir, PathBuf) {
         let temp = tempfile::tempdir().unwrap();
         let vault = temp.path().join("vault");
@@ -418,7 +679,9 @@ mod tests {
         fs::create_dir_all(vault.join(".clepsydra")).unwrap();
         fs::write(vault.join("notes/a.md"), "# A\n").unwrap();
         fs::write(vault.join("_attachments/image.bin"), [0_u8, 1, 2]).unwrap();
-        fs::write(vault.join(".clepsydra/config.toml"), "[vault]\n").unwrap();
+        let cas = temp.path().join("default-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        ContentStore::open(&cas).unwrap();
         fs::write(vault.join(".clepsydra/cache.db"), b"cache").unwrap();
         (temp, vault)
     }
@@ -435,6 +698,266 @@ mod tests {
         assert!(paths.contains(Path::new("_attachments/image.bin")));
         assert!(paths.contains(Path::new(".clepsydra/config.toml")));
         assert!(!paths.contains(Path::new(".clepsydra/cache.db")));
+    }
+
+    #[test]
+    fn archives_external_cas_snapshot_at_stable_paths() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("external-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let store = ContentStore::open(&cas).unwrap();
+        let stored = store.store(b"external blob", "text/plain").unwrap();
+        fs::write(cas.join("unreferenced"), b"not authoritative").unwrap();
+        let destination = temp.path().join("backups");
+
+        let archive = create_backup(&vault, &destination, timestamp()).unwrap();
+        let paths = archive_paths(&archive);
+        let archived_database = Path::new(".clepsydra/cas/cas.db");
+        let archived_blob = stable_blob_path(&stored.hash);
+
+        assert!(paths.contains(archived_database));
+        assert!(paths.contains(&archived_blob));
+        assert_eq!(
+            archive_entry_bytes(&archive, &archived_blob),
+            b"external blob"
+        );
+        assert!(!paths.contains(Path::new(".clepsydra/cas/unreferenced")));
+    }
+
+    #[test]
+    fn excludes_in_vault_cas_from_walk_and_archives_it_once_at_stable_path() {
+        let (temp, vault) = populated_vault();
+        let cas = vault.join(".clepsydra/live-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let store = ContentStore::open(&cas).unwrap();
+        let stored = store.store(b"in-vault blob", "text/plain").unwrap();
+        fs::write(cas.join("unreferenced"), b"not authoritative").unwrap();
+        let destination = temp.path().join("backups");
+
+        let archive = create_backup(&vault, &destination, timestamp()).unwrap();
+        let paths = archive_path_list(&archive);
+        let source_relative = cas.strip_prefix(&vault).unwrap();
+        let archived_blob = stable_blob_path(&stored.hash);
+
+        assert!(
+            paths
+                .iter()
+                .all(|path| !path.starts_with(source_relative)),
+            "live CAS subtree leaked into ordinary vault traversal"
+        );
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.as_path() == archived_blob)
+                .count(),
+            1
+        );
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.as_path() == Path::new(".clepsydra/cas/cas.db"))
+                .count(),
+            1
+        );
+        assert!(
+            !paths
+                .iter()
+                .any(|path| path == Path::new(".clepsydra/cas/unreferenced"))
+        );
+    }
+
+    #[test]
+    fn archives_committed_cas_wal_state_in_a_reopenable_database() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("wal-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        drop(ContentStore::open(&cas).unwrap());
+        let wal_bytes = b"committed only through WAL";
+        let wal_hash = ContentStore::hash_bytes(wal_bytes);
+        let wal_hex = wal_hash.strip_prefix("sha256:").unwrap();
+        fs::create_dir_all(cas.join(&wal_hex[..2])).unwrap();
+        fs::write(cas.join(&wal_hex[..2]).join(wal_hex), wal_bytes).unwrap();
+        let live_database = Connection::open(cas.join("cas.db")).unwrap();
+        live_database
+            .execute_batch("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;")
+            .unwrap();
+        live_database
+            .execute(
+                "INSERT INTO blobs (hash, size, content_type, created_at, ref_count)
+                 VALUES (?1, ?2, 'text/plain', '2026-08-08T12:00:00Z', 1)",
+                rusqlite::params![wal_hash, wal_bytes.len() as i64],
+            )
+            .unwrap();
+        assert!(
+            cas.join("cas.db-wal").is_file(),
+            "fixture must retain committed WAL state"
+        );
+        let destination = temp.path().join("backups");
+
+        let archive = create_backup(&vault, &destination, timestamp()).unwrap();
+        let extracted = temp.path().join("archived-cas.db");
+        fs::write(
+            &extracted,
+            archive_entry_bytes(&archive, Path::new(".clepsydra/cas/cas.db")),
+        )
+        .unwrap();
+        let archived_database = Connection::open(extracted).unwrap();
+        let archived_size: i64 = archived_database
+            .query_row(
+                "SELECT size FROM blobs WHERE hash = ?1",
+                [&wal_hash],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(archived_size, wal_bytes.len() as i64);
+        assert_eq!(
+            archive_entry_bytes(&archive, &stable_blob_path(&wal_hash)),
+            wal_bytes
+        );
+    }
+
+    #[test]
+    fn writes_one_exact_versioned_backup_manifest() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("manifest-cas");
+        fs::create_dir_all(&cas).unwrap();
+        let configured_path = format!("{}/.", cas.display());
+        configure_cas(&vault, &configured_path);
+        drop(ContentStore::open(&cas).unwrap());
+        fs::write(
+            vault.join(".clepsydra/backup-manifest.json"),
+            b"{\"stale\":true}",
+        )
+        .unwrap();
+        let destination = temp.path().join("backups");
+
+        let archive = create_backup(&vault, &destination, timestamp()).unwrap();
+        let paths = archive_path_list(&archive);
+        let manifest_path = Path::new(".clepsydra/backup-manifest.json");
+        let manifest: serde_json::Value =
+            serde_json::from_slice(&archive_entry_bytes(&archive, manifest_path)).unwrap();
+
+        assert_eq!(
+            paths
+                .iter()
+                .filter(|path| path.as_path() == manifest_path)
+                .count(),
+            1
+        );
+        assert_eq!(
+            manifest,
+            json!({
+                "format_version": 1,
+                "created_at": "2026-08-08T12:34:56Z",
+                "cas": {
+                    "configured_path": configured_path,
+                    "resolved_source_path": cas.canonicalize().unwrap(),
+                    "archived_path": ".clepsydra/cas"
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn omits_cas_sidecars_lock_and_unreferenced_files() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("sidecar-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let store = ContentStore::open(&cas).unwrap();
+        let stored = store.store(b"authoritative", "text/plain").unwrap();
+        drop(store);
+        let live_database = Connection::open(cas.join("cas.db")).unwrap();
+        live_database
+            .execute_batch(
+                "PRAGMA journal_mode = WAL;
+                 PRAGMA wal_autocheckpoint = 0;
+                 CREATE TABLE sidecar_probe (value TEXT NOT NULL);
+                 INSERT INTO sidecar_probe VALUES ('live');",
+            )
+            .unwrap();
+        assert!(cas.join("cas.db-wal").is_file());
+        assert!(cas.join("cas.db-shm").is_file());
+        assert!(cas.join("cas.lock").is_file());
+        fs::write(cas.join("orphan.bin"), b"orphan").unwrap();
+        let destination = temp.path().join("backups");
+
+        let archive = create_backup(&vault, &destination, timestamp()).unwrap();
+        let paths = archive_paths(&archive);
+        assert!(paths.contains(Path::new(".clepsydra/cas/cas.db")));
+        assert!(paths.contains(&stable_blob_path(&stored.hash)));
+
+        for excluded in [
+            ".clepsydra/cas/cas.db-wal",
+            ".clepsydra/cas/cas.db-shm",
+            ".clepsydra/cas/cas.lock",
+            ".clepsydra/cas/orphan.bin",
+        ] {
+            assert!(
+                !paths.contains(Path::new(excluded)),
+                "unexpected CAS entry {excluded}"
+            );
+        }
+    }
+
+    #[test]
+    fn inconsistent_cas_fails_without_final_or_partial_archive() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("inconsistent-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let store = ContentStore::open(&cas).unwrap();
+        let stored = store.store(b"missing backing file", "text/plain").unwrap();
+        let hex = stored.hash.strip_prefix("sha256:").unwrap();
+        fs::remove_file(cas.join(&hex[..2]).join(hex)).unwrap();
+        let destination = temp.path().join("backups");
+        let (final_path, partial_path) = backup_output_paths(&destination);
+
+        assert!(create_backup(&vault, &destination, timestamp()).is_err());
+        assert!(!final_path.exists());
+        assert!(!partial_path.exists());
+    }
+
+    #[test]
+    fn missing_configured_cas_fails_without_archive_artifacts() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("missing-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let destination = temp.path().join("backups");
+        let (final_path, partial_path) = backup_output_paths(&destination);
+
+        assert!(create_backup(&vault, &destination, timestamp()).is_err());
+        assert!(!cas.exists(), "backup must not create a missing CAS");
+        assert!(!final_path.exists());
+        assert!(!partial_path.exists());
+    }
+
+    #[test]
+    fn rejects_cas_at_vault_root_without_archive_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        let vault = temp.path().join("vault");
+        fs::create_dir_all(vault.join(".clepsydra")).unwrap();
+        configure_cas(&vault, &vault.display().to_string());
+        drop(ContentStore::open(&vault).unwrap());
+        let destination = temp.path().join("backups");
+        let (final_path, partial_path) = backup_output_paths(&destination);
+
+        assert!(create_backup(&vault, &destination, timestamp()).is_err());
+        assert!(!final_path.exists());
+        assert!(!partial_path.exists());
+    }
+
+    #[test]
+    fn rejects_backup_outputs_inside_cas_without_archive_artifacts() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("output-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        drop(ContentStore::open(&cas).unwrap());
+        let destination = cas.join("backups");
+        let (final_path, partial_path) = backup_output_paths(&destination);
+
+        assert!(create_backup(&vault, &destination, timestamp()).is_err());
+        assert!(!final_path.exists());
+        assert!(!partial_path.exists());
     }
 
     #[test]
@@ -745,6 +1268,9 @@ mod tests {
         let vault = temp.path().join("vault");
         let destination = temp.path().join("backups");
         fs::create_dir_all(&vault).unwrap();
+        let cas = temp.path().join("cas");
+        configure_cas(&vault, &cas.display().to_string());
+        drop(ContentStore::open(&cas).unwrap());
         let outside = temp.path().join("outside");
         fs::create_dir_all(&outside).unwrap();
         fs::write(outside.join("secret.txt"), "not in archive").unwrap();
