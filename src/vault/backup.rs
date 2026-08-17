@@ -646,6 +646,8 @@ mod tests {
         ContentStore, backup_blob_verification_passes, install_before_backup_blob_use_barrier,
         reset_backup_blob_verification_passes,
     };
+    #[cfg(target_vendor = "apple")]
+    use crate::vault::cas::install_before_backup_database_open_barrier;
 
     use super::*;
 
@@ -856,6 +858,72 @@ mod tests {
         assert_eq!(
             archive_entry_bytes(&archive, &stable_blob_path(&wal_hash)),
             wal_bytes
+        );
+    }
+
+    #[cfg(target_vendor = "apple")]
+    #[test]
+    fn backup_database_remains_bound_to_retained_root_after_descriptor_path_derivation() {
+        let (temp, vault) = populated_vault();
+        let cas = temp.path().join("identity-cas");
+        configure_cas(&vault, &cas.display().to_string());
+        let original_store = ContentStore::open(&cas).unwrap();
+        original_store
+            .store(b"shared identity blob", "text/plain")
+            .unwrap();
+        drop(original_store);
+        let original_database = Connection::open(cas.join("cas.db")).unwrap();
+        original_database
+            .execute_batch(
+                "CREATE TABLE identity_marker (value TEXT NOT NULL);
+                 INSERT INTO identity_marker VALUES ('retained-original');",
+            )
+            .unwrap();
+        drop(original_database);
+
+        let replacement = temp.path().join("replacement-cas");
+        let replacement_store = ContentStore::open(&replacement).unwrap();
+        replacement_store
+            .store(b"shared identity blob", "text/plain")
+            .unwrap();
+        drop(replacement_store);
+        let replacement_database = Connection::open(replacement.join("cas.db")).unwrap();
+        replacement_database
+            .execute_batch(
+                "CREATE TABLE identity_marker (value TEXT NOT NULL);
+                 INSERT INTO identity_marker VALUES ('pathname-replacement');",
+            )
+            .unwrap();
+        drop(replacement_database);
+
+        let destination = temp.path().join("backups");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_before_backup_database_open_barrier(cas.join("cas.db"), barrier.clone());
+        let worker_vault = vault.clone();
+        let worker_destination = destination.clone();
+        let worker = std::thread::spawn(move || {
+            create_backup(&worker_vault, &worker_destination, timestamp())
+        });
+
+        barrier.wait();
+        fs::rename(&cas, temp.path().join("retained-identity-cas")).unwrap();
+        fs::rename(&replacement, &cas).unwrap();
+        barrier.wait();
+
+        let archive = worker.join().unwrap().unwrap();
+        let extracted = temp.path().join("identity-cas-snapshot.db");
+        fs::write(
+            &extracted,
+            archive_entry_bytes(&archive, Path::new(CAS_DATABASE_ARCHIVE_PATH)),
+        )
+        .unwrap();
+        let archived_database = Connection::open(extracted).unwrap();
+        let marker: String = archived_database
+            .query_row("SELECT value FROM identity_marker", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            marker, "retained-original",
+            "backup followed the pathname replacement instead of the retained database"
         );
     }
 
