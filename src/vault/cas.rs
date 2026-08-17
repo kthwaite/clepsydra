@@ -125,10 +125,17 @@ static BACKUP_BLOB_VERIFICATION_PASSES: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::BTreeMap<String, usize>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
 
-#[cfg(test)]
-static TEST_BLOCKED_LOCK_BARRIER: std::sync::LazyLock<
-    parking_lot::Mutex<Option<std::sync::Arc<std::sync::Barrier>>>,
-> = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
+#[cfg(all(test, unix))]
+type TestLockIdentity = (u64, u64);
+
+#[cfg(all(test, unix))]
+static TEST_BLOCKED_LOCK_BARRIERS: std::sync::LazyLock<
+    parking_lot::Mutex<
+        std::collections::BTreeMap<TestLockIdentity, std::sync::Arc<std::sync::Barrier>>,
+    >,
+> = std::sync::LazyLock::new(|| {
+    parking_lot::Mutex::new(std::collections::BTreeMap::new())
+});
 
 #[cfg(test)]
 fn normalized_test_path(path: &Path) -> PathBuf {
@@ -222,15 +229,30 @@ pub(crate) fn backup_blob_verification_passes(hash: &str) -> usize {
         .unwrap_or(0)
 }
 
-#[cfg(test)]
-fn install_blocked_lock_barrier(barrier: std::sync::Arc<std::sync::Barrier>) {
-    let prior = TEST_BLOCKED_LOCK_BARRIER.lock().replace(barrier);
+#[cfg(all(test, unix))]
+fn retained_lock_identity(file: &File) -> io::Result<TestLockIdentity> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+
+#[cfg(all(test, unix))]
+fn install_blocked_lock_barrier(
+    file: &File,
+    barrier: std::sync::Arc<std::sync::Barrier>,
+) {
+    let identity = retained_lock_identity(file).expect("inspect retained CAS test lock");
+    let prior = TEST_BLOCKED_LOCK_BARRIERS
+        .lock()
+        .insert(identity, barrier);
     assert!(prior.is_none(), "CAS blocked-lock test barrier was already installed");
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 fn pause_after_confirming_lock_contention(file: &File) -> io::Result<()> {
-    let barrier = TEST_BLOCKED_LOCK_BARRIER.lock().take();
+    let identity = retained_lock_identity(file)?;
+    let barrier = TEST_BLOCKED_LOCK_BARRIERS.lock().remove(&identity);
     let Some(barrier) = barrier else {
         return Ok(());
     };
@@ -263,7 +285,7 @@ impl<'a> ExclusiveLockGuard<'a> {
                 "CAS mutation lock is already held by this content store",
             ));
         }
-        #[cfg(test)]
+        #[cfg(all(test, unix))]
         if let Err(error) = pause_after_confirming_lock_contention(file) {
             held.set(false);
             return Err(error);
@@ -2106,6 +2128,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn backup_snapshot_rejects_lock_replacement_while_acquisition_is_blocked() {
         let (holder, tmp) = test_store();
@@ -2113,7 +2136,7 @@ mod tests {
         let waiter = ContentStore::open(tmp.path()).unwrap();
         let snapshot = holder.backup_snapshot().unwrap();
         let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
-        install_blocked_lock_barrier(barrier.clone());
+        install_blocked_lock_barrier(&waiter.lock_file, barrier.clone());
         let worker = std::thread::spawn(move || {
             waiter
                 .backup_snapshot()
