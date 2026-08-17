@@ -134,13 +134,29 @@ describe("Gazetteer route filters", () => {
   });
 
   it("keeps quotation available as a backend-facing kind filter", () => {
-
     routeMocks.search.kind = "QUOTE";
     render(<GazetteerPage />);
     expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
       q: "atlas",
       tags: ["research"],
       kind: "QUOTE",
+      project: "clepsydra",
+      limit: 20,
+      offset: 20,
+    });
+  });
+
+  it("renders an unknown URL Kind as a raw-value FilterBar chip and still queries by it", () => {
+    routeMocks.search.kind = "WIDGET";
+    render(<GazetteerPage />);
+
+    expect(screen.getByTestId("filter-bar-chip-kind-WIDGET")).toHaveTextContent(
+      "KIND: WIDGET",
+    );
+    expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
+      q: "atlas",
+      tags: ["research"],
+      kind: "WIDGET",
       project: "clepsydra",
       limit: 20,
       offset: 20,
@@ -196,8 +212,9 @@ describe("Gazetteer route filters", () => {
     const user = userEvent.setup();
     render(<GazetteerPage />);
 
-    await user.click(screen.getByRole("button", { name: "Filter by kind" }));
-    await user.click(screen.getByRole("option", { name: "NOTE" }));
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByTestId("filter-bar-field-kind"));
+    await user.click(screen.getByTestId("filter-bar-option-kind-NOTE"));
     expect(resolvedSearch()).toEqual({
       ...completeSearch,
       kind: "NOTE",
@@ -205,7 +222,7 @@ describe("Gazetteer route filters", () => {
     });
 
     routeMocks.navigate.mockClear();
-    await user.click(screen.getByRole("button", { name: /clear.*project/i }));
+    await user.click(screen.getByTestId("filter-bar-chip-project-clepsydra"));
     expect(resolvedSearch()).toEqual({
       ...completeSearch,
       project: undefined,
