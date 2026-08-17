@@ -8,9 +8,10 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardResponse } from "#/api/board";
-import { EMPTY_FILTER } from "#/components/tasking/board-filter";
+import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
 import { filterTasks, TaskingScreen } from "../TaskingScreen";
 import {
@@ -82,6 +83,34 @@ function renderScreen() {
   );
 }
 
+/**
+ * Local stateful harness standing in for the /tasking route: TaskingScreen is
+ * a controlled component (filterState/onFilterChange are route-owned props),
+ * so filter-interaction tests need a real state round-trip the same way the
+ * route's useMemo/navigate wiring provides it in production.
+ */
+function ControlledTaskingScreen({
+  initial = EMPTY_FILTER_STATE,
+}: {
+  initial?: FilterState;
+}) {
+  const [filterState, setFilterState] = useState<FilterState>(initial);
+  return (
+    <TaskingScreen filterState={filterState} onFilterChange={setFilterState} />
+  );
+}
+
+function renderScreenWithFilter(initial?: FilterState) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <ControlledTaskingScreen initial={initial} />
+    </QueryClientProvider>,
+  );
+}
+
 beforeEach(() => {
   useBoardStore.setState({
     mode: "card",
@@ -91,7 +120,6 @@ beforeEach(() => {
     editTaskId: null,
     taskModal: null,
     cycleModal: null,
-    filter: EMPTY_FILTER,
   });
 });
 
@@ -491,77 +519,112 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
   });
 });
 
-// ── filter strip: text + priority + hold composition ─────────────────────────
+// ── filter strip: shared FilterBar composition ────────────────────────────────
 
-describe("TaskingScreen — text/priority/hold filtering", () => {
+describe("TaskingScreen — shared FilterBar composition", () => {
   it("typing text filters visible cards and shows the N OF M count", async () => {
     stubBoardFetch(FILTER_FIXTURE);
-    renderScreen();
+    renderScreenWithFilter();
     await screen.findByText("TASKING BOARD");
 
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.getByText("Beta task")).toBeInTheDocument();
     expect(screen.getByText("Gamma task")).toBeInTheDocument();
-    expect(screen.queryByTestId("board-filter-count")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
 
-    await userEvent.type(screen.getByTestId("board-filter-input"), "alpha");
+    await userEvent.type(screen.getByTestId("filter-bar-input"), "alpha");
 
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
     expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
-    expect(screen.getByTestId("board-filter-count")).toHaveTextContent(
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
       "01 OF 03",
     );
   });
 
-  it("clicking a priority toggle composes with the text filter", async () => {
-    stubBoardFetch(FILTER_FIXTURE);
-    renderScreen();
+  it("adding a project facet chip narrows to that project's tasks", async () => {
+    stubBoardFetch();
+    renderScreenWithFilter();
     await screen.findByText("TASKING BOARD");
 
-    await userEvent.click(screen.getByTestId("board-filter-pri-P1"));
+    expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+    expect(screen.getByText("Task Beta 1")).toBeInTheDocument();
+    expect(screen.getByText("Task Unfiled")).toBeInTheDocument();
 
-    expect(screen.getByText("Beta task")).toBeInTheDocument();
-    expect(screen.queryByText("Alpha task")).not.toBeInTheDocument();
-    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
-    expect(screen.getByTestId("board-filter-count")).toHaveTextContent(
-      "01 OF 03",
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-field-project"));
+    await userEvent.click(
+      screen.getByTestId("filter-bar-option-project-alpha"),
+    );
+
+    // t1, t2, t5 carry project="alpha"; t3 (beta) and t4 (unfiled) drop out
+    expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+    expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
+    expect(screen.getByText("Task Sealed")).toBeInTheDocument();
+    expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
+      "03 OF 05",
+    );
+  });
+
+  it("composes a project facet with the text filter", async () => {
+    stubBoardFetch();
+    renderScreenWithFilter();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-field-project"));
+    await userEvent.click(
+      screen.getByTestId("filter-bar-option-project-alpha"),
+    );
+    // Multi-select fields leave the popover open; close it explicitly so the
+    // outside text input is interactable again (react-aria's overlay hides
+    // outside content from interaction while a non-modal popover is open).
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.type(screen.getByTestId("filter-bar-input"), "sealed");
+
+    expect(screen.getByText("Task Sealed")).toBeInTheDocument();
+    expect(screen.queryByText("Task Alpha 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
+      "01 OF 05",
     );
   });
 
   it("clearing the filter restores all cards and hides the count line", async () => {
     stubBoardFetch(FILTER_FIXTURE);
-    renderScreen();
+    renderScreenWithFilter();
     await screen.findByText("TASKING BOARD");
 
-    const input = screen.getByTestId("board-filter-input");
-    await userEvent.type(input, "alpha");
+    await userEvent.type(screen.getByTestId("filter-bar-input"), "alpha");
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
 
-    await userEvent.clear(input);
+    await userEvent.click(screen.getByTestId("filter-bar-clear"));
 
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.getByText("Beta task")).toBeInTheDocument();
     expect(screen.getByText("Gamma task")).toBeInTheDocument();
-    expect(screen.queryByTestId("board-filter-count")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
   });
 
-  it("HOLD toggle keeps only tasks on hold", async () => {
-    const heldFixture: BoardResponse = {
-      ...FILTER_FIXTURE,
-      tasks: FILTER_FIXTURE.tasks.map((t) =>
-        t.id === "f2" ? { ...t, hold: "blocker" } : t,
-      ),
-    };
-    stubBoardFetch(heldFixture);
-    renderScreen();
+  it("the hold flag shows only held tasks", async () => {
+    // t2 in BOARD_FIXTURE carries hold="blocker"
+    stubBoardFetch();
+    renderScreenWithFilter();
     await screen.findByText("TASKING BOARD");
 
-    await userEvent.click(screen.getByTestId("board-filter-hold"));
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-field-hold"));
 
-    expect(screen.getByText("Beta task")).toBeInTheDocument();
-    expect(screen.queryByText("Alpha task")).not.toBeInTheDocument();
-    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+    expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
+    expect(screen.queryByText("Task Alpha 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
+      "01 OF 05",
+    );
   });
 });
 
