@@ -41,7 +41,7 @@ export const AGENDA_FILTER_URL: FilterUrlOptions = {
  * Priority is the A/B/C agenda vocabulary read from `properties.priority`
  * (deliberately distinct from the board's P0–P3 — R3).
  */
-export const AGENDA_FILTER_CONFIG: ClientFilterConfig<TaskItem> = {
+const AGENDA_FILTER_CONFIG: ClientFilterConfig<TaskItem> = {
   textHay: (t) => `${t.content}\n${t.page_title ?? ""}`,
   accessors: {
     status: (t) => [t.status],
