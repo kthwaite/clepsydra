@@ -31,6 +31,8 @@ export type BaseMemberCapability =
   components["schemas"]["BaseMemberCapability"];
 export type BaseMemberDiagnostic =
   components["schemas"]["BaseMemberDiagnostic"];
+export type BaseMemberImplication =
+  components["schemas"]["BaseMemberImplication"];
 export type BaseViewEvaluateRequest =
   components["schemas"]["BaseViewEvaluateRequest"];
 export type BaseViewEvaluateResponse =
