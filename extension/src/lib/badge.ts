@@ -45,47 +45,54 @@ export interface BadgeAppearance {
 
 const CLEAR_SUCCESS_MS = 5000;
 
+/**
+ * Badge hues are the app's own signal palette (ui/src/main.css): --cool reads,
+ * --accent works, --ok settles, --warn hesitates, --hot fails. Every browser
+ * that draws these picks the badge's text colour itself for contrast, so the
+ * light end of the palette stays legible.
+ */
+
 const APPEARANCES: Record<CapturePhase, BadgeAppearance> = {
 	capturing: {
 		text: "…",
-		color: "#2563eb",
+		color: "#4cd9ff",
 		title: "Clepsydra: reading the page…",
 		clearAfterMs: null,
 	},
 	processing: {
 		text: "…",
-		color: "#7c3aed",
+		color: "#ee7733",
 		title: "Clepsydra: building the snapshot…",
 		clearAfterMs: null,
 	},
 	uploading: {
 		text: "↑",
-		color: "#7c3aed",
+		color: "#ee7733",
 		title: "Clepsydra: sending to the vault…",
 		clearAfterMs: null,
 	},
 	done: {
 		text: "✓",
-		color: "#16a34a",
+		color: "#5dffa6",
 		title: "Clepsydra: archived",
 		clearAfterMs: CLEAR_SUCCESS_MS,
 	},
 	duplicate: {
 		text: "=",
-		color: "#16a34a",
+		color: "#5dffa6",
 		title: "Clepsydra: already archived",
 		clearAfterMs: CLEAR_SUCCESS_MS,
 	},
 	conflict: {
 		text: "!",
-		color: "#d97706",
+		color: "#ffb84a",
 		title: "Clepsydra: page changed since it was archived",
 		// Deliberately persists: this one needs a decision from the user.
 		clearAfterMs: null,
 	},
 	error: {
 		text: "!",
-		color: "#dc2626",
+		color: "#ff3b1f",
 		title: "Clepsydra: capture failed",
 		clearAfterMs: null,
 	},

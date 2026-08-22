@@ -9,6 +9,8 @@ import type { components } from "#/api/schema";
 import {
   type BaseEmbedConfig,
   baseViewEvaluationBody,
+  type EmbedScrollCap,
+  embedScrollCap,
   nextWindowSize,
   queryIdentity,
 } from "#/components/bases/embed-query";
@@ -307,8 +309,8 @@ export interface BaseViewWindows {
   loaded: number;
   hasMore: boolean;
   isLoadingMore: boolean;
-  /** True when the author's `limit`, not the result, ended the scroll. */
-  cappedByAuthor: boolean;
+  /** Which bound ended the scroll short of the total, if either did. */
+  cappedBy: EmbedScrollCap | undefined;
   loadMore(): void;
 }
 
@@ -378,11 +380,10 @@ export function useBaseViewWindows(config: BaseEmbedConfig): BaseViewWindows {
     loaded,
     hasMore: query.hasNextPage,
     isLoadingMore: query.isFetchingNextPage,
-    cappedByAuthor:
-      cap !== undefined &&
-      !query.hasNextPage &&
-      total !== undefined &&
-      loaded < total,
+    cappedBy:
+      !query.hasNextPage && total !== undefined && loaded < total
+        ? embedScrollCap(cap, loaded)
+        : undefined,
     loadMore,
   };
 }
