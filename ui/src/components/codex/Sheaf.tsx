@@ -23,6 +23,10 @@ import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
 
 type SheafProps = {
   activeTabId: string | null;
+  /** Whether the active tab's page is the one rendered in the content window.
+   * True on Folio; false on the other sheaf-bearing views (Tasking,
+   * Gazetteer), where the active tab previews like any other. */
+  activeTabVisible?: boolean;
   className?: string;
 };
 
@@ -45,7 +49,11 @@ function getSheafTabId(data: Record<string, unknown>): string | null {
     : null;
 }
 
-export function Sheaf({ activeTabId, className }: SheafProps) {
+export function Sheaf({
+  activeTabId,
+  activeTabVisible = true,
+  className,
+}: SheafProps) {
   const openInscribe = useUiStore((state) => state.openInscribe);
   const tabs = useWorkspaceStore((s) => s.tabs);
   const quires = useWorkspaceStore((s) => s.quires);
@@ -96,7 +104,7 @@ export function Sheaf({ activeTabId, className }: SheafProps) {
     el: HTMLElement,
   ) => {
     if (draggedTabId !== null) return;
-    if (!shouldPreviewTab(path, id, activeTabId)) return;
+    if (!shouldPreviewTab(path, id, activeTabId, activeTabVisible)) return;
     clearOpenTimer();
     const show = () => setHovered({ id, rect: el.getBoundingClientRect() });
     // Instant-scrub: if a card is already open, switch with no re-delay.
