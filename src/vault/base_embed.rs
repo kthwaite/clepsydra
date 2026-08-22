@@ -13,6 +13,11 @@ const MAX_SCALAR_STRING_BYTES: usize = 4 * 1024;
 const MIN_LIMIT: u32 = 1;
 const MAX_LIMIT: u32 = 200;
 
+/// The rows an embed receives when it asks for no particular limit. Embedded
+/// requests are never uncapped: a caller walks a large result with `offset`
+/// rather than rendering all of it at once.
+pub const EMBED_WINDOW_ROWS: u32 = 50;
+
 #[derive(Debug, Clone, Copy)]
 pub struct EmbedOverrides<'a> {
     pub filter: Option<&'a Filter>,
@@ -31,8 +36,8 @@ pub struct EmbedValidationDiagnostic {
 ///
 /// Request filters narrow the Base membership and saved view filters in that
 /// order. A present sort replaces the saved sort, including an empty
-/// replacement that deliberately clears it. Embedded requests without a
-/// limit are uncapped for both flat and grouped output.
+/// replacement that deliberately clears it. A caller that names no limit
+/// receives one window (`EMBED_WINDOW_ROWS`), never the whole result.
 pub fn composed_query_spec(
     base: &BaseDefinition,
     view: &ViewDefinition,
@@ -49,6 +54,7 @@ pub fn composed_query_spec(
         1 => filters.pop(),
         _ => Some(Filter::All(filters)),
     };
+    let limit = Some(limit.unwrap_or(EMBED_WINDOW_ROWS));
     let group_row_limit = match limit {
         Some(limit) => GroupRowLimit::Limit(limit),
         None => GroupRowLimit::Unlimited,
@@ -93,6 +99,25 @@ pub fn validate_embed_overrides(
     } else {
         Err(diagnostics)
     }
+}
+
+/// Validate the row window a request asks for.
+///
+/// A grouped view returns one bounded window per group, so a single flat
+/// offset has no meaning across them; asking for one is refused rather than
+/// silently ignored.
+pub fn validate_embed_window(
+    view: &ViewDefinition,
+    offset: u32,
+) -> Result<(), Vec<EmbedValidationDiagnostic>> {
+    if offset > 0 && view.group_by.is_some() {
+        return Err(vec![diagnostic(
+            Some("offset"),
+            None,
+            "offset is not supported for a grouped view",
+        )]);
+    }
+    Ok(())
 }
 
 fn validate_complexity(overrides: EmbedOverrides<'_>) -> Vec<EmbedValidationDiagnostic> {
@@ -517,7 +542,7 @@ fn op_name(op: Op) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{EmbedOverrides, composed_query_spec, validate_embed_overrides};
+    use super::{EMBED_WINDOW_ROWS, EmbedOverrides, composed_query_spec, validate_embed_overrides};
     use crate::vault::base::{
         Aggregate, AggregateFn, BaseDefinition, BaseFile, Filter, Op, PropertyDefinition,
         PropertyType, SortDir, SortKey, ViewDefinition,
@@ -615,8 +640,12 @@ mod tests {
         assert_eq!(spec.aggregates.len(), 1);
         assert!(matches!(spec.aggregates[0].function, AggregateFn::Avg));
         assert_eq!(spec.aggregates[0].field.as_deref(), Some("rating"));
-        assert_eq!(spec.limit, None);
-        assert_eq!(spec.group_row_limit, GroupRowLimit::Unlimited);
+        // A request that names no limit still receives one bounded window.
+        assert_eq!(spec.limit, Some(EMBED_WINDOW_ROWS));
+        assert_eq!(
+            spec.group_row_limit,
+            GroupRowLimit::Limit(EMBED_WINDOW_ROWS)
+        );
     }
 
     #[test]
