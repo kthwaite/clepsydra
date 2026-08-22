@@ -1857,6 +1857,11 @@ export interface components {
             filter?: null | components["schemas"]["Filter"];
             /** Format: int32 */
             limit?: number | null;
+            /**
+             * Format: int32
+             * @description Rows to skip before the window. Flat views only.
+             */
+            offset?: number | null;
             sort?: components["schemas"]["SortKey"][] | null;
         };
         BaseViewEvaluateResponse: {

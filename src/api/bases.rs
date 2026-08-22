@@ -30,6 +30,7 @@ use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
 use crate::vault::base_embed::{
     EmbedOverrides, EmbedValidationDiagnostic, composed_query_spec, validate_embed_overrides,
+    validate_embed_window,
 };
 use crate::vault::base_member::{
     BaseMemberCapability, BaseMemberDiagnostic, BaseMemberScope, composed_member_capability,
@@ -213,6 +214,9 @@ pub struct BaseViewEvaluateRequest {
     pub sort: Option<Vec<SortKey>>,
     #[schema(minimum = 1, maximum = 200)]
     pub limit: Option<u32>,
+    /// Rows to skip before the window. Flat views only.
+    #[schema(minimum = 0)]
+    pub offset: Option<u32>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -252,16 +256,19 @@ where
         },
     )
     .map_err(invalid_embed_query)?;
+    let offset = request.offset.unwrap_or(0);
+    validate_embed_window(&view, offset).map_err(invalid_embed_query)?;
 
     let member_creation =
         composed_member_capability(&stored.definition, &view, request.filter.as_ref());
-    let spec = composed_query_spec(
+    let mut spec = composed_query_spec(
         &stored.definition,
         &view,
         request.filter,
         request.sort,
         request.limit,
     );
+    spec.offset = offset;
 
     Ok(PreparedEmbeddedEvaluation {
         base: stored.definition,
@@ -834,6 +841,7 @@ mod tests {
             }),
             sort: None,
             limit: Some(1),
+            offset: None,
         };
         let counted_loads = Arc::clone(&load_calls);
         let counted_evaluations = Arc::clone(&evaluation_calls);
