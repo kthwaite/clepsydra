@@ -2,6 +2,12 @@ import type { Code, Parents, RootContent } from "mdast";
 import type { Info, Options, State } from "mdast-util-to-markdown";
 import { parse } from "smol-toml";
 import type { BaseFilter, SortKey } from "#/api/bases";
+import {
+  type BaseEmbedPresentation,
+  EMBED_WIDTH_MAX,
+  EMBED_WIDTH_MIN,
+  isBaseEmbedDisplay,
+} from "#/components/bases/embed-presentation";
 import type { BaseEmbedConfig } from "#/components/bases/embed-query";
 import type {
   BaseEmbedElement,
@@ -247,9 +253,13 @@ function validateSort(value: unknown): asserts value is SortKey[] {
 
 function assertValidBaseEmbedConfig(
   value: unknown,
-): asserts value is BaseEmbedConfig {
+): asserts value is BaseEmbedFence {
   if (!isTable(value)) fail("Base embed configuration must be a TOML table");
-  assertClosedKeys(value, ["base", "view"], ["filter", "sort", "limit"]);
+  assertClosedKeys(
+    value,
+    ["base", "view"],
+    ["filter", "sort", "limit", "display", "width"],
+  );
   if (typeof value.base !== "string" || value.base.trim().length === 0) {
     fail("`base` must be a nonblank string", "base");
   }
@@ -269,6 +279,20 @@ function assertValidBaseEmbedConfig(
     fail(
       `\`limit\` must be an integer from ${MIN_LIMIT} through ${MAX_LIMIT}`,
       "limit",
+    );
+  }
+  if (Object.hasOwn(value, "display") && !isBaseEmbedDisplay(value.display)) {
+    fail("`display` must be `compact` or `full`", "display");
+  }
+  if (
+    Object.hasOwn(value, "width") &&
+    (!Number.isInteger(value.width) ||
+      (value.width as number) < EMBED_WIDTH_MIN ||
+      (value.width as number) > EMBED_WIDTH_MAX)
+  ) {
+    fail(
+      `\`width\` must be an integer from ${EMBED_WIDTH_MIN} through ${EMBED_WIDTH_MAX}`,
+      "width",
     );
   }
 }
@@ -363,7 +387,11 @@ function serializeSort(sort: SortKey[]): string {
     .join(", ")}]`;
 }
 
-function canonicalBody(config: BaseEmbedConfig): string {
+/** The fence carries the query and, after it, the presentation the author
+ * chose. Presentation keys are written only when they were authored. */
+type BaseEmbedFence = BaseEmbedConfig & BaseEmbedPresentation;
+
+function canonicalBody(config: BaseEmbedFence): string {
   assertValidBaseEmbedConfig(config);
   const lines = [
     `base = ${encodeTomlBasicString(config.base)}`,
@@ -375,6 +403,10 @@ function canonicalBody(config: BaseEmbedConfig): string {
   if (config.sort !== undefined)
     lines.push(`sort = ${serializeSort(config.sort)}`);
   if (config.limit !== undefined) lines.push(`limit = ${config.limit}`);
+  if (config.display !== undefined) {
+    lines.push(`display = ${encodeTomlBasicString(config.display)}`);
+  }
+  if (config.width !== undefined) lines.push(`width = ${config.width}`);
   const body = `${lines.join("\n")}\n`;
   const bodyBytes = textEncoder.encode(body).length;
   if (bodyBytes > MAX_BODY_BYTES) {
@@ -408,7 +440,7 @@ export function validateBaseEmbedConfig(
   value: unknown,
 ): BaseEmbedValidationDiagnostic[] {
   try {
-    canonicalBody(value as BaseEmbedConfig);
+    canonicalBody(value as BaseEmbedFence);
     return [];
   } catch (error) {
     return [
@@ -557,13 +589,15 @@ export function baseEmbedFromCode(
 }
 
 function configuredRawBlock(node: ConfiguredBaseEmbedElement): string {
-  const { base, view, filter, sort, limit } = node;
+  const { base, view, filter, sort, limit, display, width } = node;
   return `\`\`\`base\n${canonicalBody({
     base,
     view,
     ...(filter === undefined ? {} : { filter }),
     ...(sort === undefined ? {} : { sort }),
     ...(limit === undefined ? {} : { limit }),
+    ...(display === undefined ? {} : { display }),
+    ...(width === undefined ? {} : { width }),
   })}\`\`\`\n`;
 }
 

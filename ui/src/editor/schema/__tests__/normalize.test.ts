@@ -256,6 +256,15 @@ describe("Base embed integrity invariant", () => {
     },
     {
       type: "base-embed",
+      status: "configured",
+      base: "books",
+      view: "Reading",
+      display: "full",
+      width: 1100,
+      children: [{ text: "" }],
+    },
+    {
+      type: "base-embed",
       status: "invalid",
       rawBlock: "````base\r\nunknown = true\r\n````",
       parseError: "Unknown key",

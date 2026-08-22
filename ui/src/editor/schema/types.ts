@@ -1,6 +1,7 @@
 import type { BaseEditor, Descendant } from "slate";
 import type { HistoryEditor } from "slate-history";
 import type { ReactEditor } from "slate-react";
+import type { BaseEmbedPresentation } from "#/components/bases/embed-presentation";
 import type { BaseEmbedConfig } from "#/components/bases/embed-query";
 import type { MathDelimiter } from "#/lib/markdown/folioMath";
 
@@ -141,7 +142,8 @@ export interface UnconfiguredBaseEmbedElement extends BaseEmbedElementBase {
 }
 
 export type ConfiguredBaseEmbedElement = BaseEmbedElementBase &
-  BaseEmbedConfig & {
+  BaseEmbedConfig &
+  BaseEmbedPresentation & {
     status: "configured";
   };
 
