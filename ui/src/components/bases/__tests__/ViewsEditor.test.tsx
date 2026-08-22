@@ -581,6 +581,16 @@ describe("ViewsEditor", () => {
     },
   );
 
+/** Registrations belonging to the visible-columns list, ignoring the saved-view
+ * rows that share the same drag adapters. */
+function columnRegistrations<T extends { element: Element }>(
+  registrations: T[],
+): T[] {
+  return registrations.filter((registration) =>
+    registration.element.closest('[aria-labelledby$="-columns-heading"]'),
+  );
+}
+
   it("clears a cancelled column drag, ignores a later unrelated drop, rejects properties, and unregisters", () => {
     const onChange = vi.fn<(views: DraftView[]) => void>();
     const rendered = render(
@@ -619,8 +629,9 @@ describe("ViewsEditor", () => {
     );
     expect(canDrop(propertySource, target)).toBe(false);
     expect(onChange).not.toHaveBeenCalled();
-    expect(dnd.draggables).toHaveLength(3);
-    expect(dnd.dropTargets).toHaveLength(3);
+    // Three columns, plus the saved-view row, which is now draggable too.
+    expect(columnRegistrations(dnd.draggables)).toHaveLength(3);
+    expect(columnRegistrations(dnd.dropTargets)).toHaveLength(3);
 
     rendered.unmount();
     expect(dnd.draggables).toHaveLength(0);
@@ -831,6 +842,50 @@ describe("ViewsEditor", () => {
     expect(latest<DraftView[]>(onChange)[0].sort).toEqual([
       { field: "status", dir: "asc" },
       { field: "rating", dir: "desc" },
+    ]);
+  });
+
+  it("reorders sorts from the shared grip with Alt and an arrow", async () => {
+    const onChange = renderViews();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Add sort" }));
+    await chooseSelectOption(user, "Sort field 1", "rating");
+    await user.click(screen.getByRole("button", { name: "Add sort" }));
+    await chooseSelectOption(user, "Sort field 2", "status");
+
+    const grip = screen.getByRole("button", { name: "Reorder sort 2" });
+    expect(grip).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowUp Alt+ArrowDown",
+    );
+    grip.focus();
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+
+    expect(latest<DraftView[]>(onChange)[0].sort).toEqual([
+      { field: "status", dir: "asc" },
+      { field: "rating", dir: "asc" },
+    ]);
+    expect(screen.getAllByRole("status").at(-1)).toHaveTextContent(
+      "Moved sort 2 to position 1 of 2.",
+    );
+  });
+
+  it("reorders views from the shared grip with Alt and an arrow", async () => {
+    const onChange = renderViews({
+      views: [
+        view({ id: "all", name: "All" }),
+        view({ id: "later", name: "Later" }),
+      ],
+    });
+    const user = userEvent.setup();
+
+    const grip = screen.getByRole("button", { name: "Reorder Later view" });
+    grip.focus();
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+
+    expect(latest<DraftView[]>(onChange).map((item) => item.id)).toEqual([
+      "later",
+      "all",
     ]);
   });
 

@@ -1,11 +1,20 @@
-import { useEffect, useState } from "react";
+import { Copy, Trash2 } from "lucide-react";
+import { type ReactNode, useEffect, useId, useState } from "react";
 import { Button } from "#/components/ui/button";
+import { IconButton } from "#/components/ui/icon-button";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
 import type { DraftProperty, DraftView } from "./definition-model";
 import { moveItem } from "./definition-model";
+import {
+  MoveButtons,
+  ReorderAnnouncement,
+  ReorderHandle,
+  useReorderable,
+  useReorderAnnouncement,
+} from "./ordered-list";
 import { asciiCaseFold } from "./local-validation";
 import { ViewDefinitionEditor } from "./ViewDefinitionEditor";
 
@@ -80,6 +89,8 @@ export function ViewsEditor({
     views.findIndex((view) => view.id === requestedId),
   );
   const selected = views[selectedIndex];
+  const { announcement, announce, setAnnouncement } = useReorderAnnouncement();
+  const lastViewReasonId = useId();
 
   useEffect(() => {
     if (views.length === 0) {
@@ -91,6 +102,22 @@ export function ViewsEditor({
     setInternalSelectedId(views[0].id);
     onSelectedViewChange?.(views[0].id);
   }, [onSelectedViewChange, requestedId, views]);
+
+  function move(from: number, to: number) {
+    if (to < 0 || to >= views.length || from === to) return;
+    const moved = views[from];
+    if (!moved) return;
+    announce(moved.name || "Untitled view", to + 1, views.length);
+    onChange(moveItem(views, from, to));
+  }
+
+  function dropView(sourceId: string, targetId: string, edge: string) {
+    const from = views.findIndex((view) => view.id === sourceId);
+    const target = views.findIndex((view) => view.id === targetId);
+    if (from < 0 || target < 0 || from === target) return;
+    const to = edge === "bottom" && from > target ? target + 1 : target;
+    move(from, from < to ? to - 1 : to);
+  }
 
   function select(id: string | undefined) {
     setInternalSelectedId(id);
@@ -172,7 +199,15 @@ export function ViewsEditor({
                 diagnostic.path?.startsWith(`views[${index}]`),
               );
               return (
-                <li key={item.id} className="border-b border-border py-2">
+                <ViewRow
+                  key={item.id}
+                  id={item.id}
+                  label={`${item.name || "Untitled view"} view`}
+                  index={index}
+                  count={views.length}
+                  onMove={move}
+                  onReorder={dropView}
+                >
                   <button
                     ref={(element) => {
                       registerFocus(`views[${index}]`, element);
@@ -199,49 +234,43 @@ export function ViewsEditor({
                     {item.name || "Untitled view"}
                   </button>
                   <div className="mt-1 flex flex-wrap gap-1 px-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      isDisabled={index === 0}
-                      onPress={() =>
-                        onChange(moveItem(views, index, index - 1))
-                      }
-                    >
-                      Move {item.name} up
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      isDisabled={index === views.length - 1}
-                      onPress={() =>
-                        onChange(moveItem(views, index, index + 1))
-                      }
-                    >
-                      Move {item.name} down
-                    </Button>
-                    <Button
-                      size="sm"
+                    <MoveButtons
+                      label={item.name}
+                      index={index}
+                      count={views.length}
+                      onMove={move}
+                    />
+                    <IconButton
+                      aria-label={`Duplicate ${item.name}`}
                       variant="ghost"
                       onPress={() => duplicate(item)}
                     >
-                      Duplicate {item.name}
-                    </Button>
-                    <Button
-                      size="sm"
+                      <Copy />
+                    </IconButton>
+                    <IconButton
+                      aria-label={`Delete ${item.name}`}
                       variant="ghost"
                       isDisabled={views.length <= 1}
+                      aria-describedby={
+                        views.length <= 1 ? lastViewReasonId : undefined
+                      }
                       onPress={() => remove(item)}
                     >
-                      Delete {item.name}
-                    </Button>
+                      <Trash2 />
+                    </IconButton>
                   </div>
-                </li>
+                </ViewRow>
               );
             })}
           </ol>
+          <ReorderAnnouncement message={announcement} />
+          <span id={lastViewReasonId} className="sr-only">
+            A base keeps at least one view
+          </span>
           {selected ? (
             <ViewDefinitionEditor
               key={selected.id}
+              onAnnounceMove={setAnnouncement}
               view={selected}
               viewIndex={selectedIndex}
               properties={properties}
@@ -253,5 +282,48 @@ export function ViewsEditor({
         </div>
       )}
     </section>
+  );
+}
+
+/** One saved-view row, carrying the shared grip so views reorder like every
+ * other ordered definition. */
+function ViewRow({
+  id,
+  label,
+  index,
+  count,
+  onMove,
+  onReorder,
+  children,
+}: {
+  id: string;
+  label: string;
+  index: number;
+  count: number;
+  onMove(from: number, to: number): void;
+  onReorder(sourceId: string, targetId: string, edge: string): void;
+  children: ReactNode;
+}) {
+  const { rowRef, setHandle, onHandleKeyDown } = useReorderable<HTMLLIElement>({
+    kind: "base-view",
+    idKey: "viewId",
+    id,
+    index,
+    count,
+    onMove,
+    onReorder,
+  });
+
+  return (
+    <li ref={rowRef} className="border-b border-border py-2">
+      <div className="flex items-start gap-1">
+        <ReorderHandle
+          label={label}
+          setHandle={setHandle}
+          onKeyDown={onHandleKeyDown}
+        />
+        <div className="min-w-0 flex-1">{children}</div>
+      </div>
+    </li>
   );
 }

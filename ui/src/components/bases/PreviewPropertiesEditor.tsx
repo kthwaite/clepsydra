@@ -1,4 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  type ReactNode,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "#/components/ui/button";
 import type {
   BaseDiagnostic,
@@ -10,6 +17,7 @@ import type {
 } from "./definition-model";
 import { moveItem } from "./definition-model";
 import { presentationFieldIdentity } from "./local-validation";
+import { ReorderHandle, useReorderable } from "./ordered-list";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 
 export interface PresentationFieldChoice {
@@ -132,6 +140,16 @@ export function PreviewPropertiesEditor({
     );
   }
 
+  /** Preview rows carry ids, so a drop maps them back to positions. */
+  function dropRow(sourceId: string, targetId: string, edge: string) {
+    const from = preview.findIndex((row) => row.id === sourceId);
+    const target = preview.findIndex((row) => row.id === targetId);
+    if (from < 0 || target < 0 || from === target) return;
+    const to = edge === "bottom" && from > target ? target + 1 : target;
+    move(from, from < to ? to - 1 : to);
+  }
+
+  const addReasonId = `${useId()}-add-reason`;
   const fieldToAddIdentity = presentationFieldIdentity(fieldToAdd);
   const canAddField =
     fieldToAdd.length > 0 &&
@@ -163,13 +181,18 @@ export function PreviewPropertiesEditor({
             (diagnostic) => diagnostic.severity === "error",
           );
           return (
-            <li
+            <PreviewRow
               key={row.id}
-              ref={(element) => {
+              id={row.id}
+              label={row.field}
+              index={index}
+              count={preview.length}
+              onMove={move}
+              onReorder={dropRow}
+              onRowRef={(element) => {
                 if (element) rowActions.current.set(row.id, element);
                 else rowActions.current.delete(row.id);
               }}
-              className="grid gap-3 border-b border-border py-3 sm:grid-cols-[minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto] sm:items-end"
             >
               <label className={labelClass}>
                 Property {index + 1}
@@ -314,7 +337,7 @@ export function PreviewPropertiesEditor({
                   {rowDiagnostics.map(({ message }) => message).join(" ")}
                 </p>
               ) : null}
-            </li>
+            </PreviewRow>
           );
         })}
       </ol>
@@ -356,9 +379,9 @@ export function PreviewPropertiesEditor({
           </select>
         </label>
         <Button
-          size="sm"
-          variant="secondary"
+          variant="primary"
           isDisabled={!canAddField}
+          aria-describedby={canAddField ? undefined : addReasonId}
           onPress={() => {
             if (!canAddField) return;
             const added = {
@@ -372,7 +395,63 @@ export function PreviewPropertiesEditor({
         >
           Add preview property
         </Button>
+        {canAddField ? null : (
+          <span id={addReasonId} className="sr-only">
+            {fieldToAdd.length === 0
+              ? "Choose a field to add"
+              : "That field is already a preview property"}
+          </span>
+        )}
       </div>
     </section>
+  );
+}
+
+/** A preview-property row with the shared reorder grip. Its move buttons stay
+ * as they are: they carry this editor's own focus-restoration contract. */
+function PreviewRow({
+  id,
+  label,
+  index,
+  count,
+  onMove,
+  onReorder,
+  onRowRef,
+  children,
+}: {
+  id: string;
+  label: string;
+  index: number;
+  count: number;
+  onMove(from: number, to: number): void;
+  onReorder(sourceId: string, targetId: string, edge: string): void;
+  onRowRef(element: HTMLLIElement | null): void;
+  children: ReactNode;
+}) {
+  const { rowRef, setHandle, onHandleKeyDown } = useReorderable<HTMLLIElement>({
+    kind: "base-preview-property",
+    idKey: "previewId",
+    id,
+    index,
+    count,
+    onMove,
+    onReorder,
+  });
+
+  return (
+    <li
+      ref={(element) => {
+        rowRef.current = element;
+        onRowRef(element);
+      }}
+      className="grid gap-3 border-b border-border py-3 sm:grid-cols-[auto_minmax(8rem,0.7fr)_minmax(10rem,1fr)_auto] sm:items-end"
+    >
+      <ReorderHandle
+        label={label}
+        setHandle={setHandle}
+        onKeyDown={onHandleKeyDown}
+      />
+      {children}
+    </li>
   );
 }
