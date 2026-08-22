@@ -38,6 +38,7 @@ export function FeedManagement() {
   const deleteFeed = useDeleteFeed();
   const refreshFeeds = useRefreshFeeds();
   const importOpml = useImportOpml();
+  const [isSubscribeOpen, setIsSubscribeOpen] = useState(false);
   const [editingFeed, setEditingFeed] = useState<Feed | null>(null);
   const [deletingFeed, setDeletingFeed] = useState<Feed | null>(null);
   const [activeDisclosure, setActiveDisclosure] = useState<{
@@ -152,20 +153,9 @@ export function FeedManagement() {
           fallback="The feed operation could not be completed."
         />
       ) : null}
-      <Card label="Subscribe" caption="MANIFEST · feeds.md" pip="cool">
-        <SubscribeForm
-          groups={feedGroups}
-          error={subscribeFeed.error}
-          isPending={subscribeFeed.isPending}
-          onSubmit={async (values) => {
-            subscribeFeed.reset();
-            await subscribeFeed.mutateAsync(values);
-          }}
-        />
-      </Card>
-
       <Card
         label="Subscriptions"
+        wrapHeader
         caption={
           feedsQuery.data
             ? `${feedsQuery.data.groups.reduce((count, group) => count + group.feeds.length, 0)} SOURCES`
@@ -173,13 +163,24 @@ export function FeedManagement() {
         }
         pip={feedsQuery.data?.diagnostics.length ? "hot" : "dim"}
         action={
-          <Button
-            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
-            isDisabled={refreshFeeds.isPending}
-            onPress={() => refreshFeeds.mutate(undefined)}
-          >
-            {refreshFeeds.isPending ? "Refreshing…" : "Refresh feeds"}
-          </Button>
+          <>
+            <Button
+              className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              onPress={() => {
+                subscribeFeed.reset();
+                setIsSubscribeOpen(true);
+              }}
+            >
+              Subscribe
+            </Button>
+            <Button
+              className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+              isDisabled={refreshFeeds.isPending}
+              onPress={() => refreshFeeds.mutate(undefined)}
+            >
+              {refreshFeeds.isPending ? "Refreshing…" : "Refresh feeds"}
+            </Button>
+          </>
         }
       >
         <ManifestState query={feedsQuery} />
@@ -208,7 +209,7 @@ export function FeedManagement() {
               No subscriptions yet
             </p>
             <p className="cl-marg mt-1">
-              Add a feed above or import an OPML file to start the river.
+              Subscribe to a feed or import an OPML file to start the river.
             </p>
           </div>
         ) : null}
@@ -296,6 +297,23 @@ export function FeedManagement() {
         />
       </Card>
 
+      {isSubscribeOpen ? (
+        <SubscribeFeedDialog
+          groups={feedGroups}
+          error={subscribeFeed.error}
+          isPending={subscribeFeed.isPending}
+          onDismiss={() => {
+            subscribeFeed.reset();
+            setIsSubscribeOpen(false);
+          }}
+          onSubmit={async (values) => {
+            subscribeFeed.reset();
+            await subscribeFeed.mutateAsync(values);
+            setIsSubscribeOpen(false);
+          }}
+        />
+      ) : null}
+
       {editingFeed ? (
         <EditFeedDialog
           feed={editingFeed}
@@ -336,74 +354,88 @@ export function FeedManagement() {
   );
 }
 
-function SubscribeForm({
+/** Subscription entry. The draft lives here, so dismissing drops it and a
+ * failed mutation — which keeps the dialog mounted — retains it. */
+function SubscribeFeedDialog({
   groups,
   error,
   isPending,
+  onDismiss,
   onSubmit,
 }: {
   groups: string[];
   error: unknown;
   isPending: boolean;
+  onDismiss: () => void;
   onSubmit: (values: { url: string; group: string | null }) => Promise<void>;
 }) {
   const [url, setUrl] = useState("");
   const [group, setGroup] = useState("");
   return (
-    <form
-      className="grid min-w-0 gap-2 md:grid-cols-[minmax(0,2fr)_minmax(9rem,1fr)_auto] md:items-end"
-      onSubmit={async (event) => {
-        event.preventDefault();
-        const normalizedUrl = url.trim();
-        if (!normalizedUrl) return;
-        try {
-          await onSubmit({ url: normalizedUrl, group: group.trim() || null });
-          setUrl("");
-          setGroup("");
-        } catch {
-          // Preserve both fields; the generated mutation error is rendered below.
-        }
-      }}
+    <CodexModalShell
+      ariaLabel="Subscribe to a feed"
+      maxWidthClassName="max-w-lg"
+      onDismiss={onDismiss}
     >
-      <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-        Feed or site URL
-        <input
-          disabled={isPending}
-          required
-          inputMode="url"
-          autoComplete="url"
-          value={url}
-          onChange={(event) => setUrl(event.target.value)}
-          placeholder="https://example.com/feed.xml"
-          className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-        />
-      </label>
-      <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-        Group
-        <FeedGroupComboBox
-          value={group}
-          groups={groups}
-          ariaLabel="Group"
-          disabled={isPending}
-          onChange={setGroup}
-        />
-      </label>
-      {error ? (
-        <div className="md:col-span-3">
+      <DialogHeader eyebrow="Manifest · feeds.md" title="Subscribe to a feed" />
+      <form
+        className="grid gap-3 px-4 py-4"
+        onSubmit={async (event) => {
+          event.preventDefault();
+          const normalizedUrl = url.trim();
+          if (!normalizedUrl) return;
+          try {
+            await onSubmit({ url: normalizedUrl, group: group.trim() || null });
+          } catch {
+            // Preserve both fields; the generated mutation error is rendered below.
+          }
+        }}
+      >
+        <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          Feed or site URL
+          <input
+            // biome-ignore lint/a11y/noAutofocus: the dialog opens for this one value, so focus starts in it
+            autoFocus
+            disabled={isPending}
+            required
+            inputMode="url"
+            autoComplete="url"
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+            placeholder="https://example.com/feed.xml"
+            className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+          />
+        </label>
+        <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          Group
+          <FeedGroupComboBox
+            value={group}
+            groups={groups}
+            ariaLabel="Group"
+            disabled={isPending}
+            onChange={setGroup}
+          />
+        </label>
+        {error ? (
           <MutationAlert
             error={error}
             fallback="The subscription could not be saved."
           />
+        ) : null}
+        <div className="flex flex-wrap justify-end gap-2 border-t border-rule pt-3">
+          <Button type="button" className="cl-btn" onPress={onDismiss}>
+            Cancel
+          </Button>
+          <Button
+            type="submit"
+            className="cl-btn cl-btn-hot"
+            isDisabled={isPending}
+          >
+            {isPending ? "Subscribing…" : "Subscribe"}
+          </Button>
         </div>
-      ) : null}
-      <Button
-        type="submit"
-        className="cl-btn cl-btn-hot justify-center py-2 outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        isDisabled={isPending}
-      >
-        {isPending ? "Subscribing…" : "Subscribe"}
-      </Button>
-    </form>
+      </form>
+    </CodexModalShell>
   );
 }
 

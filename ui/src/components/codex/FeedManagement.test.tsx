@@ -163,6 +163,17 @@ function renderManagement() {
   return render(<FeedManagement />);
 }
 
+/** The subscribe modal, once its opening transition has settled. */
+function subscribeDialog() {
+  return screen.findByRole("dialog", { name: /subscribe to a feed/i });
+}
+
+function noSubscribeDialog() {
+  return (
+    screen.queryByRole("dialog", { name: /subscribe to a feed/i }) === null
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
@@ -208,17 +219,29 @@ describe("FeedManagement", () => {
     renderManagement();
 
     await user.tab();
-    const url = screen.getByRole("textbox", { name: /feed or site url/i });
-    expect(url).toHaveFocus();
+    expect(screen.getByRole("button", { name: /^subscribe$/i })).toHaveFocus();
+    await user.keyboard("{Enter}");
+
+    const dialog = await subscribeDialog();
+    const url = within(dialog).getByRole("textbox", {
+      name: /feed or site url/i,
+    });
+    await waitFor(() => expect(url).toHaveFocus());
     await user.type(url, "https://one.example/feed");
 
     await user.tab();
-    const group = screen.getByRole("combobox", { name: /^group$/i });
+    const group = within(dialog).getByRole("combobox", { name: /^group$/i });
     expect(group).toHaveFocus();
     await user.type(group, "Tech");
 
     await user.tab();
-    expect(screen.getByRole("button", { name: /^subscribe$/i })).toHaveFocus();
+    expect(
+      within(dialog).getByRole("button", { name: /cancel/i }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(
+      within(dialog).getByRole("button", { name: /^subscribe$/i }),
+    ).toHaveFocus();
     await user.keyboard("{Enter}");
 
     expect(managementMocks.subscribeFeed).toHaveBeenCalledWith(
@@ -227,6 +250,30 @@ describe("FeedManagement", () => {
         group: "Tech",
       }),
     );
+  });
+
+  it("keeps subscription in a dialog opened from the Subscriptions header", async () => {
+    const user = userEvent.setup();
+    renderManagement();
+
+    expect(
+      screen.queryByRole("textbox", { name: /feed or site url/i }),
+    ).not.toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: /^subscribe$/i });
+    const subscriptions = trigger.closest("section");
+    expect(subscriptions).not.toBeNull();
+    expect(
+      within(subscriptions as HTMLElement).getByRole("button", {
+        name: /refresh feeds/i,
+      }),
+    ).toBeVisible();
+
+    await user.click(trigger);
+    const dialog = await subscribeDialog();
+    await user.click(within(dialog).getByRole("button", { name: /cancel/i }));
+
+    await waitFor(() => expect(noSubscribeDialog()).toBe(true));
+    expect(managementMocks.subscribeFeed).not.toHaveBeenCalled();
   });
 
   it("offers canonical live-manifest groups in both group comboboxes", async () => {
@@ -242,7 +289,9 @@ describe("FeedManagement", () => {
     const user = userEvent.setup();
     renderManagement();
 
-    const subscribeGroup = screen.getByRole("combobox", {
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    const subscribe = await subscribeDialog();
+    const subscribeGroup = within(subscribe).getByRole("combobox", {
       name: /^group$/i,
     });
     await user.type(subscribeGroup, "e");
@@ -252,6 +301,8 @@ describe("FeedManagement", () => {
       ),
     ).toEqual(["Engineering", "Research", "Design"]);
     await user.keyboard("{Escape}");
+    await user.click(within(subscribe).getByRole("button", { name: /cancel/i }));
+    await waitFor(() => expect(noSubscribeDialog()).toBe(true));
 
     await user.click(screen.getByRole("button", { name: /edit one example/i }));
     const dialog = screen.getByRole("dialog", { name: /edit one example/i });
@@ -271,16 +322,20 @@ describe("FeedManagement", () => {
     const user = userEvent.setup();
     renderManagement();
 
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    const dialog = await subscribeDialog();
     await user.type(
-      screen.getByRole("textbox", { name: /feed or site url/i }),
+      within(dialog).getByRole("textbox", { name: /feed or site url/i }),
       "https://canonical.example/feed",
     );
-    const group = screen.getByRole("combobox", { name: /^group$/i });
+    const group = within(dialog).getByRole("combobox", { name: /^group$/i });
     await user.type(group, "engineering");
     await user.click(
       await screen.findByRole("option", { name: "Engineering" }),
     );
-    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    await user.click(
+      within(dialog).getByRole("button", { name: /^subscribe$/i }),
+    );
 
     expect(managementMocks.subscribeFeed).toHaveBeenCalledTimes(1);
     expect(managementMocks.subscribeFeed).toHaveBeenCalledWith({
@@ -346,7 +401,7 @@ describe("FeedManagement", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("manifest read failed");
   });
 
-  it("keeps subscription setup available for an empty manifest", () => {
+  it("keeps subscription setup available for an empty manifest", async () => {
     managementMocks.feedsQuery.data = {
       diagnostics: [],
       groups: [],
@@ -359,9 +414,17 @@ describe("FeedManagement", () => {
 
     expect(screen.getByText(/no subscriptions yet/i)).toBeVisible();
     expect(
-      screen.getByRole("textbox", { name: /feed or site url/i }),
+      screen.getByText(/subscribe to a feed or import an opml file/i),
+    ).toBeVisible();
+    const trigger = screen.getByRole("button", { name: /^subscribe$/i });
+    expect(trigger).toBeEnabled();
+
+    const user = userEvent.setup();
+    await user.click(trigger);
+    const dialog = await subscribeDialog();
+    expect(
+      within(dialog).getByRole("textbox", { name: /feed or site url/i }),
     ).toBeEnabled();
-    expect(screen.getByRole("button", { name: /^subscribe$/i })).toBeEnabled();
   });
 
   it("surfaces manifest diagnostics and feed health details", () => {
@@ -498,35 +561,36 @@ describe("FeedManagement", () => {
     });
     const user = userEvent.setup();
     const view = renderManagement();
-    const url = screen.getByRole("textbox", { name: /feed or site url/i });
-    const group = screen.getByRole("combobox", { name: /^group$/i });
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    const dialog = await subscribeDialog();
+    const url = within(dialog).getByRole("textbox", {
+      name: /feed or site url/i,
+    });
+    const group = within(dialog).getByRole("combobox", { name: /^group$/i });
     await user.type(url, "https://pending.example/feed");
     await user.type(group, "engineering");
     await user.click(
       await screen.findByRole("option", { name: "Engineering" }),
     );
-    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    await user.click(
+      within(dialog).getByRole("button", { name: /^subscribe$/i }),
+    );
 
     managementMocks.subscribeState.isPending = true;
     view.rerender(<FeedManagement />);
-    expect(
-      screen.getByRole("textbox", { name: /feed or site url/i }),
-    ).toHaveValue("https://pending.example/feed");
-    expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue(
+    const pending = within(await subscribeDialog());
+    expect(pending.getByRole("textbox", { name: /feed or site url/i })).toHaveValue(
+      "https://pending.example/feed",
+    );
+    expect(pending.getByRole("combobox", { name: /^group$/i })).toHaveValue(
       "Engineering",
     );
     expect(
-      screen.getByRole("textbox", { name: /feed or site url/i }),
+      pending.getByRole("textbox", { name: /feed or site url/i }),
     ).toBeDisabled();
-    expect(screen.getByRole("combobox", { name: /^group$/i })).toBeDisabled();
-    const pendingForm = screen
-      .getByRole("textbox", { name: /feed or site url/i })
-      .closest("form");
-    expect(pendingForm).not.toBeNull();
+    expect(pending.getByRole("combobox", { name: /^group$/i })).toBeDisabled();
     expect(
-      within(pendingForm as HTMLElement).getByRole("button", {
-        name: /^subscribing…?$/i,
-      }),
+      pending.getByRole("button", { name: /^subscribing…?$/i }),
     ).toBeDisabled();
 
     const failure = new Error("feeds.md changed; reload and retry");
@@ -535,30 +599,27 @@ describe("FeedManagement", () => {
     mutationOptions?.onError?.(failure);
     rejectSubscribe(failure);
     view.rerender(<FeedManagement />);
-    const form = screen
-      .getByRole("textbox", { name: /feed or site url/i })
-      .closest("form");
-    expect(form).not.toBeNull();
-    expect(within(form as HTMLElement).getByRole("alert")).toHaveTextContent(
+    const failed = within(await subscribeDialog());
+    expect(failed.getByRole("alert")).toHaveTextContent(
       "feeds.md changed; reload and retry",
     );
-    expect(
-      screen.getByRole("textbox", { name: /feed or site url/i }),
-    ).toHaveValue("https://pending.example/feed");
-    expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue(
+    expect(failed.getByRole("textbox", { name: /feed or site url/i })).toHaveValue(
+      "https://pending.example/feed",
+    );
+    expect(failed.getByRole("combobox", { name: /^group$/i })).toHaveValue(
       "Engineering",
     );
     managementMocks.subscribeFeedAsync.mockImplementation((variables) => {
       managementMocks.subscribeFeed(variables);
       return Promise.resolve();
     });
-    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    await user.click(failed.getByRole("button", { name: /^subscribe$/i }));
     await waitFor(() =>
       expect(managementMocks.subscribeFeed).toHaveBeenCalledTimes(2),
     );
   });
 
-  it("clears the subscribe draft only after mutation success", async () => {
+  it("closes the subscribe dialog and drops its draft only after success", async () => {
     managementMocks.subscribeFeed.mockImplementation((_variables, options) => {
       options?.onSuccess?.();
     });
@@ -568,22 +629,29 @@ describe("FeedManagement", () => {
     });
     const user = userEvent.setup();
     renderManagement();
+    await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
+    const dialog = await subscribeDialog();
     await user.type(
-      screen.getByRole("textbox", { name: /feed or site url/i }),
+      within(dialog).getByRole("textbox", { name: /feed or site url/i }),
       "https://success.example/feed",
     );
-    await user.type(screen.getByRole("combobox", { name: /^group$/i }), "Tech");
+    await user.type(
+      within(dialog).getByRole("combobox", { name: /^group$/i }),
+      "Tech",
+    );
+
+    await user.click(
+      within(dialog).getByRole("button", { name: /^subscribe$/i }),
+    );
+
+    await waitFor(() => expect(noSubscribeDialog()).toBe(true));
 
     await user.click(screen.getByRole("button", { name: /^subscribe$/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("textbox", { name: /feed or site url/i }),
-      ).toHaveValue("");
-      expect(screen.getByRole("combobox", { name: /^group$/i })).toHaveValue(
-        "",
-      );
-    });
+    const reopened = within(await subscribeDialog());
+    expect(
+      reopened.getByRole("textbox", { name: /feed or site url/i }),
+    ).toHaveValue("");
+    expect(reopened.getByRole("combobox", { name: /^group$/i })).toHaveValue("");
   });
 
   it("keeps the full edit draft and local alert through a conflict", async () => {

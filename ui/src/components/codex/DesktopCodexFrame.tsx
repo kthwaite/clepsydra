@@ -159,7 +159,11 @@ export function DesktopCodexFrame({
 
       {/* ── SHEAF — hidden on full-surface destinations ─────────────── */}
       {descriptor.showsSheaf && (
-        <Sheaf activeTabId={activeTabId} className="order-1" />
+        <Sheaf
+          activeTabId={activeTabId}
+          activeTabVisible={view === "folio"}
+          className="order-1"
+        />
       )}
 
       {/* ── FOOTER RAIL ─────────────────────────────────────────────── */}
