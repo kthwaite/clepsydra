@@ -78,6 +78,17 @@ export interface BaseTableControllerModel {
   onMemberEdit(): void;
   focusCreatedId: string | undefined;
   onCreatedRowFocused(createdId: string): void;
+  /** Windowed loading, for an embedded view that scrolls in place. */
+  rowWindow:
+    | {
+        total: number | undefined;
+        loaded: number;
+        hasMore: boolean;
+        isLoadingMore: boolean;
+        cappedByAuthor: boolean;
+        loadMore(): void;
+      }
+    | undefined;
 }
 
 type PlacementIdentity =
@@ -746,5 +757,16 @@ export function useBaseTableController(
     onMemberEdit: handleMemberEdit,
     focusCreatedId,
     onCreatedRowFocused: handleCreatedRowFocused,
+    rowWindow:
+      mode === "embedded"
+        ? {
+            total: evaluationQuery.total,
+            loaded: evaluationQuery.loaded,
+            hasMore: evaluationQuery.hasMore,
+            isLoadingMore: evaluationQuery.isLoadingMore,
+            cappedByAuthor: evaluationQuery.cappedByAuthor,
+            loadMore: evaluationQuery.loadMore,
+          }
+        : undefined,
   };
 }

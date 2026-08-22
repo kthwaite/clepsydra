@@ -66,6 +66,17 @@ export interface BaseTableViewProps {
   chrome?: "full" | "compact";
   /** Controls owned by the surface hosting the table, shown in its toolbar. */
   toolbarActions?: ReactNode;
+  /** Windowed loading state, for a compact view that scrolls in place. */
+  rowWindow?: {
+    /** The authoritative row count, not the rows rendered. */
+    total: number | undefined;
+    loaded: number;
+    hasMore: boolean;
+    isLoadingMore: boolean;
+    /** The author's `limit`, not the result, ended the scroll. */
+    cappedByAuthor: boolean;
+    loadMore(): void;
+  };
   onCommitCell: (
     row: QueryRow,
     key: string,
@@ -169,6 +180,56 @@ function aggregateLabel(
   return agg.field ? `${agg.fn}(${agg.field})` : agg.fn;
 }
 
+/** How near the end of the loaded rows counts as approaching it. */
+const APPROACH_PX = 240;
+/** A compact embed is a block in someone's document, not a page of its own. */
+const VIEWPORT_CLASS = "max-h-[26rem] overflow-auto";
+
+interface ScrollViewportProps {
+  enabled: boolean;
+  onApproachEnd(): void;
+  children: ReactNode;
+}
+
+/** Bounds a compact embed's height and reports when the reader nears the end
+ * of what has been loaded, so the next window can be fetched before they get
+ * there. Full-chrome tables render their rows in the page, unwrapped. */
+function ScrollViewport({
+  enabled,
+  onApproachEnd,
+  children,
+}: ScrollViewportProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const approach = useRef(onApproachEnd);
+  approach.current = onApproachEnd;
+
+  const check = useCallback((node: HTMLElement) => {
+    const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
+    if (remaining <= APPROACH_PX) approach.current();
+  }, []);
+
+  // A window shorter than the viewport leaves nothing to scroll, so the next
+  // one has to be asked for without a scroll event.
+  useEffect(() => {
+    const node = ref.current;
+    // A zero height is an unmeasured viewport, not an empty one.
+    if (!enabled || !node || node.clientHeight === 0) return;
+    if (node.scrollHeight <= node.clientHeight) approach.current();
+  });
+
+  if (!enabled) return children;
+  return (
+    <div
+      ref={ref}
+      data-testid="base-table-scroller"
+      className={VIEWPORT_CLASS}
+      onScroll={(event) => check(event.currentTarget)}
+    >
+      {children}
+    </div>
+  );
+}
+
 /**
  * The Vessel data grid: one react-aria `Table` per (group of) rows, column
  * sorting mapped to ordered query sort keys, group header rows carrying
@@ -192,6 +253,7 @@ export const BaseTableView = forwardRef<
     configureSlug,
     chrome = "full",
     toolbarActions,
+    rowWindow,
     onCommitCell,
     readOnly = false,
     memberCapability,
@@ -591,6 +653,8 @@ export const BaseTableView = forwardRef<
               className={cn(
                 "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
                 allowsSorting && "cursor-pointer data-[hovered]:text-ink",
+                // The scroller moves the rows under the header, not past it.
+                compact && "sticky top-0 z-[1] bg-paper",
               )}
             >
               {({ sortDirection }) => (
@@ -747,6 +811,16 @@ export const BaseTableView = forwardRef<
   const groups: GroupResult[] | null =
     output?.shape === "grouped" ? output.groups : null;
   const capStatus = (() => {
+    // A compact view scrolls, so it reports how far it has read rather than
+    // what a limit excluded.
+    if (compact && rowWindow && output?.shape === "flat") {
+      const { loaded, total, hasMore, cappedByAuthor } = rowWindow;
+      if (total === undefined || loaded >= total) return undefined;
+      const seen = `Showing ${loaded} of ${total} rows`;
+      if (rowWindow.isLoadingMore) return `${seen}; loading more…`;
+      if (cappedByAuthor) return `${seen}; this embed's limit stops here.`;
+      return hasMore ? `${seen}; scroll for more.` : `${seen}.`;
+    }
     if (output?.shape === "flat" && output.rows.length < output.total) {
       const excluded = output.total - output.rows.length;
       return `Showing ${output.rows.length} of ${output.total} rows; ${excluded} rows excluded by the current limit.`;
@@ -765,6 +839,17 @@ export const BaseTableView = forwardRef<
     return undefined;
   })();
   const shouldRenderGrid = output !== undefined || (!viewError && !viewLoading);
+  // An embed that renders a header over nothing looks broken; say it is empty.
+  const emptyResult =
+    !viewLoading &&
+    !viewError &&
+    (output?.shape === "flat"
+      ? output.rows.length === 0
+      : output?.shape === "grouped" && output.groups.length === 0);
+  const approachEnd = useCallback(() => {
+    if (!rowWindow?.hasMore || rowWindow.isLoadingMore) return;
+    rowWindow.loadMore();
+  }, [rowWindow]);
 
   return (
     <div
@@ -909,56 +994,69 @@ export const BaseTableView = forwardRef<
       {capStatus ? (
         <p
           role="status"
-          aria-label="Result limit"
+          aria-label={compact ? "Result window" : "Result limit"}
           className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
         >
           {capStatus}
         </p>
       ) : null}
+      {compact && emptyResult ? (
+        <p
+          role="status"
+          aria-label="Empty view"
+          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-mute"
+        >
+          No pages match this view.
+        </p>
+      ) : null}
       {shouldRenderGrid ? (
-        groups ? (
-          <div className="flex flex-col gap-4">
-            {groups.map((group, index) => {
-              const key =
-                group.key == null
-                  ? "(empty)"
-                  : formatCellValue(group.key as CellValue);
-              const groupIdentity = `${evaluationIdentity}:group:${index}:${JSON.stringify(group.key)}`;
-              return (
-                <section key={groupIdentity}>
-                  <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
-                    <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
-                      {key}
-                    </span>
-                    <span className="cl-mono text-[10px] text-ink-mute">
-                      {group.total} row{group.total === 1 ? "" : "s"}
-                    </span>
-                    {group.aggregates.map((value, i) => (
-                      <span
-                        key={i}
-                        className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
-                      >
-                        {aggregateLabel(definition, activeView, i)}{" "}
-                        {formatCellValue(value as CellValue)}
+        <ScrollViewport enabled={compact} onApproachEnd={approachEnd}>
+          {groups ? (
+            <div className="flex flex-col gap-4">
+              {groups.map((group, index) => {
+                const key =
+                  group.key == null
+                    ? "(empty)"
+                    : formatCellValue(group.key as CellValue);
+                const groupIdentity = `${evaluationIdentity}:group:${index}:${JSON.stringify(group.key)}`;
+                return (
+                  <section key={groupIdentity}>
+                    <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
+                      <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
+                        {key}
                       </span>
-                    ))}
-                  </header>
-                  {grid(
-                    group.rows,
-                    `${definition.name} — ${key}`,
-                    groupIdentity,
-                  )}
-                </section>
-              );
-            })}
-          </div>
-        ) : (
-          grid(
-            output?.shape === "flat" ? output.rows : [],
-            `${definition.name} — ${activeView}`,
-            `${evaluationIdentity}:flat`,
-          )
-        )
+                      <span className="cl-mono text-[10px] text-ink-mute">
+                        {group.rows.length < group.total
+                          ? `${group.rows.length} of ${group.total} rows`
+                          : `${group.total} row${group.total === 1 ? "" : "s"}`}
+                      </span>
+                      {group.aggregates.map((value, i) => (
+                        <span
+                          key={i}
+                          className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
+                        >
+                          {aggregateLabel(definition, activeView, i)}{" "}
+                          {formatCellValue(value as CellValue)}
+                        </span>
+                      ))}
+                    </header>
+                    {grid(
+                      group.rows,
+                      `${definition.name} — ${key}`,
+                      groupIdentity,
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          ) : (
+            grid(
+              output?.shape === "flat" ? output.rows : [],
+              `${definition.name} — ${activeView}`,
+              `${evaluationIdentity}:flat`,
+            )
+          )}
+        </ScrollViewport>
       ) : null}
       {shouldRenderGrid && !readOnly && !memberDraftOpen && onAddMember ? (
         <Button

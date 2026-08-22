@@ -173,6 +173,184 @@ describe("BaseTableView compact chrome", () => {
   });
 });
 
+describe("BaseTableView compact scroller", () => {
+  const rows = Array.from({ length: 3 }, (_, index) => ({
+    ...row,
+    id: `row-${index}`,
+    title: `Row ${index}`,
+  }));
+  const window = (
+    overrides: Partial<NonNullable<ViewProps["rowWindow"]>> = {},
+  ) => ({
+    total: 140,
+    loaded: rows.length,
+    hasMore: true,
+    isLoadingMore: false,
+    cappedByAuthor: false,
+    loadMore: vi.fn(),
+    ...overrides,
+  });
+
+  function scroller() {
+    return screen.getByTestId("base-table-scroller");
+  }
+
+  function scrollTo(
+    element: HTMLElement,
+    metrics: {
+      scrollTop: number;
+      clientHeight: number;
+      scrollHeight: number;
+    },
+  ) {
+    for (const [key, value] of Object.entries(metrics)) {
+      Object.defineProperty(element, key, { value, configurable: true });
+    }
+    fireEvent.scroll(element);
+  }
+
+  it("scrolls its rows in place, and only when compact", () => {
+    const { rerender } = renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 140 },
+      rowWindow: window(),
+    });
+    expect(scroller()).toBeInTheDocument();
+
+    rerender({ chrome: "full" });
+    expect(screen.queryByTestId("base-table-scroller")).toBeNull();
+  });
+
+  it("asks for the next window as the reader nears the end", () => {
+    const rowWindow = window();
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 140 },
+      rowWindow,
+    });
+
+    scrollTo(scroller(), {
+      scrollTop: 0,
+      clientHeight: 400,
+      scrollHeight: 2000,
+    });
+    expect(rowWindow.loadMore).not.toHaveBeenCalled();
+
+    scrollTo(scroller(), {
+      scrollTop: 1500,
+      clientHeight: 400,
+      scrollHeight: 2000,
+    });
+    expect(rowWindow.loadMore).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a window is already in flight", { isLoadingMore: true }],
+    ["there is nothing left to load", { hasMore: false }],
+  ])("does not ask again while %s", (_name, overrides) => {
+    const rowWindow = window(overrides);
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 140 },
+      rowWindow,
+    });
+
+    scrollTo(scroller(), {
+      scrollTop: 1900,
+      clientHeight: 400,
+      scrollHeight: 2000,
+    });
+    expect(rowWindow.loadMore).not.toHaveBeenCalled();
+  });
+
+  it("reports the rows loaded against the authoritative total", () => {
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 140 },
+      rowWindow: window(),
+    });
+
+    expect(
+      screen.getByRole("status", { name: "Result window" }),
+    ).toHaveTextContent("Showing 3 of 140 rows; scroll for more.");
+  });
+
+  it("says when the embed's own limit ended the result", () => {
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 140 },
+      rowWindow: window({ hasMore: false, cappedByAuthor: true }),
+    });
+
+    expect(
+      screen.getByRole("status", { name: "Result window" }),
+    ).toHaveTextContent(
+      "Showing 3 of 140 rows; this embed's limit stops here.",
+    );
+  });
+
+  it("says nothing once every row is loaded", () => {
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 3 },
+      rowWindow: window({ total: 3, hasMore: false }),
+    });
+
+    expect(screen.queryByRole("status", { name: "Result window" })).toBeNull();
+  });
+
+  it("says a window is on its way while it loads", () => {
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 140 },
+      rowWindow: window({ isLoadingMore: true }),
+    });
+
+    expect(
+      screen.getByRole("status", { name: "Result window" }),
+    ).toHaveTextContent("Showing 3 of 140 rows; loading more…");
+  });
+
+  it("says so when the view matches nothing", () => {
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows: [], total: 0 },
+      rowWindow: window({ total: 0, loaded: 0, hasMore: false }),
+    });
+
+    expect(
+      screen.getByRole("status", { name: "Empty view" }),
+    ).toHaveTextContent("No pages match this view.");
+  });
+
+  it("counts each group's window against that group's total", () => {
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      activeView: "Shelf",
+      output: {
+        shape: "grouped",
+        groups: [
+          { key: "reading", total: 90, aggregates: [2], rows },
+          { key: "queued", total: 1, aggregates: [1], rows: [rows[0]] },
+        ],
+      },
+      rowWindow: window({ total: 91, loaded: 4, hasMore: false }),
+    });
+
+    expect(screen.getByText("3 of 90 rows")).toBeInTheDocument();
+    expect(screen.getByText("1 row")).toBeInTheDocument();
+  });
+});
+
 describe("BaseTableView", () => {
   it("renders every view name in the switcher and switches on click", async () => {
     const user = userEvent.setup();
@@ -626,7 +804,8 @@ describe("BaseTableView", () => {
     };
     renderView({ activeView: "Shelf", output: grouped });
     expect(screen.getByText("reading")).toBeTruthy();
-    expect(screen.getByText("2 rows")).toBeTruthy();
+    // Both numbers: the window rendered, and the group's true size.
+    expect(screen.getByText("1 of 2 rows")).toBeTruthy();
     expect(screen.getByText(/count\s*2/)).toBeTruthy();
     expect(screen.getByText(/avg\(rating\)\s*4.75/)).toBeTruthy();
     // The NULL bucket renders as the labelled empty group.
@@ -1109,7 +1288,7 @@ describe("BaseTableView", () => {
       },
     });
 
-    expect(screen.getByText("3 rows")).toBeInTheDocument();
+    expect(screen.getByText("1 of 3 rows")).toBeInTheDocument();
     expect(screen.getByText(/count\s*3/)).toBeInTheDocument();
     expect(screen.getByText(/avg\(rating\)\s*4.75/)).toBeInTheDocument();
     expect(
