@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import {
   forwardRef,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -35,10 +36,7 @@ import { BaseMemberDraft } from "./BaseMemberDraft";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
-import {
-  asciiCaseFold,
-  presentationFieldIdentity,
-} from "./local-validation";
+import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
 import type {
   BaseMemberDraftField,
   BaseMemberDraftValue,
@@ -64,6 +62,10 @@ export interface BaseTableViewProps {
   onSortChange: (sort: SortKey[] | undefined) => void;
   onOpenPage: (path: string) => void;
   configureSlug?: string;
+  /** Compact folds the Base chrome into one toolbar for an embedded view. */
+  chrome?: "full" | "compact";
+  /** Controls owned by the surface hosting the table, shown in its toolbar. */
+  toolbarActions?: ReactNode;
   onCommitCell: (
     row: QueryRow,
     key: string,
@@ -188,6 +190,8 @@ export const BaseTableView = forwardRef<
     onSortChange,
     onOpenPage,
     configureSlug,
+    chrome = "full",
+    toolbarActions,
     onCommitCell,
     readOnly = false,
     memberCapability,
@@ -208,6 +212,7 @@ export const BaseTableView = forwardRef<
   },
   ref,
 ) {
+  const compact = chrome === "compact";
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === equivalentActiveView,
@@ -769,10 +774,23 @@ export const BaseTableView = forwardRef<
       tabIndex={-1}
       className="flex flex-col gap-3"
     >
-      <div className="flex flex-wrap items-center gap-3 border-b border-rule pb-2">
-        <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
-          {definition.name}
-        </h1>
+      <div
+        className={cn(
+          "flex flex-wrap items-center border-b border-rule",
+          compact ? "gap-2 pb-1.5" : "gap-3 pb-2",
+        )}
+      >
+        {compact ? (
+          // An embed sits inside someone else's document: naming the Base is
+          // still needed, claiming a heading level is not.
+          <p className="cl-mono truncate text-[11px] uppercase tracking-[0.14em] text-ink">
+            {definition.name}
+          </p>
+        ) : (
+          <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
+            {definition.name}
+          </h1>
+        )}
         <nav aria-label="Views" className="flex flex-wrap gap-1">
           {(definition.views ?? []).map((v) =>
             readOnly ? (
@@ -846,6 +864,7 @@ export const BaseTableView = forwardRef<
             ) : null}
           </>
         ) : null}
+        {toolbarActions}
       </div>
       {memberDraftOpen && onSaveMember && onCancelMember ? (
         <BaseMemberDraft

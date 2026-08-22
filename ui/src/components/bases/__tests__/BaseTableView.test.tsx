@@ -135,6 +135,44 @@ async function flushFocusTimer(): Promise<void> {
   });
 }
 
+describe("BaseTableView compact chrome", () => {
+  it("names the Base without claiming a document heading", () => {
+    renderView({ chrome: "compact", configureSlug: undefined });
+
+    expect(screen.queryByRole("heading")).toBeNull();
+    expect(screen.getByText("Reading Log")).toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Reading Log table view" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the view switcher, Add member and the caller's own actions", async () => {
+    const user = userEvent.setup();
+    const props = renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      toolbarActions: (
+        <button type="button" onClick={() => undefined}>
+          Edit embed
+        </button>
+      ),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Shelf" }));
+    expect(props.onViewChange).toHaveBeenCalledWith("Shelf");
+    expect(screen.getByRole("button", { name: "Add member" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Edit embed" })).toBeEnabled();
+  });
+
+  it("still carries a heading in full chrome", () => {
+    renderView({});
+
+    expect(
+      screen.getByRole("heading", { name: "Reading Log" }),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("BaseTableView", () => {
   it("renders every view name in the switcher and switches on click", async () => {
     const user = userEvent.setup();

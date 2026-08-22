@@ -9,6 +9,7 @@ import type { RenderElementProps } from "slate-react";
 import { ReactEditor, useSelected, useSlateStatic } from "slate-react";
 import { BaseEmbedInspector } from "#/components/bases/BaseEmbedInspector";
 import type { BaseTableViewHandle } from "#/components/bases/BaseTableView";
+import { embedIsCompact } from "#/components/bases/embed-presentation";
 import { useBaseEmbedEditing } from "#/editor/baseEmbedEditing";
 import type { BaseEmbedElement as BaseEmbedNode } from "#/editor/types";
 import { EmbeddedBaseTable } from "./EmbeddedBaseTable";
@@ -99,6 +100,31 @@ export function BaseEmbedElement({
     exit(path, "after");
   };
 
+  // Compact embeds have no header of their own: the same two controls move
+  // into the table's toolbar, keeping one set of refs for entry focus.
+  const compact = element.status === "configured" && embedIsCompact(element);
+  const actions = (
+    <>
+      <button
+        ref={editRef}
+        type="button"
+        className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        onClick={openInspector}
+      >
+        Edit embed
+      </button>
+      <button
+        ref={removeRef}
+        type="button"
+        aria-label="Remove Base embed"
+        className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-destructive hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        onClick={removeEmbed}
+      >
+        Remove
+      </button>
+    </>
+  );
+
   return (
     <div
       {...attributes}
@@ -115,41 +141,33 @@ export function BaseEmbedElement({
           className="sr-only"
           onKeyDown={(event) => handleGuardKeyDown(event, "before")}
         />
-        <header className="flex flex-wrap items-center gap-3 border-b border-rule px-3 py-2">
-          <div className="min-w-0 flex-1">
-            <p className="cl-mono text-[11px] uppercase tracking-[0.14em] text-ink-mute">
-              Base embed
-            </p>
-            <p className="truncate text-sm text-ink">
-              {element.status === "configured"
-                ? `${element.base} · ${element.view}`
-                : element.status === "invalid"
-                  ? "Persisted configuration needs repair"
-                  : "Choose a saved Base and view"}
-            </p>
-          </div>
-          <button
-            ref={editRef}
-            type="button"
-            className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            onClick={openInspector}
-          >
-            Edit embed
-          </button>
-          <button
-            ref={removeRef}
-            type="button"
-            aria-label="Remove Base embed"
-            className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-destructive hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            onClick={removeEmbed}
-          >
-            Remove
-          </button>
-        </header>
+        {compact ? null : (
+          <header className="flex flex-wrap items-center gap-3 border-b border-rule px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="cl-mono text-[11px] uppercase tracking-[0.14em] text-ink-mute">
+                Base embed
+              </p>
+              <p className="truncate text-sm text-ink">
+                {element.status === "configured"
+                  ? `${element.base} · ${element.view}`
+                  : element.status === "invalid"
+                    ? "Persisted configuration needs repair"
+                    : "Choose a saved Base and view"}
+              </p>
+            </div>
+            {actions}
+          </header>
+        )}
 
-        <div className="min-w-0 p-3">
+        <div className={`min-w-0 ${compact ? "p-2" : "p-3"}`}>
           {element.status === "configured" ? (
-            <EmbeddedBaseTable ref={tableRef} element={element} path={path} />
+            <EmbeddedBaseTable
+              ref={tableRef}
+              element={element}
+              path={path}
+              chrome={compact ? "compact" : "full"}
+              {...(compact ? { actions } : {})}
+            />
           ) : element.status === "invalid" ? (
             <div role="alert" className="text-sm text-destructive">
               <p>
