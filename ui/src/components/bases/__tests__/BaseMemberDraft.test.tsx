@@ -177,6 +177,79 @@ describe("BaseMemberDraft", () => {
     ).toEqual(["—", "queued", "reading"]);
   });
 
+  it("proposes a title from the Base's template until the author writes one", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      draftElement({
+        onSave,
+        titleTemplate: "{author} — {work}",
+        fields: [
+          {
+            key: "title",
+            kind: "title",
+            membership: false,
+            viewOnly: false,
+            embedOnly: false,
+          },
+          {
+            key: "author",
+            kind: "property",
+            definition: { type: "text" },
+            membership: false,
+            viewOnly: false,
+            embedOnly: false,
+          },
+          {
+            key: "work",
+            kind: "property",
+            definition: { type: "text" },
+            membership: false,
+            viewOnly: false,
+            embedOnly: false,
+          },
+        ],
+      }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Author" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Author" }),
+      "Le Guin{Enter}",
+    );
+
+    const title = screen.getByRole("textbox", { name: "New member — Title" });
+    expect(title).toHaveValue("Le Guin");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Work" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Work" }),
+      "The Dispossessed{Enter}",
+    );
+    expect(title).toHaveValue("Le Guin — The Dispossessed");
+
+    // Once the author writes a title, the template stops overwriting it.
+    await user.clear(title);
+    await user.type(title, "A better title");
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Work" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Work" }),
+      " (1974){Enter}",
+    );
+    expect(title).toHaveValue("A better title");
+
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "A better title" }),
+    );
+  });
+
   it("does not offer quotation when choosing a new member kind", async () => {
     const user = userEvent.setup();
     render(draftElement());

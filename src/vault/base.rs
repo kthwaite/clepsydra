@@ -13,6 +13,8 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+
+use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 use utoipa::ToSchema;
 
 /// System fields addressable in filters/sorts/columns without declaration.
@@ -233,6 +235,9 @@ pub struct BaseFile {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// Optional `{field}` template that proposes a title for a new member.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -252,6 +257,8 @@ struct RawBaseFile {
     name: String,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    title_template: Option<String>,
     #[serde(default)]
     filter: Option<Filter>,
     #[serde(default)]
@@ -986,6 +993,7 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
     let file = BaseFile {
         name: raw.name,
         description: raw.description,
+        title_template: raw.title_template,
         filter: raw.filter,
         preview: raw.preview,
         properties,
@@ -994,6 +1002,25 @@ pub fn parse_base(path: &Path, content: &str) -> (Option<BaseDefinition>, Vec<Ba
     let result = validate_definition(&slug, file);
     diagnostics.extend(result.diagnostics);
     (Some(result.definition), diagnostics)
+}
+
+/// The field names a title template interpolates, in order of appearance.
+/// `{field}` is the only construct; anything unbalanced is left as literal
+/// text, which keeps a half-typed template from raising diagnostics on every
+/// keystroke.
+pub fn title_template_fields(template: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut rest = template;
+    while let Some(open) = rest.find('{') {
+        let after = &rest[open + 1..];
+        let Some(close) = after.find('}') else { break };
+        let placeholder = after[..close].trim();
+        if !placeholder.is_empty() && !placeholder.contains('{') {
+            fields.push(placeholder.to_owned());
+        }
+        rest = &after[close + 1..];
+    }
+    fields
 }
 
 fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
@@ -1012,6 +1039,45 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
             Some("name".to_string()),
             "base name must not be empty".to_string(),
         );
+    }
+
+    if let Some(template) = &base.file.title_template {
+        if template.trim().is_empty() {
+            push(
+                BaseDiagnosticSeverity::Error,
+                Some("title_template".to_string()),
+                "title template must not be empty".to_string(),
+            );
+        } else {
+            let context = QueryContext::for_base(base);
+            let declared: HashSet<&str> = base
+                .file
+                .properties
+                .iter()
+                .map(|(key, _)| key.as_str())
+                .collect();
+            for placeholder in title_template_fields(template) {
+                // A placeholder must name something a member draft can fill: a
+                // declared property or a system field. An undeclared bare name
+                // resolves as a raw page property for filtering, but nothing
+                // would ever fill it at creation time.
+                let bare = placeholder
+                    .strip_prefix("prop.")
+                    .unwrap_or(placeholder.as_str());
+                let fillable = declared.contains(bare)
+                    || matches!(
+                        resolve_field(&placeholder, &context),
+                        Ok(ResolvedField::Sys(_))
+                    );
+                if !fillable {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some("title_template".to_string()),
+                        format!("title template references unknown field `{placeholder}`"),
+                    );
+                }
+            }
+        }
     }
 
     let mut property_keys = HashSet::new();
@@ -1458,10 +1524,94 @@ columns = ["title", "author", "rating", "finished"]
         PathBuf::from(s)
     }
 
+    fn parsed(content: &str) -> (Option<BaseDefinition>, Vec<BaseDiagnostic>) {
+        parse_base(&path("bases/templated.base.toml"), content)
+    }
+
+    #[test]
+    fn a_title_template_round_trips_through_the_file() {
+        let (base, diagnostics) = parsed(
+            r#"
+name = "Reading"
+title_template = "{author} — {work}"
+[properties]
+author = { type = "text" }
+work = { type = "text" }
+[[views]]
+name = "All"
+"#,
+        );
+        let base = base.expect("base parses");
+        assert!(diagnostics.is_empty(), "no diagnostics: {diagnostics:?}");
+        assert_eq!(
+            base.file.title_template.as_deref(),
+            Some("{author} — {work}")
+        );
+        let serialized = toml::to_string(&base.file).expect("serializes");
+        assert!(
+            serialized.contains(r#"title_template = "{author} — {work}""#),
+            "template survives a write: {serialized}"
+        );
+    }
+
+    #[test]
+    fn a_blank_title_template_is_an_error() {
+        let (_, diagnostics) = parsed(
+            r#"
+name = "Reading"
+title_template = "   "
+[[views]]
+name = "All"
+"#,
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| (diagnostic.path.as_deref(), diagnostic.message.as_str()))
+                .collect::<Vec<_>>(),
+            vec![(Some("title_template"), "title template must not be empty")]
+        );
+    }
+
+    #[test]
+    fn a_template_placeholder_must_name_a_usable_field() {
+        let (_, diagnostics) = parsed(
+            r#"
+name = "Reading"
+title_template = "{author} — {nonesuch}"
+[properties]
+author = { type = "text" }
+[[views]]
+name = "All"
+"#,
+        );
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| diagnostic.message.as_str())
+                .collect::<Vec<_>>(),
+            vec!["title template references unknown field `nonesuch`"]
+        );
+    }
+
+    #[test]
+    fn a_template_may_reference_system_fields() {
+        let (_, diagnostics) = parsed(
+            r#"
+name = "Journals"
+title_template = "{kind} — {project}"
+[[views]]
+name = "All"
+"#,
+        );
+        assert!(diagnostics.is_empty(), "no diagnostics: {diagnostics:?}");
+    }
+
     fn base_file_with_views<const N: usize>(names: [&str; N]) -> BaseFile {
         BaseFile {
             name: "Reading".to_string(),
             description: None,
+            title_template: None,
             filter: None,
             properties: Vec::new(),
             preview: Vec::new(),

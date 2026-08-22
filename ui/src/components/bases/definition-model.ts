@@ -39,6 +39,8 @@ export interface DraftView {
 export interface BaseDraft {
   name: string;
   description?: string;
+  /** `{field}` template proposing a title for new members. */
+  titleTemplate?: string;
   filter?: BaseFilter;
   properties: DraftProperty[];
   preview: DraftPreviewField[];
@@ -158,6 +160,7 @@ export function fromWire(detail: BaseFile): BaseDraft {
   return {
     name: detail.name,
     description: detail.description ?? undefined,
+    titleTemplate: detail.title_template ?? undefined,
     filter: cloneFilter(detail.filter),
     preview: (detail.preview ?? []).map((definition) => ({
       id: crypto.randomUUID(),
@@ -190,6 +193,9 @@ export function toWire(draft: BaseDraft): BaseFile {
   const wire = {
     name: draft.name,
     description: draft.description,
+    ...(draft.titleTemplate === undefined
+      ? {}
+      : { title_template: draft.titleTemplate }),
     filter: cloneFilter(draft.filter),
     preview: draft.preview.map(({ field, label }) => ({
       field,

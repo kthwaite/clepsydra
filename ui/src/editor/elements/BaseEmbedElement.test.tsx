@@ -178,6 +178,7 @@ function controllerModel(
     onCommitCell: vi.fn(),
     memberCapability: undefined,
     memberDraftFields: [],
+    memberTitleTemplate: undefined,
     memberDraftOpen: false,
     memberSaving: false,
     memberDiagnostics: [],
