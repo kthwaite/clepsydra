@@ -16,7 +16,6 @@ import type {
   QueryOutput,
   SortKey,
 } from "#/api/bases";
-import { EMBED_DEFAULT_LIMIT } from "#/components/bases/embed-query";
 
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
@@ -27,7 +26,7 @@ const mocks = vi.hoisted(() => ({
   stableEvaluationRefetch: vi.fn(),
   useBase: vi.fn(),
   useBaseView: vi.fn(),
-  useBaseViewEvaluation: vi.fn(),
+  useBaseViewWindows: vi.fn(),
   currentEvaluationConfig: undefined as unknown,
   evaluationState: {
     data: undefined as BaseViewEvaluateResponse | undefined,
@@ -90,8 +89,8 @@ vi.mock("#/api/bases", async (importOriginal) => {
         refetch: mocks.savedViewRefetch,
       };
     },
-    useBaseViewEvaluation: (config: unknown) => {
-      mocks.useBaseViewEvaluation(config);
+    useBaseViewWindows: (config: unknown) => {
+      mocks.useBaseViewWindows(config);
       mocks.currentEvaluationConfig = config;
       return {
         ...mocks.evaluationState,
@@ -212,12 +211,12 @@ describe("useBaseTableController embedded mode", () => {
     const current = options();
     const { result } = renderHook(() => useBaseTableController(current));
 
-    expect(mocks.useBaseViewEvaluation).toHaveBeenLastCalledWith({
+    expect(mocks.useBaseViewWindows).toHaveBeenLastCalledWith({
       base: "reading",
       view: "Continues",
       filter: readingFilter,
       sort: undefined,
-      limit: EMBED_DEFAULT_LIMIT,
+      limit: undefined,
     });
     expect(result.current.output).toEqual(output());
     expect(result.current.memberCapability).toEqual(
@@ -310,7 +309,7 @@ describe("useBaseTableController embedded mode", () => {
         view: "Continues",
         filter: readingFilter,
         sort: newSort,
-        limit: EMBED_DEFAULT_LIMIT,
+        limit: undefined,
       });
     },
   );
@@ -381,7 +380,7 @@ describe("useBaseTableController embedded mode", () => {
         view: "Continues",
         filter: readingFilter,
         sort: newSort,
-        limit: EMBED_DEFAULT_LIMIT,
+        limit: undefined,
       });
       expect(result.current.focusCreatedId).toBeUndefined();
       expect(result.current.memberNotice).toBeUndefined();
@@ -742,12 +741,12 @@ describe("useBaseTableController standalone mode", () => {
       sort: "title",
       dir: "desc",
     });
-    expect(mocks.useBaseViewEvaluation).toHaveBeenLastCalledWith({
+    expect(mocks.useBaseViewWindows).toHaveBeenLastCalledWith({
       base: "",
       view: "",
       filter: undefined,
       sort: undefined,
-      limit: EMBED_DEFAULT_LIMIT,
+      limit: undefined,
     });
     expect(result.current.memberCapability).toEqual(
       definition.member_creation?.[0],

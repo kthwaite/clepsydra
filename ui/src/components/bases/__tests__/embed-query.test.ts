@@ -4,7 +4,8 @@ import {
   type BaseEmbedConfig,
   baseViewEvaluationBody,
   capabilityIdentity,
-  EMBED_DEFAULT_LIMIT,
+  EMBED_WINDOW_ROWS,
+  nextWindowSize,
   normalizeEmbedConfiguration,
   predicateIdentity,
   queryIdentity,
@@ -118,18 +119,41 @@ describe("embedded Base configuration identity", () => {
     );
   });
 
-  it("defaults an absent limit to 50 in both identity and request body", () => {
-    expect(EMBED_DEFAULT_LIMIT).toBe(50);
-    expect(normalizeEmbedConfiguration(config()).limit).toBe(50);
-    expect(queryIdentity(config())).toBe(queryIdentity(config({ limit: 50 })));
-    expect(baseViewEvaluationBody(config())).toMatchObject({ limit: 50 });
+  it("keeps an absent author limit distinct from a limit of one window", () => {
+    expect(normalizeEmbedConfiguration(config()).limit).toBeUndefined();
+    // Absent means "scroll to the true total"; 50 means "stop at 50".
+    expect(queryIdentity(config())).not.toBe(
+      queryIdentity(config({ limit: 50 })),
+    );
+  });
+
+  it("sends the window it is asked for, not the author's ceiling", () => {
+    expect(
+      baseViewEvaluationBody(config({ limit: 400 }), {
+        limit: 50,
+        offset: 100,
+      }),
+    ).toMatchObject({ limit: 50, offset: 100 });
+  });
+
+  it("sizes the next window against the author's ceiling", () => {
+    expect(nextWindowSize(undefined, 250)).toBe(EMBED_WINDOW_ROWS);
+    expect(nextWindowSize(120, 50)).toBe(EMBED_WINDOW_ROWS);
+    expect(nextWindowSize(53, 50)).toBe(3);
+    expect(nextWindowSize(50, 50)).toBe(0);
+    expect(nextWindowSize(10, 40)).toBe(0);
   });
 
   it("omits inherited sort from the payload but sends explicit empty and non-empty sorts", () => {
-    const inherited = baseViewEvaluationBody(config({ sort: undefined }));
-    const empty = baseViewEvaluationBody(config({ sort: [] }));
+    const firstWindow = { limit: 50, offset: 0 };
+    const inherited = baseViewEvaluationBody(
+      config({ sort: undefined }),
+      firstWindow,
+    );
+    const empty = baseViewEvaluationBody(config({ sort: [] }), firstWindow);
     const explicit = baseViewEvaluationBody(
       config({ sort: [{ field: "rating", dir: "desc" }] }),
+      firstWindow,
     );
 
     expect(Object.hasOwn(inherited, "sort")).toBe(false);
