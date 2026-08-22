@@ -195,6 +195,14 @@ function controllerModel(
     onMemberEdit: vi.fn(),
     focusCreatedId: undefined,
     onCreatedRowFocused: vi.fn(),
+    rowWindow: {
+      total: 0,
+      loaded: 0,
+      hasMore: false,
+      isLoadingMore: false,
+      cappedByAuthor: false,
+      loadMore: vi.fn(),
+    },
     ...overrides,
   };
 }

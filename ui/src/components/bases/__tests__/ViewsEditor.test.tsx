@@ -26,12 +26,15 @@ import {
   type DraftView,
 } from "#/components/bases/definition-model";
 import { ViewsEditor } from "#/components/bases/ViewsEditor";
+
 function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
 async function openSelect(user: UserEvent, label: string) {
-  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  const trigger = screen.getByRole("button", {
+    name: selectTriggerName(label),
+  });
   await user.click(trigger);
   await screen.findByRole("listbox");
 }
@@ -60,7 +63,6 @@ function visibleOptionNames() {
     .getAllByRole("option")
     .map((option) => option.textContent ?? "");
 }
-
 
 const { previewMock } = vi.hoisted(() => ({ previewMock: vi.fn() }));
 
@@ -92,32 +94,26 @@ function register<T>(registrations: T[], registration: T) {
   };
 }
 
-vi.mock(
-  "@atlaskit/pragmatic-drag-and-drop/element/adapter",
-  () => ({
-    draggable: (registration: DraggableRegistration) =>
-      register(dnd.draggables, registration),
-    dropTargetForElements: (registration: DropTargetRegistration) =>
-      register(dnd.dropTargets, registration),
-  }),
-);
+vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
+  draggable: (registration: DraggableRegistration) =>
+    register(dnd.draggables, registration),
+  dropTargetForElements: (registration: DropTargetRegistration) =>
+    register(dnd.dropTargets, registration),
+}));
 
-vi.mock(
-  "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge",
-  () => ({
-    attachClosestEdge: (
-      data: Parameters<AttachClosestEdge>[0],
-      { allowedEdges }: Parameters<AttachClosestEdge>[1],
-    ) => ({
-      ...data,
-      [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
-        ? dnd.closestEdge
-        : null,
-    }),
-    extractClosestEdge: (data: Record<string | symbol, unknown>) =>
-      (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+vi.mock("@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge", () => ({
+  attachClosestEdge: (
+    data: Parameters<AttachClosestEdge>[0],
+    { allowedEdges }: Parameters<AttachClosestEdge>[1],
+  ) => ({
+    ...data,
+    [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
+      ? dnd.closestEdge
+      : null,
   }),
-);
+  extractClosestEdge: (data: Record<string | symbol, unknown>) =>
+    (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+}));
 
 vi.mock("#/api/bases", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#/api/bases")>();
@@ -540,14 +536,7 @@ describe("ViewsEditor", () => {
     },
   ] as const)(
     "reorders a visible column $intent the named row target",
-    ({
-      edge,
-      sourceColumn,
-      sourceId,
-      targetColumn,
-      targetId,
-      expected,
-    }) => {
+    ({ edge, sourceColumn, sourceId, targetColumn, targetId, expected }) => {
       const onChange = renderViews({
         views: [
           view({
@@ -581,15 +570,15 @@ describe("ViewsEditor", () => {
     },
   );
 
-/** Registrations belonging to the visible-columns list, ignoring the saved-view
- * rows that share the same drag adapters. */
-function columnRegistrations<T extends { element: Element }>(
-  registrations: T[],
-): T[] {
-  return registrations.filter((registration) =>
-    registration.element.closest('[aria-labelledby$="-columns-heading"]'),
-  );
-}
+  /** Registrations belonging to the visible-columns list, ignoring the saved-view
+   * rows that share the same drag adapters. */
+  function columnRegistrations<T extends { element: Element }>(
+    registrations: T[],
+  ): T[] {
+    return registrations.filter((registration) =>
+      registration.element.closest('[aria-labelledby$="-columns-heading"]'),
+    );
+  }
 
   it("clears a cancelled column drag, ignores a later unrelated drop, rejects properties, and unregisters", () => {
     const onChange = vi.fn<(views: DraftView[]) => void>();
@@ -708,11 +697,7 @@ function columnRegistrations<T extends { element: Element }>(
     const laterBodyHandle = bodyHandles[1];
     expect(firstBodyRow).not.toBeNull();
 
-    dispatchDrop(
-      sourceFor(laterBodyHandle),
-      targetFor(firstBodyRow!),
-      "top",
-    );
+    dispatchDrop(sourceFor(laterBodyHandle), targetFor(firstBodyRow!), "top");
 
     expect(latest<DraftView[]>(onChange)[0].columns).toEqual([
       "title",
@@ -992,9 +977,7 @@ function columnRegistrations<T extends { element: Element }>(
     );
     expect(
       screen.getByRole("button", { name: selectTriggerName("Layout") }),
-    ).toHaveTextContent(
-      "board",
-    );
+    ).toHaveTextContent("board");
   });
 
   it("registers unsupported layout and nested diagnostics to exact controls", () => {
@@ -1066,7 +1049,9 @@ function columnRegistrations<T extends { element: Element }>(
     });
 
     const select = screen.getByLabelText("Field to label");
-    expect(within(select).getByRole("option", { name: "status" })).toBeEnabled();
+    expect(
+      within(select).getByRole("option", { name: "status" }),
+    ).toBeEnabled();
     expect(
       within(select).getByRole("option", { name: /body.*read-only/i }),
     ).toBeEnabled();
@@ -1101,7 +1086,9 @@ function columnRegistrations<T extends { element: Element }>(
       }),
     ).toBeDisabled();
 
-    await user.click(screen.getByRole("button", { name: "Reset label status" }));
+    await user.click(
+      screen.getByRole("button", { name: "Reset label status" }),
+    );
     expect(onChange).toHaveBeenLastCalledWith([{ ...initial, labels: {} }]);
     expect(screen.getByLabelText("Field to label")).toHaveFocus();
     expect(screen.getByLabelText("Field to label")).toBeEnabled();
@@ -1157,9 +1144,9 @@ function columnRegistrations<T extends { element: Element }>(
     ).toBeDisabled();
 
     const field = screen.getByLabelText("Field for display label sys.title");
-    expect(screen.getByLabelText("Stored label key sys.title")).toHaveTextContent(
-      "sys.title",
-    );
+    expect(
+      screen.getByLabelText("Stored label key sys.title"),
+    ).toHaveTextContent("sys.title");
     expect(
       within(field).getByRole("option", { name: /Property title/ }),
     ).toBeDisabled();
@@ -1169,9 +1156,7 @@ function columnRegistrations<T extends { element: Element }>(
     expect(
       within(field).getByRole("option", { name: /sys\.custom/ }),
     ).toBeDisabled();
-    expect(
-      within(field).getByRole("option", { name: /body/ }),
-    ).toBeDisabled();
+    expect(within(field).getByRole("option", { name: /body/ })).toBeDisabled();
 
     await user.selectOptions(field, "rating");
 
@@ -1218,7 +1203,6 @@ function columnRegistrations<T extends { element: Element }>(
       expect.any(HTMLElement),
     );
   });
-
 });
 
 describe("BasePreview", () => {
@@ -1444,7 +1428,8 @@ describe("BasePreview", () => {
     );
     await act(async () => vi.advanceTimersByTimeAsync(250));
     expect(screen.getByText(/1 group.*1 preview row/i)).toBeInTheDocument();
-    expect(screen.getByText("12 rows")).toBeInTheDocument();
+    // The heading carries the group's real total beside the rows shown.
+    expect(screen.getByText("1 of 12 rows")).toBeInTheDocument();
 
     previewMock.mockResolvedValueOnce({
       diagnostics: [
