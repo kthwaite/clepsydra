@@ -11,6 +11,7 @@ path = "src/bin/cli.rs"
 ammonia = "4"
 anstream = "1.0.0"
 axum = { version = "0.8.8", features = ["multipart"] }
+axum-extra = { version = "0.10", features = ["query"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 base64 = "0.22"
 biblatex = "0.11"

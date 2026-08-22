@@ -128,7 +128,8 @@ reported as diagnostics, and reconciliation preserves the last good
 subscription set rather than replacing it with a warning-bearing candidate.
 
 Return to the river and switch among **UNREAD**, **ALL**, and **SAVED**. Filter
-by group, feed, or tag. Entry read and bookmark state, cached content, fetch
+by any number of groups and feeds at once, and by a single tag; an empty
+selection means every group or feed. Entry read and bookmark state, cached content, fetch
 metadata, and counters live in `.clepsydra/feeds.db`. The scheduler runs an
 automatic 60-second due sweep and also wakes when **Refresh feeds** marks
 subscriptions due. A success or `304` uses the configured fetch interval, whose

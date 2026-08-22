@@ -186,8 +186,8 @@ function setEntries(entries: FeedEntry[], nextCursor: string | null = null) {
 function renderRiver(
   filters: {
     view: "unread" | "all" | "saved";
-    group?: string;
-    feed?: number;
+    group?: string[];
+    feed?: number[];
     tag?: string;
   } = { view: "unread" },
   compact = false,
@@ -205,6 +205,7 @@ function renderRiver(
 }
 
 beforeEach(() => {
+  vi.useRealTimers();
   vi.clearAllMocks();
   riverMocks.fetchMock.mockReset();
   riverMocks.useRealHooks = false;
@@ -468,69 +469,6 @@ describe("FeedRiver", () => {
     ).toBeVisible();
   });
 
-  it("keeps compact disclosure and its full-reader continuation", async () => {
-    const user = userEvent.setup();
-    renderRiver({ view: "all" }, true);
-
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-
-    expect(screen.getByText("The complete entry body.")).toBeVisible();
-    expect(
-      screen.getByRole("link", { name: /continue in feeds/i }),
-    ).toHaveAttribute("href", "/feeds?view=all");
-  });
-  it("marks an unread entry read when expanded and exposes a safe original link", async () => {
-    const user = userEvent.setup();
-    renderRiver({ view: "unread" }, true);
-
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-
-    expect(riverMocks.patchEntry).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 101, read: true }),
-    );
-    expect(screen.getByText("The complete entry body.")).toBeVisible();
-    expect(
-      screen.getByRole("link", { name: /open original/i }),
-    ).toHaveAttribute("href", "https://one.example/posts/cache-semantics");
-    expect(
-      screen.getByRole("link", { name: /open original/i }),
-    ).toHaveAttribute("target", "_blank");
-    expect(
-      screen.getByRole("link", { name: /open original/i }),
-    ).toHaveAttribute("rel", "noreferrer");
-  });
-
-  it("hides the visual pip while keeping Read or Unread in the disclosure name and tree", async () => {
-    const user = userEvent.setup();
-    renderRiver({ view: "unread" }, true);
-
-    const unreadTrigger = screen.getByRole("button", {
-      name: /unread entry.*cache semantics/i,
-    });
-    expect(
-      within(unreadTrigger).getByText("Unread entry", { selector: ".sr-only" }),
-    ).toBeInTheDocument();
-    expect(
-      Array.from(unreadTrigger.querySelectorAll('[aria-hidden="true"]')).some(
-        (element) => element.classList.contains("h-[7px]"),
-      ),
-    ).toBe(true);
-
-    await user.click(unreadTrigger);
-
-    const readTrigger = await screen.findByRole("button", {
-      name: /^read entry.*cache semantics/i,
-    });
-    expect(
-      within(readTrigger).getByText("Read entry", { selector: ".sr-only" }),
-    ).toBeInTheDocument();
-    expect(
-      Array.from(readTrigger.querySelectorAll('[aria-hidden="true"]')).some(
-        (element) => element.classList.contains("h-[7px]"),
-      ),
-    ).toBe(true);
-  });
-
   it("groups newest-first entries under calendar-day headings", () => {
     setEntries([
       entry(),
@@ -559,6 +497,27 @@ describe("FeedRiver", () => {
     expect(
       screen.getByRole("button", { name: /cache semantics/i }),
     ).toAppearBefore(screen.getByRole("button", { name: /previous day/i }));
+  });
+
+  it("pins each day heading to the top of the scrolling river", () => {
+    setEntries([
+      entry(),
+      entry({
+        id: 103,
+        guid: "entry-103",
+        title: "Previous day",
+        published_at: "2026-08-08T12:00:00Z",
+      }),
+    ]);
+    renderRiver({ view: "all" }, true);
+
+    for (const label of ["9 August 2026", "8 August 2026"]) {
+      const heading = screen.getByRole("heading", { name: label });
+      const bar = heading.parentElement;
+      expect(bar?.className).toContain("sticky");
+      expect(bar?.className).toContain("top-0");
+      expect(bar?.className).toContain("bg-paper-2");
+    }
   });
 
   it("renders a named loading status", () => {
@@ -605,10 +564,225 @@ describe("FeedRiver", () => {
     },
   );
 
-  it("toggles an entry bookmark from the expanded controls", async () => {
+  it("bounds mark-all-read at the newest visible cursor and preserves active filters", async () => {
+    const user = userEvent.setup();
+    setEntries([
+      entry(),
+      entry({
+        id: 102,
+        guid: "entry-102",
+        title: "Earlier",
+        published_at: "2026-08-09T11:00:00Z",
+      }),
+    ]);
+    renderRiver({
+      view: "unread",
+      group: ["Engineering", "Ops"],
+      feed: [7],
+      tag: "rust",
+    });
+
+    await user.click(screen.getByRole("button", { name: /mark all read/i }));
+
+    expect(riverMocks.markEntriesRead).toHaveBeenCalledWith({
+      before: "2026-08-09T12:00:00Z|101",
+      feed: [7],
+      group: ["Engineering", "Ops"],
+      tag: "rust",
+    });
+  });
+
+  it("loads the next cursor page in the full river", async () => {
+    const user = userEvent.setup();
+    setEntries([entry()], "2026-08-08T12:00:00Z|88");
+    renderRiver({ view: "all" });
+
+    await user.click(screen.getByRole("button", { name: /load more/i }));
+
+    expect(riverMocks.entriesQuery.fetchNextPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("hands compact continuation to the full reader without fetching in place", async () => {
+    const user = userEvent.setup();
+    setEntries([entry()], "2026-08-08T12:00:00Z|88");
+    renderRiver(
+      {
+        view: "unread",
+        group: ["Engineering", "Ops"],
+        feed: [7, 9],
+        tag: "rust",
+      },
+      true,
+    );
+
+    const continuation = screen.getByRole("link", {
+      name: /continue.*feeds|open full reader|view all entries/i,
+    });
+    const href = new URL(
+      continuation.getAttribute("href") ?? "",
+      "https://ui.test",
+    );
+    expect(href.pathname).toBe("/feeds");
+    expect(href.searchParams.get("view")).toBe("unread");
+    expect(href.searchParams.getAll("group")).toEqual(["Engineering", "Ops"]);
+    expect(href.searchParams.getAll("feed")).toEqual(["7", "9"]);
+    expect(href.searchParams.get("tag")).toBe("rust");
+
+    await user.click(continuation);
+    expect(riverMocks.entriesQuery.fetchNextPage).not.toHaveBeenCalled();
+  });
+
+  it("surfaces a mark-all failure and disables the pending boundary action", async () => {
+    const user = userEvent.setup();
+    const view = renderRiver();
+    await user.click(screen.getByRole("button", { name: /mark all read/i }));
+
+    riverMocks.markState.isPending = true;
+    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    expect(
+      screen.getByRole("button", { name: /mark all read|marking/i }),
+    ).toBeDisabled();
+
+    riverMocks.markState.isPending = false;
+    riverMocks.markState.error = new Error("Bulk mark failed");
+    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Bulk mark failed");
+  });
+
+  it("keeps the compact full-reader continuation", () => {
+    renderRiver({ view: "all" }, true);
+
+    expect(
+      screen.getByRole("link", { name: /continue in feeds/i }),
+    ).toHaveAttribute("href", "/feeds?view=all");
+  });
+
+  it("opens the original from the compact title and marks the entry read", async () => {
+    const user = userEvent.setup();
+    renderRiver({ view: "unread" }, true);
+
+    const title = screen.getByRole("link", { name: "Cache semantics" });
+    expect(title).toHaveAttribute(
+      "href",
+      "https://one.example/posts/cache-semantics",
+    );
+    expect(title).toHaveAttribute("target", "_blank");
+    expect(title).toHaveAttribute("rel", "noreferrer");
+
+    await user.click(title);
+
+    expect(riverMocks.patchEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 101, read: true }),
+    );
+  });
+
+  it("exposes every compact row action inline without mounting an entry body", () => {
+    setEntries([
+      entry(),
+      entry({
+        id: 102,
+        guid: "entry-102",
+        title: "Second dispatch",
+        content_html: "<p>Second private body.</p>",
+        url: "https://two.example/post",
+      }),
+    ]);
+    renderRiver({ view: "all" }, true);
+
+    expect(
+      screen.queryByText("The complete entry body."),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Second private body.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { expanded: false })).toBeNull();
+    expect(screen.queryByRole("button", { expanded: true })).toBeNull();
+
+    for (const title of ["Cache semantics", "Second dispatch"]) {
+      const row = screen.getByRole("article", { name: new RegExp(title, "i") });
+      expect(
+        within(row).getByRole("link", {
+          name: new RegExp(`open original: ${title}`, "i"),
+        }),
+      ).toBeVisible();
+      expect(
+        within(row).getByRole("button", {
+          name: new RegExp(`mark ${title} read`, "i"),
+        }),
+      ).toBeVisible();
+      expect(
+        within(row).getByRole("button", {
+          name: new RegExp(`bookmark ${title}`, "i"),
+        }),
+      ).toBeVisible();
+      expect(
+        within(row).getByRole("button", {
+          name: new RegExp(`edit tags for ${title}`, "i"),
+        }),
+      ).toBeVisible();
+    }
+  });
+
+  it("reveals compact row actions on hover or focus while keeping them tabbable", async () => {
     const user = userEvent.setup();
     renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+
+    const actions = screen
+      .getByRole("article", { name: /cache semantics/i })
+      .querySelector("[data-entry-actions='101']");
+    if (!(actions instanceof HTMLElement)) {
+      throw new Error("Expected an inline action track on the compact row");
+    }
+    expect(actions.className).toContain("opacity-0");
+    expect(actions.className).toContain("group-hover:opacity-100");
+    expect(actions.className).toContain("group-focus-within:opacity-100");
+    expect(actions.className).toContain("pointer-coarse:opacity-100");
+
+    await user.tab();
+    expect(screen.getByRole("link", { name: "Cache semantics" })).toHaveFocus();
+    await user.tab();
+    expect(
+      within(actions).getByRole("link", { name: /open original/i }),
+    ).toHaveFocus();
+  });
+
+  it("names the compact row by read state while hiding the pip from assistive tech", () => {
+    setEntries([
+      entry(),
+      entry({
+        id: 102,
+        guid: "entry-102",
+        title: "Second dispatch",
+        read: true,
+      }),
+    ]);
+    renderRiver({ view: "all" }, true);
+
+    const unreadRow = screen.getByRole("article", {
+      name: /unread entry.*cache semantics/i,
+    });
+    const readRow = screen.getByRole("article", {
+      name: /^read entry.*second dispatch/i,
+    });
+    expect(
+      within(unreadRow).getByText("Unread entry", { selector: ".sr-only" }),
+    ).toBeInTheDocument();
+    expect(
+      Array.from(unreadRow.querySelectorAll('[aria-hidden="true"]')).some(
+        (element) => element.classList.contains("h-[7px]"),
+      ),
+    ).toBe(true);
+    expect(
+      within(readRow).getByText("Read entry", { selector: ".sr-only" }),
+    ).toBeInTheDocument();
+    expect(
+      Array.from(readRow.querySelectorAll('[aria-hidden="true"]')).some(
+        (element) => element.classList.contains("h-[7px]"),
+      ),
+    ).toBe(true);
+  });
+
+  it("toggles an entry bookmark from the inline row actions", async () => {
+    const user = userEvent.setup();
+    renderRiver({ view: "all" }, true);
 
     await user.click(
       screen.getByRole("button", { name: /bookmark cache semantics/i }),
@@ -619,12 +793,27 @@ describe("FeedRiver", () => {
     );
   });
 
-  it("edits normalized entry tags through named controls", async () => {
+  it("offers an explicit mark-unread action on a read compact row", async () => {
+    const user = userEvent.setup();
+    setEntries([entry({ read: true })]);
+    renderRiver({ view: "all" }, true);
+
+    await user.click(
+      screen.getByRole("button", { name: /mark cache semantics unread/i }),
+    );
+
+    expect(riverMocks.patchEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 101, read: false }),
+    );
+  });
+
+  it("edits normalized entry tags from the inline row actions", async () => {
     const user = userEvent.setup();
     renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-    await user.click(screen.getByRole("button", { name: /edit tags/i }));
 
+    await user.click(
+      screen.getByRole("button", { name: /edit tags for cache semantics/i }),
+    );
     const tags = screen.getByRole("textbox", {
       name: /tags for cache semantics/i,
     });
@@ -637,20 +826,6 @@ describe("FeedRiver", () => {
     );
   });
 
-  it("offers an explicit mark-unread action for a read entry", async () => {
-    const user = userEvent.setup();
-    setEntries([entry({ read: true })]);
-    renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-    riverMocks.patchEntry.mockClear();
-
-    await user.click(screen.getByRole("button", { name: /mark unread/i }));
-
-    expect(riverMocks.patchEntry).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 101, read: false }),
-    );
-  });
-
   it("keeps read entries in all, hides them in unread, and restores them when toggled off", async () => {
     const user = userEvent.setup();
     const page = renderRiver({ view: "all" }, true);
@@ -659,7 +834,9 @@ describe("FeedRiver", () => {
       throw new Error("Expected seeded entry pages");
     }
 
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    await user.click(
+      screen.getByRole("button", { name: /mark cache semantics read/i }),
+    );
     expect(riverMocks.patchEntry).toHaveBeenCalledWith(
       expect.objectContaining({ id: 101, read: true }),
     );
@@ -695,87 +872,7 @@ describe("FeedRiver", () => {
     expect(unread.pageParams).toEqual(before.pageParams);
   });
 
-  it("bounds mark-all-read at the newest visible cursor and preserves active filters", async () => {
-    const user = userEvent.setup();
-    setEntries([
-      entry(),
-      entry({
-        id: 102,
-        guid: "entry-102",
-        title: "Earlier",
-        published_at: "2026-08-09T11:00:00Z",
-      }),
-    ]);
-    renderRiver({
-      view: "unread",
-      group: "Engineering",
-      feed: 7,
-      tag: "rust",
-    });
-
-    await user.click(screen.getByRole("button", { name: /mark all read/i }));
-
-    expect(riverMocks.markEntriesRead).toHaveBeenCalledWith({
-      before: "2026-08-09T12:00:00Z|101",
-      feed: 7,
-      group: "Engineering",
-      tag: "rust",
-    });
-  });
-
-  it("loads the next cursor page in the full river", async () => {
-    const user = userEvent.setup();
-    setEntries([entry()], "2026-08-08T12:00:00Z|88");
-    renderRiver({ view: "all" });
-
-    await user.click(screen.getByRole("button", { name: /load more/i }));
-
-    expect(riverMocks.entriesQuery.fetchNextPage).toHaveBeenCalledTimes(1);
-  });
-
-  it("hands compact continuation to the full reader without fetching in place", async () => {
-    const user = userEvent.setup();
-    setEntries([entry()], "2026-08-08T12:00:00Z|88");
-    renderRiver({ view: "unread", group: "Engineering", tag: "rust" }, true);
-
-    const continuation = screen.getByRole("link", {
-      name: /continue.*feeds|open full reader|view all entries/i,
-    });
-    const href = new URL(
-      continuation.getAttribute("href") ?? "",
-      "https://ui.test",
-    );
-    expect(href.pathname).toBe("/feeds");
-    expect(href.searchParams.get("view")).toBe("unread");
-    expect(href.searchParams.get("group")).toBe("Engineering");
-    expect(href.searchParams.get("tag")).toBe("rust");
-
-    await user.click(continuation);
-    expect(riverMocks.entriesQuery.fetchNextPage).not.toHaveBeenCalled();
-  });
-
-  it("uses named articles and controls that remain operable in a narrow flow", async () => {
-    const user = userEvent.setup();
-    setEntries([
-      entry(),
-      entry({ id: 102, guid: "entry-102", title: "Second dispatch" }),
-    ]);
-    renderRiver({ view: "all" }, true);
-
-    const first = screen.getByRole("article", { name: /cache semantics/i });
-    const second = screen.getByRole("article", { name: /second dispatch/i });
-    expect(first).toBeVisible();
-    expect(second).toBeVisible();
-
-    await user.click(
-      within(first).getByRole("button", { name: /cache semantics/i }),
-    );
-    expect(
-      within(first).getByRole("link", { name: /open original/i }),
-    ).toBeVisible();
-    await waitFor(() => expect(riverMocks.patchEntry).toHaveBeenCalled());
-  });
-  it("keeps an expanded unread entry pinned through optimistic removal and refetch", async () => {
+  it("drops a compact unread row through the real optimistic read mutation", async () => {
     riverMocks.useRealHooks = true;
     const initialPages = {
       pages: [{ entries: [entry()], next_cursor: null }],
@@ -825,7 +922,9 @@ describe("FeedRiver", () => {
       </QueryClientProvider>,
     );
 
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    await user.click(
+      screen.getByRole("button", { name: /mark cache semantics read/i }),
+    );
 
     await waitFor(() => {
       expect(
@@ -834,52 +933,8 @@ describe("FeedRiver", () => {
     });
     await waitFor(() => {
       expect(
-        riverMocks.fetchMock.mock.calls.some(([input]) => {
-          const request =
-            input instanceof riverMocks.NativeRequest
-              ? input
-              : new riverMocks.NativeRequest(input);
-          return (
-            request.method === "GET" &&
-            request.url.includes("/api/vault/feeds/entries")
-          );
-        }),
-      ).toBe(true);
-    });
-    expect(screen.getByText("The complete entry body.")).toBeVisible();
-    const pinnedArticle = screen.getByRole("article", {
-      name: /cache semantics/i,
-    });
-    await waitFor(() => {
-      const disclosure = within(pinnedArticle).getByRole("button", {
-        name: /^read entry.*cache semantics/i,
-      });
-      expect(
-        within(disclosure).getByText("Read entry", { selector: ".sr-only" }),
-      ).toBeInTheDocument();
-      expect(
-        Array.from(disclosure.querySelectorAll('[aria-hidden="true"]')).some(
-          (element) => element.classList.contains("h-[7px]"),
-        ),
-      ).toBe(true);
-      expect(
-        within(pinnedArticle).getByRole("button", {
-          name: /^mark unread$/i,
-        }),
-      ).toBeEnabled();
-    });
-    await user.click(
-      within(pinnedArticle).getByRole("button", { name: /^mark unread$/i }),
-    );
-    await waitFor(() => {
-      const patchRequests = riverMocks.fetchMock.mock.calls
-        .map(([input]) =>
-          input instanceof riverMocks.NativeRequest
-            ? input
-            : new riverMocks.NativeRequest(input),
-        )
-        .filter((request) => request.method === "PATCH");
-      expect(patchRequests).toHaveLength(2);
+        screen.queryByRole("article", { name: /cache semantics/i }),
+      ).not.toBeInTheDocument();
     });
     const patchRequests = riverMocks.fetchMock.mock.calls
       .map(([input]) =>
@@ -889,50 +944,8 @@ describe("FeedRiver", () => {
       )
       .filter((request) => request.method === "PATCH");
     await expect(patchRequests.at(-1)?.clone().json()).resolves.toEqual(
-      expect.objectContaining({ read: false }),
+      expect.objectContaining({ read: true }),
     );
-
-    await user.click(screen.getByRole("button", { expanded: true }));
-    expect(
-      screen.queryByText("The complete entry body."),
-    ).not.toBeInTheDocument();
-  });
-
-  it("mounts content and actions only for the single expanded entry", async () => {
-    const user = userEvent.setup();
-    setEntries([
-      entry(),
-      entry({
-        id: 102,
-        guid: "entry-102",
-        title: "Second dispatch",
-        content_html: "<p>Second private body.</p>",
-        url: "https://two.example/post",
-      }),
-    ]);
-    renderRiver({ view: "all" }, true);
-
-    expect(
-      screen.queryByText("The complete entry body."),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("Second private body.")).not.toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: /open original/i })).toBeNull();
-
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-    expect(screen.getByText("The complete entry body.")).toBeVisible();
-    expect(screen.queryByText("Second private body.")).not.toBeInTheDocument();
-    expect(
-      screen.getAllByRole("link", { name: /open original/i }),
-    ).toHaveLength(1);
-
-    await user.click(screen.getByRole("button", { name: /second dispatch/i }));
-    expect(
-      screen.queryByText("The complete entry body."),
-    ).not.toBeInTheDocument();
-    expect(screen.getByText("Second private body.")).toBeVisible();
-    expect(
-      screen.getAllByRole("link", { name: /open original/i }),
-    ).toHaveLength(1);
   });
 
   it.each([
@@ -940,59 +953,42 @@ describe("FeedRiver", () => {
     "data:text/html,<script>alert(1)</script>",
     "file:///etc/passwd",
     "custom-protocol://publisher/action",
-  ])("omits the original action for unsafe URL %s", async (url) => {
-    const user = userEvent.setup();
+  ])("omits the compact original link for unsafe URL %s", (url) => {
     setEntries([entry({ read: true, url })]);
     renderRiver({ view: "all" }, true);
 
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-
     expect(screen.queryByRole("link", { name: /open original/i })).toBeNull();
-  });
-
-  it("surfaces a mark-all failure and disables the pending boundary action", async () => {
-    const user = userEvent.setup();
-    const view = renderRiver();
-    await user.click(screen.getByRole("button", { name: /mark all read/i }));
-
-    riverMocks.markState.isPending = true;
-    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
+    expect(screen.queryByRole("link", { name: "Cache semantics" })).toBeNull();
     expect(
-      screen.getByRole("button", { name: /mark all read|marking/i }),
-    ).toBeDisabled();
-
-    riverMocks.markState.isPending = false;
-    riverMocks.markState.error = new Error("Bulk mark failed");
-    view.rerender(<FeedRiver filters={{ view: "unread" }} />);
-    expect(screen.getByRole("alert")).toHaveTextContent("Bulk mark failed");
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
   });
 
-  it("surfaces mark-on-expand failures without collapsing the entry", async () => {
+  it("keeps the compact row visible when the title read patch fails", async () => {
     const user = userEvent.setup();
     const view = renderRiver({ view: "unread" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
 
+    await user.click(screen.getByRole("link", { name: "Cache semantics" }));
     riverMocks.patchState.error = new Error("Read state could not be saved");
     view.rerender(<FeedRiver filters={{ view: "unread" }} compact />);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Read state could not be saved",
     );
-    expect(screen.getByText("The complete entry body.")).toBeVisible();
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
   });
 
   it.each([
-    [/mark unread/i, "Read state failed"],
+    [/mark cache semantics unread/i, "Read state failed"],
     [/bookmark cache semantics/i, "Bookmark failed"],
   ] as const)(
-    "surfaces a failed expanded-entry action and disables it while pending",
+    "surfaces a failed inline row action and disables it while pending",
     async (actionName, message) => {
       const user = userEvent.setup();
       setEntries([entry({ read: true })]);
       const view = renderRiver({ view: "all" }, true);
-      await user.click(
-        screen.getByRole("button", { name: /cache semantics/i }),
-      );
       await user.click(screen.getByRole("button", { name: actionName }));
 
       riverMocks.patchState.isPending = true;
@@ -1018,8 +1014,9 @@ describe("FeedRiver", () => {
     const user = userEvent.setup();
     setEntries([entry({ read: true })]);
     const view = renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-    await user.click(screen.getByRole("button", { name: /edit tags/i }));
+    await user.click(
+      screen.getByRole("button", { name: /edit tags for cache semantics/i }),
+    );
     const tags = screen.getByRole("textbox", {
       name: /tags for cache semantics/i,
     });
@@ -1050,11 +1047,7 @@ describe("FeedRiver", () => {
     ).toHaveValue("systems, reading");
 
     riverMocks.patchState.error = null;
-    const callbackCall = riverMocks.patchEntry.mock.calls.find(
-      (call) => typeof call[1]?.onSuccess === "function",
-    );
     await act(async () => {
-      callbackCall?.[1]?.onSuccess?.(entry({ tags: ["systems", "reading"] }));
       resolvePatch();
       await pendingPatch;
     });
@@ -1065,119 +1058,298 @@ describe("FeedRiver", () => {
       ).toBeNull();
     });
   });
-  it("reconciles an explicit read success into an expanded pinned snapshot", async () => {
-    const updated = entry({ read: false });
-    riverMocks.patchEntry.mockImplementation((_variables, options) => {
-      options?.onSuccess?.(updated);
-    });
-    riverMocks.patchEntryAsync.mockResolvedValue(updated);
+
+  it("closes the tag editor when its compact row leaves the river", async () => {
     const user = userEvent.setup();
-    setEntries([entry({ read: true })]);
     const view = renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    await user.click(
+      screen.getByRole("button", { name: /edit tags for cache semantics/i }),
+    );
+    expect(
+      screen.getByRole("textbox", { name: /tags for cache semantics/i }),
+    ).toBeVisible();
+
     setEntries([]);
     view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
 
-    await user.click(screen.getByRole("button", { name: /^mark unread$/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", { name: /^mark read$/i }),
-      ).toBeVisible();
-      expect(
-        screen.getByRole("button", {
-          name: /unread entry.*cache semantics/i,
-        }),
-      ).toHaveAttribute("aria-expanded", "true");
-    });
+    expect(
+      screen.queryByRole("textbox", { name: /tags for cache semantics/i }),
+    ).toBeNull();
   });
 
-  it("reconciles bookmark success into an expanded pinned snapshot", async () => {
-    const updated = entry({ read: true, bookmarked: true });
-    riverMocks.patchEntry.mockImplementation((_variables, options) => {
-      options?.onSuccess?.(updated);
-    });
-    riverMocks.patchEntryAsync.mockResolvedValue(updated);
-    const user = userEvent.setup();
-    setEntries([entry({ read: true })]);
-    const view = renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-    setEntries([]);
-    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
+  it("omits the domain when a compact entry stays on the feed's own site", () => {
+    renderRiver({ view: "all" }, true);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    expect(within(row).getByText("One Example")).toBeVisible();
+    expect(within(row).queryByText("one.example")).toBeNull();
+  });
+
+  it("shows the stripped domain when a compact entry points off the feed's site", () => {
+    setEntries([entry({ url: "https://www.github.com/kit/clepsydra/pull/3" })]);
+    renderRiver({ view: "all" }, true);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    expect(within(row).getByText("One Example")).toBeVisible();
+    expect(within(row).getByText("github.com")).toBeVisible();
+    expect(within(row).getByText("Kit")).toBeVisible();
+  });
+
+  it("shows the domain on a full-reader row that points off the feed's site", () => {
+    setEntries([entry({ url: "https://github.com/kit/clepsydra/pull/3" })]);
+    renderRiver({ view: "all" });
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    expect(within(row).getByText("github.com")).toBeVisible();
+  });
+
+  it("compares the domain against the feed URL host when no site URL is published", () => {
+    const group = feeds.groups[0];
+    riverMocks.feedsQuery.data = {
+      ...feeds,
+      groups: [{ ...group, feeds: [{ ...group.feeds[0], site_url: null }] }],
+    };
+    setEntries([
+      entry(),
+      entry({
+        id: 102,
+        guid: "entry-102",
+        title: "Off site",
+        url: "https://github.com/kit/clepsydra",
+      }),
+    ]);
+    renderRiver({ view: "all" }, true);
+
+    expect(
+      within(
+        screen.getByRole("article", { name: /cache semantics/i }),
+      ).queryByText("one.example"),
+    ).toBeNull();
+    expect(
+      within(screen.getByRole("article", { name: /off site/i })).getByText(
+        "github.com",
+      ),
+    ).toBeVisible();
+  });
+
+  it("omits the domain for an unsafe entry URL", () => {
+    setEntries([entry({ url: "javascript:alert(document.domain)" })]);
+    renderRiver({ view: "all" }, true);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    expect(within(row).queryByText(/javascript|document\.domain/i)).toBeNull();
+    expect(within(row).getByText("One Example")).toBeVisible();
+  });
+
+  it("holds a just-read compact row in place before animating it out", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const view = renderRiver({ view: "unread" }, true);
 
     await user.click(
-      screen.getByRole("button", { name: /bookmark cache semantics/i }),
+      screen.getByRole("button", { name: /mark cache semantics read/i }),
     );
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole("button", {
-          name: /remove bookmark from cache semantics/i,
-        }),
-      ).toBeVisible();
-      expect(screen.getByText("Saved")).toBeVisible();
-      expect(screen.getByText("The complete entry body.")).toBeVisible();
-    });
-  });
-
-  it("reconciles tag success into an expanded pinned snapshot", async () => {
-    const updated = entry({ read: true, tags: ["systems", "reading"] });
-    riverMocks.patchEntryAsync.mockResolvedValue(updated);
-    const user = userEvent.setup();
-    setEntries([entry({ read: true })]);
-    const view = renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
     setEntries([]);
-    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
-    await user.click(screen.getByRole("button", { name: /edit tags/i }));
-    const tags = screen.getByRole("textbox", {
-      name: /tags for cache semantics/i,
+    view.rerender(<FeedRiver filters={{ view: "unread" }} compact />);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    expect(row.className).toContain("cl-feed-exit");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
     });
-    await user.clear(tags);
-    await user.type(tags, "systems, reading");
-
-    await user.click(screen.getByRole("button", { name: /save tags/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("textbox", { name: /tags for cache semantics/i }),
-      ).not.toBeInTheDocument();
-      expect(screen.getByText("#systems")).toBeVisible();
-      expect(screen.getByText("#reading")).toBeVisible();
-      expect(screen.queryByText("#rust")).not.toBeInTheDocument();
-      expect(screen.getByText("The complete entry body.")).toBeVisible();
-    });
-  });
-
-  it("preserves the exact pinned snapshot when an explicit mutation rolls back", async () => {
-    const failure = new Error("Tags could not be saved");
-    riverMocks.patchEntryAsync.mockRejectedValue(failure);
-    const user = userEvent.setup();
-    setEntries([entry({ read: true, bookmarked: true })]);
-    const view = renderRiver({ view: "all" }, true);
-    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
-    setEntries([]);
-    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
-    await user.click(screen.getByRole("button", { name: /edit tags/i }));
-    const tags = screen.getByRole("textbox", {
-      name: /tags for cache semantics/i,
-    });
-    await user.clear(tags);
-    await user.type(tags, "systems");
-
-    await user.click(screen.getByRole("button", { name: /save tags/i }));
-    riverMocks.patchState.error = failure;
-    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
-
-    expect(screen.getByRole("alert")).toHaveTextContent(
-      "Tags could not be saved",
-    );
-    expect(screen.getByText("#rust")).toBeVisible();
-    expect(screen.queryByText("#systems")).not.toBeInTheDocument();
-    expect(screen.getByText("Saved")).toBeVisible();
     expect(
-      screen.getByRole("button", { name: /^mark unread$/i }),
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("holds the previously read row when the next full-reader entry is selected", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const second = entry({
+      id: 102,
+      guid: "entry-102",
+      title: "Second dispatch",
+      published_at: "2026-08-09T11:00:00Z",
+    });
+    setEntries([entry(), second]);
+    const onSelectEntry = vi.fn();
+    const view = renderRiver(
+      { view: "unread" },
+      false,
+      undefined,
+      onSelectEntry,
+    );
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+    setEntries([second]);
+    view.rerender(
+      <FeedRiver
+        filters={{ view: "unread" }}
+        selectedEntryId={102}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }).className,
+    ).toContain("cl-feed-exit");
+    expect(
+      screen.getByRole("article", { name: /second dispatch/i }).className,
+    ).not.toContain("cl-feed-exit");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).toBeNull();
+    expect(
+      screen.getByRole("article", { name: /second dispatch/i }),
     ).toBeVisible();
-    expect(screen.getByText("The complete entry body.")).toBeVisible();
+    vi.useRealTimers();
+  });
+
+  it("drops an entry that leaves the river without being read here", () => {
+    const view = renderRiver({ view: "all" }, true);
+    setEntries([]);
+    view.rerender(<FeedRiver filters={{ view: "all" }} compact />);
+
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).toBeNull();
+  });
+
+  it("stops holding a read row once the filters change", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const view = renderRiver({ view: "unread" }, true);
+
+    await user.click(
+      screen.getByRole("button", { name: /mark cache semantics read/i }),
+    );
+    setEntries([]);
+    view.rerender(<FeedRiver filters={{ view: "unread" }} compact />);
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }),
+    ).toBeVisible();
+
+    view.rerender(<FeedRiver filters={{ view: "saved" }} compact />);
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("holds the read row through a selection that lands after the optimistic removal", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const second = entry({
+      id: 102,
+      guid: "entry-102",
+      title: "Second dispatch",
+      published_at: "2026-08-09T11:00:00Z",
+    });
+    setEntries([entry(), second]);
+    const onSelectEntry = vi.fn();
+    const view = renderRiver(
+      { view: "unread" },
+      false,
+      undefined,
+      onSelectEntry,
+    );
+
+    await user.click(screen.getByRole("button", { name: /cache semantics/i }));
+
+    // The optimistic layer drops the read entry before the route has routed
+    // the selection back down as a prop.
+    setEntries([second]);
+    view.rerender(
+      <FeedRiver filters={{ view: "unread" }} onSelectEntry={onSelectEntry} />,
+    );
+
+    // The selection lands a tick later and pins the row again: it is being
+    // read, not leaving.
+    riverMocks.detailQuery.data = entry({ read: true });
+    view.rerender(
+      <FeedRiver
+        filters={{ view: "unread" }}
+        selectedEntryId={101}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+    const pinned = screen.getByRole("article", { name: /cache semantics/i });
+    expect(pinned.className).not.toContain("cl-feed-exit");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }).className,
+    ).not.toContain("cl-feed-exit");
+
+    // Only when the next entry takes the selection does the read row leave,
+    // and it leaves with the animation rather than in the same frame.
+    riverMocks.detailQuery.data = second;
+    view.rerender(
+      <FeedRiver
+        filters={{ view: "unread" }}
+        selectedEntryId={102}
+        onSelectEntry={onSelectEntry}
+      />,
+    );
+    expect(
+      screen.getByRole("article", { name: /cache semantics/i }).className,
+    ).toContain("cl-feed-exit");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it("holds every row the boundary action marked before they animate out", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const second = entry({
+      id: 102,
+      guid: "entry-102",
+      title: "Second dispatch",
+      published_at: "2026-08-09T11:00:00Z",
+    });
+    const alreadyRead = entry({
+      id: 103,
+      guid: "entry-103",
+      title: "Third dispatch",
+      published_at: "2026-08-09T10:00:00Z",
+      read: true,
+    });
+    setEntries([entry(), second, alreadyRead]);
+    const view = renderRiver({ view: "unread" }, true);
+
+    await user.click(screen.getByRole("button", { name: /mark all read/i }));
+    setEntries([]);
+    view.rerender(<FeedRiver filters={{ view: "unread" }} compact />);
+
+    for (const title of [/cache semantics/i, /second dispatch/i]) {
+      expect(screen.getByRole("article", { name: title }).className).toContain(
+        "cl-feed-exit",
+      );
+    }
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(
+      screen.queryByRole("article", { name: /cache semantics/i }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("article", { name: /second dispatch/i }),
+    ).toBeNull();
+    vi.useRealTimers();
   });
 });

@@ -9,6 +9,7 @@ import {
 import { useQuickCapture } from "#/api/journal";
 import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
+import { cn } from "#/lib/cn";
 import { formatFeedTime } from "#/lib/time";
 
 export function FeedReaderPane({
@@ -16,11 +17,15 @@ export function FeedReaderPane({
   feedName,
   onBack,
   onMissing,
+  showBack = true,
 }: {
   selectedEntryId?: number;
   feedName?: string;
   onBack: () => void;
   onMissing: (id: number) => void;
+  /** The river hides behind the reader on mobile, so only that layout needs a
+   * way back. Where both panes are visible the control is noise. */
+  showBack?: boolean;
 }) {
   const entryQuery = useFeedEntry(selectedEntryId);
   const feedsQuery = useFeeds();
@@ -132,17 +137,26 @@ export function FeedReaderPane({
   return (
     <section
       aria-label="Feed reader"
-      className="min-h-0 overflow-y-auto border border-rule bg-paper-2 md:h-full"
+      data-reader-focus={showBack ? undefined : ""}
+      tabIndex={showBack ? undefined : -1}
+      className="min-h-0 overflow-y-auto border border-rule bg-paper-2 outline-none md:h-full"
     >
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-rule bg-paper px-3 py-2">
-        <Button
-          aria-label="Back to entries"
-          data-reader-focus
-          className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          onPress={onBack}
-        >
-          ← Back to entries
-        </Button>
+      <div
+        className={cn(
+          "sticky top-0 z-10 flex items-center gap-3 border-b border-rule bg-paper px-3 py-2",
+          showBack ? "justify-between" : "justify-end",
+        )}
+      >
+        {showBack ? (
+          <Button
+            aria-label="Back to entries"
+            data-reader-focus
+            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            onPress={onBack}
+          >
+            ← Back to entries
+          </Button>
+        ) : null}
         {selectedEntryId !== undefined ? (
           <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
             Entry {selectedEntryId}
