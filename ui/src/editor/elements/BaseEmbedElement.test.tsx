@@ -292,6 +292,30 @@ describe("BaseEmbedElement width", () => {
     expect(embedNode(editor).width).toBe(480);
   });
 
+  it("reports where it sits when the pane has clamped the authored width", () => {
+    // jsdom measures nothing, so stand in for the pane's clamp directly.
+    const observers: Array<(entries: unknown[]) => void> = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: (entries: unknown[]) => void) {
+          observers.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    renderConfigured(controllerModel(), { width: 1300 });
+
+    act(() => {
+      for (const notify of observers) notify([{ contentRect: { width: 900 } }]);
+    });
+    expect(
+      screen.getByRole("separator", { name: "Resize this Base embed" }),
+    ).toHaveAttribute("aria-valuenow", "900");
+    vi.unstubAllGlobals();
+  });
+
   it("restores filling the column on double click", () => {
     const { editor } = renderConfigured(controllerModel(), { width: 1100 });
 
