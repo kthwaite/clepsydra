@@ -71,12 +71,10 @@ async function checkStatus(serverUrl: string) {
 	try {
 		const status = await client.getStatus();
 		statusBox.textContent = `Connected — ${status.blob_count} blobs, ${(status.total_size_bytes / 1024 / 1024).toFixed(1)} MB`;
-		// The tone drives the panel's signal rule from the Vessel palette; the
-		// page must not carry colour literals of its own.
-		statusBox.dataset.tone = "ok";
+		statusBox.style.borderColor = "#22c55e";
 	} catch {
 		statusBox.textContent = "Server unreachable";
-		statusBox.dataset.tone = "error";
+		statusBox.style.borderColor = "#ef4444";
 	}
 }
 

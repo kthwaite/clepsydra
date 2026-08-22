@@ -58,9 +58,6 @@ export default defineConfig({
 		},
 	},
 	build: {
-		// Chromium cannot reuse extension preloads across execution worlds and
-		// warns even though the subsequent static ESM import succeeds.
-		modulePreload: false,
 		outDir,
 		emptyOutDir: true,
 	},

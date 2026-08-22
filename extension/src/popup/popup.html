@@ -1,117 +1,198 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <link rel="stylesheet" href="/styles/vessel.css">
   <style>
-    /* Popup-specific layout. The palette, type, controls and focus ring come
-       from /styles/vessel.css, which both extension pages share. */
+    :root {
+      --color-canvas: #f7f7f5;
+      --color-ink: #181817;
+      --color-muted: #62625e;
+      --color-subtle: #e4e4df;
+      --color-hover: #ecece8;
+      --color-danger: #a61b1b;
+      --color-reading: #1749a3;
+      --color-processing: #5b248c;
+      --color-success: #156b32;
+      --color-conflict: #945008;
+      --space-1: 4px;
+      --space-2: 8px;
+      --space-3: 12px;
+      --font-size-caption: 11px;
+      --font-size-meta: 12px;
+      --font-size-body: 13px;
+      --line-height-copy: 1.4;
+      --border-width: 1px;
+      --focus-width: 2px;
+      --popup-width: 280px;
+      --control-height: 32px;
+      --radius-control: 4px;
+      --radius-pill: 999px;
+    }
     body {
-      width: 320px;
-    }
-    .body {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-3);
+      box-sizing: border-box;
+      width: var(--popup-width);
+      margin: 0;
       padding: var(--space-3);
+      background: var(--color-canvas);
+      color: var(--color-ink);
+      font-family: system-ui, sans-serif;
+      font-size: var(--font-size-body);
     }
-    .captured-indicator {
-      padding: var(--space-2);
-      border: 1px solid var(--rule-soft);
-      border-left: 2px solid var(--warn);
-      background: var(--paper-2);
-      color: var(--ink-2);
-      font-size: var(--fs-s);
-      line-height: var(--line-height-copy);
-      overflow-wrap: anywhere;
-    }
-    .capture-tags {
+    .status {
       display: flex;
-      flex-direction: column;
-      gap: var(--space-1);
+      align-items: center;
+      gap: var(--space-2);
+      margin-bottom: var(--space-3);
     }
-    .capture-tags .field-label {
-      margin-bottom: 0;
+    .dot {
+      flex: none;
+      width: var(--space-2);
+      height: var(--space-2);
+      border-radius: var(--radius-pill);
+    }
+    .dot.connected { background: var(--color-success); }
+    .dot.disconnected { background: var(--color-danger); }
+    #status-text { min-width: 0; overflow-wrap: anywhere; }
+    .captured-indicator {
+      margin-bottom: var(--space-2);
+      color: var(--color-muted);
+      font-size: var(--font-size-caption);
+      line-height: var(--line-height-copy);
+    }
+    .captured-indicator a { color: var(--color-ink); }
+    .capture-tags { margin-bottom: var(--space-3); }
+    .field-label {
+      display: block;
+      margin-bottom: var(--space-1);
+      font-weight: 650;
     }
     .tag-list {
       display: flex;
-      min-height: 20px;
+      min-height: 24px;
       flex-wrap: wrap;
       align-items: center;
       gap: var(--space-1);
-      color: var(--ink-mute);
-      font-size: var(--fs-s);
+      margin-bottom: var(--space-2);
+      color: var(--color-muted);
     }
-    /* An empty live region must not hold open a row of dead space. */
-    .tag-list:empty {
-      min-height: 0;
+    .tag {
+      max-width: 100%;
+      padding: var(--space-1) var(--space-2);
+      border: var(--border-width) solid var(--color-subtle);
+      border-radius: var(--radius-pill);
+      color: var(--color-ink);
+      overflow-wrap: anywhere;
     }
     .tag-remove {
+      width: auto;
       min-height: 0;
+      margin-left: var(--space-1);
       padding: 0;
       border: none;
       background: none;
-      color: var(--ink-mute);
-      font-size: var(--fs);
-      letter-spacing: 0;
-      line-height: 1;
+      color: var(--color-muted);
+      font: inherit;
+      cursor: pointer;
     }
-    .tag-remove:hover:not(:disabled) {
-      border: none;
-      background: none;
-      color: var(--hot);
-    }
-    /* Suggested tags are chips that happen to be buttons: they keep the chip's
-       lowercase vault spelling rather than the tracked uppercase of a control. */
     .tag-suggested {
       cursor: pointer;
-      font-weight: 400;
-      letter-spacing: 0.04em;
-      text-transform: none;
+      background: none;
+      width: auto;
+      min-height: 0;
+      font-size: inherit;
     }
-    .tag-suggested::before {
-      content: "+";
-      color: var(--accent);
+    #additional-tags {
+      box-sizing: border-box;
+      width: 100%;
+      min-height: var(--control-height);
+      padding: var(--space-1) var(--space-2);
+      border: var(--border-width) solid var(--color-muted);
+      border-radius: var(--radius-control);
+      background: var(--color-canvas);
+      color: var(--color-ink);
+      font: inherit;
     }
-    .tag-suggested:hover:not(:disabled) {
-      border-color: var(--accent);
-      background: var(--highlight);
-      color: var(--ink);
+    #additional-tags:focus-visible,
+    button:focus-visible,
+    .settings-link:focus-visible {
+      outline: var(--focus-width) solid var(--color-ink);
+      outline-offset: var(--focus-width);
+    }
+    #additional-tags:disabled {
+      border-color: var(--color-subtle);
+      color: var(--color-muted);
+      cursor: not-allowed;
+      opacity: 0.7;
     }
     .tag-suggestions {
-      max-height: 132px;
       margin: 0;
       padding: 0;
-      border: 1px solid var(--rule);
+      border: var(--border-width) solid var(--color-muted);
       border-top: none;
-      background: var(--paper);
+      background: var(--color-canvas);
       list-style: none;
+      max-height: 132px;
       overflow-y: auto;
     }
     .tag-suggestions [role="option"] {
       padding: var(--space-1) var(--space-2);
-      color: var(--ink-2);
-      letter-spacing: 0.04em;
       cursor: pointer;
     }
     .tag-suggestions [role="option"][aria-selected="true"],
     .tag-suggestions [role="option"]:hover {
-      background: var(--highlight);
-      color: var(--ink);
-      font-weight: 700;
+      background: var(--color-hover);
     }
-    #capture-btn {
+    .field-help {
+      margin: var(--space-1) 0 0;
+      color: var(--color-muted);
+      font-size: var(--font-size-caption);
+      line-height: var(--line-height-copy);
+    }
+    button {
       width: 100%;
+      min-height: var(--control-height);
+      padding: var(--space-2);
+      border: var(--focus-width) solid var(--color-ink);
+      background: var(--color-canvas);
+      color: var(--color-ink);
+      font-size: var(--font-size-body);
+      cursor: pointer;
     }
+    button:hover:not(:disabled) { background: var(--color-hover); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .error {
+      display: none;
+      margin-top: var(--space-2);
+      padding: var(--space-2);
+      border: var(--border-width) solid var(--color-danger);
+      color: var(--color-danger);
+      font-size: var(--font-size-meta);
+      line-height: var(--line-height-copy);
+      overflow-wrap: anywhere;
+    }
+    .capture-status {
+      display: none;
+      margin-top: var(--space-2);
+      padding: var(--space-2);
+      border: var(--border-width) solid currentColor;
+      font-size: var(--font-size-meta);
+      line-height: var(--line-height-copy);
+      overflow-wrap: anywhere;
+    }
+    .capture-status[data-tone="reading"] { color: var(--color-reading); }
+    .capture-status[data-tone="processing"] { color: var(--color-processing); }
+    .capture-status[data-tone="success"] { color: var(--color-success); }
+    .capture-status[data-tone="conflict"] { color: var(--color-conflict); }
+    .capture-status[data-tone="error"] { color: var(--color-danger); }
     .capture-progress {
       height: 4px;
-      border: 1px solid var(--rule);
-      background: var(--paper-2);
+      margin-top: var(--space-2);
+      border: var(--border-width) solid var(--color-subtle);
+      background: var(--color-canvas);
     }
     .capture-progress-fill {
-      width: 0%;
       height: 100%;
-      background: var(--accent);
+      width: 0%;
+      background: var(--color-processing);
       transition: width 150ms ease-out;
     }
     .capture-progress-fill.indeterminate {
@@ -122,103 +203,55 @@
       from { margin-left: 0; }
       to { margin-left: 70%; }
     }
-    /* Signal hues follow the app's telemetry: --cool reads, --accent works,
-       --ok settles, --warn hesitates, --hot fails. */
-    .capture-status {
-      display: none;
-    }
-    .capture-status[data-tone="reading"] { color: var(--cool); }
-    .capture-status[data-tone="processing"] { color: var(--accent); }
-    .capture-status[data-tone="success"] { color: var(--ok); }
-    .capture-status[data-tone="conflict"] { color: var(--warn); }
-    .capture-status[data-tone="error"] { color: var(--hot); }
     .capture-link {
       display: inline-block;
-      align-self: flex-start;
-      font-size: var(--fs-s);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
+      margin-top: var(--space-1);
+      font-size: var(--font-size-meta);
+      color: var(--color-ink);
     }
-    .error {
-      display: none;
-      color: var(--hot);
-    }
-    /* Footer rail — the popup's share of the app's status bar. */
-    .status {
-      display: flex;
-      min-width: 0;
-      flex: 1;
-      align-items: center;
-      gap: var(--space-2);
-      padding: 3px var(--space-3);
-    }
-    .dot {
-      flex: none;
-      width: 6px;
-      height: 6px;
-      background: var(--ink-faint);
-    }
-    .dot.connected { background: var(--cool); }
-    .dot.disconnected { background: var(--hot); }
-    #status-text {
-      min-width: 0;
-      overflow-wrap: anywhere;
-      opacity: 0.8;
+    .footer {
+      margin-top: var(--space-3);
+      color: var(--color-muted);
+      font-size: var(--font-size-caption);
     }
     .settings-link {
       display: inline-flex;
       min-height: 24px;
-      flex: none;
       align-items: center;
-      padding: 0 var(--space-3);
-      border: none;
-      border-left: 1px solid var(--bar-rule);
-      color: var(--ink-mute);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
-    }
-    .settings-link:hover {
-      background: none;
-      color: var(--accent);
+      color: var(--color-muted);
     }
   </style>
 </head>
 <body>
-  <header class="rail rail-top">
-    <div class="wordmark"><span class="wordmark-lead">C</span>lepsydra</div>
-    <div class="rail-label">Web Archive</div>
-  </header>
-  <main class="body">
-    <div class="captured-indicator" id="captured-indicator" hidden></div>
-    <section class="capture-tags" aria-labelledby="capture-tags-label">
-      <div id="capture-tags-label" class="field-label">Defaults</div>
-      <div id="default-tags" class="tag-list" aria-live="polite">Loading…</div>
-      <label class="field-label" for="additional-tags">Additional tags</label>
-      <div id="selected-tags" class="tag-list" aria-live="polite"></div>
-      <input id="additional-tags" type="text" autocomplete="off" role="combobox"
-             aria-expanded="false" aria-controls="tag-suggestions" aria-autocomplete="list"
-             placeholder="research, reading" aria-describedby="additional-tags-help">
-      <ul id="tag-suggestions" class="tag-suggestions" role="listbox" hidden></ul>
-      <div id="suggested-tags" class="tag-list" role="group" aria-label="Suggested from this page" hidden></div>
-      <p id="additional-tags-help" class="field-help">Applies only to this capture. Type to search vault tags. Suggested tags come from this page.</p>
-    </section>
-    <button id="capture-btn" class="btn-primary">Capture This Page</button>
-    <div class="capture-progress" id="capture-progress" hidden
-         role="progressbar" aria-label="Capture progress"
-         aria-valuemin="0" aria-valuemax="100">
-      <div class="capture-progress-fill" id="capture-progress-fill"></div>
-    </div>
-    <div class="capture-status panel" id="capture-status" role="status" aria-live="polite" aria-atomic="true"></div>
-    <a class="capture-link" id="capture-link" hidden target="_blank" rel="noopener">View in Clepsydra</a>
-    <div class="error panel" id="error-msg" role="alert"></div>
-  </main>
-  <footer class="rail rail-bottom">
-    <div class="status">
-      <div class="dot" id="status-dot"></div>
-      <span id="status-text" role="status" aria-live="polite" aria-atomic="true">Checking…</span>
-    </div>
+  <div class="status">
+    <div class="dot" id="status-dot"></div>
+    <span id="status-text" role="status" aria-live="polite" aria-atomic="true">Checking…</span>
+  </div>
+  <div class="captured-indicator" id="captured-indicator" hidden></div>
+  <section class="capture-tags" aria-labelledby="capture-tags-label">
+    <div id="capture-tags-label" class="field-label">Defaults</div>
+    <div id="default-tags" class="tag-list" aria-live="polite">Loading…</div>
+    <label class="field-label" for="additional-tags">Additional tags</label>
+    <div id="selected-tags" class="tag-list" aria-live="polite"></div>
+    <input id="additional-tags" type="text" autocomplete="off" role="combobox"
+           aria-expanded="false" aria-controls="tag-suggestions" aria-autocomplete="list"
+           placeholder="research, reading" aria-describedby="additional-tags-help">
+    <ul id="tag-suggestions" class="tag-suggestions" role="listbox" hidden></ul>
+    <div id="suggested-tags" class="tag-list" role="group" aria-label="Suggested from this page" hidden></div>
+    <p id="additional-tags-help" class="field-help">Applies only to this capture. Type to search vault tags. Suggested tags come from this page.</p>
+  </section>
+  <button id="capture-btn">Capture This Page</button>
+  <div class="capture-progress" id="capture-progress" hidden
+       role="progressbar" aria-label="Capture progress"
+       aria-valuemin="0" aria-valuemax="100">
+    <div class="capture-progress-fill" id="capture-progress-fill"></div>
+  </div>
+  <div class="capture-status" id="capture-status" role="status" aria-live="polite" aria-atomic="true"></div>
+  <a class="capture-link" id="capture-link" hidden target="_blank" rel="noopener">View in Clepsydra</a>
+  <div class="error" id="error-msg" role="alert"></div>
+  <div class="footer">
     <a class="settings-link" href="#" id="options-link">Settings</a>
-  </footer>
+  </div>
   <script src="popup.js" type="module"></script>
 </body>
 </html>
