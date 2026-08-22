@@ -1,11 +1,11 @@
 import { useEffect, useState } from "react";
 import type { BaseFilter } from "#/api/bases";
-import { Button } from "#/components/ui/button";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
+import { FilterSeedMenu } from "./filter-actions";
 import { FilterGroupEditor } from "./FilterGroupEditor";
 
 interface MembershipEditorProps {
@@ -36,8 +36,6 @@ export function MembershipEditor({
     onChange(next);
   }
 
-  const comparison: BaseFilter = { field: "kind", op: "eq", value: "" };
-
   if (!draftValue) {
     return (
       <div aria-label={label}>
@@ -48,34 +46,11 @@ export function MembershipEditor({
           </p>
         </div>
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button
-            size="sm"
+          <FilterSeedMenu
+            triggerLabel="Add rule"
             variant="primary"
-            onPress={() => commit(comparison)}
-          >
-            Add condition
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => commit({ all: [] })}
-          >
-            Add Match all group
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => commit({ any: [] })}
-          >
-            Add Match any group
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            onPress={() => commit({ not: comparison })}
-          >
-            Add Not condition
-          </Button>
+            onSeed={commit}
+          />
         </div>
       </div>
     );
@@ -98,25 +73,15 @@ export function MembershipEditor({
         aria-label="Root membership controls"
         className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3"
       >
-        <Button size="sm" variant="ghost" onPress={() => commit(comparison)}>
-          Replace with condition
-        </Button>
-        <Button size="sm" variant="ghost" onPress={() => commit({ all: [] })}>
-          Replace with Match all group
-        </Button>
-        <Button size="sm" variant="ghost" onPress={() => commit({ any: [] })}>
-          Replace with Match any group
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onPress={() => commit({ not: comparison })}
-        >
-          Replace with Not condition
-        </Button>
-        <Button size="sm" variant="ghost" onPress={() => commit(undefined)}>
-          Clear membership
-        </Button>
+        <FilterSeedMenu
+          triggerLabel="Membership actions"
+          replace
+          onSeed={commit}
+          clear={{
+            label: "Clear membership",
+            onAction: () => commit(undefined),
+          }}
+        />
       </div>
     </div>
   );

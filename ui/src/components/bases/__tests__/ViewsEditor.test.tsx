@@ -45,6 +45,16 @@ async function chooseSelectOption(
   await user.click(await screen.findByRole("option", { name: option }));
 }
 
+/** Filter actions live behind menus: open the trigger, pick the item. */
+async function chooseMenuAction(
+  user: UserEvent,
+  trigger: string | RegExp,
+  item: string | RegExp,
+) {
+  await user.click(screen.getByRole("button", { name: trigger }));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 function visibleOptionNames() {
   return screen
     .getAllByRole("option")
@@ -792,12 +802,8 @@ describe("ViewsEditor", () => {
     });
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: "Add sort" }));
-    await user.click(
-      screen.getByRole("button", { name: "Add Match all group" }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Add condition to Match all" }),
-    );
+    await chooseMenuAction(user, "Add rule", "Match all group");
+    await chooseMenuAction(user, "Add to Match all", "Condition");
     await user.click(screen.getByRole("button", { name: "Add aggregate" }));
     await chooseSelectOption(user, "Aggregate function 1", "sum");
 
@@ -914,12 +920,8 @@ describe("ViewsEditor", () => {
     expect(
       screen.getByText("Additional filter; always ANDed with base membership."),
     ).toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", { name: "Add Match all group" }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Add condition to Match all" }),
-    );
+    await chooseMenuAction(user, "Add rule", "Match all group");
+    await chooseMenuAction(user, "Add to Match all", "Condition");
     await chooseSelectOption(user, "Field for condition 1", "status");
     await user.type(screen.getByLabelText("Value for condition 1"), "reading");
     expect(latest<DraftView[]>(onChange)[0].filter).toEqual({
