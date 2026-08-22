@@ -403,6 +403,8 @@ pub struct TaskCreateParams {
     pub link: Option<String>,
     /// Frontmatter tags. Include `ai-generated` for LLM-authored tasks.
     pub tags: Option<Vec<String>>,
+    /// Prose brief; becomes the opening of the task body, above any checklist.
+    pub body: Option<String>,
     /// Checklist items; each becomes a `- [ ]` line in the task body.
     pub checklist: Option<Vec<String>>,
 }
@@ -1240,7 +1242,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a task on the TASKING board — preferred over vault_create_page for tasks: the board reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to INTAKE, priority to P2; a given cycle must match an existing cycle code (\"BACKLOG\" means none); checklist items become `- [ ]` body lines. Include `ai-generated` in tags for LLM-authored tasks.",
+        description = "Create a task on the TASKING board — preferred over vault_create_page for tasks: the board reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to INTAKE, priority to P2; a given cycle must match an existing cycle code (\"BACKLOG\" means none); a body becomes the task's prose brief and checklist items become `- [ ]` body lines beneath it. Include `ai-generated` in tags for LLM-authored tasks.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1266,6 +1268,7 @@ impl VaultMcpServer {
             "due": params.due,
             "link": params.link,
             "tags": params.tags,
+            "body": params.body,
             "checklist": params.checklist,
         });
         let value = self
@@ -3124,6 +3127,7 @@ mod tests {
             due: None,
             link: None,
             tags: None,
+            body: None,
             checklist: None,
         }
     }
@@ -3163,6 +3167,31 @@ mod tests {
         assert_eq!(value["status"], "INTAKE");
         assert_eq!(value["priority"], "P2");
         assert_eq!(value["checks"], json!([0, 1]), "checklist becomes - [ ]");
+    }
+
+    #[tokio::test]
+    async fn task_create_sends_the_brief_as_the_page_body() {
+        let (server, _tmp) = serve_board_vault().await;
+        let value = parse(
+            server
+                .vault_task_create(Parameters(TaskCreateParams {
+                    body: Some("Why this matters.".to_string()),
+                    checklist: Some(vec!["first step".to_string()]),
+                    ..task_create_params("Briefed task")
+                }))
+                .await,
+        );
+        assert!(
+            value["body_excerpt"]
+                .as_str()
+                .is_some_and(|excerpt| excerpt.contains("Why this matters")),
+            "the brief reaches the page body: {value}"
+        );
+        assert_eq!(
+            value["checks"],
+            json!([0, 1]),
+            "checklist survives: {value}"
+        );
     }
 
     #[tokio::test]
