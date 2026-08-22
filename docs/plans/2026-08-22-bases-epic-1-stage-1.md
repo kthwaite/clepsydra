@@ -1,6 +1,7 @@
 # Bases Epic 1 (TSK-0065) — Stage 1: tag conditions and filter authoring
 
-Status: in progress, 2026-08-22. Branch `feature/bases-tag-conditions`.
+Status: stage 1 delivered 2026-08-22 on `feature/bases-tag-conditions`,
+merged to develop. Stage 2 remains open under TSK-0065.
 
 ## Standing scope correction
 
@@ -54,6 +55,14 @@ Each task is red-first: write the failing test, then the implementation.
    overflow menu, carrying disabled reasons.
 5. **Docs and gates** — a compound-tag-filter section in `bases.mdx`; then
    typecheck, lint against baseline, and the full ui and cargo suites.
+
+## Delivered
+
+- `tag-condition.ts` + `TagConditionEditor` + the `FilterGroupEditor` dispatch
+  (47 tests across the model, the row, and membership authoring).
+- `filter-actions.tsx`: `FilterSeedMenu` and `FilterNodeMenu` replace the
+  button walls in `MembershipEditor` and `FilterGroupEditor`.
+- `bases.mdx` gains a "Tag conditions" section.
 
 ## Acceptance for stage 1
 
