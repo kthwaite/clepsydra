@@ -1,6 +1,6 @@
 # Bases Epic 3 (TSK-0067) — Embedded Base views
 
-Status: in progress, branch `feature/bases-embedded-views`.
+Status: delivered 2026-08-22 on `feature/bases-embedded-views`.
 
 ## What already holds
 
@@ -70,23 +70,30 @@ margin-left: calc((100% - min(var(--embed-w), var(--folio-pane-w, 100%))) / 2);
 `--folio-pane-w` from the value it has. Anywhere else the variable is unset and
 the embed simply fills its container.
 
-### Virtualization shape
+### Virtualization shape — what was built instead
 
-RAC 1.20 exports `Virtualizer` and `TableLayout`. Virtualized, RAC renders
-`role="grid"` **divs** instead of `<table>` — the ARIA roles are unchanged, so
-role-based tests keep working, but the layout must be CSS grid rather than
-table layout. Therefore:
+RAC 1.20 exports `Virtualizer` and `TableLayout`, and a spike confirmed both
+work in jsdom. Two findings changed the plan:
 
-- **compact** — always virtualized, fixed 32px rows, single-line cells,
-  horizontal overflow inside the viewport.
-- **full** — today's native table, unchanged.
+1. Virtualized, RAC renders `role="grid"` **divs** instead of `<table>`. The
+   ARIA roles survive, but the compact grid would need a CSS-grid rewrite of
+   the layout shared with the standalone Bases page.
+2. Virtualized, the `Table` *is* the scroll container, so a scroll handler of
+   our own never fires. Fetch-on-approach would have to move to RAC's
+   `TableLoadMoreItem`, whose sentinel needs `IntersectionObserver` — absent
+   in jsdom, so it would need a global stub and could not be tested anyway.
 
-A threshold that switched layouts mid-scroll would restyle the table under the
-reader, so the mode decides, not the row count.
+Both costs land on code that cannot be verified by the suite, in the rendering
+path every embed now takes by default. So compact mode keeps the native table
+inside a bounded scroll viewport, and the DOM is bounded by an explicit
+ceiling instead: `EMBED_SCROLL_CEILING`, 1000 rows in one embed, after which
+the status line asks for a narrower filter. That satisfies the epic's
+acceptance — large results navigable, nothing unbounded — by a different
+mechanism than row virtualization.
 
-In jsdom the viewport measures 0 and the virtualizer renders every row. Tests
-can prove the markup, the fetch windows and the row content; they cannot prove
-that off-screen rows are skipped. That needs a browser.
+The upgrade path, if a real vault ever needs it: `Virtualizer` + `TableLayout`
+around the compact grid, `TableLoadMoreItem` in place of the scroll handler,
+and per-column widths from RAC's column layout.
 
 ## Tasks
 

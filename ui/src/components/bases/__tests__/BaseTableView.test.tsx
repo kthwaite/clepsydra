@@ -186,7 +186,7 @@ describe("BaseTableView compact scroller", () => {
     loaded: rows.length,
     hasMore: true,
     isLoadingMore: false,
-    cappedByAuthor: false,
+    cappedBy: undefined,
     loadMore: vi.fn(),
     ...overrides,
   });
@@ -284,13 +284,33 @@ describe("BaseTableView compact scroller", () => {
       chrome: "compact",
       configureSlug: undefined,
       output: { shape: "flat", rows, total: 140 },
-      rowWindow: window({ hasMore: false, cappedByAuthor: true }),
+      rowWindow: window({ hasMore: false, cappedBy: "author" }),
     });
 
     expect(
       screen.getByRole("status", { name: "Result window" }),
     ).toHaveTextContent(
       "Showing 3 of 140 rows; this embed's limit stops here.",
+    );
+  });
+
+  it("points at the filter when the embed's row ceiling ended the scroll", () => {
+    renderView({
+      chrome: "compact",
+      configureSlug: undefined,
+      output: { shape: "flat", rows, total: 4000 },
+      rowWindow: window({
+        loaded: 1000,
+        total: 4000,
+        hasMore: false,
+        cappedBy: "ceiling",
+      }),
+    });
+
+    expect(
+      screen.getByRole("status", { name: "Result window" }),
+    ).toHaveTextContent(
+      "Showing 1000 of 4000 rows; narrow the embed's filter to reach the rest.",
     );
   });
 

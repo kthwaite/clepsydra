@@ -166,6 +166,19 @@ if (emittedChunks.length > 0) {
 	);
 }
 
+// Chromium refuses to reuse extension module preloads across execution worlds,
+// then reports the unused preload in DevTools. Static ESM imports still load
+// these chunks normally, so extension pages must not emit speculative preloads.
+for (const htmlPath of ["popup/popup.html", "options/options.html"]) {
+	const html = await readFile(resolve(distDir, htmlPath), "utf8");
+	if (/\brel=["']modulepreload["']/.test(html)) {
+		failures.push(
+			`${htmlPath} contains a modulepreload link — Chromium will reject it ` +
+				"as a cross-world extension resource mismatch",
+		);
+	}
+}
+
 // Task 11's frame responder. Its injection failure is swallowed on purpose — a
 // frame we may not script is not a reason to abandon the page — which means a
 // BUILD regression that drops this bundle would be completely invisible at

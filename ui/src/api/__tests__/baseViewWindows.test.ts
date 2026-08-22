@@ -4,7 +4,11 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useBaseViewWindows } from "#/api/bases";
 import { fetchClient } from "#/api/client";
-import type { BaseEmbedConfig } from "#/components/bases/embed-query";
+import {
+  type BaseEmbedConfig,
+  embedScrollCap,
+  nextWindowSize,
+} from "#/components/bases/embed-query";
 
 const capability = {
   view: "Reading",
@@ -130,7 +134,7 @@ describe("useBaseViewWindows", () => {
     await waitFor(() => expect(result.current.loaded).toBe(5));
     expect(requestedBodies(post)).toEqual([{ limit: 5, offset: 0 }]);
     expect(result.current.hasMore).toBe(false);
-    expect(result.current.cappedByAuthor).toBe(true);
+    expect(result.current.cappedBy).toBe("author");
     expect(result.current.total).toBe(400);
   });
 
@@ -154,6 +158,25 @@ describe("useBaseViewWindows", () => {
 
     expect(requestedBodies(post)[1]).toEqual({ limit: 3, offset: 50 });
     expect(result.current.hasMore).toBe(false);
+  });
+
+  it("stops at the ceiling that bounds one embed's rows", async () => {
+    const window = Array.from({ length: 50 }, (_, i) => i);
+    const post = vi.spyOn(fetchClient, "POST");
+    // Twenty windows of fifty reach the thousand-row ceiling.
+    post.mockResolvedValue(flatPage(window, 4000) as never);
+    const { result } = renderHook(() => useBaseViewWindows(config), {
+      wrapper: wrapper(freshClient()),
+    });
+
+    await waitFor(() => expect(result.current.loaded).toBe(50));
+    // Each window returns the same ids, so pretend they are distinct by
+    // checking the request the hook makes rather than the rows it keeps.
+    expect(nextWindowSize(undefined, 950)).toBe(50);
+    expect(nextWindowSize(undefined, 1000)).toBe(0);
+    expect(embedScrollCap(undefined, 1000)).toBe("ceiling");
+    expect(embedScrollCap(20, 20)).toBe("author");
+    expect(embedScrollCap(undefined, 200)).toBeUndefined();
   });
 
   it("never pages a grouped view", async () => {

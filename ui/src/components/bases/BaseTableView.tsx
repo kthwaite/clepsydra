@@ -36,6 +36,7 @@ import { BaseMemberDraft } from "./BaseMemberDraft";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
+import type { EmbedScrollCap } from "./embed-query";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
 import type {
   BaseMemberDraftField,
@@ -73,8 +74,8 @@ export interface BaseTableViewProps {
     loaded: number;
     hasMore: boolean;
     isLoadingMore: boolean;
-    /** The author's `limit`, not the result, ended the scroll. */
-    cappedByAuthor: boolean;
+    /** Which bound ended the scroll short of the total, if either did. */
+    cappedBy: EmbedScrollCap | undefined;
     loadMore(): void;
   };
   onCommitCell: (
@@ -814,11 +815,16 @@ export const BaseTableView = forwardRef<
     // A compact view scrolls, so it reports how far it has read rather than
     // what a limit excluded.
     if (compact && rowWindow && output?.shape === "flat") {
-      const { loaded, total, hasMore, cappedByAuthor } = rowWindow;
+      const { loaded, total, hasMore, cappedBy } = rowWindow;
       if (total === undefined || loaded >= total) return undefined;
       const seen = `Showing ${loaded} of ${total} rows`;
       if (rowWindow.isLoadingMore) return `${seen}; loading more…`;
-      if (cappedByAuthor) return `${seen}; this embed's limit stops here.`;
+      if (cappedBy === "author") {
+        return `${seen}; this embed's limit stops here.`;
+      }
+      if (cappedBy === "ceiling") {
+        return `${seen}; narrow the embed's filter to reach the rest.`;
+      }
       return hasMore ? `${seen}; scroll for more.` : `${seen}.`;
     }
     if (output?.shape === "flat" && output.rows.length < output.total) {

@@ -200,7 +200,7 @@ function controllerModel(
       loaded: 0,
       hasMore: false,
       isLoadingMore: false,
-      cappedByAuthor: false,
+      cappedBy: undefined,
       loadMore: vi.fn(),
     },
     ...overrides,

@@ -23,6 +23,7 @@ import { useProjects } from "#/lib/useProjects";
 import type { CellValue } from "./cells/types";
 import {
   type BaseEmbedConfig,
+  type EmbedScrollCap,
   predicateIdentity,
   queryIdentity,
 } from "./embed-query";
@@ -85,7 +86,7 @@ export interface BaseTableControllerModel {
         loaded: number;
         hasMore: boolean;
         isLoadingMore: boolean;
-        cappedByAuthor: boolean;
+        cappedBy: EmbedScrollCap | undefined;
         loadMore(): void;
       }
     | undefined;
@@ -764,7 +765,7 @@ export function useBaseTableController(
             loaded: evaluationQuery.loaded,
             hasMore: evaluationQuery.hasMore,
             isLoadingMore: evaluationQuery.isLoadingMore,
-            cappedByAuthor: evaluationQuery.cappedByAuthor,
+            cappedBy: evaluationQuery.cappedBy,
             loadMore: evaluationQuery.loadMore,
           }
         : undefined,
