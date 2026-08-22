@@ -1,14 +1,5 @@
-import { combine } from "@atlaskit/pragmatic-drag-and-drop/combine";
-import {
-  draggable,
-  dropTargetForElements,
-} from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
-import {
-  attachClosestEdge,
-  extractClosestEdge,
-} from "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge";
-import { ArrowDown, ArrowUp, GripVertical, Trash2 } from "lucide-react";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { Trash2 } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { Aggregate, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
@@ -25,6 +16,7 @@ import {
   type DraftView,
   moveItem,
 } from "./definition-model";
+import { MoveButtons, ReorderHandle, useReorderable } from "./ordered-list";
 import { DisplayLabelsEditor } from "./DisplayLabelsEditor";
 import { MembershipEditor } from "./MembershipEditor";
 import { OrderedSortEditor } from "./OrderedSortEditor";
@@ -78,6 +70,8 @@ interface ViewDefinitionEditorProps {
   diagnostics: BaseDiagnostic[];
   onChange(view: DraftView): void;
   registerFocus: RegisterFocusTarget;
+  /** The host owns the live region: views, columns and sorts share one. */
+  onAnnounceMove(message: string): void;
 }
 
 interface ColumnRow {
@@ -108,59 +102,18 @@ function VisibleColumnRow({
   onRemove,
   onHandleRef,
 }: VisibleColumnRowProps) {
-  const rowRef = useRef<HTMLTableRowElement>(null);
-  const handleRef = useRef<HTMLButtonElement>(null);
-
-  useEffect(() => {
-    const element = rowRef.current;
-    const dragHandle = handleRef.current;
-    if (!element || !dragHandle) return;
-
-    return combine(
-      draggable({
-        element,
-        dragHandle,
-        getInitialData: () => ({
-          kind: "base-view-column",
-          columnId: row.id,
-        }),
-      }),
-      dropTargetForElements({
-        element,
-        canDrop: ({ source }) =>
-          source.data.kind === "base-view-column" &&
-          typeof source.data.columnId === "string",
-        getData: ({ input }) =>
-          attachClosestEdge(
-            { kind: "base-view-column", columnId: row.id },
-            { element, input, allowedEdges: ["top", "bottom"] },
-          ),
-        onDrop: ({ source, self }) => {
-          const sourceColumnId = source.data.columnId;
-          const edge = extractClosestEdge(self.data);
-          if (
-            source.data.kind !== "base-view-column" ||
-            typeof sourceColumnId !== "string" ||
-            (edge !== "top" && edge !== "bottom")
-          )
-            return;
-          onReorder(sourceColumnId, row.id, edge);
-        },
-      }),
-    );
-  }, [onReorder, row.id]);
-
-  function handleKeyboardMove(event: KeyboardEvent<HTMLButtonElement>) {
-    if (!event.altKey) return;
-    if (event.key === "ArrowUp" && index > 0) {
-      event.preventDefault();
-      onMove(index, index - 1);
-    }
-    if (event.key === "ArrowDown" && index < count - 1) {
-      event.preventDefault();
-      onMove(index, index + 1);
-    }
-  }
+  const { rowRef, setHandle, onHandleKeyDown } = useReorderable<HTMLTableRowElement>(
+    {
+      kind: "base-view-column",
+      idKey: "columnId",
+      id: row.id,
+      index,
+      count,
+      onMove,
+      onReorder,
+      onHandleRef,
+    },
+  );
 
   return (
     <tr
@@ -168,20 +121,11 @@ function VisibleColumnRow({
       className="border-b border-border align-top"
     >
       <td className="w-10 px-1 py-2 align-top sm:px-2">
-        <button
-          ref={(element) => {
-            handleRef.current = element;
-            onHandleRef(row.id, element);
-          }}
-          type="button"
-          aria-label={`Reorder ${row.column} column`}
-          aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown"
-          title={`Drag to reorder ${row.column}. Alt + Up or Down also reorders.`}
-          onKeyDown={handleKeyboardMove}
-          className="inline-flex h-7 w-7 cursor-grab items-center justify-center border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 active:cursor-grabbing [&_svg]:h-4 [&_svg]:w-4"
-        >
-          <GripVertical aria-hidden="true" />
-        </button>
+        <ReorderHandle
+          label={`${row.column} column`}
+          setHandle={setHandle}
+          onKeyDown={onHandleKeyDown}
+        />
       </td>
       <th
         scope="row"
@@ -194,22 +138,12 @@ function VisibleColumnRow({
           className="flex flex-wrap justify-end gap-1"
           aria-label={`Actions for ${row.column}`}
         >
-          <IconButton
-            aria-label={`Move ${row.column} up`}
-            variant="ghost"
-            isDisabled={index === 0}
-            onPress={() => onMove(index, index - 1)}
-          >
-            <ArrowUp />
-          </IconButton>
-          <IconButton
-            aria-label={`Move ${row.column} down`}
-            variant="ghost"
-            isDisabled={index === count - 1}
-            onPress={() => onMove(index, index + 1)}
-          >
-            <ArrowDown />
-          </IconButton>
+          <MoveButtons
+            label={row.column}
+            index={index}
+            count={count}
+            onMove={onMove}
+          />
           <IconButton
             aria-label={`Remove ${row.column} column`}
             variant="ghost"
@@ -230,9 +164,12 @@ export function ViewDefinitionEditor({
   diagnostics,
   onChange,
   registerFocus,
+  onAnnounceMove,
 }: ViewDefinitionEditorProps) {
   const [columnToAdd, setColumnToAdd] = useState("");
-  const [moveAnnouncement, setMoveAnnouncement] = useState("");
+  const columnReasonId = `${useId()}-column-reason`;
+  const announceMove = (label: string, position: number, count: number) =>
+    onAnnounceMove(`Moved ${label} to position ${position} of ${count}.`);
   const [focusColumnId, setFocusColumnId] = useState<string>();
   const reorderHandles = useRef(new Map<string, HTMLButtonElement>());
   const nextColumnId = useRef(view.columns.length);
@@ -314,9 +251,7 @@ export function ViewDefinitionEditor({
     if (!movedRow || from === to) return;
     setFocusColumnId(movedRow.id);
     setColumnRows(moveItem(columnRows, from, to));
-    setMoveAnnouncement(
-      `Moved ${movedRow.column} to position ${to + 1} of ${view.columns.length}.`,
-    );
+    announceMove(movedRow.column, to + 1, view.columns.length);
     onChange({
       ...view,
       columns: moveItem(view.columns, from, to),
@@ -500,14 +435,7 @@ export function ViewDefinitionEditor({
             ))}
           </tbody>
         </table>
-        <p
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          className="sr-only"
-        >
-          {moveAnnouncement}
-        </p>
+
         <div className="mt-3 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
           <Select
             label="Column to add"
@@ -527,6 +455,7 @@ export function ViewDefinitionEditor({
             size="sm"
             variant="secondary"
             isDisabled={!columnToAdd}
+            aria-describedby={columnToAdd ? undefined : columnReasonId}
             onPress={() => {
               if (!columnToAdd) return;
               const id = `column-${nextColumnId.current}`;
@@ -541,6 +470,11 @@ export function ViewDefinitionEditor({
           >
             Add column
           </Button>
+          {columnToAdd ? null : (
+            <span id={columnReasonId} className="sr-only">
+              Choose a field to add
+            </span>
+          )}
         </div>
       </section>
 
@@ -568,6 +502,7 @@ export function ViewDefinitionEditor({
           idPrefix={`view-${viewIndex}`}
           onChange={(sort) => onChange({ ...view, sort })}
           registerFocus={registerFocus}
+          announceMove={announceMove}
         />
       </section>
 

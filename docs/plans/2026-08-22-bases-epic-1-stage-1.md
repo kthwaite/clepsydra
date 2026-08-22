@@ -1,7 +1,6 @@
 # Bases Epic 1 (TSK-0065) — Stage 1: tag conditions and filter authoring
 
-Status: stage 1 delivered 2026-08-22 on `feature/bases-tag-conditions`,
-merged to develop. Stage 2 remains open under TSK-0065.
+Status: both stages delivered 2026-08-22 and merged to develop.
 
 ## Standing scope correction
 
@@ -70,3 +69,31 @@ A tag predicate can be authored without hand-nesting groups, serializes to the
 existing AST, round-trips without rewriting untouched filters, stays
 keyboard-operable with diagnostics attached to the control at fault, and the
 filter surfaces present one coherent button hierarchy.
+
+
+## Stage 2 — delivered 2026-08-22
+
+`ordered-list.tsx` extracts the interaction the property and column editors
+already had — a grip that drags and, with Alt, moves by keyboard; closest-edge
+drops; a shared live region; and a `MoveButtons` pair whose disabled direction
+states why. Properties and columns were refactored onto it (their existing
+suites are the proof nothing changed), and sorts, saved views and preview
+properties adopted it.
+
+One live region per surface: a view editor holds views, columns and sorts, so
+`ViewsEditor` owns the region and passes an announcer down. Two regions in one
+tree is both a screen-reader annoyance and an ambiguous `getByRole("status")`.
+
+Button hierarchy across the workspace: primary for a top-level section's add
+(properties, views, preview properties), secondary for an add nested inside a
+section (sorts, columns, aggregates), ghost icon buttons for row actions, and
+menus for filter nodes. Every disabled control now names its reason through
+`aria-describedby` — already first, already last, a base keeps at least one
+view, choose a field to add.
+
+### Deliberately not done
+
+Filter children keep the node menu's Move up/down rather than gaining a grip:
+AST nodes have no stable identity to drag by, and the menu already states its
+reasons. Preview rows keep their own move buttons, which carry that editor's
+focus-restoration contract; they gained the grip only.
