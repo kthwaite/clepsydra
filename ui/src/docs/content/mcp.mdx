@@ -137,9 +137,10 @@ The board tools mirror the TASKING kanban HTTP API. Statuses move through
 INTAKE → TRIAGE → FIELD → REVIEW → SEALED; priorities are P0–P3. Create
 tasks with `vault_task_create` rather than `vault_create_page`: the board
 reserves the next `TSK-NNNN` code and files the page under
-`tasks/<project>/`. Status defaults to INTAKE, priority to P2, checklist
-items become `- [ ]` body lines, and the `ai-generated` tag requirement
-applies to LLM-authored tasks.
+`tasks/<project>/`. Status defaults to INTAKE, priority to P2, `body`
+becomes the task's prose brief with checklist items as `- [ ]` lines
+beneath it, and the `ai-generated` tag requirement applies to LLM-authored
+tasks.
 
 The update tools accept a code (`TSK-0012`, `S-13`), a vault path, or a
 page UUID; look codes up with `vault_board`. On `vault_task_update` the

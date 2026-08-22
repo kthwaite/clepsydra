@@ -347,6 +347,12 @@ describe("NewTaskModal — submit payload", () => {
     await user.click(linkInput);
     await user.paste("[[alpha-dossier]]");
 
+    // Brief: prose that becomes the page body above the checklist
+    await user.type(
+      screen.getByTestId("new-task-brief"),
+      "Why this matters.",
+    );
+
     // Checklist: two lines
     await user.type(
       screen.getByTestId("new-task-checklist"),
@@ -376,6 +382,27 @@ describe("NewTaskModal — submit payload", () => {
       expect(body.tags).toEqual(["INFRA", "DOCS"]);
       expect(body.link).toBe("[[alpha-dossier]]");
       expect(body.checklist).toEqual(["item one", "item two"]);
+      expect(body.body).toBe("Why this matters.");
+    });
+  });
+
+  it("omits an untouched brief from the payload", async () => {
+    const stub = makeCreateStub();
+    wrap(stub);
+
+    const user = userEvent.setup();
+    await user.type(screen.getByTestId("new-task-title"), "Brief-less");
+    await user.type(screen.getByTestId("new-task-brief"), "   ");
+    await user.click(screen.getByTestId("new-task-commit"));
+
+    await waitFor(() => {
+      const post = stub.mock.calls.find(([, opts]) => opts?.method === "POST");
+      expect(post).toBeDefined();
+      const body = JSON.parse(post?.[1]?.body as string) as Record<
+        string,
+        unknown
+      >;
+      expect(body.body).toBeNull();
     });
   });
 
