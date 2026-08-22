@@ -250,6 +250,69 @@ describe("BaseEmbedElement presentation", () => {
   });
 });
 
+describe("BaseEmbedElement width", () => {
+  function embedNode(editor: Editor) {
+    const node = editor.children[0];
+    expect(SlateElement.isElement(node)).toBe(true);
+    return node as unknown as Record<string, unknown>;
+  }
+
+  it("reports the authored width on its splitter", () => {
+    renderConfigured(controllerModel(), { width: 1100 });
+
+    const splitter = screen.getByRole("separator", {
+      name: "Resize this Base embed",
+    });
+    expect(splitter).toHaveAttribute("aria-valuenow", "1100");
+    expect(splitter).toHaveAttribute("aria-valuetext", "1100 pixels");
+  });
+
+  it("writes a width to the node by keyboard, clamped to the range", () => {
+    const { editor } = renderConfigured(controllerModel(), { width: 1560 });
+    const splitter = screen.getByRole("separator", {
+      name: "Resize this Base embed",
+    });
+
+    splitter.focus();
+    fireEvent.keyDown(splitter, { key: "ArrowRight" });
+    expect(embedNode(editor).width).toBe(1600);
+
+    fireEvent.keyDown(splitter, { key: "ArrowRight" });
+    expect(embedNode(editor).width).toBe(1600);
+
+    fireEvent.keyDown(splitter, { key: "Home" });
+    expect(embedNode(editor).width).toBe(480);
+  });
+
+  it("restores filling the column on double click", () => {
+    const { editor } = renderConfigured(controllerModel(), { width: 1100 });
+
+    fireEvent.doubleClick(
+      screen.getByRole("separator", { name: "Resize this Base embed" }),
+    );
+    expect(embedNode(editor)).not.toHaveProperty("width");
+  });
+
+  it("leaves an unconfigured embed without a splitter", () => {
+    adapterState.model = controllerModel();
+    const editor = withReact(withSchema(createEditor()));
+    render(
+      <Harness
+        editor={editor}
+        value={[
+          {
+            type: "base-embed",
+            status: "unconfigured",
+            children: [{ text: "" }],
+          } as BaseEmbedElement,
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
+});
+
 describe("BaseEmbedElement Slate rendering contract", () => {
   it("keeps Slate attributes and children at the top level and isolates every interactive descendant", () => {
     const { container } = renderConfigured();
