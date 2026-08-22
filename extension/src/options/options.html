@@ -1,152 +1,60 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8">
-  <title>Clepsydra Web Archive — Settings</title>
-  <link rel="stylesheet" href="/styles/vessel.css">
   <style>
-    /* Options-specific layout. Palette, type, controls and focus ring come
-       from /styles/vessel.css, which both extension pages share. */
-    body {
-      display: flex;
-      min-height: 100vh;
-      flex-direction: column;
-    }
-    .sheet {
-      display: flex;
-      width: 100%;
-      max-width: 620px;
-      flex: 1;
-      flex-direction: column;
-      gap: 28px;
-      margin: 0 auto;
-      padding: 28px var(--space-3);
-    }
-    .group {
-      display: flex;
-      flex-direction: column;
-      gap: var(--space-3);
-    }
-    .group-title {
-      padding-bottom: var(--space-1);
-      border-bottom: 1px solid var(--rule);
-      color: var(--ink-mute);
-      font-size: var(--fs-s);
-      font-weight: 500;
-      letter-spacing: var(--track);
-      text-transform: uppercase;
-    }
-    .field {
-      display: flex;
-      flex-direction: column;
-    }
-    .checkbox-row {
-      display: flex;
-      align-items: center;
-      gap: var(--space-2);
-    }
-    /* Sentence copy, not a control label: no tracking, no uppercase. */
-    .checkbox-label {
-      color: var(--ink-2);
-      font-size: var(--fs);
-      cursor: pointer;
-    }
-    .actions {
-      display: flex;
-      align-items: center;
-      gap: var(--space-3);
-    }
-    #save-btn {
-      min-width: 140px;
-    }
-    .saved {
-      display: none;
-      color: var(--ok);
-      font-size: var(--fs-s);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
-    }
-    .status-box {
-      color: var(--ink-mute);
-    }
-    .status-box[data-tone="ok"] { color: var(--ok); }
-    .status-box[data-tone="error"] { color: var(--hot); }
-    .footer-note {
-      display: flex;
-      flex: 1;
-      align-items: center;
-      padding: 3px var(--space-3);
-      color: var(--bar-fg);
-      letter-spacing: var(--track);
-      text-transform: uppercase;
-      opacity: 0.7;
-    }
+    body { max-width: 480px; margin: 40px auto; padding: 0 16px;
+           font-family: system-ui, sans-serif; font-size: 14px; }
+    h1 { font-size: 18px; margin-bottom: 24px; }
+    label { display: block; margin-top: 16px; font-weight: 600; }
+    input[type="text"], input[type="number"] {
+                          width: 100%; padding: 8px; border: 2px solid #000;
+                          margin-top: 4px; font-size: 14px; box-sizing: border-box; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
+    .hint { margin-top: 4px; color: #666; font-size: 12px; line-height: 1.4; }
+    button { margin-top: 24px; padding: 10px 20px; border: 2px solid #000;
+             background: #000; color: #fff; font-size: 14px; cursor: pointer; }
+    button:hover { background: #333; }
+    .saved { color: #22c55e; margin-left: 12px; display: none; }
+    .status { margin-top: 16px; padding: 8px; border: 2px solid #000; }
   </style>
 </head>
 <body>
-  <header class="rail rail-top">
-    <h1 class="wordmark"><span class="wordmark-lead">C</span>lepsydra</h1>
-    <div class="rail-label">Web Archive · Settings</div>
-  </header>
+  <h1>Clepsydra Web Archive</h1>
 
-  <main class="sheet">
-    <section class="group">
-      <h2 class="group-title">Server</h2>
+  <label for="server-url">Server URL</label>
+  <input type="text" id="server-url" placeholder="http://localhost:3000" />
 
-      <div class="field">
-        <label class="field-label" for="server-url">Server URL</label>
-        <input type="text" id="server-url" placeholder="http://localhost:3000" />
-      </div>
+  <label for="default-tags">Default Tags (comma-separated)</label>
+  <input type="text" id="default-tags" placeholder="reading, research" />
 
-      <div class="status-box panel" id="status-box" role="status" aria-live="polite">Checking…</div>
-    </section>
+  <div class="checkbox-row">
+    <input type="checkbox" id="notify-success" />
+    <label for="notify-success" style="margin-top:0;font-weight:normal">
+      Notify on successful capture
+    </label>
+  </div>
 
-    <section class="group">
-      <h2 class="group-title">Capture</h2>
+  <div class="checkbox-row">
+    <input type="checkbox" id="notify-duplicate" />
+    <label for="notify-duplicate" style="margin-top:0;font-weight:normal">
+      Notify when page already archived
+    </label>
+  </div>
 
-      <div class="field">
-        <label class="field-label" for="default-tags">Default tags (comma-separated)</label>
-        <input type="text" id="default-tags" placeholder="reading, research" />
-      </div>
+  <label for="max-blob-mb">Maximum resource size (MB)</label>
+  <input type="number" id="max-blob-mb" min="1" step="1" />
+  <p class="hint">
+    A resource larger than this is declined during capture, so the page is
+    archived without it. Match the server's <code>archive.max_blob_size_mb</code>.
+    The total capture budget is enforced by the server alone.
+  </p>
 
-      <div class="field">
-        <label class="field-label" for="max-blob-mb">Maximum resource size (MB)</label>
-        <input type="number" id="max-blob-mb" min="1" step="1" />
-        <p class="hint">
-          A resource larger than this is declined during capture, so the page is
-          archived without it. Match the server's <code>archive.max_blob_size_mb</code>.
-          The total capture budget is enforced by the server alone.
-        </p>
-      </div>
-    </section>
+  <div>
+    <button id="save-btn">Save</button>
+    <span class="saved" id="saved-msg">Saved</span>
+  </div>
 
-    <section class="group">
-      <h2 class="group-title">Notifications</h2>
-
-      <div class="checkbox-row">
-        <input type="checkbox" id="notify-success" />
-        <label class="checkbox-label" for="notify-success">
-          Notify on successful capture
-        </label>
-      </div>
-
-      <div class="checkbox-row">
-        <input type="checkbox" id="notify-duplicate" />
-        <label class="checkbox-label" for="notify-duplicate">
-          Notify when page already archived
-        </label>
-      </div>
-    </section>
-
-    <div class="actions">
-      <button id="save-btn" class="btn-primary">Save</button>
-      <span class="saved" id="saved-msg">Saved</span>
-    </div>
-  </main>
-
-  <footer class="rail rail-bottom">
-    <div class="footer-note">Captures are written to your vault's archive folder</div>
-  </footer>
+  <div class="status" id="status-box"></div>
 
   <script src="options.js" type="module"></script>
 </body>

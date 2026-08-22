@@ -4,8 +4,7 @@ const runtime = { id: "clepsydra-test" };
 interface TestOptionsElement {
 	value: string;
 	checked: boolean;
-	style: { display: string };
-	dataset: Record<string, string>;
+	style: { display: string; borderColor: string };
 	textContent: string;
 	addEventListener: Mock;
 }
@@ -106,11 +105,10 @@ describe("browser-only entry modules", () => {
 			storage: { sync: { get: storageGet, set: vi.fn(async () => undefined) } },
 		});
 		vi.stubGlobal("chrome", undefined);
-		const makeElement = (): TestOptionsElement => ({
+		const makeElement = () => ({
 			value: "",
 			checked: false,
-			style: { display: "" },
-			dataset: {},
+			style: { display: "", borderColor: "" },
 			textContent: "",
 			addEventListener: vi.fn(),
 		});
@@ -139,12 +137,5 @@ describe("browser-only entry modules", () => {
 		await import("#/options/options");
 
 		await vi.waitFor(() => expect(storageGet).toHaveBeenCalledWith("settings"));
-		// Wait for the reachability check too. Without this the test finishes
-		// while checkStatus is still in flight, teardown unmocks the client, and
-		// the real one's failed fetch lands on a torn-down DOM stub as an
-		// unhandled rejection.
-		await vi.waitFor(() =>
-			expect(elements["status-box"].dataset.tone).toBe("ok"),
-		);
 	});
 });
