@@ -146,16 +146,25 @@ export function BaseEmbedElement({
     if (!node || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver((entries) => {
       const entry = entries[0];
-      if (entry) setMeasuredWidth(entry.contentRect.width);
+      if (!entry) return;
+      // The embed's own box, not the body inside its border: the splitter
+      // reports the edge the reader is dragging.
+      const box = node.parentElement?.getBoundingClientRect().width;
+      setMeasuredWidth(box && box > 0 ? box : entry.contentRect.width);
     });
     observer.observe(node);
     return () => observer.disconnect();
   }, []);
-  // Nothing authored: the splitter reports what the embed actually occupies,
-  // and the default only until the first measurement arrives.
-  const occupied = measuredWidth > 0 ? measuredWidth : EMBED_WIDTH_FALLBACK;
+  // The splitter reports where it actually sits, so one arrow press always
+  // moves the edge: an authored width the pane has clamped would otherwise
+  // take several presses to have any visible effect. Only a real measurement
+  // clamps it — the fallback is a guess and must not override the author.
+  const measured = measuredWidth > 0 ? measuredWidth : undefined;
   const resizerWidth = clampEmbedWidth(
-    previewWidth ?? authoredWidth ?? occupied,
+    previewWidth ??
+      (authoredWidth === undefined
+        ? (measured ?? EMBED_WIDTH_FALLBACK)
+        : Math.min(authoredWidth, measured ?? authoredWidth)),
   );
   const widthDrag = useWidthDrag({
     width: resizerWidth,
