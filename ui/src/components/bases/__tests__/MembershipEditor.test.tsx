@@ -9,6 +9,21 @@ function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
 
+/** Filter actions now live behind menus: open the trigger, pick the item. */
+async function chooseMenuAction(
+  user: UserEvent,
+  trigger: string | RegExp,
+  item: string | RegExp,
+  scope: HTMLElement | undefined = undefined,
+  // A group's own controls and those of its nested groups share names; nth
+  // picks the outermost by document order.
+  nth = 0,
+) {
+  const root = scope ? within(scope) : screen;
+  await user.click(root.getAllByRole("button", { name: trigger })[nth]);
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 async function chooseSelectOption(
   user: UserEvent,
   label: string,
@@ -83,7 +98,7 @@ describe("MembershipEditor", () => {
     const { onChange } = renderEditor();
 
     expect(screen.getByText("All pages")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await chooseMenuAction(user, "Add rule", "Condition");
     await chooseSelectOption(user, "Field for condition 1", "Kind");
     await chooseSelectOption(user, "Operator for condition 1", "eq");
     await user.type(screen.getByLabelText("Value for condition 1"), "BOOK");
@@ -99,21 +114,23 @@ describe("MembershipEditor", () => {
     const user = userEvent.setup();
     const { onChange } = renderEditor();
 
-    await user.click(
-      screen.getByRole("button", { name: "Add Match all group" }),
-    );
+    await chooseMenuAction(user, "Add rule", "Match all group");
     expect(latest(onChange)).toEqual({ all: [] });
     expect(
       screen.getByRole("group", { name: "Match all conditions" }),
     ).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Replace with Match any group" }),
+    await chooseMenuAction(
+      user,
+      "Membership actions",
+      "Replace with Match any group",
     );
     expect(latest(onChange)).toEqual({ any: [] });
 
-    await user.click(
-      screen.getByRole("button", { name: "Replace with Not condition" }),
+    await chooseMenuAction(
+      user,
+      "Membership actions",
+      "Replace with Not condition",
     );
     expect(latest(onChange)).toEqual({
       not: { field: "kind", op: "eq", value: "" },
@@ -124,7 +141,7 @@ describe("MembershipEditor", () => {
     const user = userEvent.setup();
     const { onChange } = renderEditor();
 
-    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await chooseMenuAction(user, "Add rule", "Condition");
     await chooseSelectOption(user, "Field for condition 1", "Tags");
 
     // The generic operator list gives way to the tag quantifiers.
@@ -174,7 +191,7 @@ describe("MembershipEditor", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("labels nested boolean structure and exposes positional controls", () => {
+  it("labels nested boolean structure and exposes positional controls", async () => {
     renderEditor({
       all: [{ field: "kind", op: "eq", value: "BOOK" }, { any: [] }],
     });
@@ -185,13 +202,14 @@ describe("MembershipEditor", () => {
     expect(
       within(all).getByRole("group", { name: "Match any conditions" }),
     ).toBeInTheDocument();
+    await userEvent.setup().click(
+      within(all).getByRole("button", { name: "Condition 2 actions" }),
+    );
     expect(
-      within(all).getByRole("button", {
-        name: "Convert condition 2 to Not condition",
-      }),
+      await screen.findByRole("menuitem", { name: "Negate condition" }),
     ).toBeInTheDocument();
     expect(
-      within(all).getByRole("button", { name: "Remove condition 2" }),
+      screen.getByRole("menuitem", { name: "Remove condition" }),
     ).toBeInTheDocument();
   });
 
@@ -207,11 +225,9 @@ describe("MembershipEditor", () => {
     const all = screen.getByRole("group", {
       name: "Match all of 2 conditions",
     });
-    const moveSecondUp = within(all).getByRole("button", {
-      name: "Move condition 2 up",
-    });
-
-    moveSecondUp.focus();
+    // Opening from the keyboard lands on the first enabled item, Move up.
+    within(all).getByRole("button", { name: "Condition 2 actions" }).focus();
+    await user.keyboard("{Enter}");
     await user.keyboard("{Enter}");
 
     expect(latest(onChange)).toEqual({
@@ -238,8 +254,11 @@ describe("MembershipEditor", () => {
     };
     const { onChange } = renderEditor(original);
 
-    await user.click(
-      screen.getAllByRole("button", { name: "Remove condition 1" })[0],
+    await chooseMenuAction(
+      user,
+      "Condition 1 actions",
+      "Remove condition",
+      screen.getByRole("group", { name: "Match all of 2 conditions" }),
     );
     expect(latest(onChange)).toEqual({
       all: [{ any: [{ field: "status", op: "eq", value: "reading" }] }],
@@ -251,10 +270,11 @@ describe("MembershipEditor", () => {
       ],
     });
 
-    await user.click(
-      within(
-        screen.getByRole("group", { name: "Match any of 1 condition" }),
-      ).getByRole("button", { name: "Remove condition 1" }),
+    await chooseMenuAction(
+      user,
+      "Condition 1 actions",
+      "Remove condition",
+      screen.getByRole("group", { name: "Match any of 1 condition" }),
     );
     expect(latest(onChange)).toBeUndefined();
     expect(screen.getByText("All pages")).toBeInTheDocument();
@@ -450,8 +470,9 @@ describe("MembershipEditor", () => {
     const { onChange } = renderEditor();
 
     await user.tab();
-    expect(screen.getByRole("button", { name: "Add condition" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Add rule" })).toHaveFocus();
     await user.keyboard("{Enter}");
+    await user.click(await screen.findByRole("menuitem", { name: "Condition" }));
     expect(latest(onChange)).toEqual({ field: "kind", op: "eq", value: "" });
     expect(screen.getByLabelText("Field for condition 1")).toBeInTheDocument();
   });
@@ -462,7 +483,7 @@ describe("MembershipEditor", () => {
     render(<CreateBaseDialog isOpen onClose={vi.fn()} onCreate={onCreate} />);
 
     await user.type(screen.getByLabelText("Name"), "Books");
-    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await chooseMenuAction(user, "Add rule", "Condition");
     await chooseSelectOption(user, "Field for condition 1", "Kind");
     await user.type(screen.getByLabelText("Value for condition 1"), "BOOK");
     await user.click(screen.getByRole("button", { name: "Create base" }));

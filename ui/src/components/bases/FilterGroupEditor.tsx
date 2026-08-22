@@ -1,5 +1,4 @@
 import type { BaseFilter } from "#/api/bases";
-import { Button } from "#/components/ui/button";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
@@ -10,6 +9,7 @@ import {
   removeFilterAtPath,
   replaceFilterAtPath,
 } from "./definition-model";
+import { FilterNodeMenu, FilterSeedMenu } from "./filter-actions";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
 import { readTagCondition } from "./tag-condition";
 import { TagConditionEditor } from "./TagConditionEditor";
@@ -24,10 +24,6 @@ interface FilterGroupEditorProps {
   registerFocus: RegisterFocusTarget;
   diagnostics?: BaseDiagnostic[];
   diagnosticRoot?: string;
-}
-
-function emptyComparison(): BaseFilter {
-  return { field: "kind", op: "eq", value: "" };
 }
 
 function wrappedFilter(
@@ -111,53 +107,17 @@ export function FilterGroupEditor({
           diagnosticRoot={diagnosticRoot}
         />
         <div className="mt-3 flex flex-wrap gap-2 border-t border-border pt-3">
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() =>
-              onChange(replaceFilterAtPath(root, childPath, emptyComparison()))
+          <FilterSeedMenu
+            triggerLabel="Excluded condition actions"
+            replace
+            onSeed={(seed) =>
+              onChange(replaceFilterAtPath(root, childPath, seed))
             }
-          >
-            Replace excluded condition with condition
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() =>
-              onChange(replaceFilterAtPath(root, childPath, { all: [] }))
-            }
-          >
-            Replace excluded condition with Match all group
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() =>
-              onChange(replaceFilterAtPath(root, childPath, { any: [] }))
-            }
-          >
-            Replace excluded condition with Match any group
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() =>
-              onChange(
-                replaceFilterAtPath(root, childPath, {
-                  not: emptyComparison(),
-                }),
-              )
-            }
-          >
-            Replace excluded condition with Not condition
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() => onChange(removeFilterAtPath(root, childPath))}
-          >
-            Remove excluded condition
-          </Button>
+            clear={{
+              label: "Remove excluded condition",
+              onAction: () => onChange(removeFilterAtPath(root, childPath)),
+            }}
+          />
         </div>
       </div>
     );
@@ -222,100 +182,34 @@ export function FilterGroupEditor({
                 diagnosticRoot={diagnosticRoot}
               />
               <div className="mt-2 flex flex-wrap gap-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  isDisabled={index === 0}
-                  onPress={() => moveChild(index, index - 1)}
-                >
-                  Move condition {childPosition} up
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  isDisabled={index === children.length - 1}
-                  onPress={() => moveChild(index, index + 1)}
-                >
-                  Move condition {childPosition} down
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() =>
+                <FilterNodeMenu
+                  triggerLabel={`Condition ${childPosition} actions`}
+                  ordinal={{
+                    position: childPosition,
+                    count: children.length,
+                  }}
+                  onMove={(destination) => moveChild(index, destination)}
+                  onWrap={(wrapKind) =>
                     onChange(
                       replaceFilterAtPath(
                         root,
                         childPath,
-                        wrappedFilter("all", child),
+                        wrappedFilter(wrapKind, child),
                       ),
                     )
                   }
-                >
-                  Convert condition {childPosition} to Match all group
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() =>
-                    onChange(
-                      replaceFilterAtPath(
-                        root,
-                        childPath,
-                        wrappedFilter("any", child),
-                      ),
-                    )
-                  }
-                >
-                  Convert condition {childPosition} to Any group
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() =>
-                    onChange(
-                      replaceFilterAtPath(
-                        root,
-                        childPath,
-                        wrappedFilter("not", child),
-                      ),
-                    )
-                  }
-                >
-                  Convert condition {childPosition} to Not condition
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => onChange(removeFilterAtPath(root, childPath))}
-                >
-                  Remove condition {childPosition}
-                </Button>
+                  onRemove={() => onChange(removeFilterAtPath(root, childPath))}
+                />
               </div>
             </div>
           );
         })}
       </div>
       <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
-        <Button
-          size="sm"
-          variant="secondary"
-          onPress={() => append(emptyComparison())}
-        >
-          Add condition to {meaning}
-        </Button>
-        <Button size="sm" variant="ghost" onPress={() => append({ all: [] })}>
-          Add Match all group to {meaning}
-        </Button>
-        <Button size="sm" variant="ghost" onPress={() => append({ any: [] })}>
-          Add Match any group to {meaning}
-        </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          onPress={() => append({ not: emptyComparison() })}
-        >
-          Add Not condition to {meaning}
-        </Button>
+        <FilterSeedMenu
+          triggerLabel={`Add to ${meaning}`}
+          onSeed={append}
+        />
       </div>
     </div>
   );

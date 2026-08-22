@@ -229,6 +229,48 @@ filter = { not = { field = "status", op = "eq", value = "abandoned" } }
 
 A base's membership filter and a selected view's filter are always ANDed. A view filter narrows membership; it cannot add a page that the base filter excluded.
 
+### Tag conditions
+
+`tags` and `aliases` are multi-valued, so the three predicates authors actually
+want are spelled with the operators above rather than with a separate condition
+language:
+
+| Predicate | Filter |
+| --- | --- |
+| has all of `beer`, `tasting` | `all` of one `contains` per value |
+| has any of `beer`, `wine` | one `in` over the list |
+| has none of `beer`, `wine` | `not` around the any-of filter |
+
+```toml
+# has all of
+[[filter.all]]
+field = "tags"
+op = "contains"
+value = "beer"
+
+[[filter.all]]
+field = "tags"
+op = "contains"
+value = "tasting"
+
+# has any of
+filter = { field = "tags", op = "in", value = ["beer", "wine"] }
+
+# has none of
+filter = { not = { field = "tags", op = "in", value = ["beer", "wine"] } }
+```
+
+A single value needs no quantifier: `{ field = "tags", op = "contains", value = "beer" }`
+is the same predicate under all-of and any-of alike.
+
+In the UI these author as one condition row — field, quantifier, and tag chips
+with suggestions from the vault — for every one of those shapes, however the
+file spells them. The row rewrites only the condition you edit, so opening and
+saving a base leaves its other filters byte-identical. Two shapes stay with the
+general condition row: `tags is_empty` / `not_empty`, and a negated all-of
+group, which means "not both" rather than "neither". Any tag row can be
+switched to that general row from its own controls.
+
 ## Views: columns, sorting, grouping, and aggregates
 
 Each `[[views]]` entry is a saved view. Its fields are:

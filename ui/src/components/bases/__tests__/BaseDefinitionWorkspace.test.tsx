@@ -71,6 +71,16 @@ const detail = {
   revision: "revision-1",
 } satisfies BaseDetailResponse;
 
+/** Filter actions live behind menus: open the trigger, pick the item. */
+async function chooseMenuAction(
+  user: UserEvent,
+  trigger: string | RegExp,
+  item: string | RegExp,
+) {
+  await user.click(screen.getByRole("button", { name: trigger }));
+  await user.click(await screen.findByRole("menuitem", { name: item }));
+}
+
 function mutationResponse(
   overrides: Partial<BaseMutationResponse> = {},
 ): BaseMutationResponse {
@@ -378,7 +388,7 @@ describe("BaseDefinitionWorkspace", () => {
     const user = userEvent.setup();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
-    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await chooseMenuAction(user, "Add rule", "Condition");
     await chooseSelectOption(user, "Field for condition 1", "ID");
     await user.type(screen.getByLabelText("Value for condition 1"), "page-1");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -984,12 +994,8 @@ describe("BaseDefinitionWorkspace", () => {
     const name = screen.getByLabelText("View name");
     await user.clear(name);
     await user.type(name, "Everything");
-    await user.click(
-      screen.getByRole("button", { name: "Add Match all group" }),
-    );
-    await user.click(
-      screen.getByRole("button", { name: "Add condition to Match all" }),
-    );
+    await chooseMenuAction(user, "Add rule", "Match all group");
+    await chooseMenuAction(user, "Add to Match all", "Condition");
     await chooseSelectOption(user, "Field for condition 1", "Kind");
     await user.type(screen.getByLabelText("Value for condition 1"), "book");
     await waitFor(() =>
