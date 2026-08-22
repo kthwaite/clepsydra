@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Clepsydra">
+  <!-- Placeholder water-clock mark: ink frame with the accent as the drained
+       measure. Final artwork is TSK-0091's remaining checklist item. -->
+  <style>
+    .ink { fill: #15140f }
+    @media (prefers-color-scheme: dark) { .ink { fill: #e8e6df } }
+  </style>
+  <g class="ink">
+    <rect x="6" y="3.5" width="20" height="3" rx="0.5" />
+    <rect x="6" y="25.5" width="20" height="3" rx="0.5" />
+    <path d="M8.5 7h15L16 15.4z" />
+  </g>
+  <path fill="#ee7733" d="M16 16.6 23.5 25h-15z" />
+</svg>
