@@ -71,6 +71,8 @@ pub struct BaseFilePayload {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub filter: Option<Filter>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub preview: Vec<PreviewFieldDefinition>,
@@ -85,6 +87,7 @@ impl From<BaseFile> for BaseFilePayload {
         Self {
             name: file.name,
             description: file.description,
+            title_template: file.title_template,
             filter: file.filter,
             preview: file.preview,
             properties: file
@@ -102,6 +105,7 @@ impl From<BaseFilePayload> for BaseFile {
         Self {
             name: payload.name,
             description: payload.description,
+            title_template: payload.title_template,
             filter: payload.filter,
             preview: payload.preview,
             properties: payload
@@ -803,6 +807,7 @@ mod tests {
                 file: BaseFile {
                     name: "Injected Snapshot".to_string(),
                     description: None,
+                    title_template: None,
                     filter: None,
                     properties: Vec::new(),
                     preview: Vec::new(),

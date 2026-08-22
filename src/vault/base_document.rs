@@ -1499,6 +1499,7 @@ mod tests {
         BaseFile {
             name: "Reading".into(),
             description: None,
+            title_template: None,
             filter: None,
             preview: Vec::new(),
             properties: Vec::new(),

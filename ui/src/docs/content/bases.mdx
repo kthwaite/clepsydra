@@ -271,6 +271,24 @@ general condition row: `tags is_empty` / `not_empty`, and a negated all-of
 group, which means "not both" rather than "neither". Any tag row can be
 switched to that general row from its own controls.
 
+## Title templates
+
+A Base may propose titles for the members created through it:
+
+```toml
+name = "Reading"
+title_template = "{author} — {work}"
+```
+
+Each `{field}` interpolates that field from the member draft as it is filled;
+a placeholder with no value yet contributes nothing, and separators left
+dangling around it are trimmed, so a half-filled draft still proposes a
+sensible title. Placeholders name declared properties or system fields —
+anything else is a validation error, because nothing would ever fill it. The
+proposal stops the moment the author types a title of their own, and the
+resolved title is always visible before creation, since it determines page
+identity and the canonical path.
+
 ## Views: columns, sorting, grouping, and aggregates
 
 Each `[[views]]` entry is a saved view. Its fields are:

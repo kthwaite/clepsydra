@@ -1755,6 +1755,7 @@ export interface components {
             name: string;
             preview?: components["schemas"]["PreviewFieldDefinition"][];
             properties?: components["schemas"]["BasePropertyEntry"][];
+            title_template?: string | null;
             views?: components["schemas"]["ViewDefinition"][];
         };
         BaseListResponse: {

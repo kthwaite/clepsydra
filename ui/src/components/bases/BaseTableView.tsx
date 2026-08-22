@@ -73,6 +73,7 @@ export interface BaseTableViewProps {
   readOnly?: boolean;
   memberCapability?: BaseMemberCapability;
   memberDraftFields?: BaseMemberDraftField[];
+  memberTitleTemplate?: string;
   memberDraftOpen?: boolean;
   memberSaving?: boolean;
   memberDiagnostics?: BaseMemberDiagnostic[];
@@ -191,6 +192,7 @@ export const BaseTableView = forwardRef<
     readOnly = false,
     memberCapability,
     memberDraftFields = [],
+    memberTitleTemplate,
     memberDraftOpen = false,
     memberSaving = false,
     memberDiagnostics = [],
@@ -848,6 +850,7 @@ export const BaseTableView = forwardRef<
       {memberDraftOpen && onSaveMember && onCancelMember ? (
         <BaseMemberDraft
           fields={memberDraftFields}
+          titleTemplate={memberTitleTemplate}
           projects={projects}
           isSaving={memberSaving}
           diagnostics={memberDiagnostics}

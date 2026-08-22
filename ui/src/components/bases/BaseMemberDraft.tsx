@@ -21,6 +21,8 @@ import {
 
 export interface BaseMemberDraftProps {
   fields: BaseMemberDraftField[];
+  /** The Base's `{field}` title template, when it declares one. */
+  titleTemplate?: string;
   projects: string[];
   isSaving: boolean;
   diagnostics: BaseMemberDiagnostic[];
@@ -51,6 +53,32 @@ function implicationText(field: BaseMemberDraftField): string | undefined {
       ? values[0]
       : `${values.slice(0, -1).join(", ")} or ${values[values.length - 1]}`;
   return `The Base allows ${list}.`;
+}
+
+/** Fill a Base's `{field}` title template from the draft's current values. A
+ * field with no value contributes nothing, so a partly filled draft still
+ * proposes a title. */
+export function resolveTitleTemplate(
+  template: string,
+  fields: Record<string, CellValue>,
+): string {
+  const filled = template.replace(
+    /\{([^{}]*)\}/g,
+    (_match, placeholder: string) => {
+      const value = fields[placeholder.trim()];
+      if (Array.isArray(value)) {
+        return value.filter((item) => item != null).join(", ");
+      }
+      if (value == null || typeof value === "object") return "";
+      return String(value);
+    },
+  );
+  // An unfilled placeholder leaves its separator behind — "Le Guin —" — so
+  // trim punctuation the template only meant to sit between two values.
+  return filled
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\p{Pd}:,/|·]+/u, "")
+    .replace(/[\s\p{Pd}:,/|·]+$/u, "");
 }
 
 function formatImplied(value: unknown): string {
@@ -195,12 +223,15 @@ export function BaseMemberDraft({
   isSaving,
   diagnostics,
   summaryError,
+  titleTemplate,
   onSave,
   onCancel,
   onChange,
 }: BaseMemberDraftProps) {
   const [draft, setDraft] = useState(() => initialMemberDraft(fields));
   const [titleError, setTitleError] = useState<string>();
+  // The template proposes a title only while the author has not written one.
+  const [titleAuthored, setTitleAuthored] = useState(false);
   const draftRef = useRef(draft);
   const fieldNodes = useRef(new Map<string, HTMLElement>());
   const descriptionPrefix = useId();
@@ -212,14 +243,24 @@ export function BaseMemberDraft({
   };
 
   const updateField = (key: string, value: CellValue) => {
+    const fields = { ...draftRef.current.fields, [key]: value };
+    const proposed =
+      titleTemplate && !titleAuthored
+        ? resolveTitleTemplate(titleTemplate, fields)
+        : undefined;
     updateDraft({
       ...draftRef.current,
-      fields: { ...draftRef.current.fields, [key]: value },
+      ...(proposed === undefined ? {} : { title: proposed }),
+      fields,
     });
+    if (proposed !== undefined && proposed.trim() !== "") {
+      setTitleError(undefined);
+    }
   };
 
   const updateTitle = (title: string) => {
     if (title.trim() !== "") setTitleError(undefined);
+    setTitleAuthored(true);
     updateDraft({ ...draftRef.current, title });
   };
 
