@@ -223,6 +223,9 @@ pub struct CreateTaskRequest {
     pub start: Option<String>,
     pub tags: Option<Vec<String>>,
     pub link: Option<String>,
+    /// Prose brief. Becomes the opening paragraphs of the page body, above any
+    /// checklist. Whitespace-only input is treated as absent.
+    pub body: Option<String>,
     /// Checklist items. Each becomes a `- [ ] item` line in the page body.
     pub checklist: Option<Vec<String>>,
 }

@@ -65,6 +65,7 @@ export function NewTaskModal({
 
   // Form state — re-initialised whenever the modal opens
   const [title, setTitle] = useState("");
+  const [brief, setBrief] = useState("");
   const [project, setProject] = useState<string>("");
   const [cycle, setCycle] = useState<string>("BACKLOG");
   const [status, setStatus] = useState<string>("INTAKE");
@@ -85,6 +86,7 @@ export function NewTaskModal({
   useEffect(() => {
     if (!isOpen) return;
     setTitle("");
+    setBrief("");
     setProject(taskModal.project ?? "");
     setCycle(taskModal.cycle ?? "BACKLOG");
     setStatus(taskModal.status ?? "INTAKE");
@@ -118,6 +120,7 @@ export function NewTaskModal({
 
   const dirty =
     title !== "" ||
+    brief !== "" ||
     assignee !== "" ||
     estimate !== "" ||
     due !== "" ||
@@ -152,6 +155,7 @@ export function NewTaskModal({
         due: due.trim() || null,
         tags: tagsArr.length ? tagsArr : null,
         link: link.trim() || null,
+        body: brief.trim() || null,
         checklist: checklistArr.length ? checklistArr : null,
       },
       {
@@ -208,6 +212,18 @@ export function NewTaskModal({
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             data-testid="new-task-title"
+          />
+        </EdField>
+
+        {/* BRIEF — prose body, written above any checklist on the page. */}
+        <EdField label="BRIEF" hint="optional">
+          <textarea
+            className={`${INPUT_CLS} resize-none`}
+            rows={3}
+            placeholder="what the work is, and why…"
+            value={brief}
+            onChange={(e) => setBrief(e.target.value)}
+            data-testid="new-task-brief"
           />
         </EdField>
 

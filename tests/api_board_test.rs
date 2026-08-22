@@ -584,6 +584,89 @@ async fn create_task_without_project_files_at_tasks_root() {
 }
 
 // ---------------------------------------------------------------------------
+// POST /board/tasks — the brief becomes the page body, above any checklist
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_writes_the_brief_above_the_checklist() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "briefed",
+            "body": "Two paragraphs.\n\nThe second one.",
+            "checklist": ["first step", "second step"]
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    let (_, page_body) = content
+        .split_once("+++\n")
+        .and_then(|(_, rest)| rest.split_once("+++\n"))
+        .unwrap();
+    assert_eq!(
+        page_body.trim_start_matches('\n'),
+        "Two paragraphs.\n\nThe second one.\n\n- [ ] first step\n- [ ] second step\n",
+        "brief, blank line, then the checklist: {page_body:?}"
+    );
+
+    let dto: serde_json::Value = res.json();
+    assert_eq!(dto["checks"], serde_json::json!([0, 2]), "dto: {dto}");
+    assert!(
+        dto["body_excerpt"]
+            .as_str()
+            .is_some_and(|excerpt| excerpt.contains("Two paragraphs")),
+        "the board card shows the brief: {dto}"
+    );
+}
+
+#[tokio::test]
+async fn create_task_writes_a_brief_without_a_checklist() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "prose only", "body": "  Just prose.  " }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    assert!(
+        content.ends_with("Just prose.\n"),
+        "trimmed body: {content:?}"
+    );
+    assert!(!content.contains("- [ ]"), "no checklist: {content:?}");
+}
+
+#[tokio::test]
+async fn create_task_ignores_a_blank_brief() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "blank brief",
+            "body": "   \n  ",
+            "checklist": ["only step"]
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    let (_, page_body) = content
+        .split_once("+++\n")
+        .and_then(|(_, rest)| rest.split_once("+++\n"))
+        .unwrap();
+    assert_eq!(
+        page_body.trim_start_matches('\n'),
+        "- [ ] only step\n",
+        "a whitespace-only brief leaves the checklist alone: {page_body:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // POST /board/tasks — second create increments code
 // ---------------------------------------------------------------------------
 

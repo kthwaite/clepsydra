@@ -123,18 +123,23 @@ pub(crate) async fn create_task(
         meta.extra
             .insert("link".to_string(), toml::Value::String(l.clone()));
     }
-    // 6. Build checklist body
-    let page_body = if let Some(items) = body.checklist {
-        if items.is_empty() {
-            String::new()
-        } else {
-            items
-                .iter()
-                .map(|item| format!("- [ ] {item}\n"))
-                .collect::<String>()
-        }
-    } else {
-        String::new()
+    // 6. Build the page body: the brief first, then the checklist, separated
+    // by a blank line so the two read as distinct blocks.
+    let brief = body
+        .body
+        .as_deref()
+        .map(str::trim)
+        .filter(|brief| !brief.is_empty());
+    let checklist = body
+        .checklist
+        .iter()
+        .flatten()
+        .map(|item| format!("- [ ] {item}\n"))
+        .collect::<String>();
+    let page_body = match (brief, checklist.as_str()) {
+        (None, list) => list.to_string(),
+        (Some(brief), "") => format!("{brief}\n"),
+        (Some(brief), list) => format!("{brief}\n\n{list}"),
     };
 
     let notify = crate::api::mutation_notifier(state.as_ref());
