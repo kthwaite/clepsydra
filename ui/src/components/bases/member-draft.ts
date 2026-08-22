@@ -1,6 +1,7 @@
 import type {
   BaseDetailResponse,
   BaseMemberCapability,
+  BaseMemberImplication,
   PropertyDefinition,
 } from "#/api/bases";
 import type { CellValue } from "./cells/types";
@@ -39,6 +40,9 @@ export interface BaseMemberDraftField {
   membership: boolean;
   viewOnly: boolean;
   embedOnly: boolean;
+  /** What the Base, view and embed predicates force here, as the server
+   * derived it: a fixed value to prefill, or the set to choose from. */
+  implied?: BaseMemberImplication;
 }
 
 export interface BaseMemberDraftValue {
@@ -119,7 +123,12 @@ export function composeMemberDraftFields(
   ];
   const requirements = new Map<
     string,
-    { membership: boolean; viewOnly: boolean; embedOnly: boolean }
+    {
+      membership: boolean;
+      viewOnly: boolean;
+      embedOnly: boolean;
+      implied?: BaseMemberImplication;
+    }
   >();
   for (const requirement of capability.fields) {
     const resolved = resolveDraftField(requirement.field, properties);
@@ -129,6 +138,12 @@ export function composeMemberDraftFields(
       membership: (current?.membership ?? false) || requirement.membership,
       viewOnly: (current?.viewOnly ?? false) || requirement.view,
       embedOnly: (current?.embedOnly ?? false) || requirement.embed,
+      // The server already intersected every predicate on this field.
+      ...(requirement.implied == null
+        ? current?.implied === undefined
+          ? {}
+          : { implied: current.implied }
+        : { implied: requirement.implied }),
     });
   }
 
@@ -164,6 +179,26 @@ export function composeMemberDraftFields(
   return fields;
 }
 
+const MULTI_VALUED: Record<string, true> = { tags: true, aliases: true };
+
+/** A forced value the author should see prefilled. A choice is left unset:
+ * the Base narrows it, but the author still picks. */
+function prefill(field: BaseMemberDraftField): CellValue | undefined {
+  if (field.implied?.kind !== "fixed") return undefined;
+  const { value } = field.implied;
+  if (Object.hasOwn(MULTI_VALUED, field.kind)) {
+    return typeof value === "string" ? [value] : undefined;
+  }
+  if (
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  return undefined;
+}
+
 export function initialMemberDraft(
   fields: readonly BaseMemberDraftField[],
 ): BaseMemberDraftValue {
@@ -173,6 +208,8 @@ export function initialMemberDraft(
     if (field.kind === "tags" || field.kind === "aliases") {
       values[field.key] = [];
     }
+    const forced = prefill(field);
+    if (forced !== undefined) values[field.key] = forced;
   }
   return { title: "", fields: values };
 }

@@ -111,6 +111,72 @@ describe("BaseMemberDraft", () => {
     });
   });
 
+  it("explains a value the Base fixes and one it narrows to a set", () => {
+    render(
+      draftElement({
+        fields: [
+          {
+            key: "kind",
+            kind: "kind",
+            membership: true,
+            viewOnly: false,
+            embedOnly: false,
+            implied: { kind: "fixed", value: "BOOK" },
+          },
+          {
+            key: "status",
+            kind: "property",
+            definition: { type: "select", options: ["queued", "reading"] },
+            membership: true,
+            viewOnly: false,
+            embedOnly: false,
+            implied: { kind: "choice", values: ["queued", "reading"] },
+          },
+        ],
+      }),
+    );
+
+    expect(
+      screen.getByText(/required for base membership\. the base fixes this to BOOK/i),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/required for base membership\. the base allows queued or reading/i),
+    ).toBeVisible();
+  });
+
+  it("offers only the values a choice allows", async () => {
+    const user = userEvent.setup();
+    render(
+      draftElement({
+        fields: [
+          {
+            key: "status",
+            kind: "property",
+            definition: {
+              type: "select",
+              options: ["queued", "reading", "finished"],
+            },
+            membership: true,
+            viewOnly: false,
+            embedOnly: false,
+            implied: { kind: "choice", values: ["queued", "reading"] },
+          },
+        ],
+      }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Status" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /—.*New member — Status/ }),
+    );
+    expect(
+      (await screen.findAllByRole("option")).map((option) => option.textContent),
+      // The leading em dash is the select's own clear option.
+    ).toEqual(["—", "queued", "reading"]);
+  });
+
   it("does not offer quotation when choosing a new member kind", async () => {
     const user = userEvent.setup();
     render(draftElement());

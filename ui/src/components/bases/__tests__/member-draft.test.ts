@@ -327,4 +327,72 @@ describe("initialMemberDraft", () => {
       fields: { kind: "NOTE", tags: [], aliases: [] },
     });
   });
+
+  it("prefills the values the Base forces and leaves choices to the author", () => {
+    const fields = composeMemberDraftFields(
+      makeDefinition({
+        views: [
+          { name: "Continues", columns: ["sys.kind", "sys.tags", "status"] },
+        ],
+      }),
+      "Continues",
+      makeCapability({
+        fields: [
+          {
+            field: "kind",
+            membership: true,
+            view: false,
+            embed: false,
+            implied: { kind: "fixed", value: "BOOK" },
+          },
+          {
+            field: "tags",
+            membership: true,
+            view: false,
+            embed: false,
+            implied: { kind: "fixed", value: "reading" },
+          },
+          {
+            field: "status",
+            membership: true,
+            view: false,
+            embed: false,
+            implied: { kind: "choice", values: ["reading", "finished"] },
+          },
+        ],
+      }),
+    );
+
+    expect(initialMemberDraft(fields)).toEqual({
+      title: "",
+      fields: {
+        // A fixed value prefills; a multi-valued field takes it as a member.
+        kind: "BOOK",
+        tags: ["reading"],
+        // A choice stays the author's to make.
+        aliases: undefined,
+        status: undefined,
+      },
+    });
+  });
+
+  it("carries each field's implication onto the composed draft field", () => {
+    const [kind] = composeMemberDraftFields(
+      makeDefinition({ views: [{ name: "Continues", columns: ["sys.kind"] }] }),
+      "Continues",
+      makeCapability({
+        fields: [
+          {
+            field: "kind",
+            membership: true,
+            view: false,
+            embed: false,
+            implied: { kind: "fixed", value: "BOOK" },
+          },
+        ],
+      }),
+    ).filter((field) => field.kind === "kind");
+
+    expect(kind.implied).toEqual({ kind: "fixed", value: "BOOK" });
+  });
 });

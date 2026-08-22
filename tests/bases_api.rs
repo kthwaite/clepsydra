@@ -775,12 +775,20 @@ async fn get_base_capability_emits_resolved_member_creation_request_keys() {
     assert_eq!(
         body["member_creation"][0]["fields"],
         serde_json::json!([
-            { "field": "kind", "membership": true, "view": false, "embed": false },
-            { "field": "prop.kind", "membership": true, "view": false, "embed": false },
-            { "field": "word_count", "membership": true, "view": false, "embed": false },
-            { "field": "prop.word_count", "membership": true, "view": false, "embed": false },
-            { "field": "prop.journal_date", "membership": true, "view": false, "embed": false },
-            { "field": "status", "membership": true, "view": false, "embed": false }
+            { "field": "kind", "membership": true, "view": false, "embed": false,
+              "implied": { "kind": "fixed", "value": "BOOK" } },
+            { "field": "prop.kind", "membership": true, "view": false, "embed": false,
+              "implied": { "kind": "fixed", "value": "genre" } },
+            // A system field cannot be authored, but the predicate still names
+            // the value it forces.
+            { "field": "word_count", "membership": true, "view": false, "embed": false,
+              "implied": { "kind": "fixed", "value": 0 } },
+            { "field": "prop.word_count", "membership": true, "view": false, "embed": false,
+              "implied": { "kind": "fixed", "value": 7 } },
+            { "field": "prop.journal_date", "membership": true, "view": false, "embed": false,
+              "implied": null },
+            { "field": "status", "membership": true, "view": false, "embed": false,
+              "implied": { "kind": "fixed", "value": "reading" } }
         ])
     );
 }

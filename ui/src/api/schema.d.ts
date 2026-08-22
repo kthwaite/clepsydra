@@ -1795,8 +1795,25 @@ export interface components {
         BaseMemberFieldRequirement: {
             embed: boolean;
             field: string;
+            implied?: null | components["schemas"]["BaseMemberImplication"];
             membership: boolean;
             view: boolean;
+        };
+        /**
+         * @description What a Base's predicates force on a member created through it. Only
+         *     conjunctive equality and membership tests force anything: `kind eq "BOOK"`
+         *     fixes a value, `status in [..]` and an any-group over one field narrow it to
+         *     a set, and everything else — ranges, negations, emptiness — leaves the field
+         *     to the author.
+         */
+        BaseMemberImplication: {
+            /** @enum {string} */
+            kind: "fixed";
+            value: unknown;
+        } | {
+            /** @enum {string} */
+            kind: "choice";
+            values: unknown[];
         };
         /** @enum {string} */
         BaseMemberScope: "membership" | "view" | "field" | "embed";
