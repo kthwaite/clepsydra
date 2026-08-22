@@ -29,7 +29,7 @@ const mocks = vi.hoisted(() => ({
   refetchView: vi.fn(),
   useBase: vi.fn(),
   useBaseView: vi.fn(),
-  useBaseViewEvaluation: vi.fn(),
+  useBaseViewWindows: vi.fn(),
   viewState: {
     data: undefined as QueryOutput | undefined,
     error: null as unknown,
@@ -126,14 +126,20 @@ vi.mock("#/api/bases", async (importOriginal) => {
       mocks.useBaseView(slug, view, overrides);
       return { ...mocks.viewState, refetch: mocks.refetchView };
     },
-    useBaseViewEvaluation: (config: unknown) => {
-      mocks.useBaseViewEvaluation(config);
+    useBaseViewWindows: (config: unknown) => {
+      mocks.useBaseViewWindows(config);
       return {
         data: undefined,
         error: null,
         isLoading: false,
         isFetching: false,
         refetch: vi.fn(),
+        total: undefined,
+        loaded: 0,
+        hasMore: false,
+        isLoadingMore: false,
+        cappedByAuthor: false,
+        loadMore: vi.fn(),
       };
     },
     useCreateBaseMember: () => ({
