@@ -144,8 +144,10 @@ impl EntryCursor {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EntryFilters {
     pub view: EntryView,
-    pub feed_id: Option<i64>,
-    pub group: Option<String>,
+    /// Empty means every feed; otherwise the union of these feed ids.
+    pub feed_ids: Vec<i64>,
+    /// Empty means every group; otherwise the union of these group names.
+    pub groups: Vec<String>,
     pub tag: Option<String>,
     pub limit: usize,
     pub cursor: Option<EntryCursor>,
@@ -166,8 +168,10 @@ pub struct EntryPatch {
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct MarkReadScope {
-    pub feed_id: Option<i64>,
-    pub group: Option<String>,
+    /// Empty means every feed; otherwise the union of these feed ids.
+    pub feed_ids: Vec<i64>,
+    /// Empty means every group; otherwise the union of these group names.
+    pub groups: Vec<String>,
     pub tag: Option<String>,
     pub before: Option<EntryCursor>,
 }

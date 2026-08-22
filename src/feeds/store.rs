@@ -2522,12 +2522,18 @@ fn list_entries(
         EntryView::Unread => sql.push_str(" AND e.read_at IS NULL"),
         EntryView::Saved => sql.push_str(" AND e.bookmarked_at IS NOT NULL"),
     }
-    if let Some(feed_id) = filters.feed_id {
-        push_parameter(&mut sql, &mut values, " AND e.feed_id = ", feed_id.into());
-    }
-    if let Some(group) = filters.group {
-        push_parameter(&mut sql, &mut values, " AND f.group_name = ", group.into());
-    }
+    push_in_clause(
+        &mut sql,
+        &mut values,
+        " AND e.feed_id IN ",
+        filters.feed_ids.into_iter().map(Value::from),
+    );
+    push_in_clause(
+        &mut sql,
+        &mut values,
+        " AND f.group_name IN ",
+        filters.groups.into_iter().map(Value::from),
+    );
     if let Some(tag) = filters.tag {
         sql.push_str(
             " AND EXISTS (SELECT 1 FROM entry_tag et WHERE et.entry_id = e.id AND et.tag = ",
@@ -2822,12 +2828,19 @@ fn mark_read(connection: &Connection, scope: MarkReadScope) -> Result<u64, FeedS
         ",
     );
     let mut values = vec![Value::Text(datetime_to_db(Utc::now()))];
-    if let Some(feed_id) = scope.feed_id {
-        push_parameter(&mut sql, &mut values, " AND feed_id = ", feed_id.into());
-    }
-    if let Some(group) = scope.group {
-        sql.push_str(" AND feed_id IN (SELECT id FROM feed WHERE group_name = ");
-        push_placeholder(&mut sql, &mut values, group.into());
+    push_in_clause(
+        &mut sql,
+        &mut values,
+        " AND feed_id IN ",
+        scope.feed_ids.into_iter().map(Value::from),
+    );
+    if !scope.groups.is_empty() {
+        sql.push_str(" AND feed_id IN (SELECT id FROM feed WHERE group_name IN ");
+        push_in_list(
+            &mut sql,
+            &mut values,
+            scope.groups.into_iter().map(Value::from),
+        );
         sql.push(')');
     }
     if let Some(tag) = scope.tag {
@@ -2900,9 +2913,31 @@ fn retention_cutoff(now: DateTime<Utc>, days: u64) -> DateTime<Utc> {
         .unwrap_or(DateTime::<Utc>::MIN_UTC)
 }
 
-fn push_parameter(sql: &mut String, values: &mut Vec<Value>, prefix: &str, value: Value) {
+/// Appends `prefix (?1, ?2, ...)` for a non-empty list; an empty list adds no
+/// constraint, which is how "every feed" and "every group" are expressed.
+fn push_in_clause(
+    sql: &mut String,
+    values: &mut Vec<Value>,
+    prefix: &str,
+    items: impl IntoIterator<Item = Value>,
+) {
+    let items = items.into_iter().collect::<Vec<_>>();
+    if items.is_empty() {
+        return;
+    }
     sql.push_str(prefix);
-    push_placeholder(sql, values, value);
+    push_in_list(sql, values, items);
+}
+
+fn push_in_list(sql: &mut String, values: &mut Vec<Value>, items: impl IntoIterator<Item = Value>) {
+    sql.push('(');
+    for (index, item) in items.into_iter().enumerate() {
+        if index > 0 {
+            sql.push_str(", ");
+        }
+        push_placeholder(sql, values, item);
+    }
+    sql.push(')');
 }
 
 fn push_placeholder(sql: &mut String, values: &mut Vec<Value>, value: Value) {
@@ -3365,8 +3400,8 @@ mod tests {
     fn filters(view: EntryView) -> EntryFilters {
         EntryFilters {
             view,
-            feed_id: None,
-            group: None,
+            feed_ids: Vec::new(),
+            groups: Vec::new(),
             tag: None,
             limit: 50,
             cursor: None,
@@ -4774,7 +4809,7 @@ mod tests {
         let news_unread = store
             .list_entries(EntryFilters {
                 view: EntryView::Unread,
-                group: Some("News".to_owned()),
+                groups: vec!["News".to_owned()],
                 ..filters(EntryView::Unread)
             })
             .await
@@ -4784,8 +4819,8 @@ mod tests {
 
         let work_research = store
             .list_entries(EntryFilters {
-                feed_id: Some(second_id),
-                group: Some("Work".to_owned()),
+                feed_ids: vec![second_id],
+                groups: vec!["Work".to_owned()],
                 tag: Some("research".to_owned()),
                 ..filters(EntryView::All)
             })
@@ -4796,14 +4831,160 @@ mod tests {
 
         let impossible_intersection = store
             .list_entries(EntryFilters {
-                feed_id: Some(second_id),
-                group: Some("News".to_owned()),
+                feed_ids: vec![second_id],
+                groups: vec!["News".to_owned()],
                 tag: Some("research".to_owned()),
                 ..filters(EntryView::All)
             })
             .await
             .unwrap();
         assert!(impossible_intersection.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn listing_unions_multiple_group_and_feed_filters() {
+        let (store, _temp) = open_test_store().await;
+        store
+            .reconcile(vec![
+                manifest_feed("https://one.example/feed", "News", &[]),
+                manifest_feed("https://two.example/feed", "Work", &[]),
+                manifest_feed("https://three.example/feed", "Personal", &[]),
+            ])
+            .await
+            .unwrap();
+        let feeds = store.list_feeds().await.unwrap();
+        let feed_id = |url: &str| {
+            feeds
+                .iter()
+                .find(|feed| feed.url == url)
+                .expect("reconciled feed")
+                .id
+        };
+        let news_id = feed_id("https://one.example/feed");
+        let work_id = feed_id("https://two.example/feed");
+        let personal_id = feed_id("https://three.example/feed");
+        for (id, guid) in [
+            (news_id, "news-a"),
+            (work_id, "work-a"),
+            (personal_id, "personal-a"),
+        ] {
+            store
+                .apply_fetch(
+                    id,
+                    success(
+                        vec![fetched_entry(guid, Some(ts("2026-08-09T10:00:00Z")))],
+                        ts("2026-08-09T12:00:00Z"),
+                        ts("2026-08-09T12:30:00Z"),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+
+        let two_groups = store
+            .list_entries(EntryFilters {
+                groups: vec!["News".to_owned(), "Work".to_owned()],
+                ..filters(EntryView::All)
+            })
+            .await
+            .unwrap();
+        let mut guids = two_groups
+            .entries
+            .iter()
+            .map(|entry| entry.guid.as_str())
+            .collect::<Vec<_>>();
+        guids.sort_unstable();
+        assert_eq!(guids, vec!["news-a", "work-a"]);
+
+        let two_feeds = store
+            .list_entries(EntryFilters {
+                feed_ids: vec![news_id, personal_id],
+                ..filters(EntryView::All)
+            })
+            .await
+            .unwrap();
+        let mut guids = two_feeds
+            .entries
+            .iter()
+            .map(|entry| entry.guid.as_str())
+            .collect::<Vec<_>>();
+        guids.sort_unstable();
+        assert_eq!(guids, vec!["news-a", "personal-a"]);
+
+        let intersected = store
+            .list_entries(EntryFilters {
+                groups: vec!["News".to_owned(), "Work".to_owned()],
+                feed_ids: vec![work_id],
+                ..filters(EntryView::All)
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            intersected
+                .entries
+                .iter()
+                .map(|entry| entry.guid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["work-a"]
+        );
+    }
+
+    #[tokio::test]
+    async fn marking_read_across_multiple_groups_leaves_other_groups_unread() {
+        let (store, _temp) = open_test_store().await;
+        store
+            .reconcile(vec![
+                manifest_feed("https://one.example/feed", "News", &[]),
+                manifest_feed("https://two.example/feed", "Work", &[]),
+                manifest_feed("https://three.example/feed", "Personal", &[]),
+            ])
+            .await
+            .unwrap();
+        let feeds = store.list_feeds().await.unwrap();
+        for (url, guid) in [
+            ("https://one.example/feed", "news-a"),
+            ("https://two.example/feed", "work-a"),
+            ("https://three.example/feed", "personal-a"),
+        ] {
+            let id = feeds
+                .iter()
+                .find(|feed| feed.url == url)
+                .expect("reconciled feed")
+                .id;
+            store
+                .apply_fetch(
+                    id,
+                    success(
+                        vec![fetched_entry(guid, Some(ts("2026-08-09T10:00:00Z")))],
+                        ts("2026-08-09T12:00:00Z"),
+                        ts("2026-08-09T12:30:00Z"),
+                    ),
+                )
+                .await
+                .unwrap();
+        }
+
+        let marked = store
+            .mark_read(MarkReadScope {
+                groups: vec!["News".to_owned(), "Work".to_owned()],
+                ..MarkReadScope::default()
+            })
+            .await
+            .unwrap();
+        assert_eq!(marked, 2);
+
+        let unread = store
+            .list_entries(filters(EntryView::Unread))
+            .await
+            .unwrap();
+        assert_eq!(
+            unread
+                .entries
+                .iter()
+                .map(|entry| entry.guid.as_str())
+                .collect::<Vec<_>>(),
+            vec!["personal-a"]
+        );
     }
 
     #[tokio::test]
@@ -4991,7 +5172,7 @@ mod tests {
             .unwrap();
         let changed = store
             .mark_read(MarkReadScope {
-                feed_id: Some(feed_id),
+                feed_ids: vec![feed_id],
                 before: Some(boundary),
                 ..MarkReadScope::default()
             })

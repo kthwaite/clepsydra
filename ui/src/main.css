@@ -631,6 +631,34 @@ ul {
     animation: cl-blink 1s steps(1) infinite;
 }
 
+/* Feed rows that were just read hold their place, then collapse away, so the
+   river never reorders under the pointer that read them. */
+@keyframes cl-feed-exit {
+
+    0%,
+    57% {
+        opacity: 1;
+        max-height: 16rem;
+    }
+
+    74% {
+        opacity: 0;
+        max-height: 16rem;
+    }
+
+    100% {
+        opacity: 0;
+        max-height: 0;
+        border-bottom-width: 0;
+    }
+}
+
+.cl-feed-exit {
+    overflow: hidden;
+    pointer-events: none;
+    animation: cl-feed-exit 700ms ease-in forwards;
+}
+
 /* ASCII engraving */
 .cl-ascii {
     font-family: var(--font-mono);

@@ -2375,9 +2375,8 @@ export interface components {
         };
         MarkFeedEntriesReadRequest: {
             before?: string | null;
-            /** Format: int64 */
-            feed?: number | null;
-            group?: string | null;
+            feed?: number[];
+            group?: string[];
             tag?: string | null;
         };
         MarkFeedEntriesReadResponse: {
@@ -5337,8 +5336,10 @@ export interface operations {
         parameters: {
             query?: {
                 view?: components["schemas"]["EntryViewDto"];
-                feed?: number;
-                group?: string;
+                /** @description Repeat the parameter to widen the scope: `feed=1&feed=2`. */
+                feed?: number[];
+                /** @description Repeat the parameter to widen the scope: `group=News&group=Work`. */
+                group?: string[];
                 tag?: string;
                 limit?: number;
                 cursor?: string;
