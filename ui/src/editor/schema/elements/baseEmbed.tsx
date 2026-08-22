@@ -31,7 +31,7 @@ export function makeBaseEmbed(
   props: BaseEmbedCreateProps = {},
 ): BaseEmbedElement {
   if (props.status === "configured") {
-    const { status, base, view, filter, sort, limit } = props;
+    const { status, base, view, filter, sort, limit, display, width } = props;
     return {
       type: "base-embed",
       status,
@@ -40,6 +40,8 @@ export function makeBaseEmbed(
       ...(filter === undefined ? {} : { filter }),
       ...(sort === undefined ? {} : { sort }),
       ...(limit === undefined ? {} : { limit }),
+      ...(display === undefined ? {} : { display }),
+      ...(width === undefined ? {} : { width }),
       children: [{ text: "" }],
     };
   }
@@ -93,7 +95,7 @@ function hasValidStateShape(value: Record<string, unknown>): boolean {
     !hasExactKeys(
       value,
       ["type", "status", "base", "view", "children"],
-      ["filter", "sort", "limit"],
+      ["filter", "sort", "limit", "display", "width"],
     )
   ) {
     return false;
@@ -104,6 +106,8 @@ function hasValidStateShape(value: Record<string, unknown>): boolean {
     ...(Object.hasOwn(value, "filter") ? { filter: value.filter } : {}),
     ...(Object.hasOwn(value, "sort") ? { sort: value.sort } : {}),
     ...(Object.hasOwn(value, "limit") ? { limit: value.limit } : {}),
+    ...(Object.hasOwn(value, "display") ? { display: value.display } : {}),
+    ...(Object.hasOwn(value, "width") ? { width: value.width } : {}),
   });
 }
 

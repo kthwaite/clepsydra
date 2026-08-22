@@ -348,6 +348,62 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(onRestoreFocus).toHaveBeenCalledTimes(1);
   });
 
+  it("writes presentation only once the author touches it", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderInspector();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const untouched = onSave.mock.calls[0]?.[0];
+    expect(untouched).not.toHaveProperty("display");
+    expect(untouched).not.toHaveProperty("width");
+  });
+
+  it("saves a chosen display and a fixed width", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderInspector();
+
+    await chooseSelectOption(user, "Display", "Full");
+    await user.type(screen.getByRole("spinbutton", { name: "Width" }), "1100");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave).toHaveBeenCalledWith({
+      type: "base-embed",
+      status: "configured",
+      base: "reading",
+      view: "All",
+      limit: 25,
+      display: "full",
+      width: 1100,
+      children: [{ text: "" }],
+    });
+  });
+
+  it("reports a width outside the range and blocks the save", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderInspector();
+
+    await user.type(screen.getByRole("spinbutton", { name: "Width" }), "60");
+    expect(
+      await screen.findByText(
+        "`width` must be an integer from 480 through 1600",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("clears a stored width back to filling the column", async () => {
+    const user = userEvent.setup();
+    const { onSave } = renderInspector(configured({ width: 1100 }));
+
+    expect(screen.getByRole("spinbutton", { name: "Width" })).toHaveValue(1100);
+    await user.clear(screen.getByRole("spinbutton", { name: "Width" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("width");
+  });
+
   it("keeps edits local and Cancel/Escape report no write and restore focus", async () => {
     const user = userEvent.setup();
     const first = renderInspector();
