@@ -143,7 +143,7 @@ function patchedEntry(entry: FeedEntry, mutation: FeedEntryMutation) {
 function belongsInEntryCache(entry: FeedEntry, filters: EntryFilters) {
   if (filters.view === "unread" && entry.read) return false;
   if (filters.view === "saved" && !entry.bookmarked) return false;
-  if (filters.feed !== undefined && entry.feed_id !== filters.feed)
+  if (filters.feed?.length && !filters.feed.includes(entry.feed_id))
     return false;
   if (filters.tag !== undefined && !entry.tags.includes(filters.tag))
     return false;

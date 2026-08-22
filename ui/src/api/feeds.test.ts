@@ -314,8 +314,8 @@ describe("updateCachedEntryPages", () => {
   });
 
   it.each([
-    ["feed", { view: "unread" as const, feed: 7 }],
-    ["group", { view: "unread" as const, group: "Engineering" }],
+    ["feed", { view: "unread" as const, feed: [7] }],
+    ["group", { view: "unread" as const, group: ["Engineering"] }],
   ])("retains a present entry in a matching %s cache", (_label, filters) => {
     const entry = makeEntry({ read: false });
 
@@ -326,6 +326,30 @@ describe("updateCachedEntryPages", () => {
     );
 
     expect(result.pages[0].entries).toEqual([{ ...entry, bookmarked: false }]);
+  });
+
+  it("keeps an entry that matches any feed in a multi-feed cache", () => {
+    const entry = makeEntry({ read: false, feed_id: 9 });
+
+    const result = updateCachedEntryPages(
+      makePages([entry]),
+      { id: entry.id, bookmarked: true },
+      { view: "all", feed: [7, 9] },
+    );
+
+    expect(result.pages[0].entries).toEqual([{ ...entry, bookmarked: true }]);
+  });
+
+  it("drops an entry whose feed is outside a multi-feed cache", () => {
+    const entry = makeEntry({ read: false, feed_id: 11 });
+
+    const result = updateCachedEntryPages(
+      makePages([entry]),
+      { id: entry.id, bookmarked: true },
+      { view: "all", feed: [7, 9] },
+    );
+
+    expect(result.pages[0].entries).toEqual([]);
   });
 
   it("preserves every pageParam while patching entries across pages", () => {
@@ -355,8 +379,8 @@ describe("feedEntriesInfiniteOptions", () => {
   it("uses the OpenAPI query-key shape and omits cursor from the first request", async () => {
     const filters: EntryFilters = {
       view: "unread",
-      feed: 7,
-      group: "Engineering",
+      feed: [7],
+      group: ["Engineering"],
       tag: "rust",
       limit: 25,
     };
@@ -842,7 +866,7 @@ describe("usePatchFeedEntry", () => {
       all: entriesKey({ view: "all" }),
       saved: entriesKey({ view: "saved" }),
       tag: entriesKey({ view: "all", tag: "research" }),
-      absent: entriesKey({ view: "all", group: "Elsewhere" }),
+      absent: entriesKey({ view: "all", group: ["Elsewhere"] }),
     };
     const before = {
       unread: makePages([entry], ["unread-page"]),

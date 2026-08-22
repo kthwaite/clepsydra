@@ -9,9 +9,9 @@ type FeedEntry = components["schemas"]["FeedEntryDto"];
 const routeMocks = vi.hoisted(() => ({
   search: {
     view: "saved" as "unread" | "all" | "saved",
-    group: "Engineering" as string | undefined,
+    group: ["Engineering"] as string[] | undefined,
     ungrouped: false,
-    feed: 7 as number | undefined,
+    feed: [7] as number[] | undefined,
     tag: "rust" as string | undefined,
     manage: false,
     entry: undefined as number | undefined,
@@ -120,7 +120,7 @@ vi.mock("#/api/feeds", () => ({
               fetch_url: "https://loose.example/feed.xml",
               site_url: "https://loose.example",
               group: "",
-              tags: [],
+              tags: ["ops"],
               last_fetch_at: null,
               next_fetch_at: null,
               error_count: 0,
@@ -171,27 +171,21 @@ vi.mock("#/hooks/useOpenTodayJournal", () => ({
   useOpenTodayJournal: () => routeMocks.openTodayJournal,
 }));
 
-vi.mock("#/components/codex/Card", () => ({
-  Card: ({ label, children }: { label: string; children: ReactNode }) => (
-    <section aria-label={label}>{children}</section>
-  ),
-}));
-
 vi.mock("#/components/codex/FeedRiver", () => ({
   FeedRiver: ({
     filters,
     selectedEntryId,
     onSelectEntry,
   }: {
-    filters: { group?: string; feed?: number; tag?: string };
+    filters: { group?: string[]; feed?: number[]; tag?: string };
     selectedEntryId?: number;
     onSelectEntry?: (id: number) => void;
   }) => (
     <section
       aria-label="Feed river fixture"
       data-selected-entry={selectedEntryId}
-      data-group={filters.group ?? "__all__"}
-      data-feed={filters.feed ?? "__all__"}
+      data-group={filters.group?.join(",") ?? "__all__"}
+      data-feed={filters.feed?.join(",") ?? "__all__"}
       data-tag={filters.tag ?? "__all__"}
     >
       {routeMocks.riverHasSelected ? (
@@ -222,9 +216,9 @@ beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", routeMocks.fetchMock);
   routeMocks.search.view = "saved";
-  routeMocks.search.group = "Engineering";
+  routeMocks.search.group = ["Engineering"];
   routeMocks.search.ungrouped = false;
-  routeMocks.search.feed = 7;
+  routeMocks.search.feed = [7];
   routeMocks.search.tag = "rust";
   routeMocks.search.manage = false;
   routeMocks.search.entry = undefined;
@@ -258,18 +252,31 @@ describe("feeds route controls", () => {
   it("validateSearch keeps the ungrouped sentinel and a real __ungrouped__-named group distinct", () => {
     const validateSearch = Route.options.validateSearch as (
       search: Record<string, unknown>,
-    ) => { group?: string; ungrouped: boolean };
+    ) => { group?: string[]; ungrouped: boolean; feed?: number[] };
     expect(validateSearch({ ungrouped: true })).toMatchObject({
       group: undefined,
       ungrouped: true,
     });
     expect(validateSearch({ group: "__ungrouped__" })).toMatchObject({
-      group: "__ungrouped__",
+      group: ["__ungrouped__"],
       ungrouped: false,
     });
   });
 
-  it("selects a real sentinel-like group name through the shared FilterBar and clears it via its chip", async () => {
+  it("validateSearch reads repeated group and feed parameters as lists", () => {
+    const validateSearch = Route.options.validateSearch as (
+      search: Record<string, unknown>,
+    ) => { group?: string[]; feed?: number[] };
+    expect(
+      validateSearch({ group: ["News", "Work"], feed: ["7", 9] }),
+    ).toMatchObject({ group: ["News", "Work"], feed: [7, 9] });
+    expect(validateSearch({ group: [""], feed: ["nope"] })).toMatchObject({
+      group: undefined,
+      feed: undefined,
+    });
+  });
+
+  it("selects a real sentinel-like group name through the group select and clears it by toggling", async () => {
     routeMocks.search.view = "all";
     routeMocks.search.group = undefined;
     routeMocks.search.ungrouped = false;
@@ -278,29 +285,32 @@ describe("feeds route controls", () => {
 
     const user = userEvent.setup();
     const page = render(<FeedsPage />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-group"));
-    await user.click(
-      screen.getByTestId("filter-bar-option-group-__ungrouped__"),
-    );
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "__ungrouped__" }));
+    await user.keyboard("{Escape}");
 
     const namedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
     const namedSearch = namedNavigation.search(routeMocks.search);
-    expect(namedSearch).toMatchObject({ group: "__ungrouped__" });
+    expect(namedSearch).toMatchObject({
+      group: ["__ungrouped__"],
+      ungrouped: false,
+    });
 
     Object.assign(routeMocks.search, namedSearch);
     page.rerender(<FeedsPage />);
     expect(
-      screen.getByTestId("filter-bar-chip-group-__ungrouped__"),
-    ).toHaveTextContent("GROUP: __ungrouped__");
+      screen.getByRole("button", { name: /group filter/i }),
+    ).toHaveTextContent("__ungrouped__");
     expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
       "data-group",
       "__ungrouped__",
     );
 
-    await user.click(screen.getByTestId("filter-bar-chip-group-__ungrouped__"));
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "__ungrouped__" }));
+    await user.keyboard("{Escape}");
     const clearedNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
@@ -309,7 +319,7 @@ describe("feeds route controls", () => {
     });
   });
 
-  it("adds a feed facet through the shared FilterBar, keyed by id, labeled by its override title", async () => {
+  it("adds a feed facet through the feed select, keyed by id, labeled by its override title", async () => {
     routeMocks.search.view = "all";
     routeMocks.search.group = undefined;
     routeMocks.search.ungrouped = false;
@@ -318,46 +328,91 @@ describe("feeds route controls", () => {
 
     const user = userEvent.setup();
     const page = render(<FeedsPage />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-feed"));
-    await user.click(screen.getByTestId("filter-bar-option-feed-7"));
+    await user.click(screen.getByRole("button", { name: /feed filter/i }));
+    await user.click(screen.getByRole("button", { name: "Source Ledger" }));
+    await user.keyboard("{Escape}");
 
     const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
     const nextSearch = navigation.search(routeMocks.search);
-    expect(nextSearch).toMatchObject({ feed: 7 });
+    expect(nextSearch).toMatchObject({ feed: [7] });
 
     Object.assign(routeMocks.search, nextSearch);
     page.rerender(<FeedsPage />);
-    expect(screen.getByTestId("filter-bar-chip-feed-7")).toHaveTextContent(
-      "FEED: Source Ledger",
-    );
+    expect(
+      screen.getByRole("button", { name: /feed filter/i }),
+    ).toHaveTextContent("Source Ledger");
     expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
       "data-feed",
       "7",
     );
   });
 
-  it("narrows the FEED field's options to the selected group's feeds", async () => {
+  it("selects several feeds at once and hands the river every one", async () => {
     routeMocks.search.view = "all";
-    routeMocks.search.group = "Engineering";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = [7];
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    const page = render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /feed filter/i }));
+    await user.click(screen.getByRole("button", { name: "Loose Source" }));
+    await user.keyboard("{Escape}");
+
+    const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    const nextSearch = navigation.search(routeMocks.search);
+    expect(nextSearch).toMatchObject({ feed: [7, 8] });
+
+    Object.assign(routeMocks.search, nextSearch);
+    page.rerender(<FeedsPage />);
+    expect(
+      screen.getByRole("button", { name: /feed filter/i }),
+    ).toHaveTextContent(/2 selected/i);
+    expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
+      "data-feed",
+      "7,8",
+    );
+  });
+
+  it("narrows the feed options to the selected groups' feeds", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = ["Engineering"];
     routeMocks.search.ungrouped = false;
     routeMocks.search.feed = undefined;
     routeMocks.search.tag = undefined;
 
     const user = userEvent.setup();
     render(<FeedsPage />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-feed"));
+    await user.click(screen.getByRole("button", { name: /feed filter/i }));
 
-    expect(screen.getByTestId("filter-bar-option-feed-7")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Source Ledger" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Loose Source" })).toBeNull();
     expect(
-      screen.queryByTestId("filter-bar-option-feed-8"),
-    ).not.toBeInTheDocument();
+      screen.queryByRole("button", { name: "Literal Sentinel Source" }),
+    ).toBeNull();
+  });
+
+  it("unions the feed options across several selected groups", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = ["Engineering", "__ungrouped__"];
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /feed filter/i }));
+
+    expect(screen.getByRole("button", { name: "Source Ledger" })).toBeVisible();
     expect(
-      screen.queryByTestId("filter-bar-option-feed-9"),
-    ).not.toBeInTheDocument();
+      screen.getByRole("button", { name: "Literal Sentinel Source" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Loose Source" })).toBeNull();
   });
 
   it("offers every feed when no group is selected", async () => {
@@ -369,60 +424,284 @@ describe("feeds route controls", () => {
 
     const user = userEvent.setup();
     render(<FeedsPage />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-feed"));
+    await user.click(screen.getByRole("button", { name: /feed filter/i }));
 
-    expect(screen.getByTestId("filter-bar-option-feed-7")).toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-option-feed-8")).toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-option-feed-9")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Source Ledger" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Loose Source" })).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "Literal Sentinel Source" }),
+    ).toBeVisible();
   });
 
-  it("clears an orphaned feed when a later group change no longer contains it, dropping the stale FEED chip", async () => {
+  it("drops an orphaned feed when a later group change no longer contains it", async () => {
     routeMocks.search.view = "all";
     routeMocks.search.group = undefined;
     routeMocks.search.ungrouped = false;
-    routeMocks.search.feed = undefined;
+    routeMocks.search.feed = [8];
     routeMocks.search.tag = undefined;
 
     const user = userEvent.setup();
     const page = render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Engineering" }));
+    await user.keyboard("{Escape}");
 
-    // Select feed 8 ("Loose Source", group "") with no group filter active.
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-feed"));
-    await user.click(screen.getByTestId("filter-bar-option-feed-8"));
-    const feedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
-    const afterFeed = feedNavigation.search(routeMocks.search);
-    expect(afterFeed).toMatchObject({ feed: 8 });
-
-    Object.assign(routeMocks.search, afterFeed);
-    page.rerender(<FeedsPage />);
-    expect(screen.getByTestId("filter-bar-chip-feed-8")).toBeInTheDocument();
-
-    // Now pick a group that does NOT contain feed 8.
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-group"));
-    await user.click(screen.getByTestId("filter-bar-option-group-Engineering"));
-    const groupNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
-      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
-    };
-    const afterGroup = groupNavigation.search(routeMocks.search);
-    expect(afterGroup).toMatchObject({ group: "Engineering", feed: undefined });
+    const afterGroup = navigation.search(routeMocks.search);
+    expect(afterGroup).toMatchObject({
+      group: ["Engineering"],
+      feed: undefined,
+    });
 
     Object.assign(routeMocks.search, afterGroup);
     page.rerender(<FeedsPage />);
-    expect(
-      screen.queryByTestId("filter-bar-chip-feed-8"),
-    ).not.toBeInTheDocument();
     expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
       "data-feed",
       "__all__",
     );
   });
 
-  it("shows the UNGROUPED chip for a URL with ungrouped=true, selects it through the FilterBar, and clears it via the chip", async () => {
+  it("keeps a selected feed whose group is still selected", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = ["Engineering"];
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = [7];
+    routeMocks.search.tag = undefined;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "__ungrouped__" }));
+    await user.keyboard("{Escape}");
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      group: ["Engineering", "__ungrouped__"],
+      feed: [7],
+    });
+  });
+
+  it("closes a selected entry that the new group filter excludes", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Ungrouped" }));
+    await user.keyboard("{Escape}");
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      ungrouped: true,
+      entry: undefined,
+    });
+  });
+
+  it("keeps a selected entry that the new group filter still contains", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Engineering" }));
+    await user.keyboard("{Escape}");
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      group: ["Engineering"],
+      entry: 501,
+    });
+  });
+
+  it("closes a selected entry that the new feed filter excludes", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /feed filter/i }));
+    await user.click(screen.getByRole("button", { name: "Loose Source" }));
+    await user.keyboard("{Escape}");
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      feed: [8],
+      entry: undefined,
+    });
+  });
+
+  it("closes a selected entry that the new tag filter excludes", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /tag filter/i }));
+    await user.click(screen.getByRole("button", { name: "ops" }));
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      tag: "ops",
+      entry: undefined,
+    });
+  });
+
+  it("leaves a selected entry alone while its detail is still unloaded", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = undefined;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Ungrouped" }));
+    await user.keyboard("{Escape}");
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({ entry: 501 });
+  });
+
+  it("omits the back control on desktop and focuses the reader region instead", async () => {
+    routeMocks.search.entry = undefined;
+    routeMocks.detailQuery.data = directEntry;
+    const page = render(<FeedsPage />);
+
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: /select direct entry/i }));
+    routeMocks.search.entry = 501;
+    page.rerender(<FeedsPage />);
+
+    expect(
+      screen.queryByRole("button", { name: "Back to entries" }),
+    ).toBeNull();
+    expect(document.activeElement).toBe(
+      screen.getByRole("region", { name: "Feed reader" }),
+    );
+  });
+
+  it("clears every facet from one control while keeping the view and the open entry", async () => {
+    routeMocks.search.view = "unread";
+    routeMocks.search.group = ["Engineering"];
+    routeMocks.search.ungrouped = true;
+    routeMocks.search.feed = [7];
+    routeMocks.search.tag = "rust";
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /clear filters/i }));
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      group: undefined,
+      ungrouped: false,
+      feed: undefined,
+      tag: undefined,
+      view: "unread",
+      entry: 501,
+    });
+  });
+
+  it("offers no clear control while every facet is empty", () => {
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+
+    render(<FeedsPage />);
+
+    expect(screen.queryByRole("button", { name: /clear filters/i })).toBeNull();
+  });
+
+  it.each([
+    ["group", { group: ["Engineering"] }],
+    ["ungrouped", { ungrouped: true }],
+    ["feed", { feed: [7] }],
+    ["tag", { tag: "rust" }],
+  ] as const)(
+    "offers the clear control for an active %s facet",
+    (_label, facet) => {
+      routeMocks.search.group = undefined;
+      routeMocks.search.ungrouped = false;
+      routeMocks.search.feed = undefined;
+      routeMocks.search.tag = undefined;
+      Object.assign(routeMocks.search, facet);
+
+      render(<FeedsPage />);
+
+      expect(
+        screen.getByRole("button", { name: /clear filters/i }),
+      ).toBeVisible();
+    },
+  );
+
+  it("keeps a selected entry open when only the view changes", async () => {
+    routeMocks.search.view = "all";
+    routeMocks.search.group = undefined;
+    routeMocks.search.ungrouped = false;
+    routeMocks.search.feed = undefined;
+    routeMocks.search.tag = undefined;
+    routeMocks.search.entry = 501;
+    routeMocks.detailQuery.data = directEntry;
+
+    const user = userEvent.setup();
+    render(<FeedsPage />);
+    await user.click(screen.getByRole("button", { name: /hide read/i }));
+
+    const navigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
+      search: (current: typeof routeMocks.search) => typeof routeMocks.search;
+    };
+    expect(navigation.search(routeMocks.search)).toMatchObject({
+      view: "unread",
+      entry: 501,
+    });
+  });
+
+  it("shows Ungrouped for a URL with ungrouped=true, selects it, and clears it", async () => {
     routeMocks.search.view = "all";
     routeMocks.search.group = undefined;
     routeMocks.search.ungrouped = true;
@@ -432,15 +711,17 @@ describe("feeds route controls", () => {
     const user = userEvent.setup();
     const page = render(<FeedsPage />);
 
-    expect(screen.getByTestId("filter-bar-chip-group-")).toHaveTextContent(
-      "GROUP: UNGROUPED",
-    );
+    expect(
+      screen.getByRole("button", { name: /group filter/i }),
+    ).toHaveTextContent(/ungrouped/i);
     expect(screen.getByLabelText("Feed river fixture")).toHaveAttribute(
       "data-group",
       "",
     );
 
-    await user.click(screen.getByTestId("filter-bar-chip-group-"));
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Ungrouped" }));
+    await user.keyboard("{Escape}");
     const clearedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
@@ -451,10 +732,9 @@ describe("feeds route controls", () => {
 
     routeMocks.search.ungrouped = false;
     page.rerender(<FeedsPage />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-group"));
-    await user.click(screen.getByTestId("filter-bar-option-group-"));
-
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Ungrouped" }));
+    await user.keyboard("{Escape}");
     const selectedNavigation = routeMocks.navigate.mock.calls.at(-1)?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
@@ -473,19 +753,19 @@ describe("feeds route controls", () => {
 
     const user = userEvent.setup();
     render(<FeedsPage />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-group"));
-    await user.click(screen.getByTestId("filter-bar-option-group-"));
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Ungrouped" }));
+    await user.keyboard("{Escape}");
 
     const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
     const nextSearch = navigation.search(routeMocks.search);
-    expect(nextSearch.group).not.toBe("");
     expect(nextSearch.group).toBeUndefined();
+    expect(nextSearch.ungrouped).toBe(true);
   });
 
-  it("distinguishes picking the real group named __ungrouped__ from picking the UNGROUPED sentinel", async () => {
+  it("distinguishes picking the real group named __ungrouped__ from picking Ungrouped", async () => {
     routeMocks.search.view = "all";
     routeMocks.search.group = undefined;
     routeMocks.search.ungrouped = false;
@@ -495,23 +775,22 @@ describe("feeds route controls", () => {
     const user = userEvent.setup();
     render(<FeedsPage />);
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-group"));
-    await user.click(
-      screen.getByTestId("filter-bar-option-group-__ungrouped__"),
-    );
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "__ungrouped__" }));
+    await user.keyboard("{Escape}");
     const namedNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
     expect(namedNavigation.search(routeMocks.search)).toMatchObject({
-      group: "__ungrouped__",
+      group: ["__ungrouped__"],
+      ungrouped: false,
     });
 
     routeMocks.navigate.mockClear();
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-group"));
-    await user.click(screen.getByTestId("filter-bar-option-group-"));
+    await user.click(screen.getByRole("button", { name: /group filter/i }));
+    await user.click(screen.getByRole("button", { name: "Ungrouped" }));
+    await user.keyboard("{Escape}");
     const sentinelNavigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
@@ -520,7 +799,6 @@ describe("feeds route controls", () => {
       group: undefined,
     });
   });
-
   it.each([23, "23"])("accepts positive integer entry %s", (entry) => {
     const validateSearch = Route.options.validateSearch as (
       search: Record<string, unknown>,
@@ -555,6 +833,7 @@ describe("feeds route controls", () => {
   });
 
   it("explicit back removes only entry", async () => {
+    routeMocks.mobile = true;
     routeMocks.search.entry = 501;
     routeMocks.detailQuery.data = directEntry;
     render(<FeedsPage />);
@@ -792,7 +1071,7 @@ describe("feeds route controls", () => {
     );
   });
 
-  it.each([undefined, 99])(
+  it.each([[undefined], [[99]]])(
     "resolves source from entry feed id when the feed filter is %s",
     (feed) => {
       routeMocks.search.feed = feed;
@@ -820,7 +1099,7 @@ describe("feeds route controls", () => {
     );
 
     const main = screen.getByRole("main");
-    const routePage = main.querySelector(".mx-auto");
+    const routePage = main.querySelector("[data-feeds-page]");
     const reader = screen.getByRole("region", { name: "Feed reader" });
     expect(routePage).toHaveClass("md:h-full");
     expect(routePage).toHaveClass("md:contain-paint");
@@ -879,15 +1158,18 @@ describe("feeds route controls", () => {
     });
   });
 
-  it("offers tag facet options derived from loaded feed tags, deduped and sorted", async () => {
+  it("offers tag options derived from loaded feed tags, deduped and sorted", async () => {
     routeMocks.search.tag = undefined;
     const user = userEvent.setup();
     render(<FeedsPage />);
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tag"));
-    await user.click(screen.getByTestId("filter-bar-option-tag-rust"));
+    await user.click(screen.getByRole("button", { name: /tag filter/i }));
+    const options = screen
+      .getAllByRole("button", { pressed: false })
+      .filter((option) => option.textContent === "rust");
+    expect(options).toHaveLength(1);
 
+    await user.click(screen.getByRole("button", { name: "rust" }));
     const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;
     };
@@ -905,11 +1187,12 @@ describe("feeds route controls", () => {
     expect(screen.getAllByRole("main")).toHaveLength(1);
   });
 
-  it("removing the tag chip clears the tag param", async () => {
+  it("clears the tag param when its option is toggled off", async () => {
     const user = userEvent.setup();
     render(<FeedsPage />);
 
-    await user.click(screen.getByTestId("filter-bar-chip-tag-rust"));
+    await user.click(screen.getByRole("button", { name: /tag filter/i }));
+    await user.click(screen.getByRole("button", { name: "rust" }));
 
     const navigation = routeMocks.navigate.mock.calls[0]?.[0] as {
       search: (current: typeof routeMocks.search) => typeof routeMocks.search;

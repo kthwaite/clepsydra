@@ -1,11 +1,12 @@
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use axum_extra::extract::Query as RepeatableQuery;
 use chrono::{DateTime, Utc};
 use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
@@ -183,9 +184,12 @@ impl From<EntryViewDto> for EntryView {
 #[into_params(parameter_in = Query)]
 pub struct FeedEntriesQuery {
     pub view: Option<EntryViewDto>,
-    #[serde(alias = "feed_id")]
-    pub feed: Option<i64>,
-    pub group: Option<String>,
+    /// Repeat the parameter to widen the scope: `feed=1&feed=2`.
+    #[serde(default, alias = "feed_id")]
+    pub feed: Vec<i64>,
+    /// Repeat the parameter to widen the scope: `group=News&group=Work`.
+    #[serde(default)]
+    pub group: Vec<String>,
     pub tag: Option<String>,
     pub limit: Option<usize>,
     pub cursor: Option<String>,
@@ -241,9 +245,10 @@ pub struct PatchFeedEntryRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct MarkFeedEntriesReadRequest {
-    #[serde(alias = "feed_id")]
-    pub feed: Option<i64>,
-    pub group: Option<String>,
+    #[serde(default, alias = "feed_id")]
+    pub feed: Vec<i64>,
+    #[serde(default)]
+    pub group: Vec<String>,
     pub tag: Option<String>,
     pub before: Option<String>,
 }
@@ -691,7 +696,7 @@ pub async fn refresh_feed(
 )]
 pub async fn list_entries(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<FeedEntriesQuery>,
+    RepeatableQuery(query): RepeatableQuery<FeedEntriesQuery>,
 ) -> Result<Json<FeedEntryPageResponse>, ApiError> {
     let limit = query.limit.unwrap_or(DEFAULT_ENTRY_LIMIT);
     if limit == 0 || limit > MAX_ENTRY_LIMIT {
@@ -709,8 +714,8 @@ pub async fn list_entries(
         .feeds
         .list_entries(EntryFilters {
             view: query.view.unwrap_or(EntryViewDto::All).into(),
-            feed_id: query.feed,
-            group: query.group,
+            feed_ids: query.feed,
+            groups: query.group,
             tag: query.tag,
             limit,
             cursor,
@@ -807,8 +812,8 @@ pub async fn mark_entries_read(
     let marked = state
         .feeds
         .mark_read(MarkReadScope {
-            feed_id: request.feed,
-            group: request.group,
+            feed_ids: request.feed,
+            groups: request.group,
             tag: request.tag,
             before,
         })
@@ -1347,8 +1352,8 @@ mod tests {
             .feeds
             .list_entries(EntryFilters {
                 view: EntryView::Unread,
-                feed_id: None,
-                group: None,
+                feed_ids: Vec::new(),
+                groups: Vec::new(),
                 tag: None,
                 limit: 100,
                 cursor: None,
@@ -1365,6 +1370,122 @@ mod tests {
             .iter()
             .map(|entry| entry["id"].as_i64().unwrap())
             .collect()
+    }
+
+    /// One entry per group: News, Work, Personal. Returns their feed ids in
+    /// that order.
+    async fn seed_grouped_feeds(state: &Arc<AppState>) -> [i64; 3] {
+        state
+            .feeds
+            .reconcile(
+                ["News", "Work", "Personal"]
+                    .iter()
+                    .enumerate()
+                    .map(|(index, group)| ManifestFeed {
+                        url: format!("https://{}.example/rss", group.to_lowercase()),
+                        title_override: None,
+                        group: (*group).to_owned(),
+                        tags: Vec::new(),
+                        line: index + 1,
+                    })
+                    .collect(),
+            )
+            .await
+            .unwrap();
+        let feeds = state.feeds.list_feeds().await.unwrap();
+        let mut ids = [0_i64; 3];
+        for (index, group) in ["News", "Work", "Personal"].iter().enumerate() {
+            let feed = feeds
+                .iter()
+                .find(|feed| feed.group == *group)
+                .expect("reconciled feed");
+            ids[index] = feed.id;
+            state
+                .feeds
+                .apply_fetch(
+                    feed.id,
+                    FetchOutcome::Success {
+                        fetched_at: fixture_time(12),
+                        next_fetch_at: Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap(),
+                        fetch_url: feed.url.clone(),
+                        etag: None,
+                        last_modified: None,
+                        title: Some((*group).to_owned()),
+                        site_url: None,
+                        entries: vec![fetched_entry(&group.to_lowercase(), 10)],
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        ids
+    }
+
+    #[tokio::test]
+    async fn list_entries_unions_repeated_group_and_feed_parameters() {
+        let fixture = feed_test_app("").await;
+        let [news_id, _work_id, personal_id] = seed_grouped_feeds(&fixture.state).await;
+
+        let (status, grouped) = request_json(
+            &fixture.app,
+            Method::GET,
+            "/api/vault/feeds/entries?group=News&group=Work",
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(entry_ids(&grouped).len(), 2);
+
+        let (status, by_feed) = request_json(
+            &fixture.app,
+            Method::GET,
+            &format!("/api/vault/feeds/entries?feed={news_id}&feed={personal_id}"),
+            None,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        let mut ids = entry_ids(&by_feed);
+        ids.sort_unstable();
+        let mut expected = grouped["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry["feed_id"].as_i64() == Some(news_id))
+            .map(|entry| entry["id"].as_i64().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(expected.len(), 1);
+        expected.push(
+            by_feed["entries"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|entry| entry["feed_id"].as_i64() == Some(personal_id))
+                .expect("personal entry")["id"]
+                .as_i64()
+                .unwrap(),
+        );
+        expected.sort_unstable();
+        assert_eq!(ids, expected);
+    }
+
+    #[tokio::test]
+    async fn mark_entries_read_accepts_a_multi_group_scope() {
+        let fixture = feed_test_app("").await;
+        let [_news_id, _work_id, personal_id] = seed_grouped_feeds(&fixture.state).await;
+
+        let (status, marked) = request_json(
+            &fixture.app,
+            Method::POST,
+            "/api/vault/feeds/entries/mark-read",
+            Some(json!({ "group": ["News", "Work"] })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(marked["marked"].as_u64(), Some(2));
+
+        let remaining = unread_entries(&fixture.state).await;
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].feed_id, personal_id);
     }
 
     #[tokio::test]

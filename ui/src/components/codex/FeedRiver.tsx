@@ -1,6 +1,6 @@
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Button, Disclosure, DisclosurePanel } from "react-aria-components";
+import { Button } from "react-aria-components";
 import {
   type EntryView,
   type FeedEntry,
@@ -10,13 +10,24 @@ import {
   useMarkFeedEntriesRead,
   usePatchFeedEntry,
 } from "#/api/feeds";
+import { cn } from "#/lib/cn";
 import { feedEntryBoundary, formatFeedDay, formatFeedTime } from "#/lib/time";
 import { normalizeFeedEntryTags, safeFeedEntryUrl } from "./FeedReaderPane";
 
+/**
+ * How long a row that this river just marked read stays on screen. Long enough
+ * to hold its place through the click that read it, then to animate out —
+ * `cl-feed-exit` in main.css holds still for the first stretch and collapses
+ * over the rest, so the list never reorders under the pointer.
+ */
+const READ_ROW_EXIT_MS = 700;
+
 export type FeedRiverFilters = {
   view: EntryView;
-  group?: string;
-  feed?: number;
+  /** Empty or absent means every group; otherwise the union of these groups. */
+  group?: string[];
+  /** Empty or absent means every feed; otherwise the union of these feeds. */
+  feed?: number[];
   tag?: string;
 };
 
@@ -38,68 +49,46 @@ export function FeedRiver({
   );
   const patchEntry = usePatchFeedEntry();
   const markEntriesRead = useMarkFeedEntriesRead();
-  const [expandedEntry, setExpandedEntry] = useState<FeedEntry | null>(null);
   const [selectedEntrySnapshot, setSelectedEntrySnapshot] =
     useState<FeedEntry | null>(null);
-  const [expandedEntryFilters, setExpandedEntryFilters] =
-    useState<FeedRiverFilters | null>(null);
   const [tagEditorId, setTagEditorId] = useState<number | null>(null);
-  const expandedMutationVersion = useRef(0);
-  const activeExpandedEntry =
-    expandedEntryFilters && sameFeedRiverFilters(expandedEntryFilters, filters)
-      ? expandedEntry
-      : null;
+  // Rows this river marked read, held by id until the query drops them so the
+  // departure can be animated instead of reordering the list on the click.
+  const readHere = useRef(new Map<number, FeedEntry>());
+  const exitTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  const [departing, setDeparting] = useState<FeedEntry[]>([]);
+  const rememberRead = (entry: FeedEntry) => {
+    readHere.current.set(entry.id, { ...entry, read: true });
+  };
+  const filterKey = [
+    filters.view,
+    (filters.group ?? []).join("\u0000"),
+    (filters.feed ?? []).join(","),
+    filters.tag ?? "",
+  ].join("|");
 
   useEffect(() => {
-    if (
-      expandedEntryFilters &&
-      !sameFeedRiverFilters(expandedEntryFilters, filters)
-    ) {
-      expandedMutationVersion.current += 1;
-      setExpandedEntry(null);
-      setExpandedEntryFilters(null);
-      setTagEditorId(null);
-    }
-  }, [
-    expandedEntryFilters,
-    filters.feed,
-    filters.group,
-    filters.tag,
-    filters.view,
-  ]);
+    const timers = exitTimers.current;
+    return () => {
+      for (const timer of timers.values()) clearTimeout(timer);
+      timers.clear();
+    };
+  }, []);
 
-  const reconcileExpandedMutation = async (
-    entryId: number,
-    mutation: {
-      read?: boolean;
-      bookmarked?: boolean;
-      tags?: string[];
-    },
-  ) => {
-    const version = expandedMutationVersion.current + 1;
-    expandedMutationVersion.current = version;
-    const updated = await patchEntry.mutateAsync({ id: entryId, ...mutation });
-    if (
-      !updated ||
-      updated.id !== entryId ||
-      expandedMutationVersion.current !== version
-    ) {
-      return;
-    }
-    setExpandedEntry((current) =>
-      current?.id === entryId ? updated : current,
-    );
-  };
+  const heldFilterKey = useRef(filterKey);
+  useEffect(() => {
+    if (heldFilterKey.current === filterKey) return;
+    heldFilterKey.current = filterKey;
+    readHere.current.clear();
+    for (const timer of exitTimers.current.values()) clearTimeout(timer);
+    exitTimers.current.clear();
+    setDeparting([]);
+  }, [filterKey]);
 
   const entries = useMemo(
     () =>
       (entriesQuery.data?.pages.flatMap((page) => page.entries) ?? []).sort(
-        (left, right) => {
-          const timeDifference =
-            Date.parse(right.published_at ?? right.fetched_at) -
-            Date.parse(left.published_at ?? left.fetched_at);
-          return timeDifference || right.id - left.id;
-        },
+        byRecency,
       ),
     [entriesQuery.data],
   );
@@ -132,40 +121,75 @@ export function FeedRiver({
     );
     if (selectedIndex === -1) mergedEntries.push(activeSelectedEntry);
     else mergedEntries[selectedIndex] = activeSelectedEntry;
-    return mergedEntries.sort((left, right) => {
-      const timeDifference =
-        Date.parse(right.published_at ?? right.fetched_at) -
-        Date.parse(left.published_at ?? left.fetched_at);
-      return timeDifference || right.id - left.id;
-    });
+    return mergedEntries.sort(byRecency);
   }, [activeSelectedEntry, entries]);
-  const visibleEntries = useMemo(() => {
-    if (!activeExpandedEntry) return entries;
-
-    const mergedEntries = entries.slice();
-    const expandedIndex = mergedEntries.findIndex(
-      (entry) => entry.id === activeExpandedEntry.id,
-    );
-    if (expandedIndex === -1) mergedEntries.push(activeExpandedEntry);
-    else mergedEntries[expandedIndex] = activeExpandedEntry;
-
-    return mergedEntries.sort((left, right) => {
-      const timeDifference =
-        Date.parse(right.published_at ?? right.fetched_at) -
-        Date.parse(left.published_at ?? left.fetched_at);
-      return timeDifference || right.id - left.id;
-    });
-  }, [activeExpandedEntry, entries]);
-  const feedNames = useMemo(() => {
-    const names = new Map<number, string>();
+  const feedSources = useMemo(() => {
+    const sources = new Map<number, { name: string; host?: string }>();
     for (const group of feedsQuery.data?.groups ?? []) {
-      for (const feed of group.feeds)
-        names.set(feed.id, feed.title_override || feed.title);
+      for (const feed of group.feeds) {
+        sources.set(feed.id, {
+          name: feed.title_override || feed.title,
+          host: urlHost(feed.site_url ?? feed.url),
+        });
+      }
     }
-    return names;
+    return sources;
   }, [feedsQuery.data]);
-  const riverEntries = compact ? visibleEntries : selectedEntries;
-  const days = useMemo(() => groupByDay(riverEntries), [riverEntries]);
+  const riverEntries = compact ? entries : selectedEntries;
+
+  useEffect(() => {
+    const present = new Set(riverEntries.map((entry) => entry.id));
+    // A row can come back after the selection that read it finally arrives as
+    // a prop: it is being read, not leaving. Cancel its exit so the animation
+    // never plays on the row under the pointer.
+    const returning: number[] = [];
+    for (const [id, timer] of exitTimers.current) {
+      if (!present.has(id)) continue;
+      clearTimeout(timer);
+      exitTimers.current.delete(id);
+      returning.push(id);
+    }
+    if (returning.length > 0) {
+      setDeparting((current) =>
+        current.filter((entry) => !returning.includes(entry.id)),
+      );
+    }
+    // A read row still standing only because the reader pins it earns the same
+    // courtesy when the next selection releases it — however late the pin was.
+    for (const entry of riverEntries) {
+      if (!entry.read) continue;
+      if (entries.some((loaded) => loaded.id === entry.id)) continue;
+      readHere.current.set(entry.id, entry);
+    }
+    const leaving: FeedEntry[] = [];
+    for (const [id, snapshot] of readHere.current) {
+      if (present.has(id)) continue;
+      readHere.current.delete(id);
+      if (exitTimers.current.has(id)) continue;
+      leaving.push(snapshot);
+      exitTimers.current.set(
+        id,
+        setTimeout(() => {
+          exitTimers.current.delete(id);
+          setDeparting((current) => current.filter((entry) => entry.id !== id));
+        }, READ_ROW_EXIT_MS),
+      );
+    }
+    if (leaving.length > 0) {
+      setDeparting((current) => [...current, ...leaving]);
+    }
+  }, [entries, riverEntries]);
+
+  const visibleEntries = useMemo(() => {
+    if (departing.length === 0) return riverEntries;
+    const held = departing.filter(
+      (entry) => !riverEntries.some((present) => present.id === entry.id),
+    );
+    if (held.length === 0) return riverEntries;
+    return [...riverEntries, ...held].sort(byRecency);
+  }, [departing, riverEntries]);
+  const departingIds = new Set(departing.map((entry) => entry.id));
+  const days = useMemo(() => groupByDay(visibleEntries), [visibleEntries]);
 
   if (entriesQuery.isPending || entriesQuery.isLoading) {
     return (
@@ -233,7 +257,7 @@ export function FeedRiver({
         </div>
       ) : null}
 
-      {!entriesQuery.isError && riverEntries.length === 0 ? (
+      {!entriesQuery.isError && visibleEntries.length === 0 ? (
         <div className="border border-dashed border-rule px-4 py-8 text-center">
           <p className="font-sans text-[14px] font-semibold text-ink">
             {emptyTitle(filters.view)}
@@ -251,6 +275,11 @@ export function FeedRiver({
             onPress={() => {
               const newest = entries[0];
               if (!newest) return;
+              // The boundary covers every loaded unread row, so hold them all
+              // rather than letting the refetch clear the river in one frame.
+              for (const entry of entries) {
+                if (!entry.read) rememberRead(entry);
+              }
               markEntriesRead.mutate({
                 before: feedEntryBoundary(
                   newest.published_at ?? newest.fetched_at,
@@ -270,7 +299,7 @@ export function FeedRiver({
       <div className="space-y-5">
         {days.map(({ key, label, entries: dayEntries }) => (
           <section key={key} aria-labelledby={`feed-day-${key}`}>
-            <div className="mb-1.5 flex items-center gap-3">
+            <div className="sticky top-0 z-10 mb-1.5 flex items-center gap-3 bg-paper-2 py-1">
               <h2
                 id={`feed-day-${key}`}
                 className="cl-mono shrink-0 text-[10px] font-medium uppercase tracking-[0.2em] text-ink-mute"
@@ -285,58 +314,33 @@ export function FeedRiver({
             <div className="border-t border-rule">
               {dayEntries.map((entry) =>
                 compact ? (
-                  <EntryDisclosure
+                  <EntryRow
                     key={entry.id}
                     entry={entry}
-                    feedName={feedNames.get(entry.feed_id)}
-                    isExpanded={activeExpandedEntry?.id === entry.id}
+                    feedName={feedSources.get(entry.feed_id)?.name}
+                    domain={offSiteDomain(
+                      entry.url,
+                      feedSources.get(entry.feed_id)?.host,
+                    )}
+                    isDeparting={departingIds.has(entry.id)}
                     isEditingTags={tagEditorId === entry.id}
                     isPatchPending={patchEntry.isPending}
-                    onExpandedChange={(expanded) => {
-                      expandedMutationVersion.current += 1;
-                      setExpandedEntry(expanded ? entry : null);
-                      setExpandedEntryFilters(expanded ? { ...filters } : null);
-                      setTagEditorId(null);
-                      if (expanded && !entry.read) {
-                        patchEntry.reset();
-                        const version = expandedMutationVersion.current;
-                        void patchEntry
-                          .mutateAsync({ id: entry.id, read: true })
-                          .then((updated) => {
-                            setExpandedEntry((current) => {
-                              if (
-                                current?.id !== entry.id ||
-                                expandedMutationVersion.current !== version
-                              ) {
-                                return current;
-                              }
-                              if (updated && updated.id === entry.id) {
-                                return updated;
-                              }
-                              return updated
-                                ? current
-                                : { ...current, read: true };
-                            });
-                          })
-                          .catch(() => {
-                            // Keep the pinned unread snapshot aligned with rollback.
-                          });
-                      }
-                    }}
-                    onToggleBookmark={() => {
+                    onOpenOriginal={() => {
+                      if (entry.read) return;
                       patchEntry.reset();
-                      void reconcileExpandedMutation(entry.id, {
-                        bookmarked: !entry.bookmarked,
-                      }).catch(() => {
-                        // The mutation error remains visible while the pinned snapshot stays unchanged.
-                      });
+                      rememberRead(entry);
+                      patchEntry.mutate({ id: entry.id, read: true });
                     }}
                     onToggleRead={() => {
                       patchEntry.reset();
-                      void reconcileExpandedMutation(entry.id, {
-                        read: !entry.read,
-                      }).catch(() => {
-                        // The mutation error remains visible while the pinned snapshot stays unchanged.
+                      if (!entry.read) rememberRead(entry);
+                      patchEntry.mutate({ id: entry.id, read: !entry.read });
+                    }}
+                    onToggleBookmark={() => {
+                      patchEntry.reset();
+                      patchEntry.mutate({
+                        id: entry.id,
+                        bookmarked: !entry.bookmarked,
                       });
                     }}
                     onEditTags={() => {
@@ -347,7 +351,7 @@ export function FeedRiver({
                     onSaveTags={async (tags) => {
                       patchEntry.reset();
                       try {
-                        await reconcileExpandedMutation(entry.id, { tags });
+                        await patchEntry.mutateAsync({ id: entry.id, tags });
                         setTagEditorId((current) =>
                           current === entry.id ? null : current,
                         );
@@ -360,13 +364,19 @@ export function FeedRiver({
                   <EntrySelectionRow
                     key={entry.id}
                     entry={entry}
-                    feedName={feedNames.get(entry.feed_id)}
+                    feedName={feedSources.get(entry.feed_id)?.name}
+                    domain={offSiteDomain(
+                      entry.url,
+                      feedSources.get(entry.feed_id)?.host,
+                    )}
+                    isDeparting={departingIds.has(entry.id)}
                     isSelected={selectedEntryId === entry.id}
                     onSelect={() => {
                       setSelectedEntrySnapshot(entry);
                       onSelectEntry?.(entry.id);
                       if (!entry.read) {
                         patchEntry.reset();
+                        rememberRead(entry);
                         void patchEntry
                           .mutateAsync({ id: entry.id, read: true })
                           .then((updated) => {
@@ -412,11 +422,15 @@ export function FeedRiver({
 function EntrySelectionRow({
   entry,
   feedName,
+  domain,
+  isDeparting,
   isSelected,
   onSelect,
 }: {
   entry: FeedEntry;
   feedName?: string;
+  domain?: string;
+  isDeparting: boolean;
   isSelected: boolean;
   onSelect: () => void;
 }) {
@@ -425,7 +439,11 @@ function EntrySelectionRow({
     <article
       aria-current={isSelected ? "true" : undefined}
       aria-labelledby={titleId}
-      className={`min-w-0 border-b border-rule ${isSelected ? "bg-highlight" : "bg-paper-2"}`}
+      className={cn(
+        "min-w-0 border-b border-rule",
+        isSelected ? "bg-highlight" : "bg-paper-2",
+        isDeparting && "cl-feed-exit",
+      )}
     >
       <h3 id={titleId} className="m-0">
         <Button
@@ -446,6 +464,7 @@ function EntrySelectionRow({
             </span>
             <span className="cl-mono mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
               {feedName ? <span className="text-ink-2">{feedName}</span> : null}
+              {domain ? <span>{domain}</span> : null}
               {entry.author ? <span>{entry.author}</span> : null}
               <time dateTime={entry.published_at ?? entry.fetched_at}>
                 {formatFeedTime(entry.published_at ?? entry.fetched_at)}
@@ -470,27 +489,29 @@ function EntrySelectionRow({
   );
 }
 
-function EntryDisclosure({
+function EntryRow({
   entry,
   feedName,
-  isExpanded,
+  domain,
+  isDeparting,
   isEditingTags,
   isPatchPending,
-  onExpandedChange,
-  onToggleBookmark,
+  onOpenOriginal,
   onToggleRead,
+  onToggleBookmark,
   onEditTags,
   onCancelTags,
   onSaveTags,
 }: {
   entry: FeedEntry;
   feedName?: string;
-  isExpanded: boolean;
+  domain?: string;
+  isDeparting: boolean;
   isEditingTags: boolean;
   isPatchPending: boolean;
-  onExpandedChange: (expanded: boolean) => void;
-  onToggleBookmark: () => void;
+  onOpenOriginal: () => void;
   onToggleRead: () => void;
+  onToggleBookmark: () => void;
   onEditTags: () => void;
   onCancelTags: () => void;
   onSaveTags: (tags: string[]) => Promise<void>;
@@ -500,111 +521,111 @@ function EntryDisclosure({
   return (
     <article
       aria-labelledby={titleId}
-      className="min-w-0 border-b border-rule bg-paper-2"
+      className={cn(
+        "group min-w-0 border-b border-rule bg-paper-2 hover:bg-paper-edge focus-within:bg-paper-edge",
+        isDeparting && "cl-feed-exit",
+      )}
     >
-      <Disclosure isExpanded={isExpanded} onExpandedChange={onExpandedChange}>
-        <h3 id={titleId} className="m-0">
-          <Button
-            slot="trigger"
-            className="group grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 text-left outline-none hover:bg-paper-edge focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent md:px-3.5"
+      <div className="grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 md:px-3.5">
+        <span
+          aria-hidden="true"
+          className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
+        />
+        <div className="min-w-0">
+          <h3
+            id={titleId}
+            className="m-0 break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink"
           >
-            <span
-              aria-hidden="true"
-              className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
-            />
             <span className="sr-only">
               {entry.read ? "Read entry" : "Unread entry"}
             </span>
-            <span className="min-w-0">
-              <span className="block break-words font-sans text-[14px] font-semibold leading-[1.3] text-ink">
+            {originalUrl ? (
+              <a
+                href={originalUrl}
+                target="_blank"
+                rel="noreferrer"
+                onClick={onOpenOriginal}
+                className="outline-none hover:text-accent focus-visible:ring-2 focus-visible:ring-accent"
+              >
                 {entry.title}
-              </span>
-              <span className="cl-mono mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
-                {feedName ? (
-                  <span className="text-ink-2">{feedName}</span>
-                ) : null}
-                {entry.author ? <span>{entry.author}</span> : null}
-                <time dateTime={entry.published_at ?? entry.fetched_at}>
-                  {formatFeedTime(entry.published_at ?? entry.fetched_at)}
-                </time>
-                {entry.bookmarked ? (
-                  <span className="text-accent">Saved</span>
-                ) : null}
-                {entry.tags.map((tag) => (
-                  <span key={tag}>#{tag}</span>
-                ))}
-              </span>
-            </span>
-            <span
-              aria-hidden="true"
-              className="cl-mono mt-0.5 text-[12px] text-ink-mute"
+              </a>
+            ) : (
+              entry.title
+            )}
+          </h3>
+          <span className="cl-mono mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-[9px] uppercase tracking-[0.12em] text-ink-mute">
+            {feedName ? <span className="text-ink-2">{feedName}</span> : null}
+            {domain ? <span>{domain}</span> : null}
+            {entry.author ? <span>{entry.author}</span> : null}
+            <time dateTime={entry.published_at ?? entry.fetched_at}>
+              {formatFeedTime(entry.published_at ?? entry.fetched_at)}
+            </time>
+            {entry.bookmarked ? (
+              <span className="text-accent">Saved</span>
+            ) : null}
+            {entry.tags.map((tag) => (
+              <span key={tag}>#{tag}</span>
+            ))}
+          </span>
+        </div>
+        <div
+          data-entry-actions={entry.id}
+          className={cn(
+            "flex shrink-0 flex-wrap items-center justify-end gap-1 transition-opacity",
+            isEditingTags
+              ? "opacity-100"
+              : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100",
+          )}
+        >
+          {originalUrl ? (
+            <a
+              href={originalUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`Open original: ${entry.title}`}
+              onClick={onOpenOriginal}
+              className="cl-btn cl-btn-hot px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
-              {isExpanded ? "−" : "+"}
-            </span>
+              Open ↗
+            </a>
+          ) : null}
+          <Button
+            aria-label={`Mark ${entry.title} ${entry.read ? "unread" : "read"}`}
+            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            isDisabled={isPatchPending}
+            onPress={onToggleRead}
+          >
+            {entry.read ? "Unread" : "Read"}
           </Button>
-        </h3>
-        {isExpanded ? (
-          <DisclosurePanel className="overflow-hidden">
-            <div className="border-t border-rule-soft px-3 py-3 md:px-6 md:py-4">
-              {entry.content_html ? (
-                <div
-                  className="feed-entry-content"
-                  dangerouslySetInnerHTML={{ __html: entry.content_html }}
-                />
-              ) : (
-                <p className="cl-marg">
-                  This entry has no stored body. Open the original to continue
-                  reading.
-                </p>
-              )}
+          <Button
+            aria-label={`${entry.bookmarked ? "Remove bookmark from" : "Bookmark"} ${entry.title}`}
+            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            isDisabled={isPatchPending}
+            onPress={onToggleBookmark}
+          >
+            {entry.bookmarked ? "Unsave" : "Save"}
+          </Button>
+          <Button
+            aria-label={`Edit tags for ${entry.title}`}
+            className="cl-btn px-2 py-1 text-[9px] outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            isDisabled={isPatchPending}
+            onPress={onEditTags}
+          >
+            Tags
+          </Button>
+        </div>
+      </div>
 
-              <div className="mt-4 flex min-w-0 flex-wrap items-center gap-2 border-t border-rule-soft pt-3">
-                {originalUrl ? (
-                  <a
-                    href={originalUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="cl-btn cl-btn-hot outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  >
-                    Open original ↗
-                  </a>
-                ) : null}
-                <Button
-                  className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  isDisabled={isPatchPending}
-                  onPress={onToggleRead}
-                >
-                  {entry.read ? "Mark unread" : "Mark read"}
-                </Button>
-                <Button
-                  aria-label={`${entry.bookmarked ? "Remove bookmark from" : "Bookmark"} ${entry.title}`}
-                  className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  isDisabled={isPatchPending}
-                  onPress={onToggleBookmark}
-                >
-                  {entry.bookmarked ? "Unsave" : "Bookmark"}
-                </Button>
-                <Button
-                  className="cl-btn outline-none focus-visible:ring-2 focus-visible:ring-accent"
-                  isDisabled={isPatchPending}
-                  onPress={onEditTags}
-                >
-                  Edit tags
-                </Button>
-              </div>
-
-              {isEditingTags ? (
-                <TagEditor
-                  entry={entry}
-                  isPending={isPatchPending}
-                  onCancel={onCancelTags}
-                  onSave={onSaveTags}
-                />
-              ) : null}
-            </div>
-          </DisclosurePanel>
-        ) : null}
-      </Disclosure>
+      {isEditingTags ? (
+        <div className="border-t border-rule-soft px-2.5 pb-3 md:px-3.5">
+          <TagEditor
+            entry={entry}
+            isPending={isPatchPending}
+            onCancel={onCancelTags}
+            onSave={onSaveTags}
+          />
+        </div>
+      ) : null}
     </article>
   );
 }
@@ -660,6 +681,28 @@ function TagEditor({
   );
 }
 
+function urlHost(url: string | null | undefined) {
+  const safe = safeFeedEntryUrl(url);
+  if (!safe) return undefined;
+  try {
+    return new URL(safe).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
+
+function offSiteDomain(url: string | null | undefined, feedHost?: string) {
+  const host = urlHost(url);
+  return host && host !== feedHost ? host : undefined;
+}
+
+function byRecency(left: FeedEntry, right: FeedEntry) {
+  const timeDifference =
+    Date.parse(right.published_at ?? right.fetched_at) -
+    Date.parse(left.published_at ?? left.fetched_at);
+  return timeDifference || right.id - left.id;
+}
+
 function groupByDay(entries: FeedEntry[]) {
   const groups = new Map<string, FeedEntry[]>();
   for (const entry of entries) {
@@ -683,19 +726,10 @@ function groupByDay(entries: FeedEntry[]) {
 
 function fullReaderHref(filters: FeedRiverFilters) {
   const params = new URLSearchParams({ view: filters.view });
-  if (filters.group) params.set("group", filters.group);
-  if (filters.feed !== undefined) params.set("feed", String(filters.feed));
+  for (const group of filters.group ?? []) params.append("group", group);
+  for (const feed of filters.feed ?? []) params.append("feed", String(feed));
   if (filters.tag) params.set("tag", filters.tag);
   return `/feeds?${params.toString()}`;
-}
-
-function sameFeedRiverFilters(left: FeedRiverFilters, right: FeedRiverFilters) {
-  return (
-    left.view === right.view &&
-    left.group === right.group &&
-    left.feed === right.feed &&
-    left.tag === right.tag
-  );
 }
 
 function emptyTitle(view: EntryView) {

@@ -56,8 +56,8 @@ async fn feed_fixture() -> FeedFixture {
         .feeds
         .list_entries(EntryFilters {
             view: EntryView::All,
-            feed_id: None,
-            group: None,
+            feed_ids: Vec::new(),
+            groups: Vec::new(),
             tag: None,
             limit: 10,
             cursor: None,
