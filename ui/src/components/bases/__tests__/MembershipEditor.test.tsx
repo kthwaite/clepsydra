@@ -26,6 +26,10 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => navigateMock,
 }));
 
+vi.mock("#/api/index", () => ({
+  useTags: () => ({ data: [{ tag: "beer", count: 3 }] }),
+}));
+
 const properties: DraftProperty[] = [
   {
     id: "status-property",
@@ -114,6 +118,60 @@ describe("MembershipEditor", () => {
     expect(latest(onChange)).toEqual({
       not: { field: "kind", op: "eq", value: "" },
     });
+  });
+
+  it("turns a condition into a tag row when its field is a tag field", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor();
+
+    await user.click(screen.getByRole("button", { name: "Add condition" }));
+    await chooseSelectOption(user, "Field for condition 1", "Tags");
+
+    // The generic operator list gives way to the tag quantifiers.
+    const operator = screen.getByRole("button", {
+      name: /operator for condition 1/i,
+    });
+    expect(operator).toHaveTextContent(/has all of/i);
+    await user.click(operator);
+    await user.click(await screen.findByRole("option", { name: /has any of/i }));
+    const values = screen.getByRole("combobox", {
+      name: /values for condition 1/i,
+    });
+    await user.type(values, "beer{Enter}");
+
+    // One value needs no quantifier: the row keeps the simplest node that
+    // expresses the predicate, and only spells out `in` once it must.
+    expect(latest(onChange)).toEqual({
+      field: "tags",
+      op: "contains",
+      value: "beer",
+    });
+    expect(
+      screen.getByRole("button", { name: /operator for condition 1/i }),
+    ).toHaveTextContent(/has any of/i);
+
+    await user.type(values, "tasting{Enter}");
+    expect(latest(onChange)).toEqual({
+      field: "tags",
+      op: "in",
+      value: ["beer", "tasting"],
+    });
+  });
+
+  it("presents a stored tag predicate as one row instead of a nested group", () => {
+    renderEditor({
+      all: [
+        { field: "tags", op: "contains", value: "beer" },
+        { field: "tags", op: "contains", value: "tasting" },
+      ],
+    });
+
+    expect(
+      screen.getByRole("button", { name: /operator for condition 1/i }),
+    ).toHaveTextContent(/has all of/i);
+    expect(
+      screen.queryByRole("group", { name: /match all conditions/i }),
+    ).not.toBeInTheDocument();
   });
 
   it("labels nested boolean structure and exposes positional controls", () => {
@@ -209,6 +267,11 @@ describe("MembershipEditor", () => {
       op: "contains",
       value: "research",
     });
+    await user.click(
+      screen.getByRole("button", {
+        name: /edit condition 1 as an advanced condition/i,
+      }),
+    );
     const field = screen.getByRole("button", { name: selectTriggerName("Field for condition 1") });
     await user.click(field);
     expect(await screen.findByRole("option", { name: "ID" })).toBeInTheDocument();
@@ -279,20 +342,20 @@ describe("MembershipEditor", () => {
     });
 
     await user.keyboard("{Escape}");
-    await chooseSelectOption(user, "Field for condition 1", "Tags");
+    await chooseSelectOption(user, "Field for condition 1", "Title");
     await chooseSelectOption(user, "Operator for condition 1", "in");
     const freeform = screen.getByLabelText("Value for condition 1");
     await user.clear(freeform);
     await user.type(freeform, "alpha, beta");
     expect(freeform).toHaveValue("alpha, beta");
     expect(latest(onChange)).toEqual({
-      field: "tags",
+      field: "title",
       op: "in",
       value: [],
     });
     await user.keyboard("{Enter}");
     expect(latest(onChange)).toEqual({
-      field: "tags",
+      field: "title",
       op: "in",
       value: ["alpha", "beta"],
     });
