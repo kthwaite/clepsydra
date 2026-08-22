@@ -129,7 +129,9 @@ vi.mock("#/components/codex/ReadingProgressContext", () => ({
   useReadingProgress: () => ({ progress: 0.42 }),
 }));
 vi.mock("#/components/codex/Sheaf", () => ({
-  Sheaf: () => <div data-testid="sheaf" />,
+  Sheaf: ({ activeTabVisible }: { activeTabVisible?: boolean }) => (
+    <div data-testid="sheaf" data-active-tab-visible={String(activeTabVisible)} />
+  ),
 }));
 vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
@@ -472,6 +474,27 @@ describe("CodexFrame destination integration", () => {
     expect(screen.getByText("42%")).toBeInTheDocument();
     expect(screen.getByTestId("sheaf")).toBeInTheDocument();
   });
+
+  it("marks the active tab as displayed only on Folio", () => {
+    renderFrame("folio");
+    expect(screen.getByTestId("sheaf")).toHaveAttribute(
+      "data-active-tab-visible",
+      "true",
+    );
+  });
+
+  it.each(["/tasking", "/gazetteer"])(
+    "frees the active tab's preview on %s, where no folio is displayed",
+    (pathname) => {
+      locationState.pathname = pathname;
+      renderFrame();
+
+      expect(screen.getByTestId("sheaf")).toHaveAttribute(
+        "data-active-tab-visible",
+        "false",
+      );
+    },
+  );
 
   it("does not re-render the shell when the UTC clock ticks", () => {
     vi.useFakeTimers();

@@ -837,3 +837,27 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     },
   );
 });
+
+describe("Sheaf tab preview gating", () => {
+  it("suppresses the active tab's preview while its folio is on screen", () => {
+    vi.useFakeTimers();
+    seed(false);
+    render(<Sheaf activeTabId="t3" activeTabVisible />);
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Gamma" }));
+    act(() => vi.advanceTimersByTime(220));
+
+    expect(screen.queryByTestId("tab-preview")).not.toBeInTheDocument();
+  });
+
+  it("previews the active tab when no folio is on screen", () => {
+    vi.useFakeTimers();
+    seed(false);
+    render(<Sheaf activeTabId="t3" activeTabVisible={false} />);
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: "Gamma" }));
+    act(() => vi.advanceTimersByTime(220));
+
+    expect(screen.getByTestId("tab-preview")).toHaveTextContent("c.md");
+  });
+});

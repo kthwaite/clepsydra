@@ -17,13 +17,16 @@ export function clampPreviewLeft(
 }
 
 /**
- * Whether hovering a tab should open a preview: it needs a real path and must
- * not be the currently-active tab (whose page is already in the main pane).
+ * Whether hovering a tab should open a preview: it needs a real path, and the
+ * active tab is exempt only while its page is the one on screen. Off Folio —
+ * Tasking, Gazetteer — no tab's page is rendered, so the active tab previews
+ * like any other (`activeTabVisible: false`).
  */
 export function shouldPreviewTab(
   path: string | undefined,
   tabId: string,
   activeTabId: string | null,
+  activeTabVisible: boolean,
 ): boolean {
-  return !!path && tabId !== activeTabId;
+  return !!path && (!activeTabVisible || tabId !== activeTabId);
 }

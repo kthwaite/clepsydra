@@ -20,19 +20,24 @@ describe("clampPreviewLeft", () => {
 
 describe("shouldPreviewTab", () => {
   it("previews an inactive tab with a path", () => {
-    expect(shouldPreviewTab("docs/a.md", "tab-1", "tab-2")).toBe(true);
+    expect(shouldPreviewTab("docs/a.md", "tab-1", "tab-2", true)).toBe(true);
   });
 
-  it("suppresses the active tab", () => {
-    expect(shouldPreviewTab("docs/a.md", "tab-1", "tab-1")).toBe(false);
+  it("suppresses the active tab while its page is on screen", () => {
+    expect(shouldPreviewTab("docs/a.md", "tab-1", "tab-1", true)).toBe(false);
+  });
+
+  it("previews the active tab when its page is not on screen", () => {
+    expect(shouldPreviewTab("docs/a.md", "tab-1", "tab-1", false)).toBe(true);
   });
 
   it("suppresses a tab with no path", () => {
-    expect(shouldPreviewTab(undefined, "tab-1", "tab-2")).toBe(false);
-    expect(shouldPreviewTab("", "tab-1", "tab-2")).toBe(false);
+    expect(shouldPreviewTab(undefined, "tab-1", "tab-2", true)).toBe(false);
+    expect(shouldPreviewTab("", "tab-1", "tab-2", true)).toBe(false);
+    expect(shouldPreviewTab(undefined, "tab-1", "tab-1", false)).toBe(false);
   });
 
   it("suppresses a null active id without crashing", () => {
-    expect(shouldPreviewTab("docs/a.md", "tab-1", null)).toBe(true);
+    expect(shouldPreviewTab("docs/a.md", "tab-1", null, true)).toBe(true);
   });
 });
