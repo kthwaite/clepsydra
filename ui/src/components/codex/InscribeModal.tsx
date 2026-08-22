@@ -5,6 +5,9 @@ import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagInput } from "#/components/ui/tag-input";
+import { useBases } from "#/api/bases";
+import { BaseMemberIntake } from "#/components/bases/BaseMemberIntake";
+import { Select, SelectItem } from "#/components/ui/select";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
@@ -32,6 +35,11 @@ export function InscribeModal() {
   const openTab = useOpenTab();
   const projects = useProjects();
   const { data: tagIndex } = useTags();
+  const { data: baseList } = useBases();
+  // Choosing a Base hands the form to the member draft: same composition and
+  // same endpoint as the Base table's own Add member.
+  const [baseSlug, setBaseSlug] = useState<string | null>(null);
+  const bases = baseList?.bases ?? [];
 
   if (!isOpen) return null;
 
@@ -88,6 +96,7 @@ export function InscribeModal() {
   };
 
   const reset = () => {
+    setBaseSlug(null);
     setKind("NOTE");
     setProject(null);
     setTitle("");
@@ -119,6 +128,37 @@ export function InscribeModal() {
         </div>
 
         <div className="px-4 py-3">
+          {bases.length > 0 ? (
+            <div className="mb-2.5">
+              <Field label="00 · Base · optional">
+                {/* A listbox, unlike the project combobox below, needs no
+                    Enter guard: RAC handles Enter within the open menu. */}
+                <div className="mt-1">
+                  <Select
+                    label="Base"
+                    value={baseSlug ?? ""}
+                    onChange={(key) =>
+                      setBaseSlug(key == null || key === "" ? null : String(key))
+                    }
+                  >
+                    <SelectItem id="">None — a plain page</SelectItem>
+                    {bases.map((base) => (
+                      <SelectItem key={base.slug} id={base.slug}>
+                        {base.name}
+                      </SelectItem>
+                    ))}
+                  </Select>
+                </div>
+              </Field>
+            </div>
+          ) : null}
+          {baseSlug ? (
+            <BaseMemberIntake
+              slug={baseSlug}
+              onCreated={(path, label) => finish(path, label)}
+            />
+          ) : (
+          <>
           <div className="mb-2.5 grid grid-cols-2 gap-3">
             <Field label="01 · Kind">
               <div className="mt-1">
@@ -185,6 +225,8 @@ export function InscribeModal() {
               {create.isPending ? "committing…" : "▣ commit to archive"}
             </button>
           </div>
+          </>
+          )}
         </div>
       </form>
     </CodexModalShell>
