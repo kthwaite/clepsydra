@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import type { BaseMemberDiagnostic } from "#/api/bases";
+import type { BaseMemberDiagnostic, PropertyDefinition } from "#/api/bases";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagInput } from "#/components/ui/tag-input";
@@ -21,6 +21,8 @@ import {
 
 export interface BaseMemberDraftProps {
   fields: BaseMemberDraftField[];
+  /** The Base's `{field}` title template, when it declares one. */
+  titleTemplate?: string;
   projects: string[];
   isSaving: boolean;
   diagnostics: BaseMemberDiagnostic[];
@@ -35,6 +37,52 @@ function fieldLabel(key: string): string {
     .replace(/^sys\.|^prop\./, "")
     .replace(/[_-]+/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+/** How a forced value reads to the author. The draft states it rather than
+ * applying it silently, so nothing reaches the page as hidden metadata. */
+function implicationText(field: BaseMemberDraftField): string | undefined {
+  if (!field.implied) return undefined;
+  if (field.implied.kind === "fixed") {
+    return `The Base fixes this to ${formatImplied(field.implied.value)}.`;
+  }
+  const values = field.implied.values.map(formatImplied);
+  if (values.length === 0) return undefined;
+  const list =
+    values.length === 1
+      ? values[0]
+      : `${values.slice(0, -1).join(", ")} or ${values[values.length - 1]}`;
+  return `The Base allows ${list}.`;
+}
+
+/** Fill a Base's `{field}` title template from the draft's current values. A
+ * field with no value contributes nothing, so a partly filled draft still
+ * proposes a title. */
+export function resolveTitleTemplate(
+  template: string,
+  fields: Record<string, CellValue>,
+): string {
+  const filled = template.replace(
+    /\{([^{}]*)\}/g,
+    (_match, placeholder: string) => {
+      const value = fields[placeholder.trim()];
+      if (Array.isArray(value)) {
+        return value.filter((item) => item != null).join(", ");
+      }
+      if (value == null || typeof value === "object") return "";
+      return String(value);
+    },
+  );
+  // An unfilled placeholder leaves its separator behind — "Le Guin —" — so
+  // trim punctuation the template only meant to sit between two values.
+  return filled
+    .replace(/\s+/g, " ")
+    .replace(/^[\s\p{Pd}:,/|·]+/u, "")
+    .replace(/[\s\p{Pd}:,/|·]+$/u, "");
+}
+
+function formatImplied(value: unknown): string {
+  return typeof value === "string" ? value : JSON.stringify(value);
 }
 
 function requirementText(field: BaseMemberDraftField): string | undefined {
@@ -54,6 +102,30 @@ function requirementText(field: BaseMemberDraftField): string | undefined {
   if (field.viewOnly) return "Required for the active view.";
   if (field.embedOnly) return "Required for the embedded filter.";
   return undefined;
+}
+
+function fieldDescription(field: BaseMemberDraftField): string | undefined {
+  const parts = [requirementText(field), implicationText(field)].filter(
+    (part): part is string => Boolean(part),
+  );
+  return parts.length > 0 ? parts.join(" ") : undefined;
+}
+
+/** A choice narrows a declared option list to what the Base still allows, so
+ * the control cannot offer a value the server would reject. */
+function narrowedDefinition(
+  field: BaseMemberDraftField,
+  definition: PropertyDefinition,
+): PropertyDefinition {
+  if (field.implied?.kind !== "choice") return definition;
+  if (definition.options === undefined) return definition;
+  const allowed = new Set(
+    field.implied.values.filter(
+      (value): value is string => typeof value === "string",
+    ),
+  );
+  const options = definition.options.filter((option) => allowed.has(option));
+  return options.length > 0 ? { ...definition, options } : definition;
 }
 
 interface DraftFieldControlProps {
@@ -124,7 +196,7 @@ function DraftFieldControl({
       <div data-draft-editor>
         <EditableCell
           value={value ?? null}
-          definition={field.definition}
+          definition={narrowedDefinition(field, field.definition)}
           ariaLabel={label}
           commitOnBlur
           ariaDescribedBy={describedBy}
@@ -151,12 +223,15 @@ export function BaseMemberDraft({
   isSaving,
   diagnostics,
   summaryError,
+  titleTemplate,
   onSave,
   onCancel,
   onChange,
 }: BaseMemberDraftProps) {
   const [draft, setDraft] = useState(() => initialMemberDraft(fields));
   const [titleError, setTitleError] = useState<string>();
+  // The template proposes a title only while the author has not written one.
+  const [titleAuthored, setTitleAuthored] = useState(false);
   const draftRef = useRef(draft);
   const fieldNodes = useRef(new Map<string, HTMLElement>());
   const descriptionPrefix = useId();
@@ -168,14 +243,24 @@ export function BaseMemberDraft({
   };
 
   const updateField = (key: string, value: CellValue) => {
+    const fields = { ...draftRef.current.fields, [key]: value };
+    const proposed =
+      titleTemplate && !titleAuthored
+        ? resolveTitleTemplate(titleTemplate, fields)
+        : undefined;
     updateDraft({
       ...draftRef.current,
-      fields: { ...draftRef.current.fields, [key]: value },
+      ...(proposed === undefined ? {} : { title: proposed }),
+      fields,
     });
+    if (proposed !== undefined && proposed.trim() !== "") {
+      setTitleError(undefined);
+    }
   };
 
   const updateTitle = (title: string) => {
     if (title.trim() !== "") setTitleError(undefined);
+    setTitleAuthored(true);
     updateDraft({ ...draftRef.current, title });
   };
 
@@ -256,7 +341,7 @@ export function BaseMemberDraft({
             const fieldDiagnostics = diagnostics.filter(
               (diagnostic) => diagnostic.field === key,
             );
-            const requirement = requirementText(field);
+            const requirement = fieldDescription(field);
             const localError = field.kind === "title" ? titleError : undefined;
             const idKey = encodeURIComponent(key).replaceAll("%", "_");
             const requirementId = requirement

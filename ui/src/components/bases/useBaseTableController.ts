@@ -66,6 +66,7 @@ export interface BaseTableControllerModel {
   ): void;
   memberCapability: BaseMemberCapability | undefined;
   memberDraftFields: BaseMemberDraftField[];
+  memberTitleTemplate: string | undefined;
   memberDraftOpen: boolean;
   memberSaving: boolean;
   memberDiagnostics: BaseMemberDiagnostic[];
@@ -734,6 +735,7 @@ export function useBaseTableController(
     onCommitCell: handleCommitCell,
     memberCapability,
     memberDraftFields,
+    memberTitleTemplate: detail.data?.title_template ?? undefined,
     memberDraftOpen: memberState.draftOpen,
     memberSaving,
     memberDiagnostics: memberState.diagnostics,

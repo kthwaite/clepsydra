@@ -271,6 +271,44 @@ general condition row: `tags is_empty` / `not_empty`, and a negated all-of
 group, which means "not both" rather than "neither". Any tag row can be
 switched to that general row from its own controls.
 
+## Creating members
+
+Every entry point composes the same draft and posts to the same endpoint, so a
+member created from one surface is the member any other surface would have
+made:
+
+- **Add member** in a Base table's toolbar, and the **+ Add member…** row
+  beneath the listing.
+- The same actions inside an embedded Base table, which additionally carry the
+  embed's own filter into the candidate.
+- **Base** in the intake modal (⌘N), which hands the form to the member draft
+  for the chosen Base and view.
+
+The draft prefills what the Base's predicates force and says so in each
+field's description — nothing is applied as hidden metadata. A predicate that
+allows several values narrows the control to those values and leaves the choice
+to the author. Creation is atomic: a rejected candidate leaves no page and no
+index row, and its diagnostics come back attached to the field or filter at
+fault while the draft stays open with everything already typed.
+
+## Title templates
+
+A Base may propose titles for the members created through it:
+
+```toml
+name = "Reading"
+title_template = "{author} — {work}"
+```
+
+Each `{field}` interpolates that field from the member draft as it is filled;
+a placeholder with no value yet contributes nothing, and separators left
+dangling around it are trimmed, so a half-filled draft still proposes a
+sensible title. Placeholders name declared properties or system fields —
+anything else is a validation error, because nothing would ever fill it. The
+proposal stops the moment the author types a title of their own, and the
+resolved title is always visible before creation, since it determines page
+identity and the canonical path.
+
 ## Views: columns, sorting, grouping, and aggregates
 
 Each `[[views]]` entry is a saved view. Its fields are:

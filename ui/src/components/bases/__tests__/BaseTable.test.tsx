@@ -247,6 +247,24 @@ describe("BaseTable standalone regression", () => {
 });
 
 describe("BaseTable member creation", () => {
+  it("opens the same draft from a final row beneath the listing", async () => {
+    const user = userEvent.setup();
+    render(<BaseTable slug="reading" />);
+
+    const finalRow = await screen.findByRole("button", {
+      name: "Add member to Reading Log",
+    });
+    await user.click(finalRow);
+
+    expect(
+      screen.getByRole("group", { name: "New base member" }),
+    ).toBeInTheDocument();
+    // The draft is open, so the entry points step aside until it resolves.
+    expect(
+      screen.queryByRole("button", { name: "Add member to Reading Log" }),
+    ).toBeNull();
+  });
+
   it("preserves a rejected draft, clears stale diagnostics on edit, then focuses the authoritative grouped row", async () => {
     const user = userEvent.setup();
     mocks.viewState.data = groupedOutput();

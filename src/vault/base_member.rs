@@ -16,12 +16,26 @@ pub enum BaseMemberScope {
     Embed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+/// What a Base's predicates force on a member created through it. Only
+/// conjunctive equality and membership tests force anything: `kind eq "BOOK"`
+/// fixes a value, `status in [..]` and an any-group over one field narrow it to
+/// a set, and everything else — ranges, negations, emptiness — leaves the field
+/// to the author.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum BaseMemberImplication {
+    Fixed { value: serde_json::Value },
+    Choice { values: Vec<serde_json::Value> },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct BaseMemberFieldRequirement {
     pub field: String,
     pub membership: bool,
     pub view: bool,
     pub embed: bool,
+    /// The value this field is forced to, when the predicates force one.
+    pub implied: Option<BaseMemberImplication>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
@@ -32,7 +46,7 @@ pub struct BaseMemberDiagnostic {
     pub message: String,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, ToSchema)]
 pub struct BaseMemberCapability {
     pub view: String,
     pub enabled: bool,
@@ -267,16 +281,61 @@ fn collect_fields(
     embed: bool,
     fields: &mut Vec<(FieldIdentity, BaseMemberFieldRequirement)>,
 ) {
+    collect_fields_in(base, filter, membership, view, embed, true, fields);
+}
+
+/// `forcing` marks a conjunctive positive position: only there does a predicate
+/// force a value on a new member. Under a negation, or inside a disjunction the
+/// branches do not agree on, a predicate still names its field but implies
+/// nothing about it.
+fn collect_fields_in(
+    base: &BaseDefinition,
+    filter: &Filter,
+    membership: bool,
+    view: bool,
+    embed: bool,
+    forcing: bool,
+    fields: &mut Vec<(FieldIdentity, BaseMemberFieldRequirement)>,
+) {
     match filter {
-        Filter::All(children) | Filter::Any(children) => {
+        Filter::Any(children) => {
+            // A disjunction forces a value only when every branch tests the
+            // same field for equality: then it is a choice among those values.
+            let alternatives = if forcing {
+                single_field_alternatives(base, children)
+            } else {
+                None
+            };
             for child in children {
-                collect_fields(base, child, membership, view, embed, fields);
+                collect_fields_in(base, child, membership, view, embed, false, fields);
+            }
+            if let Some((identity, values)) = alternatives
+                && let Some((_, requirement)) = fields
+                    .iter_mut()
+                    .find(|(candidate, _)| *candidate == identity)
+            {
+                requirement.implied = merge_implications(
+                    requirement.implied.take(),
+                    Some(BaseMemberImplication::Choice { values }),
+                );
             }
         }
-        Filter::Not(child) => collect_fields(base, child, membership, view, embed, fields),
+        Filter::All(children) => {
+            for child in children {
+                collect_fields_in(base, child, membership, view, embed, forcing, fields);
+            }
+        }
+        Filter::Not(child) => {
+            collect_fields_in(base, child, membership, view, embed, false, fields)
+        }
         Filter::Cmp { field, .. } => {
             let Some((identity, request_key)) = resolved_requirement(base, field) else {
                 return;
+            };
+            let implied = if forcing {
+                implication_of(filter)
+            } else {
+                None
             };
             if let Some((_, existing)) = fields
                 .iter_mut()
@@ -285,6 +344,7 @@ fn collect_fields(
                 existing.membership |= membership;
                 existing.view |= view;
                 existing.embed |= embed;
+                existing.implied = merge_implications(existing.implied.take(), implied);
             } else {
                 fields.push((
                     identity,
@@ -293,8 +353,100 @@ fn collect_fields(
                         membership,
                         view,
                         embed,
+                        implied,
                     },
                 ));
+            }
+        }
+    }
+}
+
+/// The value one comparison forces, if any.
+fn implication_of(filter: &Filter) -> Option<BaseMemberImplication> {
+    let Filter::Cmp { op, value, .. } = filter else {
+        return None;
+    };
+    if value.is_null() {
+        return None;
+    }
+    match op {
+        Op::Eq | Op::Contains => Some(BaseMemberImplication::Fixed {
+            value: value.clone(),
+        }),
+        Op::In => {
+            let values = value.as_array()?;
+            if values.is_empty() {
+                return None;
+            }
+            Some(BaseMemberImplication::Choice {
+                values: values.clone(),
+            })
+        }
+        _ => None,
+    }
+}
+
+/// The values an any-group forces when every branch tests the same field for
+/// equality; anything else makes the group unforceable.
+fn single_field_alternatives(
+    base: &BaseDefinition,
+    children: &[Filter],
+) -> Option<(FieldIdentity, Vec<serde_json::Value>)> {
+    if children.is_empty() {
+        return None;
+    }
+    let mut identity: Option<FieldIdentity> = None;
+    let mut values = Vec::new();
+    for child in children {
+        let Filter::Cmp { field, op, value } = child else {
+            return None;
+        };
+        if !matches!(op, Op::Eq | Op::Contains) {
+            return None;
+        }
+        let (child_identity, _) = resolved_requirement(base, field)?;
+        match &identity {
+            Some(current) if *current != child_identity => return None,
+            Some(_) => {}
+            None => identity = Some(child_identity),
+        }
+        if value.is_null() {
+            return None;
+        }
+        values.push(value.clone());
+    }
+    identity.map(|identity| (identity, values))
+}
+
+/// Predicates on one field intersect: each narrows what a new member may hold,
+/// a predicate that forces nothing leaves the others standing, and a
+/// contradiction prefills nothing rather than guessing.
+fn merge_implications(
+    existing: Option<BaseMemberImplication>,
+    incoming: Option<BaseMemberImplication>,
+) -> Option<BaseMemberImplication> {
+    use BaseMemberImplication::{Choice, Fixed};
+    match (existing, incoming) {
+        (None, other) => other,
+        (some, None) => some,
+        (Some(Fixed { value: left }), Some(Fixed { value: right })) => {
+            (left == right).then_some(Fixed { value: left })
+        }
+        (Some(Fixed { value }), Some(Choice { values }))
+        | (Some(Choice { values }), Some(Fixed { value })) => {
+            values.contains(&value).then_some(Fixed { value })
+        }
+        (Some(Choice { values: left }), Some(Choice { values: right })) => {
+            let mut both: Vec<_> = left
+                .into_iter()
+                .filter(|value| right.contains(value))
+                .collect();
+            match both.len() {
+                0 => None,
+                1 => Some(Fixed {
+                    value: both.remove(0),
+                }),
+                _ => Some(Choice { values: both }),
             }
         }
     }
@@ -531,24 +683,37 @@ filter = { field = "status", op = "eq", value = "reading" }
                     membership: true,
                     view: false,
                     embed: true,
+                    // Membership and the embed agree on the same value.
+                    implied: Some(BaseMemberImplication::Fixed {
+                        value: serde_json::json!("BOOK"),
+                    }),
                 },
                 BaseMemberFieldRequirement {
                     field: "prop.kind".into(),
                     membership: true,
                     view: false,
                     embed: true,
+                    implied: Some(BaseMemberImplication::Fixed {
+                        value: serde_json::json!("genre"),
+                    }),
                 },
                 BaseMemberFieldRequirement {
                     field: "status".into(),
                     membership: true,
                     view: true,
                     embed: true,
+                    // `ne finished` forces nothing and the embed's disjunction
+                    // spans two fields, but the view still pins the value.
+                    implied: Some(BaseMemberImplication::Fixed {
+                        value: serde_json::json!("reading"),
+                    }),
                 },
                 BaseMemberFieldRequirement {
                     field: "rating".into(),
                     membership: false,
                     view: false,
                     embed: true,
+                    implied: None,
                 },
             ]
         );
@@ -1022,14 +1187,189 @@ columns = ["title", "rating"]
                     membership: true,
                     view: false,
                     embed: false,
+                    implied: Some(BaseMemberImplication::Fixed {
+                        value: serde_json::json!("BOOK"),
+                    }),
                 },
                 BaseMemberFieldRequirement {
                     field: "status".into(),
                     membership: true,
                     view: true,
                     embed: false,
+                    implied: Some(BaseMemberImplication::Fixed {
+                        value: serde_json::json!("reading"),
+                    }),
                 },
             ]
+        );
+    }
+
+    #[test]
+    fn membership_equality_implies_a_fixed_value() {
+        let base = base(
+            r#"
+name = "Reading"
+[filter]
+all = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "tags", op = "contains", value = "reading" }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        let capability = creation_capabilities(&base).remove(0);
+        let implied: Vec<_> = capability
+            .fields
+            .iter()
+            .map(|field| (field.field.as_str(), field.implied.clone()))
+            .collect();
+        assert_eq!(
+            implied,
+            vec![
+                (
+                    "kind",
+                    Some(BaseMemberImplication::Fixed {
+                        value: serde_json::json!("BOOK")
+                    })
+                ),
+                (
+                    "tags",
+                    Some(BaseMemberImplication::Fixed {
+                        value: serde_json::json!("reading")
+                    })
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_in_predicate_implies_a_choice() {
+        let base = base(
+            r#"
+name = "Queue"
+filter = { field = "status", op = "in", value = ["queued", "reading"] }
+[properties]
+status = { type = "select", options = ["queued", "reading", "finished"] }
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        let capability = creation_capabilities(&base).remove(0);
+        assert_eq!(
+            capability.fields[0].implied,
+            Some(BaseMemberImplication::Choice {
+                values: vec![serde_json::json!("queued"), serde_json::json!("reading")],
+            })
+        );
+    }
+
+    #[test]
+    fn an_any_group_over_one_field_implies_a_choice() {
+        let base = base(
+            r#"
+name = "Either"
+[filter]
+any = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "kind", op = "eq", value = "QUOTE" }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        let capability = creation_capabilities(&base).remove(0);
+        assert_eq!(
+            capability.fields[0].implied,
+            Some(BaseMemberImplication::Choice {
+                values: vec![serde_json::json!("BOOK"), serde_json::json!("QUOTE")],
+            })
+        );
+    }
+
+    #[test]
+    fn a_view_predicate_implies_its_own_value() {
+        let base = base(
+            r#"
+name = "Reading"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+[properties]
+status = { type = "select", options = ["queued", "reading"] }
+[[views]]
+name = "Unread"
+layout = "table"
+filter = { field = "status", op = "eq", value = "reading" }
+"#,
+        );
+
+        let capability = creation_capabilities(&base).remove(0);
+        let status = capability
+            .fields
+            .iter()
+            .find(|field| field.field == "status")
+            .expect("status requirement");
+        assert_eq!(
+            status.implied,
+            Some(BaseMemberImplication::Fixed {
+                value: serde_json::json!("reading")
+            })
+        );
+    }
+
+    #[test]
+    fn predicates_without_a_forced_value_imply_nothing() {
+        let base = base(
+            r#"
+name = "Loose"
+[filter]
+all = [
+  { field = "word_count", op = "gte", value = 1 },
+  { field = "project", op = "not_empty" },
+  { not = { field = "kind", op = "eq", value = "QUOTE" } }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        let capability = creation_capabilities(&base).remove(0);
+        assert!(
+            capability
+                .fields
+                .iter()
+                .all(|field| field.implied.is_none()),
+            "no predicate here forces a value: {:?}",
+            capability.fields
+        );
+    }
+
+    #[test]
+    fn conflicting_implications_for_one_field_force_nothing() {
+        let base = base(
+            r#"
+name = "Impossible"
+[filter]
+all = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "kind", op = "eq", value = "QUOTE" }
+]
+[[views]]
+name = "All"
+layout = "table"
+"#,
+        );
+
+        let capability = creation_capabilities(&base).remove(0);
+        assert_eq!(
+            capability.fields[0].implied, None,
+            "a contradiction must not prefill either value"
         );
     }
 

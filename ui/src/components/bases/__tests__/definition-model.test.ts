@@ -414,3 +414,22 @@ describe("base definition model", () => {
     expect(isValidBaseSlug("")).toBe(false);
   });
 });
+
+describe("title templates", () => {
+  it("round-trips a title template through the draft model", () => {
+    const draft = fromWire({
+      name: "Books",
+      title_template: "{author} — {work}",
+      properties: [],
+      views: [],
+    } as never);
+    expect(draft.titleTemplate).toBe("{author} — {work}");
+    expect(toWire(draft).title_template).toBe("{author} — {work}");
+  });
+
+  it("omits an absent template from the wire form", () => {
+    const draft = fromWire({ name: "Books", properties: [], views: [] } as never);
+    expect(draft.titleTemplate).toBeUndefined();
+    expect(toWire(draft)).not.toHaveProperty("title_template");
+  });
+});

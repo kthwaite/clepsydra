@@ -111,6 +111,145 @@ describe("BaseMemberDraft", () => {
     });
   });
 
+  it("explains a value the Base fixes and one it narrows to a set", () => {
+    render(
+      draftElement({
+        fields: [
+          {
+            key: "kind",
+            kind: "kind",
+            membership: true,
+            viewOnly: false,
+            embedOnly: false,
+            implied: { kind: "fixed", value: "BOOK" },
+          },
+          {
+            key: "status",
+            kind: "property",
+            definition: { type: "select", options: ["queued", "reading"] },
+            membership: true,
+            viewOnly: false,
+            embedOnly: false,
+            implied: { kind: "choice", values: ["queued", "reading"] },
+          },
+        ],
+      }),
+    );
+
+    expect(
+      screen.getByText(/required for base membership\. the base fixes this to BOOK/i),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/required for base membership\. the base allows queued or reading/i),
+    ).toBeVisible();
+  });
+
+  it("offers only the values a choice allows", async () => {
+    const user = userEvent.setup();
+    render(
+      draftElement({
+        fields: [
+          {
+            key: "status",
+            kind: "property",
+            definition: {
+              type: "select",
+              options: ["queued", "reading", "finished"],
+            },
+            membership: true,
+            viewOnly: false,
+            embedOnly: false,
+            implied: { kind: "choice", values: ["queued", "reading"] },
+          },
+        ],
+      }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Status" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: /—.*New member — Status/ }),
+    );
+    expect(
+      (await screen.findAllByRole("option")).map((option) => option.textContent),
+      // The leading em dash is the select's own clear option.
+    ).toEqual(["—", "queued", "reading"]);
+  });
+
+  it("proposes a title from the Base's template until the author writes one", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(
+      draftElement({
+        onSave,
+        titleTemplate: "{author} — {work}",
+        fields: [
+          {
+            key: "title",
+            kind: "title",
+            membership: false,
+            viewOnly: false,
+            embedOnly: false,
+          },
+          {
+            key: "author",
+            kind: "property",
+            definition: { type: "text" },
+            membership: false,
+            viewOnly: false,
+            embedOnly: false,
+          },
+          {
+            key: "work",
+            kind: "property",
+            definition: { type: "text" },
+            membership: false,
+            viewOnly: false,
+            embedOnly: false,
+          },
+        ],
+      }),
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Author" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Author" }),
+      "Le Guin{Enter}",
+    );
+
+    const title = screen.getByRole("textbox", { name: "New member — Title" });
+    expect(title).toHaveValue("Le Guin");
+
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Work" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Work" }),
+      "The Dispossessed{Enter}",
+    );
+    expect(title).toHaveValue("Le Guin — The Dispossessed");
+
+    // Once the author writes a title, the template stops overwriting it.
+    await user.clear(title);
+    await user.type(title, "A better title");
+    await user.click(
+      screen.getByRole("button", { name: "Edit New member — Work" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "New member — Work" }),
+      " (1974){Enter}",
+    );
+    expect(title).toHaveValue("A better title");
+
+    await user.click(screen.getByRole("button", { name: "Save new member" }));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "A better title" }),
+    );
+  });
+
   it("does not offer quotation when choosing a new member kind", async () => {
     const user = userEvent.setup();
     render(draftElement());
