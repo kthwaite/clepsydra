@@ -2,11 +2,21 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createMutate, assignMutate, openTabMock } = vi.hoisted(() => ({
-  createMutate: vi.fn(),
-  assignMutate: vi.fn(),
-  openTabMock: vi.fn(),
-}));
+const { createMutate, assignMutate, openTabMock, basesQuery, intakeProps } =
+  vi.hoisted(() => ({
+    createMutate: vi.fn(),
+    assignMutate: vi.fn(),
+    openTabMock: vi.fn(),
+    basesQuery: {
+      data: {
+        bases: [
+          { slug: "reading", name: "Reading Log" },
+          { slug: "recipes", name: "Recipes" },
+        ],
+      },
+    },
+    intakeProps: vi.fn(),
+  }));
 
 vi.mock("#/api/pages", () => ({
   useCreatePage: () => ({ mutate: createMutate, isPending: false }),
@@ -26,6 +36,15 @@ vi.mock("#/lib/useProjects", () => ({
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
+vi.mock("#/api/bases", () => ({
+  useBases: () => basesQuery,
+}));
+vi.mock("#/components/bases/BaseMemberIntake", () => ({
+  BaseMemberIntake: (props: { slug: string }) => {
+    intakeProps(props);
+    return <div data-testid="member-intake">{props.slug}</div>;
+  },
+}));
 
 import { InscribeModal } from "#/components/codex/InscribeModal";
 import { useUiStore } from "#/store/ui";
@@ -43,6 +62,25 @@ describe("InscribeModal", () => {
       screen.getByRole("combobox", { name: "Project" }),
     ).toBeInTheDocument();
     expect(screen.queryByPlaceholderText("ideas/new-page")).toBeNull();
+  });
+
+  it("hands intake over to the Base member draft when a Base is chosen", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+
+    // Nothing Base-shaped until a Base is picked.
+    expect(screen.queryByTestId("member-intake")).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Title" })).toBeVisible();
+
+    await user.click(screen.getByRole("button", { name: /Base$/ }));
+    await user.click(await screen.findByRole("option", { name: "Reading Log" }));
+
+    expect(screen.getByTestId("member-intake")).toHaveTextContent("reading");
+    // The page-shaped fields step aside; the member draft owns the form.
+    expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
+    expect(intakeProps).toHaveBeenCalledWith(
+      expect.objectContaining({ slug: "reading" }),
+    );
   });
 
   it("does not offer quotation as a creation kind", async () => {

@@ -941,6 +941,20 @@ export const BaseTableView = forwardRef<
           )
         )
       ) : null}
+      {shouldRenderGrid && !readOnly && !memberDraftOpen && onAddMember ? (
+        <Button
+          variant="ghost"
+          // The row reads as "+ Add member…"; its name stays plain for
+          // assistive technology and matches the toolbar action.
+          aria-label={`Add member to ${definition.name}`}
+          className="cl-mono w-full justify-start border border-dashed border-rule px-2 py-1.5 text-[11px] text-ink-mute hover:text-ink"
+          isDisabled={memberAddDisabled}
+          aria-describedby={memberBlocker ? memberBlockerId : undefined}
+          onPress={onAddMember}
+        >
+          + Add member…
+        </Button>
+      ) : null}
     </div>
   );
 });
