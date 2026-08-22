@@ -1,11 +1,21 @@
+import { Trash2 } from "lucide-react";
+import type { ReactNode } from "react";
 import type { PropertyType, SortKey } from "#/api/bases";
 import { Button } from "#/components/ui/button";
+import { IconButton } from "#/components/ui/icon-button";
 import { Select, SelectItem } from "#/components/ui/select";
 import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
 import { canSort, type DraftProperty, moveItem } from "./definition-model";
+import {
+  MoveButtons,
+  ReorderAnnouncement,
+  ReorderHandle,
+  useReorderable,
+  useReorderAnnouncement,
+} from "./ordered-list";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 
 interface FieldCapability {
@@ -45,6 +55,9 @@ interface OrderedSortEditorProps {
   idPrefix: string;
   onChange(value: SortKey[]): void;
   registerFocus: RegisterFocusTarget;
+  /** Supplied when the host already owns a live region, so the two ordered
+   * lists in a view editor do not each announce into their own. */
+  announceMove?(label: string, position: number, count: number): void;
 }
 
 export function OrderedSortEditor({
@@ -55,13 +68,32 @@ export function OrderedSortEditor({
   idPrefix,
   onChange,
   registerFocus,
+  announceMove,
 }: OrderedSortEditorProps) {
   const fields = sortableFieldKeys(properties);
+  const own = useReorderAnnouncement();
+  const announce = announceMove ?? own.announce;
 
   function replace(index: number, sort: SortKey) {
     onChange(
       value.map((current, position) => (position === index ? sort : current)),
     );
+  }
+
+  function move(from: number, to: number) {
+    if (to < 0 || to >= value.length || from === to) return;
+    announce(`sort ${from + 1}`, to + 1, value.length);
+    onChange(moveItem(value, from, to));
+  }
+
+  /** Sort keys have no identity of their own, so the drag payload carries the
+   * row's position. */
+  function dropSort(sourceId: string, targetId: string, edge: string) {
+    const from = Number(sourceId);
+    const target = Number(targetId);
+    if (!Number.isInteger(from) || !Number.isInteger(target)) return;
+    const to = edge === "bottom" && from > target ? target + 1 : target;
+    move(from, from < to ? to - 1 : to);
   }
 
   return (
@@ -78,9 +110,12 @@ export function OrderedSortEditor({
           const sortSupported = fields.includes(sort.field);
           const errorId = `${idPrefix}-sort-field-error-${index}`;
           return (
-            <li
+            <SortRow
               key={index}
-              className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[minmax(0,1fr)_9rem_auto]"
+              index={index}
+              count={value.length}
+              onMove={move}
+              onReorder={dropSort}
             >
               <div>
                 <Select
@@ -139,34 +174,24 @@ export function OrderedSortEditor({
                 <SelectItem id="asc">Ascending</SelectItem>
                 <SelectItem id="desc">Descending</SelectItem>
               </Select>
-              <div className="flex flex-wrap gap-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  isDisabled={index === 0}
-                  onPress={() => onChange(moveItem(value, index, index - 1))}
-                >
-                  Move sort {index + 1} up
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  isDisabled={index === value.length - 1}
-                  onPress={() => onChange(moveItem(value, index, index + 1))}
-                >
-                  Move sort {index + 1} down
-                </Button>
-                <Button
-                  size="sm"
+              <div className="flex flex-wrap justify-end gap-1">
+                <MoveButtons
+                  label={`sort ${index + 1}`}
+                  index={index}
+                  count={value.length}
+                  onMove={move}
+                />
+                <IconButton
+                  aria-label={`Remove sort ${index + 1}`}
                   variant="ghost"
                   onPress={() =>
                     onChange(value.filter((_, position) => position !== index))
                   }
                 >
-                  Remove sort {index + 1}
-                </Button>
+                  <Trash2 />
+                </IconButton>
               </div>
-            </li>
+            </SortRow>
           );
         })}
       </ol>
@@ -180,6 +205,48 @@ export function OrderedSortEditor({
       >
         Add sort
       </Button>
+      {announceMove ? null : <ReorderAnnouncement message={own.announcement} />}
     </>
+  );
+}
+
+/** One sort key row, carrying the shared grip so sorts reorder exactly as
+ * properties and columns do. */
+function SortRow({
+  index,
+  count,
+  onMove,
+  onReorder,
+  children,
+}: {
+  index: number;
+  count: number;
+  onMove(from: number, to: number): void;
+  onReorder(sourceId: string, targetId: string, edge: string): void;
+  children: ReactNode;
+}) {
+  const { rowRef, setHandle, onHandleKeyDown } =
+    useReorderable<HTMLLIElement>({
+      kind: "base-sort",
+      idKey: "sortIndex",
+      id: String(index),
+      index,
+      count,
+      onMove,
+      onReorder,
+    });
+
+  return (
+    <li
+      ref={rowRef}
+      className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[auto_minmax(0,1fr)_9rem_auto]"
+    >
+      <ReorderHandle
+        label={`sort ${index + 1}`}
+        setHandle={setHandle}
+        onKeyDown={onHandleKeyDown}
+      />
+      {children}
+    </li>
   );
 }

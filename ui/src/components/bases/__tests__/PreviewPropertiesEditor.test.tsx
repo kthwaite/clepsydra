@@ -63,6 +63,26 @@ function renderEditor(
 }
 
 describe("PreviewPropertiesEditor", () => {
+  it("reorders preview rows from the shared grip with Alt and an arrow", async () => {
+    const user = userEvent.setup();
+    renderEditor([
+      { id: "preview-status", field: "status", label: "State" },
+      { id: "preview-body", field: "body", label: "Excerpt" },
+    ]);
+
+    const grip = screen.getByRole("button", { name: "Reorder body" });
+    expect(grip).toHaveAttribute(
+      "aria-keyshortcuts",
+      "Alt+ArrowUp Alt+ArrowDown",
+    );
+    grip.focus();
+    await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Moved body to position 1 of 2.",
+    );
+  });
+
   it("offers body once as read-only and disables duplicate canonical choices with reasons", () => {
     renderEditor([
       { id: "preview-system-title", field: "sys.title" },
