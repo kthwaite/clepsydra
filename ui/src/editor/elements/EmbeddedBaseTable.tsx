@@ -1,4 +1,10 @@
-import { forwardRef, useCallback, useEffect, useRef } from "react";
+import {
+  forwardRef,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import type { Path } from "slate";
 import { Transforms } from "slate";
 import { useSlateStatic } from "slate-react";
@@ -12,12 +18,15 @@ import type { ConfiguredBaseEmbedElement } from "#/editor/types";
 interface EmbeddedBaseTableProps {
   element: ConfiguredBaseEmbedElement;
   path: Path;
+  chrome: "full" | "compact";
+  /** Rendered in the table's toolbar, or beside the message that replaces it. */
+  actions?: ReactNode;
 }
 
 export const EmbeddedBaseTable = forwardRef<
   BaseTableViewHandle,
   EmbeddedBaseTableProps
->(function EmbeddedBaseTable({ element, path }, ref) {
+>(function EmbeddedBaseTable({ element, path, chrome, actions }, ref) {
   const editor = useSlateStatic();
   const mounted = useRef(true);
   const pendingSortReset = useRef(0);
@@ -85,19 +94,31 @@ export const EmbeddedBaseTable = forwardRef<
   });
   const { detailLoading, detailMissing, definition, ...viewProps } = controller;
 
+  // The Base cannot be rendered, but the embed still has to be editable and
+  // removable — so the actions travel with the message that replaces it.
+  const withActions = (message: ReactNode) =>
+    actions === undefined ? (
+      message
+    ) : (
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        {message}
+        <span className="flex items-center gap-2">{actions}</span>
+      </div>
+    );
+
   if (detailLoading && !definition) {
-    return (
+    return withActions(
       <p role="status" className="cl-mono p-4 text-[12px] text-ink-mute">
         Loading Base embed…
-      </p>
+      </p>,
     );
   }
   if (detailMissing || !definition) {
-    return (
+    return withActions(
       <p role="alert" className="cl-mono p-4 text-[12px] text-ink-mute">
         No Base named “{element.base}” is available. Edit the embed to choose a
         saved Base and view.
-      </p>
+      </p>,
     );
   }
 
@@ -106,6 +127,8 @@ export const EmbeddedBaseTable = forwardRef<
       ref={ref}
       definition={definition}
       {...viewProps}
+      chrome={chrome}
+      {...(actions === undefined ? {} : { toolbarActions: actions })}
       configureSlug={element.base}
     />
   );

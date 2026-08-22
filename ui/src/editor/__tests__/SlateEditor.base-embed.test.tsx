@@ -99,7 +99,7 @@ vi.mock("#/editor/elements/EmbeddedBaseTable", async () => {
   const React = await import("react");
   return {
     EmbeddedBaseTable: React.forwardRef(function MockEmbeddedBaseTable(
-      _props: Record<string, unknown>,
+      props: Record<string, unknown>,
       ref: React.ForwardedRef<{ focusEntry(): boolean }>,
     ) {
       const entryRef = React.useRef<HTMLButtonElement>(null);
@@ -129,6 +129,8 @@ vi.mock("#/editor/elements/EmbeddedBaseTable", async () => {
             Table entry
           </button>
           <input aria-label="Member title" defaultValue="draft" />
+          {/* Compact embeds hand their Edit and Remove controls to the table. */}
+          {props.actions as React.ReactNode}
         </>
       );
     }),

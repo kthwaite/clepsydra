@@ -115,6 +115,7 @@ vi.mock("#/components/bases/BaseTableView", async () => {
           {props.viewError ? (
             <p role="alert">{String(props.viewError)}</p>
           ) : null}
+          {props.toolbarActions as React.ReactNode}
         </div>
       );
     }),
@@ -128,12 +129,15 @@ const filter: BaseFilter = {
   ],
 };
 
-function configured(): BaseEmbedElement {
+function configured(
+  presentation: { display?: "compact" | "full"; width?: number } = {},
+): BaseEmbedElement {
   return {
     type: "base-embed",
     status: "configured",
     base: "reading",
     view: "All",
+    ...presentation,
     filter,
     sort: [
       { field: "rating", dir: "desc" },
@@ -206,9 +210,12 @@ function Harness({ editor, value }: { editor: Editor; value: Descendant[] }) {
   );
 }
 
-function renderConfigured(model: BaseTableControllerModel = controllerModel()) {
+function renderConfigured(
+  model: BaseTableControllerModel = controllerModel(),
+  presentation: { display?: "compact" | "full"; width?: number } = {},
+) {
   adapterState.model = model;
-  const node = configured();
+  const node = configured(presentation);
   const editor = withReact(withSchema(createEditor()));
   const result = render(<Harness editor={editor} value={[node]} />);
   return { ...result, editor, node };
@@ -218,6 +225,29 @@ beforeEach(() => {
   adapterState.options = null;
   adapterState.tableProps = null;
   adapterState.model = null;
+});
+
+describe("BaseEmbedElement presentation", () => {
+  it("folds its own chrome into the table toolbar by default", () => {
+    renderConfigured();
+
+    expect(screen.queryByText("Base embed")).toBeNull();
+    expect(adapterState.tableProps?.chrome).toBe("compact");
+    // The controls survive the fold: they are the table's toolbar actions now.
+    expect(screen.getByRole("button", { name: "Edit embed" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Remove Base embed" }),
+    ).toBeEnabled();
+  });
+
+  it("keeps its own header when the author asks for the full display", () => {
+    renderConfigured(controllerModel(), { display: "full" });
+
+    expect(screen.getByText("Base embed")).toBeInTheDocument();
+    expect(adapterState.tableProps?.chrome).toBe("full");
+    expect(adapterState.tableProps?.toolbarActions).toBeUndefined();
+    expect(screen.getByRole("button", { name: "Edit embed" })).toBeEnabled();
+  });
 });
 
 describe("BaseEmbedElement Slate rendering contract", () => {
