@@ -20,6 +20,11 @@ import type {
 } from "#/editor/schema/types";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
+import {
+  type BaseEmbedDisplay,
+  EMBED_WIDTH_MAX,
+  EMBED_WIDTH_MIN,
+} from "./embed-presentation";
 import { validateBaseEmbedSemantics } from "./embed-semantic-validation";
 import { asciiCaseFold } from "./local-validation";
 import { MembershipEditor } from "./MembershipEditor";
@@ -32,6 +37,10 @@ interface StructuredDraft {
   sort?: SortKey[];
   limit: number | string;
   persistLimit: boolean;
+  display: BaseEmbedDisplay;
+  persistDisplay: boolean;
+  /** Empty means the embed fills the column it sits in. */
+  width: number | string;
 }
 
 export interface BaseEmbedInspectorProps {
@@ -65,6 +74,9 @@ function draftFromNode(
           : node.sort.map((sort) => ({ ...sort })),
       limit: node.limit ?? 50,
       persistLimit: node.limit !== undefined,
+      display: node.display ?? "compact",
+      persistDisplay: node.display !== undefined,
+      width: node.width ?? "",
     };
   }
   const base = bases[0];
@@ -73,6 +85,9 @@ function draftFromNode(
     view: base?.views[0] ?? "",
     limit: 50,
     persistLimit: false,
+    display: "compact",
+    persistDisplay: false,
+    width: "",
   };
 }
 
@@ -82,6 +97,8 @@ function configuredNode(config: {
   filter?: BaseFilter;
   sort?: SortKey[];
   limit?: number;
+  display?: BaseEmbedDisplay;
+  width?: number;
 }): ConfiguredBaseEmbedElement {
   return {
     type: "base-embed",
@@ -95,6 +112,8 @@ function configuredNode(config: {
       ? {}
       : { sort: config.sort.map((sort) => ({ ...sort })) }),
     ...(config.limit === undefined ? {} : { limit: config.limit }),
+    ...(config.display === undefined ? {} : { display: config.display }),
+    ...(config.width === undefined ? {} : { width: config.width }),
     children: [{ text: "" }],
   };
 }
@@ -193,6 +212,8 @@ export function BaseEmbedInspector({
             typeof draft.limit === "number" ? draft.limit : Number(draft.limit),
         }
       : {}),
+    ...(draft.persistDisplay ? { display: draft.display } : {}),
+    ...(draft.width === "" ? {} : { width: Number(draft.width) }),
   };
   const codecDiagnostics = sourceRepair
     ? parsedSource.config
@@ -245,6 +266,9 @@ export function BaseEmbedInspector({
   );
   const limitDiagnostics = diagnostics.filter(
     (diagnostic) => diagnostic.path === "limit",
+  );
+  const widthDiagnostics = diagnostics.filter(
+    (diagnostic) => diagnostic.path === "width",
   );
   const rootDiagnostics = diagnostics.filter(
     (diagnostic) => diagnostic.path === "$",
@@ -601,6 +625,76 @@ export function BaseEmbedInspector({
               {limitDiagnostics.map((diagnostic) => (
                 <p key={diagnostic.message}>{diagnostic.message}</p>
               ))}
+            </div>
+          </section>
+
+          <section className={sectionClass}>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <Select
+                  id="base-embed-display"
+                  label="Display"
+                  value={draft.display}
+                  aria-describedby="base-embed-display-description"
+                  onChange={(key) => {
+                    if (key == null) return;
+                    setDraft((current) => ({
+                      ...current,
+                      display: key === "full" ? "full" : "compact",
+                      persistDisplay: true,
+                    }));
+                  }}
+                >
+                  <SelectItem id="compact">Compact</SelectItem>
+                  <SelectItem id="full">Full</SelectItem>
+                </Select>
+                <p
+                  id="base-embed-display-description"
+                  className={descriptionClass}
+                >
+                  Compact folds the Base chrome into one toolbar and scrolls
+                  large results in place. Full renders the whole table.
+                </p>
+              </div>
+
+              <div>
+                <label className={labelClass} htmlFor="base-embed-width">
+                  Width
+                </label>
+                <input
+                  id="base-embed-width"
+                  type="number"
+                  min={EMBED_WIDTH_MIN}
+                  max={EMBED_WIDTH_MAX}
+                  step={1}
+                  className={controlClass}
+                  value={draft.width}
+                  aria-invalid={widthDiagnostics.length > 0}
+                  aria-describedby="base-embed-width-description base-embed-width-diagnostics"
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      width: event.target.value,
+                    }))
+                  }
+                />
+                <p
+                  id="base-embed-width-description"
+                  className={descriptionClass}
+                >
+                  Leave empty to fill the column. {EMBED_WIDTH_MIN} through{" "}
+                  {EMBED_WIDTH_MAX} pixels sets a fixed width, which may exceed
+                  the reading column but never the pane.
+                </p>
+                <div
+                  id="base-embed-width-diagnostics"
+                  className="text-xs text-destructive"
+                >
+                  {widthDiagnostics.map((diagnostic) => (
+                    <p key={diagnostic.message}>{diagnostic.message}</p>
+                  ))}
+                </div>
+              </div>
             </div>
           </section>
 

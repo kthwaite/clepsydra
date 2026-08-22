@@ -354,6 +354,12 @@ describe("Base fence recognition and closed TOML shapes", () => {
       "sort item has an unknown key",
       documentBody('sort = [{ field = "f", nulls = "first" }]'),
     ],
+    ["display is unknown", documentBody('display = "tiny"')],
+    ["display is not a string", documentBody("display = true")],
+    ["width is below the minimum", documentBody("width = 479")],
+    ["width is above the maximum", documentBody("width = 1601")],
+    ["width is fractional", documentBody("width = 900.5")],
+    ["width is not numeric", documentBody('width = "900"')],
     ["limit is zero", documentBody("limit = 0")],
     ["limit is over 200", documentBody("limit = 201")],
     ["limit is fractional", documentBody("limit = 1.5")],
@@ -469,6 +475,16 @@ describe("Base embed complexity boundaries", () => {
       accepted: documentBody("limit = 200"),
       rejected: documentBody("limit = 201"),
     },
+    {
+      name: "minimum width",
+      accepted: documentBody("width = 480"),
+      rejected: documentBody("width = 479"),
+    },
+    {
+      name: "maximum width",
+      accepted: documentBody("width = 1600"),
+      rejected: documentBody("width = 1601"),
+    },
   ];
 
   it.each(cases)(
@@ -521,6 +537,55 @@ describe("configured Base embed canonical TOML", () => {
 
     expect(slateToMarkdown([node] as never)).toBe(expected);
     expect(markdownToSlate(expected)).toEqual([node]);
+  });
+
+  it("round-trips presentation keys after the query keys, and only when authored", () => {
+    const authored = lines(
+      "```base",
+      'base = "books"',
+      'view = "Reading"',
+      "limit = 20",
+      'display = "full"',
+      "width = 1100",
+      "```",
+    );
+    const node = {
+      type: "base-embed",
+      status: "configured",
+      base: "books",
+      view: "Reading",
+      limit: 20,
+      display: "full",
+      width: 1100,
+      children: emptyChildren,
+    };
+
+    expect(markdownToSlate(authored)).toEqual([node]);
+    expect(slateToMarkdown([node] as never)).toBe(authored);
+
+    const bare = lines("```base", 'base = "books"', 'view = "Reading"', "```");
+    const bareNode = {
+      type: "base-embed",
+      status: "configured",
+      base: "books",
+      view: "Reading",
+      children: emptyChildren,
+    };
+    expect(markdownToSlate(bare)).toEqual([bareNode]);
+    // A default is never written back: saving must not rewrite what the
+    // author did not touch.
+    expect(slateToMarkdown([bareNode] as never)).toBe(bare);
+  });
+
+  it("keeps an authored compact display rather than dropping it as the default", () => {
+    const authored = lines(
+      "```base",
+      'base = "books"',
+      'view = "Reading"',
+      'display = "compact"',
+      "```",
+    );
+    expect(slateToMarkdown(markdownToSlate(authored) as never)).toBe(authored);
   });
 
   it("encodes DEL as TOML Unicode escapes in every configurable string position", () => {

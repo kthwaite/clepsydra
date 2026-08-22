@@ -5,6 +5,7 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import {
+  type CSSProperties,
   lazy,
   Suspense,
   useCallback,
@@ -12,8 +13,8 @@ import {
   useLayoutEffect,
   useMemo,
   useRef,
-  useSyncExternalStore,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   type Descendant,
@@ -29,9 +30,9 @@ import {
   useSimilar,
   useTagSuggestions,
 } from "#/api/index";
-import type { PageMeta } from "#/api/types";
 import { useJournalEditorOptions, useJournalToday } from "#/api/journal";
 import { type ArchivedPage, useAssignPage } from "#/api/pages";
+import type { PageMeta } from "#/api/types";
 import { AiConversationControls } from "#/components/codex/AiConversationControls";
 import { CLink } from "#/components/codex/CLink";
 import {
@@ -52,9 +53,9 @@ import { LockedFolio } from "#/components/codex/LockedFolio";
 import { MobileFolioLayout } from "#/components/codex/MobileFolioLayout";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { RawMarkdownEditor } from "#/components/codex/RawMarkdownEditor";
+import { ReadingColumnResizer } from "#/components/codex/ReadingColumnResizer";
 import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
-import { ReadingColumnResizer } from "#/components/codex/ReadingColumnResizer";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
@@ -1627,7 +1628,19 @@ function DesktopFolioLayout({
         </aside>
       )}
 
-      <div className="relative min-h-0" ref={column.paneRef}>
+      <div
+        className="relative min-h-0"
+        ref={column.paneRef}
+        // Published for the content: an embed may exceed the reading column,
+        // but the pane is the hard bound.
+        style={
+          column.available > 0
+            ? ({
+                "--folio-pane-w": `${Math.round(column.available)}px`,
+              } as CSSProperties)
+            : undefined
+        }
+      >
         <div
           ref={bodyRef}
           onScroll={onScroll}

@@ -11,6 +11,8 @@ import {
 export interface ReadingColumn {
   /** The width to render, clamped to what the pane can hold. */
   width: number;
+  /** The measured pane width, 0 before the first measurement. */
+  available: number;
   /** Attach to the pane whose width bounds the column. */
   paneRef: (element: HTMLElement | null) => void;
   setWidth(width: number): void;
@@ -67,10 +69,7 @@ export function useReadingColumn(): ReadingColumn {
     }
   }, []);
 
-  const reset = useCallback(
-    () => setWidth(READING_COLUMN_DEFAULT),
-    [setWidth],
-  );
+  const reset = useCallback(() => setWidth(READING_COLUMN_DEFAULT), [setWidth]);
 
   const onDragStart = useCallback(
     (event: { clientX: number; preventDefault(): void }) => {
@@ -103,5 +102,5 @@ export function useReadingColumn(): ReadingColumn {
     };
   }, [dragging, setWidth]);
 
-  return { width, paneRef, setWidth, reset, onDragStart, dragging };
+  return { width, available, paneRef, setWidth, reset, onDragStart, dragging };
 }

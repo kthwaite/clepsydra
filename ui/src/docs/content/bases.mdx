@@ -372,12 +372,28 @@ view = "Currently reading"
 filter = { field = "rating", op = "gte", value = 4 }
 sort = [{ field = "rating", dir = "desc" }]
 limit = 20
+display = "full"
+width = 1100
 ```
 ````
 
-Normal configured embeds are not edited as raw source. Use **Edit embed** and the structured inspector; raw TOML editing appears only when repairing an invalid fence. Saving a valid configuration writes canonical TOML with the keys in `base`, `view`, `filter`, `sort`, `limit` order.
+Normal configured embeds are not edited as raw source. Use **Edit embed** and the structured inspector; raw TOML editing appears only when repairing an invalid fence. Saving a valid configuration writes canonical TOML with the keys in `base`, `view`, `filter`, `sort`, `limit`, `display`, `width` order. `display` and `width` are written only when you set them, so an embed you never resized keeps a fence without them.
 
-An omitted embed limit has an effective default of 50. Explicit limits accept 1 through 200. A flat table applies the limit to its total returned rows; a grouped table applies it to each group while preserving the true group totals and aggregates. The rendered block reports when rows were capped.
+### Compact display
+
+An embed renders compact. The Base name, its view switcher, **Add member**, and the embed's own **Edit embed** and **Remove** share one toolbar, and the rows scroll inside the block rather than pushing the rest of the document down. Set `display = "full"` in the fence, or **Display → Full** in the inspector, to get the older form: the embed's own header above the complete Base table, with every loaded row in the page.
+
+### Large results
+
+A compact embed loads its rows one window at a time. It asks for the next window as you approach the end of the loaded ones, and the status line under the toolbar reports how far it has read: *Showing 150 of 4212 rows; scroll for more*. The count on the right of that line is the authoritative total from the server, not the rows on screen, and grouped views carry the same pair in each group heading — *3 of 90 rows* — with aggregates always computed over the whole group, never the window.
+
+Two things stop a scroll short of the total. An embed's own `limit` is a ceiling on the whole result, not a page size: with `limit = 20` you see twenty rows and the line says the embed's limit stops there. Without a limit the reader can reach the true total, up to a ceiling of 1000 rows in one embed; past that the line asks for a narrower filter, because a document block is not the place to render a whole vault.
+
+A grouped view does not page. Each group renders one bounded window with its real total, and a narrower filter or a flat view is the way to see the rest.
+
+### Width
+
+Drag the splitter on an embed's right edge, or focus it and use the arrow keys, to set the block's width; double-click restores it to filling the reading column. The width is authored content — it goes into the fence as `width`, in pixels from 480 to 1600 — so it travels with the document and one drag makes one undo entry. An embed may exceed the reading column, which is the point of setting one for a wide table, but never the pane: on a narrow window the block shrinks to fit and the stored width is waiting when the window is wide again.
 
 An omitted `sort` inherits the saved view's ordered sort. An explicit `sort = []` removes saved-view sorting without inheriting it. Switching saved views keeps the embed filter and limit but resets sort to inherited for the new view. Changing the Base selects its first view, clears filter and sort, and keeps the limit. Clicking a sortable table header replaces any ordered override with that one column and direction. These Base/view/sort changes update only this Folio block and survive reload.
 

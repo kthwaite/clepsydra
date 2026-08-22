@@ -12,7 +12,7 @@ import {
   type SortKey,
   useBase,
   useBaseView,
-  useBaseViewEvaluation,
+  useBaseViewWindows,
   useCreateBaseMember,
   usePropertyCommit,
   type ViewOverrides,
@@ -23,7 +23,7 @@ import { useProjects } from "#/lib/useProjects";
 import type { CellValue } from "./cells/types";
 import {
   type BaseEmbedConfig,
-  EMBED_DEFAULT_LIMIT,
+  type EmbedScrollCap,
   predicateIdentity,
   queryIdentity,
 } from "./embed-query";
@@ -79,6 +79,17 @@ export interface BaseTableControllerModel {
   onMemberEdit(): void;
   focusCreatedId: string | undefined;
   onCreatedRowFocused(createdId: string): void;
+  /** Windowed loading, for an embedded view that scrolls in place. */
+  rowWindow:
+    | {
+        total: number | undefined;
+        loaded: number;
+        hasMore: boolean;
+        isLoadingMore: boolean;
+        cappedBy: EmbedScrollCap | undefined;
+        loadMore(): void;
+      }
+    | undefined;
 }
 
 type PlacementIdentity =
@@ -187,10 +198,9 @@ export function useBaseTableController(
       view: mode === "embedded" ? activeView : "",
       filter: mode === "embedded" ? filter : undefined,
       sort: mode === "embedded" ? sort : undefined,
-      limit:
-        mode === "embedded"
-          ? (limit ?? EMBED_DEFAULT_LIMIT)
-          : EMBED_DEFAULT_LIMIT,
+      // The author's ceiling, when they set one. Absent means the reader may
+      // scroll to the true total.
+      limit: mode === "embedded" ? limit : undefined,
     }),
     [activeView, filter, limit, mode, slug, sort],
   );
@@ -199,7 +209,7 @@ export function useBaseTableController(
     mode === "standalone" ? activeView : undefined,
     mode === "standalone" ? sortOverride : {},
   );
-  const evaluationQuery = useBaseViewEvaluation(embeddedConfig);
+  const evaluationQuery = useBaseViewWindows(embeddedConfig);
   const commit = usePropertyCommit();
   const { mutateAsync: createMemberAsync } = useCreateBaseMember();
   const projects = useProjects();
@@ -748,5 +758,16 @@ export function useBaseTableController(
     onMemberEdit: handleMemberEdit,
     focusCreatedId,
     onCreatedRowFocused: handleCreatedRowFocused,
+    rowWindow:
+      mode === "embedded"
+        ? {
+            total: evaluationQuery.total,
+            loaded: evaluationQuery.loaded,
+            hasMore: evaluationQuery.hasMore,
+            isLoadingMore: evaluationQuery.isLoadingMore,
+            cappedBy: evaluationQuery.cappedBy,
+            loadMore: evaluationQuery.loadMore,
+          }
+        : undefined,
   };
 }

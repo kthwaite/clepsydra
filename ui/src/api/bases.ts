@@ -1,16 +1,17 @@
 import {
   type QueryClient,
-  queryOptions,
-  type UseQueryResult,
-  useQuery,
+  useInfiniteQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { toast } from "sonner";
 import type { components } from "#/api/schema";
 import {
   type BaseEmbedConfig,
   baseViewEvaluationBody,
+  type EmbedScrollCap,
+  embedScrollCap,
+  nextWindowSize,
   queryIdentity,
 } from "#/components/bases/embed-query";
 import { $api, fetchClient } from "./client";
@@ -50,8 +51,7 @@ export type PageBaseProperty = components["schemas"]["PageBaseProperty"];
 export type PagePreviewField = components["schemas"]["PagePreviewField"];
 export type PagePreviewProjection =
   components["schemas"]["PagePreviewProjection"];
-export type PagePropertyBlocker =
-  components["schemas"]["PagePropertyBlocker"];
+export type PagePropertyBlocker = components["schemas"]["PagePropertyBlocker"];
 export type PagePropertyCompatibility =
   components["schemas"]["PagePropertyCompatibility"];
 export type PagePropertyDeclaration =
@@ -131,7 +131,9 @@ export function invalidateBaseMutationQueries(queryClient: QueryClient): void {
   invalidateByPath(queryClient, queryKeys.pages.pathPrefix);
 }
 
-function invalidatePropertyCommitFailureQueries(queryClient: QueryClient): void {
+function invalidatePropertyCommitFailureQueries(
+  queryClient: QueryClient,
+): void {
   invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
   invalidateByPath(queryClient, queryKeys.query.pathPrefix);
   queryClient.invalidateQueries({
@@ -229,43 +231,161 @@ export function useBaseView(
   );
 }
 
-export function baseViewEvaluationOptions(config: BaseEmbedConfig) {
-  return queryOptions<
-    BaseViewEvaluateResponse,
-    ApiError,
-    BaseViewEvaluateResponse,
-    BaseEvaluationQueryKey
-  >({
-    queryKey: queryKeys.bases.evaluation(queryIdentity(config)),
-    queryFn: async (): Promise<BaseViewEvaluateResponse> => {
-      const { data, error } = await fetchClient.POST(
-        "/api/vault/bases/{slug}/views/{view}/evaluate",
-        {
-          params: { path: { slug: config.base, view: config.view } },
-          body: baseViewEvaluationBody(config),
-        },
-      );
-      if (error) throw error;
-      if (!data) {
-        throw {
-          status: 500,
-          error: "Embedded Base evaluation response was empty",
-          hint: null,
-        } satisfies ApiError;
-      }
-      return data;
+async function evaluateWindow(
+  config: BaseEmbedConfig,
+  window: { limit: number; offset: number },
+  signal: AbortSignal | undefined,
+): Promise<BaseViewEvaluateResponse> {
+  const { data, error } = await fetchClient.POST(
+    "/api/vault/bases/{slug}/views/{view}/evaluate",
+    {
+      params: { path: { slug: config.base, view: config.view } },
+      body: baseViewEvaluationBody(config, window),
+      ...(signal === undefined ? {} : { signal }),
     },
-  });
+  );
+  if (error) throw error;
+  if (!data) {
+    throw {
+      status: 500,
+      error: "Embedded Base evaluation response was empty",
+      hint: null,
+    } satisfies ApiError;
+  }
+  return data;
 }
 
-export function useBaseViewEvaluation(
-  config: BaseEmbedConfig,
-): UseQueryResult<BaseViewEvaluateResponse, ApiError> {
-  return useQuery({
-    ...baseViewEvaluationOptions(config),
+function rowsIn(output: QueryOutput): number {
+  return output.shape === "flat"
+    ? output.rows.length
+    : output.groups.reduce((sum, group) => sum + group.rows.length, 0);
+}
+
+function totalIn(output: QueryOutput): number {
+  return output.shape === "flat"
+    ? output.total
+    : output.groups.reduce((sum, group) => sum + group.total, 0);
+}
+
+/** One response out of the windows loaded so far.
+ *
+ * Rows are deduplicated by id: a page inserted above the window while the
+ * reader scrolls slides a row into the next window, and a grid cannot render
+ * the same row twice. The freshest window owns the total and the revision. */
+function mergeWindows(
+  pages: BaseViewEvaluateResponse[],
+): BaseViewEvaluateResponse | undefined {
+  const newest = pages.at(-1);
+  if (!newest) return undefined;
+  if (newest.output.shape !== "flat") return pages[0];
+
+  const seen = new Set<string>();
+  const rows: QueryRow[] = [];
+  for (const page of pages) {
+    if (page.output.shape !== "flat") continue;
+    for (const row of page.output.rows) {
+      if (seen.has(row.id)) continue;
+      seen.add(row.id);
+      rows.push(row);
+    }
+  }
+  return {
+    ...newest,
+    output: { shape: "flat", rows, total: newest.output.total },
+  };
+}
+
+export interface BaseViewWindows {
+  data: BaseViewEvaluateResponse | undefined;
+  error: ApiError | null;
+  isLoading: boolean;
+  isFetching: boolean;
+  refetch(): Promise<{
+    data: BaseViewEvaluateResponse | undefined;
+    error: ApiError | null;
+  }>;
+  /** The authoritative row count behind the windows, not the rows rendered. */
+  total: number | undefined;
+  loaded: number;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  /** Which bound ended the scroll short of the total, if either did. */
+  cappedBy: EmbedScrollCap | undefined;
+  loadMore(): void;
+}
+
+/** An embedded view, loaded one window at a time.
+ *
+ * An embed is never uncapped: it asks for a window, and asks again as the
+ * reader approaches the end of what it has. A grouped view is served whole
+ * within its per-group windows and never pages — one flat offset has no
+ * meaning across groups. */
+export function useBaseViewWindows(config: BaseEmbedConfig): BaseViewWindows {
+  const cap = config.limit;
+  const query = useInfiniteQuery<
+    BaseViewEvaluateResponse,
+    ApiError,
+    { pages: BaseViewEvaluateResponse[] },
+    BaseEvaluationQueryKey,
+    number
+  >({
+    queryKey: queryKeys.bases.evaluation(queryIdentity(config)),
     enabled: !!config.base && !!config.view,
     throwOnError: false,
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      evaluateWindow(
+        config,
+        {
+          limit: Math.max(1, nextWindowSize(cap, pageParam)),
+          offset: pageParam,
+        },
+        signal,
+      ),
+    getNextPageParam: (last, pages) => {
+      if (last.output.shape !== "flat") return undefined;
+      const loaded = pages.reduce((sum, page) => sum + rowsIn(page.output), 0);
+      if (loaded >= last.output.total) return undefined;
+      if (nextWindowSize(cap, loaded) === 0) return undefined;
+      return loaded;
+    },
   });
+
+  const pages = query.data?.pages;
+  const merged = useMemo(
+    () => (pages ? mergeWindows(pages) : undefined),
+    [pages],
+  );
+  const refetch = useCallback(async () => {
+    const result = await query.refetch();
+    return {
+      data: result.data ? mergeWindows(result.data.pages) : undefined,
+      error: (result.error ?? null) as ApiError | null,
+    };
+  }, [query.refetch]);
+  const { fetchNextPage } = query;
+  const loadMore = useCallback(() => {
+    void fetchNextPage();
+  }, [fetchNextPage]);
+
+  const loaded = merged ? rowsIn(merged.output) : 0;
+  const total = merged ? totalIn(merged.output) : undefined;
+  return {
+    data: merged,
+    error: query.error,
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    refetch,
+    total,
+    loaded,
+    hasMore: query.hasNextPage,
+    isLoadingMore: query.isFetchingNextPage,
+    cappedBy:
+      !query.hasNextPage && total !== undefined && loaded < total
+        ? embedScrollCap(cap, loaded)
+        : undefined,
+    loadMore,
+  };
 }
 
 /**

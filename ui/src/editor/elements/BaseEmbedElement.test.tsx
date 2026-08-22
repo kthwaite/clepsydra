@@ -115,6 +115,7 @@ vi.mock("#/components/bases/BaseTableView", async () => {
           {props.viewError ? (
             <p role="alert">{String(props.viewError)}</p>
           ) : null}
+          {props.toolbarActions as React.ReactNode}
         </div>
       );
     }),
@@ -128,12 +129,15 @@ const filter: BaseFilter = {
   ],
 };
 
-function configured(): BaseEmbedElement {
+function configured(
+  presentation: { display?: "compact" | "full"; width?: number } = {},
+): BaseEmbedElement {
   return {
     type: "base-embed",
     status: "configured",
     base: "reading",
     view: "All",
+    ...presentation,
     filter,
     sort: [
       { field: "rating", dir: "desc" },
@@ -191,6 +195,14 @@ function controllerModel(
     onMemberEdit: vi.fn(),
     focusCreatedId: undefined,
     onCreatedRowFocused: vi.fn(),
+    rowWindow: {
+      total: 0,
+      loaded: 0,
+      hasMore: false,
+      isLoadingMore: false,
+      cappedBy: undefined,
+      loadMore: vi.fn(),
+    },
     ...overrides,
   };
 }
@@ -206,9 +218,12 @@ function Harness({ editor, value }: { editor: Editor; value: Descendant[] }) {
   );
 }
 
-function renderConfigured(model: BaseTableControllerModel = controllerModel()) {
+function renderConfigured(
+  model: BaseTableControllerModel = controllerModel(),
+  presentation: { display?: "compact" | "full"; width?: number } = {},
+) {
   adapterState.model = model;
-  const node = configured();
+  const node = configured(presentation);
   const editor = withReact(withSchema(createEditor()));
   const result = render(<Harness editor={editor} value={[node]} />);
   return { ...result, editor, node };
@@ -218,6 +233,116 @@ beforeEach(() => {
   adapterState.options = null;
   adapterState.tableProps = null;
   adapterState.model = null;
+});
+
+describe("BaseEmbedElement presentation", () => {
+  it("folds its own chrome into the table toolbar by default", () => {
+    renderConfigured();
+
+    expect(screen.queryByText("Base embed")).toBeNull();
+    expect(adapterState.tableProps?.chrome).toBe("compact");
+    // The controls survive the fold: they are the table's toolbar actions now.
+    expect(screen.getByRole("button", { name: "Edit embed" })).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Remove Base embed" }),
+    ).toBeEnabled();
+  });
+
+  it("keeps its own header when the author asks for the full display", () => {
+    renderConfigured(controllerModel(), { display: "full" });
+
+    expect(screen.getByText("Base embed")).toBeInTheDocument();
+    expect(adapterState.tableProps?.chrome).toBe("full");
+    expect(adapterState.tableProps?.toolbarActions).toBeUndefined();
+    expect(screen.getByRole("button", { name: "Edit embed" })).toBeEnabled();
+  });
+});
+
+describe("BaseEmbedElement width", () => {
+  function embedNode(editor: Editor) {
+    const node = editor.children[0];
+    expect(SlateElement.isElement(node)).toBe(true);
+    return node as unknown as Record<string, unknown>;
+  }
+
+  it("reports the authored width on its splitter", () => {
+    renderConfigured(controllerModel(), { width: 1100 });
+
+    const splitter = screen.getByRole("separator", {
+      name: "Resize this Base embed",
+    });
+    expect(splitter).toHaveAttribute("aria-valuenow", "1100");
+    expect(splitter).toHaveAttribute("aria-valuetext", "1100 pixels");
+  });
+
+  it("writes a width to the node by keyboard, clamped to the range", () => {
+    const { editor } = renderConfigured(controllerModel(), { width: 1560 });
+    const splitter = screen.getByRole("separator", {
+      name: "Resize this Base embed",
+    });
+
+    splitter.focus();
+    fireEvent.keyDown(splitter, { key: "ArrowRight" });
+    expect(embedNode(editor).width).toBe(1600);
+
+    fireEvent.keyDown(splitter, { key: "ArrowRight" });
+    expect(embedNode(editor).width).toBe(1600);
+
+    fireEvent.keyDown(splitter, { key: "Home" });
+    expect(embedNode(editor).width).toBe(480);
+  });
+
+  it("reports where it sits when the pane has clamped the authored width", () => {
+    // jsdom measures nothing, so stand in for the pane's clamp directly.
+    const observers: Array<(entries: unknown[]) => void> = [];
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(callback: (entries: unknown[]) => void) {
+          observers.push(callback);
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+    renderConfigured(controllerModel(), { width: 1300 });
+
+    act(() => {
+      for (const notify of observers) notify([{ contentRect: { width: 900 } }]);
+    });
+    expect(
+      screen.getByRole("separator", { name: "Resize this Base embed" }),
+    ).toHaveAttribute("aria-valuenow", "900");
+    vi.unstubAllGlobals();
+  });
+
+  it("restores filling the column on double click", () => {
+    const { editor } = renderConfigured(controllerModel(), { width: 1100 });
+
+    fireEvent.doubleClick(
+      screen.getByRole("separator", { name: "Resize this Base embed" }),
+    );
+    expect(embedNode(editor)).not.toHaveProperty("width");
+  });
+
+  it("leaves an unconfigured embed without a splitter", () => {
+    adapterState.model = controllerModel();
+    const editor = withReact(withSchema(createEditor()));
+    render(
+      <Harness
+        editor={editor}
+        value={[
+          {
+            type: "base-embed",
+            status: "unconfigured",
+            children: [{ text: "" }],
+          } as BaseEmbedElement,
+        ]}
+      />,
+    );
+
+    expect(screen.queryByRole("separator")).toBeNull();
+  });
 });
 
 describe("BaseEmbedElement Slate rendering contract", () => {

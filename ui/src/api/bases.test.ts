@@ -9,12 +9,11 @@ import {
   type BaseMemberDiagnostic,
   type BaseViewEvaluateRequest,
   type BaseViewEvaluateResponse,
-  type PageBasePropertiesResponse,
-  type PageBaseProperty,
-  baseViewEvaluationOptions,
   decodeBaseMemberDiagnostics,
   invalidateBaseMutationQueries,
-  useBaseViewEvaluation,
+  type PageBasePropertiesResponse,
+  type PageBaseProperty,
+  useBaseViewWindows,
   useCreateBaseMember,
   usePageBaseProperties,
   usePropertyCommit,
@@ -154,7 +153,7 @@ describe("Base member API", () => {
     expect(diagnostic.scope).toBe("embed");
     expect(evaluationResponse.member_creation).toBe(capability);
     expect(typeof useCreateBaseMember).toBe("function");
-    expect(typeof useBaseViewEvaluation).toBe("function");
+    expect(typeof useBaseViewWindows).toBe("function");
   });
 
   it("preserves generated evaluation ApiError values unchanged", async () => {
@@ -183,17 +182,20 @@ describe("Base member API", () => {
       },
     ] satisfies ApiError[];
     const post = vi.spyOn(fetchClient, "POST");
-    const options = baseViewEvaluationOptions({
+    const config: BaseEmbedConfig = {
       base: "books",
       view: "Reading",
       filter: { field: "rating", op: "contains", value: "4" },
-    });
-    const evaluate =
-      options.queryFn as unknown as () => Promise<BaseViewEvaluateResponse>;
+    };
 
     for (const wireError of errors) {
       post.mockResolvedValueOnce({ error: wireError } as never);
-      const thrown = await evaluate().catch((error: unknown) => error);
+      const queryClient = freshQueryClient();
+      const { result } = renderHook(() => useBaseViewWindows(config), {
+        wrapper: wrapper(queryClient),
+      });
+      await waitFor(() => expect(result.current.error).not.toBeNull());
+      const thrown = result.current.error;
       expect(thrown).toBe(wireError);
       expect(thrown).toMatchObject({
         status: wireError.status,
@@ -278,7 +280,7 @@ describe("Base member API", () => {
     ).toEqual([]);
   });
 
-  it("builds distinct normalized POST keys for distinct evaluations", () => {
+  it("builds distinct normalized POST keys for distinct evaluations", async () => {
     const first: BaseEmbedConfig = {
       base: "books",
       view: "Reading",
@@ -288,27 +290,38 @@ describe("Base member API", () => {
       ...first,
       filter: { field: "status", op: "eq", value: "finished" },
     };
-    const firstOptions = baseViewEvaluationOptions(first);
-    const secondOptions = baseViewEvaluationOptions(second);
-    const queryClient = new QueryClient();
-
-    expect(firstOptions.queryKey).toEqual([
+    const firstKey = [
       "post",
       "/api/vault/bases/{slug}/views/{view}/evaluate",
       queryIdentity(first),
-    ]);
-    expect(secondOptions.queryKey).not.toEqual(firstOptions.queryKey);
-    queryClient.setQueryData(firstOptions.queryKey, {
-      revision: "rev-1",
-      member_creation: {
-        view: "Reading",
-        enabled: true,
-        blockers: [],
-        fields: [],
+    ] as const;
+    const secondKey = [
+      "post",
+      "/api/vault/bases/{slug}/views/{view}/evaluate",
+      queryIdentity(second),
+    ] as const;
+    expect(secondKey).not.toEqual(firstKey);
+
+    vi.spyOn(fetchClient, "POST").mockResolvedValue({
+      data: {
+        revision: "rev-1",
+        member_creation: {
+          view: "Reading",
+          enabled: true,
+          blockers: [],
+          fields: [],
+        },
+        output: { shape: "flat", rows: [], total: 0 },
       },
-      output: { shape: "flat", rows: [], total: 0 },
+    } as never);
+    const queryClient = freshQueryClient();
+    const { result } = renderHook(() => useBaseViewWindows(first), {
+      wrapper: wrapper(queryClient),
     });
-    expect(queryClient.getQueryData(secondOptions.queryKey)).toBeUndefined();
+
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(queryClient.getQueryData(firstKey)).toBeDefined();
+    expect(queryClient.getQueryData(secondKey)).toBeUndefined();
   });
 
   it("member creation success invalidates every shared mutation cache", async () => {
@@ -377,10 +390,9 @@ describe("Base member API", () => {
       response: new Response(null, { status: 200 }),
     } as never);
 
-    const { result } = renderHook(
-      () => usePageBaseProperties("page-alpha"),
-      { wrapper: wrapper(queryClient) },
-    );
+    const { result } = renderHook(() => usePageBaseProperties("page-alpha"), {
+      wrapper: wrapper(queryClient),
+    });
 
     await waitFor(() => expect(result.current.data).toEqual(response));
     expect(get).toHaveBeenCalledWith(
@@ -424,21 +436,17 @@ describe("Base member API", () => {
     expect(result.current.empty.fetchStatus).toBe("idle");
     expect(get).toHaveBeenCalledTimes(1);
     expect(
-      queryClient
-        .getQueryCache()
-        .findAll({
-          predicate: (query) =>
-            query.queryKey[1] ===
-              "/api/vault/pages/by-id/{uuid}/properties" &&
-            (
-              query.queryKey[2] as
-                | { params?: { path?: { uuid?: string } } }
-                | undefined
-            )?.params?.path?.uuid === "page-alpha",
-        }),
+      queryClient.getQueryCache().findAll({
+        predicate: (query) =>
+          query.queryKey[1] === "/api/vault/pages/by-id/{uuid}/properties" &&
+          (
+            query.queryKey[2] as
+              | { params?: { path?: { uuid?: string } } }
+              | undefined
+          )?.params?.path?.uuid === "page-alpha",
+      }),
     ).toHaveLength(1);
   });
-
 
   it("bounds automatic property projection retries before returning an error", async () => {
     const queryClient = freshQueryClient();
@@ -449,15 +457,13 @@ describe("Base member API", () => {
       },
     } as never);
 
-    const { result } = renderHook(
-      () => usePageBaseProperties("page-alpha"),
-      { wrapper: wrapper(queryClient) },
-    );
+    const { result } = renderHook(() => usePageBaseProperties("page-alpha"), {
+      wrapper: wrapper(queryClient),
+    });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(get).toHaveBeenCalledTimes(3);
   });
-
 
   it("property mutation success invalidates every shared mutation cache", async () => {
     const queryClient = freshQueryClient();
@@ -519,13 +525,7 @@ describe("Base member API", () => {
     };
 
     await expect(
-      result.current(
-        page,
-        "started",
-        "2026-08-12",
-        "date",
-        "page-rev-7",
-      ),
+      result.current(page, "started", "2026-08-12", "date", "page-rev-7"),
     ).rejects.toBe(conflict);
     expect(get).not.toHaveBeenCalled();
     expect(patch).toHaveBeenCalledWith(
@@ -648,7 +648,6 @@ describe("Base member API", () => {
       ).toBe(true);
     }
   });
-
 
   it("invalidates Base, query, and page caches without invalidating other scopes", () => {
     const queryClient = new QueryClient();

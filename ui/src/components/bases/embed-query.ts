@@ -9,8 +9,6 @@ export interface BaseEmbedConfig {
   limit?: number;
 }
 
-export const EMBED_DEFAULT_LIMIT = 50;
-
 export type NormalizedEmbedSort =
   | { mode: "inherited" }
   | { mode: "explicit"; value: SortKey[] };
@@ -20,7 +18,8 @@ export interface NormalizedEmbedConfig {
   view: string;
   filter?: BaseFilter;
   sort: NormalizedEmbedSort;
-  limit: number;
+  /** The author's ceiling on the whole result; absent means the true total. */
+  limit: number | undefined;
 }
 
 function canonicalize(value: unknown): unknown {
@@ -55,7 +54,7 @@ export function normalizeEmbedConfiguration(
       config.sort === undefined
         ? { mode: "inherited" }
         : { mode: "explicit", value: canonicalSort(config.sort) },
-    limit: config.limit ?? EMBED_DEFAULT_LIMIT,
+    limit: config.limit,
   };
 }
 
@@ -80,12 +79,15 @@ export function queryIdentity(config: BaseEmbedConfig): string {
   return JSON.stringify({
     predicate: predicateIdentity(config),
     sort: normalized.sort,
-    limit: normalized.limit,
+    // `null` is "no author cap", which scrolls to the true total — a
+    // different result from a cap that happens to equal one window.
+    limit: normalized.limit ?? null,
   });
 }
 
 export function baseViewEvaluationBody(
   config: BaseEmbedConfig,
+  window: { limit: number; offset: number },
 ): BaseViewEvaluateRequest {
   const normalized = normalizeEmbedConfiguration(config);
   return {
@@ -93,6 +95,41 @@ export function baseViewEvaluationBody(
     ...(normalized.sort.mode === "inherited"
       ? {}
       : { sort: normalized.sort.value }),
-    limit: normalized.limit,
+    limit: window.limit,
+    offset: window.offset,
   };
+}
+
+/** Rows fetched per scroll window. The author's `limit`, when set, is a hard
+ * ceiling on the whole result; this is only how much of it arrives at once. */
+export const EMBED_WINDOW_ROWS = 50;
+
+/** The most rows one embed will hold at once.
+ *
+ * The scroller keeps every loaded row in the document, so something has to
+ * bound it: past this many rows a filter is the answer, not more scrolling. */
+export const EMBED_SCROLL_CEILING = 1000;
+
+/** Why a scroll stopped short of the total, if it did. */
+export type EmbedScrollCap = "author" | "ceiling";
+
+/** How large the next request may be: a full window, unless the author's cap
+ * or the ceiling is nearer. Zero means there is nothing left to ask for. */
+export function nextWindowSize(
+  cap: number | undefined,
+  loaded: number,
+): number {
+  const ceiling = Math.max(0, EMBED_SCROLL_CEILING - loaded);
+  const allowed = cap === undefined ? ceiling : Math.min(ceiling, cap - loaded);
+  return Math.max(0, Math.min(EMBED_WINDOW_ROWS, allowed));
+}
+
+/** Which bound ended the scroll, when the reader has not reached the total. */
+export function embedScrollCap(
+  cap: number | undefined,
+  loaded: number,
+): EmbedScrollCap | undefined {
+  if (nextWindowSize(cap, loaded) > 0) return undefined;
+  if (cap !== undefined && loaded >= cap) return "author";
+  return "ceiling";
 }

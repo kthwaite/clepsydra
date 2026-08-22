@@ -255,6 +255,12 @@ layout = "table"
 group_by = "status"
 aggregates = [ { fn = "count" }, { fn = "sum", field = "rating" } ]
 columns = ["title", "rating"]
+
+[[views]]
+name = "Flat"
+layout = "table"
+columns = ["title", "rating"]
+sort = [ { field = "rating", dir = "asc" } ]
 "#,
     )
     .unwrap();
@@ -1081,7 +1087,7 @@ async fn evaluate_embedded_sort_inheritance_empty_reset_and_replacement_are_exac
 }
 
 #[tokio::test]
-async fn evaluate_embedded_grouped_limit_is_per_group_and_absence_is_uncapped() {
+async fn evaluate_embedded_grouped_limit_is_per_group_and_absence_is_the_default_window() {
     let fixture = ApiFixture::builder()
         .pre_index_seed(seed_grouped_limit_base)
         .build();
@@ -1089,7 +1095,7 @@ async fn evaluate_embedded_grouped_limit_is_per_group_and_absence_is_uncapped() 
     for (request, expected_rows, expected_total, expected_aggregates) in [
         (
             serde_json::json!({}),
-            55,
+            50,
             55,
             serde_json::json!([55, 1540.0]),
         ),
@@ -1131,6 +1137,101 @@ async fn evaluate_embedded_grouped_limit_is_per_group_and_absence_is_uncapped() 
         assert_eq!(groups[0]["total"], expected_total);
         assert_eq!(groups[0]["aggregates"], expected_aggregates);
     }
+}
+
+#[tokio::test]
+async fn evaluate_embedded_flat_without_a_limit_serves_one_window_of_the_true_total() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_grouped_limit_base)
+        .build();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/grouped/views/flat/evaluate")
+        .json(&serde_json::json!({}))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(
+        body["output"]["rows"].as_array().unwrap().len(),
+        50,
+        "{body}"
+    );
+    assert_eq!(body["output"]["total"], 55);
+}
+
+#[tokio::test]
+async fn evaluate_embedded_flat_offset_walks_the_result_without_repeating_rows() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_grouped_limit_base)
+        .build();
+
+    let mut seen: Vec<String> = Vec::new();
+    for offset in [0, 20, 40] {
+        let response = fixture
+            .server
+            .post("/api/vault/bases/grouped/views/flat/evaluate")
+            .json(&serde_json::json!({ "limit": 20, "offset": offset }))
+            .await;
+        response.assert_status_ok();
+        let body: serde_json::Value = response.json();
+        assert_eq!(body["output"]["total"], 55, "{body}");
+        let rows = body["output"]["rows"].as_array().unwrap();
+        assert_eq!(rows.len(), if offset == 40 { 15 } else { 20 }, "{body}");
+        seen.extend(
+            rows.iter()
+                .map(|row| row["id"].as_str().unwrap().to_owned()),
+        );
+    }
+
+    let mut unique = seen.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(unique.len(), 55, "windows overlapped: {seen:?}");
+}
+
+#[tokio::test]
+async fn evaluate_embedded_offset_past_the_end_is_an_empty_window() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_grouped_limit_base)
+        .build();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/grouped/views/flat/evaluate")
+        .json(&serde_json::json!({ "limit": 20, "offset": 500 }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert!(
+        body["output"]["rows"].as_array().unwrap().is_empty(),
+        "{body}"
+    );
+    assert_eq!(body["output"]["total"], 55);
+}
+
+#[tokio::test]
+async fn evaluate_embedded_rejects_an_offset_on_a_grouped_view() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(seed_grouped_limit_base)
+        .build();
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/grouped/views/by%20status/evaluate")
+        .json(&serde_json::json!({ "limit": 10, "offset": 10 }))
+        .await;
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["detail"]["code"], "invalid_embed_query");
+    assert_eq!(body["detail"]["diagnostics"][0]["field"], "offset");
+    assert_eq!(
+        body["detail"]["diagnostics"][0]["message"],
+        "offset is not supported for a grouped view"
+    );
 }
 
 #[tokio::test]

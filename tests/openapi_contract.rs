@@ -238,7 +238,7 @@ fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
             .unwrap()
             .keys()
             .collect::<Vec<_>>(),
-        vec!["filter", "limit", "sort"]
+        vec!["filter", "limit", "offset", "sort"]
     );
     assert_eq!(
         request["properties"]["filter"]["oneOf"],
@@ -263,6 +263,13 @@ fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
     assert_eq!(request["properties"]["limit"]["format"], "int32");
     assert_eq!(request["properties"]["limit"]["minimum"], 1);
     assert_eq!(request["properties"]["limit"]["maximum"], 200);
+    // The row window: flat views walk a large result with this.
+    assert_eq!(
+        request["properties"]["offset"]["type"],
+        serde_json::json!(["integer", "null"])
+    );
+    assert_eq!(request["properties"]["offset"]["format"], "int32");
+    assert_eq!(request["properties"]["offset"]["minimum"], 0);
     assert!(request.get("required").is_none());
 
     let response = &schemas["BaseViewEvaluateResponse"];

@@ -1,14 +1,27 @@
 import {
   type KeyboardEvent,
   useCallback,
+  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
+  useState,
 } from "react";
+import { Element as SlateElement, Transforms } from "slate";
 import type { RenderElementProps } from "slate-react";
 import { ReactEditor, useSelected, useSlateStatic } from "slate-react";
 import { BaseEmbedInspector } from "#/components/bases/BaseEmbedInspector";
 import type { BaseTableViewHandle } from "#/components/bases/BaseTableView";
+import {
+  clampEmbedWidth,
+  EMBED_WIDTH_FALLBACK,
+  EMBED_WIDTH_MAX,
+  EMBED_WIDTH_MIN,
+  EMBED_WIDTH_STEP,
+  embedIsCompact,
+  embedWidthStyle,
+} from "#/components/bases/embed-presentation";
+import { useWidthDrag, WidthResizer } from "#/components/ui/width-resizer";
 import { useBaseEmbedEditing } from "#/editor/baseEmbedEditing";
 import type { BaseEmbedElement as BaseEmbedNode } from "#/editor/types";
 import { EmbeddedBaseTable } from "./EmbeddedBaseTable";
@@ -99,15 +112,117 @@ export function BaseEmbedElement({
     exit(path, "after");
   };
 
+  // Compact embeds have no header of their own: the same two controls move
+  // into the table's toolbar, keeping one set of refs for entry focus.
+  const compact = element.status === "configured" && embedIsCompact(element);
+  const authoredWidth =
+    element.status === "configured" ? element.width : undefined;
+  const setWidth = useCallback(
+    (width: number | undefined) => {
+      Transforms.setNodes(
+        editor,
+        { width: width === undefined ? undefined : clampEmbedWidth(width) },
+        {
+          at: path,
+          // Matched by type, not identity: successive resizes must not depend
+          // on this closure still holding the node the last one replaced.
+          match: (node) =>
+            SlateElement.isElement(node) && node.type === "base-embed",
+          voids: true,
+        },
+      );
+    },
+    [editor, path],
+  );
+  // While dragging, the width is only a preview: one undo entry per animation
+  // frame would bury the edit that put the embed there.
+  const [previewWidth, setPreviewWidth] = useState<number | undefined>(
+    undefined,
+  );
+  const [measuredWidth, setMeasuredWidth] = useState(0);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = bodyRef.current;
+    if (!node || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      // The embed's own box, not the body inside its border: the splitter
+      // reports the edge the reader is dragging.
+      const box = node.parentElement?.getBoundingClientRect().width;
+      setMeasuredWidth(box && box > 0 ? box : entry.contentRect.width);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  // The splitter reports where it actually sits, so one arrow press always
+  // moves the edge: an authored width the pane has clamped would otherwise
+  // take several presses to have any visible effect. Only a real measurement
+  // clamps it — the fallback is a guess and must not override the author.
+  const measured = measuredWidth > 0 ? measuredWidth : undefined;
+  const resizerWidth = clampEmbedWidth(
+    previewWidth ??
+      (authoredWidth === undefined
+        ? (measured ?? EMBED_WIDTH_FALLBACK)
+        : Math.min(authoredWidth, measured ?? authoredWidth)),
+  );
+  const widthDrag = useWidthDrag({
+    width: resizerWidth,
+    onPreview: setPreviewWidth,
+    onCommit: (width) => {
+      setPreviewWidth(undefined);
+      setWidth(width);
+    },
+  });
+  const actions = (
+    <>
+      <button
+        ref={editRef}
+        type="button"
+        className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        onClick={openInspector}
+      >
+        Edit embed
+      </button>
+      <button
+        ref={removeRef}
+        type="button"
+        aria-label="Remove Base embed"
+        className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-destructive hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+        onClick={removeEmbed}
+      >
+        Remove
+      </button>
+    </>
+  );
+
   return (
     <div
       {...attributes}
-      className={`my-4 min-w-0 rounded border bg-paper transition-colors ${
+      style={embedWidthStyle(previewWidth ?? authoredWidth)}
+      className={`relative my-4 min-w-0 rounded border bg-paper transition-colors ${
         selected ? "border-accent ring-1 ring-accent" : "border-rule"
       }`}
       data-testid="base-embed"
     >
-      <div contentEditable={false} onKeyDown={handleInteractiveKeyDown}>
+      <div
+        ref={bodyRef}
+        contentEditable={false}
+        onKeyDown={handleInteractiveKeyDown}
+      >
+        {element.status === "configured" ? (
+          <WidthResizer
+            label="Resize this Base embed"
+            width={resizerWidth}
+            min={EMBED_WIDTH_MIN}
+            max={EMBED_WIDTH_MAX}
+            step={EMBED_WIDTH_STEP}
+            className="left-auto right-0 translate-x-1/2"
+            onWidth={setWidth}
+            onReset={() => setWidth(undefined)}
+            onDragStart={widthDrag.onDragStart}
+          />
+        ) : null}
         <span
           aria-label="Exit Base embed before"
           data-testid="base-embed-before-guard"
@@ -115,41 +230,33 @@ export function BaseEmbedElement({
           className="sr-only"
           onKeyDown={(event) => handleGuardKeyDown(event, "before")}
         />
-        <header className="flex flex-wrap items-center gap-3 border-b border-rule px-3 py-2">
-          <div className="min-w-0 flex-1">
-            <p className="cl-mono text-[11px] uppercase tracking-[0.14em] text-ink-mute">
-              Base embed
-            </p>
-            <p className="truncate text-sm text-ink">
-              {element.status === "configured"
-                ? `${element.base} · ${element.view}`
-                : element.status === "invalid"
-                  ? "Persisted configuration needs repair"
-                  : "Choose a saved Base and view"}
-            </p>
-          </div>
-          <button
-            ref={editRef}
-            type="button"
-            className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-accent hover:text-accent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            onClick={openInspector}
-          >
-            Edit embed
-          </button>
-          <button
-            ref={removeRef}
-            type="button"
-            aria-label="Remove Base embed"
-            className="cl-mono border border-rule px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink hover:border-destructive hover:text-destructive focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
-            onClick={removeEmbed}
-          >
-            Remove
-          </button>
-        </header>
+        {compact ? null : (
+          <header className="flex flex-wrap items-center gap-3 border-b border-rule px-3 py-2">
+            <div className="min-w-0 flex-1">
+              <p className="cl-mono text-[11px] uppercase tracking-[0.14em] text-ink-mute">
+                Base embed
+              </p>
+              <p className="truncate text-sm text-ink">
+                {element.status === "configured"
+                  ? `${element.base} · ${element.view}`
+                  : element.status === "invalid"
+                    ? "Persisted configuration needs repair"
+                    : "Choose a saved Base and view"}
+              </p>
+            </div>
+            {actions}
+          </header>
+        )}
 
-        <div className="min-w-0 p-3">
+        <div className={`min-w-0 ${compact ? "p-2" : "p-3"}`}>
           {element.status === "configured" ? (
-            <EmbeddedBaseTable ref={tableRef} element={element} path={path} />
+            <EmbeddedBaseTable
+              ref={tableRef}
+              element={element}
+              path={path}
+              chrome={compact ? "compact" : "full"}
+              {...(compact ? { actions } : {})}
+            />
           ) : element.status === "invalid" ? (
             <div role="alert" className="text-sm text-destructive">
               <p>

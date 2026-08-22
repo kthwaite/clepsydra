@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Settings } from "lucide-react";
 import {
   forwardRef,
+  type ReactNode,
   useCallback,
   useEffect,
   useId,
@@ -35,10 +36,8 @@ import { BaseMemberDraft } from "./BaseMemberDraft";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
-import {
-  asciiCaseFold,
-  presentationFieldIdentity,
-} from "./local-validation";
+import type { EmbedScrollCap } from "./embed-query";
+import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
 import type {
   BaseMemberDraftField,
   BaseMemberDraftValue,
@@ -64,6 +63,21 @@ export interface BaseTableViewProps {
   onSortChange: (sort: SortKey[] | undefined) => void;
   onOpenPage: (path: string) => void;
   configureSlug?: string;
+  /** Compact folds the Base chrome into one toolbar for an embedded view. */
+  chrome?: "full" | "compact";
+  /** Controls owned by the surface hosting the table, shown in its toolbar. */
+  toolbarActions?: ReactNode;
+  /** Windowed loading state, for a compact view that scrolls in place. */
+  rowWindow?: {
+    /** The authoritative row count, not the rows rendered. */
+    total: number | undefined;
+    loaded: number;
+    hasMore: boolean;
+    isLoadingMore: boolean;
+    /** Which bound ended the scroll short of the total, if either did. */
+    cappedBy: EmbedScrollCap | undefined;
+    loadMore(): void;
+  };
   onCommitCell: (
     row: QueryRow,
     key: string,
@@ -167,6 +181,56 @@ function aggregateLabel(
   return agg.field ? `${agg.fn}(${agg.field})` : agg.fn;
 }
 
+/** How near the end of the loaded rows counts as approaching it. */
+const APPROACH_PX = 240;
+/** A compact embed is a block in someone's document, not a page of its own. */
+const VIEWPORT_CLASS = "max-h-[26rem] overflow-auto";
+
+interface ScrollViewportProps {
+  enabled: boolean;
+  onApproachEnd(): void;
+  children: ReactNode;
+}
+
+/** Bounds a compact embed's height and reports when the reader nears the end
+ * of what has been loaded, so the next window can be fetched before they get
+ * there. Full-chrome tables render their rows in the page, unwrapped. */
+function ScrollViewport({
+  enabled,
+  onApproachEnd,
+  children,
+}: ScrollViewportProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const approach = useRef(onApproachEnd);
+  approach.current = onApproachEnd;
+
+  const check = useCallback((node: HTMLElement) => {
+    const remaining = node.scrollHeight - node.scrollTop - node.clientHeight;
+    if (remaining <= APPROACH_PX) approach.current();
+  }, []);
+
+  // A window shorter than the viewport leaves nothing to scroll, so the next
+  // one has to be asked for without a scroll event.
+  useEffect(() => {
+    const node = ref.current;
+    // A zero height is an unmeasured viewport, not an empty one.
+    if (!enabled || !node || node.clientHeight === 0) return;
+    if (node.scrollHeight <= node.clientHeight) approach.current();
+  });
+
+  if (!enabled) return children;
+  return (
+    <div
+      ref={ref}
+      data-testid="base-table-scroller"
+      className={VIEWPORT_CLASS}
+      onScroll={(event) => check(event.currentTarget)}
+    >
+      {children}
+    </div>
+  );
+}
+
 /**
  * The Vessel data grid: one react-aria `Table` per (group of) rows, column
  * sorting mapped to ordered query sort keys, group header rows carrying
@@ -188,6 +252,9 @@ export const BaseTableView = forwardRef<
     onSortChange,
     onOpenPage,
     configureSlug,
+    chrome = "full",
+    toolbarActions,
+    rowWindow,
     onCommitCell,
     readOnly = false,
     memberCapability,
@@ -208,6 +275,7 @@ export const BaseTableView = forwardRef<
   },
   ref,
 ) {
+  const compact = chrome === "compact";
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === equivalentActiveView,
@@ -586,6 +654,8 @@ export const BaseTableView = forwardRef<
               className={cn(
                 "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
                 allowsSorting && "cursor-pointer data-[hovered]:text-ink",
+                // The scroller moves the rows under the header, not past it.
+                compact && "sticky top-0 z-[1] bg-paper",
               )}
             >
               {({ sortDirection }) => (
@@ -742,6 +812,21 @@ export const BaseTableView = forwardRef<
   const groups: GroupResult[] | null =
     output?.shape === "grouped" ? output.groups : null;
   const capStatus = (() => {
+    // A compact view scrolls, so it reports how far it has read rather than
+    // what a limit excluded.
+    if (compact && rowWindow && output?.shape === "flat") {
+      const { loaded, total, hasMore, cappedBy } = rowWindow;
+      if (total === undefined || loaded >= total) return undefined;
+      const seen = `Showing ${loaded} of ${total} rows`;
+      if (rowWindow.isLoadingMore) return `${seen}; loading more…`;
+      if (cappedBy === "author") {
+        return `${seen}; this embed's limit stops here.`;
+      }
+      if (cappedBy === "ceiling") {
+        return `${seen}; narrow the embed's filter to reach the rest.`;
+      }
+      return hasMore ? `${seen}; scroll for more.` : `${seen}.`;
+    }
     if (output?.shape === "flat" && output.rows.length < output.total) {
       const excluded = output.total - output.rows.length;
       return `Showing ${output.rows.length} of ${output.total} rows; ${excluded} rows excluded by the current limit.`;
@@ -760,6 +845,17 @@ export const BaseTableView = forwardRef<
     return undefined;
   })();
   const shouldRenderGrid = output !== undefined || (!viewError && !viewLoading);
+  // An embed that renders a header over nothing looks broken; say it is empty.
+  const emptyResult =
+    !viewLoading &&
+    !viewError &&
+    (output?.shape === "flat"
+      ? output.rows.length === 0
+      : output?.shape === "grouped" && output.groups.length === 0);
+  const approachEnd = useCallback(() => {
+    if (!rowWindow?.hasMore || rowWindow.isLoadingMore) return;
+    rowWindow.loadMore();
+  }, [rowWindow]);
 
   return (
     <div
@@ -769,10 +865,23 @@ export const BaseTableView = forwardRef<
       tabIndex={-1}
       className="flex flex-col gap-3"
     >
-      <div className="flex flex-wrap items-center gap-3 border-b border-rule pb-2">
-        <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
-          {definition.name}
-        </h1>
+      <div
+        className={cn(
+          "flex flex-wrap items-center border-b border-rule",
+          compact ? "gap-2 pb-1.5" : "gap-3 pb-2",
+        )}
+      >
+        {compact ? (
+          // An embed sits inside someone else's document: naming the Base is
+          // still needed, claiming a heading level is not.
+          <p className="cl-mono truncate text-[11px] uppercase tracking-[0.14em] text-ink">
+            {definition.name}
+          </p>
+        ) : (
+          <h1 className="cl-mono text-[13px] uppercase tracking-[0.14em] text-ink">
+            {definition.name}
+          </h1>
+        )}
         <nav aria-label="Views" className="flex flex-wrap gap-1">
           {(definition.views ?? []).map((v) =>
             readOnly ? (
@@ -846,6 +955,7 @@ export const BaseTableView = forwardRef<
             ) : null}
           </>
         ) : null}
+        {toolbarActions}
       </div>
       {memberDraftOpen && onSaveMember && onCancelMember ? (
         <BaseMemberDraft
@@ -890,56 +1000,69 @@ export const BaseTableView = forwardRef<
       {capStatus ? (
         <p
           role="status"
-          aria-label="Result limit"
+          aria-label={compact ? "Result window" : "Result limit"}
           className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-2"
         >
           {capStatus}
         </p>
       ) : null}
+      {compact && emptyResult ? (
+        <p
+          role="status"
+          aria-label="Empty view"
+          className="cl-mono border border-rule px-3 py-2 text-[11px] text-ink-mute"
+        >
+          No pages match this view.
+        </p>
+      ) : null}
       {shouldRenderGrid ? (
-        groups ? (
-          <div className="flex flex-col gap-4">
-            {groups.map((group, index) => {
-              const key =
-                group.key == null
-                  ? "(empty)"
-                  : formatCellValue(group.key as CellValue);
-              const groupIdentity = `${evaluationIdentity}:group:${index}:${JSON.stringify(group.key)}`;
-              return (
-                <section key={groupIdentity}>
-                  <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
-                    <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
-                      {key}
-                    </span>
-                    <span className="cl-mono text-[10px] text-ink-mute">
-                      {group.total} row{group.total === 1 ? "" : "s"}
-                    </span>
-                    {group.aggregates.map((value, i) => (
-                      <span
-                        key={i}
-                        className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
-                      >
-                        {aggregateLabel(definition, activeView, i)}{" "}
-                        {formatCellValue(value as CellValue)}
+        <ScrollViewport enabled={compact} onApproachEnd={approachEnd}>
+          {groups ? (
+            <div className="flex flex-col gap-4">
+              {groups.map((group, index) => {
+                const key =
+                  group.key == null
+                    ? "(empty)"
+                    : formatCellValue(group.key as CellValue);
+                const groupIdentity = `${evaluationIdentity}:group:${index}:${JSON.stringify(group.key)}`;
+                return (
+                  <section key={groupIdentity}>
+                    <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
+                      <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
+                        {key}
                       </span>
-                    ))}
-                  </header>
-                  {grid(
-                    group.rows,
-                    `${definition.name} — ${key}`,
-                    groupIdentity,
-                  )}
-                </section>
-              );
-            })}
-          </div>
-        ) : (
-          grid(
-            output?.shape === "flat" ? output.rows : [],
-            `${definition.name} — ${activeView}`,
-            `${evaluationIdentity}:flat`,
-          )
-        )
+                      <span className="cl-mono text-[10px] text-ink-mute">
+                        {group.rows.length < group.total
+                          ? `${group.rows.length} of ${group.total} rows`
+                          : `${group.total} row${group.total === 1 ? "" : "s"}`}
+                      </span>
+                      {group.aggregates.map((value, i) => (
+                        <span
+                          key={i}
+                          className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
+                        >
+                          {aggregateLabel(definition, activeView, i)}{" "}
+                          {formatCellValue(value as CellValue)}
+                        </span>
+                      ))}
+                    </header>
+                    {grid(
+                      group.rows,
+                      `${definition.name} — ${key}`,
+                      groupIdentity,
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          ) : (
+            grid(
+              output?.shape === "flat" ? output.rows : [],
+              `${definition.name} — ${activeView}`,
+              `${evaluationIdentity}:flat`,
+            )
+          )}
+        </ScrollViewport>
       ) : null}
       {shouldRenderGrid && !readOnly && !memberDraftOpen && onAddMember ? (
         <Button
