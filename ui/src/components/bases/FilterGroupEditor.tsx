@@ -11,6 +11,8 @@ import {
   replaceFilterAtPath,
 } from "./definition-model";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
+import { readTagCondition } from "./tag-condition";
+import { TagConditionEditor } from "./TagConditionEditor";
 
 interface FilterGroupEditorProps {
   value: BaseFilter;
@@ -48,6 +50,29 @@ export function FilterGroupEditor({
   diagnostics = [],
   diagnosticRoot = "filter",
 }: FilterGroupEditorProps) {
+  // A membership predicate over tags or aliases — however it is spelled in the
+  // AST — authors as one row rather than a hand-nested group.
+  if (readTagCondition(value)) {
+    return (
+      <TagConditionEditor
+        value={value}
+        path={path}
+        position={position}
+        properties={properties}
+        onChange={(next) =>
+          onChange(
+            next === undefined
+              ? removeFilterAtPath(root, path)
+              : replaceFilterAtPath(root, path, next),
+          )
+        }
+        registerFocus={registerFocus}
+        diagnostics={diagnostics}
+        diagnosticRoot={diagnosticRoot}
+      />
+    );
+  }
+
   if ("field" in value) {
     return (
       <FilterComparisonEditor
