@@ -547,6 +547,54 @@ describe("Folio invalid-tab recovery", () => {
     expect(useWorkspaceStore.getState().tabs).toHaveLength(0);
   });
 
+  it("renders the reading column at its stored width, with a splitter", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    window.localStorage.setItem("clp.folio.column.w", "1024");
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    const splitter = screen.getByRole("separator", {
+      name: /resize the reading column/i,
+    });
+    expect(splitter).toHaveAttribute("aria-valuenow", "1024");
+    const column = document.querySelector<HTMLElement>(
+      "[style*='max-width: 1024px']",
+    );
+    expect(column).not.toBeNull();
+
+    splitter.focus();
+    await user.keyboard("{ArrowRight}");
+
+    expect(
+      screen.getByRole("separator", { name: /resize the reading column/i }),
+    ).toHaveAttribute("aria-valuenow", "1056");
+    // The preference outlives the session, not just the render.
+    expect(window.localStorage.getItem("clp.folio.column.w")).toBe("1056");
+  });
+
+  it("keeps the editor, its overlays, and the rails working at the widest column", async () => {
+    const user = userEvent.setup();
+    usePageEditorMock.mockReturnValue(editableEditor());
+    window.localStorage.setItem("clp.folio.column.w", "1400");
+
+    render(<Folio tabId="t1" path="notes/alpha.md" />);
+
+    expect(
+      screen.getByRole("separator", { name: /resize the reading column/i }),
+    ).toHaveAttribute("aria-valuenow", "1400");
+
+    // An overlay anchored inside the column still opens and lands its choice.
+    const tags = screen.getByRole("combobox", { name: "Add tags" });
+    await user.type(tags, "res");
+    expect(
+      await screen.findByRole("option", { name: "research" }),
+    ).toBeInTheDocument();
+
+    // The document surface and the rails are unaffected by the width.
+    expect(screen.getByTestId("slate-editor")).toBeInTheDocument();
+  });
+
   it("suggests indexed tags while editing folio tags", async () => {
     const user = userEvent.setup();
     usePageEditorMock.mockReturnValue(editableEditor());

@@ -54,7 +54,9 @@ import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { RawMarkdownEditor } from "#/components/codex/RawMarkdownEditor";
 import { useSetReadingProgress } from "#/components/codex/ReadingProgressContext";
 import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
+import { ReadingColumnResizer } from "#/components/codex/ReadingColumnResizer";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
+import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
@@ -1604,6 +1606,7 @@ function DesktopFolioLayout({
     min: 220,
     max: 480,
   });
+  const column = useReadingColumn();
   const lw = left.collapsed ? 34 : left.width;
   const rw = right.collapsed ? 34 : right.width;
 
@@ -1624,15 +1627,33 @@ function DesktopFolioLayout({
         </aside>
       )}
 
-      <div className="relative min-h-0">
+      <div className="relative min-h-0" ref={column.paneRef}>
         <div
           ref={bodyRef}
           onScroll={onScroll}
           className="cl-noscroll h-full overflow-auto"
         >
-          <div className="mx-auto max-w-[900px] px-7 py-[18px] pb-10">
+          <div
+            className="mx-auto px-7 py-[18px] pb-10"
+            style={{ maxWidth: `${column.width}px` }}
+          >
             {header}
             {document}
+          </div>
+        </div>
+        {/* Anchored to the column's right edge, which sits half its width from
+            the centre of the pane. */}
+        <div
+          className="pointer-events-none absolute inset-y-0 left-1/2 z-10"
+          style={{ transform: `translateX(${column.width / 2}px)` }}
+        >
+          <div className="pointer-events-auto relative h-full">
+            <ReadingColumnResizer
+              width={column.width}
+              onWidth={column.setWidth}
+              onReset={column.reset}
+              onDragStart={column.onDragStart}
+            />
           </div>
         </div>
         <ReadingTicks toc={toc} activeIndex={activeIndex} onJump={onJump} />
