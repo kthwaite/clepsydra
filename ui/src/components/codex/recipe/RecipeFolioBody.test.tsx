@@ -12,9 +12,26 @@ vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 
 const recipe: RecipeDocument = {
   description: "A bright, weeknight pasta.",
-  ingredients: ["200 g spaghetti", "1 lemon", "30 g parmesan"],
-  steps: ["Boil the pasta.", "Toss with lemon and parmesan."],
+  ingredientGroups: [
+    { name: null, items: ["200 g spaghetti", "1 lemon", "30 g parmesan"] },
+  ],
+  stepGroups: [
+    { name: null, items: ["Boil the pasta.", "Toss with lemon and parmesan."] },
+  ],
   notesMarkdown: "Serve with **black pepper** and [[salad]].",
+};
+
+const grouped: RecipeDocument = {
+  description: "A composed dish.",
+  ingredientGroups: [
+    { name: null, items: ["200g flour"] },
+    { name: "For the sauce", items: ["2 tomatoes"] },
+  ],
+  stepGroups: [
+    { name: null, items: ["Make the dough."] },
+    { name: "For the sauce", items: ["Blend."] },
+  ],
+  notesMarkdown: "",
 };
 
 function ControlledRecipe({
@@ -121,7 +138,9 @@ describe("RecipeFolioBody", () => {
     await user.type(ingredients, "1 lemon{enter}sea salt");
 
     expect(onDocumentChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ ingredients: ["1 lemon", "sea salt"] }),
+      expect.objectContaining({
+        ingredientGroups: [{ name: null, items: ["1 lemon", "sea salt"] }],
+      }),
     );
   });
 
@@ -136,7 +155,9 @@ describe("RecipeFolioBody", () => {
 
     expect(onDocumentChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        ingredients: ["2 onions", "4 garlic cloves", "30 g ginger"],
+        ingredientGroups: [
+          { name: null, items: ["2 onions", "4 garlic cloves", "30 g ginger"] },
+        ],
       }),
     );
   });
@@ -166,7 +187,9 @@ describe("RecipeFolioBody", () => {
     await user.paste("1. Boil the pasta.\n2. Drain.");
 
     expect(onDocumentChange).toHaveBeenLastCalledWith(
-      expect.objectContaining({ steps: ["Boil the pasta.", "Drain."] }),
+      expect.objectContaining({
+        stepGroups: [{ name: null, items: ["Boil the pasta.", "Drain."] }],
+      }),
     );
   });
 
@@ -181,7 +204,12 @@ describe("RecipeFolioBody", () => {
 
     expect(onDocumentChange).toHaveBeenLastCalledWith(
       expect.objectContaining({
-        steps: ["Start the aromatics\nHeat the oil.", "Serve."],
+        stepGroups: [
+          {
+            name: null,
+            items: ["Start the aromatics\nHeat the oil.", "Serve."],
+          },
+        ],
       }),
     );
   });
@@ -201,6 +229,79 @@ describe("RecipeFolioBody", () => {
 
     expect(serialized).toHaveBeenLastCalledWith(
       "A bright, weeknight pasta.\n\n## Ingredients\n\n- 200 g spaghetti\n- 1 lemon\n- 30 g parmesan\n\n## Steps\n\n1. Boil the pasta.\n2. Toss with lemon and parmesan.\n\n## Notes\n\nServe with **black pepper** and [[salad]].\n",
+    );
+  });
+
+  it("renders group subheads and restarts numbering per group in read mode", () => {
+    render(
+      <RecipeFolioBody
+        document={grouped}
+        mode="read"
+        onModeChange={vi.fn()}
+        onDocumentChange={vi.fn()}
+      />,
+    );
+
+    const steps = screen.getByRole("region", { name: "Steps" });
+    expect(
+      within(steps).getByRole("heading", { name: "For the sauce", level: 3 }),
+    ).toBeVisible();
+    expect(within(steps).getAllByRole("list")).toHaveLength(2);
+  });
+
+  it("adds a group and edits its items independently", async () => {
+    const user = userEvent.setup();
+    const onDocumentChange = vi.fn();
+    render(
+      <ControlledRecipe
+        initial={grouped}
+        onDocumentChange={onDocumentChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Add ingredient group" }),
+    );
+    const name = screen.getByRole("textbox", {
+      name: "Ingredient group 2 name",
+    });
+    await user.type(name, "For the topping");
+
+    const items = screen.getByRole("textbox", {
+      name: "Ingredient group 2 items",
+    });
+    await user.click(items);
+    await user.paste("- 50g parmesan");
+
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ingredientGroups: [
+          { name: null, items: ["200g flour"] },
+          { name: "For the sauce", items: ["2 tomatoes"] },
+          { name: "For the topping", items: ["50g parmesan"] },
+        ],
+      }),
+    );
+  });
+
+  it("merges a removed group's items into the group before it", async () => {
+    const user = userEvent.setup();
+    const onDocumentChange = vi.fn();
+    render(
+      <ControlledRecipe
+        initial={grouped}
+        onDocumentChange={onDocumentChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove ingredient group 1" }),
+    );
+
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ingredientGroups: [{ name: null, items: ["200g flour", "2 tomatoes"] }],
+      }),
     );
   });
 });

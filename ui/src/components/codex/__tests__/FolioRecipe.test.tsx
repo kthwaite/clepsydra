@@ -221,8 +221,10 @@ describe("Folio recipe presentation", () => {
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
       serializeRecipeMarkdown({
         description: "A deeper dish.",
-        ingredients: ["one lemon", "200 g pasta"],
-        steps: ["Boil the pasta.", "Toss and serve."],
+        ingredientGroups: [{ name: null, items: ["one lemon", "200 g pasta"] }],
+        stepGroups: [
+          { name: null, items: ["Boil the pasta.", "Toss and serve."] },
+        ],
         notesMarkdown: "Finish with **pepper**.",
       }),
     );
@@ -368,8 +370,8 @@ describe("Folio recipe presentation", () => {
       "Ingredients, Steps, and Notes once and in that order",
     );
     expect(alert).toHaveTextContent("bullet ingredients and numbered steps");
-    expect(alert).toHaveTextContent("uppercase markers");
-    expect(alert).toHaveTextContent("consistent Markdown headings and lists");
+    expect(alert).toHaveTextContent("headings of one consistent level");
+    expect(alert).toHaveTextContent("grouped under headings one level deeper");
     const fallback = screen.getByRole("textbox", { name: "Page body" });
     expect(fallback).toHaveValue(malformed);
     expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
