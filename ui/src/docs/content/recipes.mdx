@@ -20,8 +20,66 @@ lines remain description text and never replace the metadata title.
 
 ## Recipe format
 
-The canonical recipe body uses plain section markers, Unicode ingredient
-bullets, numbered steps, and Markdown notes:
+The canonical recipe body uses `##` section headings, `-` ingredient bullets,
+and `1.` numbered steps:
+
+```markdown
+Clean, clear chicken broth with charred aromatics. Makes four bowls.
+
+## Ingredients
+
+- 200g flour
+
+### For the sauce
+
+- 2 tomatoes
+- 1 clove garlic
+
+## Steps
+
+1. Make the dough.
+   Rest it 30 minutes under a cloth.
+2. Heat the oven to 240C.
+
+### For the sauce
+
+1. Blanch the tomatoes.
+2. Blend.
+
+## Notes
+
+**Batch-friendly**: the broth freezes well.
+```
+
+Everything before `## Ingredients` is the description. Every ingredient and
+step is an opaque string: Clepsydra preserves quantities, punctuation,
+temperatures, units, emphasis, and wording. It does not parse measurements or
+perform unit conversion. Content after `## Notes` remains Markdown.
+
+The three section headings are matched case-insensitively and must use a
+consistent heading level. The sections must appear once each, in the order
+Ingredients, Steps, Notes. Empty sections are accepted when their headings are
+present.
+
+A `###` heading one level below a section opens a **component group** — a
+sauce, a dough, an assembly. Items before the first group heading belong to the
+section's **lead group**, the unnamed group every section has even when
+nothing else does. Ingredients and Steps group independently: naming a group
+under Ingredients does not create a matching group under Steps, so the
+`### For the sauce` heading appears once in each section above. Step numbers
+restart at 1 in each group. A named group is written even when it holds no
+items; the lead group is written only when it holds some.
+
+A step may carry indented continuation lines, kept verbatim as part of that
+step, as `Rest it 30 minutes under a cloth.` is above. Ingredients stay
+single-line — an indented line under an ingredient is not accepted.
+
+Creating a page with kind `RECIPE` and no body writes the three empty headings
+for you, so a new recipe opens structured and ready to fill in rather than in
+the fallback below. An already-empty body is read the same way.
+
+Clepsydra also reads a legacy form: bare `INGREDIENTS`, `STEPS`, and `NOTES`
+markers with `•` bullets and no heading level.
 
 ```markdown
 Clean, clear chicken broth with charred aromatics. Makes four bowls.
@@ -38,57 +96,55 @@ NOTES
 **Batch-friendly**: The broth freezes well.
 ```
 
-Everything before `INGREDIENTS` is the description. Every ingredient and step
-is an opaque string: Clepsydra preserves quantities, punctuation, temperatures,
-units, emphasis, and wording. It does not parse measurements or perform unit
-conversion. Content after `NOTES` remains Markdown.
-
-Clepsydra also reads an equivalent standard-Markdown form:
-
-```markdown
-Clean, clear chicken broth with charred aromatics. Makes four bowls.
-
-## Ingredients
-- 1.5 kilograms whole chicken
-- 2 large brown onions, halved
-
-## Steps
-1. Char the aromatics until blackened in patches.
-2. Poach the chicken at a bare simmer.
-
-## Notes
-**Batch-friendly**: The broth freezes well.
-```
-
-The three heading names are matched case-insensitively and must use a consistent
-heading level. Ingredients may use `-`, `*`, or `+` unordered-list markers;
-steps use an ordered list. The sections must appear once each in the order
-Ingredients, Steps, Notes. Empty sections are accepted when their markers are
-present.
+A legacy body opens structured like any other, but it cannot carry component
+groups — a heading anywhere inside it falls back to Markdown. It is rewritten
+to the canonical heading form only when you save a structured edit; opening it,
+or merely assigning `RECIPE`, does not touch the source.
 
 ## Structured editing
 
-A supported recipe opens with dedicated read and edit views for its description,
-ingredients, steps, and notes. Add, remove, or reorder ingredient and step rows;
-step numbers follow the current row order. Edit description and notes as
-Markdown.
+A supported recipe opens with dedicated read and edit views for its
+description, ingredients, steps, and notes. Description and notes are edited
+as Markdown.
 
-Saving from the structured editor always writes one deterministic canonical
-body: uppercase `INGREDIENTS`, `STEPS`, and `NOTES` markers, `•` ingredient
-bullets, sequential step numbers, normalized spacing and line endings, all
-three markers, and one final newline. A standard-Markdown recipe is normalized
-to this format only after an explicit structured edit and save. Opening it, or
-merely assigning `RECIPE`, does not rewrite its source.
+Ingredients and Steps each edit as a textarea per group — one for the lead
+group, then one more per named group — with one item per line, so a block of
+ingredients or steps pasted from a website lands as separate items.
+Any list marker on a pasted line — `-`, `*`, `+`, `•`, `1.`, `1)` — is stripped
+on the way in; the textarea itself never shows markers or step numbers, so
+typing never fights renumbering. In the Steps textarea, an indented line
+continues the step above it rather than starting a new one.
+
+**Add group** appends a new group with an empty name field for you to fill in.
+**Remove group** deletes a group and moves its items into the group above, so
+removing one never discards written text. Clearing a group's name has the same
+effect once the body is written: an unnamed group is not a valid group, so its
+items merge into the group above.
+
+Saving from the structured editor always writes the canonical body described
+above: `##` section headings, `-` ingredient bullets, sequential step numbers
+that restart per group, normalized spacing and line endings, and one final
+newline. A legacy recipe is rewritten to this form only after an explicit
+structured edit and save.
 
 ## When Clepsydra falls back to Markdown
 
 If Clepsydra cannot account for the complete body without losing content, it
 shows a preservation notice and uses the generic Markdown editor instead of the
-structured recipe editor. Examples include missing, duplicated, or out-of-order
-sections; mixed section formats; unsupported nested list shapes; or other
-Markdown between recognized list items and boundaries.
+structured recipe editor. Examples include:
+
+- a section heading that is missing, duplicated, or out of order
+- inconsistent heading levels between the three sections
+- a group heading at the wrong depth, or with no name
+- a group heading inside a legacy-form body
+- an ingredient or step line Clepsydra cannot parse as a list item
+- a `[ ]` or `[x]` task-list marker leading an ingredient or step
+
+That last one applies to the heading format only: the same text in the
+legacy form (`1. [ ] Prepare broth.`) is kept as ordinary, opaque step text
+rather than triggering the fallback.
 
 The original Markdown remains authoritative in fallback mode. Editing and
 saving through the generic editor preserves unsupported Markdown rather than
 silently dropping or canonicalizing it. To enable structured editing, reshape
-the body into one of the complete accepted formats above.
+the body into one of the accepted formats above.

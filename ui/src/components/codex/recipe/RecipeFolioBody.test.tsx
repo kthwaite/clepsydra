@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -12,9 +12,26 @@ vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 
 const recipe: RecipeDocument = {
   description: "A bright, weeknight pasta.",
-  ingredients: ["200 g spaghetti", "1 lemon", "30 g parmesan"],
-  steps: ["Boil the pasta.", "Toss with lemon and parmesan."],
+  ingredientGroups: [
+    { name: null, items: ["200 g spaghetti", "1 lemon", "30 g parmesan"] },
+  ],
+  stepGroups: [
+    { name: null, items: ["Boil the pasta.", "Toss with lemon and parmesan."] },
+  ],
   notesMarkdown: "Serve with **black pepper** and [[salad]].",
+};
+
+const grouped: RecipeDocument = {
+  description: "A composed dish.",
+  ingredientGroups: [
+    { name: null, items: ["200g flour"] },
+    { name: "For the sauce", items: ["2 tomatoes"] },
+  ],
+  stepGroups: [
+    { name: null, items: ["Make the dough."] },
+    { name: "For the sauce", items: ["Blend."] },
+  ],
+  notesMarkdown: "",
 };
 
 function ControlledRecipe({
@@ -109,142 +126,95 @@ describe("RecipeFolioBody", () => {
     });
   });
 
-  it("adds, focuses, reorders, and removes ingredients with keyboard-accessible controls", async () => {
+  it("edits ingredients as one item per line", async () => {
     const user = userEvent.setup();
     const onDocumentChange = vi.fn();
     render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
 
-    const secondMoveUp = screen.getByRole("button", {
-      name: "Move ingredient 2 up",
-    });
-    secondMoveUp.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      ingredients: ["1 lemon", "200 g spaghetti", "30 g parmesan"],
-    });
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    expect(ingredients).toHaveValue("200 g spaghetti\n1 lemon\n30 g parmesan");
 
-    const firstMoveDown = screen.getByRole("button", {
-      name: "Move ingredient 1 down",
-    });
-    firstMoveDown.focus();
-    await user.keyboard(" ");
-    expect(onDocumentChange).toHaveBeenLastCalledWith(recipe);
+    await user.clear(ingredients);
+    await user.type(ingredients, "1 lemon{enter}sea salt");
 
-    const removeThird = screen.getByRole("button", {
-      name: "Remove ingredient 3",
-    });
-    removeThird.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      ingredients: ["200 g spaghetti", "1 lemon"],
-    });
-
-    const add = screen.getByRole("button", { name: "Add ingredient" });
-    add.focus();
-    await user.keyboard("{Enter}");
-    expect(screen.getByRole("textbox", { name: "Ingredient 3" })).toHaveFocus();
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ingredientGroups: [{ name: null, items: ["1 lemon", "sea salt"] }],
+      }),
+    );
   });
 
-  it("adds, focuses, reorders, and removes steps with keyboard-accessible controls", async () => {
+  it("accepts a pasted block of marked-up ingredients", async () => {
     const user = userEvent.setup();
     const onDocumentChange = vi.fn();
     render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
 
-    const secondMoveUp = screen.getByRole("button", {
-      name: "Move step 2 up",
-    });
-    secondMoveUp.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      steps: ["Toss with lemon and parmesan.", "Boil the pasta."],
-    });
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    await user.clear(ingredients);
+    await user.paste("- 2 onions\n- 4 garlic cloves\n- 30 g ginger");
 
-    const firstMoveDown = screen.getByRole("button", {
-      name: "Move step 1 down",
-    });
-    firstMoveDown.focus();
-    await user.keyboard(" ");
-    expect(onDocumentChange).toHaveBeenLastCalledWith(recipe);
-
-    const removeSecond = screen.getByRole("button", {
-      name: "Remove step 2",
-    });
-    removeSecond.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      steps: ["Boil the pasta."],
-    });
-
-    const add = screen.getByRole("button", { name: "Add step" });
-    add.focus();
-    await user.keyboard("{Enter}");
-    expect(screen.getByRole("textbox", { name: "Step 2" })).toHaveFocus();
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ingredientGroups: [
+          { name: null, items: ["2 onions", "4 garlic cloves", "30 g ginger"] },
+        ],
+      }),
+    );
   });
 
-  it("keeps the same ingredient move-up action focused across consecutive moves", async () => {
+  it("re-renders the canonical text once the textarea loses focus", async () => {
     const user = userEvent.setup();
     render(<ControlledRecipe />);
 
-    act(() => {
-      screen.getByRole("button", { name: "Move ingredient 3 up" }).focus();
-    });
-    await user.keyboard("{Enter}");
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    await user.clear(ingredients);
+    await user.paste("- 2 onions\n\n- 4 garlic cloves");
+    expect(ingredients).toHaveValue("- 2 onions\n\n- 4 garlic cloves");
 
-    const movedAction = screen.getByRole("button", {
-      name: "Move ingredient 2 up",
-    });
-    expect(movedAction).toHaveFocus();
-    await user.keyboard("{Enter}");
-
-    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
-      "30 g parmesan",
-    );
-    expect(screen.getByRole("textbox", { name: "Ingredient 2" })).toHaveValue(
-      "200 g spaghetti",
-    );
-    expect(
-      screen.getByRole("button", { name: "Move ingredient 1 down" }),
-    ).toHaveFocus();
+    await user.tab();
+    expect(ingredients).toHaveValue("2 onions\n4 garlic cloves");
   });
 
-  it("keeps the same step move-down action focused across consecutive moves", async () => {
+  it("edits steps as one item per line", async () => {
     const user = userEvent.setup();
-    render(
-      <ControlledRecipe
-        initial={{
-          ...recipe,
-          steps: ["Boil.", "Toss.", "Serve."],
-        }}
-      />,
-    );
+    const onDocumentChange = vi.fn();
+    render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
 
-    act(() => {
-      screen.getByRole("button", { name: "Move step 1 down" }).focus();
-    });
-    await user.keyboard("{Enter}");
+    const steps = screen.getByRole("textbox", { name: "Steps" });
+    expect(steps).toHaveValue("Boil the pasta.\nToss with lemon and parmesan.");
 
-    const movedAction = screen.getByRole("button", {
-      name: "Move step 2 down",
-    });
-    expect(movedAction).toHaveFocus();
-    await user.keyboard("{Enter}");
+    await user.clear(steps);
+    await user.paste("1. Boil the pasta.\n2. Drain.");
 
-    expect(screen.getByRole("textbox", { name: "Step 3" })).toHaveValue(
-      "Boil.",
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        stepGroups: [{ name: null, items: ["Boil the pasta.", "Drain."] }],
+      }),
     );
-    expect(screen.getByRole("textbox", { name: "Step 2" })).toHaveValue(
-      "Serve.",
-    );
-    expect(
-      screen.getByRole("button", { name: "Move step 3 up" }),
-    ).toHaveFocus();
   });
 
-  it("does not persist newly added empty rows in canonical Markdown", async () => {
+  it("keeps indented detail lines inside their step", async () => {
+    const user = userEvent.setup();
+    const onDocumentChange = vi.fn();
+    render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
+
+    const steps = screen.getByRole("textbox", { name: "Steps" });
+    await user.clear(steps);
+    await user.paste("Start the aromatics\n  Heat the oil.\nServe.");
+
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        stepGroups: [
+          {
+            name: null,
+            items: ["Start the aromatics\nHeat the oil.", "Serve."],
+          },
+        ],
+      }),
+    );
+  });
+
+  it("does not persist blank rows in canonical Markdown", async () => {
     const user = userEvent.setup();
     const serialized = vi.fn<(markdown: string) => void>();
     render(
@@ -253,9 +223,150 @@ describe("RecipeFolioBody", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Add ingredient" }));
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    await user.clear(ingredients);
+    await user.paste("200 g spaghetti\n\n1 lemon\n\n30 g parmesan");
+
     expect(serialized).toHaveBeenLastCalledWith(
-      "A bright, weeknight pasta.\n\nINGREDIENTS\n• 200 g spaghetti\n• 1 lemon\n• 30 g parmesan\n\nSTEPS\n1. Boil the pasta.\n2. Toss with lemon and parmesan.\n\nNOTES\nServe with **black pepper** and [[salad]].\n",
+      "A bright, weeknight pasta.\n\n## Ingredients\n\n- 200 g spaghetti\n- 1 lemon\n- 30 g parmesan\n\n## Steps\n\n1. Boil the pasta.\n2. Toss with lemon and parmesan.\n\n## Notes\n\nServe with **black pepper** and [[salad]].\n",
+    );
+  });
+
+  it("renders group subheads and restarts numbering per group in read mode", () => {
+    render(
+      <RecipeFolioBody
+        document={grouped}
+        mode="read"
+        onModeChange={vi.fn()}
+        onDocumentChange={vi.fn()}
+      />,
+    );
+
+    const steps = screen.getByRole("region", { name: "Steps" });
+    expect(
+      within(steps).getByRole("heading", { name: "For the sauce", level: 3 }),
+    ).toBeVisible();
+    expect(within(steps).getAllByRole("list")).toHaveLength(2);
+  });
+
+  it("renders no list for an empty lead group in read mode", () => {
+    render(
+      <RecipeFolioBody
+        document={{
+          description: "",
+          ingredientGroups: [
+            { name: null, items: [] },
+            { name: "For the sauce", items: ["2 tomatoes"] },
+          ],
+          stepGroups: [{ name: null, items: [] }],
+          notesMarkdown: "",
+        }}
+        mode="read"
+        onModeChange={vi.fn()}
+        onDocumentChange={vi.fn()}
+      />,
+    );
+
+    const ingredients = screen.getByRole("region", { name: "Ingredients" });
+    expect(within(ingredients).getAllByRole("list")).toHaveLength(1);
+    expect(
+      within(ingredients).getByRole("heading", {
+        name: "For the sauce",
+        level: 3,
+      }),
+    ).toBeVisible();
+  });
+
+  it("renders two groups that share a name without colliding keys", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    render(
+      <RecipeFolioBody
+        document={{
+          description: "",
+          ingredientGroups: [
+            { name: null, items: [] },
+            { name: "For the sauce", items: ["2 tomatoes"] },
+            { name: "For the sauce", items: ["1 clove garlic"] },
+          ],
+          stepGroups: [{ name: null, items: [] }],
+          notesMarkdown: "",
+        }}
+        mode="read"
+        onModeChange={vi.fn()}
+        onDocumentChange={vi.fn()}
+      />,
+    );
+
+    const errors = consoleError.mock.calls.map((call) => String(call[0]));
+    consoleError.mockRestore();
+
+    const ingredients = screen.getByRole("region", { name: "Ingredients" });
+    expect(
+      within(ingredients).getAllByRole("heading", {
+        name: "For the sauce",
+        level: 3,
+      }),
+    ).toHaveLength(2);
+    expect(within(ingredients).getAllByRole("list")).toHaveLength(2);
+    expect(errors).toEqual([]);
+  });
+
+  it("adds a group and edits its items independently", async () => {
+    const user = userEvent.setup();
+    const onDocumentChange = vi.fn();
+    render(
+      <ControlledRecipe
+        initial={grouped}
+        onDocumentChange={onDocumentChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Add ingredient group" }),
+    );
+    const name = screen.getByRole("textbox", {
+      name: "Ingredient group 2 name",
+    });
+    await user.type(name, "For the topping");
+
+    const items = screen.getByRole("textbox", {
+      name: "Ingredient group 2 items",
+    });
+    await user.click(items);
+    await user.paste("- 50g parmesan");
+
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ingredientGroups: [
+          { name: null, items: ["200g flour"] },
+          { name: "For the sauce", items: ["2 tomatoes"] },
+          { name: "For the topping", items: ["50g parmesan"] },
+        ],
+      }),
+    );
+  });
+
+  it("merges a removed group's items into the group before it", async () => {
+    const user = userEvent.setup();
+    const onDocumentChange = vi.fn();
+    render(
+      <ControlledRecipe
+        initial={grouped}
+        onDocumentChange={onDocumentChange}
+      />,
+    );
+
+    await user.click(
+      screen.getByRole("button", { name: "Remove ingredient group 1" }),
+    );
+
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ingredientGroups: [{ name: null, items: ["200g flour", "2 tomatoes"] }],
+      }),
     );
   });
 });

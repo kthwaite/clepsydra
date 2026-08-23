@@ -221,13 +221,15 @@ describe("Folio recipe presentation", () => {
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
       serializeRecipeMarkdown({
         description: "A deeper dish.",
-        ingredients: ["one lemon", "200 g pasta"],
-        steps: ["Boil the pasta.", "Toss and serve."],
+        ingredientGroups: [{ name: null, items: ["one lemon", "200 g pasta"] }],
+        stepGroups: [
+          { name: null, items: ["Boil the pasta.", "Toss and serve."] },
+        ],
         notesMarkdown: "Finish with **pepper**.",
       }),
     );
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
-      "A deeper dish.\n\nINGREDIENTS\n• one lemon\n• 200 g pasta\n\nSTEPS\n1. Boil the pasta.\n2. Toss and serve.\n\nNOTES\nFinish with **pepper**.\n",
+      "A deeper dish.\n\n## Ingredients\n\n- one lemon\n- 200 g pasta\n\n## Steps\n\n1. Boil the pasta.\n2. Toss and serve.\n\n## Notes\n\nFinish with **pepper**.\n",
     );
   });
 
@@ -256,15 +258,15 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
       "Authored in raw mode.",
     );
-    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
-      "two lemons",
+    expect(screen.getByRole("textbox", { name: "Ingredients" })).toHaveValue(
+      "two lemons\n200 g pasta",
     );
 
     fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
       target: { value: "Structured after raw." },
     });
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
-      "Structured after raw.\n\nINGREDIENTS\n• two lemons\n• 200 g pasta\n\nSTEPS\n1. Boil the pasta.\n2. Toss and serve.\n\nNOTES\nKeep this exact note.\n",
+      "Structured after raw.\n\n## Ingredients\n\n- two lemons\n- 200 g pasta\n\n## Steps\n\n1. Boil the pasta.\n2. Toss and serve.\n\n## Notes\n\nKeep this exact note.\n",
     );
   });
 
@@ -289,7 +291,7 @@ describe("Folio recipe presentation", () => {
     expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
     expect(editor.setBodyMarkdown).toHaveBeenCalledWith(authoredRaw);
     expect(screen.queryByRole("textbox", { name: "Description" })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Ingredient 1" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Ingredients" })).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "recipe structure could not be read",
     );
@@ -322,17 +324,19 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByText(/no longer editable/i)).toBeVisible();
   });
 
-  it("keeps a new empty row available for input while omitting it from Markdown", async () => {
+  it("omits blank ingredient lines from the Markdown it writes", async () => {
     const user = userEvent.setup();
     const editor = pageEditor();
     renderFolio(editor);
 
     await user.click(screen.getByRole("radio", { name: "Edit" }));
-    await user.click(screen.getByRole("button", { name: "Add ingredient" }));
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    fireEvent.change(ingredients, {
+      target: { value: "one lemon\n\n200 g pasta" },
+    });
 
-    expect(screen.getByRole("textbox", { name: "Ingredient 3" })).toHaveFocus();
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
-      canonicalRecipeMarkdown,
+      "A bright dish.\n\n## Ingredients\n\n- one lemon\n- 200 g pasta\n\n## Steps\n\n1. Boil the pasta.\n2. Toss and serve.\n\n## Notes\n\nFinish with **pepper**.\n",
     );
   });
 
@@ -366,8 +370,8 @@ describe("Folio recipe presentation", () => {
       "Ingredients, Steps, and Notes once and in that order",
     );
     expect(alert).toHaveTextContent("bullet ingredients and numbered steps");
-    expect(alert).toHaveTextContent("uppercase markers");
-    expect(alert).toHaveTextContent("consistent Markdown headings and lists");
+    expect(alert).toHaveTextContent("headings of one consistent level");
+    expect(alert).toHaveTextContent("grouped under headings one level deeper");
     const fallback = screen.getByRole("textbox", { name: "Page body" });
     expect(fallback).toHaveValue(malformed);
     expect(editor.setBodyMarkdown).not.toHaveBeenCalled();
@@ -472,10 +476,36 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
       "Server revision.",
     );
-    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
+    expect(screen.getByRole("textbox", { name: "Ingredients" })).toHaveValue(
       "fresh ingredient",
     );
     expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
+  });
+
+  it("opens an empty recipe body in the structured editor", () => {
+    renderFolio(pageEditor({ bodyMarkdown: "" }));
+
+    expect(screen.getByRole("region", { name: "Ingredients" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a recipe with block ids in the generic editor", () => {
+    renderFolio(
+      pageEditor({
+        bodyMarkdown:
+          "## Ingredients\n\n- one lemon\n\n## Steps\n\n1. Boil.\n\n## Notes\n",
+        initialValue: [
+          {
+            type: "paragraph",
+            blockId: "ab12cd34",
+            children: [{ text: "one lemon" }],
+          },
+        ] as unknown as Descendant[],
+      }),
+    );
+
+    expect(screen.getByTestId("slate-editor")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Ingredients" })).toBeNull();
   });
 
   it("renders a locked encrypted Folio before recipe controls", () => {

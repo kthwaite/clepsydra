@@ -1,5 +1,5 @@
-import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
-import { useEffect, useId, useRef } from "react";
+import { Plus, Trash2 } from "lucide-react";
+import { useId, useState } from "react";
 import {
   TextField as AriaTextField,
   Label,
@@ -9,22 +9,19 @@ import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { Button } from "#/components/ui/button";
 import { SegmentedControl } from "#/components/ui/segmented-control";
 import { TextField } from "#/components/ui/text-field";
-import type { RecipeDocument } from "#/recipe/recipeCodec";
+import type { RecipeDocument, RecipeGroup } from "#/recipe/recipeCodec";
+import {
+  itemsFromText,
+  stepsFromText,
+  textFromItems,
+  textFromSteps,
+} from "#/recipe/recipeText";
 
 export type RecipeFolioBodyProps = {
   document: RecipeDocument;
   mode: "read" | "edit";
   onModeChange: (mode: "read" | "edit") => void;
   onDocumentChange: (document: RecipeDocument) => void;
-};
-
-type RecipeCollectionKey = "ingredients" | "steps";
-type PendingFocus = { collection: RecipeCollectionKey; index: number } | null;
-const focusContainedAction = (
-  container: HTMLSpanElement | null | undefined,
-) => {
-  const action = container?.firstElementChild;
-  if (action instanceof HTMLElement) action.focus();
 };
 
 const recipeModeOptions = [
@@ -41,92 +38,6 @@ export function RecipeFolioBody({
   const ingredientsId = useId();
   const stepsId = useId();
   const notesId = useId();
-  const pendingFocus = useRef<PendingFocus>(null);
-  const ingredientInputs = useRef<Array<HTMLInputElement | null>>([]);
-  const stepInputs = useRef<Array<HTMLInputElement | null>>([]);
-  const nextRowId = useRef(0);
-  const ingredientRowIds = useRef<string[]>([]);
-  const stepRowIds = useRef<string[]>([]);
-
-  ingredientRowIds.current.length = Math.min(
-    ingredientRowIds.current.length,
-    document.ingredients.length,
-  );
-  while (ingredientRowIds.current.length < document.ingredients.length) {
-    ingredientRowIds.current.push(`ingredient-${nextRowId.current++}`);
-  }
-  stepRowIds.current.length = Math.min(
-    stepRowIds.current.length,
-    document.steps.length,
-  );
-  while (stepRowIds.current.length < document.steps.length) {
-    stepRowIds.current.push(`step-${nextRowId.current++}`);
-  }
-
-  useEffect(() => {
-    const target = pendingFocus.current;
-    if (!target) return;
-    const inputs =
-      target.collection === "ingredients" ? ingredientInputs : stepInputs;
-    const input = inputs.current[target.index];
-    if (!input) return;
-    input.focus();
-    pendingFocus.current = null;
-  }, [document.ingredients.length, document.steps.length]);
-
-  const updateCollection = (
-    collection: RecipeCollectionKey,
-    values: string[],
-  ) => {
-    onDocumentChange({ ...document, [collection]: values });
-  };
-
-  const addRow = (collection: RecipeCollectionKey) => {
-    const values = document[collection];
-    const rowIds = collection === "ingredients" ? ingredientRowIds : stepRowIds;
-    rowIds.current.push(`${collection}-${nextRowId.current++}`);
-    pendingFocus.current = { collection, index: values.length };
-    updateCollection(collection, [...values, ""]);
-  };
-
-  const moveRow = (
-    collection: RecipeCollectionKey,
-    index: number,
-    destination: number,
-  ) => {
-    const values = [...document[collection]];
-    const rowIds =
-      collection === "ingredients"
-        ? ingredientRowIds.current
-        : stepRowIds.current;
-    const movingValue = values[index];
-    const displacedValue = values[destination];
-    const movingRowId = rowIds[index];
-    const displacedRowId = rowIds[destination];
-    if (
-      movingValue === undefined ||
-      displacedValue === undefined ||
-      movingRowId === undefined ||
-      displacedRowId === undefined
-    ) {
-      return;
-    }
-
-    values[index] = displacedValue;
-    values[destination] = movingValue;
-    rowIds[index] = displacedRowId;
-    rowIds[destination] = movingRowId;
-    updateCollection(collection, values);
-  };
-
-  const removeRow = (collection: RecipeCollectionKey, index: number) => {
-    const rowIds = collection === "ingredients" ? ingredientRowIds : stepRowIds;
-    rowIds.current.splice(index, 1);
-    updateCollection(
-      collection,
-      document[collection].filter((_, candidate) => candidate !== index),
-    );
-  };
 
   return (
     <div className="recipe-folio-body" data-folio-heading-root>
@@ -155,45 +66,38 @@ export function RecipeFolioBody({
             onChange={(description) =>
               onDocumentChange({ ...document, description })
             }
+            placeholder="what the dish is, yield, timing"
             rows={4}
           />
 
-          <RecipeCollectionEditor
-            collection="ingredients"
+          <RecipeGroupsEditor
             heading="Ingredients"
             headingId={ingredientsId}
-            values={document.ingredients}
-            inputRefs={ingredientInputs}
-            rowIds={ingredientRowIds.current}
-            onValueChange={(index, value) => {
-              const ingredients = [...document.ingredients];
-              ingredients[index] = value;
-              updateCollection("ingredients", ingredients);
-            }}
-            onAdd={() => addRow("ingredients")}
-            onMove={(index, destination) =>
-              moveRow("ingredients", index, destination)
+            singular="ingredient"
+            groupLabel="Ingredient"
+            itemPlaceholder="200g flour"
+            rows={8}
+            groups={document.ingredientGroups}
+            toText={textFromItems}
+            fromText={itemsFromText}
+            onGroupsChange={(ingredientGroups) =>
+              onDocumentChange({ ...document, ingredientGroups })
             }
-            onRemove={(index) => removeRow("ingredients", index)}
           />
 
-          <RecipeCollectionEditor
-            collection="steps"
+          <RecipeGroupsEditor
             heading="Steps"
             headingId={stepsId}
-            values={document.steps}
-            inputRefs={stepInputs}
-            rowIds={stepRowIds.current}
-            onValueChange={(index, value) => {
-              const steps = [...document.steps];
-              steps[index] = value;
-              updateCollection("steps", steps);
-            }}
-            onAdd={() => addRow("steps")}
-            onMove={(index, destination) =>
-              moveRow("steps", index, destination)
+            singular="step"
+            groupLabel="Step"
+            itemPlaceholder="what to do first"
+            rows={10}
+            groups={document.stepGroups}
+            toText={textFromSteps}
+            fromText={stepsFromText}
+            onGroupsChange={(stepGroups) =>
+              onDocumentChange({ ...document, stepGroups })
             }
-            onRemove={(index) => removeRow("steps", index)}
           />
 
           <section aria-labelledby={notesId} className="grid gap-3">
@@ -210,12 +114,38 @@ export function RecipeFolioBody({
               onChange={(notesMarkdown) =>
                 onDocumentChange({ ...document, notesMarkdown })
               }
+              placeholder="substitutions, make-ahead, storage"
               rows={7}
             />
           </section>
         </div>
       )}
     </div>
+  );
+}
+
+/** The unnamed lead group is structural, not visible: hide it when it holds
+ * nothing, so a fully grouped recipe shows no stray empty list. Named groups
+ * always render — the heading tells the reader the component exists. */
+const visibleGroups = (groups: RecipeGroup[]): RecipeGroup[] =>
+  groups.filter((group, index) => index > 0 || group.items.length > 0);
+
+function RecipeReadGroup({
+  name,
+  children,
+}: {
+  name: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      {name === null ? null : (
+        <h3 className="cl-mono m-0 pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-ink-mute">
+          {name}
+        </h3>
+      )}
+      {children}
+    </>
   );
 }
 
@@ -246,13 +176,20 @@ function RecipeReadView({
           >
             Ingredients
           </h2>
-          <ul className="m-0 list-disc space-y-2 py-4 pl-5 marker:text-accent">
-            {document.ingredients.map((ingredient, index) => (
-              <li key={`${index}:${ingredient}`} className="pl-1 text-ink-2">
-                {ingredient}
-              </li>
-            ))}
-          </ul>
+          {visibleGroups(document.ingredientGroups).map((group, index) => (
+            <RecipeReadGroup
+              key={`${index}:${group.name ?? ""}`}
+              name={group.name}
+            >
+              <ul className="m-0 list-disc space-y-2 py-4 pl-5 marker:text-accent">
+                {group.items.map((item, itemIndex) => (
+                  <li key={`${itemIndex}:${item}`} className="pl-1 text-ink-2">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </RecipeReadGroup>
+          ))}
         </section>
 
         <section aria-labelledby={stepsId}>
@@ -262,13 +199,23 @@ function RecipeReadView({
           >
             Steps
           </h2>
-          <ol className="m-0 list-decimal space-y-4 py-4 pl-7 marker:font-heading marker:text-base marker:font-bold marker:text-accent">
-            {document.steps.map((step, index) => (
-              <li key={`${index}:${step}`} className="pl-2 text-ink-2">
-                {step}
-              </li>
-            ))}
-          </ol>
+          {visibleGroups(document.stepGroups).map((group, index) => (
+            <RecipeReadGroup
+              key={`${index}:${group.name ?? ""}`}
+              name={group.name}
+            >
+              <ol className="m-0 list-decimal space-y-4 py-4 pl-7 marker:font-heading marker:text-base marker:font-bold marker:text-accent">
+                {group.items.map((item, itemIndex) => (
+                  <li
+                    key={`${itemIndex}:${item}`}
+                    className="whitespace-pre-line pl-2 text-ink-2"
+                  >
+                    {item}
+                  </li>
+                ))}
+              </ol>
+            </RecipeReadGroup>
+          ))}
         </section>
       </div>
 
@@ -285,33 +232,52 @@ function RecipeReadView({
   );
 }
 
-function RecipeCollectionEditor({
-  collection,
+/** One whole collection — the lead textarea, every named group, and Add group.
+ * It owns its group operations, so the parent passes only `groups` and
+ * `onGroupsChange`. */
+function RecipeGroupsEditor({
   heading,
   headingId,
-  values,
-  inputRefs,
-  rowIds,
-  onValueChange,
-  onAdd,
-  onMove,
-  onRemove,
+  singular,
+  groupLabel,
+  itemPlaceholder,
+  rows,
+  groups,
+  toText,
+  fromText,
+  onGroupsChange,
 }: {
-  collection: RecipeCollectionKey;
   heading: string;
   headingId: string;
-  values: string[];
-  rowIds: string[];
-  inputRefs: React.RefObject<Array<HTMLInputElement | null>>;
-  onValueChange: (index: number, value: string) => void;
-  onAdd: () => void;
-  onMove: (index: number, destination: number) => void;
-  onRemove: (index: number) => void;
+  /** Lowercase, for button copy: "Add ingredient group". */
+  singular: "ingredient" | "step";
+  /** Capitalised, for field labels: "Ingredient group 1 name". */
+  groupLabel: "Ingredient" | "Step";
+  itemPlaceholder: string;
+  rows: number;
+  groups: RecipeGroup[];
+  toText: (items: string[]) => string;
+  fromText: (text: string) => string[];
+  onGroupsChange: (groups: RecipeGroup[]) => void;
 }) {
-  const singular = collection === "ingredients" ? "ingredient" : "step";
-  const label = collection === "ingredients" ? "Ingredient" : "Step";
-  const moveUpActions = useRef<Array<HTMLSpanElement | null>>([]);
-  const moveDownActions = useRef<Array<HTMLSpanElement | null>>([]);
+  const [lead, ...named] = groups;
+
+  const replace = (index: number, patch: Partial<RecipeGroup>) =>
+    onGroupsChange(
+      groups.map((group, candidate) =>
+        candidate === index ? { ...group, ...patch } : group,
+      ),
+    );
+
+  /** Removing a group keeps its items: they join the group above, so a misclick
+   * never destroys written text. */
+  const removeGroup = (index: number) => {
+    const next = groups.map((group) => ({ ...group }));
+    const [removed] = next.splice(index, 1);
+    const target = next[index - 1];
+    if (removed && target) target.items = [...target.items, ...removed.items];
+    onGroupsChange(next);
+  };
 
   return (
     <section aria-labelledby={headingId} className="grid gap-3">
@@ -322,83 +288,102 @@ function RecipeCollectionEditor({
         >
           {heading}
         </h2>
-        <Button variant="secondary" size="sm" onPress={onAdd}>
+        <Button
+          variant="secondary"
+          size="sm"
+          onPress={() => onGroupsChange([...groups, { name: "", items: [] }])}
+        >
           <Plus aria-hidden="true" className="h-3.5 w-3.5" />
-          Add {singular}
+          Add {singular} group
         </Button>
       </div>
 
-      <ol className="m-0 grid list-none gap-3 p-0">
-        {values.map((value, index) => (
-          <li
-            key={rowIds[index]}
-            className="grid gap-2 border-l-2 border-rule-soft pl-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end"
+      <RecipeItemsTextArea
+        label={heading}
+        items={lead?.items ?? []}
+        placeholder={itemPlaceholder}
+        rows={rows}
+        toText={toText}
+        fromText={fromText}
+        onItemsChange={(items) => replace(0, { items })}
+      />
+
+      {named.map((group, offset) => {
+        const index = offset + 1;
+        return (
+          <div
+            key={`${singular}-group-${index}`}
+            className="grid gap-2 border-l-2 border-rule-soft pl-3"
           >
-            <TextField
-              label={`${label} ${index + 1}`}
-              value={value}
-              onChange={(next) => onValueChange(index, next)}
-              inputRef={(input) => {
-                inputRefs.current[index] = input;
-              }}
-              className="min-w-0"
-            />
-            <div className="flex items-center gap-1 sm:pb-px">
-              <span
-                ref={(container) => {
-                  moveUpActions.current[index] = container;
-                }}
-                className="contents"
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Move ${singular} ${index + 1} up`}
-                  isDisabled={index === 0}
-                  onPress={() => {
-                    if (index === 1) {
-                      focusContainedAction(moveDownActions.current[index]);
-                    }
-                    onMove(index, index - 1);
-                  }}
-                >
-                  <ArrowUp aria-hidden="true" className="h-3.5 w-3.5" />
-                </Button>
-              </span>
-              <span
-                ref={(container) => {
-                  moveDownActions.current[index] = container;
-                }}
-                className="contents"
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`Move ${singular} ${index + 1} down`}
-                  isDisabled={index === values.length - 1}
-                  onPress={() => {
-                    if (index === values.length - 2) {
-                      focusContainedAction(moveUpActions.current[index]);
-                    }
-                    onMove(index, index + 1);
-                  }}
-                >
-                  <ArrowDown aria-hidden="true" className="h-3.5 w-3.5" />
-                </Button>
-              </span>
+            <div className="flex items-end justify-between gap-2">
+              <TextField
+                label={`${groupLabel} group ${index} name`}
+                value={group.name ?? ""}
+                onChange={(name) => replace(index, { name })}
+                placeholder="for the sauce"
+                className="min-w-0 flex-1"
+              />
               <Button
                 variant="ghost"
                 size="icon"
-                aria-label={`Remove ${singular} ${index + 1}`}
-                onPress={() => onRemove(index)}
+                aria-label={`Remove ${singular} group ${index}`}
+                onPress={() => removeGroup(index)}
               >
                 <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
               </Button>
             </div>
-          </li>
-        ))}
-      </ol>
+            <RecipeItemsTextArea
+              label={`${groupLabel} group ${index} items`}
+              items={group.items}
+              placeholder={itemPlaceholder}
+              rows={rows}
+              toText={toText}
+              fromText={fromText}
+              onItemsChange={(items) => replace(index, { items })}
+            />
+          </div>
+        );
+      })}
     </section>
+  );
+}
+
+/** A textarea whose value is the document's canonical text, except while the
+ * reader is mid-edit. Re-deriving the value on every keystroke would move the
+ * caret whenever normalisation changed the text, so the local draft governs
+ * until focus leaves. */
+function RecipeItemsTextArea({
+  label,
+  items,
+  placeholder,
+  rows,
+  toText,
+  fromText,
+  onItemsChange,
+}: {
+  label: string;
+  items: string[];
+  placeholder: string;
+  rows: number;
+  toText: (items: string[]) => string;
+  fromText: (text: string) => string[];
+  onItemsChange: (items: string[]) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+
+  return (
+    <RecipeTextArea
+      label={label}
+      hideLabel
+      value={draft ?? toText(items)}
+      placeholder={placeholder}
+      rows={rows}
+      onChange={(value) => {
+        setDraft(value);
+        onItemsChange(fromText(value));
+      }}
+      onBlur={() => setDraft(null)}
+    />
   );
 }
 
@@ -406,19 +391,24 @@ function RecipeTextArea({
   label,
   value,
   onChange,
+  onBlur,
   rows,
+  placeholder,
   hideLabel = false,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
+  onBlur?: () => void;
   rows: number;
+  placeholder?: string;
   hideLabel?: boolean;
 }) {
   return (
     <AriaTextField
       value={value}
       onChange={onChange}
+      onBlur={onBlur}
       className="group flex min-w-0 flex-col"
     >
       <Label
@@ -432,6 +422,7 @@ function RecipeTextArea({
       </Label>
       <TextArea
         rows={rows}
+        placeholder={placeholder}
         className="mt-2 w-full resize-y border border-input bg-background px-3 py-2 font-sans text-sm leading-relaxed text-ink outline-none data-[focused]:border-ring data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-ring data-[focus-visible]:outline-offset-2"
       />
     </AriaTextField>

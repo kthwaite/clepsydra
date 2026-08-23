@@ -627,6 +627,11 @@ pub async fn get_page(
 
 const BY_ID_PATH_ATTEMPTS: usize = 8;
 
+/// Body written for a RECIPE page created without one: the three canonical
+/// section headings. An empty body would open in the raw-Markdown fallback,
+/// because the codec needs all three sections present to read a recipe.
+const RECIPE_SCAFFOLD: &str = "## Ingredients\n\n## Steps\n\n## Notes\n";
+
 async fn indexed_page_path_by_id(state: &AppState, uuid: &str) -> Result<VaultPath, ApiError> {
     let indexed_uuid = uuid.to_string();
     let page_path = state
@@ -759,6 +764,11 @@ pub async fn create_page(
         meta.project = Some(project);
     }
     let page_body = body.body.unwrap_or_default();
+    let page_body = if page_body.trim().is_empty() && matches!(meta.kind, Some(Kind::Recipe)) {
+        RECIPE_SCAFFOLD.to_string()
+    } else {
+        page_body
+    };
 
     let notify = super::mutation_notifier(state.as_ref());
     let result = state
