@@ -1084,9 +1084,9 @@ export function Folio({ tabId, path }: FolioProps) {
         <div className="ai-conversation-warning" role="alert">
           The recipe structure could not be read. The original Markdown is
           preserved in the editor below. To restore structured editing, include
-          Ingredients, Steps, and Notes once and in that order, with bullet
-          ingredients and numbered steps. Either uppercase markers with •
-          bullets or consistent Markdown headings and lists are accepted.
+          Ingredients, Steps, and Notes once and in that order as headings of
+          one consistent level, with bullet ingredients and numbered steps.
+          Components may be grouped under headings one level deeper.
         </div>
       ) : null}
 
@@ -1134,7 +1134,7 @@ export function Folio({ tabId, path }: FolioProps) {
                     editorRevision: editor.editorRevision,
                     result: {
                       ok: true,
-                      sourceFormat: "example",
+                      sourceFormat: "markdown",
                       value: nextDocument,
                     },
                   });

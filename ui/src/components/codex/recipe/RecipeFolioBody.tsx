@@ -1,3 +1,4 @@
+import { Plus, Trash2 } from "lucide-react";
 import { useId, useState } from "react";
 import {
   TextField as AriaTextField,
@@ -5,14 +6,16 @@ import {
   TextArea,
 } from "react-aria-components";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
+import { Button } from "#/components/ui/button";
 import { SegmentedControl } from "#/components/ui/segmented-control";
+import { TextField } from "#/components/ui/text-field";
 import {
   itemsFromText,
   stepsFromText,
   textFromItems,
   textFromSteps,
 } from "#/recipe/recipeText";
-import type { RecipeDocument } from "#/recipe/recipeCodec";
+import type { RecipeDocument, RecipeGroup } from "#/recipe/recipeCodec";
 
 export type RecipeFolioBodyProps = {
   document: RecipeDocument;
@@ -67,43 +70,35 @@ export function RecipeFolioBody({
             rows={4}
           />
 
-          <section aria-labelledby={ingredientsId} className="grid gap-3">
-            <h2
-              id={ingredientsId}
-              className="cl-mono m-0 border-b border-rule pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-            >
-              Ingredients
-            </h2>
-            <RecipeItemsTextArea
-              label="Ingredients"
-              items={document.ingredients}
-              placeholder="200g flour"
-              rows={8}
-              toText={textFromItems}
-              fromText={itemsFromText}
-              onItemsChange={(ingredients) =>
-                onDocumentChange({ ...document, ingredients })
-              }
-            />
-          </section>
+          <RecipeGroupsEditor
+            heading="Ingredients"
+            headingId={ingredientsId}
+            singular="ingredient"
+            groupLabel="Ingredient"
+            itemPlaceholder="200g flour"
+            rows={8}
+            groups={document.ingredientGroups}
+            toText={textFromItems}
+            fromText={itemsFromText}
+            onGroupsChange={(ingredientGroups) =>
+              onDocumentChange({ ...document, ingredientGroups })
+            }
+          />
 
-          <section aria-labelledby={stepsId} className="grid gap-3">
-            <h2
-              id={stepsId}
-              className="cl-mono m-0 border-b border-rule pb-2 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
-            >
-              Steps
-            </h2>
-            <RecipeItemsTextArea
-              label="Steps"
-              items={document.steps}
-              placeholder="what to do first"
-              rows={10}
-              toText={textFromSteps}
-              fromText={stepsFromText}
-              onItemsChange={(steps) => onDocumentChange({ ...document, steps })}
-            />
-          </section>
+          <RecipeGroupsEditor
+            heading="Steps"
+            headingId={stepsId}
+            singular="step"
+            groupLabel="Step"
+            itemPlaceholder="what to do first"
+            rows={10}
+            groups={document.stepGroups}
+            toText={textFromSteps}
+            fromText={stepsFromText}
+            onGroupsChange={(stepGroups) =>
+              onDocumentChange({ ...document, stepGroups })
+            }
+          />
 
           <section aria-labelledby={notesId} className="grid gap-3">
             <h2
@@ -126,6 +121,31 @@ export function RecipeFolioBody({
         </div>
       )}
     </div>
+  );
+}
+
+/** The unnamed lead group is structural, not visible: hide it when it holds
+ * nothing, so a fully grouped recipe shows no stray empty list. Named groups
+ * always render — the heading tells the reader the component exists. */
+const visibleGroups = (groups: RecipeGroup[]): RecipeGroup[] =>
+  groups.filter((group, index) => index > 0 || group.items.length > 0);
+
+function RecipeReadGroup({
+  name,
+  children,
+}: {
+  name: string | null;
+  children: React.ReactNode;
+}) {
+  return (
+    <>
+      {name === null ? null : (
+        <h3 className="cl-mono m-0 pt-4 text-[10px] font-bold uppercase tracking-[0.16em] text-ink-mute">
+          {name}
+        </h3>
+      )}
+      {children}
+    </>
   );
 }
 
@@ -156,13 +176,20 @@ function RecipeReadView({
           >
             Ingredients
           </h2>
-          <ul className="m-0 list-disc space-y-2 py-4 pl-5 marker:text-accent">
-            {document.ingredients.map((ingredient, index) => (
-              <li key={`${index}:${ingredient}`} className="pl-1 text-ink-2">
-                {ingredient}
-              </li>
-            ))}
-          </ul>
+          {visibleGroups(document.ingredientGroups).map((group, index) => (
+            <RecipeReadGroup
+              key={group.name ?? `ingredient-lead-${index}`}
+              name={group.name}
+            >
+              <ul className="m-0 list-disc space-y-2 py-4 pl-5 marker:text-accent">
+                {group.items.map((item, itemIndex) => (
+                  <li key={`${itemIndex}:${item}`} className="pl-1 text-ink-2">
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </RecipeReadGroup>
+          ))}
         </section>
 
         <section aria-labelledby={stepsId}>
@@ -172,13 +199,23 @@ function RecipeReadView({
           >
             Steps
           </h2>
-          <ol className="m-0 list-decimal space-y-4 py-4 pl-7 marker:font-heading marker:text-base marker:font-bold marker:text-accent">
-            {document.steps.map((step, index) => (
-              <li key={`${index}:${step}`} className="pl-2 text-ink-2">
-                {step}
-              </li>
-            ))}
-          </ol>
+          {visibleGroups(document.stepGroups).map((group, index) => (
+            <RecipeReadGroup
+              key={group.name ?? `step-lead-${index}`}
+              name={group.name}
+            >
+              <ol className="m-0 list-decimal space-y-4 py-4 pl-7 marker:font-heading marker:text-base marker:font-bold marker:text-accent">
+                {group.items.map((item, itemIndex) => (
+                  <li
+                    key={`${itemIndex}:${item}`}
+                    className="whitespace-pre-line pl-2 text-ink-2"
+                  >
+                    {item}
+                  </li>
+                ))}
+              </ol>
+            </RecipeReadGroup>
+          ))}
         </section>
       </div>
 
@@ -192,6 +229,122 @@ function RecipeReadView({
         <MarkdownRenderer content={document.notesMarkdown} />
       </section>
     </div>
+  );
+}
+
+/** One whole collection — the lead textarea, every named group, and Add group.
+ * It owns its group operations, so the parent passes only `groups` and
+ * `onGroupsChange`. */
+function RecipeGroupsEditor({
+  heading,
+  headingId,
+  singular,
+  groupLabel,
+  itemPlaceholder,
+  rows,
+  groups,
+  toText,
+  fromText,
+  onGroupsChange,
+}: {
+  heading: string;
+  headingId: string;
+  /** Lowercase, for button copy: "Add ingredient group". */
+  singular: "ingredient" | "step";
+  /** Capitalised, for field labels: "Ingredient group 1 name". */
+  groupLabel: "Ingredient" | "Step";
+  itemPlaceholder: string;
+  rows: number;
+  groups: RecipeGroup[];
+  toText: (items: string[]) => string;
+  fromText: (text: string) => string[];
+  onGroupsChange: (groups: RecipeGroup[]) => void;
+}) {
+  const [lead, ...named] = groups;
+
+  const replace = (index: number, patch: Partial<RecipeGroup>) =>
+    onGroupsChange(
+      groups.map((group, candidate) =>
+        candidate === index ? { ...group, ...patch } : group,
+      ),
+    );
+
+  /** Removing a group keeps its items: they join the group above, so a misclick
+   * never destroys written text. */
+  const removeGroup = (index: number) => {
+    const next = groups.map((group) => ({ ...group }));
+    const [removed] = next.splice(index, 1);
+    const target = next[index - 1];
+    if (removed && target) target.items = [...target.items, ...removed.items];
+    onGroupsChange(next);
+  };
+
+  return (
+    <section aria-labelledby={headingId} className="grid gap-3">
+      <div className="flex items-center justify-between gap-3 border-b border-rule pb-2">
+        <h2
+          id={headingId}
+          className="cl-mono m-0 text-[11px] font-bold uppercase tracking-[0.16em] text-ink-mute"
+        >
+          {heading}
+        </h2>
+        <Button
+          variant="secondary"
+          size="sm"
+          onPress={() => onGroupsChange([...groups, { name: "", items: [] }])}
+        >
+          <Plus aria-hidden="true" className="h-3.5 w-3.5" />
+          Add {singular} group
+        </Button>
+      </div>
+
+      <RecipeItemsTextArea
+        label={heading}
+        items={lead?.items ?? []}
+        placeholder={itemPlaceholder}
+        rows={rows}
+        toText={toText}
+        fromText={fromText}
+        onItemsChange={(items) => replace(0, { items })}
+      />
+
+      {named.map((group, offset) => {
+        const index = offset + 1;
+        return (
+          <div
+            key={`${singular}-group-${index}`}
+            className="grid gap-2 border-l-2 border-rule-soft pl-3"
+          >
+            <div className="flex items-end justify-between gap-2">
+              <TextField
+                label={`${groupLabel} group ${index} name`}
+                value={group.name ?? ""}
+                onChange={(name) => replace(index, { name })}
+                placeholder="for the sauce"
+                className="min-w-0 flex-1"
+              />
+              <Button
+                variant="ghost"
+                size="icon"
+                aria-label={`Remove ${singular} group ${index}`}
+                onPress={() => removeGroup(index)}
+              >
+                <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            <RecipeItemsTextArea
+              label={`${groupLabel} group ${index} items`}
+              items={group.items}
+              placeholder={itemPlaceholder}
+              rows={rows}
+              toText={toText}
+              fromText={fromText}
+              onItemsChange={(items) => replace(index, { items })}
+            />
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
