@@ -6,7 +6,12 @@ import {
 } from "react-aria-components";
 import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { SegmentedControl } from "#/components/ui/segmented-control";
-import { itemsFromText, textFromItems } from "#/recipe/recipeText";
+import {
+  itemsFromText,
+  stepsFromText,
+  textFromItems,
+  textFromSteps,
+} from "#/recipe/recipeText";
 import type { RecipeDocument } from "#/recipe/recipeCodec";
 
 export type RecipeFolioBodyProps = {
@@ -74,6 +79,8 @@ export function RecipeFolioBody({
               items={document.ingredients}
               placeholder="200g flour"
               rows={8}
+              toText={textFromItems}
+              fromText={itemsFromText}
               onItemsChange={(ingredients) =>
                 onDocumentChange({ ...document, ingredients })
               }
@@ -92,6 +99,8 @@ export function RecipeFolioBody({
               items={document.steps}
               placeholder="what to do first"
               rows={10}
+              toText={textFromSteps}
+              fromText={stepsFromText}
               onItemsChange={(steps) => onDocumentChange({ ...document, steps })}
             />
           </section>
@@ -195,12 +204,16 @@ function RecipeItemsTextArea({
   items,
   placeholder,
   rows,
+  toText,
+  fromText,
   onItemsChange,
 }: {
   label: string;
   items: string[];
   placeholder: string;
   rows: number;
+  toText: (items: string[]) => string;
+  fromText: (text: string) => string[];
   onItemsChange: (items: string[]) => void;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
@@ -209,12 +222,12 @@ function RecipeItemsTextArea({
     <RecipeTextArea
       label={label}
       hideLabel
-      value={draft ?? textFromItems(items)}
+      value={draft ?? toText(items)}
       placeholder={placeholder}
       rows={rows}
       onChange={(value) => {
         setDraft(value);
-        onItemsChange(itemsFromText(value));
+        onItemsChange(fromText(value));
       }}
       onBlur={() => setDraft(null)}
     />

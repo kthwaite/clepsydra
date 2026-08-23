@@ -168,6 +168,128 @@ NOTES
       },
     });
   });
+  it("keeps indented continuation lines as part of their step", () => {
+    expect(
+      parseRecipeMarkdown(
+        `## Ingredients
+
+- 2 shallots
+
+## Steps
+
+1. Start the aromatics
+   Heat the oil over medium heat.
+   Add shallots and sauté until softened.
+2. Add the garlic
+   Cook for about 1 minute.
+
+## Notes
+`,
+        "Stew",
+      ),
+    ).toMatchObject({
+      ok: true,
+      value: {
+        steps: [
+          "Start the aromatics\nHeat the oil over medium heat.\nAdd shallots and sauté until softened.",
+          "Add the garlic\nCook for about 1 minute.",
+        ],
+      },
+    });
+  });
+
+  it("preserves indentation relative to a step's shallowest continuation", () => {
+    const parsed = parseRecipeMarkdown(
+      `## Ingredients
+
+- salt
+
+## Steps
+
+1. Season
+     deeply indented
+   shallower line
+
+## Notes
+`,
+      "Seasoning",
+    );
+
+    expect(parsed).toMatchObject({
+      ok: true,
+      value: { steps: ["Season\n  deeply indented\nshallower line"] },
+    });
+  });
+
+  it("keeps a blank line inside a step and drops trailing blanks", () => {
+    expect(
+      parseRecipeMarkdown(
+        `## Ingredients
+
+- salt
+
+## Steps
+
+1. Rest the dough
+
+   Come back in an hour.
+
+2. Bake
+
+## Notes
+`,
+        "Dough",
+      ),
+    ).toMatchObject({
+      ok: true,
+      value: { steps: ["Rest the dough\n\nCome back in an hour.", "Bake"] },
+    });
+  });
+
+  it("indents continuation lines under their own step marker", () => {
+    expect(
+      serializeRecipeMarkdown({
+        description: "",
+        ingredients: [],
+        steps: ["Start\nThen this.", "Finish"],
+        notesMarkdown: "",
+      }),
+    ).toBe(
+      "## Ingredients\n\n## Steps\n\n1. Start\n   Then this.\n2. Finish\n\n## Notes\n",
+    );
+  });
+
+  it("accepts a bullet character in the heading format", () => {
+    expect(
+      parseRecipeMarkdown(
+        `## Ingredients
+
+• 2 onions
+
+## Steps
+
+1. Season.
+
+## Notes
+`,
+        "Recipe",
+      ),
+    ).toMatchObject({ ok: true, value: { ingredients: ["2 onions"] } });
+  });
+
+  it("round-trips a multi-line step", () => {
+    const document = {
+      description: "",
+      ingredients: ["salt"],
+      steps: ["Start the aromatics\nHeat the oil.\n\nWait.", "Serve"],
+      notesMarkdown: "",
+    };
+
+    expect(
+      parseRecipeMarkdown(serializeRecipeMarkdown(document), "Recipe"),
+    ).toEqual({ ok: true, sourceFormat: "markdown", value: document });
+  });
+
   it.each([
     {
       name: "missing marker",

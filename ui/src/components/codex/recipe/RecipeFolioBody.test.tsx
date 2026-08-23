@@ -170,6 +170,22 @@ describe("RecipeFolioBody", () => {
     );
   });
 
+  it("keeps indented detail lines inside their step", async () => {
+    const user = userEvent.setup();
+    const onDocumentChange = vi.fn();
+    render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
+
+    const steps = screen.getByRole("textbox", { name: "Steps" });
+    await user.clear(steps);
+    await user.paste("Start the aromatics\n  Heat the oil.\nServe.");
+
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        steps: ["Start the aromatics\nHeat the oil.", "Serve."],
+      }),
+    );
+  });
+
   it("does not persist blank rows in canonical Markdown", async () => {
     const user = userEvent.setup();
     const serialized = vi.fn<(markdown: string) => void>();

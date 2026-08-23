@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { itemsFromText, textFromItems } from "#/recipe/recipeText";
+import {
+  itemsFromText,
+  stepsFromText,
+  textFromItems,
+  textFromSteps,
+} from "#/recipe/recipeText";
 
 describe("itemsFromText", () => {
   it("makes one item per line", () => {
@@ -41,5 +46,35 @@ describe("textFromItems", () => {
   it("round-trips through itemsFromText", () => {
     const items = ["200 g spaghetti", "1 lemon", "30 g parmesan"];
     expect(itemsFromText(textFromItems(items))).toEqual(items);
+  });
+});
+
+describe("stepsFromText", () => {
+  it("starts a step at each unindented line", () => {
+    expect(stepsFromText("Boil the pasta.\nDrain.")).toEqual([
+      "Boil the pasta.",
+      "Drain.",
+    ]);
+  });
+
+  it("folds indented lines into the step above", () => {
+    expect(
+      stepsFromText(
+        "Start the aromatics\n  Heat the oil.\n  Add shallots.\nServe.",
+      ),
+    ).toEqual(["Start the aromatics\nHeat the oil.\nAdd shallots.", "Serve."]);
+  });
+
+  it("strips ordered markers pasted from elsewhere", () => {
+    expect(stepsFromText("1. Boil.\n2) Drain.")).toEqual(["Boil.", "Drain."]);
+  });
+
+  it("round-trips through textFromSteps", () => {
+    const steps = ["Start\nThen this.", "Finish"];
+    expect(stepsFromText(textFromSteps(steps))).toEqual(steps);
+  });
+
+  it("renders no step numbers", () => {
+    expect(textFromSteps(["Boil.", "Drain."])).toBe("Boil.\nDrain.");
   });
 });
