@@ -256,8 +256,8 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
       "Authored in raw mode.",
     );
-    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
-      "two lemons",
+    expect(screen.getByRole("textbox", { name: "Ingredients" })).toHaveValue(
+      "two lemons\n200 g pasta",
     );
 
     fireEvent.change(screen.getByRole("textbox", { name: "Description" }), {
@@ -322,15 +322,17 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByText(/no longer editable/i)).toBeVisible();
   });
 
-  it("keeps a new empty row available for input while omitting it from Markdown", async () => {
+  it("omits blank ingredient lines from the Markdown it writes", async () => {
     const user = userEvent.setup();
     const editor = pageEditor();
     renderFolio(editor);
 
     await user.click(screen.getByRole("radio", { name: "Edit" }));
-    await user.click(screen.getByRole("button", { name: "Add ingredient" }));
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    fireEvent.change(ingredients, {
+      target: { value: "one lemon\n\n200 g pasta" },
+    });
 
-    expect(screen.getByRole("textbox", { name: "Ingredient 3" })).toHaveFocus();
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
       "A bright dish.\n\n## Ingredients\n\n- one lemon\n- 200 g pasta\n\n## Steps\n\n1. Boil the pasta.\n2. Toss and serve.\n\n## Notes\n\nFinish with **pepper**.\n",
     );
@@ -472,7 +474,7 @@ describe("Folio recipe presentation", () => {
     expect(screen.getByRole("textbox", { name: "Description" })).toHaveValue(
       "Server revision.",
     );
-    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
+    expect(screen.getByRole("textbox", { name: "Ingredients" })).toHaveValue(
       "fresh ingredient",
     );
     expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
