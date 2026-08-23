@@ -572,6 +572,29 @@ NOTES
     },
   );
 
+  it("round-trips two groups that share a name", () => {
+    const document = {
+      description: "",
+      ingredientGroups: [
+        { name: null, items: [] },
+        { name: "For the sauce", items: ["2 tomatoes"] },
+        { name: "For the sauce", items: ["1 clove garlic"] },
+      ],
+      stepGroups: [{ name: null, items: [] }],
+      notesMarkdown: "",
+    };
+    const serialized = serializeRecipeMarkdown(document);
+
+    expect(serialized).toBe(
+      "## Ingredients\n\n### For the sauce\n\n- 2 tomatoes\n\n### For the sauce\n\n- 1 clove garlic\n\n## Steps\n\n## Notes\n",
+    );
+    expect(parseRecipeMarkdown(serialized, "Recipe")).toEqual({
+      ok: true,
+      sourceFormat: "markdown",
+      value: document,
+    });
+  });
+
   it("round-trips a grouped recipe", () => {
     const document = {
       description: "A composed dish.",

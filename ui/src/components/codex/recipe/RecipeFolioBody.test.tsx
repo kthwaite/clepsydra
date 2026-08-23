@@ -249,6 +249,71 @@ describe("RecipeFolioBody", () => {
     expect(within(steps).getAllByRole("list")).toHaveLength(2);
   });
 
+  it("renders no list for an empty lead group in read mode", () => {
+    render(
+      <RecipeFolioBody
+        document={{
+          description: "",
+          ingredientGroups: [
+            { name: null, items: [] },
+            { name: "For the sauce", items: ["2 tomatoes"] },
+          ],
+          stepGroups: [{ name: null, items: [] }],
+          notesMarkdown: "",
+        }}
+        mode="read"
+        onModeChange={vi.fn()}
+        onDocumentChange={vi.fn()}
+      />,
+    );
+
+    const ingredients = screen.getByRole("region", { name: "Ingredients" });
+    expect(within(ingredients).getAllByRole("list")).toHaveLength(1);
+    expect(
+      within(ingredients).getByRole("heading", {
+        name: "For the sauce",
+        level: 3,
+      }),
+    ).toBeVisible();
+  });
+
+  it("renders two groups that share a name without colliding keys", () => {
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => {});
+
+    render(
+      <RecipeFolioBody
+        document={{
+          description: "",
+          ingredientGroups: [
+            { name: null, items: [] },
+            { name: "For the sauce", items: ["2 tomatoes"] },
+            { name: "For the sauce", items: ["1 clove garlic"] },
+          ],
+          stepGroups: [{ name: null, items: [] }],
+          notesMarkdown: "",
+        }}
+        mode="read"
+        onModeChange={vi.fn()}
+        onDocumentChange={vi.fn()}
+      />,
+    );
+
+    const errors = consoleError.mock.calls.map((call) => String(call[0]));
+    consoleError.mockRestore();
+
+    const ingredients = screen.getByRole("region", { name: "Ingredients" });
+    expect(
+      within(ingredients).getAllByRole("heading", {
+        name: "For the sauce",
+        level: 3,
+      }),
+    ).toHaveLength(2);
+    expect(within(ingredients).getAllByRole("list")).toHaveLength(2);
+    expect(errors).toEqual([]);
+  });
+
   it("adds a group and edits its items independently", async () => {
     const user = userEvent.setup();
     const onDocumentChange = vi.fn();
