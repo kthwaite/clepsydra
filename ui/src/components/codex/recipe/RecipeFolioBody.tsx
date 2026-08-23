@@ -178,7 +178,7 @@ function RecipeReadView({
           </h2>
           {visibleGroups(document.ingredientGroups).map((group, index) => (
             <RecipeReadGroup
-              key={group.name ?? `ingredient-lead-${index}`}
+              key={`${index}:${group.name ?? ""}`}
               name={group.name}
             >
               <ul className="m-0 list-disc space-y-2 py-4 pl-5 marker:text-accent">
@@ -201,7 +201,7 @@ function RecipeReadView({
           </h2>
           {visibleGroups(document.stepGroups).map((group, index) => (
             <RecipeReadGroup
-              key={group.name ?? `step-lead-${index}`}
+              key={`${index}:${group.name ?? ""}`}
               name={group.name}
             >
               <ol className="m-0 list-decimal space-y-4 py-4 pl-7 marker:font-heading marker:text-base marker:font-bold marker:text-accent">
