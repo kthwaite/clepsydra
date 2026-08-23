@@ -74,13 +74,13 @@ describe("VIEW_REGISTRY", () => {
       "BIN",
     ]);
   });
-  it("shows the Sheaf exactly for folio, launcher, gazetteer, tasking", () => {
+  it("shows the Sheaf exactly for folio, launcher, gazetteer", () => {
     const withSheaf = (
       Object.keys(VIEW_REGISTRY) as Array<keyof typeof VIEW_REGISTRY>
     )
       .filter((v) => VIEW_REGISTRY[v].showsSheaf)
       .sort();
-    expect(withSheaf).toEqual(["folio", "gazetteer", "launcher", "tasking"]);
+    expect(withSheaf).toEqual(["folio", "gazetteer", "launcher"]);
   });
   it("keeps today's folio codes", () => {
     expect(VIEW_REGISTRY.constellation.folioCode).toBe("GRAPH");
