@@ -127,6 +127,22 @@ export function parseRecipeMarkdown(
   body: string,
   pageTitle: string,
 ): RecipeParseResult {
+  // A page created with no body, or one just assigned RECIPE, is an empty
+  // recipe rather than a broken one — the editor should offer its fields, not
+  // the preservation notice.
+  if (body.trim() === "") {
+    return {
+      ok: true,
+      sourceFormat: "markdown",
+      value: {
+        description: "",
+        ingredients: [],
+        steps: [],
+        notesMarkdown: "",
+      },
+    };
+  }
+
   const lines = trimBoundaryBlankLines(normalizeLineEndings(body).split("\n"));
   if (lines[0]?.trim() === pageTitle.trim()) lines.shift();
 
