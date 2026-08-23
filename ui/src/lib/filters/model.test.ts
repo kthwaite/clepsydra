@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   applyClientFilter,
+  clearFacet,
   clearFilter,
   EMPTY_FILTER_STATE,
-  facetsEqual,
   FLAG_ON,
+  facetsEqual,
   isFilterActive,
   removeFacetValue,
   setText,
@@ -49,6 +50,22 @@ describe("filter state helpers", () => {
     expect(s.facets.hold).toEqual([FLAG_ON]);
     s = toggleFacetValue(s, flag, FLAG_ON);
     expect("hold" in s.facets).toBe(false);
+  });
+
+  it("clearFacet drops every value of one field, leaving the others", () => {
+    let s = toggleFacetValue(EMPTY_FILTER_STATE, multi, "a");
+    s = toggleFacetValue(s, multi, "b");
+    s = toggleFacetValue(s, single, "NOTE");
+    s = setText(s, "q");
+    const cleared = clearFacet(s, "tags");
+    expect("tags" in cleared.facets).toBe(false);
+    expect(cleared.facets.kind).toEqual(["NOTE"]);
+    expect(cleared.text).toBe("q");
+  });
+
+  it("clearFacet on an unset field is a no-op", () => {
+    const s = toggleFacetValue(EMPTY_FILTER_STATE, multi, "a");
+    expect(clearFacet(s, "kind").facets).toEqual({ tags: ["a"] });
   });
 
   it("removeFacetValue and clearFilter behave", () => {

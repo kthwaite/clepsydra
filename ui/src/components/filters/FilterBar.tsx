@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { Button, Dialog, DialogTrigger } from "react-aria-components";
+import { FacetBadge } from "#/components/filters/FacetBadge";
 import { Popover } from "#/components/ui/popover";
 import { cn } from "#/lib/cn";
 import {
   activeFacets,
+  clearFacet,
   clearFilter,
   type FilterField,
   type FilterState,
@@ -38,7 +40,7 @@ const inputClasses =
   "cl-mono border border-[var(--rule)] bg-transparent px-[8px] py-[4px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink)] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)]";
 
 const chromeButtonClasses =
-  "cl-mono cursor-pointer border border-[var(--rule)] px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-mute)] transition-colors hover:text-[var(--ink-2)]";
+  "cl-mono shrink-0 cursor-pointer whitespace-nowrap border border-[var(--rule)] px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-mute)] transition-colors hover:text-[var(--ink-2)]";
 
 export function FilterBar({
   fields,
@@ -94,10 +96,12 @@ export function FilterBar({
     }
   };
 
-  const chips = activeFacets(state).flatMap(([fieldId, values]) => {
+  // One badge per active field, not per applied value — FacetBadge collapses
+  // a multi-value field behind a popover.
+  const badges = activeFacets(state).flatMap(([fieldId, values]) => {
     const field = fields.find((f) => f.id === fieldId);
     if (!field) return [];
-    return values.map((value) => ({ field, value }));
+    return [{ field, values }];
   });
 
   const active = isFilterActive(state);
@@ -205,30 +209,17 @@ export function FilterBar({
         </Popover>
       </DialogTrigger>
 
-      {chips.map(({ field, value }) => {
-        const optionLabel =
-          field.options.find((o) => o.value === value)?.label ?? value;
-        const label =
-          field.kind === "flag"
-            ? field.label
-            : `${field.label}: ${optionLabel}`;
-        const removeLabel =
-          field.kind === "flag"
-            ? `Remove filter ${field.label}`
-            : `Remove filter ${field.label}: ${optionLabel}`;
-        return (
-          <button
-            key={`${field.id}-${value}`}
-            type="button"
-            data-testid={`filter-bar-chip-${field.id}-${value}`}
-            aria-label={removeLabel}
-            className="cl-mono border border-[var(--hot)] bg-[var(--hot)] px-[7px] py-[3px] text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--paper)] transition-colors"
-            onClick={() => onChange(removeFacetValue(state, field.id, value))}
-          >
-            {label}
-          </button>
-        );
-      })}
+      {badges.map(({ field, values }) => (
+        <FacetBadge
+          key={field.id}
+          field={field}
+          values={values}
+          onRemoveValue={(value) =>
+            onChange(removeFacetValue(state, field.id, value))
+          }
+          onClearField={() => onChange(clearFacet(state, field.id))}
+        />
+      ))}
 
       {active && (
         <button
@@ -244,7 +235,7 @@ export function FilterBar({
       {showCount && (
         <span
           data-testid="filter-bar-count"
-          className="cl-mono ml-auto text-[var(--fs-xs)] uppercase tracking-[0.15em] text-[var(--ink-mute)]"
+          className="cl-mono ml-auto shrink-0 whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.15em] text-[var(--ink-mute)]"
         >
           {pad2(filteredCount as number)} OF {pad2(totalCount as number)}
         </span>
