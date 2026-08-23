@@ -216,25 +216,33 @@ export function parseRecipeMarkdown(
   };
 }
 
+/** `## Name` alone when the section is empty, `## Name` + blank line + block
+ * otherwise. Empty sections must still emit their heading so the body keeps
+ * parsing. */
+const serializeSection = (heading: string, block: string): string =>
+  block.length > 0 ? `## ${heading}\n\n${block}` : `## ${heading}`;
+
 export function serializeRecipeMarkdown(document: RecipeDocument): string {
   const description = joinMarkdown(
     normalizeLineEndings(document.description).split("\n"),
   );
   const ingredients = document.ingredients
     .filter((ingredient) => ingredient.trim().length > 0)
-    .map((ingredient) => `• ${normalizeLineEndings(ingredient)}`);
+    .map((ingredient) => `- ${normalizeLineEndings(ingredient)}`)
+    .join("\n");
   const steps = document.steps
     .filter((step) => step.trim().length > 0)
-    .map((step, index) => `${index + 1}. ${normalizeLineEndings(step)}`);
+    .map((step, index) => `${index + 1}. ${normalizeLineEndings(step)}`)
+    .join("\n");
   const notes = joinMarkdown(
     normalizeLineEndings(document.notesMarkdown).split("\n"),
   );
 
   const sections = [
     ...(description.length > 0 ? [description] : []),
-    ["INGREDIENTS", ...ingredients].join("\n"),
-    ["STEPS", ...steps].join("\n"),
-    notes.length > 0 ? `NOTES\n${notes}` : "NOTES",
+    serializeSection("Ingredients", ingredients),
+    serializeSection("Steps", steps),
+    serializeSection("Notes", notes),
   ];
 
   return `${sections.join("\n\n")}\n`;

@@ -255,7 +255,7 @@ describe("RecipeFolioBody", () => {
 
     await user.click(screen.getByRole("button", { name: "Add ingredient" }));
     expect(serialized).toHaveBeenLastCalledWith(
-      "A bright, weeknight pasta.\n\nINGREDIENTS\n• 200 g spaghetti\n• 1 lemon\n• 30 g parmesan\n\nSTEPS\n1. Boil the pasta.\n2. Toss with lemon and parmesan.\n\nNOTES\nServe with **black pepper** and [[salad]].\n",
+      "A bright, weeknight pasta.\n\n## Ingredients\n\n- 200 g spaghetti\n- 1 lemon\n- 30 g parmesan\n\n## Steps\n\n1. Boil the pasta.\n2. Toss with lemon and parmesan.\n\n## Notes\n\nServe with **black pepper** and [[salad]].\n",
     );
   });
 });

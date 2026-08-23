@@ -227,7 +227,7 @@ describe("Folio recipe presentation", () => {
       }),
     );
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
-      "A deeper dish.\n\nINGREDIENTS\n• one lemon\n• 200 g pasta\n\nSTEPS\n1. Boil the pasta.\n2. Toss and serve.\n\nNOTES\nFinish with **pepper**.\n",
+      "A deeper dish.\n\n## Ingredients\n\n- one lemon\n- 200 g pasta\n\n## Steps\n\n1. Boil the pasta.\n2. Toss and serve.\n\n## Notes\n\nFinish with **pepper**.\n",
     );
   });
 
@@ -264,7 +264,7 @@ describe("Folio recipe presentation", () => {
       target: { value: "Structured after raw." },
     });
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
-      "Structured after raw.\n\nINGREDIENTS\n• two lemons\n• 200 g pasta\n\nSTEPS\n1. Boil the pasta.\n2. Toss and serve.\n\nNOTES\nKeep this exact note.\n",
+      "Structured after raw.\n\n## Ingredients\n\n- two lemons\n- 200 g pasta\n\n## Steps\n\n1. Boil the pasta.\n2. Toss and serve.\n\n## Notes\n\nKeep this exact note.\n",
     );
   });
 
@@ -332,7 +332,7 @@ describe("Folio recipe presentation", () => {
 
     expect(screen.getByRole("textbox", { name: "Ingredient 3" })).toHaveFocus();
     expect(editor.setBodyMarkdown).toHaveBeenLastCalledWith(
-      canonicalRecipeMarkdown,
+      "A bright dish.\n\n## Ingredients\n\n- one lemon\n- 200 g pasta\n\n## Steps\n\n1. Boil the pasta.\n2. Toss and serve.\n\n## Notes\n\nFinish with **pepper**.\n",
     );
   });
 
