@@ -6778,3 +6778,53 @@ async fn folder_move_waits_for_descendant_mutation_guard() {
     response.assert_status(StatusCode::OK);
     assert!(state.vault.root().join("destination/page.md").is_file());
 }
+
+#[tokio::test]
+async fn create_recipe_page_without_body_writes_the_section_scaffold() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/recipes/scaffold.md")
+        .json(&serde_json::json!({ "title": "Scaffold", "kind": "RECIPE" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/pages/recipes/scaffold.md").await;
+    res.assert_status(StatusCode::OK);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["body"], "## Ingredients\n\n## Steps\n\n## Notes\n");
+}
+
+#[tokio::test]
+async fn create_recipe_page_keeps_a_supplied_body() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/recipes/supplied.md")
+        .json(&serde_json::json!({
+            "title": "Supplied",
+            "kind": "RECIPE",
+            "body": "Already written.\n"
+        }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/pages/recipes/supplied.md").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["body"], "Already written.\n");
+}
+
+#[tokio::test]
+async fn create_non_recipe_page_without_body_stays_empty() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/notes/plain.md")
+        .json(&serde_json::json!({ "title": "Plain", "kind": "NOTE" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+
+    let res = server.get("/api/vault/pages/notes/plain.md").await;
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["body"], "");
+}
