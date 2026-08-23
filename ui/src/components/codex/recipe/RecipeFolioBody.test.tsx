@@ -1,4 +1,4 @@
-import { act, render, screen, within } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -109,142 +109,68 @@ describe("RecipeFolioBody", () => {
     });
   });
 
-  it("adds, focuses, reorders, and removes ingredients with keyboard-accessible controls", async () => {
+  it("edits ingredients as one item per line", async () => {
     const user = userEvent.setup();
     const onDocumentChange = vi.fn();
     render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
 
-    const secondMoveUp = screen.getByRole("button", {
-      name: "Move ingredient 2 up",
-    });
-    secondMoveUp.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      ingredients: ["1 lemon", "200 g spaghetti", "30 g parmesan"],
-    });
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    expect(ingredients).toHaveValue("200 g spaghetti\n1 lemon\n30 g parmesan");
 
-    const firstMoveDown = screen.getByRole("button", {
-      name: "Move ingredient 1 down",
-    });
-    firstMoveDown.focus();
-    await user.keyboard(" ");
-    expect(onDocumentChange).toHaveBeenLastCalledWith(recipe);
+    await user.clear(ingredients);
+    await user.type(ingredients, "1 lemon{enter}sea salt");
 
-    const removeThird = screen.getByRole("button", {
-      name: "Remove ingredient 3",
-    });
-    removeThird.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      ingredients: ["200 g spaghetti", "1 lemon"],
-    });
-
-    const add = screen.getByRole("button", { name: "Add ingredient" });
-    add.focus();
-    await user.keyboard("{Enter}");
-    expect(screen.getByRole("textbox", { name: "Ingredient 3" })).toHaveFocus();
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ ingredients: ["1 lemon", "sea salt"] }),
+    );
   });
 
-  it("adds, focuses, reorders, and removes steps with keyboard-accessible controls", async () => {
+  it("accepts a pasted block of marked-up ingredients", async () => {
     const user = userEvent.setup();
     const onDocumentChange = vi.fn();
     render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
 
-    const secondMoveUp = screen.getByRole("button", {
-      name: "Move step 2 up",
-    });
-    secondMoveUp.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      steps: ["Toss with lemon and parmesan.", "Boil the pasta."],
-    });
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    await user.clear(ingredients);
+    await user.paste("- 2 onions\n- 4 garlic cloves\n- 30 g ginger");
 
-    const firstMoveDown = screen.getByRole("button", {
-      name: "Move step 1 down",
-    });
-    firstMoveDown.focus();
-    await user.keyboard(" ");
-    expect(onDocumentChange).toHaveBeenLastCalledWith(recipe);
-
-    const removeSecond = screen.getByRole("button", {
-      name: "Remove step 2",
-    });
-    removeSecond.focus();
-    await user.keyboard("{Enter}");
-    expect(onDocumentChange).toHaveBeenLastCalledWith({
-      ...recipe,
-      steps: ["Boil the pasta."],
-    });
-
-    const add = screen.getByRole("button", { name: "Add step" });
-    add.focus();
-    await user.keyboard("{Enter}");
-    expect(screen.getByRole("textbox", { name: "Step 2" })).toHaveFocus();
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        ingredients: ["2 onions", "4 garlic cloves", "30 g ginger"],
+      }),
+    );
   });
 
-  it("keeps the same ingredient move-up action focused across consecutive moves", async () => {
+  it("re-renders the canonical text once the textarea loses focus", async () => {
     const user = userEvent.setup();
     render(<ControlledRecipe />);
 
-    act(() => {
-      screen.getByRole("button", { name: "Move ingredient 3 up" }).focus();
-    });
-    await user.keyboard("{Enter}");
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    await user.clear(ingredients);
+    await user.paste("- 2 onions\n\n- 4 garlic cloves");
+    expect(ingredients).toHaveValue("- 2 onions\n\n- 4 garlic cloves");
 
-    const movedAction = screen.getByRole("button", {
-      name: "Move ingredient 2 up",
-    });
-    expect(movedAction).toHaveFocus();
-    await user.keyboard("{Enter}");
-
-    expect(screen.getByRole("textbox", { name: "Ingredient 1" })).toHaveValue(
-      "30 g parmesan",
-    );
-    expect(screen.getByRole("textbox", { name: "Ingredient 2" })).toHaveValue(
-      "200 g spaghetti",
-    );
-    expect(
-      screen.getByRole("button", { name: "Move ingredient 1 down" }),
-    ).toHaveFocus();
+    await user.tab();
+    expect(ingredients).toHaveValue("2 onions\n4 garlic cloves");
   });
 
-  it("keeps the same step move-down action focused across consecutive moves", async () => {
+  it("edits steps as one item per line", async () => {
     const user = userEvent.setup();
-    render(
-      <ControlledRecipe
-        initial={{
-          ...recipe,
-          steps: ["Boil.", "Toss.", "Serve."],
-        }}
-      />,
-    );
+    const onDocumentChange = vi.fn();
+    render(<ControlledRecipe onDocumentChange={onDocumentChange} />);
 
-    act(() => {
-      screen.getByRole("button", { name: "Move step 1 down" }).focus();
-    });
-    await user.keyboard("{Enter}");
+    const steps = screen.getByRole("textbox", { name: "Steps" });
+    expect(steps).toHaveValue("Boil the pasta.\nToss with lemon and parmesan.");
 
-    const movedAction = screen.getByRole("button", {
-      name: "Move step 2 down",
-    });
-    expect(movedAction).toHaveFocus();
-    await user.keyboard("{Enter}");
+    await user.clear(steps);
+    await user.paste("1. Boil the pasta.\n2. Drain.");
 
-    expect(screen.getByRole("textbox", { name: "Step 3" })).toHaveValue(
-      "Boil.",
+    expect(onDocumentChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ steps: ["Boil the pasta.", "Drain."] }),
     );
-    expect(screen.getByRole("textbox", { name: "Step 2" })).toHaveValue(
-      "Serve.",
-    );
-    expect(
-      screen.getByRole("button", { name: "Move step 3 up" }),
-    ).toHaveFocus();
   });
 
-  it("does not persist newly added empty rows in canonical Markdown", async () => {
+  it("does not persist blank rows in canonical Markdown", async () => {
     const user = userEvent.setup();
     const serialized = vi.fn<(markdown: string) => void>();
     render(
@@ -253,7 +179,10 @@ describe("RecipeFolioBody", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Add ingredient" }));
+    const ingredients = screen.getByRole("textbox", { name: "Ingredients" });
+    await user.clear(ingredients);
+    await user.paste("200 g spaghetti\n\n1 lemon\n\n30 g parmesan");
+
     expect(serialized).toHaveBeenLastCalledWith(
       "A bright, weeknight pasta.\n\n## Ingredients\n\n- 200 g spaghetti\n- 1 lemon\n- 30 g parmesan\n\n## Steps\n\n1. Boil the pasta.\n2. Toss with lemon and parmesan.\n\n## Notes\n\nServe with **black pepper** and [[salad]].\n",
     );
