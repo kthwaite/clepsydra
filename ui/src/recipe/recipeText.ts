@@ -49,9 +49,7 @@ export function stepsFromText(text: string): string[] {
 
   const flush = () => {
     if (lead === null) return;
-    steps.push(
-      [lead, ...dedent(continuation)].join("\n").replace(/\n+$/u, ""),
-    );
+    steps.push([lead, ...dedent(continuation)].join("\n").replace(/\n+$/u, ""));
     lead = null;
     continuation = [];
   };

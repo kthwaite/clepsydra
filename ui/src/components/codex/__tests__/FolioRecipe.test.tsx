@@ -291,7 +291,7 @@ describe("Folio recipe presentation", () => {
     expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
     expect(editor.setBodyMarkdown).toHaveBeenCalledWith(authoredRaw);
     expect(screen.queryByRole("textbox", { name: "Description" })).toBeNull();
-    expect(screen.queryByRole("textbox", { name: "Ingredient 1" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Ingredients" })).toBeNull();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "recipe structure could not be read",
     );

@@ -9,13 +9,13 @@ import { MarkdownRenderer } from "#/components/MarkdownRenderer";
 import { Button } from "#/components/ui/button";
 import { SegmentedControl } from "#/components/ui/segmented-control";
 import { TextField } from "#/components/ui/text-field";
+import type { RecipeDocument, RecipeGroup } from "#/recipe/recipeCodec";
 import {
   itemsFromText,
   stepsFromText,
   textFromItems,
   textFromSteps,
 } from "#/recipe/recipeText";
-import type { RecipeDocument, RecipeGroup } from "#/recipe/recipeCodec";
 
 export type RecipeFolioBodyProps = {
   document: RecipeDocument;
