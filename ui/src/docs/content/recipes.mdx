@@ -138,6 +138,11 @@ structured recipe editor. Examples include:
 - a group heading at the wrong depth, or with no name
 - a group heading inside a legacy-form body
 - an ingredient or step line Clepsydra cannot parse as a list item
+- a `[ ]` or `[x]` task-list marker leading an ingredient or step
+
+That last one applies to the heading format only: the same text in the
+legacy form (`1. [ ] Prepare broth.`) is kept as ordinary, opaque step text
+rather than triggering the fallback.
 
 The original Markdown remains authoritative in fallback mode. Editing and
 saving through the generic editor preserves unsupported Markdown rather than
