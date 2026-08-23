@@ -20,7 +20,7 @@ const FIELDS: FilterField[] = [
     id: "tags",
     kind: "multi",
     label: "TAG",
-    options: [{ value: "rust" }, { value: "ui" }],
+    options: [{ value: "rust" }, { value: "ui" }, { value: "docs" }],
   },
   { id: "hold", kind: "flag", label: "ON HOLD", options: [] },
 ];
@@ -83,6 +83,109 @@ describe("FilterBar", () => {
     expect(
       screen.queryByTestId("filter-bar-chip-tags-rust"),
     ).not.toBeInTheDocument();
+  });
+
+  it("collapses two values of one field into a single badge", () => {
+    render(
+      <Harness initial={{ text: "", facets: { tags: ["rust", "ui"] } }} />,
+    );
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: rust +1",
+    );
+    expect(
+      screen.queryByTestId("filter-bar-chip-tags-rust"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByTestId("filter-bar-chip-tags-ui"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("counts every value beyond the first in the badge", () => {
+    render(
+      <Harness
+        initial={{ text: "", facets: { tags: ["rust", "ui", "docs"] } }}
+      />,
+    );
+    const badge = screen.getByTestId("filter-bar-chip-tags");
+    expect(badge).toHaveTextContent("TAG: rust +2");
+    expect(badge).toHaveAccessibleName("TAG: 3 filters applied");
+  });
+
+  it("badge label uses the resolved option label of the first value", () => {
+    const labeled: FilterField[] = [
+      {
+        id: "status",
+        kind: "multi",
+        label: "STATUS",
+        options: [
+          { value: "open", label: "Open Ticket" },
+          { value: "shut", label: "Shut Ticket" },
+        ],
+      },
+    ];
+    render(
+      <FilterBar
+        fields={labeled}
+        state={{ text: "", facets: { status: ["open", "shut"] } }}
+        onChange={() => {}}
+      />,
+    );
+    expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
+      "STATUS: Open Ticket +1",
+    );
+  });
+
+  it("lists the applied values in a popover when the badge is clicked", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness initial={{ text: "", facets: { tags: ["rust", "ui"] } }} />,
+    );
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
+    expect(
+      screen.getByTestId("filter-bar-facet-tags-rust"),
+    ).toHaveAccessibleName("Remove filter TAG: rust");
+    expect(screen.getByTestId("filter-bar-facet-tags-ui")).toBeInTheDocument();
+    // only the applied values, never the whole option list
+    expect(
+      screen.queryByTestId("filter-bar-facet-tags-docs"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("removing one popover value collapses the badge back to a plain chip", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness initial={{ text: "", facets: { tags: ["rust", "ui"] } }} />,
+    );
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
+    await user.click(screen.getByTestId("filter-bar-facet-tags-ui"));
+    expect(
+      screen.queryByTestId("filter-bar-chip-tags"),
+    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-chip-tags-rust")).toHaveTextContent(
+      "TAG: rust",
+    );
+  });
+
+  it("clears one field from the popover without touching the others", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={{
+          text: "",
+          facets: { tags: ["rust", "ui"], project: ["clepsydra"] },
+        }}
+      />,
+    );
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
+    const clear = screen.getByTestId("filter-bar-facet-clear-tags");
+    expect(clear).toHaveAccessibleName("Clear all TAG filters");
+    await user.click(clear);
+    expect(
+      screen.queryByTestId("filter-bar-chip-tags"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByTestId("filter-bar-chip-project-clepsydra"),
+    ).toBeInTheDocument();
   });
 
   it("clears everything via CLEAR and hides it when inactive", async () => {
