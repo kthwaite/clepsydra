@@ -1,0 +1,363 @@
+/* =============================================================================
+   CLEPSYDRA WEB ARCHIVE — VESSEL shell
+   The extension's share of the language defined in ui/src/main.css: warm-grey
+   achromatic field, barbican accent, JetBrains Mono chrome + Inter display,
+   zero radius, hard offset shadows.
+
+   Two deliberate divergences from the app:
+     - The app resolves dark/paper through ThemeProvider (a `.paper` class on
+       <html>). An extension page has no operator prefs to read, so paper is
+       driven by the browser's own colour-scheme instead.
+     - `--ok` has no counterpart in main.css, which signals health with --cool.
+       The popup already spends --cool on "reading", so a terminal success needs
+       its own hue; the values are the app's phosphor accent (dark) and its
+       verdigris quire hue (paper), so nothing new enters the palette.
+
+   Lives in public/ so it is copied verbatim to the extension root: both pages
+   link it as /styles/vessel.css and it is never touched by the bundler.
+   ============================================================================= */
+
+@font-face {
+	font-family: "JetBrains Mono Variable";
+	font-style: normal;
+	font-weight: 100 800;
+	/* `block`, not `swap`: the file is packaged alongside the page, so the block
+	   period is measured in milliseconds — and a popup that lives for two
+	   seconds must not spend the first of them repainting in a fallback face. */
+	font-display: block;
+	src: url("/fonts/jetbrains-mono-latin-wght-normal.woff2")
+		format("woff2-variations");
+}
+
+@font-face {
+	font-family: "Inter Variable";
+	font-style: normal;
+	font-weight: 100 900;
+	font-display: block;
+	src: url("/fonts/inter-latin-opsz-normal.woff2") format("woff2-variations");
+}
+
+/* Vessel dark — the base, exactly as :root in ui/src/main.css ---------------- */
+:root {
+	color-scheme: dark;
+	--paper: #0a0a0a;
+	--paper-2: #111111;
+	--paper-edge: #161616;
+	--ink: #e8e6df;
+	--ink-2: #b8b5a8;
+	--ink-mute: #918d80;
+	--ink-faint: #3a3833;
+	--accent: #ee7733;
+	--accent-deep: #c75f24;
+	--cool: #4cd9ff;
+	--warn: #ffb84a;
+	--hot: #ff3b1f;
+	--ok: #5dffa6;
+	--rule: #2a2825;
+	--rule-soft: #1c1b18;
+	--highlight: rgba(238, 119, 51, 0.12);
+	--bar-bg: #050505;
+	--bar-fg: #e8e6df;
+	--bar-rule: rgba(232, 230, 223, 0.18);
+	--shadow-sm: 2px 2px 0 0 rgba(0, 0, 0, 0.55);
+	--shadow-md: 4px 4px 0 0 rgba(0, 0, 0, 0.6);
+
+	--font-mono: "JetBrains Mono Variable", ui-monospace, "SFMono-Regular", Menlo,
+		Consolas, monospace;
+	--font-sans: "Inter Variable", ui-sans-serif, system-ui, "Helvetica Neue",
+		Arial, sans-serif;
+
+	--space-1: 4px;
+	--space-2: 8px;
+	--space-3: 12px;
+	--rail-h: 26px;
+	--control-height: 28px;
+	--fs: 11px;
+	--fs-s: 10px;
+	--fs-xs: 9px;
+	--line-height-copy: 1.45;
+	--track: 0.18em;
+}
+
+/* "Paper" light mode — the printed-dossier inversion from main.css. ---------- */
+@media (prefers-color-scheme: light) {
+	:root {
+		color-scheme: light;
+		--paper: #efece2;
+		--paper-2: #e7e3d6;
+		--paper-edge: #ddd8c9;
+		--ink: #15140f;
+		--ink-2: #3a3833;
+		--ink-mute: #6a675c;
+		--ink-faint: #9a978a;
+		--cool: #2b7f9e;
+		--ok: #2f6f56;
+		--rule: #15140f;
+		--rule-soft: #6a675c;
+		--highlight: rgba(238, 119, 51, 0.16);
+		--bar-bg: #ddd8c9;
+		--bar-fg: #15140f;
+		--bar-rule: rgba(21, 20, 15, 0.18);
+		--shadow-sm: 2px 2px 0 0 rgba(21, 20, 15, 0.18);
+		--shadow-md: 4px 4px 0 0 rgba(21, 20, 15, 0.25);
+	}
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+	background: var(--paper);
+	color: var(--ink);
+	font-family: var(--font-mono);
+	font-size: var(--fs);
+	line-height: 1.5;
+	letter-spacing: 0.005em;
+	font-feature-settings: "tnum" 1, "zero" 1, "calt" 0;
+	-webkit-font-smoothing: antialiased;
+	text-rendering: geometricPrecision;
+}
+
+h1,
+h2,
+h3 {
+	margin: 0;
+	font-size: inherit;
+	font-weight: inherit;
+}
+
+::selection {
+	background: var(--accent);
+	color: #000;
+}
+
+/* Rails — the header/footer chrome of the app frame, at popup scale. --------- */
+.rail {
+	display: flex;
+	min-height: var(--rail-h);
+	align-items: stretch;
+	font-size: var(--fs-s);
+}
+
+.rail-top {
+	border-bottom: 1px solid var(--rule);
+}
+
+.rail-bottom {
+	border-top: 1px solid var(--rule);
+	background: var(--bar-bg);
+	color: var(--bar-fg);
+}
+
+/* Wordmark — Inter black, leading glyph in accent, as in the app header. */
+.wordmark {
+	display: flex;
+	flex: none;
+	align-items: center;
+	padding: 0 var(--space-3);
+	border-right: 1px solid var(--rule);
+	font-family: var(--font-sans);
+	font-size: 14px;
+	font-weight: 900;
+	letter-spacing: 0.08em;
+	text-transform: uppercase;
+	color: var(--ink);
+}
+
+.wordmark-lead {
+	color: var(--accent);
+}
+
+/* Tracked-out hairline label (.cl-cap). */
+.cap {
+	font-family: var(--font-mono);
+	font-weight: 500;
+	letter-spacing: var(--track);
+	text-transform: uppercase;
+}
+
+.rail-label {
+	display: flex;
+	flex: 1;
+	align-items: center;
+	justify-content: flex-end;
+	padding: 0 var(--space-3);
+	color: var(--ink-mute);
+	font-size: var(--fs-xs);
+	letter-spacing: var(--track);
+	text-transform: uppercase;
+}
+
+/* Chips — hard rectangles, never pills. */
+.tag {
+	display: inline-flex;
+	max-width: 100%;
+	align-items: center;
+	gap: var(--space-1);
+	padding: 1px 6px;
+	border: 1px solid var(--rule);
+	background: var(--paper-2);
+	color: var(--ink-2);
+	font-size: var(--fs);
+	letter-spacing: 0.04em;
+	overflow-wrap: anywhere;
+}
+
+/* Fields --------------------------------------------------------------------- */
+.field-label {
+	display: block;
+	margin-bottom: var(--space-1);
+	color: var(--ink-mute);
+	font-size: var(--fs-s);
+	font-weight: 500;
+	letter-spacing: var(--track);
+	text-transform: uppercase;
+}
+
+input[type="text"],
+input[type="number"] {
+	width: 100%;
+	min-height: var(--control-height);
+	padding: var(--space-1) var(--space-2);
+	border: 1px solid var(--rule);
+	background: var(--paper);
+	color: var(--ink);
+	font: inherit;
+	letter-spacing: 0.02em;
+}
+
+input[type="text"]::placeholder,
+input[type="number"]::placeholder {
+	color: var(--ink-faint);
+}
+
+input[type="text"]:focus,
+input[type="number"]:focus {
+	border-color: var(--accent);
+}
+
+input[type="checkbox"] {
+	width: 13px;
+	height: 13px;
+	margin: 0;
+	accent-color: var(--accent);
+}
+
+input:disabled {
+	border-color: var(--rule-soft);
+	color: var(--ink-mute);
+	cursor: not-allowed;
+	opacity: 0.7;
+}
+
+.field-help,
+.hint {
+	margin: var(--space-1) 0 0;
+	color: var(--ink-mute);
+	font-size: var(--fs-s);
+	line-height: var(--line-height-copy);
+}
+
+.hint code {
+	font-family: var(--font-mono);
+	background: var(--paper-edge);
+	padding: 0 3px;
+	color: var(--ink-2);
+}
+
+/* Buttons — hard rect, mono uppercase, tracked (.cl-btn). -------------------- */
+button {
+	border: 1px solid var(--rule);
+	background: var(--paper-2);
+	color: var(--ink);
+	font-family: var(--font-mono);
+	font-size: var(--fs);
+	font-weight: 500;
+	letter-spacing: 0.14em;
+	text-transform: uppercase;
+	cursor: pointer;
+	transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+button:hover:not(:disabled) {
+	background: var(--ink);
+	border-color: var(--ink);
+	color: var(--paper);
+}
+
+button:disabled {
+	cursor: not-allowed;
+	opacity: 0.45;
+}
+
+/* Primary — filled barbican with the Vessel offset shadow. */
+.btn-primary {
+	min-height: var(--control-height);
+	padding: var(--space-2);
+	border-color: var(--rule);
+	background: var(--accent);
+	color: #0a0a0a;
+	box-shadow: var(--shadow-sm);
+}
+
+.btn-primary:hover:not(:disabled) {
+	background: var(--accent-deep);
+	border-color: var(--rule);
+	color: #0a0a0a;
+}
+
+.btn-primary:active:not(:disabled) {
+	box-shadow: none;
+	transform: translate(2px, 2px);
+}
+
+/* One focus treatment everywhere: 2px accent ring, offset. */
+:focus-visible {
+	outline: 2px solid var(--accent);
+	outline-offset: 2px;
+}
+
+/* Links */
+a {
+	color: var(--accent);
+	text-decoration: none;
+	border-bottom: 1px solid var(--accent-deep);
+}
+
+a:hover {
+	background: var(--highlight);
+}
+
+/* Tone-carrying panel — hairline frame with a 2px signal rule at the start. */
+.panel {
+	border: 1px solid var(--rule);
+	border-left: 2px solid currentColor;
+	background: var(--paper-2);
+	padding: var(--space-2);
+	font-size: var(--fs);
+	line-height: var(--line-height-copy);
+	overflow-wrap: anywhere;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
+
+/* `hidden` must win over the layout `display` a component sets on itself.
+   Without this, `.tag-list { display: flex }` and `.capture-link
+   { display: inline-block }` outrank the UA's `[hidden] { display: none }`
+   — author origin beats UA origin at equal specificity — and every element
+   the popup hides by toggling `.hidden` stays on screen. */
+[hidden] {
+	display: none !important;
+}
