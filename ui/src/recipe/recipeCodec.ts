@@ -1,3 +1,5 @@
+import { dedent } from "#/recipe/recipeText";
+
 export type RecipeDocument = {
   description: string;
   ingredients: string[];
@@ -79,10 +81,32 @@ type ListParseResult =
       reason: "invalid-ingredient" | "invalid-step" | "unsupported-content";
     };
 
-const parseListLines = (
-  lines: string[],
-  pattern: RegExp,
+/** Shared verdict across ingredient and step parsing: an item-shaped-but-rejected
+ * line (a checked task box, a continuation line with nowhere to land) always beats
+ * plain unrecognised content, and *both* lose to having zero valid values at all. */
+const finishList = (
+  values: string[],
   invalidReason: "invalid-ingredient" | "invalid-step",
+  hasInvalidItem: boolean,
+  hasUnsupportedStructure: boolean,
+  hasUnrecognizedContent: boolean,
+): ListParseResult => {
+  if (hasInvalidItem || (values.length === 0 && hasUnrecognizedContent)) {
+    return { ok: false, reason: invalidReason };
+  }
+  if (hasUnsupportedStructure || hasUnrecognizedContent) {
+    return { ok: false, reason: "unsupported-content" };
+  }
+  return { ok: true, values };
+};
+
+/** Ingredients are single-line: any indented continuation is rejected rather
+ * than folded in, since a lead-plus-detail shape belongs to steps only.
+ * `rejectTaskItems` reproduces the original per-format behaviour — the
+ * demonstrated (bare-heading) format keeps `[ ]`/`[x]` text opaque, while
+ * standard Markdown headings treat it as an unsupported checkbox. */
+const parseIngredientLines = (
+  lines: string[],
   rejectTaskItems: boolean,
 ): ListParseResult => {
   const values: string[] = [];
@@ -93,7 +117,7 @@ const parseListLines = (
   for (const line of lines) {
     if (line.trim() === "") continue;
 
-    const match = line.match(pattern);
+    const match = line.match(/^[-*+•]\s+(.+)$/u);
     const value = match?.[1];
     if (value !== undefined) {
       if (rejectTaskItems && /^\[[ xX]\](?:\s|$)/u.test(value)) {
@@ -104,23 +128,89 @@ const parseListLines = (
       continue;
     }
 
-    if (/^\s/u.test(line)) {
-      hasUnsupportedStructure = true;
-    } else if (/^(?:•|[-*+]|\d)/u.test(line)) {
-      hasInvalidItem = true;
-    } else {
-      hasUnrecognizedContent = true;
+    if (/^\s/u.test(line)) hasUnsupportedStructure = true;
+    else if (/^(?:•|[-*+]|\d)/u.test(line)) hasInvalidItem = true;
+    else hasUnrecognizedContent = true;
+  }
+
+  return finishList(
+    values,
+    "invalid-ingredient",
+    hasInvalidItem,
+    hasUnsupportedStructure,
+    hasUnrecognizedContent,
+  );
+};
+
+/** A step is a lead line plus its indented continuation lines, folded into one
+ * opaque `\n`-joined string. `dedent` strips only the offset shared by every
+ * continuation line, so indentation meaningful *within* the step (e.g. a
+ * further-nested sub-point) survives. See `parseIngredientLines` for
+ * `rejectTaskItems`. */
+const parseStepLines = (
+  lines: string[],
+  rejectTaskItems: boolean,
+): ListParseResult => {
+  const values: string[] = [];
+  let lead: string | null = null;
+  let continuation: string[] = [];
+  let pendingBlanks = 0;
+  let hasInvalidItem = false;
+  let hasUnsupportedStructure = false;
+  let hasUnrecognizedContent = false;
+
+  const flush = () => {
+    if (lead === null) return;
+    const text = [lead, ...dedent(continuation)].join("\n");
+    values.push(text.replace(/\n+$/u, ""));
+    lead = null;
+    continuation = [];
+    pendingBlanks = 0;
+  };
+
+  for (const line of lines) {
+    if (line.trim() === "") {
+      if (lead !== null) pendingBlanks += 1;
+      continue;
     }
-  }
 
-  if (hasInvalidItem || (values.length === 0 && hasUnrecognizedContent)) {
-    return { ok: false, reason: invalidReason };
-  }
-  if (hasUnsupportedStructure || hasUnrecognizedContent) {
-    return { ok: false, reason: "unsupported-content" };
-  }
+    const marker = line.match(/^\d+[.)]\s+(.+)$/u);
+    const value = marker?.[1];
+    if (value !== undefined) {
+      flush();
+      if (rejectTaskItems && /^\[[ xX]\](?:\s|$)/u.test(value)) {
+        hasUnsupportedStructure = true;
+      } else {
+        lead = value;
+      }
+      continue;
+    }
 
-  return { ok: true, values };
+    if (/^\s/u.test(line)) {
+      if (lead === null) {
+        hasUnsupportedStructure = true;
+        continue;
+      }
+      for (let blank = 0; blank < pendingBlanks; blank += 1) {
+        continuation.push("");
+      }
+      pendingBlanks = 0;
+      continuation.push(line);
+      continue;
+    }
+
+    if (/^(?:•|[-*+]|\d)/u.test(line)) hasInvalidItem = true;
+    else hasUnrecognizedContent = true;
+  }
+  flush();
+
+  return finishList(
+    values,
+    "invalid-step",
+    hasInvalidItem,
+    hasUnsupportedStructure,
+    hasUnrecognizedContent,
+  );
 };
 
 export function parseRecipeMarkdown(
@@ -200,18 +290,15 @@ export function parseRecipeMarkdown(
   }
 
   const sourceFormat = ingredientMarker.format;
-  const ingredients = parseListLines(
+  const rejectTaskItems = sourceFormat === "markdown";
+  const ingredients = parseIngredientLines(
     lines.slice(ingredientMarker.index + 1, stepMarker.index),
-    sourceFormat === "example" ? /^•\s+(.+)$/u : /^[-*+]\s+(.+)$/u,
-    "invalid-ingredient",
-    sourceFormat === "markdown",
+    rejectTaskItems,
   );
 
-  const steps = parseListLines(
+  const steps = parseStepLines(
     lines.slice(stepMarker.index + 1, notesMarker.index),
-    /^\d+[.)]\s+(.+)$/u,
-    "invalid-step",
-    sourceFormat === "markdown",
+    rejectTaskItems,
   );
   if (!ingredients.ok && ingredients.reason !== "unsupported-content") {
     return ingredients;
@@ -248,7 +335,15 @@ export function serializeRecipeMarkdown(document: RecipeDocument): string {
     .join("\n");
   const steps = document.steps
     .filter((step) => step.trim().length > 0)
-    .map((step, index) => `${index + 1}. ${normalizeLineEndings(step)}`)
+    .map((step, index) => {
+      const marker = `${index + 1}. `;
+      const indent = " ".repeat(marker.length);
+      const [lead = "", ...rest] = normalizeLineEndings(step).split("\n");
+      return [
+        `${marker}${lead}`,
+        ...rest.map((line) => (line.trim() === "" ? "" : `${indent}${line}`)),
+      ].join("\n");
+    })
     .join("\n");
   const notes = joinMarkdown(
     normalizeLineEndings(document.notesMarkdown).split("\n"),
