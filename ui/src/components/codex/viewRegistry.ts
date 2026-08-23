@@ -105,7 +105,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
   tasking: {
     label: "TASKING",
     folioCode: "TASKING",
-    showsSheaf: true,
+    showsSheaf: false,
     navRoot: "tasking",
     mobile: null,
     go: ({ navigate }) => void navigate({ to: "/tasking" }),
