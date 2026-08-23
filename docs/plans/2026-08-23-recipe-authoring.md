@@ -155,7 +155,11 @@ The legacy bare-marker form has no groups. A heading line inside it is
 ### Ingredient items
 
 Unchanged except for leniency: `^[-*+•]\s+(.+)$` in both formats. A leading
-`[ ]` or `[x]` task marker is `unsupported-content` in both formats. An indented
+`[ ]` or `[x]` task marker is `unsupported-content` in the heading format only;
+in the legacy bare-marker format such text stays opaque, unchanged from today
+(unifying the two would change how bodies already on disk parse, contrary to
+legacy bodies staying readable and rewritten only on an explicit structured
+save). An indented
 line is `unsupported-content`. A bullet-or-digit line that does not match is
 `invalid-ingredient`.
 
