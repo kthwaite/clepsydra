@@ -86,6 +86,11 @@ export function removeFacetValue(
   );
 }
 
+/** Drops every value of one field, leaving the rest of the state intact. */
+export function clearFacet(state: FilterState, fieldId: string): FilterState {
+  return withFacet(state, fieldId, []);
+}
+
 export function clearFilter(_state: FilterState): FilterState {
   return EMPTY_FILTER_STATE;
 }
