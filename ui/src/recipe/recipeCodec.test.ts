@@ -376,6 +376,32 @@ Keep every marker-shaped line.`,
       });
     }
   });
+
+  it.each(["", "   ", "\n\n", "\r\n \r\n"])(
+    "reads a blank body (%j) as an empty recipe",
+    (source) => {
+      expect(parseRecipeMarkdown(source, "Untitled recipe")).toEqual({
+        ok: true,
+        sourceFormat: "markdown",
+        value: {
+          description: "",
+          ingredients: [],
+          steps: [],
+          notesMarkdown: "",
+        },
+      });
+    },
+  );
+
+  it("serialises a blank body into the scaffold the server writes", () => {
+    const parsed = parseRecipeMarkdown("", "Untitled recipe");
+    expect(parsed.ok).toBe(true);
+    if (parsed.ok) {
+      expect(serializeRecipeMarkdown(parsed.value)).toBe(
+        "## Ingredients\n\n## Steps\n\n## Notes\n",
+      );
+    }
+  });
 });
 
 describe("serializeRecipeMarkdown", () => {

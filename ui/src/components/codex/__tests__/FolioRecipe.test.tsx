@@ -478,6 +478,32 @@ describe("Folio recipe presentation", () => {
     expect(editor.setBodyMarkdown).toHaveBeenCalledOnce();
   });
 
+  it("opens an empty recipe body in the structured editor", () => {
+    renderFolio(pageEditor({ bodyMarkdown: "" }));
+
+    expect(screen.getByRole("region", { name: "Ingredients" })).toBeVisible();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a recipe with block ids in the generic editor", () => {
+    renderFolio(
+      pageEditor({
+        bodyMarkdown:
+          "## Ingredients\n\n- one lemon\n\n## Steps\n\n1. Boil.\n\n## Notes\n",
+        initialValue: [
+          {
+            type: "paragraph",
+            blockId: "ab12cd34",
+            children: [{ text: "one lemon" }],
+          },
+        ] as unknown as Descendant[],
+      }),
+    );
+
+    expect(screen.getByTestId("slate-editor")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Ingredients" })).toBeNull();
+  });
+
   it("renders a locked encrypted Folio before recipe controls", () => {
     const editor = pageEditor({
       encrypted: true,
