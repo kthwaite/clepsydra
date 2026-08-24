@@ -13,9 +13,7 @@ use rusqlite::params;
 
 use crate::api::AppState;
 use crate::api::error::ApiError;
-use crate::vault::batch_mutation::{
-    BatchMutationCommand, BatchPathIntent, ExpectedPathState,
-};
+use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::CreatePageCommand;
 use crate::vault::page::{PageMeta, parse_frontmatter, write_page_content};
@@ -163,8 +161,7 @@ fn plan_cycle_patch_and_carryover(
     task_paths: &[String],
     now: DateTime<Utc>,
 ) -> Result<BatchMutationCommand, ApiError> {
-    let (expected_cycle, mut cycle_meta, cycle_body) =
-        read_indexed_page_once(state, &cycle_path)?;
+    let (expected_cycle, mut cycle_meta, cycle_body) = read_indexed_page_once(state, &cycle_path)?;
     if let Some(cycle_state) = new_state {
         cycle_meta.extra.insert(
             "state".to_string(),
@@ -205,10 +202,8 @@ fn plan_cycle_patch_and_carryover(
             if carry_to == "BACKLOG" {
                 meta.extra.remove("cycle");
             } else {
-                meta.extra.insert(
-                    "cycle".to_string(),
-                    toml::Value::String(carry_to.clone()),
-                );
+                meta.extra
+                    .insert("cycle".to_string(), toml::Value::String(carry_to.clone()));
             }
             meta.updated_at = Some(now);
             heal_task_update(&path, &expected, &mut meta).map_err(ApiError::bad_request)?;
@@ -303,9 +298,9 @@ pub(crate) async fn patch_cycle(
         state
             .index
             .with_index(move |index, _vault| {
-                let mut statement = index.connection().prepare(
-                    "SELECT path, meta_json FROM pages WHERE kind = ?1 ORDER BY path",
-                )?;
+                let mut statement = index
+                    .connection()
+                    .prepare("SELECT path, meta_json FROM pages WHERE kind = ?1 ORDER BY path")?;
                 let rows = statement
                     .query_map(params![Kind::Task.as_str()], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
@@ -314,8 +309,8 @@ pub(crate) async fn patch_cycle(
                 Ok::<_, rusqlite::Error>(
                     rows.into_iter()
                         .filter(|(_, meta_json)| {
-                            let metadata: serde_json::Value = serde_json::from_str(meta_json)
-                                .unwrap_or(serde_json::Value::Null);
+                            let metadata: serde_json::Value =
+                                serde_json::from_str(meta_json).unwrap_or(serde_json::Value::Null);
                             extra_str(&metadata, "cycle").as_deref()
                                 == Some(cycle_code_for_query.as_str())
                                 && extra_str(&metadata, "status").unwrap_or_default() != "SEALED"

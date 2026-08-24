@@ -38,8 +38,7 @@ impl PostMoveHook for AcademicMoveHook {
 
             let content = fs::read_to_string(&ann_abs)?;
             let (mut meta, body) = parse_frontmatter(&content)?;
-            if meta.extra.get("work_path").and_then(toml::Value::as_str)
-                == Some(new_path.as_str())
+            if meta.extra.get("work_path").and_then(toml::Value::as_str) == Some(new_path.as_str())
             {
                 continue;
             }

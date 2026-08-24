@@ -547,8 +547,8 @@ async fn sort_tasks_for_atrium_agenda() {
         .json(&serde_json::json!({
             "title": "A Agenda Ties",
             "body": "\
-- [ ] Same-date B first in a [due:: 2026-09-01] [priority:: B]\n\
-- [ ] Same-date B second in a [due:: 2026-09-01] [priority:: B]\n"
+        - [ ] Same-date B first in a [due:: 2026-09-01] [priority:: B]\n\
+        - [ ] Same-date B second in a [due:: 2026-09-01] [priority:: B]\n"
         }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);
@@ -558,14 +558,14 @@ async fn sort_tasks_for_atrium_agenda() {
         .json(&serde_json::json!({
             "title": "Atrium Agenda",
             "body": "\
-- [ ] Same-date C [due:: 2026-09-01] [priority:: C]\n\
-- [ ] Overdue A later [due:: 2025-01-02] [priority:: A]\n\
-- [x] Completed earliest [due:: 2024-01-01] [priority:: A]\n\
-- [ ] Undated C [priority:: C]\n\
-- [ ] Overdue B earlier [due:: 2025-01-01] [priority:: B]\n\
-- [ ] Undated A [priority:: A]\n\
-- [ ] Same-date unknown [due:: 2026-09-01] [priority:: Z]\n\
-- [ ] Same-date A [due:: 2026-09-01] [priority:: A]\n"
+        - [ ] Same-date C [due:: 2026-09-01] [priority:: C]\n\
+        - [ ] Overdue A later [due:: 2025-01-02] [priority:: A]\n\
+        - [x] Completed earliest [due:: 2024-01-01] [priority:: A]\n\
+        - [ ] Undated C [priority:: C]\n\
+        - [ ] Overdue B earlier [due:: 2025-01-01] [priority:: B]\n\
+        - [ ] Undated A [priority:: A]\n\
+        - [ ] Same-date unknown [due:: 2026-09-01] [priority:: Z]\n\
+        - [ ] Same-date A [due:: 2026-09-01] [priority:: A]\n"
         }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);

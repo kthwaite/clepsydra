@@ -298,17 +298,18 @@ pub async fn upload_attachment(
                 }
                 file_seen = true;
 
-                while let Some(chunk) = field.chunk().await.map_err(|e| {
-                    ApiError::bad_request(format!("failed to read file: {e}"))
-                })? {
-                    temporary_file.write_all(&chunk).await.map_err(|e| {
-                        ApiError::internal(format!("failed to write file: {e}"))
+                while let Some(chunk) = field
+                    .chunk()
+                    .await
+                    .map_err(|e| ApiError::bad_request(format!("failed to read file: {e}")))?
+                {
+                    temporary_file
+                        .write_all(&chunk)
+                        .await
+                        .map_err(|e| ApiError::internal(format!("failed to write file: {e}")))?;
+                    size = size.checked_add(chunk.len() as u64).ok_or_else(|| {
+                        ApiError::internal("attachment size overflow".to_string())
                     })?;
-                    size = size
-                        .checked_add(chunk.len() as u64)
-                        .ok_or_else(|| {
-                            ApiError::internal("attachment size overflow".to_string())
-                        })?;
                 }
             }
             Some("plaintext_acknowledged") => {

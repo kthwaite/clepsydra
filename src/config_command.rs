@@ -527,16 +527,19 @@ mod tests {
         let xdg = tempfile::tempdir().unwrap();
         let path = xdg.path().join("clepsydra/config.toml");
 
-        let error = create_with_env_and_write(
-            Some(xdg.path().as_os_str().to_owned()),
-            None,
-            |_| Err(io::Error::other("injected config write failure")),
-        )
-        .unwrap_err();
+        let error =
+            create_with_env_and_write(Some(xdg.path().as_os_str().to_owned()), None, |_| {
+                Err(io::Error::other("injected config write failure"))
+            })
+            .unwrap_err();
 
-        assert!(
-            matches!(error, ConfigCommandError::Io { operation: "write", .. })
-        );
+        assert!(matches!(
+            error,
+            ConfigCommandError::Io {
+                operation: "write",
+                ..
+            }
+        ));
         assert!(!path.exists());
     }
 }
