@@ -119,9 +119,7 @@ fn install_with(
         std::fs::rename(&app_path, &backup)?;
     }
     if let Err(error) = std::fs::rename(&staged, &app_path) {
-        if had_previous
-            && let Err(restore) = std::fs::rename(&backup, &app_path)
-        {
+        if had_previous && let Err(restore) = std::fs::rename(&backup, &app_path) {
             let preserved = workspace.keep();
             return Err(format!(
                 "publish URL handler failed: {error}; restoring previous bundle failed: \

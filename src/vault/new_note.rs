@@ -480,7 +480,9 @@ mod tests {
             fs::read_dir(&root)
                 .unwrap()
                 .filter_map(Result::ok)
-                .all(|entry| entry.path().extension().and_then(|value| value.to_str()) != Some("md"))
+                .all(
+                    |entry| entry.path().extension().and_then(|value| value.to_str()) != Some("md")
+                )
         );
     }
 }

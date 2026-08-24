@@ -7,7 +7,9 @@ use super::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathS
 use super::index::{IndexError, VaultIndex};
 use super::link::{LinkKind, extract_links};
 use super::mutation::{MutationPlan, PlannedTextEdit};
-use super::page::{PageMeta, body_offset, page_revision, parse_or_repair_frontmatter, write_page_content};
+use super::page::{
+    PageMeta, body_offset, page_revision, parse_or_repair_frontmatter, write_page_content,
+};
 use super::path::VaultPath;
 use super::reference_issues::{
     ReferenceIssue, ReferenceIssueAction, ReferenceIssueFilter, ReferenceIssueKind,
@@ -18,8 +20,13 @@ use super::toml_patch::{FrontmatterEdits, SpliceError, splice_frontmatter};
 
 #[derive(Debug, Clone)]
 pub enum ReferenceRepairAction {
-    Create { folder: String, body: Option<String> },
-    Replace { candidate_page_id: String },
+    Create {
+        folder: String,
+        body: Option<String>,
+    },
+    Replace {
+        candidate_page_id: String,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -88,13 +95,9 @@ pub fn prepare_reference_repair(
         ReferenceRepairAction::Create { folder, body } => {
             prepare_create(vault, index, issue, source_path, source, folder, body)
         }
-        ReferenceRepairAction::Replace { candidate_page_id } => prepare_replace(
-            index,
-            issue,
-            source_path,
-            source,
-            &candidate_page_id,
-        ),
+        ReferenceRepairAction::Replace { candidate_page_id } => {
+            prepare_replace(index, issue, source_path, source, &candidate_page_id)
+        }
     }
 }
 
@@ -133,11 +136,7 @@ fn prepare_create(
 
     let mut destination = VaultPath::from_title(target);
     if !folder.is_empty() {
-        let combined = format!(
-            "{}/{}",
-            folder.trim_end_matches('/'),
-            destination.as_str()
-        );
+        let combined = format!("{}/{}", folder.trim_end_matches('/'), destination.as_str());
         destination = VaultPath::new(&combined)
             .map_err(|error| ReferenceRepairError::Invalid(error.to_string()))?;
     }
@@ -242,7 +241,6 @@ fn prepare_replace(
         moved_pages: Vec::new(),
     };
 
-
     Ok(PreparedReferenceRepair {
         fingerprint: issue.fingerprint,
         before,
@@ -256,14 +254,16 @@ fn body_link_context(
     issue: &ReferenceIssue,
     source: &str,
 ) -> Result<(String, std::ops::Range<usize>), ReferenceRepairError> {
-    let start = usize::try_from(issue.span_start.ok_or_else(|| {
-        ReferenceRepairError::Invalid("issue has no source span".to_string())
-    })?)
-    .map_err(|_| ReferenceRepairError::Invalid("invalid source span".to_string()))?;
-    let end = usize::try_from(issue.span_end.ok_or_else(|| {
-        ReferenceRepairError::Invalid("issue has no source span".to_string())
-    })?)
-    .map_err(|_| ReferenceRepairError::Invalid("invalid source span".to_string()))?;
+    let start =
+        usize::try_from(issue.span_start.ok_or_else(|| {
+            ReferenceRepairError::Invalid("issue has no source span".to_string())
+        })?)
+        .map_err(|_| ReferenceRepairError::Invalid("invalid source span".to_string()))?;
+    let end =
+        usize::try_from(issue.span_end.ok_or_else(|| {
+            ReferenceRepairError::Invalid("issue has no source span".to_string())
+        })?)
+        .map_err(|_| ReferenceRepairError::Invalid("invalid source span".to_string()))?;
     if start == 0 || end <= start {
         return Err(ReferenceRepairError::Invalid(
             "source span is not a positive body span".to_string(),
@@ -316,9 +316,10 @@ fn replace_property_reference(
     let field = issue.source_field.as_deref().ok_or_else(|| {
         ReferenceRepairError::Invalid("property issue has no source field".to_string())
     })?;
-    let old_target = issue.target_raw.as_deref().ok_or_else(|| {
-        ReferenceRepairError::Invalid("property issue has no target".to_string())
-    })?;
+    let old_target = issue
+        .target_raw
+        .as_deref()
+        .ok_or_else(|| ReferenceRepairError::Invalid("property issue has no target".to_string()))?;
     let (meta, body, _, warning) = parse_or_repair_frontmatter(source);
     if warning.is_some() {
         return Err(ReferenceRepairError::Invalid(
@@ -326,13 +327,7 @@ fn replace_property_reference(
         ));
     }
     let mut value = match field {
-        "tags" => toml::Value::Array(
-            meta.tags
-                .iter()
-                .cloned()
-                .map(toml::Value::String)
-                .collect(),
-        ),
+        "tags" => toml::Value::Array(meta.tags.iter().cloned().map(toml::Value::String).collect()),
         "aliases" => toml::Value::Array(
             meta.aliases
                 .iter()
@@ -397,7 +392,10 @@ fn rewrite_property_value(
 ) -> Result<(), ReferenceRepairError> {
     let mut rewrite = |text: &mut String| -> Result<(), ReferenceRepairError> {
         let extracted = super::link::extract_property_refs("property", std::slice::from_ref(text));
-        if extracted.first().is_some_and(|link| link.target_raw == old_target) {
+        if extracted
+            .first()
+            .is_some_and(|link| link.target_raw == old_target)
+        {
             let replacement = replace_reference_target(text, old_target, explicit_target)?;
             *replacements += 1;
             if before.is_none() {

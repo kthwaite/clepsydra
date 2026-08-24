@@ -3,7 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use clepsydra::api::openapi::ApiDoc;
 use utoipa::OpenApi;
 
-const HTTP_METHODS: &[&str] = &["get", "put", "post", "delete", "options", "head", "patch", "trace"];
+const HTTP_METHODS: &[&str] = &[
+    "get", "put", "post", "delete", "options", "head", "patch", "trace",
+];
 
 #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct PublicOperation {
@@ -37,7 +39,10 @@ fn public_openapi_operations() -> BTreeSet<PublicOperation> {
                         .to_owned()
                 })
                 .collect::<Vec<_>>();
-            assert!(!tags.is_empty(), "{method} {path} should declare at least one tag");
+            assert!(
+                !tags.is_empty(),
+                "{method} {path} should declare at least one tag"
+            );
 
             operations.insert(PublicOperation {
                 method: method.to_uppercase(),

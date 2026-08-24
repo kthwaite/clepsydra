@@ -10,9 +10,8 @@ use clepsydra::vault::academic::{
 };
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::init::init_vault;
-use tempfile::TempDir;
 use support::ApiFixture;
-
+use tempfile::TempDir;
 
 #[test]
 fn work_meta_roundtrip_through_extra() {
@@ -296,7 +295,11 @@ async fn zotero_item_two_update_failure_is_reported_without_rolling_back_item_on
     let first_body: serde_json::Value = first_response.json();
     let first_results = first_body["results"].as_array().unwrap();
     assert_eq!(first_results.len(), 2);
-    assert!(first_results.iter().all(|result| result["status"] == "created"));
+    assert!(
+        first_results
+            .iter()
+            .all(|result| result["status"] == "created")
+    );
     let first_path = first_results[0]["page_path"].as_str().unwrap().to_string();
     let second_path = first_results[1]["page_path"].as_str().unwrap().to_string();
 

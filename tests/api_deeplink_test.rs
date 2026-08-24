@@ -96,11 +96,7 @@ async fn deeplink_redirects_unknown_targets_to_repairs_with_target_context() {
             "/repairs?target=clepsydra%3A%2F%2Ffrobnicate%2Fnope",
         ),
     ] {
-        let res = fx
-            .server
-            .get("/deeplink")
-            .add_query_param("url", url)
-            .await;
+        let res = fx.server.get("/deeplink").add_query_param("url", url).await;
         res.assert_status(StatusCode::TEMPORARY_REDIRECT);
         assert_eq!(res.header("location"), expected_location);
     }

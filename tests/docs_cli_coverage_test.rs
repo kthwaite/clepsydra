@@ -24,7 +24,6 @@ fn executable_name(help: &str) -> &str {
         .expect("root help should contain a Usage line")
 }
 
-
 fn command_names(help: &str) -> Vec<String> {
     let mut in_commands = false;
     let mut names = Vec::new();
