@@ -10,5 +10,7 @@ export type FeatureFlags = components["schemas"]["FeatureFlagsResponse"];
 export type FeatureName = keyof FeatureFlags;
 
 export function useFeatures() {
-  return $api.useQuery("get", "/api/features");
+  return $api.useQuery("get", "/api/features", undefined, {
+    throwOnError: false,
+  });
 }
