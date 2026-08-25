@@ -77,6 +77,7 @@ impl Modify for SchemaOverrides {
         (name = "Agenda", description = "Today, week and overdue task views"),
         (name = "Blocks", description = "Block lookup, search and identifiers"),
         (name = "Events", description = "Server-sent events stream"),
+        (name = "Features", description = "Effective server feature capabilities"),
         (name = "BCL", description = "Brimley-Cocoon Line countdown"),
         (name = "Location", description = "Vault geographic location"),
         (name = "Uptime", description = "Server uptime"),
@@ -85,6 +86,8 @@ impl Modify for SchemaOverrides {
         (name = "Deeplink", description = "clepsydra:// / obsidian:// deep-link resolution")
     ),
     paths(
+        // Features
+        crate::api::features::get_features,
         // Pages
         crate::api::pages::list_pages,
         crate::api::pages::create_default_page,
@@ -226,6 +229,7 @@ impl Modify for SchemaOverrides {
         schemas(
             // Shared
             crate::api::error::ApiError,
+            crate::api::features::FeatureFlagsResponse,
             crate::vault::kind::Kind,
             // Bases
             crate::vault::base::PropertyType,
@@ -441,12 +445,28 @@ impl Modify for SchemaOverrides {
 )]
 pub struct ApiDoc;
 
-/// Routes that expose OpenAPI JSON and Swagger UI.
-pub fn router<S>() -> Router<S>
+/// Full build-time OpenAPI document filtered to the enabled runtime features.
+pub fn document(features: crate::FeatureFlags) -> utoipa::openapi::OpenApi {
+    let mut document = ApiDoc::openapi();
+    document.paths.paths.retain(|path, _| {
+        (features.academic || !path.starts_with("/api/vault/academic"))
+            && (features.feeds || !path.starts_with("/api/vault/feeds"))
+    });
+    if let Some(tags) = document.tags.as_mut() {
+        tags.retain(|tag| {
+            (features.academic || tag.name != "Academic")
+                && (features.feeds || tag.name != "Feeds")
+        });
+    }
+    document
+}
+
+/// Routes that expose runtime OpenAPI JSON and Swagger UI.
+pub fn router<S>(features: crate::FeatureFlags) -> Router<S>
 where
     S: Clone + Send + Sync + 'static,
 {
-    Router::new().merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", ApiDoc::openapi()))
+    Router::new().merge(SwaggerUi::new("/api/docs").url("/api/openapi.json", document(features)))
 }
 
 #[cfg(test)]
@@ -457,7 +477,7 @@ mod tests {
 
     #[tokio::test]
     async fn swagger_is_scoped_under_api_docs() {
-        let response = router::<()>()
+        let response = router::<()>(crate::FeatureFlags::default())
             .oneshot(
                 Request::builder()
                     .uri("/api/docs/")
@@ -468,7 +488,7 @@ mod tests {
             .unwrap();
         assert!(response.status().is_success() || response.status().is_redirection());
 
-        let old = router::<()>()
+        let old = router::<()>(crate::FeatureFlags::default())
             .oneshot(
                 Request::builder()
                     .uri("/docs/")

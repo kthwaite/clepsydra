@@ -567,12 +567,21 @@ pub(crate) fn build_router(
     archive_view_config: api::archive::ArchiveViewConfig,
     dev_mode: bool,
 ) -> Router {
+    let features = state.features;
     let mut app = Router::new()
+        .route(
+            "/api/features",
+            axum::routing::get(api::features::get_features),
+        )
         .nest(
             "/api/vault",
-            api::api_router_with_archive_limit(archive_body_limit, archive_view_config),
+            api::api_router_with_archive_limit(
+                archive_body_limit,
+                archive_view_config,
+                features,
+            ),
         )
-        .merge(api::openapi::router())
+        .merge(api::openapi::router(features))
         .merge(api::deeplink::root_router());
     if !dev_mode {
         app = app.merge(api::frontend::frontend_router());
