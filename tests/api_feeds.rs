@@ -24,9 +24,14 @@ async fn feed_fixture() -> FeedFixture {
         })
         .build();
     reconcile_feed_manifest(&api.state).await.unwrap();
-    let feed_id = api.state.feeds.list_feeds().await.unwrap()[0].id;
+    let runtime = api
+        .state
+        .feed_runtime
+        .as_ref()
+        .expect("feed fixture enables the feed runtime");
+    let feed_id = runtime.feeds.list_feeds().await.unwrap()[0].id;
     let fetched_at = Utc.with_ymd_and_hms(2026, 8, 11, 12, 0, 0).unwrap();
-    api.state
+    runtime
         .feeds
         .apply_fetch(
             feed_id,
@@ -51,8 +56,7 @@ async fn feed_fixture() -> FeedFixture {
         )
         .await
         .unwrap();
-    let entry_id = api
-        .state
+    let entry_id = runtime
         .feeds
         .list_entries(EntryFilters {
             view: EntryView::All,
@@ -66,7 +70,7 @@ async fn feed_fixture() -> FeedFixture {
         .unwrap()
         .entries[0]
         .id;
-    api.state
+    runtime
         .feeds
         .patch_entry(
             entry_id,
@@ -85,10 +89,16 @@ async fn feed_fixture() -> FeedFixture {
 #[tokio::test]
 async fn entry_detail_returns_the_list_projection_without_scheduling_refresh() {
     let fixture = feed_fixture().await;
+    let runtime = fixture
+        .api
+        .state
+        .feed_runtime
+        .as_ref()
+        .expect("feed fixture enables the feed runtime");
     let list_response = fixture.api.server.get("/api/vault/feeds/entries").await;
     list_response.assert_status_ok();
     let listed = list_response.json::<Value>()["entries"][0].clone();
-    let due_before = fixture.api.state.feeds.due_feeds(Utc::now()).await.unwrap();
+    let due_before = runtime.feeds.due_feeds(Utc::now()).await.unwrap();
 
     let detail_response = fixture
         .api
@@ -106,18 +116,15 @@ async fn entry_detail_returns_the_list_projection_without_scheduling_refresh() {
     assert_eq!(detail["bookmarked"], true);
     assert_eq!(detail["tags"], serde_json::json!(["fixture", "saved"]));
 
-    let due_after = fixture.api.state.feeds.due_feeds(Utc::now()).await.unwrap();
+    let due_after = runtime.feeds.due_feeds(Utc::now()).await.unwrap();
     assert_eq!(
         due_after.iter().map(|feed| feed.id).collect::<Vec<_>>(),
         due_before.iter().map(|feed| feed.id).collect::<Vec<_>>()
     );
     assert!(
-        tokio::time::timeout(
-            Duration::from_millis(25),
-            fixture.api.state.feed_refresh.notified(),
-        )
-        .await
-        .is_err(),
+        tokio::time::timeout(Duration::from_millis(25), runtime.feed_refresh.notified())
+            .await
+            .is_err(),
         "entry detail must not wake the feed scheduler"
     );
 }
