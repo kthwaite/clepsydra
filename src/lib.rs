@@ -47,7 +47,30 @@ pub struct Settings {
     #[serde(default)]
     pub vault: VaultSettings,
     #[serde(default)]
+    pub features: FeatureFlags,
+    #[serde(default)]
     pub feeds: FeedsSettings,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+pub struct FeatureFlags {
+    #[serde(default = "enabled")]
+    pub academic: bool,
+    #[serde(default = "enabled")]
+    pub feeds: bool,
+}
+
+const fn enabled() -> bool {
+    true
+}
+
+impl Default for FeatureFlags {
+    fn default() -> Self {
+        Self {
+            academic: true,
+            feeds: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -1633,6 +1656,47 @@ mod watcher_reconcile_tests {
 mod settings_tests {
     use super::*;
 
+    fn assert_feature_defaults(features: FeatureFlags) {
+        assert!(features.academic);
+        assert!(features.feeds);
+    }
+
+    #[test]
+    fn settings_without_features_use_enabled_defaults() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = tmp.path().join("config.toml");
+        std::fs::write(&config, "").unwrap();
+
+        assert_feature_defaults(Settings::load_from(&config).unwrap().features);
+    }
+
+    #[test]
+    fn settings_read_independent_feature_values() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = tmp.path().join("config.toml");
+        std::fs::write(
+            &config,
+            "[features]\nacademic = false\nfeeds = true\n",
+        )
+        .unwrap();
+
+        let features = Settings::load_from(&config).unwrap().features;
+        assert!(!features.academic);
+        assert!(features.feeds);
+    }
+
+    #[serial_test::serial]
+    #[test]
+    fn feature_environment_override_wins_over_file() {
+        let _guard = EnvGuard::set("CLEPSYDRA__FEATURES__FEEDS", "false");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = tmp.path().join("config.toml");
+        std::fs::write(&config, "[features]\nfeeds = true\n").unwrap();
+
+        assert!(!Settings::load_from(&config).unwrap().features.feeds);
+    }
+
+
     fn assert_feed_defaults(feeds: &FeedsSettings) {
         assert_eq!(feeds.fetch_interval_minutes, 30);
         assert_eq!(feeds.retention_days, 30);
@@ -1813,6 +1877,7 @@ mod settings_tests {
                 ..ServerSettings::default()
             },
             vault: VaultSettings::default(),
+            features: FeatureFlags::default(),
             feeds: FeedsSettings::default(),
         }
     }
