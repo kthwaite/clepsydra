@@ -29,6 +29,9 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal()),
   useIsMutating: () => 0,
 }));
+vi.mock("#/components/FeatureFlagsProvider", () => ({
+  useFeatureFlags: () => ({ academic: true, feeds: true }),
+}));
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { Constellation } from "#/components/codex/Constellation";
 import { Folio } from "#/components/codex/Folio";

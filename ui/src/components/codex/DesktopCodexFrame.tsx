@@ -2,6 +2,7 @@ import { useIsMutating } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { createPortal } from "react-dom";
 import { useStats } from "#/api/index";
+import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
@@ -9,6 +10,7 @@ import { Sheaf } from "#/components/codex/Sheaf";
 import { useCodexView } from "#/components/codex/useCodexView";
 import {
   DESKTOP_NAV,
+  enabledNavItems,
   goToView,
   VIEW_REGISTRY,
 } from "#/components/codex/viewRegistry";
@@ -49,6 +51,7 @@ export function DesktopCodexFrame({
   forceView,
 }: CodexFrameChromeProps) {
   const { progress } = useReadingProgress();
+  const features = useFeatureFlags();
   const navigate = useNavigate();
   const openSearch = useUiStore((s) => s.openSearch);
   const { toggle, resolvedTheme, diegetic } = useTheme();
@@ -64,6 +67,7 @@ export function DesktopCodexFrame({
   const resolved = useCodexView();
   const view = forceView ?? resolved;
   const descriptor = VIEW_REGISTRY[view];
+  const navItems = enabledNavItems(DESKTOP_NAV, features);
   const folioCode =
     descriptor.folioCode ?? (activePath ? shortFolio(activePath) : "—");
 
@@ -102,7 +106,7 @@ export function DesktopCodexFrame({
           aria-label="Primary navigation"
           className="flex min-w-0 items-stretch overflow-x-auto"
         >
-          {DESKTOP_NAV.map((key, i) => {
+          {navItems.map((key, i) => {
             const active = VIEW_REGISTRY[view].navRoot === key;
             return (
               <button

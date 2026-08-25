@@ -11,6 +11,7 @@ import { canonicalFeedGroups } from "#/components/codex/FeedGroupComboBox";
 import { FeedManagement } from "#/components/codex/FeedManagement";
 import { FeedReaderPane } from "#/components/codex/FeedReaderPane";
 import { FeedRiver, type FeedRiverFilters } from "#/components/codex/FeedRiver";
+import { FeatureGate } from "#/components/FeatureGate";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 
 type FeedsSearch = FeedRiverFilters & {
@@ -61,8 +62,16 @@ export const Route = createFileRoute("/feeds")({
           : undefined,
     };
   },
-  component: FeedsPage,
+  component: FeedsRoute,
 });
+
+function FeedsRoute() {
+  return (
+    <FeatureGate feature="feeds">
+      <FeedsPage />
+    </FeatureGate>
+  );
+}
 
 function FeedsPage() {
   const search = Route.useSearch();

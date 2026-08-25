@@ -5,6 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { AcademicLibrary } from "#/components/academic/AcademicLibrary";
+import { FeatureGate } from "#/components/FeatureGate";
 import { facetsEqual, type FilterState } from "#/lib/filters/model";
 import {
   type FilterUrlOptions,
@@ -22,7 +23,7 @@ export const ACADEMIC_FILTER_URL: FilterUrlOptions = {
   ],
 };
 
-function AcademicRoute() {
+function AcademicPage() {
   const search = Route.useSearch();
   const navigate = useNavigate();
 
@@ -50,6 +51,14 @@ function AcademicRoute() {
       filterState={filterState}
       onFilterChange={onFilterChange}
     />
+  );
+}
+
+function AcademicRoute() {
+  return (
+    <FeatureGate feature="academic">
+      <AcademicPage />
+    </FeatureGate>
   );
 }
 

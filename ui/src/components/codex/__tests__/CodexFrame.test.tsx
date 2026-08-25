@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
   locationState,
+  featureFlagsState,
   locationHookMock,
   mobileLayoutState,
   navigateMock,
@@ -16,6 +17,7 @@ const {
   toggleThemeMock,
   workspaceState,
 } = vi.hoisted(() => ({
+  featureFlagsState: { academic: true, feeds: true },
   locationState: { pathname: "/docs/getting-started" },
   locationHookMock: vi.fn(),
   mobileLayoutState: { matches: false },
@@ -38,6 +40,9 @@ const {
 
 vi.mock("@tanstack/react-query", () => ({
   useIsMutating: () => 0,
+}));
+vi.mock("#/components/FeatureFlagsProvider", () => ({
+  useFeatureFlags: () => featureFlagsState,
 }));
 const TEST_ROUTE_VIEWS: ReadonlyArray<[prefix: string, view: string]> = [
   ["/archive", "archive"],
@@ -248,6 +253,8 @@ describe("CodexFrame destination integration", () => {
     vi.clearAllMocks();
     mobileLayoutState.matches = false;
     locationState.pathname = "/docs/getting-started";
+    featureFlagsState.academic = true;
+    featureFlagsState.feeds = true;
     workspaceState.tabs = [];
     workspaceState.activeTabId = null;
   });
@@ -483,18 +490,15 @@ describe("CodexFrame destination integration", () => {
     );
   });
 
-  it.each(["/tasking", "/gazetteer"])(
-    "frees the active tab's preview on %s, where no folio is displayed",
-    (pathname) => {
-      locationState.pathname = pathname;
-      renderFrame();
+  it("frees the active tab's preview on Gazetteer, where no folio is displayed", () => {
+    locationState.pathname = "/gazetteer";
+    renderFrame();
 
-      expect(screen.getByTestId("sheaf")).toHaveAttribute(
-        "data-active-tab-visible",
-        "false",
-      );
-    },
-  );
+    expect(screen.getByTestId("sheaf")).toHaveAttribute(
+      "data-active-tab-visible",
+      "false",
+    );
+  });
 
   it("does not re-render the shell when the UTC clock ticks", () => {
     vi.useFakeTimers();
@@ -515,6 +519,8 @@ describe("CodexFrame responsive shell", () => {
     vi.clearAllMocks();
     locationState.pathname = "/";
     mobileLayoutState.matches = false;
+    featureFlagsState.academic = true;
+    featureFlagsState.feeds = true;
     workspaceState.tabs = [];
     workspaceState.activeTabId = null;
   });
@@ -528,6 +534,51 @@ describe("CodexFrame responsive shell", () => {
     expect(screen.getByText(/FILE ATRIUM.*VIEW ATRIUM/)).toBeVisible();
     expect(
       screen.queryByRole("navigation", { name: "Mobile roots" }),
+    ).not.toBeInTheDocument();
+  });
+  it("hides disabled destinations and keeps desktop ordinals contiguous", () => {
+    featureFlagsState.academic = false;
+    featureFlagsState.feeds = false;
+    renderFrame();
+
+    const navigation = screen.getByRole("navigation", {
+      name: "Primary navigation",
+    });
+    expect(
+      within(navigation)
+        .getAllByRole("button")
+        .map((button) => button.textContent?.replace(/\s/g, "")),
+    ).toEqual([
+      "00FOLIO",
+      "01GAZETTEER",
+      "02STATS",
+      "03CONSTELLATION",
+      "04TASKING",
+      "05BASES",
+      "06DOCS",
+      "07RUBBISHBIN",
+    ]);
+    expect(
+      within(navigation).queryByRole("button", { name: /ACADEMIC/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(navigation).queryByRole("button", { name: /FEEDS/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides disabled destinations from mobile roots", () => {
+    featureFlagsState.academic = false;
+    featureFlagsState.feeds = false;
+    mobileLayoutState.matches = true;
+    renderFrame();
+
+    const roots = screen.getByRole("navigation", { name: "Mobile roots" });
+    expect(within(roots).getAllByRole("button")).toHaveLength(5);
+    expect(
+      within(roots).queryByRole("button", { name: "Academic" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(roots).queryByRole("button", { name: "Feeds" }),
     ).not.toBeInTheDocument();
   });
 

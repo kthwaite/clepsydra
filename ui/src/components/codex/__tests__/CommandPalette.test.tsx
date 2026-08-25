@@ -19,6 +19,7 @@ function deferred<T>() {
 }
 
 const {
+  featureFlagsState,
   navigateMock,
   openTabMock,
   searchRefetchMock,
@@ -28,6 +29,7 @@ const {
 } = vi.hoisted(() => {
   const searchRefetchMock = vi.fn();
   return {
+    featureFlagsState: { academic: true, feeds: true },
     navigateMock: vi.fn(),
     openTabMock: vi.fn(),
     searchRefetchMock,
@@ -74,6 +76,9 @@ vi.mock("#/api/index", () => ({
   useSearch: useSearchMock,
   useTags: useTagsMock,
 }));
+vi.mock("#/components/FeatureFlagsProvider", () => ({
+  useFeatureFlags: () => featureFlagsState,
+}));
 vi.mock("#/components/ThemeProvider", () => ({
   useTheme: () => ({
     toggle: vi.fn(),
@@ -106,6 +111,8 @@ import { useUiStore } from "#/store/ui";
 describe("CommandPalette keyboard navigation", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    featureFlagsState.academic = true;
+    featureFlagsState.feeds = true;
     workspaceStateMock.tabs = [];
     workspaceStateMock.quires = {};
     workspaceStateMock.activeTabId = null;
@@ -272,6 +279,18 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(navigateMock).toHaveBeenCalledWith({ to: "/academic" });
     expect(useUiStore.getState().isSearchOpen).toBe(false);
+  });
+  it("omits Academic commands when Academic is disabled", async () => {
+    featureFlagsState.academic = false;
+    render(<CommandPalette />);
+    const query = screen.getByRole("textbox", { name: "Command query" });
+
+    await userEvent.setup().type(query, "Academic");
+    expect(screen.queryByText("Open Academic Library")).not.toBeInTheDocument();
+
+    await userEvent.setup().clear(query);
+    await userEvent.setup().type(query, "Add book");
+    expect(screen.queryByText("Add book by ISBN")).not.toBeInTheDocument();
   });
 
   it("announces while the current query is waiting for search", async () => {
