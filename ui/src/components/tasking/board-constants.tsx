@@ -45,13 +45,21 @@ export const COL_ORDER = [
   "SEALED",
 ] as const;
 
+export const COL_LABEL: Record<string, string> = {
+  INTAKE: "Inbox",
+  TRIAGE: "Ready",
+  FIELD: "In Progress",
+  REVIEW: "Review",
+  SEALED: "Done",
+};
+
 export const PRI_ORDER = ["P0", "P1", "P2", "P3"] as const;
 
 export const PRI_LABEL: Record<string, string> = {
-  P0: "CRITICAL",
-  P1: "HIGH",
-  P2: "NORMAL",
-  P3: "LOW",
+  P0: "Critical",
+  P1: "High",
+  P2: "Medium",
+  P3: "Low",
 };
 
 /**
@@ -70,20 +78,16 @@ export function priColor(pri: string): { bar: string; text: string } {
   return PRI_COLOR[pri] ?? { bar: "var(--ink-3)", text: "var(--ink-mute)" };
 }
 
-/**
- * Resolves a board status column id to its display label. Callers build this
- * from the server's `BoardColumn.label` (see TaskingScreen) so column
- * vocabulary is single-sourced from the backend instead of hardcoded here.
- */
+/** Resolves a persisted board status id to its fixed display label. */
 export type ColLabelFn = (id: string) => string;
 
 // ── mode descriptor ──────────────────────────────────────────────────────────
 
 export const MODES = [
-  { id: "card", label: "CARD", gl: "cards" },
-  { id: "backlog", label: "BACKLOG", gl: "rows" },
-  { id: "cycle", label: "CYCLE", gl: "sprint" },
-  { id: "timeline", label: "TIMELINE", gl: "tl" },
+  { id: "card", label: "Board", gl: "cards" },
+  { id: "backlog", label: "List", gl: "rows" },
+  { id: "cycle", label: "Cycles", gl: "sprint" },
+  { id: "timeline", label: "Timeline", gl: "tl" },
 ] as const satisfies { id: BoardMode; label: string; gl: string }[];
 
 // ── health color helper ──────────────────────────────────────────────────────

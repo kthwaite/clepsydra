@@ -136,7 +136,7 @@ export function DispositionRow({
 }) {
   return (
     <RadioGroup
-      aria-label="Disposition"
+      aria-label="Status"
       value={value}
       onChange={onChange}
       optionsClassName="gap-[6px]"

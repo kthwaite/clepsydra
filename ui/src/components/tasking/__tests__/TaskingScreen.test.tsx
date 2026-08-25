@@ -228,14 +228,14 @@ describe("TaskingScreen smoke", () => {
     expect(screen.getByText("SCOPE")).toBeInTheDocument();
   });
 
-  it("renders all mode buttons after load", async () => {
+  it("renders neutral mode labels after load", async () => {
     stubBoardFetch();
     renderScreen();
     await screen.findByText("TASKING BOARD");
-    expect(screen.getByRole("tab", { name: /CARD/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /BACKLOG/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /CYCLE/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /TIMELINE/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Board" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "List" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Cycles" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Timeline" })).toBeInTheDocument();
   });
 
   it("renders ALL OPS rail row after load", async () => {
@@ -245,14 +245,22 @@ describe("TaskingScreen smoke", () => {
     expect(screen.getByText("ALL OPS")).toBeInTheDocument();
   });
 
-  it("shows kanban columns in card mode (default)", async () => {
+  it("shows fixed human-facing status labels in board mode", async () => {
     stubBoardFetch();
     renderScreen();
     await screen.findByText("TASKING BOARD");
-    // KanbanView renders column labels from board.columns
-    expect(screen.getByTestId("kb-col-INTAKE")).toBeInTheDocument();
-    expect(screen.getByTestId("kb-col-FIELD")).toBeInTheDocument();
-    expect(screen.getByTestId("kb-col-SEALED")).toBeInTheDocument();
+
+    for (const [id, label] of [
+      ["INTAKE", "Inbox"],
+      ["TRIAGE", "Ready"],
+      ["FIELD", "In Progress"],
+      ["REVIEW", "Review"],
+      ["SEALED", "Done"],
+    ]) {
+      expect(
+        within(screen.getByTestId(`kb-col-${id}`)).getByText(label),
+      ).toBeInTheDocument();
+    }
   });
 
   it("shows the backlog register in backlog mode (not the placeholder)", async () => {
@@ -263,6 +271,30 @@ describe("TaskingScreen smoke", () => {
     // BacklogView's header row is mounted
     expect(screen.getByText("FILE-ID")).toBeInTheDocument();
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
+  });
+
+  it("shows neutral priority descriptions in list mode", async () => {
+    const priorityFixture: BoardResponse = {
+      ...BOARD_FIXTURE,
+      tasks: [
+        ...BOARD_FIXTURE.tasks,
+        {
+          ...BOARD_FIXTURE.tasks[0],
+          id: "priority-p0",
+          code: "TSK-P0",
+          title: "Critical task",
+          priority: "P0",
+        },
+      ],
+    };
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch(priorityFixture);
+    renderScreen();
+    await screen.findByText("TASKING BOARD");
+
+    for (const label of ["Critical", "High", "Medium", "Low"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
   });
 
   it("op with null project: clicking its row highlights it, shows op-meta, zero tasks", async () => {
@@ -522,6 +554,20 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
 // ── filter strip: shared FilterBar composition ────────────────────────────────
 
 describe("TaskingScreen — shared FilterBar composition", () => {
+  it("offers neutral filter labels", async () => {
+    stubBoardFetch();
+    renderScreenWithFilter();
+    await screen.findByText("TASKING BOARD");
+
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+
+    for (const label of ["Project", "Tags", "Priority", "Status", "Blocked"]) {
+      expect(
+        screen.getByRole("button", { name: label }),
+      ).toBeInTheDocument();
+    }
+  });
+
   it("typing text filters visible cards and shows the N OF M count", async () => {
     stubBoardFetch(FILTER_FIXTURE);
     renderScreenWithFilter();
@@ -628,10 +674,10 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   });
 });
 
-// ── column labels sourced from the server ─────────────────────────────────────
+// ── fixed human-facing status labels ──────────────────────────────────────────
 
-describe("TaskingScreen — column labels come from the server", () => {
-  it("BACKLOG mode renders the server's FIELD column label, not a hardcoded one", async () => {
+describe("TaskingScreen — fixed human-facing status labels", () => {
+  it("keeps FIELD displayed as In Progress when the server sends DEPLOYED", async () => {
     const relabeled: BoardResponse = {
       ...BOARD_FIXTURE,
       columns: BOARD_FIXTURE.columns.map((c) =>
@@ -643,16 +689,12 @@ describe("TaskingScreen — column labels come from the server", () => {
     renderScreen();
     await screen.findByText("TASKING BOARD");
 
-    // t1 is FIELD-status in BOARD_FIXTURE — its disposition cell must show
-    // the server-supplied label, not the old hardcoded "IN-FIELD". Scoped to
-    // the row itself: BoardHeader's unrelated "IN-FIELD" stat label is a
-    // separate, hardcoded metric name and out of scope here.
     const row = screen.getByTestId("bk-row-t1");
-    expect(within(row).getByText("DEPLOYED")).toBeInTheDocument();
-    expect(within(row).queryByText("IN-FIELD")).not.toBeInTheDocument();
+    expect(within(row).getByText("In Progress")).toBeInTheDocument();
+    expect(within(row).queryByText("DEPLOYED")).not.toBeInTheDocument();
   });
 
-  it("inline status popover on a backlog row shows the server's column label, not the raw id", async () => {
+  it("uses the fixed FIELD label in the inline status popover", async () => {
     const relabeled: BoardResponse = {
       ...BOARD_FIXTURE,
       columns: BOARD_FIXTURE.columns.map((c) =>
@@ -664,15 +706,12 @@ describe("TaskingScreen — column labels come from the server", () => {
     renderScreen();
     await screen.findByText("TASKING BOARD");
 
-    // t1 is FIELD-status — open its inline status-edit popover chip
     await userEvent.click(screen.getByTestId("bk-inline-status-t1"));
 
-    // The testid is on the underlying <input>; its visible label text (the
-    // column-label span) is on the wrapping <label>.
     const fieldOption = screen.getByTestId("inline-status-FIELD");
     const fieldLabel = fieldOption.closest("label");
-    expect(fieldLabel).toHaveTextContent("DEPLOYED");
-    expect(fieldLabel).not.toHaveTextContent("FIELD");
+    expect(fieldLabel).toHaveTextContent("In Progress");
+    expect(fieldLabel).not.toHaveTextContent("DEPLOYED");
   });
 });
 
