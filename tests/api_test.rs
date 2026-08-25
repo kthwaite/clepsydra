@@ -8,12 +8,13 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Poll;
 
-use axum::Router;
+use axum::{Router, routing::get};
 use axum::body::{Body, Bytes};
 use axum::http::{Request, StatusCode};
 use axum_test::TestServer;
 use tokio::sync::{Barrier, mpsc};
 
+use clepsydra::FeatureFlags;
 use clepsydra::api::error::{parse_internal_path, parse_request_path};
 use clepsydra::api::events::SyncNotification;
 use clepsydra::api::openapi::ApiDoc;
@@ -34,6 +35,104 @@ fn setup_server() -> (TestServer, TempDir) {
 fn setup_app() -> (Router, TempDir) {
     let fixture = ApiFixture::builder().build();
     (fixture.app, fixture.temp_dir)
+}
+
+fn build_test_router_with_features(features: FeatureFlags) -> (TestServer, TempDir) {
+    let fixture = ApiFixture::builder().build();
+    let ApiFixture {
+        app,
+        server,
+        temp_dir,
+        mut state,
+    } = fixture;
+    drop(app);
+    drop(server);
+    Arc::get_mut(&mut state)
+        .expect("fixture state should be exclusively owned after dropping its routers")
+        .features = features;
+
+    let app = Router::new()
+        .route("/api/features", get(clepsydra::api::features::get_features))
+        .nest(
+            "/api/vault",
+            clepsydra::api::api_router_with_archive_limit(
+                usize::MAX,
+                clepsydra::api::archive::ArchiveViewConfig::default(),
+                features,
+            ),
+        )
+        .with_state(state);
+    (TestServer::new(app).unwrap(), temp_dir)
+}
+
+#[tokio::test]
+async fn feature_capabilities_match_all_effective_flag_combinations() {
+    for features in [
+        FeatureFlags {
+            academic: false,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: false,
+            feeds: true,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: true,
+        },
+    ] {
+        let (server, _temp_dir) = build_test_router_with_features(features);
+        let response = server.get("/api/features").await;
+        response.assert_status(StatusCode::OK);
+        assert_eq!(
+            response.json::<serde_json::Value>(),
+            serde_json::json!({
+                "academic": features.academic,
+                "feeds": features.feeds,
+            })
+        );
+    }
+}
+
+#[tokio::test]
+async fn disabled_feature_routes_are_unknown_while_enabled_routes_are_reachable() {
+    for features in [
+        FeatureFlags {
+            academic: false,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: false,
+            feeds: true,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: true,
+        },
+    ] {
+        let (server, _temp_dir) = build_test_router_with_features(features);
+        let academic = server.get("/api/vault/academic/works").await;
+        let feeds = server.get("/api/vault/feeds").await;
+
+        if features.academic {
+            assert_ne!(academic.status_code(), StatusCode::NOT_FOUND);
+        } else {
+            academic.assert_status(StatusCode::NOT_FOUND);
+        }
+        if features.feeds {
+            assert_ne!(feeds.status_code(), StatusCode::NOT_FOUND);
+        } else {
+            feeds.assert_status(StatusCode::NOT_FOUND);
+        }
+    }
 }
 
 struct CountingFixedClock {

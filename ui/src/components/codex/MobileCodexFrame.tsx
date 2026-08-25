@@ -1,8 +1,10 @@
 import { useNavigate } from "@tanstack/react-router";
 import { createPortal } from "react-dom";
+import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { useCodexView } from "#/components/codex/useCodexView";
 import {
+  enabledNavItems,
   goToView,
   MOBILE_NAV,
   VIEW_REGISTRY,
@@ -20,6 +22,7 @@ export function MobileCodexFrame({
   bottomSlot,
   forceView,
 }: CodexFrameChromeProps) {
+  const features = useFeatureFlags();
   const navigate = useNavigate();
   const openSearch = useUiStore((state) => state.openSearch);
   const openInscribe = useUiStore((state) => state.openInscribe);
@@ -31,6 +34,7 @@ export function MobileCodexFrame({
   const openTab = useOpenTab();
   const activateTab = useActivateTabWithFolioHistory();
   const leaveWorkspace = useLeaveFolioWorkspace();
+  const navItems = enabledNavItems(MOBILE_NAV, features);
 
   return (
     <>
@@ -85,7 +89,7 @@ export function MobileCodexFrame({
               aria-label="Mobile roots"
               className="cl-mobile-bottom order-3 flex flex-shrink-0 border-t border-rule bg-bar-bg"
             >
-              {MOBILE_NAV.map((root) => {
+              {navItems.map((root) => {
                 const { mobile } = VIEW_REGISTRY[root];
                 if (!mobile) return null;
                 const active = VIEW_REGISTRY[view].navRoot === root;

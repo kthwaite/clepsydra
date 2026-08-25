@@ -1,4 +1,5 @@
 import type { useNavigate } from "@tanstack/react-router";
+import type { FeatureFlags, FeatureName } from "#/api/features";
 import type { CodexView } from "#/components/codex/useCodexView";
 import { DEFAULT_DOC_SLUG } from "#/docs/constants";
 import type {
@@ -31,6 +32,7 @@ interface ViewDescriptor {
   /** Footer FILE code; null = derive from the active folio's path. */
   folioCode: string | null;
   showsSheaf: boolean;
+  feature: FeatureName | null;
   /** Route owns the entire content window; suppress both responsive shells. */
   fullPage?: boolean;
   /** Which rail/mobile entry highlights while this view is current; null =
@@ -47,6 +49,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "ATRIUM",
     folioCode: "ATRIUM",
     showsSheaf: false,
+    feature: null,
     navRoot: "atrium",
     mobile: { name: "Atrium", label: "ATR" },
     go: ({ navigate }) => void navigate({ to: "/" }),
@@ -55,6 +58,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "FOLIO",
     folioCode: null,
     showsSheaf: true,
+    feature: null,
     navRoot: "folio",
     mobile: null,
     go: ({ activateTab, leaveWorkspace, navigate }) => {
@@ -74,6 +78,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "LAUNCHER",
     folioCode: "—",
     showsSheaf: true,
+    feature: null,
     navRoot: "folio",
     mobile: null,
     go: null,
@@ -82,6 +87,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "CONSTELLATION",
     folioCode: "GRAPH",
     showsSheaf: false,
+    feature: null,
     navRoot: "constellation",
     mobile: { name: "Constellation", label: "GRAPH" },
     go: ({ openTab }) => openTab("graph"),
@@ -90,6 +96,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "GAZETTEER",
     folioCode: "INDEX",
     showsSheaf: true,
+    feature: null,
     navRoot: "gazetteer",
     mobile: { name: "Gazetteer", label: "GAZ" },
     go: ({ navigate }) => void navigate({ to: "/gazetteer" }),
@@ -98,6 +105,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "STATS",
     folioCode: "STATS",
     showsSheaf: false,
+    feature: null,
     navRoot: "stats",
     mobile: null,
     go: ({ navigate }) => void navigate({ to: "/stats" }),
@@ -106,6 +114,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "TASKING",
     folioCode: "TASKING",
     showsSheaf: false,
+    feature: null,
     navRoot: "tasking",
     mobile: null,
     go: ({ navigate }) => void navigate({ to: "/tasking" }),
@@ -114,6 +123,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "ACADEMIC",
     folioCode: "ACADEMIC",
     showsSheaf: false,
+    feature: "academic",
     navRoot: "academic",
     mobile: { name: "Academic", label: "ACAD" },
     go: ({ navigate }) => void navigate({ to: "/academic" }),
@@ -122,6 +132,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "BASES",
     folioCode: "BASES",
     showsSheaf: false,
+    feature: null,
     navRoot: "bases",
     mobile: { name: "Bases", label: "BASE" },
     go: ({ navigate }) => void navigate({ to: "/bases" }),
@@ -130,6 +141,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "FEEDS",
     folioCode: "FEEDS",
     showsSheaf: false,
+    feature: "feeds",
     navRoot: "feeds",
     mobile: { name: "Feeds", label: "FEED" },
     go: ({ navigate }) => void navigate({ to: "/feeds" }),
@@ -138,6 +150,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "DOCS",
     folioCode: "DOC-001",
     showsSheaf: false,
+    feature: null,
     navRoot: "docs",
     mobile: null,
     go: ({ navigate }) =>
@@ -147,6 +160,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "ARCHIVE",
     folioCode: "ARCHIVE",
     showsSheaf: false,
+    feature: null,
     fullPage: true,
     navRoot: null,
     mobile: null,
@@ -156,6 +170,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "RUBBISH BIN",
     folioCode: "RUBBISH",
     showsSheaf: false,
+    feature: null,
     navRoot: "rubbish",
     mobile: { name: "Rubbish Bin", label: "BIN" },
     go: ({ navigate }) => void navigate({ to: "/rubbish" }),
@@ -164,6 +179,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "REPAIRS",
     folioCode: "REPAIRS",
     showsSheaf: false,
+    feature: null,
     navRoot: null,
     mobile: null,
     go: ({ navigate }) => void navigate({ to: "/repairs" }),
@@ -172,6 +188,7 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     label: "AGENDA",
     folioCode: "AGENDA",
     showsSheaf: false,
+    feature: null,
     navRoot: null,
     mobile: null,
     go: ({ navigate }) => void navigate({ to: "/agenda" }),
@@ -201,6 +218,16 @@ export const MOBILE_NAV: readonly CodexView[] = [
   "constellation",
   "rubbish",
 ];
+
+export function enabledNavItems(
+  items: readonly CodexView[],
+  features: FeatureFlags,
+): CodexView[] {
+  return items.filter((view) => {
+    const feature = VIEW_REGISTRY[view].feature;
+    return feature === null || features[feature];
+  });
+}
 
 export function goToView(view: CodexView, deps: ViewNavDeps): void {
   const go = VIEW_REGISTRY[view].go;

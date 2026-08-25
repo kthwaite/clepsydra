@@ -57,7 +57,10 @@ fn setup_archive_view_server() -> (TestServer, TempDir, Arc<AppState>) {
     };
     let view_config = ArchiveViewConfig::from_server_settings(&server_settings).unwrap();
     let app = Router::new()
-        .nest("/api/vault", api_router_with_archive_limit(1, view_config))
+        .nest(
+            "/api/vault",
+            api_router_with_archive_limit(1, view_config, clepsydra::FeatureFlags::default()),
+        )
         .with_state(Arc::clone(&state));
     let server = TestServer::new(app).unwrap();
     (server, temp_dir, state)

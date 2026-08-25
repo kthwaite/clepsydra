@@ -204,6 +204,41 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
 
     let loaded = check_top_level_config(cwd, &mut report);
 
+    match loaded.as_ref().map(|(settings, _)| &settings.features) {
+        Some(features) => {
+            report.push(info(
+                "features",
+                "academic",
+                if features.academic {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+            ));
+            report.push(info(
+                "features",
+                "feeds",
+                if features.feeds {
+                    "enabled"
+                } else {
+                    "disabled"
+                },
+            ));
+        }
+        None => {
+            report.push(skip(
+                "features",
+                "academic",
+                "skipped — config did not load",
+            ));
+            report.push(skip(
+                "features",
+                "feeds",
+                "skipped — config did not load",
+            ));
+        }
+    }
+
     if let Some(settings) = loaded.as_ref().map(|(s, _)| s) {
         check_server_address(settings, &mut report).await;
         check_tls(settings, &mut report).await;
@@ -220,17 +255,29 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
     };
 
+    let academic_enabled = loaded
+        .as_ref()
+        .map(|(settings, _)| settings.features.academic);
+
     if let Some(v) = vault.as_ref() {
         check_index(v, opts.full, &mut report).await;
         check_cas(v, opts.full, &mut report);
-        check_academic(v, &mut report);
+        if academic_enabled == Some(false) {
+            skip_disabled_academic(&mut report);
+        } else {
+            check_academic(v, &mut report);
+        }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
         check_bases(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
         report.push(skip("cas", "store", "skipped — vault unavailable"));
-        report.push(skip("academic", "folders", "skipped — vault unavailable"));
+        if academic_enabled == Some(false) {
+            skip_disabled_academic(&mut report);
+        } else {
+            report.push(skip("academic", "folders", "skipped — vault unavailable"));
+        }
         report.push(skip("bcl", "config", "skipped — vault unavailable"));
         report.push(skip(
             "frontmatter",
@@ -1177,8 +1224,16 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
 // Check 7: academic / Zotero
 // ---------------------------------------------------------------------------
 
+fn skip_disabled_academic(report: &mut Report) {
+    const SECTION: &str = "academic";
+    for name in ["library", "papers", "books", "annotations", "zotero db"] {
+        report.push(skip(SECTION, name, "skipped — feature disabled"));
+    }
+}
+
 fn check_academic(vault: &Vault, report: &mut Report) {
     const SECTION: &str = "academic";
+
     let cfg = &vault.config().academic;
 
     let folders: [(&'static str, &str); 4] = [
@@ -1497,6 +1552,172 @@ mod tests {
         .unwrap();
     }
 
+    fn write_top_level_config_with_features(
+        dir: &Path,
+        vault_root: &Path,
+        academic: bool,
+        feeds: bool,
+    ) {
+        fs::write(
+            dir.join("config.toml"),
+            format!(
+                concat!(
+                    "[server]\nhost = \"localhost\"\nport = 0\n\n",
+                    "[vault]\nroot = \"{}\"\n\n",
+                    "[features]\nacademic = {}\nfeeds = {}\n",
+                ),
+                vault_root.display(),
+                academic,
+                feeds,
+            ),
+        )
+        .unwrap();
+    }
+
+    fn assert_record(
+        report: &Report,
+        section: &str,
+        name: &str,
+        status: Status,
+        detail: &str,
+    ) {
+        let record = report
+            .results
+            .iter()
+            .find(|record| record.section == section && record.name == name)
+            .unwrap_or_else(|| panic!("expected {section}.{name}"));
+        assert_eq!(record.status, status, "{record:#?}");
+        assert_eq!(record.detail, detail, "{record:#?}");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn doctor_reports_effective_feature_states() {
+        let enabled = TempDir::new().unwrap();
+        let enabled_vault = enabled.path().join("vault");
+        crate::vault::init::init_vault(&enabled_vault).unwrap();
+        write_top_level_config(enabled.path(), &enabled_vault);
+
+        let enabled_report =
+            run_with_cwd(enabled.path(), DoctorOpts::default()).await;
+        let enabled_features: Vec<_> = enabled_report
+            .results
+            .iter()
+            .filter(|record| record.section == "features")
+            .map(|record| (record.name, record.status, record.detail.as_str()))
+            .collect();
+        assert_eq!(
+            enabled_features,
+            [
+                ("academic", Status::Info, "enabled"),
+                ("feeds", Status::Info, "enabled"),
+            ]
+        );
+
+        let disabled = TempDir::new().unwrap();
+        let disabled_vault = disabled.path().join("vault");
+        crate::vault::init::init_vault(&disabled_vault).unwrap();
+        write_top_level_config_with_features(
+            disabled.path(),
+            &disabled_vault,
+            false,
+            false,
+        );
+
+        let disabled_report =
+            run_with_cwd(disabled.path(), DoctorOpts::default()).await;
+        let disabled_features: Vec<_> = disabled_report
+            .results
+            .iter()
+            .filter(|record| record.section == "features")
+            .map(|record| (record.name, record.status, record.detail.as_str()))
+            .collect();
+        assert_eq!(
+            disabled_features,
+            [
+                ("academic", Status::Info, "disabled"),
+                ("feeds", Status::Info, "disabled"),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn disabled_academic_skips_academic_checks() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+
+        let vault_cfg = vault_root.join(".clepsydra/config.toml");
+        let extant = fs::read_to_string(&vault_cfg).unwrap();
+        let missing_zotero_db = tmp.path().join("missing-zotero.sqlite");
+        fs::write(
+            &vault_cfg,
+            format!(
+                "{extant}\n[academic.zotero]\ndatabase_path = \"{}\"\n",
+                missing_zotero_db.display()
+            ),
+        )
+        .unwrap();
+        write_top_level_config_with_features(cwd, &vault_root, false, false);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        for name in ["library", "papers", "books", "annotations", "zotero db"] {
+            assert_record(
+                &report,
+                "academic",
+                name,
+                Status::Skip,
+                "skipped — feature disabled",
+            );
+        }
+        assert_record(
+            &report,
+            "features",
+            "academic",
+            Status::Info,
+            "disabled",
+        );
+        assert_record(&report, "features", "feeds", Status::Info, "disabled");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn disabled_academic_skips_checks_when_vault_is_unavailable() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        fs::create_dir_all(&vault_root).unwrap();
+        write_top_level_config_with_features(cwd, &vault_root, false, true);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let vault_initialized = report
+            .results
+            .iter()
+            .find(|record| record.section == "vault" && record.name == "initialized")
+            .expect("expected vault initialized check");
+        assert_eq!(vault_initialized.status, Status::Err);
+        for name in ["library", "papers", "books", "annotations", "zotero db"] {
+            assert_record(
+                &report,
+                "academic",
+                name,
+                Status::Skip,
+                "skipped — feature disabled",
+            );
+        }
+        assert!(
+            !report
+                .results
+                .iter()
+                .any(|record| record.section == "academic" && record.name == "folders"),
+            "disabled Academic must not emit the vault-unavailable placeholder"
+        );
+    }
+
     #[tokio::test]
     #[serial_test::serial]
     async fn report_for_initialized_vault_is_clean() {
@@ -1525,6 +1746,28 @@ mod tests {
         let _home = EnvGuard::set("HOME", tmp.path().join("home-empty"));
 
         let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_record(
+            &report,
+            "features",
+            "academic",
+            Status::Skip,
+            "skipped — config did not load",
+        );
+        assert_record(
+            &report,
+            "features",
+            "feeds",
+            Status::Skip,
+            "skipped — config did not load",
+        );
+        assert_record(
+            &report,
+            "academic",
+            "folders",
+            Status::Skip,
+            "skipped — vault unavailable",
+        );
 
         assert!(report.summary.err > 0);
         // Runtime info should still appear.
@@ -1556,6 +1799,20 @@ mod tests {
             .expect("expected vault initialized check");
         assert_eq!(init.status, Status::Err);
         assert!(init.hint.as_ref().unwrap().contains("clepsydra init"));
+        assert_record(
+            &report,
+            "features",
+            "academic",
+            Status::Info,
+            "enabled",
+        );
+        assert_record(
+            &report,
+            "academic",
+            "folders",
+            Status::Skip,
+            "skipped — vault unavailable",
+        );
     }
 
     #[tokio::test]

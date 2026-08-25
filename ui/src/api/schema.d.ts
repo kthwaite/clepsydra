@@ -4,6 +4,22 @@
  */
 
 export interface paths {
+    "/api/features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_features"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/academic/annotations": {
         parameters: {
             query?: never;
@@ -2182,6 +2198,10 @@ export interface components {
             doi?: string | null;
             isbn?: string | null;
         };
+        FeatureFlagsResponse: {
+            academic: boolean;
+            feeds: boolean;
+        };
         FeedDiagnosticDto: {
             line: number;
             message: string;
@@ -3157,6 +3177,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_features: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Effective server feature capabilities */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureFlagsResponse"];
+                };
+            };
+        };
+    };
     create_annotation: {
         parameters: {
             query?: never;

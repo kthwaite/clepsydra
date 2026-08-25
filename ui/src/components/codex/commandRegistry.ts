@@ -1,3 +1,4 @@
+import type { FeatureFlags, FeatureName } from "#/api/features";
 import type { ShortcutId } from "#/lib/shortcuts";
 
 export type StaticCommandAction =
@@ -23,6 +24,7 @@ export interface StaticCommandDescriptor {
   readonly id: string;
   readonly title: string;
   readonly shortcut?: ShortcutId;
+  readonly feature?: FeatureName;
   readonly action: StaticCommandAction;
 }
 
@@ -177,6 +179,7 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
   {
     id: "nav.academic",
     title: "Open Academic Library",
+    feature: "academic",
     action: "navigate-academic",
   },
   {
@@ -197,6 +200,7 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
   {
     id: "library.add-book",
     title: "Add book by ISBN",
+    feature: "academic",
     action: "add-book",
   },
   {
@@ -234,3 +238,11 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
     action: "run-boot-sequence",
   },
 ];
+
+export function enabledStaticCommands(
+  features: FeatureFlags,
+): StaticCommandDescriptor[] {
+  return STATIC_COMMANDS.filter(
+    (command) => !command.feature || features[command.feature],
+  );
+}

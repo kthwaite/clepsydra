@@ -135,15 +135,9 @@ impl ApiFixtureBuilder {
             .map_or_else(Vec::new, |factory| factory(&cas));
         let index = IndexHandle::spawn(index, vault.clone());
         let (change_tx, _) = broadcast::channel(64);
-        let feed_settings = clepsydra::FeedsSettings::default();
-        let feeds =
-            clepsydra::feeds::store::FeedStoreHandle::open(&root.join(".clepsydra/feeds.db"))
-                .unwrap();
-        let feed_client =
-            clepsydra::feeds::network::CheckedHttpClient::new(feed_settings.max_response_bytes)
-                .unwrap();
         let state = Arc::new(AppState {
             started_at: std::time::Instant::now(),
+            features: clepsydra::FeatureFlags::default(),
             clock: self.clock,
             vault,
             index,
@@ -155,15 +149,13 @@ impl ApiFixtureBuilder {
             delete_hooks: Arc::new(delete_hooks),
             mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(
             ),
-            feeds,
-            feed_client,
-            feed_discovery_semaphore: tokio::sync::Semaphore::new(
-                feed_settings.fetch_concurrency.max(1),
+            feed_runtime: Some(
+                clepsydra::feeds::runtime::FeedRuntime::open(
+                    &root,
+                    &clepsydra::FeedsSettings::default(),
+                )
+                .unwrap(),
             ),
-            feed_refresh: tokio::sync::Notify::new(),
-            feed_manifest_diagnostics: parking_lot::RwLock::new(Vec::new()),
-            feed_manifest_lock: tokio::sync::Mutex::new(()),
-            feed_settings,
             archive_ingest_lock: tokio::sync::Mutex::new(()),
             archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(

@@ -4,6 +4,7 @@ import { useBcl } from "#/api/bcl";
 import { useContentIndex } from "#/api/index";
 import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
+import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
@@ -30,6 +31,7 @@ import { SkyCard } from "./SkyCard";
 import { deriveSky, hasCoords } from "./sky";
 
 export function Atrium() {
+  const features = useFeatureFlags();
   const { data: content } = useContentIndex({ limit: 500 });
   const { data: bcl } = useBcl();
   const configuredBcl =
@@ -252,7 +254,7 @@ export function Atrium() {
       </section>
       <AgendaTile className="col-span-12 lg:col-span-5" />
 
-      <FeedRiverPanel />
+      {features.feeds ? <FeedRiverPanel /> : null}
       {/* BCL (col-7) + SKY (col-5) */}
       <div className="col-span-12 grid grid-cols-12 gap-3.5">
         {configuredBcl ? (

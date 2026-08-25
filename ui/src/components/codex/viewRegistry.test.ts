@@ -2,6 +2,7 @@ import type { useNavigate } from "@tanstack/react-router";
 import { describe, expect, it, vi } from "vitest";
 import {
   DESKTOP_NAV,
+  enabledNavItems,
   goToView,
   MOBILE_NAV,
   VIEW_REGISTRY,
@@ -72,6 +73,52 @@ describe("VIEW_REGISTRY", () => {
       "FEED",
       "GRAPH",
       "BIN",
+    ]);
+  });
+  it("removes Academic independently from desktop and mobile navigation", () => {
+    const flags = { academic: false, feeds: true };
+
+    expect(enabledNavItems(DESKTOP_NAV, flags)).toEqual([
+      "folio",
+      "gazetteer",
+      "stats",
+      "constellation",
+      "tasking",
+      "bases",
+      "feeds",
+      "docs",
+      "rubbish",
+    ]);
+    expect(enabledNavItems(MOBILE_NAV, flags)).toEqual([
+      "atrium",
+      "gazetteer",
+      "bases",
+      "feeds",
+      "constellation",
+      "rubbish",
+    ]);
+  });
+  it("removes Feeds independently from desktop and mobile navigation", () => {
+    const flags = { academic: true, feeds: false };
+
+    expect(enabledNavItems(DESKTOP_NAV, flags)).toEqual([
+      "folio",
+      "gazetteer",
+      "stats",
+      "constellation",
+      "tasking",
+      "academic",
+      "bases",
+      "docs",
+      "rubbish",
+    ]);
+    expect(enabledNavItems(MOBILE_NAV, flags)).toEqual([
+      "atrium",
+      "gazetteer",
+      "academic",
+      "bases",
+      "constellation",
+      "rubbish",
     ]);
   });
   it("shows the Sheaf exactly for folio, launcher, gazetteer", () => {
