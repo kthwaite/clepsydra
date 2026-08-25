@@ -1,4 +1,5 @@
-use clepsydra::api::openapi::ApiDoc;
+use clepsydra::FeatureFlags;
+use clepsydra::api::openapi::{self, ApiDoc};
 use utoipa::OpenApi;
 
 const VAULT_OPERATIONS: &[(&str, &str)] = &[
@@ -319,4 +320,63 @@ fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
             .unwrap()
             .contains(&serde_json::json!("embed"))
     );
+}
+
+#[test]
+fn runtime_openapi_filters_disabled_features_without_narrowing_static_document() {
+    for features in [
+        FeatureFlags {
+            academic: false,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: false,
+        },
+        FeatureFlags {
+            academic: false,
+            feeds: true,
+        },
+        FeatureFlags {
+            academic: true,
+            feeds: true,
+        },
+    ] {
+        let runtime = serde_json::to_value(openapi::document(features))
+            .expect("runtime OpenAPI should serialize");
+        let paths = runtime["paths"]
+            .as_object()
+            .expect("runtime OpenAPI paths should be an object");
+        let tags = runtime["tags"]
+            .as_array()
+            .expect("runtime OpenAPI tags should be an array");
+
+        assert!(paths.contains_key("/api/features"));
+        assert_eq!(
+            paths.keys().any(|path| path.starts_with("/api/vault/academic")),
+            features.academic
+        );
+        assert_eq!(
+            paths.keys().any(|path| path.starts_with("/api/vault/feeds")),
+            features.feeds
+        );
+        assert_eq!(
+            tags.iter().any(|tag| tag["name"] == "Academic"),
+            features.academic
+        );
+        assert_eq!(
+            tags.iter().any(|tag| tag["name"] == "Feeds"),
+            features.feeds
+        );
+    }
+
+    let complete = ApiDoc::openapi();
+    assert!(complete.paths.paths.contains_key("/api/features"));
+    assert!(
+        complete
+            .paths
+            .paths
+            .contains_key("/api/vault/academic/works")
+    );
+    assert!(complete.paths.paths.contains_key("/api/vault/feeds"));
 }

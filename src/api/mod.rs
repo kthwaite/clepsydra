@@ -13,6 +13,7 @@ pub mod encryption;
 pub mod error;
 pub mod events;
 pub mod feeds;
+pub mod features;
 pub mod folders;
 pub mod frontend;
 pub mod index_routes;
@@ -173,6 +174,7 @@ pub fn api_router() -> Router<Arc<AppState>> {
     api_router_with_archive_limit(
         archive::archive_body_limit_bytes(250),
         archive::ArchiveViewConfig::default(),
+        crate::FeatureFlags::default(),
     )
 }
 
@@ -181,8 +183,9 @@ pub fn api_router() -> Router<Arc<AppState>> {
 pub fn api_router_with_archive_limit(
     archive_body_limit: usize,
     archive_view_config: archive::ArchiveViewConfig,
+    features: crate::FeatureFlags,
 ) -> Router<Arc<AppState>> {
-    Router::new()
+    let mut router = Router::new()
         .route("/events", axum::routing::get(events::event_stream))
         .nest("/encryption", encryption::router())
         .nest("/pages", pages::router())
@@ -196,7 +199,6 @@ pub fn api_router_with_archive_limit(
         .nest("/folders", folders::router())
         .nest("/folders-move", folders::move_router())
         .nest("/attachments", attachments::router())
-        .nest("/academic", academic::router())
         .nest(
             "/archive",
             archive::router_with_body_limit(archive_body_limit, archive_view_config),
@@ -209,7 +211,6 @@ pub fn api_router_with_archive_limit(
         .nest("/board", board::router())
         .nest("/agenda", agenda::router())
         .nest("/bases", bases::router())
-        .nest("/feeds", feeds::router())
         .nest("/query", query::router())
         .nest("/blocks", blocks::router())
         .route("/bcl", axum::routing::get(bcl::get_bcl))
@@ -219,5 +220,14 @@ pub fn api_router_with_archive_limit(
         )
         .route("/geocode", axum::routing::get(location::geocode_search))
         .route("/uptime", axum::routing::get(uptime::get_uptime))
-        .merge(deeplink::router())
+        .merge(deeplink::router());
+
+    if features.academic {
+        router = router.nest("/academic", academic::router());
+    }
+    if features.feeds {
+        router = router.nest("/feeds", feeds::router());
+    }
+
+    router
 }
