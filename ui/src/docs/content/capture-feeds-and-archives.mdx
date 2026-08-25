@@ -12,6 +12,20 @@ website or exposes a public feed.
 
 ## Prerequisites
 
+The private feed reader requires the application-config flag `features.feeds`,
+which defaults to `true`:
+
+```toml
+[features]
+feeds = true
+```
+
+Set `CLEPSYDRA__FEATURES__FEEDS=true` to override the config value from the
+environment. Feature changes take effect only after restarting Clepsydra.
+Setting the flag to `false` disables the Feed routes, UI, storage, networking,
+and scheduler without deleting `feeds.md`, other Markdown data, or
+`.clepsydra/feeds.db`; re-enabling it uses the preserved data.
+
 - Start the Clepsydra server and open `/feeds` for the private reader.
 - Follow the [Browser Extension](/docs/browser-extension) guide to build and
   connect the capture client. Archiving must be enabled.
