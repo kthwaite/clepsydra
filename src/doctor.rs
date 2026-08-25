@@ -257,19 +257,27 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
 
     let academic_enabled = loaded
         .as_ref()
-        .is_some_and(|(settings, _)| settings.features.academic);
+        .map(|(settings, _)| settings.features.academic);
 
     if let Some(v) = vault.as_ref() {
         check_index(v, opts.full, &mut report).await;
         check_cas(v, opts.full, &mut report);
-        check_academic(v, academic_enabled, &mut report);
+        if academic_enabled == Some(false) {
+            skip_disabled_academic(&mut report);
+        } else {
+            check_academic(v, &mut report);
+        }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
         check_bases(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
         report.push(skip("cas", "store", "skipped — vault unavailable"));
-        report.push(skip("academic", "folders", "skipped — vault unavailable"));
+        if academic_enabled == Some(false) {
+            skip_disabled_academic(&mut report);
+        } else {
+            report.push(skip("academic", "folders", "skipped — vault unavailable"));
+        }
         report.push(skip("bcl", "config", "skipped — vault unavailable"));
         report.push(skip(
             "frontmatter",
@@ -1216,15 +1224,15 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
 // Check 7: academic / Zotero
 // ---------------------------------------------------------------------------
 
-fn check_academic(vault: &Vault, enabled: bool, report: &mut Report) {
+fn skip_disabled_academic(report: &mut Report) {
     const SECTION: &str = "academic";
-
-    if !enabled {
-        for name in ["library", "papers", "books", "annotations", "zotero db"] {
-            report.push(skip(SECTION, name, "skipped — feature disabled"));
-        }
-        return;
+    for name in ["library", "papers", "books", "annotations", "zotero db"] {
+        report.push(skip(SECTION, name, "skipped — feature disabled"));
     }
+}
+
+fn check_academic(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "academic";
 
     let cfg = &vault.config().academic;
 
@@ -1677,6 +1685,41 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
+    async fn disabled_academic_skips_checks_when_vault_is_unavailable() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        fs::create_dir_all(&vault_root).unwrap();
+        write_top_level_config_with_features(cwd, &vault_root, false, true);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        let vault_initialized = report
+            .results
+            .iter()
+            .find(|record| record.section == "vault" && record.name == "initialized")
+            .expect("expected vault initialized check");
+        assert_eq!(vault_initialized.status, Status::Err);
+        for name in ["library", "papers", "books", "annotations", "zotero db"] {
+            assert_record(
+                &report,
+                "academic",
+                name,
+                Status::Skip,
+                "skipped — feature disabled",
+            );
+        }
+        assert!(
+            !report
+                .results
+                .iter()
+                .any(|record| record.section == "academic" && record.name == "folders"),
+            "disabled Academic must not emit the vault-unavailable placeholder"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
     async fn report_for_initialized_vault_is_clean() {
         let tmp = TempDir::new().unwrap();
         let cwd = tmp.path();
@@ -1717,6 +1760,13 @@ mod tests {
             "feeds",
             Status::Skip,
             "skipped — config did not load",
+        );
+        assert_record(
+            &report,
+            "academic",
+            "folders",
+            Status::Skip,
+            "skipped — vault unavailable",
         );
 
         assert!(report.summary.err > 0);
