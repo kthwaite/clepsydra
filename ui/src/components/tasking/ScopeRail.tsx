@@ -145,7 +145,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
         onClick={() => setRailOpen(true)}
         title="Open scope rail"
       >
-        <span>SCOPE</span> ›
+        <span>Scope</span> ›
       </button>
     );
   }
@@ -155,7 +155,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
       {/* Header */}
       <div className="sticky top-0 z-[2] flex items-center justify-between border-b border-[var(--rule)] bg-[var(--paper-2)] px-[var(--pad)] py-[10px]">
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-          SCOPE
+          Scope
         </span>
         <button
           type="button"
@@ -174,14 +174,14 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
         onClick={handleNewTasking}
       >
         <span className="text-[14px] font-bold leading-none">+</span>
-        NEW TASKING
+        New task
       </button>
 
       {/* OPERATIONS section */}
       <div className="pb-[10px] pt-1">
         <div className="mx-0 mb-1 mt-1 flex items-center justify-between border-b border-[var(--rule)] px-[var(--pad)] pb-[5px] pt-1">
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-            OPERATIONS
+            Projects
           </span>
           <span className="cl-mono text-[var(--fs-xs)] tabular-nums tracking-[0.1em] text-[var(--ink-mute)]">
             {operations.length}
@@ -202,7 +202,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
           {/* neutral square dot */}
           <span className="inline-block h-[7px] w-[7px] flex-shrink-0 border border-[var(--ink-mute)]" />
           <span className="text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
-            ALL OPS
+            All projects
           </span>
           <span
             className={cn(
@@ -272,7 +272,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
           >
             <span className="inline-block h-[7px] w-[7px] flex-shrink-0 border border-[var(--ink-mute)]" />
             <span className="text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
-              UNFILED
+              No project
             </span>
             <span
               className={cn(
@@ -291,7 +291,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
       <div className="pb-[10px] pt-1">
         <div className="mx-0 mb-1 mt-1 flex items-center justify-between border-b border-[var(--rule)] px-[var(--pad)] pb-[5px] pt-1">
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-            CYCLES
+            Cycles
           </span>
           <span className="flex items-center gap-2">
             <button
@@ -328,7 +328,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
         {/* BKLG pseudo-row */}
         <CycleNavRow
           code="BACKLOG"
-          displayCode="BKLG"
+          displayCode="Backlog"
           state="BACKLOG"
           windowLabel="unscheduled"
           count={backlogCount}

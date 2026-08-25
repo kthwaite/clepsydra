@@ -265,17 +265,17 @@ beforeEach(() => {
 });
 
 describe("BacklogView — header columns", () => {
-  it("renders all 8 header columns", () => {
+  it("renders the approved 8 header columns", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
     for (const label of [
-      "FILE-ID",
-      "TASKING",
-      "OP",
-      "DISPOSITION",
-      "OPR",
-      "EST",
-      "DUE",
-      "CHK",
+      "ID",
+      "Task",
+      "Project",
+      "Status",
+      "Assignee",
+      "Estimate",
+      "Due",
+      "Checklist",
     ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
@@ -312,17 +312,17 @@ describe("BacklogView — grouping", () => {
     expect(allPriTexts).not.toContain("P3");
   });
 
-  it("renders CRITICAL / HIGH / NORMAL / LOW labels for visible groups", () => {
+  it("renders canonical priority labels for visible groups", () => {
     wrap(
       <BacklogView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[T_P0_DUE, T_P1_HOLD, T_P2_CHECKS, tasks[3]]}
       />,
     );
-    expect(screen.getByText("CRITICAL")).toBeInTheDocument();
-    expect(screen.getByText("HIGH")).toBeInTheDocument();
-    expect(screen.getByText("NORMAL")).toBeInTheDocument();
-    expect(screen.getByText("LOW")).toBeInTheDocument();
+    expect(screen.getByText("Critical")).toBeInTheDocument();
+    expect(screen.getByText("High")).toBeInTheDocument();
+    expect(screen.getByText("Medium")).toBeInTheDocument();
+    expect(screen.getByText("Low")).toBeInTheDocument();
   });
 
   it("zero-pads group count to 2 digits (01 ITEMS, 10 ITEMS etc.)", () => {
@@ -378,17 +378,16 @@ describe("BacklogView — row rendering", () => {
     expect(screen.getByText("alpha")).toBeInTheDocument();
   });
 
-  it("renders HOLD tag inline in the title cell when task has hold", () => {
+  it("renders Blocked tag inline in the title cell when task has hold", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P1_HOLD]} />);
-    // The HOLD tag should be in the same title cell as the task title
-    const holdTag = screen.getByTestId("bk-hold-tag-bk-p1-hold");
-    expect(holdTag).toBeInTheDocument();
-    expect(holdTag).toHaveTextContent("HOLD");
+    const blockedTag = screen.getByTestId("bk-hold-tag-bk-p1-hold");
+    expect(blockedTag).toBeInTheDocument();
+    expect(blockedTag).toHaveTextContent("Blocked");
     // Title text also present
     expect(screen.getByText("High priority on hold")).toBeInTheDocument();
   });
 
-  it("does not render HOLD tag when task has no hold", () => {
+  it("does not render Blocked tag when task has no hold", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
     expect(
       screen.queryByTestId("bk-hold-tag-bk-p0-due"),
@@ -405,10 +404,14 @@ describe("BacklogView — row rendering", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
-  it("renders state pip + column label in the DISPOSITION cell", () => {
-    // T_P0_DUE is FIELD → label "IN-FIELD"
-    wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    expect(screen.getByText("IN-FIELD")).toBeInTheDocument();
+  it("renders state pip + canonical status label in the Status cell", () => {
+    wrap(
+      <BacklogView
+        colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
+        tasks={[T_P0_DUE]}
+      />,
+    );
+    expect(screen.getByText("In Progress")).toBeInTheDocument();
   });
 });
 
@@ -531,16 +534,16 @@ describe("BacklogView — empty state", () => {
   it("renders only the header when no tasks are provided", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
     // Header should be present
-    expect(screen.getByText("FILE-ID")).toBeInTheDocument();
+    expect(screen.getByText("ID")).toBeInTheDocument();
     // No group headers
-    expect(screen.queryByText("CRITICAL")).not.toBeInTheDocument();
+    expect(screen.queryByText("Critical")).not.toBeInTheDocument();
   });
 
-  it("renders the dashed — NONE — empty-state block when no tasks are provided", () => {
+  it("renders the dashed No tasks empty-state block when no tasks are provided", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[]} />);
     const empty = screen.getByTestId("bk-empty");
     expect(empty).toBeInTheDocument();
-    expect(empty).toHaveTextContent("— NONE —");
+    expect(empty).toHaveTextContent("No tasks");
   });
 
   it("does not render the empty-state block when tasks are present", () => {

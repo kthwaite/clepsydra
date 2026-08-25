@@ -199,9 +199,8 @@ describe("TimelineView — empty state", () => {
         cycles={undatedCycles}
       />,
     );
-    expect(screen.getByTestId("tl-empty")).toBeInTheDocument();
-    expect(screen.getByTestId("tl-empty").textContent).toContain(
-      "NOTHING SCHEDULED",
+    expect(screen.getByTestId("tl-empty")).toHaveTextContent(
+      "No scheduled tasks",
     );
   });
 
@@ -239,6 +238,20 @@ describe("TimelineView — empty state", () => {
       />,
     );
     expect(screen.getByTestId("tl-empty")).toBeInTheDocument();
+  });
+});
+
+describe("TimelineView — headings", () => {
+  it("labels the task grouping axis by project", () => {
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[TL_TASK_ALPHA]}
+        operations={TL_OPS}
+        cycles={TL_CYCLES}
+      />,
+    );
+    expect(screen.getByText("Project / Task")).toBeInTheDocument();
   });
 });
 
@@ -390,7 +403,7 @@ describe("TimelineView — UNFILED group", () => {
     expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
   });
 
-  it("UNFILED group header shows UNFILED code and label", () => {
+  it("labels tasks with no matching project in plain language", () => {
     wrap(
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
@@ -399,8 +412,7 @@ describe("TimelineView — UNFILED group", () => {
         cycles={TL_CYCLES}
       />,
     );
-    const grp = screen.getByTestId("tl-grp-UNFILED");
-    expect(grp.textContent).toContain("UNFILED");
+    expect(screen.getByText("Tasks with no project")).toBeInTheDocument();
   });
 
   it("does not render UNFILED group when there are no unfiled scheduled tasks", () => {
@@ -532,10 +544,10 @@ describe("TimelineView — bar positioning", () => {
     expect(bar.className).toContain("hold");
   });
 
-  it("bar shows code and status label text", () => {
+  it("bar shows code and canonical status label text", () => {
     wrap(
       <TimelineView
-        colLabel={FIXTURE_COL_LABEL}
+        colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
         tasks={[TL_TASK_ALPHA]}
         operations={TL_OPS}
         cycles={TL_CYCLES}
@@ -543,7 +555,7 @@ describe("TimelineView — bar positioning", () => {
     );
     const bar = screen.getByTestId("tl-bar-t-alpha-1");
     expect(bar.textContent).toContain("TSK-0010");
-    expect(bar.textContent).toContain("IN-FIELD");
+    expect(bar.textContent).toContain("In Progress");
   });
 
   it("bar has title attribute set to task title", () => {
@@ -641,7 +653,7 @@ describe("TimelineView — unscheduled footer", () => {
     );
   });
 
-  it("footer shows descriptive subtitle", () => {
+  it("footer explains where tasks without due dates appear", () => {
     wrap(
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
@@ -650,7 +662,9 @@ describe("TimelineView — unscheduled footer", () => {
         cycles={TL_CYCLES}
       />,
     );
-    expect(screen.getByTestId("tl-foot").textContent).toContain("no due date");
+    expect(screen.getByTestId("tl-foot")).toHaveTextContent(
+      "No due date · in Backlog or Inbox",
+    );
   });
 
   it("does not render footer when all tasks are scheduled", () => {
@@ -691,8 +705,8 @@ describe("TimelineView — UNFILED non-null project", () => {
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
     // orphan-unknown-project doesn't match any op → UNFILED group
     expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
-    expect(screen.getByTestId("tl-grp-UNFILED").textContent).toContain(
-      "UNFILED",
+    expect(screen.getByTestId("tl-grp-UNFILED")).toHaveTextContent(
+      "Tasks with no project",
     );
   });
 });
@@ -816,7 +830,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     expect(screen.getByTestId("tl-root")).toBeInTheDocument();
   });
 
@@ -824,7 +838,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline", opFilter: "ALL" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     // t1 → alpha; t3 → beta
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
     expect(screen.getByTestId("tl-grp-beta")).toBeInTheDocument();
@@ -834,7 +848,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline", opFilter: "alpha" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
     expect(screen.queryByTestId("tl-grp-beta")).not.toBeInTheDocument();
   });
@@ -843,7 +857,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline" });
     stubBoardFetch(BOARD_FIXTURE); // no due dates in base fixture
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     expect(screen.getByTestId("tl-empty")).toBeInTheDocument();
   });
 
@@ -851,7 +865,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline" });
     stubBoardFetch(TL_BOARD);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
   });
 
@@ -881,7 +895,7 @@ describe("TaskingScreen integration — timeline mode", () => {
     useBoardStore.setState({ mode: "timeline", opFilter: "UNFILED" });
     stubBoardFetch(boardWithUnfiled);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     // Unfiled group should exist
     expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
     // Named operation groups should NOT exist (filtered out by TaskingScreen)

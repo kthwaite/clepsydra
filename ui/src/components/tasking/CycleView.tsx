@@ -22,7 +22,6 @@ import {
   COL_ORDER,
   type ColLabelFn,
   fmtCycleWindow,
-  HoldTag,
   PRI_ORDER,
   PriChip,
   StatePip,
@@ -256,7 +255,7 @@ export function CycleView({
           <div className="flex gap-[20px]">
             <div className="flex flex-col items-end gap-[1px]">
               <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                COMMITTED
+                Tasks
               </span>
               <b className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]">
                 {pad2(stats.committed)}
@@ -264,7 +263,7 @@ export function CycleView({
             </div>
             <div className="flex flex-col items-end gap-[1px]">
               <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                SEALED
+                Done
               </span>
               <b
                 className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]"
@@ -275,7 +274,7 @@ export function CycleView({
             </div>
             <div className="flex flex-col items-end gap-[1px]">
               <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                IN-FIELD
+                In progress
               </span>
               <b className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]">
                 {pad2(stats.field)}
@@ -283,7 +282,7 @@ export function CycleView({
             </div>
             <div className="flex flex-col items-end gap-[1px]">
               <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-                HOLD
+                Blocked
               </span>
               <b
                 className="cl-display text-[22px] font-black leading-none [font-variant-numeric:tabular-nums]"
@@ -298,7 +297,7 @@ export function CycleView({
           {/* Burndown */}
           <div className="flex flex-col items-end gap-[2px]">
             <span className="text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--ink-3)]">
-              BURNDOWN
+              Progress
             </span>
             {!burndownApplicable ? (
               <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
@@ -339,7 +338,7 @@ export function CycleView({
           />
         </div>
         <span className="whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {stats.pct}% SEALED · {stats.checkDone}/{stats.checkTot} CHECKS
+          {stats.pct}% Completion · {stats.checkDone}/{stats.checkTot} Checklist items
         </span>
       </div>
 
@@ -349,14 +348,14 @@ export function CycleView({
         <div className="py-[60px] text-center">
           <div className="mb-[8px] text-[32px] text-[var(--ink-mute)]">∅</div>
           <div className="mb-[12px] text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-3)]">
-            NO TASKS IN {cycle.label}
+            No tasks in {cycle.label}
           </div>
           <button
             type="button"
             className="cursor-pointer border border-[var(--hot)] px-[12px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.16em] text-[var(--hot)] transition-colors hover:bg-[var(--hot)] hover:text-black"
             onClick={handleCommitTask}
           >
-            + COMMIT TASK
+            + New task
           </button>
         </div>
       ) : (
@@ -437,7 +436,9 @@ export function CycleView({
                           className="flex-shrink-0"
                           data-testid={`cv-hold-${t.id}`}
                         >
-                          <HoldTag />
+                          <span className="inline-block border border-[var(--hot)] px-[4px] text-[var(--fs-xs)] leading-[14px] tracking-[0.12em] text-[var(--hot)]">
+                            Blocked
+                          </span>
                         </span>
                       )}
                       <span

@@ -8,7 +8,7 @@
  */
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardCycle, BoardTask } from "#/api/board";
@@ -353,14 +353,12 @@ describe("CycleView — header", () => {
 // ── metrics + burndown ────────────────────────────────────────────────────────
 
 describe("CycleView — metrics and burndown", () => {
-  it("renders COMMITTED metric zero-padded", () => {
+  it("renders approved cycle summary labels", () => {
     renderCycleView(ACTIVE_CYCLE, C01_TASKS); // 3 tasks
+    for (const label of ["Tasks", "Done", "In progress", "Blocked", "Progress"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
     expect(screen.getByText("03")).toBeInTheDocument();
-  });
-
-  it("renders BURNDOWN label", () => {
-    renderCycleView(ACTIVE_CYCLE, C01_TASKS);
-    expect(screen.getByText("BURNDOWN")).toBeInTheDocument();
   });
 
   it("renders the Spark SVG for burndown", () => {
@@ -378,25 +376,20 @@ describe("CycleView — metrics and burndown", () => {
     expect(svg?.querySelector("polyline")).toBeInTheDocument();
   });
 
-  it("renders HOLD metric in hot color when hold > 0", () => {
+  it("renders Blocked metric in hot color when blocked > 0", () => {
     renderCycleView(ACTIVE_CYCLE, [T_HOLD]);
-    // Multiple "HOLD" texts may exist (metric label + HoldTag in a row).
-    // Find the one that is the metric label (uppercase tracking span) and
-    // check its sibling <b>.
-    const holdLabels = screen.getAllByText("HOLD");
-    // The metric label "HOLD" is wrapped in a div.flex-col alongside a <b>
-    const metricLabel = holdLabels.find(
-      (el) => el.closest("div")?.querySelector("b") !== null,
-    );
-    const metricValue = metricLabel?.closest("div")?.querySelector("b");
+    const blockedLabel = screen
+      .getAllByText("Blocked")
+      .find((element) => element.closest("div")?.querySelector("b") !== null);
+    const metricValue = blockedLabel?.closest("div")?.querySelector("b");
     // data-hot attribute is used (not a CSS class) to avoid Tailwind purging
     expect(metricValue?.getAttribute("data-hot")).toBe("true");
   });
 
-  it("renders HOLD metric without hot color when hold = 0", () => {
+  it("renders Blocked metric without hot color when blocked = 0", () => {
     renderCycleView(ACTIVE_CYCLE, [T_FIELD]);
-    const holdLabel = screen.getByText("HOLD"); // only one "HOLD" — no HoldTag
-    const metricValue = holdLabel.closest("div")?.querySelector("b");
+    const blockedLabel = screen.getByText("Blocked");
+    const metricValue = blockedLabel.closest("div")?.querySelector("b");
     expect(metricValue?.getAttribute("data-hot")).toBeNull();
   });
 });
@@ -404,19 +397,19 @@ describe("CycleView — metrics and burndown", () => {
 // ── progress bar ──────────────────────────────────────────────────────────────
 
 describe("CycleView — progress bar", () => {
-  it("renders pct SEALED label", () => {
+  it("renders completion percentage", () => {
     renderCycleView(ACTIVE_CYCLE, [T_SEALED, T_FIELD]); // 1/2 = 50%
-    expect(screen.getByText(/50% SEALED/)).toBeInTheDocument();
+    expect(screen.getByText(/50% Completion/)).toBeInTheDocument();
   });
 
-  it("renders 0% SEALED when no tasks", () => {
+  it("renders 0% Completion when no tasks", () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    expect(screen.getByText(/0% SEALED/)).toBeInTheDocument();
+    expect(screen.getByText(/0% Completion/)).toBeInTheDocument();
   });
 
-  it("renders checks summary", () => {
+  it("renders Checklist items summary", () => {
     renderCycleView(ACTIVE_CYCLE, [T_SEALED]); // checks: [3,3]
-    expect(screen.getByText(/3\/3 CHECKS/)).toBeInTheDocument();
+    expect(screen.getByText(/3\/3 Checklist items/)).toBeInTheDocument();
   });
 });
 
@@ -439,14 +432,16 @@ describe("CycleView — lanes", () => {
     expect(screen.getByTestId("cv-lane-count-FIELD")).toHaveTextContent("01");
   });
 
-  it("lane header shows COL_LABEL text (FIELD→IN-FIELD)", () => {
-    renderCycleView(ACTIVE_CYCLE, [T_FIELD]);
-    // "IN-FIELD" appears in both the metrics section and the lane header;
-    // verify at least one exists (lane is rendered).
-    expect(screen.getAllByText("IN-FIELD").length).toBeGreaterThanOrEqual(1);
-    // The lane header span specifically
+  it("lane header uses the canonical status label", () => {
+    wrap(
+      <CycleView
+        colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
+        cycle={ACTIVE_CYCLE}
+        tasks={[T_FIELD]}
+      />,
+    );
     const laneHd = screen.getByTestId("cv-lane-FIELD");
-    expect(laneHd.textContent).toContain("IN-FIELD");
+    expect(laneHd).toHaveTextContent("In Progress");
   });
 
   it("tasks appear in COL_ORDER across lanes", () => {
@@ -468,12 +463,12 @@ describe("CycleView — lanes", () => {
     expect(screen.getByText("alpha")).toBeInTheDocument();
   });
 
-  it("renders HOLD tag inline in title cell for held tasks", () => {
+  it("renders Blocked tag inline in title cell for held tasks", () => {
     renderCycleView(ACTIVE_CYCLE, [T_HOLD]);
-    const row = screen.getByTestId("cv-row-th1");
-    expect(
-      row.querySelector("[data-testid='cv-hold-th1']"),
-    ).toBeInTheDocument();
+    const tag = screen
+      .getByTestId("cv-row-th1")
+      .querySelector("[data-testid='cv-hold-th1']");
+    expect(tag).toHaveTextContent("Blocked");
   });
 
   it("renders PriChip for each row", () => {
@@ -560,33 +555,33 @@ describe("CycleView — empty state", () => {
     expect(screen.getByText("∅")).toBeInTheDocument();
   });
 
-  it("renders NO TASKS IN {label}", () => {
+  it("renders No tasks in {label}", () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    expect(screen.getByText(/NO TASKS IN Cycle 01/i)).toBeInTheDocument();
+    expect(screen.getByText("No tasks in Cycle 01")).toBeInTheDocument();
   });
 
-  it("renders COMMIT TASK button", () => {
+  it("renders New task button", () => {
     renderCycleView(ACTIVE_CYCLE, []);
     expect(
-      screen.getByRole("button", { name: /COMMIT TASK/i }),
+      screen.getByRole("button", { name: /New task/i }),
     ).toBeInTheDocument();
   });
 
-  it("COMMIT TASK button opens taskModal with cycle preset", async () => {
+  it("New task button opens taskModal with cycle preset", async () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    await userEvent.click(screen.getByRole("button", { name: /New task/i }));
     const modal = useBoardStore.getState().taskModal;
     expect(modal).toMatchObject({ cycle: "C-01" });
   });
 
-  it("COMMIT TASK button on BACKLOG opens taskModal without cycle", async () => {
+  it("New task button on BACKLOG opens taskModal without cycle", async () => {
     renderCycleView(BACKLOG_PSEUDO, []);
-    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    await userEvent.click(screen.getByRole("button", { name: /New task/i }));
     const modal = useBoardStore.getState().taskModal;
     expect(modal).not.toHaveProperty("cycle");
   });
 
-  it("COMMIT TASK includes project when activeProject prop is set", async () => {
+  it("New task includes project when activeProject prop is set", async () => {
     wrap(
       <CycleView
         colLabel={FIXTURE_COL_LABEL}
@@ -595,14 +590,14 @@ describe("CycleView — empty state", () => {
         activeProject="alpha"
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    await userEvent.click(screen.getByRole("button", { name: /New task/i }));
     expect(useBoardStore.getState().taskModal).toEqual({
       cycle: "C-01",
       project: "alpha",
     });
   });
 
-  it("COMMIT TASK omits project when activeProject prop is absent", async () => {
+  it("New task omits project when activeProject prop is absent", async () => {
     wrap(
       <CycleView
         colLabel={FIXTURE_COL_LABEL}
@@ -610,7 +605,7 @@ describe("CycleView — empty state", () => {
         tasks={[]}
       />,
     );
-    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    await userEvent.click(screen.getByRole("button", { name: /New task/i }));
     const modal = useBoardStore.getState().taskModal;
     expect(modal).toEqual({ cycle: "C-01" });
     expect(modal).not.toHaveProperty("project");
@@ -660,7 +655,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     // CycleView renders the cycle label as h2
     expect(
       screen.getByRole("heading", { name: /Cycle 01/i }),
@@ -672,7 +667,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     // C-01 is ACTIVE
     expect(
       screen.getByRole("heading", { name: /Cycle 01/i }),
@@ -683,15 +678,15 @@ describe("TaskingScreen integration — cycle mode", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "BACKLOG" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
     expect(
       screen.getByRole("heading", { name: /BACKLOG/i }),
     ).toBeInTheDocument();
     expect(screen.getByText(/UNSCHEDULED/)).toBeInTheDocument();
   });
 
-  it("op with slug active: COMMIT TASK presets {cycle, project}", async () => {
-    // C-02 has no tasks → empty state with COMMIT TASK; "alpha" op has a slug
+  it("op with slug active: New task presets {cycle, project}", async () => {
+    // C-02 has no tasks → empty state with New task; "alpha" op has a slug
     useBoardStore.setState({
       mode: "cycle",
       cycleSel: "C-02",
@@ -699,16 +694,21 @@ describe("TaskingScreen integration — cycle mode", () => {
     });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
 
-    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    const cycleEmptyState = screen
+      .getByText("No tasks in Cycle 02")
+      .parentElement!;
+    await userEvent.click(
+      within(cycleEmptyState).getByRole("button", { name: /New task/i }),
+    );
     expect(useBoardStore.getState().taskModal).toEqual({
       cycle: "C-02",
       project: "alpha",
     });
   });
 
-  it("slug-less op active: COMMIT TASK presets {cycle} only — the op CODE is not a project", async () => {
+  it("slug-less op active: New task presets {cycle} only — the op CODE is not a project", async () => {
     // opFilter holds OPS-3 (the op code; NO_SLUG_OP has project: null).
     // No task carries the code as a project → empty state in any cycle.
     useBoardStore.setState({
@@ -718,9 +718,14 @@ describe("TaskingScreen integration — cycle mode", () => {
     });
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
 
-    await userEvent.click(screen.getByRole("button", { name: /COMMIT TASK/i }));
+    const cycleEmptyState = screen
+      .getByText("No tasks in Cycle 02")
+      .parentElement!;
+    await userEvent.click(
+      within(cycleEmptyState).getByRole("button", { name: /New task/i }),
+    );
     const modal = useBoardStore.getState().taskModal;
     expect(modal).toEqual({ cycle: "C-02" });
     expect(modal).not.toHaveProperty("project");
@@ -745,7 +750,7 @@ describe("ScopeRail — cycle selection still passes", () => {
     useBoardStore.setState({ mode: "card", cycleSel: "" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByRole("heading", { name: "Task Board" });
 
     // Click C-02 in the rail
     const c02btn = screen.getByText("C-02").closest("button")!;
