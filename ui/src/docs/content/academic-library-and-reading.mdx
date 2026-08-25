@@ -11,6 +11,20 @@ source of truth.
 
 ## Prerequisites
 
+The Academic Library requires the application-config flag
+`features.academic`, which defaults to `true`:
+
+```toml
+[features]
+academic = true
+```
+
+Set `CLEPSYDRA__FEATURES__ACADEMIC=true` to override the config value from the
+environment. Feature changes take effect only after restarting Clepsydra.
+Setting the flag to `false` disables the Academic routes and UI without
+deleting existing Markdown work or annotation Folios; re-enabling it uses the
+preserved data.
+
 - Start the Clepsydra server with network access for DOI and ISBN lookups.
 - Open **Academic Library** from the command palette or navigate to `/academic`.
 - Configure `academic.papers_folder`, `academic.books_folder`, and

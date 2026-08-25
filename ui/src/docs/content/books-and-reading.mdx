@@ -13,6 +13,20 @@ DOI, Zotero, citation-key conflicts, reading status, and annotations, see
 
 ## Prerequisites
 
+Book import and the Academic workspace require the application-config flag
+`features.academic`, which defaults to `true`:
+
+```toml
+[features]
+academic = true
+```
+
+Set `CLEPSYDRA__FEATURES__ACADEMIC=true` to override the config value from the
+environment. Feature changes take effect only after restarting Clepsydra.
+Setting the flag to `false` disables the Academic routes and UI without
+deleting existing Markdown book Folios; re-enabling it uses the preserved
+data.
+
 Start the Clepsydra server with an initialized vault and network access to
 Open Library. Camera scanning additionally needs a secure browser context
 (HTTPS or loopback), camera permission, and a device capable of reading the
