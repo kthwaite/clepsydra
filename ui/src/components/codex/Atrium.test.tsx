@@ -16,6 +16,8 @@ const atriumMocks = vi.hoisted(() => ({
   openLocation: vi.fn(),
   openTab: vi.fn(),
   openTodayJournal: vi.fn(),
+  featureFlags: { academic: true, feeds: true },
+  feedHook: vi.fn(),
   readingContinues: false,
   workspaceState: {
     openHistory: [] as Array<{ path: string; openedAt: number }>,
@@ -24,6 +26,10 @@ const atriumMocks = vi.hoisted(() => ({
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => atriumMocks.navigate,
+}));
+
+vi.mock("#/components/FeatureFlagsProvider", () => ({
+  useFeatureFlags: () => atriumMocks.featureFlags,
 }));
 
 vi.mock("#/api/bcl", () => ({
@@ -91,13 +97,16 @@ vi.mock("#/components/codex/AgendaTile", () => ({
 }));
 
 vi.mock("#/components/codex/FeedRiverPanel", () => ({
-  FeedRiverPanel: () => (
-    <section
-      aria-label="Feed river panel"
-      className="col-span-12"
-      data-testid="feed-river-panel"
-    />
-  ),
+  FeedRiverPanel: () => {
+    atriumMocks.feedHook();
+    return (
+      <section
+        aria-label="Feed river panel"
+        className="col-span-12"
+        data-testid="feed-river-panel"
+      />
+    );
+  },
 }));
 
 vi.mock("#/components/codex/ReadingContinues", () => ({
@@ -131,6 +140,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   atriumMocks.bcl = undefined;
   atriumMocks.readingContinues = false;
+  atriumMocks.featureFlags = { academic: true, feeds: true };
 });
 
 describe("Atrium composition", () => {
@@ -182,6 +192,17 @@ describe("Atrium composition", () => {
       "grid",
       "grid-cols-12",
     );
+  });
+
+  it("omits the feed panel without mounting its feed hook when feeds are disabled", () => {
+    atriumMocks.featureFlags = { academic: true, feeds: false };
+
+    render(<Atrium />);
+
+    expect(
+      screen.queryByRole("region", { name: "Feed river panel" }),
+    ).not.toBeInTheDocument();
+    expect(atriumMocks.feedHook).not.toHaveBeenCalled();
   });
 
   it("expands Sky across the row when BCL is not configured", () => {
