@@ -39,6 +39,13 @@ const LITERATE_CONFIG_TEMPLATE: &str = r##"# Clepsydra application configuration
 # Default: ./vault.
 # root = "./vault"
 
+# [features]
+# Enable Academic routes and UI. Default: true.
+# academic = true
+# Enable Feeds routes, UI, storage, networking, and scheduler. Default: true.
+# feeds = true
+# Environment overrides: CLEPSYDRA__FEATURES__ACADEMIC and CLEPSYDRA__FEATURES__FEEDS.
+
 # [feeds]
 # Periodic RSS/Atom fetch interval in minutes. Default: 30.
 # fetch_interval_minutes = 30
@@ -473,6 +480,9 @@ mod tests {
             "# key_path = \"certs/localhost-key.pem\"",
             "# [vault]",
             "# root = \"./vault\"",
+            "# [features]",
+            "# academic = true",
+            "# feeds = true",
             "# [feeds]",
             "# fetch_interval_minutes = 30",
             "# retention_days = 30",
@@ -498,6 +508,8 @@ mod tests {
         let contents = fs::read_to_string(path).unwrap();
 
         assert!(contents.contains("CLEPSYDRA__SERVER__HOST"));
+        assert!(contents.contains("CLEPSYDRA__FEATURES__ACADEMIC"));
+        assert!(contents.contains("CLEPSYDRA__FEATURES__FEEDS"));
         assert!(contents.contains("defaults → config file → environment → serve flags"));
         assert!(contents.contains("cert_path and key_path must be set together"));
         assert!(contents.contains("relative to this config file"));
