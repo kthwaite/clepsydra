@@ -582,7 +582,11 @@ pub(crate) fn build_router(
             ),
         )
         .merge(api::openapi::router(features))
-        .merge(api::deeplink::root_router());
+        .merge(api::deeplink::root_router())
+        .nest(
+            "/api",
+            Router::new().fallback(|| async { axum::http::StatusCode::NOT_FOUND }),
+        );
     if !dev_mode {
         app = app.merge(api::frontend::frontend_router());
     }
@@ -1268,8 +1272,11 @@ mod resolve_addr_tests {
 
 #[cfg(test)]
 mod router_tests {
-    use super::state_test_support::make_state;
+    use super::state_test_support::{make_state, make_state_with_features};
     use super::*;
+    use axum::body::Body;
+    use axum::http::{Request, StatusCode};
+    use tower::ServiceExt;
 
     #[tokio::test]
     async fn build_router_dev_mode_does_not_panic() {
@@ -1290,6 +1297,54 @@ mod router_tests {
             1024,
             api::archive::ArchiveViewConfig::default(),
             false,
+        );
+    }
+
+    #[tokio::test]
+    async fn prod_router_disabled_feature_gets_remain_api_404_before_spa_fallback() {
+        let features = FeatureFlags {
+            academic: false,
+            feeds: false,
+        };
+        let (state, _tmp) = make_state_with_features(features).await;
+        let app = build_router(
+            state,
+            1024,
+            api::archive::ArchiveViewConfig::default(),
+            false,
+        );
+
+        for uri in ["/api/vault/academic/works", "/api/vault/feeds"] {
+            let response = app
+                .clone()
+                .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::NOT_FOUND, "{uri}");
+            assert_ne!(
+                response
+                    .headers()
+                    .get(axum::http::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok()),
+                Some("text/html; charset=utf-8"),
+                "{uri} must not receive the SPA fallback"
+            );
+        }
+
+        let spa = app
+            .oneshot(
+                Request::get("/non-api-spa-route")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(spa.status(), StatusCode::OK);
+        assert_eq!(
+            spa.headers()
+                .get(axum::http::header::CONTENT_TYPE)
+                .and_then(|value| value.to_str().ok()),
+            Some("text/html; charset=utf-8")
         );
     }
 }
