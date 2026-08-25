@@ -581,11 +581,16 @@ pub(crate) fn build_router(
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
 }
 
-/// Build the shared application state over a vault root with default feed settings.
+/// Build the shared application state with default feed settings and features.
 pub async fn build_app_state(
     vault_root: &Path,
 ) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
-    build_app_state_with_feeds(vault_root, &FeedsSettings::default()).await
+    build_app_state_with_settings(
+        vault_root,
+        &FeedsSettings::default(),
+        FeatureFlags::default(),
+    )
+    .await
 }
 
 fn startup_index_error(
@@ -631,10 +636,11 @@ fn startup_transaction_error(
     }
 }
 
-/// Build the shared application state with the configured RSS runtime.
-pub async fn build_app_state_with_feeds(
+/// Build the shared application state with configured feed settings and features.
+pub async fn build_app_state_with_settings(
     vault_root: &Path,
     feed_settings: &FeedsSettings,
+    features: FeatureFlags,
 ) -> Result<Arc<AppState>, Box<dyn std::error::Error>> {
     let vault = Vault::open(vault_root)?;
     let rubbish = vault::rubbish::RubbishStore::for_vault(vault.root());
@@ -687,10 +693,14 @@ pub async fn build_app_state_with_feeds(
     let cas_path_raw = &vault.config().archive.cas_path;
     let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
     let cas = vault::cas::ContentStore::open(&cas_path)?;
-    let feeds =
-        crate::feeds::store::FeedStoreHandle::open(&vault.root().join(".clepsydra/feeds.db"))?;
-    let feed_client =
-        crate::feeds::network::CheckedHttpClient::new(feed_settings.max_response_bytes)?;
+    let feed_runtime = if features.feeds {
+        Some(crate::feeds::runtime::FeedRuntime::open(
+            vault.root(),
+            feed_settings,
+        )?)
+    } else {
+        None
+    };
 
     let index_handle = IndexHandle::spawn(index, vault.clone());
     let (change_broadcast_tx, _) =
@@ -710,6 +720,7 @@ pub async fn build_app_state_with_feeds(
         api::archive::archive_resource_concurrency(vault.config().archive.max_blob_size_mb);
     Ok(Arc::new(AppState {
         started_at: std::time::Instant::now(),
+        features,
         clock: Arc::new(crate::api::SystemClock),
         vault,
         index: index_handle,
@@ -720,21 +731,7 @@ pub async fn build_app_state_with_feeds(
         hooks,
         delete_hooks,
         mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
-        feeds,
-        feed_client,
-        feed_discovery_semaphore: tokio::sync::Semaphore::new(
-            feed_settings.fetch_concurrency.max(1),
-        ),
-        feed_refresh: tokio::sync::Notify::new(),
-        feed_manifest_diagnostics: parking_lot::RwLock::new(Vec::new()),
-        feed_manifest_lock: tokio::sync::Mutex::new(()),
-        #[cfg(test)]
-        feed_before_reconcile_commit_hook: parking_lot::Mutex::new(None),
-        #[cfg(test)]
-        feed_after_list_snapshot_hook: parking_lot::Mutex::new(None),
-        #[cfg(test)]
-        feed_before_opml_parse_hook: parking_lot::Mutex::new(None),
-        feed_settings: feed_settings.clone(),
+        feed_runtime,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(
@@ -820,14 +817,21 @@ async fn reconcile_upserts(state: &AppState, upserts: Vec<VaultPath>) {
     }
 }
 
+fn batch_touches_manifest(batch: &[ChangeEvent]) -> bool {
+    batch.iter().any(|event| match event {
+        ChangeEvent::Upsert(path) | ChangeEvent::Remove(path) => path.as_str() == "feeds.md",
+        ChangeEvent::BaseChanged => false,
+    })
+}
+
 /// Wake the feed scheduler when a raw watcher batch touches the reserved root
 /// manifest. This runs before the ordinary exclusion pipeline discards it.
 fn notify_feed_scheduler_from_batch(state: &AppState, batch: &[ChangeEvent]) {
-    if batch.iter().any(|event| match event {
-        ChangeEvent::Upsert(path) | ChangeEvent::Remove(path) => path.as_str() == "feeds.md",
-        ChangeEvent::BaseChanged => false,
-    }) {
-        state.feed_refresh.notify_one();
+    let Some(runtime) = state.feed_runtime.as_ref() else {
+        return;
+    };
+    if batch_touches_manifest(batch) {
+        runtime.feed_refresh.notify_one();
     }
 }
 
@@ -903,7 +907,8 @@ async fn build_server_state(
         vault_root_config = %settings.vault.root,
         "resolved configuration; opening vault"
     );
-    let state = build_app_state_with_feeds(&vault_root, &settings.feeds)
+    let state =
+        build_app_state_with_settings(&vault_root, &settings.feeds, settings.features)
         .await
         .map_err(|e| explain_startup_error(e, &vault_root))?;
     Ok((state, settings))
@@ -1007,12 +1012,15 @@ pub(crate) async fn run_startup_reconcile(state: &Arc<AppState>) {
     }
 }
 
-/// Retain the owned feed scheduler for exactly the lifetime of the serving
-/// future, then cancel and join it before returning.
-async fn serve_with_feed_scheduler(
+/// Retain the optional owned feed scheduler for exactly the lifetime of the
+/// serving future, then cancel and join it before returning.
+async fn serve_with_optional_feed_scheduler(
     state: Arc<AppState>,
     serving: impl Future<Output = Result<(), Box<dyn std::error::Error>>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    if state.feed_runtime.is_none() {
+        return serving.await;
+    }
     crate::feeds::scheduler::reconcile_feed_manifest(&state).await?;
     let scheduler = crate::feeds::scheduler::spawn_scheduler(state);
     let serving_result = serving.await;
@@ -1044,7 +1052,7 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
         archive_view_config,
         settings.server.dev_mode,
     );
-    serve_with_feed_scheduler(Arc::clone(&state), serve(app, &settings)).await
+    serve_with_optional_feed_scheduler(Arc::clone(&state), serve(app, &settings)).await
 }
 
 #[cfg(test)]
@@ -1052,10 +1060,19 @@ pub(crate) mod state_test_support {
     use super::*;
     use tempfile::TempDir;
     pub(crate) async fn make_state() -> (Arc<AppState>, TempDir) {
+        make_state_with_features(FeatureFlags::default()).await
+    }
+
+    pub(crate) async fn make_state_with_features(
+        features: FeatureFlags,
+    ) -> (Arc<AppState>, TempDir) {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         crate::vault::init::init_vault(&root).unwrap();
-        let state = build_app_state(&root).await.unwrap();
+        let state =
+            build_app_state_with_settings(&root, &FeedsSettings::default(), features)
+                .await
+                .unwrap();
         (state, tmp)
     }
 }
@@ -1087,6 +1104,27 @@ mod tests {
     fn notifications_from_empty_batch_are_empty() {
         let batch = Vec::<ChangeEvent>::new();
         assert!(notifications_from_batch(&batch).is_empty());
+    }
+
+    #[tokio::test]
+    async fn disabled_feeds_create_no_runtime_or_database() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+
+        let state = build_app_state_with_settings(
+            &root,
+            &FeedsSettings::default(),
+            FeatureFlags {
+                academic: true,
+                feeds: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(state.feed_runtime.is_none());
+        assert!(!root.join(".clepsydra/feeds.db").exists());
     }
 
     #[test]
@@ -1427,13 +1465,15 @@ mod feed_serving_lifecycle_tests {
         let serving_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let observed = Arc::clone(&serving_ran);
 
-        serve_with_feed_scheduler(Arc::clone(&state), async move {
+        serve_with_optional_feed_scheduler(Arc::clone(&state), async move {
             observed.store(true, std::sync::atomic::Ordering::Release);
             Ok::<(), Box<dyn std::error::Error>>(())
         })
         .await
         .unwrap();
         assert!(serving_ran.load(std::sync::atomic::Ordering::Acquire));
+
+        let runtime = state.feed_runtime();
 
         // Once the serving future has ended, the joined scheduler cannot
         // consume a later wake-up and reconcile this new manifest.
@@ -1442,9 +1482,30 @@ mod feed_serving_lifecycle_tests {
             "## After serving\n- http://127.0.0.1:9/rss\n",
         )
         .unwrap();
-        state.feed_refresh.notify_one();
+        runtime.feed_refresh.notify_one();
         tokio::time::sleep(Duration::from_millis(100)).await;
-        assert!(state.feeds.list_feeds().await.unwrap().is_empty());
+        assert!(runtime.feeds.list_feeds().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn serving_without_feed_runtime_completes_without_scheduler() {
+        let (state, _tmp) = state_test_support::make_state_with_features(FeatureFlags {
+            academic: true,
+            feeds: false,
+        })
+        .await;
+        std::fs::write(state.vault.root().join("feeds.md"), [0xff]).unwrap();
+        let serving_ran = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let observed = Arc::clone(&serving_ran);
+
+        serve_with_optional_feed_scheduler(state, async move {
+            observed.store(true, std::sync::atomic::Ordering::Release);
+            Ok::<(), Box<dyn std::error::Error>>(())
+        })
+        .await
+        .unwrap();
+
+        assert!(serving_ran.load(std::sync::atomic::Ordering::Acquire));
     }
 }
 
@@ -1625,7 +1686,7 @@ mod watcher_reconcile_tests {
                 ChangeEvent::Remove(path)
             }
         };
-        let notified = state.feed_refresh.notified();
+        let notified = state.feed_runtime().feed_refresh.notified();
         tokio::pin!(notified);
 
         notify_feed_scheduler_from_batch(&state, &[event]);
@@ -1649,6 +1710,20 @@ mod watcher_reconcile_tests {
     #[tokio::test]
     async fn watcher_notifies_scheduler_for_manifest_removal() {
         assert_manifest_edit_notifies_scheduler(None).await;
+    }
+
+    #[tokio::test]
+    async fn disabled_feeds_ignore_manifest_watcher_batches() {
+        let (state, _tmp) = state_test_support::make_state_with_features(FeatureFlags {
+            academic: true,
+            feeds: false,
+        })
+        .await;
+        let event = ChangeEvent::Upsert(VaultPath::new("feeds.md").unwrap());
+
+        notify_feed_scheduler_from_batch(&state, &[event]);
+
+        assert!(state.feed_runtime.is_none());
     }
 }
 

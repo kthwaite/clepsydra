@@ -481,15 +481,10 @@ name = "All"
             ContentStore::open(&temp.path().join("cas")).unwrap(),
         ));
         let (change_tx, _) = broadcast::channel(8);
-        let feed_settings = crate::FeedsSettings::default();
-        let feeds =
-            crate::feeds::store::FeedStoreHandle::open(&root.join(".clepsydra/feeds.db")).unwrap();
-        let feed_client =
-            crate::feeds::network::CheckedHttpClient::new(feed_settings.max_response_bytes)
-                .unwrap();
         let rubbish = crate::vault::rubbish::RubbishStore::for_vault(vault.root());
         let state = Arc::new(AppState {
             started_at: std::time::Instant::now(),
+            features: crate::FeatureFlags::default(),
             clock: Arc::new(FixedClock(
                 DateTime::parse_from_rfc3339("2026-08-09T12:34:56Z")
                     .unwrap()
@@ -504,18 +499,13 @@ name = "All"
             hooks: Arc::new(Vec::new()),
             delete_hooks: Arc::new(Vec::new()),
             mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
-            feeds,
-            feed_client,
-            feed_discovery_semaphore: tokio::sync::Semaphore::new(
-                feed_settings.fetch_concurrency.max(1),
+            feed_runtime: Some(
+                crate::feeds::runtime::FeedRuntime::open(
+                    &root,
+                    &crate::FeedsSettings::default(),
+                )
+                .unwrap(),
             ),
-            feed_refresh: tokio::sync::Notify::new(),
-            feed_manifest_diagnostics: parking_lot::RwLock::new(Vec::new()),
-            feed_manifest_lock: tokio::sync::Mutex::new(()),
-            feed_before_reconcile_commit_hook: parking_lot::Mutex::new(None),
-            feed_after_list_snapshot_hook: parking_lot::Mutex::new(None),
-            feed_before_opml_parse_hook: parking_lot::Mutex::new(None),
-            feed_settings,
             archive_ingest_lock: tokio::sync::Mutex::new(()),
             archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(

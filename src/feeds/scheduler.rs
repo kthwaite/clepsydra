@@ -34,26 +34,28 @@ pub enum SchedulerError {
 
 /// Reconcile one serialized raw-manifest snapshot into feed storage.
 ///
-/// Callers must hold `state.feed_manifest_lock`. The returned bytes are the
-/// exact snapshot that supplied diagnostics and the optional store commit.
+/// Callers must hold `state.feed_runtime().feed_manifest_lock`. The returned
+/// bytes are the exact snapshot that supplied diagnostics and the optional
+/// store commit.
 pub(crate) async fn reconcile_feed_manifest_bytes_locked(
     state: &AppState,
     bytes: &[u8],
 ) -> Result<bool, SchedulerError> {
+    let runtime = state.feed_runtime();
     let path = state.vault.root().join(MANIFEST_PATH);
     let source = String::from_utf8(bytes.to_vec())
         .map_err(|source| SchedulerError::ManifestEncoding { path, source })?;
     let manifest = crate::feeds::manifest::parse(&source);
     #[cfg(test)]
-    if let Some(hook) = state.feed_before_reconcile_commit_hook.lock().clone() {
+    if let Some(hook) = runtime.feed_before_reconcile_commit_hook.lock().clone() {
         hook();
     }
     let is_valid = manifest.warnings.is_empty();
-    *state.feed_manifest_diagnostics.write() = manifest.warnings;
+    *runtime.feed_manifest_diagnostics.write() = manifest.warnings;
     if !is_valid {
         return Ok(false);
     }
-    state.feeds.reconcile(manifest.feeds).await?;
+    runtime.feeds.reconcile(manifest.feeds).await?;
     Ok(true)
 }
 
@@ -73,7 +75,7 @@ pub(crate) async fn reconcile_feed_manifest_locked(
 /// Reconcile the raw root manifest while serializing the complete snapshot,
 /// parse, diagnostics, and store-commit operation with API mutations/lists.
 pub async fn reconcile_feed_manifest(state: &AppState) -> Result<(), SchedulerError> {
-    let _manifest_guard = state.feed_manifest_lock.lock().await;
+    let _manifest_guard = state.feed_runtime().feed_manifest_lock.lock().await;
     reconcile_feed_manifest_locked(state).await.map(|_| ())
 }
 
@@ -82,12 +84,16 @@ pub(crate) fn set_before_reconcile_commit_hook(
     state: &AppState,
     hook: Option<Arc<dyn Fn() + Send + Sync>>,
 ) {
-    *state.feed_before_reconcile_commit_hook.lock() = hook;
+    *state
+        .feed_runtime()
+        .feed_before_reconcile_commit_hook
+        .lock() = hook;
 }
 
 async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
+    let runtime = state.feed_runtime();
     let persisted_reconciliation = {
-        let _manifest_guard = state.feed_manifest_lock.lock().await;
+        let _manifest_guard = runtime.feed_manifest_lock.lock().await;
         let (_, persisted) = reconcile_feed_manifest_locked(state).await?;
         persisted
     };
@@ -95,9 +101,9 @@ async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
         let _ = state.change_tx.send(SyncNotification::FeedChanged);
     }
     let now = Utc::now();
-    let due = state.feeds.due_feeds(now).await?;
-    let concurrency = state.feed_settings.fetch_concurrency.max(1);
-    let interval_minutes = i64::try_from(state.feed_settings.fetch_interval_minutes)
+    let due = runtime.feeds.due_feeds(now).await?;
+    let concurrency = runtime.feed_settings.fetch_concurrency.max(1);
+    let interval_minutes = i64::try_from(runtime.feed_settings.fetch_interval_minutes)
         .unwrap_or(i64::MAX / 60)
         .min(i64::MAX / 60);
     let fetch_interval = Duration::minutes(interval_minutes);
@@ -105,10 +111,10 @@ async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
     for chunk in due.chunks(concurrency) {
         let mut tasks = JoinSet::new();
         for feed in chunk {
-            let client = state.feed_client.clone();
-            let store = state.feeds.clone();
+            let client = runtime.feed_client.clone();
+            let store = runtime.feeds.clone();
             let feed = feed.clone();
-            let max_entry_content_bytes = state.feed_settings.max_entry_content_bytes;
+            let max_entry_content_bytes = runtime.feed_settings.max_entry_content_bytes;
             tasks.spawn(async move {
                 let outcome = fetch_subscription(
                     &client,
@@ -132,12 +138,12 @@ async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
         }
     }
 
-    state
+    runtime
         .feeds
         .prune(
             Utc::now(),
-            state.feed_settings.retention_days,
-            state.feed_settings.unread_retention_days,
+            runtime.feed_settings.retention_days,
+            runtime.feed_settings.unread_retention_days,
         )
         .await?;
     Ok(())
@@ -157,7 +163,7 @@ async fn scheduler_loop(state: Arc<AppState>, mut shutdown: oneshot::Receiver<()
         tokio::select! {
             _ = &mut shutdown => break,
             _ = tokio::time::sleep(DUE_SWEEP_INTERVAL) => {}
-            _ = state.feed_refresh.notified() => {}
+            _ = state.feed_runtime().feed_refresh.notified() => {}
         }
     }
 }
@@ -215,7 +221,7 @@ mod tests {
     use super::{reconcile_feed_manifest, run_due_sweep, spawn_scheduler};
     use crate::api::AppState;
     use crate::feeds::types::FetchOutcome;
-    use crate::{FeedsSettings, build_app_state_with_feeds};
+    use crate::{FeatureFlags, FeedsSettings, build_app_state_with_settings};
 
     struct SchedulerFixture {
         state: Arc<AppState>,
@@ -227,16 +233,19 @@ mod tests {
         let root = temp.path().join("vault");
         crate::vault::init::init_vault(&root).unwrap();
         std::fs::write(root.join("feeds.md"), manifest).unwrap();
-        let state = build_app_state_with_feeds(&root, &FeedsSettings::default())
-            .await
-            .unwrap();
+        let state = build_app_state_with_settings(
+            &root,
+            &FeedsSettings::default(),
+            FeatureFlags::default(),
+        )
+        .await
+        .unwrap();
         reconcile_feed_manifest(&state).await.unwrap();
 
         // Keep the deterministic fixture feed outside the due set. A scheduler
         // bug must not turn this local contract test into a network request.
-        if let Some(feed) = state.feeds.list_feeds().await.unwrap().first() {
-            state
-                .feeds
+        if let Some(feed) = state.feed_runtime().feeds.list_feeds().await.unwrap().first() {
+            state.feed_runtime().feeds
                 .apply_fetch(
                     feed.id,
                     FetchOutcome::Failure {
@@ -265,11 +274,11 @@ mod tests {
             "## After\n- [Fixture](http://127.0.0.1:9/rss)\n",
         )
         .unwrap();
-        fixture.state.feed_refresh.notify_one();
+        fixture.state.feed_runtime().feed_refresh.notify_one();
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let feeds = fixture.state.feeds.list_feeds().await.unwrap();
+                let feeds = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
                 if feeds.len() == 1 && feeds[0].group == "After" {
                     break;
                 }
@@ -290,13 +299,11 @@ mod tests {
              - [Periodic](http://127.0.0.1:9/periodic.xml)\n",
         )
         .await;
-        let feeds = fixture.state.feeds.list_feeds().await.unwrap();
+        let feeds = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
         assert_eq!(feeds.len(), 2);
         for feed in &feeds {
             let periodic = feed.url.ends_with("/periodic.xml");
-            fixture
-                .state
-                .feeds
+            fixture.state.feed_runtime().feeds
                 .apply_fetch(
                     feed.id,
                     FetchOutcome::Failure {
@@ -317,9 +324,7 @@ mod tests {
             .find(|feed| feed.url.ends_with("/explicit.xml"))
             .unwrap()
             .id;
-        fixture
-            .state
-            .feeds
+        fixture.state.feed_runtime().feeds
             .schedule_refresh(Some(explicit_id), Utc::now())
             .await
             .unwrap();
@@ -335,7 +340,7 @@ mod tests {
 
         run_due_sweep(&fixture.state).await.unwrap();
 
-        let persisted = fixture.state.feeds.list_feeds().await.unwrap();
+        let persisted = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
         assert_eq!(persisted.len(), 3);
         assert!(
             persisted.iter().all(|feed| {
@@ -379,8 +384,17 @@ mod tests {
             "## After shutdown\n- https://after.example/rss\n",
         )
         .unwrap();
-        fixture.state.feed_refresh.notify_one();
+        fixture.state.feed_runtime().feed_refresh.notify_one();
         tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(fixture.state.feeds.list_feeds().await.unwrap().is_empty());
+        assert!(
+            fixture
+                .state
+                .feed_runtime()
+                .feeds
+                .list_feeds()
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 }

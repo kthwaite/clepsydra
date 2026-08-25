@@ -59,6 +59,8 @@ pub struct AppState {
     /// `/uptime` endpoint reports `started_at.elapsed()`, giving true server
     /// uptime independent of any client's tab lifetime.
     pub started_at: std::time::Instant,
+    /// Startup feature switches resolved from configuration and environment.
+    pub features: crate::FeatureFlags,
     /// Time source for date-sensitive API behavior. Defaults to `SystemClock`.
     pub clock: Arc<dyn Clock>,
     /// Vault instance, shared across all API handlers.
@@ -79,29 +81,8 @@ pub struct AppState {
     pub delete_hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>>,
     /// Mutation coordinator for serializing vault mutations, shared across all API handlers.
     pub mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator,
-    /// Serialized feed/entry storage backed by `.clepsydra/feeds.db`.
-    pub feeds: crate::feeds::store::FeedStoreHandle,
-    /// Checked HTTP client enforcing the RSS network boundary.
-    pub feed_client: crate::feeds::network::CheckedHttpClient,
-    /// Bounds subscribe discovery independently of manifest serialization.
-    pub feed_discovery_semaphore: tokio::sync::Semaphore,
-    /// Shared wake-up for manifest edits and explicit refresh requests.
-    pub feed_refresh: tokio::sync::Notify,
-    /// Diagnostics from the current raw manifest. Warning-bearing manifests do
-    /// not replace the last-good subscription set.
-    pub feed_manifest_diagnostics: parking_lot::RwLock<Vec<crate::feeds::types::ManifestWarning>>,
-    /// Serializes API read/transform/CAS membership mutations.
-    pub feed_manifest_lock: tokio::sync::Mutex<()>,
-    #[cfg(test)]
-    pub(crate) feed_before_reconcile_commit_hook:
-        parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    #[cfg(test)]
-    pub(crate) feed_after_list_snapshot_hook:
-        parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    #[cfg(test)]
-    pub(crate) feed_before_opml_parse_hook: parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    /// Feed scheduler limits resolved from the application configuration.
-    pub feed_settings: crate::FeedsSettings,
+    /// Resources allocated only when the Feeds feature is enabled.
+    pub feed_runtime: Option<crate::feeds::runtime::FeedRuntime>,
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
     pub archive_ingest_lock: tokio::sync::Mutex<()>,
@@ -120,6 +101,14 @@ pub struct AppState {
     /// `None` means the feature is hidden. Wrapped in an `RwLock` so the
     /// `PUT /location` handler can update it live without a restart.
     pub location: parking_lot::RwLock<Option<crate::vault::location::Location>>,
+}
+
+impl AppState {
+    pub(crate) fn feed_runtime(&self) -> &crate::feeds::runtime::FeedRuntime {
+        self.feed_runtime
+            .as_ref()
+            .expect("feed routes and scheduler are mounted only when the feed runtime exists")
+    }
 }
 
 pub(crate) fn mutation_notifier(
