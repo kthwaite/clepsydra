@@ -22,6 +22,10 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => mocks.navigate,
 }));
 
+vi.mock("#/components/FeatureFlagsProvider", () => ({
+  useFeatureFlags: () => ({ academic: true, feeds: true }),
+}));
+
 vi.mock("#/api/index", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#/api/index")>();
   return {

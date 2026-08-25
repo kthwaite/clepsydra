@@ -41,6 +41,10 @@ vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => policyMocks.navigate,
 }));
 
+vi.mock("#/components/FeatureFlagsProvider", () => ({
+  useFeatureFlags: () => ({ academic: true, feeds: true }),
+}));
+
 vi.mock("#/api/bcl", () => ({
   useBcl: () => ({ data: undefined }),
 }));
