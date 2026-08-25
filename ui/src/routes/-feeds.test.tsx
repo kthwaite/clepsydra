@@ -7,6 +7,7 @@ import type { components } from "#/api/schema";
 type FeedEntry = components["schemas"]["FeedEntryDto"];
 
 const routeMocks = vi.hoisted(() => ({
+  featureFlags: { academic: true, feeds: true },
   search: {
     view: "saved" as "unread" | "all" | "saved",
     group: ["Engineering"] as string[] | undefined,
@@ -20,6 +21,7 @@ const routeMocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   mobile: false,
   useFeedEntry: vi.fn(),
+  useFeeds: vi.fn(),
   fetchMock: vi.fn(),
   detailQuery: {
     data: undefined as FeedEntry | undefined,
@@ -72,6 +74,10 @@ vi.mock("@tanstack/react-router", () => ({
     select: (state: { matches: unknown[] }) => unknown;
   }) => select({ matches: [{ staticData: { codexView: "feeds" } }] }),
 }));
+vi.mock("#/components/FeatureFlagsProvider", () => ({
+  useFeatureFlags: () => routeMocks.featureFlags,
+}));
+
 
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => routeMocks.mobile,
@@ -86,7 +92,7 @@ vi.mock("#/components/codex/MobileCodexFrame", () => ({
 }));
 
 vi.mock("#/api/feeds", () => ({
-  useFeeds: () => ({
+  useFeeds: routeMocks.useFeeds.mockImplementation(() => ({
     data: {
       diagnostics: [],
       groups: [
@@ -149,7 +155,7 @@ vi.mock("#/api/feeds", () => ({
         },
       ],
     },
-  }),
+  })),
   useFeedEntry: (id?: number) => {
     routeMocks.useFeedEntry(id);
     return routeMocks.detailQuery;
@@ -215,6 +221,8 @@ const FeedsPage = Route.options.component as () => ReactNode;
 beforeEach(() => {
   vi.clearAllMocks();
   vi.stubGlobal("fetch", routeMocks.fetchMock);
+  routeMocks.featureFlags.academic = true;
+  routeMocks.featureFlags.feeds = true;
   routeMocks.search.view = "saved";
   routeMocks.search.group = ["Engineering"];
   routeMocks.search.ungrouped = false;
@@ -238,6 +246,16 @@ beforeEach(() => {
 });
 
 describe("feeds route controls", () => {
+  it("renders not found without mounting Feed API hooks when disabled", () => {
+    routeMocks.featureFlags.feeds = false;
+
+    render(<FeedsPage />);
+
+    expect(screen.getByText("404 · folio missing")).toBeVisible();
+    expect(routeMocks.useFeeds).not.toHaveBeenCalled();
+    expect(routeMocks.useFeedEntry).not.toHaveBeenCalled();
+  });
+
   it("defaults an omitted or unknown view to all", () => {
     const validateSearch = Route.options.validateSearch;
     if (typeof validateSearch !== "function") {

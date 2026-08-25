@@ -8,10 +8,11 @@ import {
 } from "react";
 import { formatApiError } from "#/api/error";
 import { useSearch, useTags } from "#/api/index";
+import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import {
+  enabledStaticCommands,
   runtimeQuireCommands,
-  STATIC_COMMANDS,
   type StaticCommandAction,
 } from "#/components/codex/commandRegistry";
 import { shortFolio } from "#/components/codex/folio-utils";
@@ -55,6 +56,7 @@ export function CommandPalette() {
 }
 
 function CommandPaletteContent() {
+  const features = useFeatureFlags();
   const open = useUiStore((s) => s.isSearchOpen);
   const close = useUiStore((s) => s.closeSearch);
   const openInscribe = useUiStore((s) => s.openInscribe);
@@ -99,7 +101,7 @@ function CommandPaletteContent() {
 
   const verbCommands = useMemo<Command[]>(
     () =>
-      STATIC_COMMANDS.map((command) => ({
+      enabledStaticCommands(features).map((command) => ({
         kind: "cmd",
         id: command.shortcut
           ? formatChord(SHORTCUTS[command.shortcut].chord)
@@ -202,6 +204,7 @@ function CommandPaletteContent() {
         },
       })),
     [
+      features,
       navigate,
       openTab,
       activateTab,

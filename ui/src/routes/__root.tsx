@@ -1,5 +1,7 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
 import { lazy, type ReactNode, Suspense, useEffect, useRef } from "react";
+import { FeatureFlagsProvider } from "#/components/FeatureFlagsProvider";
+import { NotFoundPage } from "#/components/FeatureGate";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
@@ -8,6 +10,8 @@ import { Toaster } from "#/components/ui/Toaster";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
 import { usePreviewStore } from "#/store/preview";
 import { useUiStore } from "#/store/ui";
+
+export { NotFoundPage };
 
 const CommandPalette = lazy(() =>
   import("#/components/codex/CommandPalette").then((module) => ({
@@ -171,9 +175,7 @@ function OverlayLoadingFallback({
 
 export const Route = createRootRoute({
   staticData: { codexView: "atrium" },
-  notFoundComponent: () => (
-    <div className="cl-cap p-8 text-[var(--ink-mute)]">404 · folio missing</div>
-  ),
+  notFoundComponent: NotFoundPage,
   errorComponent: RouteError,
   head: () => ({
     meta: [{ title: "clepsydra" }],
@@ -181,14 +183,16 @@ export const Route = createRootRoute({
   component: () => (
     <>
       <HeadContent />
-      <ReadingProgressProvider>
-        <CodexFrame>
-          <Outlet />
-        </CodexFrame>
-        <GlobalShortcuts />
-        <GlobalOverlays />
-        <Toaster />
-      </ReadingProgressProvider>
+      <FeatureFlagsProvider>
+        <ReadingProgressProvider>
+          <CodexFrame>
+            <Outlet />
+          </CodexFrame>
+          <GlobalShortcuts />
+          <GlobalOverlays />
+          <Toaster />
+        </ReadingProgressProvider>
+      </FeatureFlagsProvider>
     </>
   ),
 });
