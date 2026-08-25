@@ -316,7 +316,7 @@ export function CycleView({
                 NO HISTORY
               </span>
             ) : (
-              <div aria-label={`Cycle burndown: ${burndown.join(", ")}`}>
+              <div aria-label={`Cycle progress: ${burndown.join(", ")}`}>
                 <Spark
                   data={burndown}
                   width={150}

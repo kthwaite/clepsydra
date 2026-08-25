@@ -361,7 +361,7 @@ describe("CycleView — metrics and burndown", () => {
     expect(screen.getByText("03")).toBeInTheDocument();
   });
 
-  it("renders the Spark SVG for burndown", () => {
+  it("labels the progress chart with its values", () => {
     wrap(
       <CycleView
         colLabel={FIXTURE_COL_LABEL}
@@ -370,10 +370,9 @@ describe("CycleView — metrics and burndown", () => {
         burndown={[3, 2, 1]}
       />,
     );
-    // Spark renders an SVG polyline
-    const svg = document.querySelector("svg");
-    expect(svg).toBeInTheDocument();
-    expect(svg?.querySelector("polyline")).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("Cycle progress: 3, 2, 1"),
+    ).toBeInTheDocument();
   });
 
   it("renders Blocked metric in hot color when blocked > 0", () => {
