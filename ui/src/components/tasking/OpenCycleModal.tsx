@@ -64,7 +64,7 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
 
   return (
     <BoardModalFrame
-      ariaLabel="Open Cycle"
+      ariaLabel="Start cycle"
       widthClassName={BOARD_MODAL_WIDTHS.confirm}
       backdropTestId="open-cycle-modal-backdrop"
       modalTestId="open-cycle-modal"
@@ -79,7 +79,7 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
           ▶
         </span>
         <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-          OPEN CYCLE
+          Start cycle
         </span>
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
           {cycle.code} · {windowLabel}
@@ -120,8 +120,8 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
             testId="open-cycle-checks"
           />
           <CycleMetric
-            label="→ STATE"
-            value="ACTIVE"
+            label="Target state"
+            value="Active"
             color="var(--cool)"
             testId="open-cycle-state"
           />
@@ -178,7 +178,7 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
             disabled={patch.isPending}
             data-testid="open-cycle-commit"
           >
-            {patch.isPending ? "OPENING…" : "▶ OPEN CYCLE"}
+            {patch.isPending ? "Starting…" : "Start cycle"}
           </button>
         </div>
       </div>
