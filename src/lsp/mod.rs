@@ -461,18 +461,39 @@ impl LanguageServer for LspBackend {
         let state = self.state()?;
 
         // Determine target vault path: either link target or current file
-        let target_vp = {
-            let link_target = {
-                let docs = self.documents.lock().await;
-                let doc = match docs.get(&uri) {
-                    Some(d) => d,
-                    None => return Ok(None),
-                };
-                if doc.encrypted {
-                    return Ok(None);
-                }
-                doc.link_at_position(pos).map(|l| l.target_raw.clone())
+        let link_info = {
+            let docs = self.documents.lock().await;
+            let doc = match docs.get(&uri) {
+                Some(d) => d,
+                None => return Ok(None),
             };
+            if doc.encrypted {
+                return Ok(None);
+            }
+            doc.link_at_position(pos)
+                .map(|l| (l.target_raw.clone(), l.kind.clone()))
+        };
+
+        if let Some((target_raw, crate::vault::link::LinkKind::BlockRef)) = &link_info {
+            let sources = crate::lsp::queries::block_ref_sources(&state.index, target_raw).await;
+            let mut locations = Vec::new();
+            for s in &sources {
+                if let Some(loc) = self
+                    .span_to_location(&s.source_path, s.span_start, s.span_end)
+                    .await
+                {
+                    locations.push(loc);
+                }
+            }
+            return Ok(if locations.is_empty() {
+                None
+            } else {
+                Some(locations)
+            });
+        }
+
+        let target_vp = {
+            let link_target = link_info.map(|(raw, _)| raw);
 
             if let Some(target_raw) = link_target {
                 let canonical = crate::vault::canonical::CanonicalName::from_title(&target_raw);
@@ -1484,6 +1505,39 @@ impl LspBackend {
             }
         }
         Range::default()
+    }
+
+    /// Convert an indexed body span in `source_path` to a `Location`, using
+    /// the open document if present, else a throwaway parse from disk.
+    async fn span_to_location(
+        &self,
+        source_path: &str,
+        span_start: i64,
+        span_end: i64,
+    ) -> Option<Location> {
+        if span_start < 0 || span_end < 0 {
+            return None;
+        }
+        let state = self.state_opt()?;
+        let vp = crate::vault::path::VaultPath::new(source_path).ok()?;
+        let abs = state.vault.resolve(&vp);
+        let uri = Url::from_file_path(&abs).ok()?;
+        let (start, end) = (span_start as usize, span_end as usize);
+        {
+            let docs = self.documents.lock().await;
+            if let Some(doc) = docs.get(&uri) {
+                return Some(Location {
+                    range: doc.body_span_to_range(start, end),
+                    uri,
+                });
+            }
+        }
+        let content = tokio::fs::read_to_string(&abs).await.ok()?;
+        let doc = document::Document::from_text(&content, 0);
+        Some(Location {
+            range: doc.body_span_to_range(start, end),
+            uri,
+        })
     }
 
     /// Publish diagnostics for a single open document.
@@ -2552,5 +2606,44 @@ mod tests {
         // "A fact worth citing" is line 5 of the file (0-indexed), after the
         // three frontmatter lines, "intro line", and a blank line.
         assert_eq!(loc.range.start.line, 5);
+    }
+
+    #[tokio::test]
+    async fn references_on_block_ref_lists_all_referrers() {
+        let (backend, _tmp) = make_backend(&[
+            ("Ref.md", "# Ref\n\nA fact worth citing ^blk123XYZ99\n"),
+            ("SrcA.md", "# A\n\nsee ((blk123XYZ99))\n"),
+            ("SrcB.md", "# B\n\nalso ((blk123XYZ99))\n"),
+        ]);
+        let uri = uri_for(&backend, "SrcA.md");
+        open_doc(&backend, &uri, "# A\n\nsee ((blk123XYZ99))\n").await;
+        let params = ReferenceParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 8,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: ReferenceContext {
+                include_declaration: false,
+            },
+        };
+        let locs = backend
+            .references(params)
+            .await
+            .unwrap()
+            .expect("locations");
+        assert_eq!(locs.len(), 2);
+        let mut paths: Vec<String> = locs
+            .iter()
+            .map(|l| l.uri.path().rsplit('/').next().unwrap().to_string())
+            .collect();
+        paths.sort();
+        assert_eq!(paths, vec!["SrcA.md".to_string(), "SrcB.md".to_string()]);
+        // Spans are real (converted from indexed offsets), not defaults.
+        assert!(locs.iter().any(|l| l.range.start.line > 0));
     }
 }
