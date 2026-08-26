@@ -54,4 +54,14 @@ return {
 			eq("/vault/p/X.md", items[1].file)
 		end,
 	},
+	{
+		name = "rel_under_root guards the prefix boundary",
+		fn = function()
+			eq("notes/A.md", picker.rel_under_root("/vault/notes/A.md", "/vault"))
+			eq(nil, picker.rel_under_root("/vault-backup/x.md", "/vault"))
+			eq(nil, picker.rel_under_root("/elsewhere/x.md", "/vault"))
+			eq(nil, picker.rel_under_root("", "/vault"))
+			eq(nil, picker.rel_under_root("/vault", "/vault"))
+		end,
+	},
 }

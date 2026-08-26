@@ -17,9 +17,9 @@
   - `POST /journal/today` → 200/201 `PageDetail` JSON; the plugin uses `.path` (vault-relative).
   - `GET /journal/{date}` → `PageDetail` or 404.
   - `POST /journal/today/capture` body `{"content": "..."}`.
-  - `GET /search?q=&limit=` → array of `{page_id, path, title|null, snippet}`; 400 if `q` missing/empty.
-  - `GET /backlinks/{*path}` → array of `{source_id, source_path, source_title|null, target_raw, kind, context}` (no span fields — backlink confirm opens the file, no line jump).
-  - `GET /tags` → array of `{tag, count, computed_count}`.
+  - `GET /index/search?q=&limit=` → array of `{page_id, path, title|null, snippet}`; 400 if `q` missing/empty.
+  - `GET /index/backlinks/{*path}` → array of `{source_id, source_path, source_title|null, target_raw, kind, context}` (no span fields — backlink confirm opens the file, no line jump).
+  - `GET /index/tags` → array of `{tag, count, computed_count}`.
   - `GET /pages?tag=&limit=` → `{items: [{id, path, title|null, canonical_name, kind, ...}], ...}` (exact tag match).
 - snacks.nvim contract (verified at the pinned commit): `Snacks.picker.pick(opts)` with `items` or `finder(opts, ctx)`; live sources set `live = true, supports_live = true` and read `ctx.filter.search`; items use `text` (filter string), `file` (path), optional `label`; `format = "file"` + default confirm jumps to `item.file`.
 - No default keymaps. Commands + the `:Clep` tree only.
@@ -940,6 +940,16 @@ return {
 			eq("/vault/p/X.md", items[1].file)
 		end,
 	},
+	{
+		name = "rel_under_root guards the prefix boundary",
+		fn = function()
+			eq("notes/A.md", picker.rel_under_root("/vault/notes/A.md", "/vault"))
+			eq(nil, picker.rel_under_root("/vault-backup/x.md", "/vault"))
+			eq(nil, picker.rel_under_root("/elsewhere/x.md", "/vault"))
+			eq(nil, picker.rel_under_root("", "/vault"))
+			eq(nil, picker.rel_under_root("/vault", "/vault"))
+		end,
+	},
 }
 ```
 
@@ -1023,6 +1033,26 @@ function M.page_items(pages, root)
 	return items
 end
 
+--- Vault-relative path of a buffer under `root`, or nil when the buffer is
+--- outside the vault. Guards the prefix boundary so a sibling directory
+--- sharing root's prefix (e.g. /vault-backup) does not match /vault. Pure.
+---@param bufname string
+---@param root string
+---@return string|nil
+function M.rel_under_root(bufname, root)
+	if bufname == "" or bufname:sub(1, #root) ~= root then
+		return nil
+	end
+	if bufname:sub(#root + 1, #root + 1) ~= "/" then
+		return nil
+	end
+	local rel = bufname:sub(#root + 2)
+	if rel ~= "" then
+		return rel
+	end
+	return nil
+end
+
 local function vault_root_or_notify()
 	local root = config.vault_root(0)
 	if not root then
@@ -1049,7 +1079,7 @@ function M.pages()
 				return {}
 			end
 			local err, results =
-				client.request_sync("GET", "/search" .. client.encode_query({ q = q, limit = 50 }))
+				client.request_sync("GET", "/index/search" .. client.encode_query({ q = q, limit = 50 }))
 			if err then
 				return {}
 			end
@@ -1064,12 +1094,11 @@ function M.backlinks()
 	if not root then
 		return
 	end
-	local bufname = vim.api.nvim_buf_get_name(0)
-	if bufname == "" or bufname:sub(1, #root) ~= root then
+	local rel = M.rel_under_root(vim.api.nvim_buf_get_name(0), root)
+	if not rel then
 		return vim.notify("clepsydra: current buffer is not a vault page", vim.log.levels.WARN)
 	end
-	local rel = bufname:sub(#root + 2)
-	local err, entries = client.request_sync("GET", "/backlinks/" .. client.encode_path(rel))
+	local err, entries = client.request_sync("GET", "/index/backlinks/" .. client.encode_path(rel))
 	if err then
 		return vim.notify(err, vim.log.levels.ERROR)
 	end
@@ -1086,7 +1115,7 @@ function M.tags()
 	if not root then
 		return
 	end
-	local err, tag_counts = client.request_sync("GET", "/tags")
+	local err, tag_counts = client.request_sync("GET", "/index/tags")
 	if err then
 		return vim.notify(err, vim.log.levels.ERROR)
 	end
@@ -1116,7 +1145,7 @@ return M
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `nvim --headless -l nvim/tests/run.lua`
-Expected: `27 passed, 0 failed`, exit 0.
+Expected: `31 passed, 0 failed`, exit 0.
 
 - [ ] **Step 5: Format and commit**
 
@@ -1168,7 +1197,7 @@ function M.check()
 		})
 	end
 
-	local err = client.request_sync("GET", "/stats")
+	local err = client.request_sync("GET", "/index/stats")
 	if err then
 		health.error("clep serve unreachable at " .. config.options.server_url, { "start `clep serve`", err })
 	else
