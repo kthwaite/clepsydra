@@ -110,12 +110,12 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
         {/* Stats row */}
         <div className="flex gap-[20px]" data-testid="open-cycle-stats">
           <CycleMetric
-            label="COMMITTED"
+            label="Tasks"
             value={committed}
             testId="open-cycle-committed"
           />
           <CycleMetric
-            label="CHECKS"
+            label="Checklist items"
             value={checkTot}
             testId="open-cycle-checks"
           />
@@ -135,8 +135,8 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
           >
             <div className="w-[3px] flex-shrink-0 bg-[var(--warn)]" />
             <div className="cl-mono text-[var(--fs-s)] leading-snug text-[var(--ink-2)]">
-              No tasking committed to this cycle yet — it will open empty. Pull
-              work in from the backlog after opening.
+              No tasks in this cycle. It will start empty; you can add tasks
+              after starting it.
             </div>
           </div>
         )}
@@ -149,9 +149,7 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
           >
             <div className="w-[3px] flex-shrink-0 bg-[var(--hot)]" />
             <div className="cl-mono text-[var(--fs-s)] leading-snug text-[var(--ink-2)]">
-              <b>{clash.code}</b> is still ACTIVE. Running two live cycles
-              splits cadence — seal it first, or proceed to run both in
-              parallel.
+              {`${clash.code} is already Active. Starting this cycle will leave two active cycles. Close ${clash.code} first if that is not intended.`}
             </div>
           </div>
         )}

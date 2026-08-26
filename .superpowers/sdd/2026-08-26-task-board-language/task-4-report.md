@@ -41,7 +41,7 @@ Result: passed with no output.
 - Added accessible names to creation fields while retaining the existing form structure and test IDs.
 - Kept internal modal kinds, component names, mutation fields, state IDs, carry sentinels, date calculations, and success behavior unchanged.
 - Kept `PLANNED`, `ACTIVE`, `CLOSED`, `BACKLOG`, cycle codes, and omitted `carry_to` as wire values while presenting title-case human labels.
-- Changed the creation sub-header to `SET UP A CADENCE WINDOW` so creation no longer reads as activation.
+- Reduced the creation sub-header to the formatted cycle window only, with no descriptive suffix.
 - Updated this focused test file's integration wait from the superseded `TASKING BOARD` heading to the shared `Task Board` heading supplied by Tasks 1–3.
 
 ## Self-review
@@ -55,3 +55,31 @@ Result: passed with no output.
 ## Commit
 
 `feat(tasking): clarify cycle lifecycle language` (this task commit)
+
+## Review Fix Round 1
+
+### Red evidence
+
+Command:
+
+`bun run test src/components/tasking/__tests__/cycleModals.test.tsx`
+
+Result after updating the review tests first: 68 tests ran; 6 failed and 62 passed. The six expected failures covered the creation sub-header, activation metrics, exact empty-cycle guidance, exact active-cycle clash guidance, and the accessible incomplete-task choice group.
+
+### Green evidence
+
+Command:
+
+`bun run test src/components/tasking/__tests__/cycleModals.test.tsx`
+
+Result: 1 test file passed; 68 tests passed.
+
+### Decisions and self-review
+
+- The creation sub-header now contains only the formatted date window. The test asserts the exact date text and rejects `cadence window`.
+- Activation metrics now use `Tasks` and `Checklist items`.
+- Empty-cycle and active-cycle clash guidance match the reviewed sentences exactly.
+- Incomplete-task choices expose `role=\"group\"` with the accessible name `Incomplete tasks`; button labels and payload tests remain unchanged.
+- A scoped audit of the three assigned modals found no remaining visible or accessible `tasking`, `committed`, `checks`, `open cycle`, `seal cycle`, or `cadence window` copy. Residual matches are internal variable names and stable test IDs only.
+- Internal `open`/`seal` modal kinds, component names, test IDs, `ACTIVE`/`CLOSED` states, carry sentinels, and PATCH bodies remain unchanged.
+- Follow-up commit: `fix(tasking): complete cycle lifecycle language`.

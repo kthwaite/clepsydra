@@ -167,7 +167,12 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
             label="Incomplete tasks"
             hint={`${carryover} task${carryover === 1 ? "" : "s"}`}
           >
-            <div className="flex gap-[6px]" data-testid="seal-cycle-carry-opts">
+            <div
+              className="flex gap-[6px]"
+              role="group"
+              aria-label="Incomplete tasks"
+              data-testid="seal-cycle-carry-opts"
+            >
               {carryOpts.map((o) => (
                 <button
                   key={o.v}

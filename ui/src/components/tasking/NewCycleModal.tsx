@@ -174,7 +174,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
           New cycle
         </span>
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {windowLabel} · SET UP A CADENCE WINDOW
+          {windowLabel}
         </span>
         <ModalEscChip onClose={closeCycleModal} testId="new-cycle-close-btn" />
       </div>

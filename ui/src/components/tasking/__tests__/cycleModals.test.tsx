@@ -352,12 +352,11 @@ describe("NewCycleModal — render", () => {
     const planned = screen.getByTestId("new-cycle-state-PLANNED");
     expect(planned.className).toContain("bg-[var(--ink)]");
   });
-  it("shows SET UP A CADENCE WINDOW in the sub-header", () => {
+  it("shows only the formatted cycle window in the sub-header", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
-    expect(
-      screen.getByText(/SET UP A CADENCE WINDOW/),
-    ).toBeInTheDocument();
+    expect(screen.getByText("06.12 — 06.18")).toBeInTheDocument();
+    expect(screen.queryByText(/cadence window/i)).not.toBeInTheDocument();
   });
 });
 
@@ -555,21 +554,25 @@ describe("OpenCycleModal — render", () => {
     );
   });
 
-  it("shows COMMITTED count from cycle tasks", () => {
+  it("shows Tasks count from cycle tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={TASKS} />);
     // t3 has cycle "C-02"
+    expect(screen.getByText("Tasks", { exact: true })).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-committed")).toHaveTextContent("01");
   });
 
-  it("shows CHECKS total from cycle tasks", () => {
+  it("shows Checklist items total from cycle tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-111" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={TASKS} />);
-    // t1: checks [0,3], t2: checks [2,2] → tot = 5
+    // t1: checks [0,3], t2: checks [2,2] → total = 5
+    expect(
+      screen.getByText("Checklist items", { exact: true }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-checks")).toHaveTextContent("05");
   });
 
@@ -581,18 +584,17 @@ describe("OpenCycleModal — render", () => {
     expect(screen.getByTestId("open-cycle-state")).toHaveTextContent("Active");
   });
 
-  it("shows empty-cycle callout when COMMITTED = 0", () => {
+  it("shows exact empty-cycle guidance when there are no tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
-    expect(screen.getByTestId("open-cycle-empty-callout")).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-empty-callout")).toHaveTextContent(
-      /No tasking committed/,
+      "No tasks in this cycle. It will start empty; you can add tasks after starting it.",
     );
   });
 
-  it("does NOT show empty-cycle callout when COMMITTED > 0", () => {
+  it("does NOT show empty-cycle callout when the cycle has tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
@@ -603,7 +605,7 @@ describe("OpenCycleModal — render", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows clash callout when another cycle is ACTIVE", () => {
+  it("shows exact guidance when another cycle is Active", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
@@ -614,9 +616,8 @@ describe("OpenCycleModal — render", () => {
         tasks={[]}
       />,
     );
-    expect(screen.getByTestId("open-cycle-clash-callout")).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-clash-callout")).toHaveTextContent(
-      "C-01",
+      "C-01 is already Active. Starting this cycle will leave two active cycles. Close C-01 first if that is not intended.",
     );
   });
 
@@ -817,6 +818,9 @@ describe("SealCycleModal — render", () => {
     );
 
     expect(screen.getAllByText("Incomplete tasks")).toHaveLength(2);
+    expect(
+      screen.getByRole("group", { name: "Incomplete tasks" }),
+    ).toBeInTheDocument();
     for (const choice of [
       "Move to Backlog",
       `Move to ${CYCLE_PLANNED.code}`,
