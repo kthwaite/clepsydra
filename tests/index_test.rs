@@ -1654,6 +1654,21 @@ fn fts_search_matches_title() {
 }
 
 #[test]
+fn fts_search_returns_typed_query_errors() {
+    let (_tmp, vault) = setup_vault(&[(
+        "note.md",
+        "---\ntitle: Searchable\n---\nStructured search content.",
+    )]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let error = index.search("unknown:value", 10).unwrap_err();
+    assert!(format!("{error:?}").starts_with("SearchQuery("));
+    assert!(error.to_string().contains("unknown field"));
+}
+
+#[test]
 fn fts_search_removed_page_not_returned() {
     let (_tmp, vault) = setup_vault(&[(
         "ephemeral.md",

@@ -177,6 +177,19 @@ Nothing special here.
     assert!(results.is_empty());
 }
 
+#[tokio::test]
+async fn search_propagates_typed_query_errors() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let handle = build_handle(&vault);
+
+    let error = handle
+        .search("unknown:value".into(), 10)
+        .await
+        .unwrap_err();
+    assert!(format!("{error:?}").starts_with("SearchQuery("));
+    assert!(error.to_string().contains("unknown field"));
+}
+
 // ---------------------------------------------------------------------------
 // backlinks() finds linking pages
 // ---------------------------------------------------------------------------

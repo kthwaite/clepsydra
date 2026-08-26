@@ -24,6 +24,7 @@ use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
 use super::reference_issues::{ReferenceIssueFilter, ReferenceIssuePage};
 use super::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
+use super::search::{self, SearchExecutionError, SearchQueryError};
 
 // ---------------------------------------------------------------------------
 // IndexError
@@ -33,26 +34,21 @@ use super::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
 pub enum IndexError {
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("{0}")]
+    SearchQuery(#[from] SearchQueryError),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Other(String),
 }
 
-fn fts_prefix_query(input: &str) -> Option<String> {
-    let mut query = String::new();
-    for term in input
-        .split(|ch: char| !ch.is_alphanumeric())
-        .filter(|term| !term.is_empty())
-    {
-        if !query.is_empty() {
-            query.push_str(" AND ");
+impl From<SearchExecutionError> for IndexError {
+    fn from(error: SearchExecutionError) -> Self {
+        match error {
+            SearchExecutionError::Query(error) => Self::SearchQuery(error),
+            SearchExecutionError::Sqlite(error) => Self::Sqlite(error),
         }
-        query.push('"');
-        query.push_str(term);
-        query.push_str("\"*");
     }
-    (!query.is_empty()).then_some(query)
 }
 
 // ---------------------------------------------------------------------------
@@ -1514,12 +1510,9 @@ impl VaultIndex {
         ranked
     }
 
-    /// Human-oriented full-text search across page titles and bodies.
+    /// Search indexed page text and metadata with the structured query language.
     pub fn search(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>, IndexError> {
-        let Some(query) = fts_prefix_query(query) else {
-            return Ok(Vec::new());
-        };
-        self.search_fts(&query, limit)
+        Ok(search::search(&self.conn, query, limit)?)
     }
 
     /// Execute an already prepared FTS5 expression.
@@ -3123,31 +3116,71 @@ mod tests {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         crate::vault::init::init_vault(&root).unwrap();
-        fs::create_dir_all(root.join("notes")).unwrap();
-        fs::write(
-            root.join("notes/stray.md"),
-            "# Clepsydra: Stray Thoughts\n\nIdeas gathered between sessions.\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("notes/clepsydra.md"),
-            "# Clepsydra Handbook\n\nReference notes for the project.\n",
-        )
-        .unwrap();
-        fs::write(
-            root.join("notes/unicode.md"),
-            "# Élan vital\n\nA Unicode search fixture.\n",
-        )
-        .unwrap();
+
+        let pages = [
+            (
+                "notes/clepsydra.md",
+                "---\nid: 00000000-0000-0000-0000-000000000101\ntitle: Clepsydra Handbook\ntype: note\nproject: Core\ntags:\n  - handbook\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-10T00:00:00Z\n---\nReference notes for the Clepsydra project.\n",
+            ),
+            (
+                "notes/stray.md",
+                "---\nid: 00000000-0000-0000-0000-000000000102\ntitle: Clepsydra Stray Thoughts\ntype: note\nproject: Core\ntags:\n  - ideas\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-11T00:00:00Z\n---\nIdeas gathered between sessions.\n",
+            ),
+            (
+                "notes/backup.md",
+                "---\nid: 00000000-0000-0000-0000-000000000103\ntitle: Backup Manual\ntype: note\nproject: Core\ntags:\n  - operations\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-12T00:00:00Z\n---\nKeep a local backup before migration.\n",
+            ),
+            (
+                "recipes/beer.md",
+                "---\nid: 00000000-0000-0000-0000-000000000104\ntitle: Tasting Beer\ntype: recipe\nproject: Kitchen\ntags:\n  - beer\n  - fermentation\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-20T00:00:00Z\n---\nFermentation notes for a crisp lager.\n",
+            ),
+            (
+                "recipes/wine.md",
+                "---\nid: 00000000-0000-0000-0000-000000000105\ntitle: Wine Journal\ntype: recipe\nproject: Cellar\ntags:\n  - wine\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-19T00:00:00Z\n---\nA patient tasting record with fruit, mineral, and oak observations.\n",
+            ),
+            (
+                "notes/reference.md",
+                "---\nid: 00000000-0000-0000-0000-000000000106\ntitle: Reference Shelf\ntype: note\nproject: Core\ntags:\n  - reference\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-13T00:00:00Z\n---\nA catalog entry without sensory notes.\n",
+            ),
+            (
+                "notes/tasting-reference.md",
+                "---\nid: 00000000-0000-0000-0000-000000000107\ntitle: Reference Card\ntype: note\nproject: Core\ntags:\n  - reference\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-14T00:00:00Z\n---\nA concise tasting field guide.\n",
+            ),
+            (
+                "archive/old.md",
+                "---\nid: 00000000-0000-0000-0000-000000000108\ntitle: Old Material\ntype: archive\nproject: Archive\ntags:\n  - historical\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-09T00:00:00Z\n---\nRetired material.\n",
+            ),
+            (
+                "notes/unicode.md",
+                "---\nid: 00000000-0000-0000-0000-000000000109\ntitle: Élan vital\ntype: note\nproject: Core\ntags:\n  - unicode\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-08T00:00:00Z\n---\nA Unicode search fixture.\n",
+            ),
+        ];
+
+        for (path, contents) in pages {
+            let absolute = root.join(path);
+            fs::create_dir_all(absolute.parent().unwrap()).unwrap();
+            fs::write(absolute, contents).unwrap();
+        }
 
         let vault = Vault::open(&root).unwrap();
         let mut index = VaultIndex::open_in_memory().unwrap();
         index.build(&vault).unwrap();
         index
+            .connection()
+            .execute(
+                "UPDATE pages SET updated_at = NULL WHERE id = ?1",
+                params!["00000000-0000-0000-0000-000000000105"],
+            )
+            .unwrap();
+        index
+    }
+
+    fn paths(results: &[SearchResult]) -> Vec<&str> {
+        results.iter().map(|result| result.path.as_str()).collect()
     }
 
     fn assert_paths(results: Vec<SearchResult>, expected: &[&str]) {
-        let mut paths = results
+        let mut actual = results
             .into_iter()
             .map(|result| result.path)
             .collect::<Vec<_>>();
@@ -3155,44 +3188,144 @@ mod tests {
             .iter()
             .map(|path| (*path).to_owned())
             .collect::<Vec<_>>();
-        paths.sort();
+        actual.sort();
         expected.sort();
-        assert_eq!(paths, expected);
+        assert_eq!(actual, expected);
     }
 
     #[test]
-    fn search_prefixes_human_tokens() {
+    fn search_preserves_plain_text_prefix_compatibility() {
         let index = search_index();
 
         assert_paths(
             index.search("clep", 20).unwrap(),
-            &["notes/stray.md", "notes/clepsydra.md"],
+            &["notes/clepsydra.md", "notes/stray.md"],
         );
         assert_paths(
             index.search("clepsydra", 20).unwrap(),
-            &["notes/stray.md", "notes/clepsydra.md"],
+            &["notes/clepsydra.md", "notes/stray.md"],
         );
-        assert_paths(
-            index.search("Clepsydra: Stray", 20).unwrap(),
-            &["notes/stray.md"],
-        );
-    }
-
-    #[test]
-    fn search_treats_fts_punctuation_as_inert_separators() {
-        let index = search_index();
-
-        assert!(index.search(": OR *", 20).is_ok());
-        assert!(index.search("", 20).unwrap().is_empty());
-        assert!(index.search("---", 20).unwrap().is_empty());
-    }
-
-    #[test]
-    fn search_preserves_multi_token_and_unicode_prefixes() {
-        let index = search_index();
-
         assert_paths(index.search("clep stray", 20).unwrap(), &["notes/stray.md"]);
         assert_paths(index.search("Éla", 20).unwrap(), &["notes/unicode.md"]);
+    }
+
+    #[test]
+    fn search_supports_phrases_fields_and_exact_metadata_values() {
+        let index = search_index();
+
+        assert_paths(
+            index.search("\"local backup\"", 20).unwrap(),
+            &["notes/backup.md"],
+        );
+        assert_paths(
+            index.search("\"local: backup\"", 20).unwrap(),
+            &["notes/backup.md"],
+        );
+        assert_paths(
+            index.search("kind:recipe", 20).unwrap(),
+            &["recipes/beer.md", "recipes/wine.md"],
+        );
+        assert_paths(
+            index.search("tag:fermentation", 20).unwrap(),
+            &["recipes/beer.md"],
+        );
+        assert_paths(
+            index.search("tag:recipe", 20).unwrap(),
+            &["recipes/beer.md", "recipes/wine.md"],
+        );
+        assert_paths(
+            index.search("project:Kitchen", 20).unwrap(),
+            &["recipes/beer.md"],
+        );
+        assert!(index.search("project:kitchen", 20).unwrap().is_empty());
+        assert!(index.search("tag:Fermentation", 20).unwrap().is_empty());
+    }
+
+    #[test]
+    fn search_composes_mixed_boolean_expressions() {
+        let index = search_index();
+
+        assert_paths(
+            index
+                .search("(tag:beer | tag:wine) tasting", 20)
+                .unwrap(),
+            &["recipes/beer.md", "recipes/wine.md"],
+        );
+        assert_paths(
+            index
+                .search("(tag:beer | tag:wine) tasting -project:Cellar", 20)
+                .unwrap(),
+            &["recipes/beer.md"],
+        );
+        assert_paths(
+            index.search("-project:Archive", 20).unwrap(),
+            &[
+                "notes/backup.md",
+                "notes/clepsydra.md",
+                "notes/reference.md",
+                "notes/stray.md",
+                "notes/tasting-reference.md",
+                "notes/unicode.md",
+                "recipes/beer.md",
+                "recipes/wine.md",
+            ],
+        );
+    }
+
+    #[test]
+    fn search_orders_and_snippets_after_the_complete_expression() {
+        let index = search_index();
+
+        let text = index.search("tasting", 20).unwrap();
+        assert_eq!(
+            paths(&text),
+            [
+                "notes/tasting-reference.md",
+                "recipes/beer.md",
+                "recipes/wine.md"
+            ]
+        );
+        assert!(text.windows(2).all(|pair| pair[0].rank <= pair[1].rank));
+        assert!(text.iter().all(|result| !result.snippet.is_empty()));
+
+        let mixed = index.search("tasting | tag:reference", 20).unwrap();
+        let metadata_only = mixed
+            .iter()
+            .find(|result| result.path == "notes/reference.md")
+            .unwrap();
+        let text_and_metadata = mixed
+            .iter()
+            .find(|result| result.path == "notes/tasting-reference.md")
+            .unwrap();
+        assert_eq!(mixed.last().unwrap().path, "notes/reference.md");
+        assert!(metadata_only.snippet.is_empty());
+        assert!(!text_and_metadata.snippet.is_empty());
+
+        let recipes = index.search("kind:recipe", 20).unwrap();
+        assert_eq!(paths(&recipes), ["recipes/beer.md", "recipes/wine.md"]);
+        assert!(recipes.iter().all(|result| result.snippet.is_empty()));
+
+        let limited = index.search("tasting | tag:reference", 1).unwrap();
+        assert_eq!(limited.len(), 1);
+        assert_eq!(limited[0].page_id, mixed[0].page_id);
+    }
+
+    #[test]
+    fn search_rejects_structural_and_unsearchable_punctuation() {
+        let index = search_index();
+
+        assert!(matches!(
+            index.search("Clepsydra: Stray", 20),
+            Err(IndexError::SearchQuery(_))
+        ));
+        assert!(matches!(
+            index.search("\"---\"", 20),
+            Err(IndexError::SearchQuery(_))
+        ));
+        assert!(matches!(
+            index.search("", 20),
+            Err(IndexError::SearchQuery(_))
+        ));
     }
 }
 
