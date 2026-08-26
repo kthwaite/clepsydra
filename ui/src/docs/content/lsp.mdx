@@ -81,10 +81,10 @@ vaults as separate editor workspaces so each LSP process resolves independently.
 
 | Capability | Shipped behavior |
 | --- | --- |
-| Completion | `[[` completes canonical page names; `#` completes indexed tags. Inside `+++` TOML frontmatter, declared Base property keys and quoted values complete; relation values use wikilink completion. |
-| Hover | Shows the linked Folio’s title, path, and leading body lines, or reports an unresolved link. |
-| Go to definition | Opens the resolved wikilink target. |
-| References | Returns every indexed wikilink to the page under the cursor. |
+| Completion | `[[` completes canonical page names and date words (`today`, `tomorrow`, `yesterday`, weekday names) that insert journal-date links; `((` completes block references by content; `#` completes indexed tags. Inside `+++` TOML frontmatter, declared Base property keys and quoted values complete; relation values use wikilink completion. |
+| Hover | Shows the linked Folio’s title, path, backlink count, and leading body lines, or reports an unresolved link. On a `((block-id))`, shows the block’s content and source page. |
+| Go to definition | Opens the resolved wikilink target. On a `((block-id))`, jumps to the defining block's exact span. |
+| References | Returns every indexed wikilink to the page under the cursor. On a `((block-id))`, returns every page referencing that block. |
 | Diagnostics | Reports unresolved and ambiguous links. For plaintext pages, also reports matching Base property type warnings. |
 | Code actions | Creates a page for an unresolved link or rewrites an ambiguous link to a selected candidate path. |
 | Rename | Returns one editor-applied workspace edit that updates the target title, renames its file, and rewrites indexed referrers. |

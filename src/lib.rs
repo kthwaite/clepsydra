@@ -131,8 +131,7 @@ impl Default for FeedsSettings {
 pub struct ServerSettings {
     /// The host to listen on. (Default: "localhost".)
     pub host: String,
-    /// The port to listen on. (Default: 16667, chosen for being memorable and unused
-    /// by common services.)
+    /// The port to listen on. (Default: 3000.)
     pub port: u16,
     /// When true, the server will include extra debug information in API responses
     #[serde(default)]
