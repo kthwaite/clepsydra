@@ -438,7 +438,7 @@ it("documents task date, stale-span, and current Today projection boundaries", (
 
   expect(source).toContain("server does not validate them as dates");
   expect(source).toContain("compares indexed values lexicographically");
-  expect(source).toContain("rewrite a different nearby");
+  expect(source).toMatch(/rewrite a different nearby\s+checkbox/);
   expect(source).toContain("both **Overdue** and **Due Today**");
 });
 

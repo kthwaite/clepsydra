@@ -259,3 +259,25 @@ The assertion alignment is committed separately as:
 ```text
 test(tasking): align cutover assertions
 ```
+
+## Stale-span boundary assertion fix
+
+Assertion review found that the aligned stale-span fragment no longer required
+the word `checkbox`. The assertion now uses
+`/rewrite a different nearby\\s+checkbox/`, which preserves the semantic
+boundary while tolerating Markdown line wrapping.
+
+Verification:
+
+```text
+bun run test src/docs/mdx-smoke.test.tsx
+```
+
+Result: 1 test file passed; 69 tests passed. The run emitted only the existing
+Vite native-config warning.
+
+The assertion fix is committed separately as:
+
+```text
+test(docs): preserve stale-span boundary
+```
