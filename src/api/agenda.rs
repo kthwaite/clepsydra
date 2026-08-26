@@ -67,6 +67,20 @@ pub enum AgendaItem {
 }
 
 fn parse_today(value: &str) -> Result<NaiveDate, ApiError> {
+    let bytes = value.as_bytes();
+    let has_exact_shape = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit());
+    if !has_exact_shape {
+        return Err(ApiError::bad_request(
+            "today must be a real date in YYYY-MM-DD format",
+        ));
+    }
+
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map_err(|_| ApiError::bad_request("today must be a real date in YYYY-MM-DD format"))
 }
@@ -341,8 +355,12 @@ pub async fn get_agenda(
     Query(query): Query<AgendaQuery>,
 ) -> Result<Json<AgendaResponse>, ApiError> {
     let today = parse_today(&query.today)?;
-    let tomorrow = today + Duration::days(1);
-    let end = today + Duration::days(7);
+    let tomorrow = today.checked_add_signed(Duration::days(1)).ok_or_else(|| {
+        ApiError::bad_request("today must allow a seven-day Agenda window")
+    })?;
+    let end = today.checked_add_signed(Duration::days(7)).ok_or_else(|| {
+        ApiError::bad_request("today must allow a seven-day Agenda window")
+    })?;
     let today_key = today.format("%Y-%m-%d").to_string();
     let tomorrow_key = tomorrow.format("%Y-%m-%d").to_string();
     let end_key = end.format("%Y-%m-%d").to_string();

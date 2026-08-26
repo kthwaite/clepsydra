@@ -278,7 +278,20 @@ async fn agenda_rejects_missing_malformed_and_impossible_today() {
         .await
         .assert_status_bad_request();
     server
+        .get("/api/vault/agenda?today=2026-8-6")
+        .await
+        .assert_status_bad_request();
+    server
         .get("/api/vault/agenda?today=2026-02-30")
+        .await
+        .assert_status_bad_request();
+}
+
+#[tokio::test]
+async fn agenda_rejects_extended_upper_bound_without_panicking() {
+    let (server, _tmp) = setup_server();
+    server
+        .get("/api/vault/agenda?today=%2B262142-12-31")
         .await
         .assert_status_bad_request();
 }
