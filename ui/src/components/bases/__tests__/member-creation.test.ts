@@ -3,6 +3,7 @@ import type {
   BaseDetailResponse,
   BaseFilter,
   BaseMemberCapability,
+  BaseMemberCreateRequest,
   BaseMemberCreateResponse,
   BaseMemberDiagnostic,
   BaseViewEvaluateResponse,
@@ -111,6 +112,20 @@ describe("resolveMemberCreationSession", () => {
     ).toMatchObject({ view: "Shelf", capability: shelfCapability });
   });
 
+  it("does not fold non-ASCII capability names", () => {
+    expect(
+      resolveMemberCreationSession({
+        kind: "definition",
+        baseSlug: "books",
+        requestedView: "ä",
+        detail: definition({
+          views: [{ name: "ä" }],
+          member_creation: [capability({ view: "Ä" })],
+        }),
+      }),
+    ).toBeUndefined();
+  });
+
   it("returns undefined when a definition has no active view", () => {
     expect(
       resolveMemberCreationSession({
@@ -205,38 +220,56 @@ describe("MemberCreationSession.submit", () => {
   it("creates once with a normalized definition request and returns the response", async () => {
     const create = vi.fn().mockResolvedValue(createdMember);
     const refreshAfterConflict = vi.fn();
-    const draft: BaseMemberDraftValue = {
-      title: "  Trim me  ",
-      fields: {
-        tags: [],
+    const retainedArray: BaseMemberDraftValue["fields"][string] = [];
+    const retainedObject: BaseMemberDraftValue["fields"][string] = {
+      label: "retained",
+    };
+    const fields = Object.assign(
+      Object.create({ inherited: "must not be submitted" }),
+      {
+        tags: retainedArray,
+        metadata: retainedObject,
         subtitle: "",
         featured: false,
         rating: 0,
         omittedNull: null,
         omittedUndefined: undefined,
-      } as unknown as BaseMemberDraftValue["fields"],
+      },
+    ) as unknown as BaseMemberDraftValue["fields"];
+    const draft: BaseMemberDraftValue = {
+      title: "  Trim me  ",
+      fields,
     };
 
     await expect(
       requiredSession().submit(draft, { create, refreshAfterConflict }),
     ).resolves.toEqual({ kind: "created", member: createdMember });
     expect(create).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith("books", {
+    const request = create.mock.calls[0]?.[1] as
+      | BaseMemberCreateRequest
+      | undefined;
+    expect(request).toEqual({
       base_revision: "detail-r1",
       view: "Reading",
       title: "Trim me",
       fields: {
         tags: [],
+        metadata: { label: "retained" },
         subtitle: "",
         featured: false,
         rating: 0,
       },
     });
+    expect(Object.hasOwn(request ?? {}, "embed_filter")).toBe(false);
+    expect(Object.hasOwn(request?.fields ?? {}, "inherited")).toBe(false);
+    expect(request?.fields?.tags).toBe(retainedArray);
+    expect(request?.fields?.metadata).toBe(retainedObject);
     expect(refreshAfterConflict).not.toHaveBeenCalled();
   });
 
   it("uses the evaluator revision and captures the embedded filter", async () => {
     const create = vi.fn().mockResolvedValue(createdMember);
+    const refreshAfterConflict = vi.fn();
     const embedFilter: BaseFilter = {
       field: "status",
       op: "eq",
@@ -252,29 +285,74 @@ describe("MemberCreationSession.submit", () => {
 
     await session.submit(
       { title: "New book", fields: { status: "reading" } },
-      { create, refreshAfterConflict: vi.fn() },
+      { create, refreshAfterConflict },
     );
 
     expect(create).toHaveBeenCalledOnce();
-    expect(create).toHaveBeenCalledWith("books", {
+    const request = create.mock.calls[0]?.[1] as
+      | BaseMemberCreateRequest
+      | undefined;
+    expect(request).toEqual({
       base_revision: "evaluator-r9",
       view: "Reading",
       title: "New book",
       fields: { status: "reading" },
-      embed_filter: embedFilter,
+      embed_filter: {
+        field: "status",
+        op: "eq",
+        value: "reading",
+      },
     });
+    expect(request?.embed_filter).toBe(embedFilter);
+    expect(refreshAfterConflict).not.toHaveBeenCalled();
+  });
+
+  it("includes an undefined embedded filter for an evaluation request", async () => {
+    const create = vi.fn().mockResolvedValue(createdMember);
+    const refreshAfterConflict = vi.fn();
+    const session = requiredSession({
+      kind: "evaluation",
+      baseSlug: "books",
+      requestedView: "Reading",
+      evaluation: evaluation(),
+    });
+
+    await session.submit(
+      { title: "New book", fields: {} },
+      { create, refreshAfterConflict },
+    );
+
+    expect(create).toHaveBeenCalledOnce();
+    const request = create.mock.calls[0]?.[1] as
+      | BaseMemberCreateRequest
+      | undefined;
+    expect(request).toEqual({
+      base_revision: "evaluation-r1",
+      view: "Reading",
+      title: "New book",
+      fields: {},
+      embed_filter: undefined,
+    });
+    expect(Object.hasOwn(request ?? {}, "embed_filter")).toBe(true);
+    expect(refreshAfterConflict).not.toHaveBeenCalled();
   });
 
   it.each(["base_revision_conflict", "revision_conflict"])(
     "refreshes once for recognized 409 code %s and returns conflict",
     async (code) => {
+      const detail: {
+        code: string;
+        diagnostics?: BaseMemberDiagnostic[];
+      } = { code, diagnostics: [fieldDiagnostic] };
       const failure = {
         status: 409,
         error: "The Base changed.",
-        detail: { code, diagnostics: [fieldDiagnostic] },
+        detail,
       };
       const create = vi.fn().mockRejectedValue(failure);
-      const refreshAfterConflict = vi.fn().mockResolvedValue(undefined);
+      const refreshAfterConflict = vi.fn(async () => {
+        delete failure.detail.diagnostics;
+      });
 
       await expect(
         requiredSession().submit(
@@ -284,7 +362,13 @@ describe("MemberCreationSession.submit", () => {
       ).resolves.toEqual({
         kind: "conflict",
         message: "The Base changed.",
-        diagnostics: [fieldDiagnostic],
+        diagnostics: [
+          {
+            scope: "field",
+            field: "rating",
+            message: "Rating is outside the allowed range.",
+          },
+        ],
       });
       expect(create).toHaveBeenCalledOnce();
       expect(refreshAfterConflict).toHaveBeenCalledOnce();
@@ -297,44 +381,65 @@ describe("MemberCreationSession.submit", () => {
       error: "A page already exists.",
       detail: { code: "page_conflict", diagnostics: [fieldDiagnostic] },
     };
+    const create = vi.fn().mockRejectedValue(failure);
     const refreshAfterConflict = vi.fn();
 
     await expect(
       requiredSession().submit(
         { title: "New book", fields: {} },
-        { create: vi.fn().mockRejectedValue(failure), refreshAfterConflict },
+        { create, refreshAfterConflict },
       ),
     ).resolves.toEqual({
       kind: "failed",
       message: "A page already exists.",
-      diagnostics: [fieldDiagnostic],
+      diagnostics: [
+        {
+          scope: "field",
+          field: "rating",
+          message: "Rating is outside the allowed range.",
+        },
+      ],
     });
+    expect(create).toHaveBeenCalledOnce();
     expect(refreshAfterConflict).not.toHaveBeenCalled();
   });
 
   it("returns a failed outcome when conflict refresh rejects", async () => {
+    const detail: {
+      code: string;
+      diagnostics?: BaseMemberDiagnostic[];
+    } = {
+      code: "base_revision_conflict",
+      diagnostics: [fieldDiagnostic],
+    };
     const failure = {
       status: 409,
       error: "The Base changed.",
-      detail: {
-        code: "base_revision_conflict",
-        diagnostics: [fieldDiagnostic],
-      },
+      detail,
     };
-    const refreshAfterConflict = vi
-      .fn()
-      .mockRejectedValue(new Error("Definition refresh failed."));
+    const create = vi.fn().mockRejectedValue(failure);
+    const refreshAfterConflict = vi.fn(async () => {
+      delete failure.detail.diagnostics;
+      throw new Error("Definition refresh failed.");
+    });
 
     await expect(
       requiredSession().submit(
         { title: "New book", fields: {} },
-        { create: vi.fn().mockRejectedValue(failure), refreshAfterConflict },
+        { create, refreshAfterConflict },
       ),
     ).resolves.toEqual({
       kind: "failed",
       message: "Definition refresh failed.",
-      diagnostics: [fieldDiagnostic],
+      diagnostics: [
+        {
+          scope: "field",
+          field: "rating",
+          message: "Rating is outside the allowed range.",
+        },
+      ],
     });
+    expect(create).toHaveBeenCalledOnce();
     expect(refreshAfterConflict).toHaveBeenCalledOnce();
   });
 
@@ -344,20 +449,21 @@ describe("MemberCreationSession.submit", () => {
       error: "The Base changed.",
       detail: { code: "revision_conflict" },
     };
+    const create = vi.fn().mockRejectedValue(failure);
+    const refreshAfterConflict = vi.fn().mockRejectedValue(null);
 
     await expect(
       requiredSession().submit(
         { title: "New book", fields: {} },
-        {
-          create: vi.fn().mockRejectedValue(failure),
-          refreshAfterConflict: vi.fn().mockRejectedValue(null),
-        },
+        { create, refreshAfterConflict },
       ),
     ).resolves.toEqual({
       kind: "failed",
       message: "Base definition could not be refreshed.",
       diagnostics: [],
     });
+    expect(create).toHaveBeenCalledOnce();
+    expect(refreshAfterConflict).toHaveBeenCalledOnce();
   });
 
   it("returns an ordinary API failure with valid diagnostics", async () => {
@@ -366,20 +472,27 @@ describe("MemberCreationSession.submit", () => {
       error: "Candidate rejected.",
       detail: { diagnostics: [fieldDiagnostic] },
     };
+    const create = vi.fn().mockRejectedValue(failure);
+    const refreshAfterConflict = vi.fn();
 
     await expect(
       requiredSession().submit(
         { title: "New book", fields: {} },
-        {
-          create: vi.fn().mockRejectedValue(failure),
-          refreshAfterConflict: vi.fn(),
-        },
+        { create, refreshAfterConflict },
       ),
     ).resolves.toEqual({
       kind: "failed",
       message: "Candidate rejected.",
-      diagnostics: [fieldDiagnostic],
+      diagnostics: [
+        {
+          scope: "field",
+          field: "rating",
+          message: "Rating is outside the allowed range.",
+        },
+      ],
     });
+    expect(create).toHaveBeenCalledOnce();
+    expect(refreshAfterConflict).not.toHaveBeenCalled();
   });
 
   it("falls back and discards malformed diagnostics", async () => {
@@ -388,19 +501,20 @@ describe("MemberCreationSession.submit", () => {
       error: "",
       detail: { diagnostics: [fieldDiagnostic, { scope: "field" }] },
     };
+    const create = vi.fn().mockRejectedValue(failure);
+    const refreshAfterConflict = vi.fn();
 
     await expect(
       requiredSession().submit(
         { title: "New book", fields: {} },
-        {
-          create: vi.fn().mockRejectedValue(failure),
-          refreshAfterConflict: vi.fn(),
-        },
+        { create, refreshAfterConflict },
       ),
     ).resolves.toEqual({
       kind: "failed",
       message: "Member could not be created.",
       diagnostics: [],
     });
+    expect(create).toHaveBeenCalledOnce();
+    expect(refreshAfterConflict).not.toHaveBeenCalled();
   });
 });
