@@ -31,6 +31,7 @@ pub mod import_doi;
 pub mod import_isbn;
 pub mod import_zotero;
 pub mod index;
+mod search;
 pub mod index_handle;
 pub mod index_policy;
 pub mod init;
