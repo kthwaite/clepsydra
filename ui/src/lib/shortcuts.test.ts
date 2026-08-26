@@ -133,7 +133,7 @@ describe("registry", () => {
     const shortcut = SHORTCUTS["editor.taskProperties"];
     expect(shortcut).toEqual({
       chord: { key: "p", mod: true, shift: true },
-      label: "Task properties",
+      label: "Todo properties",
       group: "Editor",
       scope: "editor",
       note: "on a task item",

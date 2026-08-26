@@ -145,13 +145,13 @@ describe("AgendaTile", () => {
     vi.useRealTimers();
   });
 
-  it("marks a checked task done through the task mutation boundary", async () => {
+  it("marks a checked Todo done through the Todo mutation boundary", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<AgendaTile />);
 
     await user.click(
       within(rowFor("Overdue high priority")).getByRole("button", {
-        name: /mark task done/i,
+        name: /mark Todo done/i,
       }),
     );
 

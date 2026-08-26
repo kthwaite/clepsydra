@@ -82,7 +82,7 @@ function renderEditor(initialValue: Descendant[]) {
 }
 
 function dialog(): HTMLElement {
-  return screen.getByRole("dialog", { name: "Task properties" });
+  return screen.getByRole("dialog", { name: "Todo properties" });
 }
 
 describe("SlateEditor task property popover", () => {
@@ -118,7 +118,7 @@ describe("SlateEditor task property popover", () => {
     const user = userEvent.setup();
     renderEditor([taskList(task("No properties yet", { checked: false }))]);
 
-    await user.click(screen.getByRole("button", { name: "Task properties" }));
+    await user.click(screen.getByRole("button", { name: "Todo properties" }));
 
     const popover = dialog();
     expect(within(popover).getByLabelText("Due")).toHaveValue("");
@@ -182,7 +182,7 @@ describe("SlateEditor task property popover", () => {
       ),
     ]);
 
-    await user.click(screen.getByRole("button", { name: "Task properties" }));
+    await user.click(screen.getByRole("button", { name: "Todo properties" }));
     const due = within(dialog()).getByLabelText("Due");
     fireEvent.change(due, { target: { value: "2026-09-01" } });
     await user.click(within(dialog()).getByRole("button", { name: "HIGH" }));
@@ -254,7 +254,7 @@ describe("SlateEditor task property popover", () => {
       taskList(task("Ship the picker", { checked: false })),
     ]);
 
-    await user.click(screen.getByRole("button", { name: "Task properties" }));
+    await user.click(screen.getByRole("button", { name: "Todo properties" }));
     fireEvent.change(within(dialog()).getByLabelText("Scheduled"), {
       target: { value: "2026-08-15" },
     });

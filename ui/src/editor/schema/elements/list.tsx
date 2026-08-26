@@ -29,7 +29,7 @@ import { makeParagraph } from "./paragraph";
 // Task property chips — read-only ledger stamps for due / scheduled / priority
 // ---------------------------------------------------------------------------
 
-/** Mirrors `priorityLabel` in `#/components/TaskList` so agenda and editor agree. */
+/** Mirrors Agenda Todo priority labels so the row and editor agree. */
 function priorityLabel(value: string): string {
   switch (value) {
     case "A":
@@ -130,7 +130,7 @@ function TaskPropertyControls({ element }: { element: ListItemElement }) {
       ) : (
         <button
           type="button"
-          aria-label="Task properties"
+          aria-label="Todo properties"
           className={cn(
             CHIP_CLASS,
             CHIP_INTERACTIVE,

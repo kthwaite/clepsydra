@@ -99,7 +99,7 @@ describe("task property chips", () => {
       priority,
     ]);
     expect(
-      screen.queryByRole("button", { name: "Task properties" }),
+      screen.queryByRole("button", { name: "Todo properties" }),
     ).toBeNull();
   });
 
@@ -153,7 +153,7 @@ describe("task property chips", () => {
   it("offers a hover-revealed control on a task with no properties", () => {
     renderList(list(item("no properties yet", { checked: false })));
 
-    const control = screen.getByRole("button", { name: "Task properties" });
+    const control = screen.getByRole("button", { name: "Todo properties" });
     expect(control).toHaveTextContent("+");
     expect(control).toHaveClass("opacity-0", "group-hover:opacity-100");
     expect(screen.getByText("no properties yet").closest("li")).toHaveClass(
@@ -224,7 +224,7 @@ describe("task property chips", () => {
     expect(openForPath).toHaveBeenCalledTimes(1);
     expect(openForPath).toHaveBeenCalledWith([0, 1], chip);
 
-    const control = screen.getByRole("button", { name: "Task properties" });
+    const control = screen.getByRole("button", { name: "Todo properties" });
     await user.click(control);
 
     expect(openForPath).toHaveBeenCalledTimes(2);
@@ -261,7 +261,7 @@ describe("task property chips", () => {
       screen.getByRole("button", { name: "Due 2026-08-20" }),
     ).toBeDisabled();
     expect(
-      screen.queryByRole("button", { name: "Task properties" }),
+      screen.queryByRole("button", { name: "Todo properties" }),
     ).toBeNull();
   });
 });

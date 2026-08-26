@@ -15,6 +15,19 @@ import {
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 
+export function priorityLabel(priority: string): string {
+  switch (priority.toUpperCase()) {
+    case "A":
+      return "HIGH";
+    case "B":
+      return "MED";
+    case "C":
+      return "LOW";
+    default:
+      return priority.toUpperCase();
+  }
+}
+
 function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
   const toggle = useToggleTaskStatus();
   const openTab = useOpenTab();
@@ -67,7 +80,7 @@ function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
 function AgendaTaskRow({ task }: { task: AgendaTask }) {
   const patch = usePatchTask();
   const openTab = useOpenTab();
-  const priorityLabel = PRI_LABEL[task.priority];
+  const taskPriorityLabel = PRI_LABEL[task.priority];
 
   return (
     <li className="flex items-start gap-2 px-2 py-2">
@@ -99,7 +112,7 @@ function AgendaTaskRow({ task }: { task: AgendaTask }) {
           {task.due && <Badge size="sm">{task.due}</Badge>}
           <Badge size="sm">
             {task.priority}
-            {priorityLabel ? ` ${priorityLabel}` : ""}
+            {taskPriorityLabel ? ` ${taskPriorityLabel}` : ""}
           </Badge>
           {task.project && <Badge size="sm">{task.project}</Badge>}
           {task.hold?.trim() && <Badge size="sm">Blocked</Badge>}
