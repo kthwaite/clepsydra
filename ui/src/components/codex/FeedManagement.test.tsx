@@ -543,6 +543,24 @@ describe("FeedManagement", () => {
       controls.getByRole("button", { name: /unsubscribe one example/i }),
     ).toBeVisible();
   });
+
+  it("gives mobile subscription actions 44px targets without changing desktop density", () => {
+    renderManagement();
+
+    for (const name of [/edit one example/i, /unsubscribe one example/i]) {
+      expect(screen.getByRole("button", { name })).toHaveClass(
+        "min-h-11",
+        "min-w-11",
+        "md:min-h-0",
+        "md:min-w-0",
+        "h-7",
+        "w-7",
+        "p-0",
+        "[&_svg]:h-4",
+        "[&_svg]:w-4",
+      );
+    }
+  });
   it("preserves the full subscribe draft through a conflict and retries once", async () => {
     let rejectSubscribe!: (error: Error) => void;
     let mutationOptions:

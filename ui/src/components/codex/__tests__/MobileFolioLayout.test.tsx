@@ -65,4 +65,39 @@ describe("MobileFolioLayout", () => {
       screen.queryByRole("dialog", { name: "Page relationships" }),
     ).not.toBeInTheDocument();
   });
+
+  it("sizes text fields without stretching checkbox and radio controls", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <MobileFolioLayout
+        header={<div>Dossier header</div>}
+        document={
+          <>
+            <input aria-label="Title" type="text" />
+            <input aria-label="Complete" type="checkbox" />
+            <input aria-label="Choice" type="radio" />
+          </>
+        }
+        details={<input aria-label="Detail title" type="text" />}
+        relationships={<div>Backlinks</div>}
+        contents={<input aria-label="Detail choice" type="checkbox" />}
+        onBack={vi.fn()}
+      />,
+    );
+
+    const layout = container.firstElementChild;
+    expect(layout).toHaveClass(
+      "[&_input:not([type=checkbox]):not([type=radio])]:min-h-11",
+      "[&_select]:min-h-11",
+    );
+    expect(layout).not.toHaveClass("[&_input]:min-h-11");
+
+    await user.click(screen.getByRole("button", { name: "Document details" }));
+    const dialog = screen.getByRole("dialog", { name: "Document details" });
+    expect(dialog).toHaveClass(
+      "[&_input:not([type=checkbox]):not([type=radio])]:min-h-11",
+      "[&_select]:min-h-11",
+    );
+    expect(dialog).not.toHaveClass("[&_input]:min-h-11");
+  });
 });

@@ -25,11 +25,11 @@ describe("PageEditorHeader read-only title", () => {
     expect(screen.queryByPlaceholderText("2026-08-07.md")).toBeNull();
   });
 
-  it("keeps the editable input when readOnlyTitle is absent", () => {
+  it("keeps the editable title field when readOnlyTitle is absent", () => {
     const onTitleChange = vi.fn();
     render(<PageEditorHeader {...baseProps} onTitleChange={onTitleChange} />);
-    const input = screen.getByDisplayValue("2026-08-07");
-    fireEvent.change(input, { target: { value: "renamed" } });
+    const titleField = screen.getByDisplayValue("2026-08-07");
+    fireEvent.change(titleField, { target: { value: "renamed" } });
     expect(onTitleChange).toHaveBeenCalledWith("renamed");
   });
 
@@ -95,5 +95,63 @@ describe("PageEditorHeader read-only title", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(
       "Unable to lock while an editor has unsaved changes",
     );
+  });
+
+  it("wraps a complete mobile title while retaining desktop and save semantics", () => {
+    const longTitle =
+      "A complete title that must remain visible on a narrow mobile folio";
+    const onTitleChange = vi.fn();
+    const onSaveNow = vi.fn();
+    render(
+      <PageEditorHeader
+        {...baseProps}
+        title={longTitle}
+        onTitleChange={onTitleChange}
+        onSaveNow={onSaveNow}
+      />,
+    );
+
+    const title = screen.getByRole("textbox", { name: "Page title" });
+    expect(title).toHaveValue(longTitle);
+    expect(title.tagName).toBe("TEXTAREA");
+    expect(title).toHaveAttribute("rows", "1");
+    expect(title).toHaveClass(
+      "field-sizing-content",
+      "whitespace-pre-wrap",
+      "break-words",
+      "md:field-sizing-fixed",
+      "md:whitespace-nowrap",
+    );
+
+    expect(fireEvent.keyDown(title, { key: "Enter" })).toBe(false);
+    fireEvent.change(title, { target: { value: "Reframed title" } });
+    fireEvent.blur(title);
+
+    expect(onTitleChange).toHaveBeenCalledWith("Reframed title");
+    expect(onSaveNow).toHaveBeenCalledOnce();
+  });
+
+  it("strips CR and LF from multiline title changes", () => {
+    const onTitleChange = vi.fn();
+    render(<PageEditorHeader {...baseProps} onTitleChange={onTitleChange} />);
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Page title" }), {
+      target: { value: "First line\r\nSecond line\nThird line\rFourth line" },
+    });
+
+    expect(onTitleChange).toHaveBeenCalledWith(
+      "First lineSecond lineThird lineFourth line",
+    );
+  });
+
+  it("allows Enter while an IME composition is active", () => {
+    const onTitleChange = vi.fn();
+    render(<PageEditorHeader {...baseProps} onTitleChange={onTitleChange} />);
+
+    const title = screen.getByRole("textbox", { name: "Page title" });
+    expect(
+      fireEvent.keyDown(title, { key: "Enter", isComposing: true }),
+    ).toBe(true);
+    expect(onTitleChange).not.toHaveBeenCalled();
   });
 });

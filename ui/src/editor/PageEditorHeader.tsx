@@ -98,14 +98,21 @@ export function PageEditorHeader({
           {readOnlyTitle}
         </h1>
       ) : (
-        <input
-          type="text"
+        <textarea
+          rows={1}
           aria-label="Page title"
           value={title}
-          onChange={(e) => onTitleChange(e.target.value)}
+          onChange={(event) =>
+            onTitleChange(event.currentTarget.value.replace(/[\r\n]/g, ""))
+          }
           onBlur={flush}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+              event.preventDefault();
+            }
+          }}
           placeholder={filename(path)}
-          className="w-full bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground max-md:min-h-11"
+          className="field-sizing-content block w-full max-w-full resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground max-md:min-h-11 md:field-sizing-fixed md:whitespace-nowrap md:break-normal md:overflow-x-auto"
         />
       )}
 

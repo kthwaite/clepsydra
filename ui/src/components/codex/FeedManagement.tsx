@@ -549,6 +549,7 @@ function FeedRow({
             <IconButton
               variant="ghost"
               aria-label={`Edit ${title}`}
+              className="min-h-11 min-w-11 md:min-h-0 md:min-w-0"
               onPress={onEdit}
             >
               <Pencil aria-hidden="true" />
@@ -556,7 +557,7 @@ function FeedRow({
             <IconButton
               variant="ghost"
               aria-label={`Unsubscribe ${title}`}
-              className="text-hot hover:bg-hot/10 hover:text-hot data-[hovered]:bg-hot/10 data-[hovered]:text-hot"
+              className="min-h-11 min-w-11 text-hot hover:bg-hot/10 hover:text-hot data-[hovered]:bg-hot/10 data-[hovered]:text-hot md:min-h-0 md:min-w-0"
               onPress={onDelete}
             >
               <Trash2 aria-hidden="true" />

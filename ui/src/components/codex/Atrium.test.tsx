@@ -251,6 +251,19 @@ describe("Atrium composition", () => {
     expect(atriumMocks.navigate).toHaveBeenCalledWith({ to: "/stats" });
   });
 
+  it("lets the Activity caption and Stats action wrap in the shared card header", () => {
+    render(<Atrium />);
+
+    const stats = screen.getByRole("button", { name: /Stats/i });
+    const actionCluster = stats.parentElement;
+    const header = actionCluster?.parentElement;
+    expect(header).toHaveClass("min-w-0", "flex-wrap");
+    expect(actionCluster).toHaveClass("min-w-0", "flex-wrap");
+    expect(screen.getByText("FIG. IV — CAPTURES PER DAY · UTC")).toHaveClass(
+      "whitespace-normal",
+    );
+  });
+
   it("keeps daystart compact and action-oriented without Julian time", async () => {
     const user = userEvent.setup();
     render(<Atrium />);

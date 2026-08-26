@@ -264,4 +264,32 @@ describe("task property chips", () => {
       screen.queryByRole("button", { name: "Todo properties" }),
     ).toBeNull();
   });
+
+  it("removes an empty property control from mobile layout without hiding chips", () => {
+    const bareText =
+      "A long mobile task label that needs the full remaining content width";
+    renderList(
+      list(
+        item(bareText, { checked: false }),
+        item("dated task", {
+          checked: false,
+          properties: { due: "2026-08-20" },
+        }),
+      ),
+    );
+
+    const bareProperties = chipContainer(bareText);
+    const visibleProperties = chipContainer("dated task");
+    const bareContent = screen
+      .getByText(bareText)
+      .closest("li")
+      ?.querySelector("[data-task-content]");
+
+    expect(bareProperties).toHaveClass("max-md:hidden");
+    expect(bareContent).toHaveClass("min-w-0", "flex-1");
+    expect(visibleProperties).not.toHaveClass("max-md:hidden");
+    expect(
+      screen.getByRole("button", { name: "Due 2026-08-20" }),
+    ).toBeEnabled();
+  });
 });

@@ -33,7 +33,7 @@ export function MobileFolioLayout({
   const title = sheet === "details" ? "Document details" : "Page relationships";
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col bg-paper [&_button]:min-h-11 [&_input]:min-h-11 [&_select]:min-h-11">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-paper [&_button]:min-h-11 [&_input:not([type=checkbox]):not([type=radio])]:min-h-11 [&_select]:min-h-11">
       <nav
         aria-label="Page controls"
         className="flex min-h-11 shrink-0 items-stretch border-b border-rule"
@@ -75,7 +75,7 @@ export function MobileFolioLayout({
         <Modal className="h-dvh w-full max-w-md bg-paper-2 shadow-lg outline-none">
           <Dialog
             aria-label={title}
-            className="flex h-full min-h-0 flex-col outline-none [&_button]:min-h-11 [&_input]:min-h-11 [&_select]:min-h-11 [&_[role=option]]:min-h-11"
+            className="flex h-full min-h-0 flex-col outline-none [&_button]:min-h-11 [&_input:not([type=checkbox]):not([type=radio])]:min-h-11 [&_select]:min-h-11 [&_[role=option]]:min-h-11"
           >
             <div className="flex min-h-11 shrink-0 items-stretch border-b border-rule pl-4">
               <Heading

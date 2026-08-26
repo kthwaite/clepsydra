@@ -291,6 +291,7 @@ export function Atrium() {
         label="Activity · Rolling 26 weeks"
         pip="cool"
         caption="FIG. IV — CAPTURES PER DAY · UTC"
+        wrapHeader
         action={
           <button
             type="button"

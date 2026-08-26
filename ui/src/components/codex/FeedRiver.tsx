@@ -526,7 +526,7 @@ function EntryRow({
         isDeparting && "cl-feed-exit",
       )}
     >
-      <div className="grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)_auto] items-start gap-3 px-2.5 py-3 md:px-3.5">
+      <div className="grid w-full min-w-0 grid-cols-[7px_minmax(0,1fr)] items-start gap-3 px-2.5 py-3 md:grid-cols-[7px_minmax(0,1fr)_auto] md:px-3.5">
         <span
           aria-hidden="true"
           className={`mt-1.5 h-[7px] w-[7px] ${entry.read ? "bg-ink-mute" : "bg-accent"}`}
@@ -571,7 +571,7 @@ function EntryRow({
         <div
           data-entry-actions={entry.id}
           className={cn(
-            "flex shrink-0 flex-wrap items-center justify-end gap-1 transition-opacity",
+            "col-start-2 row-start-2 flex shrink-0 flex-wrap items-center justify-end gap-1 transition-opacity md:col-start-3 md:row-start-1",
             isEditingTags
               ? "opacity-100"
               : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100",

@@ -727,6 +727,26 @@ describe("FeedRiver", () => {
     }
   });
 
+  it("keeps compact content flexible while placing actions on a mobile row and in the desktop action column", () => {
+    renderRiver({ view: "all" }, true);
+
+    const row = screen.getByRole("article", { name: /cache semantics/i });
+    const layout = row.firstElementChild;
+    const actions = row.querySelector("[data-entry-actions='101']");
+    expect(layout).toHaveClass(
+      "grid-cols-[7px_minmax(0,1fr)]",
+      "md:grid-cols-[7px_minmax(0,1fr)_auto]",
+    );
+    expect(actions).toHaveClass(
+      "col-start-2",
+      "row-start-2",
+      "flex",
+      "flex-wrap",
+      "md:col-start-3",
+      "md:row-start-1",
+    );
+  });
+
   it("reveals compact row actions on hover or focus while keeping them tabbable", async () => {
     const user = userEvent.setup();
     renderRiver({ view: "all" }, true);

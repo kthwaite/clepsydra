@@ -1,4 +1,5 @@
 import type { List } from "mdast";
+import { Children } from "react";
 import {
   type Editor,
   type Element,
@@ -111,7 +112,10 @@ function TaskPropertyControls({ element }: { element: ListItemElement }) {
     <span
       contentEditable={false}
       data-task-properties=""
-      className="ml-2 shrink-0 select-none space-x-1 whitespace-nowrap"
+      className={cn(
+        "ml-2 shrink-0 select-none space-x-1 whitespace-nowrap",
+        chips.length === 0 && "max-md:hidden",
+      )}
     >
       {chips.length > 0 ? (
         chips.map((chip) => (
@@ -172,19 +176,29 @@ function ListItem({
     );
   }
   const label = Node.string(element);
+  const renderedChildren = Children.toArray(children);
+  const firstNestedListIndex = element.children.findIndex(
+    (child) =>
+      SlateElement.isElement(child) &&
+      (child.type === "bulleted-list" || child.type === "numbered-list"),
+  );
+  const firstRowEnd =
+    firstNestedListIndex === -1
+      ? renderedChildren.length
+      : firstNestedListIndex;
 
   return (
     <li
       {...attributes}
       data-block-id={element.blockId}
       className={cn(
-        "group flex items-baseline",
+        "group flex items-baseline max-md:items-start",
         checked === true && "line-through text-muted-foreground",
       )}
     >
-      <span
+      <label
         contentEditable={false}
-        className="mr-2 inline-flex cursor-pointer select-none"
+        className="mr-2 inline-flex size-4 shrink-0 cursor-pointer select-none max-md:-ml-3.5 max-md:min-h-11 max-md:min-w-11 max-md:items-start max-md:justify-start max-md:pt-1 max-md:pl-3.5"
       >
         <input
           type="checkbox"
@@ -204,11 +218,14 @@ function ListItem({
           }}
           className="accent-foreground"
         />
-      </span>
+      </label>
       {/* Chips sit outside the content column so they stay on the first line
           even when the item carries a nested sub-list. */}
       <div data-task-content="" className="min-w-0 flex-1">
-        {children}
+        <div data-task-content-row="" className="max-md:min-h-11">
+          {renderedChildren.slice(0, firstRowEnd)}
+        </div>
+        {renderedChildren.slice(firstRowEnd)}
       </div>
       <TaskPropertyControls element={element} />
     </li>
