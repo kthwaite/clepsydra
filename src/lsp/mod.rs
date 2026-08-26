@@ -431,7 +431,23 @@ impl LanguageServer for LspBackend {
         // Wikilink completion works in body and frontmatter alike — relation
         // values (`series = ["[[…`) delegate to the same completer.
         if let Some(prefix) = completion::wikilink_prefix(&line_text, character) {
-            let items = self.complete_wikilinks(&prefix).await?;
+            let mut items = self.complete_wikilinks(&prefix).await?;
+            let today = chrono::Local::now().date_naive();
+            items.extend(
+                completion::date_word_candidates(&prefix, today)
+                    .into_iter()
+                    .map(|(word, date)| {
+                        let date_str = date.format("%Y-%m-%d").to_string();
+                        CompletionItem {
+                            label: format!("{word} → {date_str}"),
+                            kind: Some(CompletionItemKind::EVENT),
+                            detail: Some("journal".to_string()),
+                            insert_text: Some(date_str),
+                            filter_text: Some(word.to_string()),
+                            ..Default::default()
+                        }
+                    }),
+            );
             return Ok(Some(CompletionResponse::Array(items)));
         }
 
@@ -2543,6 +2559,41 @@ mod tests {
             other => panic!("expected an (empty) array, got {other:?}"),
         };
         assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn completion_offers_date_words_in_wikilinks() {
+        let (backend, _tmp) = make_backend(&[("Src.md", "# Src\n\n[[tod\n")]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\n[[tod\n").await;
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 5,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+        let resp = backend.completion(params).await.unwrap();
+        let items = match resp {
+            Some(CompletionResponse::Array(v)) => v,
+            other => panic!("expected completions, got {other:?}"),
+        };
+        let item = items
+            .iter()
+            .find(|i| i.label.starts_with("today"))
+            .expect("date word offered");
+        let expected = chrono::Local::now()
+            .date_naive()
+            .format("%Y-%m-%d")
+            .to_string();
+        assert_eq!(item.insert_text.as_deref(), Some(expected.as_str()));
+        assert_eq!(item.filter_text.as_deref(), Some("today"));
+        assert_eq!(item.detail.as_deref(), Some("journal"));
     }
 
     #[tokio::test]

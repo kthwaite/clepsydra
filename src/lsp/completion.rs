@@ -1,3 +1,5 @@
+use chrono::Datelike;
+
 /// Detect if the cursor is in a wikilink context.
 /// Returns the filter prefix (text between `[[` and cursor) if found.
 pub fn wikilink_prefix(line_text: &str, character: usize) -> Option<String> {
@@ -101,6 +103,53 @@ fn clamp_to_char_boundary(s: &str, offset: usize) -> usize {
         i -= 1;
     }
     i
+}
+
+/// Date words offered inside `[[` completion, in fixed presentation order.
+const DATE_WORDS: [&str; 10] = [
+    "today",
+    "tomorrow",
+    "yesterday",
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+];
+
+/// Match a typed wikilink prefix against the date vocabulary and resolve each
+/// matching word to a concrete date. Weekdays resolve to the next occurrence
+/// strictly after `today`. An empty prefix matches nothing.
+pub fn date_word_candidates(
+    prefix: &str,
+    today: chrono::NaiveDate,
+) -> Vec<(&'static str, chrono::NaiveDate)> {
+    if prefix.is_empty() {
+        return Vec::new();
+    }
+    let needle = prefix.to_ascii_lowercase();
+    DATE_WORDS
+        .iter()
+        .filter(|w| w.starts_with(&needle))
+        .map(|&word| {
+            let date = match word {
+                "today" => today,
+                "tomorrow" => today + chrono::Duration::days(1),
+                "yesterday" => today - chrono::Duration::days(1),
+                weekday => {
+                    let target: chrono::Weekday = weekday.parse().expect("valid weekday word");
+                    let mut d = today + chrono::Duration::days(1);
+                    while d.weekday() != target {
+                        d += chrono::Duration::days(1);
+                    }
+                    d
+                }
+            };
+            (word, date)
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -280,5 +329,70 @@ mod tests {
     fn block_ref_mid_codepoint_offset_is_safe() {
         // Offset 1 is mid-codepoint of 你 (3 bytes) — must not panic.
         assert!(block_ref_prefix("你((x", 1).is_none());
+    }
+
+    // ---- date_word_candidates tests ----
+    // 2026-08-26 is a Wednesday.
+
+    fn wed() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 8, 26).unwrap()
+    }
+
+    #[test]
+    fn date_words_today_tomorrow_yesterday() {
+        let c = date_word_candidates("tod", wed());
+        assert_eq!(c, vec![("today", wed())]);
+        let c = date_word_candidates("tomorrow", wed());
+        assert_eq!(
+            c,
+            vec![(
+                "tomorrow",
+                chrono::NaiveDate::from_ymd_opt(2026, 8, 27).unwrap()
+            )]
+        );
+        let c = date_word_candidates("yes", wed());
+        assert_eq!(
+            c,
+            vec![(
+                "yesterday",
+                chrono::NaiveDate::from_ymd_opt(2026, 8, 25).unwrap()
+            )]
+        );
+    }
+
+    #[test]
+    fn date_words_weekday_is_next_occurrence() {
+        // "friday" from Wednesday 2026-08-26 → 2026-08-28.
+        let c = date_word_candidates("fri", wed());
+        assert_eq!(
+            c,
+            vec![(
+                "friday",
+                chrono::NaiveDate::from_ymd_opt(2026, 8, 28).unwrap()
+            )]
+        );
+        // Same weekday resolves a full week ahead, never today.
+        let c = date_word_candidates("wednesday", wed());
+        assert_eq!(
+            c,
+            vec![(
+                "wednesday",
+                chrono::NaiveDate::from_ymd_opt(2026, 9, 2).unwrap()
+            )]
+        );
+    }
+
+    #[test]
+    fn date_words_case_insensitive_and_multi_match() {
+        let c = date_word_candidates("T", wed());
+        let words: Vec<&str> = c.iter().map(|(w, _)| *w).collect();
+        assert_eq!(words, vec!["today", "tomorrow", "tuesday", "thursday"]);
+    }
+
+    #[test]
+    fn date_words_no_match_for_page_titles() {
+        assert!(date_word_candidates("Design", wed()).is_empty());
+        // Empty prefix offers nothing — plain [[ completion stays page-only.
+        assert!(date_word_candidates("", wed()).is_empty());
     }
 }
