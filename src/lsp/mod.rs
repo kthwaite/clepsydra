@@ -355,6 +355,12 @@ impl LanguageServer for LspBackend {
                 let vault_path = crate::vault::path::VaultPath::new(&path)
                     .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
                 let abs_path = state.vault.resolve(&vault_path);
+                let backlink_count = state
+                    .index
+                    .backlinks(vault_path, 0)
+                    .await
+                    .map(|bl| bl.len())
+                    .unwrap_or(0);
                 let (title, preview) = match tokio::fs::read_to_string(&abs_path).await {
                     Ok(file_content) => {
                         let target = document::Document::from_text(&file_content, 0);
@@ -363,7 +369,12 @@ impl LanguageServer for LspBackend {
                     }
                     Err(_) => (None, String::new()),
                 };
-                crate::lsp::hover::format_hover_resolved(&path, title.as_deref(), &preview)
+                crate::lsp::hover::format_hover_resolved(
+                    &path,
+                    title.as_deref(),
+                    &preview,
+                    backlink_count,
+                )
             }
             None => crate::lsp::hover::format_hover_unresolved(&link.target_raw),
         };
@@ -1891,6 +1902,32 @@ mod tests {
             panic!("expected markup hover");
         };
         assert!(value.contains("Target Page"));
+    }
+
+    #[tokio::test]
+    async fn hover_shows_backlink_count() {
+        let (backend, _tmp) = make_backend(&[
+            ("Target.md", "# Target\n\nbody\n"),
+            ("SrcA.md", "# A\n\nsee [[Target]]\n"),
+            ("SrcB.md", "# B\n\nalso [[Target]]\n"),
+        ]);
+        let uri = uri_for(&backend, "SrcA.md");
+        open_doc(&backend, &uri, "# A\n\nsee [[Target]]\n").await;
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 8,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+        let hover = backend.hover(params).await.unwrap().expect("hover content");
+        let HoverContents::Markup(m) = hover.contents else {
+            panic!("expected markup");
+        };
+        assert!(m.value.contains("*2 backlinks*"), "got: {}", m.value);
     }
 
     #[tokio::test]

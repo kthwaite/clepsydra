@@ -2,11 +2,21 @@
 
 /// Markdown shown when hovering a link that resolves to a page.
 ///
-/// Produces a bold title line, a code-span path line, a `---` rule, then the
-/// preview (see the `resolved_format_exact` test for the byte-exact layout).
-pub fn format_hover_resolved(path: &str, title: Option<&str>, preview: &str) -> String {
+/// Bold title, code-span path, an italic backlink count, a `---` rule, then
+/// the preview (see the `resolved_format_exact` test for the exact layout).
+pub fn format_hover_resolved(
+    path: &str,
+    title: Option<&str>,
+    preview: &str,
+    backlink_count: usize,
+) -> String {
     let display_title = title.unwrap_or(path);
-    format!("**{display_title}**\n`{path}`\n\n---\n\n{preview}")
+    let noun = if backlink_count == 1 {
+        "backlink"
+    } else {
+        "backlinks"
+    };
+    format!("**{display_title}**\n`{path}`\n*{backlink_count} {noun}*\n\n---\n\n{preview}")
 }
 
 /// Markdown shown when hovering a link with no resolvable target.
@@ -38,23 +48,25 @@ mod tests {
 
     #[test]
     fn resolved_uses_title_when_present() {
-        let s = format_hover_resolved("A.md", Some("Alpha"), "preview");
+        let s = format_hover_resolved("A.md", Some("Alpha"), "preview", 2);
         assert!(s.contains("**Alpha**"));
         assert!(s.contains("A.md"));
         assert!(s.contains("preview"));
+        assert!(s.contains("*2 backlinks*"));
     }
 
     #[test]
     fn resolved_falls_back_to_path() {
-        let s = format_hover_resolved("A.md", None, "p");
+        let s = format_hover_resolved("A.md", None, "p", 0);
         // When no title, path is used as display title (bold) and also shown as code
         assert!(s.contains("**A.md**"));
+        assert!(s.contains("*0 backlinks*"));
     }
 
     #[test]
     fn resolved_format_exact() {
-        let s = format_hover_resolved("A.md", Some("Alpha"), "hello");
-        assert_eq!(s, "**Alpha**\n`A.md`\n\n---\n\nhello");
+        let s = format_hover_resolved("A.md", Some("Alpha"), "hello", 1);
+        assert_eq!(s, "**Alpha**\n`A.md`\n*1 backlink*\n\n---\n\nhello");
     }
 
     #[test]
