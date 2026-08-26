@@ -167,9 +167,8 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
             label="Incomplete tasks"
             hint={`${carryover} task${carryover === 1 ? "" : "s"}`}
           >
-            <div
+            <fieldset
               className="flex gap-[6px]"
-              role="group"
               aria-label="Incomplete tasks"
               data-testid="seal-cycle-carry-opts"
             >
@@ -184,7 +183,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
                   {o.label}
                 </button>
               ))}
-            </div>
+            </fieldset>
           </EdField>
         ) : (
           <div

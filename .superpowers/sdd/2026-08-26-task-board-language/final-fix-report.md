@@ -189,3 +189,36 @@ The verification fix is committed separately as:
 ```text
 fix(tasking): remove stale Kanban import
 ```
+
+## Semantic carry-group verification fix
+
+Focused lint found that the carry-choice wrapper used `role=\"group\"` on a
+`div`. It now uses a semantic `fieldset` with the same `aria-label`, classes,
+test ID, buttons, and accessible group name.
+
+Verification:
+
+```text
+bunx biome lint src/components/tasking/SealCycleModal.tsx
+```
+
+Result: passed; 1 file checked with no diagnostics and no fixes applied.
+
+```text
+bun run test src/components/tasking/__tests__/cycleModals.test.tsx
+```
+
+Result: 1 test file passed; 70 tests passed. The run emitted only the existing
+Vite native-config warning.
+
+```text
+bun run typecheck
+```
+
+Result: passed (`tsc --noEmit --project tsconfig.app.json`).
+
+The semantic fix is committed separately as:
+
+```text
+fix(tasking): use semantic carry group
+```
