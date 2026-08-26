@@ -4,6 +4,7 @@ import type {
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
+import { createFilterDiagnosticScope } from "./filter-diagnostics";
 import {
   type FilterPath,
   type FilterWrapKind,
@@ -45,13 +46,18 @@ export function FilterGroupEditor({
     rows: childRows,
     setRows: setChildRows,
   } = useIdentifiedRows(logicalChildren, "filter");
+  const diagnosticScope = createFilterDiagnosticScope({
+    root: diagnosticRoot,
+    path,
+    diagnostics,
+    registerFocus,
+  });
   // A membership predicate over tags or aliases — however it is spelled in the
   // AST — authors as one row rather than a hand-nested group.
   if (readTagCondition(value)) {
     return (
       <TagConditionEditor
         value={value}
-        path={path}
         position={position}
         properties={properties}
         onChange={(next) =>
@@ -64,9 +70,7 @@ export function FilterGroupEditor({
             ),
           )
         }
-        registerFocus={registerFocus}
-        diagnostics={diagnostics}
-        diagnosticRoot={diagnosticRoot}
+        diagnosticScope={diagnosticScope}
       />
     );
   }
@@ -75,15 +79,12 @@ export function FilterGroupEditor({
     return (
       <FilterComparisonEditor
         value={value}
-        path={path}
         position={position}
         properties={properties}
         onChange={(next) =>
           onChange(updateFilterTree(root, { type: "replace", path, value: next }))
         }
-        registerFocus={registerFocus}
-        diagnostics={diagnostics}
-        diagnosticRoot={diagnosticRoot}
+        diagnosticScope={diagnosticScope}
       />
     );
   }

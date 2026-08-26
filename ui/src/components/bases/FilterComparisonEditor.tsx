@@ -7,12 +7,8 @@ import {
   SelectItem,
   SelectSection,
 } from "#/components/ui/select";
-import type {
-  BaseDiagnostic,
-  RegisterFocusTarget,
-} from "./BaseDefinitionWorkspace";
 import { type DraftProperty, operatorsFor } from "./definition-model";
-import type { FilterPath } from "./filter-tree";
+import type { FilterDiagnosticScope } from "./filter-diagnostics";
 
 interface FieldCapability {
   key: string;
@@ -40,18 +36,6 @@ const VALUELESS_OPERATORS: Partial<Record<FilterOp, true>> = {
   is_empty: true,
   not_empty: true,
 };
-
-function diagnosticPath(
-  root: string,
-  path: FilterPath,
-  control: "field" | "op" | "value",
-) {
-  let result = root;
-  for (const segment of path) {
-    result += typeof segment === "number" ? `[${segment}]` : `.${segment}`;
-  }
-  return `${result}.${control}`;
-}
 
 function comparison(field: string, op: FilterOp, value: unknown): BaseFilter {
   return VALUELESS_OPERATORS[op] ? { field, op } : { field, op, value };
@@ -141,24 +125,18 @@ function ConditionalValueSelect({
 
 interface FilterComparisonEditorProps {
   value: BaseFilter;
-  path: FilterPath;
   position: number;
   properties: DraftProperty[];
   onChange(value: BaseFilter): void;
-  registerFocus: RegisterFocusTarget;
-  diagnostics?: BaseDiagnostic[];
-  diagnosticRoot?: string;
+  diagnosticScope: FilterDiagnosticScope;
 }
 
 export function FilterComparisonEditor({
   value,
-  path,
   position,
   properties,
   onChange,
-  registerFocus,
-  diagnostics = [],
-  diagnosticRoot = "filter",
+  diagnosticScope,
 }: FilterComparisonEditorProps) {
   const [relationSuggestions, setRelationSuggestions] = useState<string[]>([]);
   const [freeformDraft, setFreeformDraft] = useState<string>();
@@ -212,14 +190,9 @@ export function FilterComparisonEditor({
   const missingOptions = selectedOptionValues.filter(
     (option) => !declaredOptions.includes(option),
   );
-  const diagnosticsFor = (control: "field" | "op" | "value") =>
-    diagnostics.filter(
-      (diagnostic) =>
-        diagnostic.path === diagnosticPath(diagnosticRoot, path, control),
-    );
-  const fieldDiagnostics = diagnosticsFor("field");
-  const operatorDiagnostics = diagnosticsFor("op");
-  const valueDiagnostics = diagnosticsFor("value");
+  const fieldDiagnostics = diagnosticScope.exact("field");
+  const operatorDiagnostics = diagnosticScope.exact("op");
+  const valueDiagnostics = diagnosticScope.exact("value");
   const fieldInvalid = fieldDiagnostics.some(
     (diagnostic) => diagnostic.severity === "error",
   );
@@ -295,10 +268,7 @@ export function FilterComparisonEditor({
           label="Field"
           aria-label={`Field for condition ${position}`}
           triggerRef={(element) =>
-            registerFocus(
-              diagnosticPath(diagnosticRoot, path, "field"),
-              element,
-            )
+            diagnosticScope.register("field", element)
           }
           value={filterValue.field}
           isInvalid={fieldInvalid}
@@ -363,9 +333,7 @@ export function FilterComparisonEditor({
         <Select
           label="Operator"
           aria-label={`Operator for condition ${position}`}
-          triggerRef={(element) =>
-            registerFocus(diagnosticPath(diagnosticRoot, path, "op"), element)
-          }
+          triggerRef={(element) => diagnosticScope.register("op", element)}
           isInvalid={operatorInvalid}
           aria-describedby={
             operatorDiagnostics.length > 0 ? operatorErrorId : undefined
@@ -431,10 +399,7 @@ export function FilterComparisonEditor({
               }
               choices={BOOLEAN_CHOICES}
               triggerRef={(element) =>
-                registerFocus(
-                  diagnosticPath(diagnosticRoot, path, "value"),
-                  element,
-                )
+                diagnosticScope.register("value", element)
               }
               onSingleChange={(selectedValue) =>
                 onChange(
@@ -475,10 +440,7 @@ export function FilterComparisonEditor({
                 })),
               ]}
               triggerRef={(element) =>
-                registerFocus(
-                  diagnosticPath(diagnosticRoot, path, "value"),
-                  element,
-                )
+                diagnosticScope.register("value", element)
               }
               onSingleChange={(selectedValue) =>
                 onChange(
@@ -504,10 +466,7 @@ export function FilterComparisonEditor({
               <span className={labelClass}>Value</span>
               <input
                 ref={(element) =>
-                  registerFocus(
-                    diagnosticPath(diagnosticRoot, path, "value"),
-                    element,
-                  )
+                  diagnosticScope.register("value", element)
                 }
                 aria-label={`Value for condition ${position}`}
                 aria-invalid={valueInvalid || undefined}

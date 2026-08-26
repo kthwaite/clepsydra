@@ -4,12 +4,8 @@ import { useTags } from "#/api/index";
 import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TagInput } from "#/components/ui/tag-input";
-import type {
-  BaseDiagnostic,
-  RegisterFocusTarget,
-} from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
-import type { FilterPath } from "./filter-tree";
+import type { FilterDiagnosticScope } from "./filter-diagnostics";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
 import {
   readTagCondition,
@@ -21,13 +17,10 @@ import {
 
 interface TagConditionEditorProps {
   value: BaseFilter;
-  path: FilterPath;
   position: number;
   properties: DraftProperty[];
   onChange(value: BaseFilter | undefined): void;
-  registerFocus: RegisterFocusTarget;
-  diagnostics?: BaseDiagnostic[];
-  diagnosticRoot?: string;
+  diagnosticScope: FilterDiagnosticScope;
 }
 
 const FIELD_LABELS: Record<TagConditionField, string> = {
@@ -41,45 +34,16 @@ const QUANTIFIER_LABELS: Record<TagQuantifier, string> = {
   none_of: "Has none of",
 };
 
-/** The AST path string this row occupies, in the notation the validator uses
- * for diagnostics (`filter.all[1]`). */
-export function filterPathString(root: string, path: FilterPath): string {
-  let result = root;
-  for (const segment of path) {
-    result += typeof segment === "number" ? `[${segment}]` : `.${segment}`;
-  }
-  return result;
-}
-
-/** A tag row stands in for a whole subtree — an `all` group of memberships, or
- * a negated `in` — so it must show the diagnostics addressed to any node
- * inside it, not only to its own path. */
-export function subsumedDiagnostics(
-  diagnostics: readonly BaseDiagnostic[],
-  prefix: string,
-): BaseDiagnostic[] {
-  return diagnostics.filter(
-    (diagnostic) =>
-      typeof diagnostic.path === "string" &&
-      (diagnostic.path === prefix ||
-        diagnostic.path.startsWith(`${prefix}.`) ||
-        diagnostic.path.startsWith(`${prefix}[`)),
-  );
-}
-
 /** Membership authoring for the multi-valued system fields: one row for
  * has-all-of / has-any-of / has-none-of, serialized through the existing
  * filter AST (see `tag-condition.ts`). Anything the row cannot express stays
  * available behind the advanced condition it wraps. */
 export function TagConditionEditor({
   value,
-  path,
   position,
   properties,
   onChange,
-  registerFocus,
-  diagnostics = [],
-  diagnosticRoot = "filter",
+  diagnosticScope,
 }: TagConditionEditorProps) {
   const [advanced, setAdvanced] = useState(false);
   const [pendingQuantifier, setPendingQuantifier] = useState<TagQuantifier>();
@@ -92,13 +56,10 @@ export function TagConditionEditor({
       <div className="grid gap-2">
         <FilterComparisonEditor
           value={value}
-          path={path}
           position={position}
           properties={properties}
           onChange={(next) => onChange(next)}
-          registerFocus={registerFocus}
-          diagnostics={diagnostics}
-          diagnosticRoot={diagnosticRoot}
+          diagnosticScope={diagnosticScope}
         />
         {condition ? (
           <div>
@@ -117,8 +78,7 @@ export function TagConditionEditor({
     condition.values.length >= 2
       ? condition.quantifier
       : (pendingQuantifier ?? condition.quantifier);
-  const prefix = filterPathString(diagnosticRoot, path);
-  const rowDiagnostics = subsumedDiagnostics(diagnostics, prefix);
+  const rowDiagnostics = diagnosticScope.subtree();
   const invalid = rowDiagnostics.some(
     (diagnostic) => diagnostic.severity === "error",
   );
@@ -204,10 +164,9 @@ export function TagConditionEditor({
             <p
               key={`${diagnostic.path}:${diagnostic.message}`}
               role={diagnostic.severity === "error" ? "alert" : undefined}
-              ref={(element) => {
-                if (typeof diagnostic.path !== "string") return;
-                registerFocus(diagnostic.path, element);
-              }}
+              ref={(element) =>
+                diagnosticScope.register("value", element)
+              }
               tabIndex={-1}
               className={
                 diagnostic.severity === "error"

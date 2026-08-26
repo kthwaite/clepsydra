@@ -2,6 +2,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { BaseFilter } from "#/api/bases";
+import type { BaseDiagnostic } from "#/components/bases/BaseDefinitionWorkspace";
+import { createFilterDiagnosticScope } from "#/components/bases/filter-diagnostics";
 import { TagConditionEditor } from "#/components/bases/TagConditionEditor";
 
 const tagsQuery = vi.hoisted(() => ({
@@ -24,19 +26,22 @@ function latest(mock: Mock): BaseFilter | undefined {
   return mock.mock.calls.at(-1)?.[0];
 }
 
-function renderRow(value: BaseFilter, diagnostics = []) {
+function renderRow(value: BaseFilter, diagnostics: BaseDiagnostic[] = []) {
   const onChange = vi.fn();
   const registerFocus = vi.fn();
+  const diagnosticScope = createFilterDiagnosticScope({
+    root: "filter",
+    path: [],
+    diagnostics,
+    registerFocus,
+  });
   render(
     <TagConditionEditor
       value={value}
-      path={[]}
       position={1}
       properties={[]}
       onChange={onChange}
-      registerFocus={registerFocus}
-      diagnostics={diagnostics}
-      diagnosticRoot="filter"
+      diagnosticScope={diagnosticScope}
     />,
   );
   return { onChange, registerFocus };
@@ -188,12 +193,12 @@ describe("TagConditionEditor", () => {
           message: "unknown tag `wine`",
           path: "filter.all[1].value",
         },
-      ] as never,
+      ] as BaseDiagnostic[],
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent("unknown tag `wine`");
     expect(registerFocus).toHaveBeenCalledWith(
-      "filter.all[1].value",
+      "filter.value",
       expect.any(HTMLElement),
     );
   });
