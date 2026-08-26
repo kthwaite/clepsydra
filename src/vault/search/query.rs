@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::VecDeque, fmt};
 
 use crate::vault::kind::Kind;
 
@@ -125,7 +125,7 @@ impl fmt::Display for SearchQueryError {
 
 impl std::error::Error for SearchQueryError {}
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 enum TokenKind {
     Word(String),
     Quoted(String),
@@ -136,7 +136,7 @@ enum TokenKind {
     RightParenthesis,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 struct Token {
     kind: TokenKind,
     span: SearchSpan,
@@ -144,16 +144,11 @@ struct Token {
 
 pub(super) fn parse(input: &str) -> Result<SearchExpr, SearchQueryError> {
     let tokens = lex(input)?;
-    Parser {
-        input,
-        tokens,
-        position: 0,
-    }
-    .parse()
+    Parser { input, tokens }.parse()
 }
 
-fn lex(input: &str) -> Result<Vec<Token>, SearchQueryError> {
-    let mut tokens = Vec::new();
+fn lex(input: &str) -> Result<VecDeque<Token>, SearchQueryError> {
+    let mut tokens = VecDeque::new();
     let mut characters = input.char_indices().peekable();
 
     while let Some(&(start, character)) = characters.peek() {
@@ -231,7 +226,7 @@ fn lex(input: &str) -> Result<Vec<Token>, SearchQueryError> {
                 }
             }
         };
-        tokens.push(token);
+        tokens.push_back(token);
     }
 
     Ok(tokens)
@@ -280,8 +275,7 @@ fn lex_quoted(
 
 struct Parser<'a> {
     input: &'a str,
-    tokens: Vec<Token>,
-    position: usize,
+    tokens: VecDeque<Token>,
 }
 
 impl Parser<'_> {
@@ -351,6 +345,21 @@ impl Parser<'_> {
                     | TokenKind::LeftParenthesis
             )
         ) {
+            let next_span = self
+                .current()
+                .expect("the loop condition requires a current token")
+                .span;
+            let previous_end = expression.span().end;
+            if !self.input[previous_end..next_span.start]
+                .chars()
+                .any(char::is_whitespace)
+            {
+                return Err(self.error(
+                    SearchDiagnosticKind::ExpectedExpression,
+                    next_span,
+                    "implicit AND requires whitespace",
+                ));
+            }
             let right = self.parse_unary()?;
             expression = merge_all(expression, right);
         }
@@ -387,7 +396,7 @@ impl Parser<'_> {
     }
 
     fn parse_primary(&mut self) -> Result<SearchExpr, SearchQueryError> {
-        let Some(token) = self.current().cloned() else {
+        if self.current().is_none() {
             return Err(self.error(
                 SearchDiagnosticKind::ExpectedExpression,
                 SearchSpan {
@@ -396,10 +405,11 @@ impl Parser<'_> {
                 },
                 "expected an expression",
             ));
-        };
+        }
+        let token = self.advance();
 
         match token.kind {
-            TokenKind::LeftParenthesis => self.parse_group(),
+            TokenKind::LeftParenthesis => self.parse_group(token.span),
             TokenKind::RightParenthesis => Err(self.error(
                 SearchDiagnosticKind::UnexpectedParenthesis,
                 token.span,
@@ -417,7 +427,6 @@ impl Parser<'_> {
             )),
             TokenKind::Minus => unreachable!("minus tokens are parsed by parse_unary"),
             TokenKind::Quoted(value) => {
-                self.advance();
                 if value.is_empty() {
                     return Err(self.error(
                         SearchDiagnosticKind::EmptyValue,
@@ -432,7 +441,6 @@ impl Parser<'_> {
                 })
             }
             TokenKind::Word(value) => {
-                self.advance();
                 if matches!(self.current_kind(), Some(TokenKind::Colon)) {
                     self.parse_field(value, token.span)
                 } else {
@@ -446,21 +454,22 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_group(&mut self) -> Result<SearchExpr, SearchQueryError> {
-        let opening_span = self.advance().span;
-        if let Some(token) = self.current() {
-            if matches!(token.kind, TokenKind::RightParenthesis) {
-                let closing_span = self.advance().span;
-                return Err(self.error(
-                    SearchDiagnosticKind::EmptyGroup,
-                    SearchSpan {
-                        start: opening_span.start,
-                        end: closing_span.end,
-                    },
-                    "empty parenthesized expression",
-                ));
-            }
-        } else {
+    fn parse_group(
+        &mut self,
+        opening_span: SearchSpan,
+    ) -> Result<SearchExpr, SearchQueryError> {
+        if matches!(self.current_kind(), Some(TokenKind::RightParenthesis)) {
+            let closing_span = self.advance().span;
+            return Err(self.error(
+                SearchDiagnosticKind::EmptyGroup,
+                SearchSpan {
+                    start: opening_span.start,
+                    end: closing_span.end,
+                },
+                "empty parenthesized expression",
+            ));
+        }
+        if self.current().is_none() {
             return Err(self.error(
                 SearchDiagnosticKind::UnmatchedParenthesis,
                 opening_span,
@@ -469,24 +478,23 @@ impl Parser<'_> {
         }
 
         let mut expression = self.parse_or()?;
-        let Some(closing) = self.current().cloned() else {
-            return Err(self.error(
-                SearchDiagnosticKind::UnmatchedParenthesis,
-                opening_span,
-                "unclosed parenthesis",
-            ));
+        let closing_span = match self.current() {
+            Some(Token {
+                kind: TokenKind::RightParenthesis,
+                span,
+            }) => *span,
+            Some(_) | None => {
+                return Err(self.error(
+                    SearchDiagnosticKind::UnmatchedParenthesis,
+                    opening_span,
+                    "unclosed parenthesis",
+                ));
+            }
         };
-        if !matches!(closing.kind, TokenKind::RightParenthesis) {
-            return Err(self.error(
-                SearchDiagnosticKind::UnmatchedParenthesis,
-                opening_span,
-                "unclosed parenthesis",
-            ));
-        }
         self.advance();
         expression.set_span(SearchSpan {
             start: opening_span.start,
-            end: closing.span.end,
+            end: closing_span.end,
         });
         Ok(expression)
     }
@@ -509,7 +517,7 @@ impl Parser<'_> {
             }
         };
         let colon_span = self.advance().span;
-        let Some(value_token) = self.current().cloned() else {
+        let Some(current) = self.current() else {
             let end = colon_span.end;
             return Err(self.error(
                 SearchDiagnosticKind::MissingFieldValue,
@@ -517,23 +525,26 @@ impl Parser<'_> {
                 format_args!("missing value for field `{name}`"),
             ));
         };
+        let value_span = current.span;
+        if !matches!(
+            current.kind,
+            TokenKind::Word(_) | TokenKind::Quoted(_)
+        ) {
+            return Err(self.error(
+                SearchDiagnosticKind::MissingFieldValue,
+                value_span,
+                format_args!("missing value for field `{name}`"),
+            ));
+        }
 
-        let value = match value_token.kind {
+        let value = match self.advance().kind {
             TokenKind::Word(value) | TokenKind::Quoted(value) => value,
-            _ => {
-                return Err(self.error(
-                    SearchDiagnosticKind::MissingFieldValue,
-                    value_token.span,
-                    format_args!("missing value for field `{name}`"),
-                ));
-            }
+            _ => unreachable!("the current token was validated as a field value"),
         };
-        self.advance();
-
         if value.is_empty() {
             return Err(self.error(
                 SearchDiagnosticKind::EmptyValue,
-                value_token.span,
+                value_span,
                 "value cannot be empty",
             ));
         }
@@ -544,7 +555,7 @@ impl Parser<'_> {
                 .ok_or_else(|| {
                     self.error(
                         SearchDiagnosticKind::UnknownKind,
-                        value_token.span,
+                        value_span,
                         format_args!("unknown kind `{value}`"),
                     )
                 })?
@@ -557,13 +568,13 @@ impl Parser<'_> {
             value,
             span: SearchSpan {
                 start: name_span.start,
-                end: value_token.span.end,
+                end: value_span.end,
             },
         })
     }
 
     fn current(&self) -> Option<&Token> {
-        self.tokens.get(self.position)
+        self.tokens.front()
     }
 
     fn current_kind(&self) -> Option<&TokenKind> {
@@ -571,9 +582,9 @@ impl Parser<'_> {
     }
 
     fn advance(&mut self) -> Token {
-        let token = self.tokens[self.position].clone();
-        self.position += 1;
-        token
+        self.tokens
+            .pop_front()
+            .expect("the parser only advances when a current token exists")
     }
 
     fn error(
@@ -840,6 +851,32 @@ mod tests {
                 0,
                 14,
             )
+        );
+    }
+
+    #[test]
+    fn rejects_word_and_quote_adjacency_without_whitespace() {
+        assert_diagnostic(
+            "foo\"bar\"",
+            SearchDiagnosticKind::ExpectedExpression,
+            span(3, 8),
+            "implicit AND requires whitespace",
+        );
+    }
+
+    #[test]
+    fn rejects_parenthesis_adjacency_without_whitespace() {
+        assert_diagnostic(
+            "foo(bar)",
+            SearchDiagnosticKind::ExpectedExpression,
+            span(3, 4),
+            "implicit AND requires whitespace",
+        );
+        assert_diagnostic(
+            "(foo)(bar)",
+            SearchDiagnosticKind::ExpectedExpression,
+            span(5, 6),
+            "implicit AND requires whitespace",
         );
     }
 
