@@ -450,7 +450,7 @@ it("documents consolidated local-date Agenda semantics and Todo controls", () =>
     /overdue `due` date wins[\s\S]*scheduled today[\s\S]*today’s journal/,
   );
   expect(source).toMatch(
-    /\*\*Undated\*\* contains other open Todos without a `due` property\.[\s\S]*scheduled today\s+or contained in today’s journal belongs in \*\*Today\*\*/,
+    /\*\*Undated\*\* contains other open Todos without a `due` property\.[\s\S]*scheduled for a future day remains \*\*Undated\*\* unless it is contained in\s+today’s journal, which puts it in \*\*Today\*\*\./,
   );
   expect(source).not.toContain("both **Overdue** and **Due Today**");
   expect(source).not.toContain("calendar boundaries in UTC");
