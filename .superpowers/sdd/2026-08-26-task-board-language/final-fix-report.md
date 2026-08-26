@@ -222,3 +222,40 @@ The semantic fix is committed separately as:
 ```text
 fix(tasking): use semantic carry group
 ```
+
+## Full-suite assertion alignment
+
+### Red evidence
+
+Main-agent full UI verification reported four deterministic failing tests in
+the three files below. The source behavior and guide copy were already
+correct, so the reported failures were not re-run before editing:
+
+- `ui/src/api/board.test.ts` still expected the retired task create/archive
+  toast strings.
+- `ui/src/docs/mdx-smoke.test.tsx` still expected three earlier wordings for
+  the same date, lexicographic-comparison, and nearby-checkbox boundaries.
+- `ui/src/docs/search.test.ts` still expected the earlier Cycle recovery
+  heading and heading ID.
+
+### Root cause
+
+These assertions were outside the focused Task Board component and route-doc
+commands used for the fix wave. The display-language cutover changed the
+observable copy and guide heading without migrating these full-suite
+consumers. No production or guide source change was required.
+
+### Green evidence
+
+```text
+bun run test src/api/board.test.ts src/docs/mdx-smoke.test.tsx src/docs/search.test.ts
+```
+
+Result: 3 test files passed; 122 tests passed. The run emitted only the
+existing Vite native-config warning.
+
+The assertion alignment is committed separately as:
+
+```text
+test(tasking): align cutover assertions
+```

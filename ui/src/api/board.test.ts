@@ -252,7 +252,7 @@ describe("Board mutation error toasts", () => {
     }
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("TASK CREATION FAILED");
+      expect(toast.error).toHaveBeenCalledWith("Couldn’t create task");
     });
   });
 
@@ -321,7 +321,7 @@ describe("Board mutation error toasts", () => {
     ).rejects.toThrow("Network error");
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("TASK ARCHIVE FAILED");
+      expect(toast.error).toHaveBeenCalledWith("Couldn’t archive task");
     });
   });
 
