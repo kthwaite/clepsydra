@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { BaseFilter } from "#/api/bases";
@@ -182,6 +182,305 @@ describe("BaseFilterEditor", () => {
         { field: "status", op: "eq", value: "draft" },
       ],
     });
+  });
+
+  it("appends inside a nested all group through one complete root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      any: [
+        {
+          all: [{ field: "title", op: "eq", value: "First" }],
+        },
+        { field: "kind", op: "eq", value: "NOTE" },
+      ],
+    });
+
+    await chooseMenuAction(
+      user,
+      "Add to Match all",
+      "Condition",
+      screen.getByRole("group", { name: "Match all of 1 condition" }),
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      any: [
+        {
+          all: [
+            { field: "title", op: "eq", value: "First" },
+            { field: "kind", op: "eq", value: "" },
+          ],
+        },
+        { field: "kind", op: "eq", value: "NOTE" },
+      ],
+    });
+  });
+
+  it("appends inside a nested any group through one complete root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [
+        {
+          any: [{ field: "title", op: "eq", value: "First" }],
+        },
+        { field: "kind", op: "eq", value: "NOTE" },
+      ],
+    });
+
+    await chooseMenuAction(
+      user,
+      "Add to Match any",
+      "Condition",
+      screen.getByRole("group", { name: "Match any of 1 condition" }),
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [
+        {
+          any: [
+            { field: "title", op: "eq", value: "First" },
+            { field: "kind", op: "eq", value: "" },
+          ],
+        },
+        { field: "kind", op: "eq", value: "NOTE" },
+      ],
+    });
+  });
+
+  it("moves inside a nested all group through one complete root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      any: [
+        {
+          all: [
+            { field: "title", op: "eq", value: "First" },
+            { field: "kind", op: "eq", value: "NOTE" },
+          ],
+        },
+        { field: "status", op: "eq", value: "reading" },
+      ],
+    });
+
+    await chooseMenuAction(
+      user,
+      "Condition 2 actions",
+      "Move up",
+      screen.getByRole("group", { name: "Match all of 2 conditions" }),
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      any: [
+        {
+          all: [
+            { field: "kind", op: "eq", value: "NOTE" },
+            { field: "title", op: "eq", value: "First" },
+          ],
+        },
+        { field: "status", op: "eq", value: "reading" },
+      ],
+    });
+  });
+
+  it("moves inside a nested any group through one complete root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [
+        {
+          any: [
+            { field: "title", op: "eq", value: "First" },
+            { field: "kind", op: "eq", value: "NOTE" },
+          ],
+        },
+        { field: "status", op: "eq", value: "reading" },
+      ],
+    });
+
+    await chooseMenuAction(
+      user,
+      "Condition 2 actions",
+      "Move up",
+      screen.getByRole("group", { name: "Match any of 2 conditions" }),
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [
+        {
+          any: [
+            { field: "kind", op: "eq", value: "NOTE" },
+            { field: "title", op: "eq", value: "First" },
+          ],
+        },
+        { field: "status", op: "eq", value: "reading" },
+      ],
+    });
+  });
+
+  it("edits a leaf below all, any, and not through one complete root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [
+        {
+          any: [
+            {
+              not: { field: "title", op: "eq", value: "Before" },
+            },
+          ],
+        },
+      ],
+    });
+
+    await chooseSelectOption(user, "Operator for condition 1", "ne");
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [
+        {
+          any: [
+            {
+              not: { field: "title", op: "ne", value: "Before" },
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  it("replaces a nested not child through its seed menu in one complete root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [
+        {
+          not: { field: "title", op: "eq", value: "Before" },
+        },
+        { field: "kind", op: "eq", value: "NOTE" },
+      ],
+    });
+
+    await chooseMenuAction(
+      user,
+      "Excluded condition actions",
+      "Replace with Match any group",
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [
+        { not: { any: [] } },
+        { field: "kind", op: "eq", value: "NOTE" },
+      ],
+    });
+  });
+
+  it("keeps a duplicate occurrence's focused draft through controlled movement and sibling removal", async () => {
+    const firstOccurrence: BaseFilter = {
+      field: "title",
+      op: "in",
+      value: ["same"],
+    };
+    const secondOccurrence: BaseFilter = {
+      field: "title",
+      op: "in",
+      value: ["same"],
+    };
+    const onChange = vi.fn();
+    const view = render(
+      <BaseFilterEditor
+        value={{ all: [firstOccurrence, secondOccurrence] }}
+        properties={properties}
+        onChange={onChange}
+      />,
+    );
+    const [firstInput, secondInput] = screen.getAllByLabelText(
+      /Value for condition/,
+    ) as HTMLInputElement[];
+
+    secondInput.focus();
+    fireEvent.change(secondInput, { target: { value: "same, drafting" } });
+    expect(secondInput).toHaveFocus();
+    expect(onChange).not.toHaveBeenCalled();
+
+    view.rerender(
+      <BaseFilterEditor
+        value={{ all: [secondOccurrence, firstOccurrence] }}
+        properties={properties}
+        onChange={onChange}
+      />,
+    );
+
+    const [movedInput, stationaryInput] = screen.getAllByLabelText(
+      /Value for condition/,
+    ) as HTMLInputElement[];
+    expect(movedInput).toBe(secondInput);
+    expect(movedInput).toHaveFocus();
+    expect(movedInput).toHaveValue("same, drafting");
+    expect(stationaryInput).toBe(firstInput);
+    expect(stationaryInput).toHaveValue("same");
+    expect(onChange).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Condition 2 actions" }),
+    );
+    const callsBeforeRemove = onChange.mock.calls.length;
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Remove condition" }),
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(callsBeforeRemove + 1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [{ field: "title", op: "in", value: ["same", "drafting"] }],
+    });
+    expect(screen.getByLabelText("Value for condition 1")).toBe(secondInput);
+    expect(secondInput).toHaveValue("same, drafting");
+    expect(firstInput).not.toBeInTheDocument();
+  });
+
+  it("removes the intended equal-reference duplicate and keeps the survivor stable", async () => {
+    const duplicate: BaseFilter = {
+      field: "title",
+      op: "in",
+      value: ["same"],
+    };
+    const initial: BaseFilter = { all: [duplicate, duplicate] };
+    const onChange = vi.fn();
+    const view = render(
+      <BaseFilterEditor
+        value={initial}
+        properties={properties}
+        onChange={onChange}
+      />,
+    );
+    const [removedInput, survivingInput] = screen.getAllByLabelText(
+      /Value for condition/,
+    ) as HTMLInputElement[];
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Condition 1 actions" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Remove condition" }),
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({ all: [duplicate] });
+    expect(screen.queryAllByLabelText(/Value for condition/)).toEqual([
+      survivingInput,
+    ]);
+    expect(removedInput).not.toBeInTheDocument();
+
+    survivingInput.focus();
+    view.rerender(
+      <BaseFilterEditor
+        value={latest(onChange)}
+        properties={properties}
+        onChange={onChange}
+      />,
+    );
+    expect(screen.getByLabelText("Value for condition 1")).toBe(survivingInput);
+    expect(survivingInput).toHaveFocus();
+    expect(survivingInput).toHaveValue("same");
   });
 
   it("replaces its controlled root without emitting an authoring change", () => {
@@ -556,31 +855,49 @@ describe("BaseFilterEditor", () => {
     expect(other).toHaveAttribute("aria-selected", "true");
   });
 
-  it("registers exact recursive diagnostic focus paths", () => {
-    const registerFocus = vi.fn();
+  it("registers only the exact live recursive native focus targets", () => {
+    const liveTargets = new Map<string, HTMLElement>();
+    const registerFocus = vi.fn(
+      (path: string, element: HTMLElement | null) => {
+        if (element) {
+          liveTargets.set(path, element);
+        } else {
+          liveTargets.delete(path);
+        }
+      },
+    );
     renderEditor(
       {
         all: [
           { field: "kind", op: "eq", value: "BOOK" },
-          { not: { field: "status", op: "eq", value: "reading" } },
+          { not: { field: "title", op: "eq", value: "Reading" } },
         ],
       },
       registerFocus,
     );
 
-    const registeredPaths = registerFocus.mock.calls
-      .filter((call) => call[1] instanceof HTMLElement)
-      .map((call) => call[0]);
-    expect(registeredPaths).toEqual(
-      expect.arrayContaining([
-        "filter.all[0].field",
-        "filter.all[0].op",
-        "filter.all[0].value",
-        "filter.all[1].not.field",
-        "filter.all[1].not.op",
-        "filter.all[1].not.value",
-      ]),
-    );
+    const fieldTriggers = screen.getAllByRole("button", {
+      name: selectTriggerName("Field for condition 1"),
+    });
+    const operatorTriggers = screen.getAllByRole("button", {
+      name: selectTriggerName("Operator for condition 1"),
+    });
+    const valueControls = screen.getAllByLabelText("Value for condition 1");
+
+    expect([...liveTargets.keys()].sort()).toEqual([
+      "filter.all[0].field",
+      "filter.all[0].op",
+      "filter.all[0].value",
+      "filter.all[1].not.field",
+      "filter.all[1].not.op",
+      "filter.all[1].not.value",
+    ]);
+    expect(liveTargets.get("filter.all[0].field")).toBe(fieldTriggers[0]);
+    expect(liveTargets.get("filter.all[0].op")).toBe(operatorTriggers[0]);
+    expect(liveTargets.get("filter.all[0].value")).toBe(valueControls[0]);
+    expect(liveTargets.get("filter.all[1].not.field")).toBe(fieldTriggers[1]);
+    expect(liveTargets.get("filter.all[1].not.op")).toBe(operatorTriggers[1]);
+    expect(liveTargets.get("filter.all[1].not.value")).toBe(valueControls[1]);
   });
 
   it("supports keyboard activation for membership actions", async () => {
