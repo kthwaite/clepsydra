@@ -16,18 +16,21 @@ import { FilterBar } from "#/components/filters/FilterBar";
 import { SectionHeading } from "#/components/ui/section-heading";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 import {
-  facetsEqual,
   type FilterField,
   type FilterState,
   isFilterActive,
 } from "#/lib/filters/model";
 import {
+  canonicalizeFilterSearch,
   type FilterUrlOptions,
-  filterStateToSearch,
+  mergeFilterSearch,
   parseFilterSearch,
+  shouldReplaceFilterHistory,
 } from "#/lib/filters/url";
 import { localDateKey, parseLocalDate } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
+
+const AGENDA_ROUTE_PATH = "/agenda" as const;
 
 /** Route-level filter field specs for the Agenda's URL-backed filter. */
 export const AGENDA_FILTER_URL: FilterUrlOptions = {
@@ -41,6 +44,18 @@ export const AGENDA_FILTER_URL: FilterUrlOptions = {
     { id: "blocked", kind: "flag" },
   ],
 };
+
+export function agendaFilterNavigation(
+  next: FilterState,
+  previous: FilterState,
+) {
+  return {
+    to: AGENDA_ROUTE_PATH,
+    search: <TSearch extends Record<string, unknown>>(current: TSearch) =>
+      mergeFilterSearch(current, next, AGENDA_FILTER_URL),
+    replace: shouldReplaceFilterHistory(next, previous),
+  };
+}
 
 const TODO_STATUS_VALUES = ["open", "doing"] as const;
 const TODO_PRIORITY_VALUES = ["A", "B", "C"] as const;
@@ -58,15 +73,10 @@ interface AgendaQueryState {
   isError: boolean;
 }
 
-export const Route = createFileRoute("/agenda")({
+export const Route = createFileRoute(AGENDA_ROUTE_PATH)({
   staticData: { codexView: "agenda" },
-  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) => ({
-    ...search,
-    ...filterStateToSearch(
-      parseFilterSearch(search, AGENDA_FILTER_URL),
-      AGENDA_FILTER_URL,
-    ),
-  }),
+  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
+    canonicalizeFilterSearch(search, AGENDA_FILTER_URL),
   component: AgendaPage,
 });
 
@@ -83,14 +93,7 @@ function AgendaPage() {
 
   const onFilterChange = useCallback(
     (next: FilterState) => {
-      navigate({
-        to: "/agenda",
-        search: (current) => ({
-          ...current,
-          ...filterStateToSearch(next, AGENDA_FILTER_URL),
-        }),
-        replace: facetsEqual(next.facets, filterState.facets),
-      });
+      navigate(agendaFilterNavigation(next, filterState));
     },
     [navigate, filterState],
   );

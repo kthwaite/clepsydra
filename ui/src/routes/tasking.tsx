@@ -7,12 +7,16 @@ import { useCallback, useMemo } from "react";
 import { DesktopOnlyRoute } from "#/components/codex/DesktopOnlyRoute";
 import { TaskingScreen } from "#/components/tasking/TaskingScreen";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { facetsEqual, type FilterState } from "#/lib/filters/model";
+import type { FilterState } from "#/lib/filters/model";
 import {
+  canonicalizeFilterSearch,
   type FilterUrlOptions,
-  filterStateToSearch,
+  mergeFilterSearch,
   parseFilterSearch,
+  shouldReplaceFilterHistory,
 } from "#/lib/filters/url";
+
+const TASKING_ROUTE_PATH = "/tasking" as const;
 
 /** Route-level filter field specs for the Tasking board's URL-backed filter. */
 export const TASKING_FILTER_URL: FilterUrlOptions = {
@@ -24,6 +28,18 @@ export const TASKING_FILTER_URL: FilterUrlOptions = {
     { id: "hold", kind: "flag" },
   ],
 };
+
+export function taskingFilterNavigation(
+  next: FilterState,
+  previous: FilterState,
+) {
+  return {
+    to: TASKING_ROUTE_PATH,
+    search: <TSearch extends Record<string, unknown>>(current: TSearch) =>
+      mergeFilterSearch(current, next, TASKING_FILTER_URL),
+    replace: shouldReplaceFilterHistory(next, previous),
+  };
+}
 
 /**
  * Resolve a dossier canonical name to a vault path via the search index, then
@@ -55,14 +71,7 @@ function TaskingRoute() {
 
   const onFilterChange = useCallback(
     (next: FilterState) => {
-      navigate({
-        to: "/tasking",
-        search: (current) => ({
-          ...current,
-          ...filterStateToSearch(next, TASKING_FILTER_URL),
-        }),
-        replace: facetsEqual(next.facets, filterState.facets),
-      });
+      navigate(taskingFilterNavigation(next, filterState));
     },
     [navigate, filterState],
   );
@@ -95,14 +104,9 @@ function TaskingRoute() {
   );
 }
 
-export const Route = createFileRoute("/tasking")({
+export const Route = createFileRoute(TASKING_ROUTE_PATH)({
   staticData: { codexView: "tasking" },
-  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) => ({
-    ...search,
-    ...filterStateToSearch(
-      parseFilterSearch(search, TASKING_FILTER_URL),
-      TASKING_FILTER_URL,
-    ),
-  }),
+  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
+    canonicalizeFilterSearch(search, TASKING_FILTER_URL),
   component: TaskingRoute,
 });

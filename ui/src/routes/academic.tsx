@@ -6,12 +6,16 @@ import {
 import { useCallback, useMemo } from "react";
 import { AcademicLibrary } from "#/components/academic/AcademicLibrary";
 import { FeatureGate } from "#/components/FeatureGate";
-import { facetsEqual, type FilterState } from "#/lib/filters/model";
+import type { FilterState } from "#/lib/filters/model";
 import {
+  canonicalizeFilterSearch,
   type FilterUrlOptions,
-  filterStateToSearch,
+  mergeFilterSearch,
   parseFilterSearch,
+  shouldReplaceFilterHistory,
 } from "#/lib/filters/url";
+
+const ACADEMIC_ROUTE_PATH = "/academic" as const;
 
 /** Route-level filter field specs for the Academic Library's URL-backed filter. */
 export const ACADEMIC_FILTER_URL: FilterUrlOptions = {
@@ -22,6 +26,18 @@ export const ACADEMIC_FILTER_URL: FilterUrlOptions = {
     { id: "tag", kind: "single" },
   ],
 };
+
+export function academicFilterNavigation(
+  next: FilterState,
+  previous: FilterState,
+) {
+  return {
+    to: ACADEMIC_ROUTE_PATH,
+    search: <TSearch extends Record<string, unknown>>(current: TSearch) =>
+      mergeFilterSearch(current, next, ACADEMIC_FILTER_URL),
+    replace: shouldReplaceFilterHistory(next, previous),
+  };
+}
 
 function AcademicPage() {
   const search = Route.useSearch();
@@ -34,14 +50,7 @@ function AcademicPage() {
 
   const onFilterChange = useCallback(
     (next: FilterState) => {
-      navigate({
-        to: "/academic",
-        search: (current) => ({
-          ...current,
-          ...filterStateToSearch(next, ACADEMIC_FILTER_URL),
-        }),
-        replace: facetsEqual(next.facets, filterState.facets),
-      });
+      navigate(academicFilterNavigation(next, filterState));
     },
     [navigate, filterState],
   );
@@ -62,14 +71,9 @@ function AcademicRoute() {
   );
 }
 
-export const Route = createFileRoute("/academic")({
+export const Route = createFileRoute(ACADEMIC_ROUTE_PATH)({
   staticData: { codexView: "academic" },
-  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) => ({
-    ...search,
-    ...filterStateToSearch(
-      parseFilterSearch(search, ACADEMIC_FILTER_URL),
-      ACADEMIC_FILTER_URL,
-    ),
-  }),
+  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
+    canonicalizeFilterSearch(search, ACADEMIC_FILTER_URL),
   component: AcademicRoute,
 });

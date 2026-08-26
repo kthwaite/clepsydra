@@ -1,60 +1,14 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import type { ReactNode } from "react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { FilterState } from "#/lib/filters/model";
-
-const routeMocks = vi.hoisted(() => ({
-  search: {} as Record<string, unknown>,
-  navigate: vi.fn(),
-}));
+import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@tanstack/react-router", () => ({
-  createFileRoute: () => (options: Record<string, unknown>) => ({
-    options,
-    useSearch: () => routeMocks.search,
-  }),
-  useNavigate: () => routeMocks.navigate,
+  createFileRoute: () => (options: Record<string, unknown>) => ({ options }),
 }));
 
-vi.mock("#/components/rubbish/RubbishBin", () => ({
-  RubbishBin: ({
-    filterState,
-    onFilterChange,
-  }: {
-    filterState: FilterState;
-    onFilterChange: (next: FilterState) => void;
-  }) => (
-    <div>
-      <button
-        type="button"
-        onClick={() => onFilterChange({ ...filterState, text: "abc" })}
-      >
-        set-text
-      </button>
-      <button
-        type="button"
-        onClick={() =>
-          onFilterChange({
-            ...filterState,
-            facets: { ...filterState.facets, kind: ["NOTE"] },
-          })
-        }
-      >
-        toggle-facet
-      </button>
-    </div>
-  ),
-}));
-
-import { Route, RUBBISH_FILTER_URL } from "#/routes/rubbish";
-
-const RubbishRoute = Route.options.component as () => ReactNode;
-
-beforeEach(() => {
-  vi.clearAllMocks();
-  routeMocks.search = {};
-});
+import {
+  Route,
+  RUBBISH_FILTER_URL,
+  rubbishFilterNavigation,
+} from "#/routes/rubbish";
 
 describe("Rubbish route filters", () => {
   it("exposes the kind field id matching the URL codec", () => {
@@ -70,7 +24,7 @@ describe("Rubbish route filters", () => {
       validateSearch({
         kind: "note",
         bogus: "x",
-      } as any),
+      } as never),
     ).toEqual({
       kind: "NOTE",
       bogus: "x",
@@ -83,28 +37,40 @@ describe("Rubbish route filters", () => {
     if (typeof validateSearch !== "function") {
       throw new Error("Expected a callable search validator");
     }
-    expect(validateSearch({ kind: "PROJECT", q: "alpha" } as any)).toEqual({
+    expect(validateSearch({ kind: "PROJECT", q: "alpha" } as never)).toEqual({
       kind: "PROJECT",
       q: "alpha",
     });
   });
 
-  describe("history replace semantics", () => {
-    it("replaces the current history entry when only the text changes", async () => {
-      const user = userEvent.setup();
-      render(<RubbishRoute />);
-      await user.click(screen.getByText("set-text"));
-      expect(routeMocks.navigate).toHaveBeenCalledWith(
-        expect.objectContaining({ to: "/rubbish", replace: true }),
-      );
-    });
+  it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
+    const navigation = rubbishFilterNavigation(
+      { text: "trash", facets: { kind: ["NOTE"] } },
+      { text: "old", facets: { kind: ["NOTE"] } },
+    );
 
-    it("pushes a new history entry when a facet toggles", async () => {
-      const user = userEvent.setup();
-      render(<RubbishRoute />);
-      await user.click(screen.getByText("toggle-facet"));
-      const call = routeMocks.navigate.mock.calls.at(-1)?.[0];
-      expect(call.replace).not.toBe(true);
+    expect(navigation.to).toBe("/rubbish");
+    expect(navigation.replace).toBe(true);
+    expect(
+      navigation.search({
+        q: "old",
+        kind: "PROJECT",
+        page: "2",
+      }),
+    ).toEqual({
+      q: "trash",
+      kind: "NOTE",
+      page: "2",
     });
+  });
+
+  it("pushes history when a Rubbish facet changes with the text", () => {
+    const navigation = rubbishFilterNavigation(
+      { text: "new", facets: { kind: ["NOTE"] } },
+      { text: "old", facets: { kind: ["PROJECT"] } },
+    );
+
+    expect(navigation.to).toBe("/rubbish");
+    expect(navigation.replace).toBe(false);
   });
 });

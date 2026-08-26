@@ -28,7 +28,11 @@ vi.mock("#/components/academic/AcademicLibrary", () => ({
 }));
 
 
-import { ACADEMIC_FILTER_URL, Route } from "#/routes/academic";
+import {
+  ACADEMIC_FILTER_URL,
+  academicFilterNavigation,
+  Route,
+} from "#/routes/academic";
 const AcademicRoute = Route.options.component as () => ReactNode;
 
 beforeEach(() => {
@@ -58,7 +62,7 @@ describe("Academic route filters", () => {
         work_type: "paper",
         status: "reading",
         bogus: "x",
-      } as any),
+      } as never),
     ).toEqual({
       work_type: "paper",
       status: "reading",
@@ -75,7 +79,7 @@ describe("Academic route filters", () => {
       throw new Error("Expected a callable search validator");
     }
     expect(
-      validateSearch({ year: "2017", tag: "transformers" } as any),
+      validateSearch({ year: "2017", tag: "transformers" } as never),
     ).toEqual({
       work_type: undefined,
       status: undefined,
@@ -83,6 +87,41 @@ describe("Academic route filters", () => {
       tag: "transformers",
       q: undefined,
     });
+  });
+
+  it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
+    const navigation = academicFilterNavigation(
+      { text: "graph", facets: { status: ["reading"] } },
+      { text: "old", facets: { status: ["reading"] } },
+    );
+
+    expect(navigation.to).toBe("/academic");
+    expect(navigation.replace).toBe(true);
+    expect(
+      navigation.search({
+        q: "old",
+        work_type: "paper",
+        status: "reading",
+        view: "cards",
+      }),
+    ).toEqual({
+      q: "graph",
+      work_type: undefined,
+      status: "reading",
+      year: undefined,
+      tag: undefined,
+      view: "cards",
+    });
+  });
+
+  it("pushes history when an Academic facet changes with the text", () => {
+    const navigation = academicFilterNavigation(
+      { text: "new", facets: { status: ["complete"] } },
+      { text: "old", facets: { status: ["reading"] } },
+    );
+
+    expect(navigation.to).toBe("/academic");
+    expect(navigation.replace).toBe(false);
   });
 });
 

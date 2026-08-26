@@ -49,7 +49,12 @@ vi.mock("#/lib/useProjects", () => ({
   useProjects: () => ["Atlas", "Zephyr"],
 }));
 
-import { AGENDA_FILTER_URL, AgendaScreen, Route } from "#/routes/agenda";
+import {
+  AGENDA_FILTER_URL,
+  AgendaScreen,
+  agendaFilterNavigation,
+  Route,
+} from "#/routes/agenda";
 
 function todo(
   content: string,
@@ -185,6 +190,44 @@ describe("Agenda route filters", () => {
       "project",
       "blocked",
     ]);
+  });
+
+  it("builds text-only navigation for the exact route while retaining unrelated search and clearing stale fields", () => {
+    const navigation = agendaFilterNavigation(
+      { text: "ship", facets: { taskStatus: ["FIELD"] } },
+      { text: "old", facets: { taskStatus: ["FIELD"] } },
+    );
+
+    expect(navigation.to).toBe("/agenda");
+    expect(navigation.replace).toBe(true);
+    expect(
+      navigation.search({
+        q: "old",
+        taskStatus: "TRIAGE",
+        blocked: "1",
+        tab: "today",
+      }),
+    ).toEqual({
+      q: "ship",
+      type: undefined,
+      todoStatus: undefined,
+      todoPriority: undefined,
+      taskStatus: "FIELD",
+      taskPriority: undefined,
+      project: undefined,
+      blocked: undefined,
+      tab: "today",
+    });
+  });
+
+  it("pushes history when an Agenda facet changes with the text", () => {
+    const navigation = agendaFilterNavigation(
+      { text: "new", facets: { taskPriority: ["P1"] } },
+      { text: "old", facets: { taskPriority: ["P2"] } },
+    );
+
+    expect(navigation.to).toBe("/agenda");
+    expect(navigation.replace).toBe(false);
   });
 });
 

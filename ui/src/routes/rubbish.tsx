@@ -5,17 +5,33 @@ import {
 } from "@tanstack/react-router";
 import { useCallback, useMemo } from "react";
 import { RubbishBin } from "#/components/rubbish/RubbishBin";
-import { facetsEqual, type FilterState } from "#/lib/filters/model";
+import type { FilterState } from "#/lib/filters/model";
 import {
+  canonicalizeFilterSearch,
   type FilterUrlOptions,
-  filterStateToSearch,
+  mergeFilterSearch,
   parseFilterSearch,
+  shouldReplaceFilterHistory,
 } from "#/lib/filters/url";
+
+const RUBBISH_ROUTE_PATH = "/rubbish" as const;
 
 /** Route-level filter field specs for the Rubbish Bin's URL-backed filter. */
 export const RUBBISH_FILTER_URL: FilterUrlOptions = {
   fields: [{ id: "kind", kind: "single", normalize: (v) => v.toUpperCase() }],
 };
+
+export function rubbishFilterNavigation(
+  next: FilterState,
+  previous: FilterState,
+) {
+  return {
+    to: RUBBISH_ROUTE_PATH,
+    search: <TSearch extends Record<string, unknown>>(current: TSearch) =>
+      mergeFilterSearch(current, next, RUBBISH_FILTER_URL),
+    replace: shouldReplaceFilterHistory(next, previous),
+  };
+}
 
 function RubbishRoute() {
   const search = Route.useSearch();
@@ -28,14 +44,7 @@ function RubbishRoute() {
 
   const onFilterChange = useCallback(
     (next: FilterState) => {
-      navigate({
-        to: "/rubbish",
-        search: (current) => ({
-          ...current,
-          ...filterStateToSearch(next, RUBBISH_FILTER_URL),
-        }),
-        replace: facetsEqual(next.facets, filterState.facets),
-      });
+      navigate(rubbishFilterNavigation(next, filterState));
     },
     [navigate, filterState],
   );
@@ -45,14 +54,9 @@ function RubbishRoute() {
   );
 }
 
-export const Route = createFileRoute("/rubbish")({
+export const Route = createFileRoute(RUBBISH_ROUTE_PATH)({
   staticData: { codexView: "rubbish" },
-  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) => ({
-    ...search,
-    ...filterStateToSearch(
-      parseFilterSearch(search, RUBBISH_FILTER_URL),
-      RUBBISH_FILTER_URL,
-    ),
-  }),
+  validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
+    canonicalizeFilterSearch(search, RUBBISH_FILTER_URL),
   component: RubbishRoute,
 });
