@@ -57,14 +57,8 @@ pub fn render_todo(input: &TodoCaptureInput) -> Result<String, TodoCaptureError>
     }
 
     let property_capacity = input.due.as_ref().map_or(0, |value| 9 + value.len())
-        + input
-            .scheduled
-            .as_ref()
-            .map_or(0, |value| 15 + value.len())
-        + input
-            .priority
-            .as_ref()
-            .map_or(0, |value| 14 + value.len());
+        + input.scheduled.as_ref().map_or(0, |value| 15 + value.len())
+        + input.priority.as_ref().map_or(0, |value| 14 + value.len());
     let mut rendered = String::with_capacity(6 + input.text.len() + property_capacity);
     rendered.push_str("- [ ] ");
     rendered.push_str(first_word);
@@ -87,8 +81,8 @@ pub fn render_todo(input: &TodoCaptureInput) -> Result<String, TodoCaptureError>
 /// Capture one Todo into today's journal through the configured local server.
 pub async fn capture_todo(input: TodoCaptureInput) -> Result<String, TodoCaptureError> {
     let content = render_todo(&input)?;
-    let cwd =
-        std::env::current_dir().map_err(|error| TodoCaptureError::Configuration(Box::new(error)))?;
+    let cwd = std::env::current_dir()
+        .map_err(|error| TodoCaptureError::Configuration(Box::new(error)))?;
     capture_rendered_from(&cwd, content).await
 }
 
@@ -108,17 +102,8 @@ async fn capture_rendered_from(
     base_dir: &Path,
     content: String,
 ) -> Result<String, TodoCaptureError> {
-    let client =
-        configured_api_client(base_dir, false).map_err(TodoCaptureError::Configuration)?;
+    let client = configured_api_client(base_dir, false).map_err(TodoCaptureError::Configuration)?;
     capture_rendered_with_client(&client, content).await
-}
-
-async fn capture_todo_with_client(
-    client: &ApiClient,
-    input: TodoCaptureInput,
-) -> Result<String, TodoCaptureError> {
-    let content = render_todo(&input)?;
-    capture_rendered_with_client(client, content).await
 }
 
 async fn capture_rendered_with_client(
@@ -204,10 +189,7 @@ mod tests {
 
             let error = render_todo(&todo).unwrap_err();
             assert!(
-                matches!(
-                    error,
-                    TodoCaptureError::InvalidDate { field: "due", .. }
-                ),
+                matches!(error, TodoCaptureError::InvalidDate { field: "due", .. }),
                 "unexpected error for {due}: {error}"
             );
         }
@@ -238,7 +220,10 @@ mod tests {
         for priority in ["A", "B", "C"] {
             let mut todo = input("Review proposal");
             todo.priority = Some(priority.to_string());
-            assert!(render_todo(&todo).is_ok(), "priority {priority} should pass");
+            assert!(
+                render_todo(&todo).is_ok(),
+                "priority {priority} should pass"
+            );
         }
 
         for priority in ["a", "P1", "D", ""] {
@@ -301,7 +286,10 @@ mod tests {
             .await;
 
         let client = ApiClient::new(server.uri(), None).unwrap();
-        let captured_path = capture_todo_with_client(&client, todo).await.unwrap();
+        let content = render_todo(&todo).unwrap();
+        let captured_path = capture_rendered_with_client(&client, content)
+            .await
+            .unwrap();
 
         assert_eq!(captured_path, "journals/2026-08-26--abc.md");
     }
@@ -318,7 +306,8 @@ mod tests {
             .await;
 
         let client = ApiClient::new(server.uri(), None).unwrap();
-        let error = capture_todo_with_client(&client, input("Review proposal"))
+        let content = render_todo(&input("Review proposal")).unwrap();
+        let error = capture_rendered_with_client(&client, content)
             .await
             .unwrap_err();
 
@@ -341,7 +330,8 @@ mod tests {
             .await;
 
         let client = ApiClient::new(server.uri(), None).unwrap();
-        let error = capture_todo_with_client(&client, input("Review proposal"))
+        let content = render_todo(&input("Review proposal")).unwrap();
+        let error = capture_rendered_with_client(&client, content)
             .await
             .unwrap_err();
 

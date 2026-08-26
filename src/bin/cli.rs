@@ -1,4 +1,8 @@
-use std::{future::Future, io::{Read, Write}, path::PathBuf};
+use std::{
+    future::Future,
+    io::{Read, Write},
+    path::PathBuf,
+};
 
 use clap::{Parser, Subcommand};
 
