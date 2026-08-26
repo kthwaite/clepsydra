@@ -174,9 +174,7 @@ impl Modify for SchemaOverrides {
         crate::api::tasks::list_tasks,
         crate::api::tasks::get_task_completion_history,
         crate::api::tasks::update_task_status,
-        crate::api::agenda::agenda_today,
-        crate::api::agenda::agenda_week,
-        crate::api::agenda::agenda_overdue,
+        crate::api::agenda::get_agenda,
         crate::api::agenda::get_cycle_burndown,
         // Blocks
         crate::api::blocks::search_blocks,
@@ -391,10 +389,9 @@ impl Modify for SchemaOverrides {
             crate::api::tasks::TaskItem,
             crate::api::tasks::TaskListResponse,
             crate::api::tasks::UpdateStatusRequest,
-            crate::api::agenda::AgendaTodayResponse,
-            crate::api::agenda::AgendaWeekResponse,
+            crate::api::agenda::AgendaResponse,
             crate::api::agenda::AgendaDay,
-            crate::api::agenda::AgendaOverdueResponse,
+            crate::api::agenda::AgendaItem,
             // Blocks
             crate::api::blocks::BlockResponse,
             crate::api::blocks::AssignIdRequest,

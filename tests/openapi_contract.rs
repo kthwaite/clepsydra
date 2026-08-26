@@ -18,9 +18,7 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/tasks", "get"),
     ("/api/vault/tasks/history", "get"),
     ("/api/vault/tasks/status", "put"),
-    ("/api/vault/agenda/today", "get"),
-    ("/api/vault/agenda/week", "get"),
-    ("/api/vault/agenda/overdue", "get"),
+    ("/api/vault/agenda", "get"),
     ("/api/vault/agenda/cycle-burndown", "get"),
     ("/api/vault/blocks/search", "get"),
     ("/api/vault/blocks/assign-id", "post"),
@@ -68,9 +66,41 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 117,
-        "OpenAPI should document all 117 registered /api/vault operations"
+        operation_count, 115,
+        "OpenAPI should document all 115 registered /api/vault operations"
     );
+}
+
+#[test]
+fn openapi_defines_consolidated_agenda_contract() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let paths = document["paths"]
+        .as_object()
+        .expect("OpenAPI paths should be an object");
+    let operation = &paths["/api/vault/agenda"]["get"];
+    let parameters = operation["parameters"]
+        .as_array()
+        .expect("Agenda parameters should be an array");
+
+    assert!(parameters.iter().any(|parameter| {
+        parameter["name"] == "today"
+            && parameter["in"] == "query"
+            && parameter["required"] == true
+    }));
+    for obsolete in [
+        "/api/vault/agenda/today",
+        "/api/vault/agenda/week",
+        "/api/vault/agenda/overdue",
+    ] {
+        assert!(!paths.contains_key(obsolete));
+    }
+
+    let schemas = document["components"]["schemas"]
+        .as_object()
+        .expect("OpenAPI schemas should be an object");
+    for schema in ["AgendaResponse", "AgendaDay", "AgendaItem"] {
+        assert!(schemas.contains_key(schema), "missing {schema} schema");
+    }
 }
 
 #[test]
