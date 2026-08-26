@@ -1,4 +1,4 @@
-use std::{io::Write, path::PathBuf};
+use std::{future::Future, io::{Read, Write}, path::PathBuf};
 
 use clap::{Parser, Subcommand};
 
@@ -65,6 +65,25 @@ enum Commands {
         title: String,
         #[arg(short, long, value_name = "TEXT", help = "Optional initial body text")]
         body: Option<String>,
+    },
+    #[command(
+        about = "Capture one Todo in today's journal",
+        long_about = "Capture one unchecked Markdown Todo in today's journal through the configured local Clepsydra server.\n\nProvide the Todo text as positional words. With no words, text is read from stdin to EOF.",
+        after_help = "Examples:\n  clep todo Buy milk\n  clep todo \"Buy milk and eggs\"\n  echo \"Buy milk\" | clep todo\n  clep todo Ship release --due 2026-09-01 --scheduled 2026-08-30 --priority A"
+    )]
+    Todo {
+        #[arg(
+            value_name = "WORDS",
+            num_args = 0..,
+            help = "Todo text as one or more words; omit to read stdin"
+        )]
+        words: Vec<String>,
+        #[arg(long, value_name = "YYYY-MM-DD", help = "Optional due date")]
+        due: Option<String>,
+        #[arg(long, value_name = "YYYY-MM-DD", help = "Optional scheduled date")]
+        scheduled: Option<String>,
+        #[arg(long, value_name = "A|B|C", help = "Optional priority")]
+        priority: Option<String>,
     },
     #[command(about = "Create a local archive of the configured vault")]
     Backup {
@@ -206,6 +225,39 @@ enum Commands {
     Version,
 }
 
+async fn run_todo_command<R, W, C, F>(
+    words: Vec<String>,
+    due: Option<String>,
+    scheduled: Option<String>,
+    priority: Option<String>,
+    stdin: &mut R,
+    stdout: &mut W,
+    capture: C,
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    R: Read + ?Sized,
+    W: Write + ?Sized,
+    C: FnOnce(clepsydra::todo_capture::TodoCaptureInput) -> F,
+    F: Future<Output = Result<String, clepsydra::todo_capture::TodoCaptureError>>,
+{
+    let text = if words.is_empty() {
+        let mut text = String::new();
+        stdin.read_to_string(&mut text)?;
+        text
+    } else {
+        words.join(" ")
+    };
+    let path = capture(clepsydra::todo_capture::TodoCaptureInput {
+        text,
+        due,
+        scheduled,
+        priority,
+    })
+    .await?;
+    writeln!(stdout, "Captured Todo in {path}")?;
+    Ok(())
+}
+
 /// Dispatch a parsed CLI invocation; returns the process exit code.
 /// (Extracted from main so every arm except Serve is unit-testable.)
 async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
@@ -213,6 +265,26 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         Commands::Init { path } => {
             init_vault(&path)?;
             println!("Initialized vault at {}", path.display());
+            Ok(0)
+        }
+        Commands::Todo {
+            words,
+            due,
+            scheduled,
+            priority,
+        } => {
+            let mut stdin = std::io::stdin().lock();
+            let mut stdout = std::io::stdout().lock();
+            run_todo_command(
+                words,
+                due,
+                scheduled,
+                priority,
+                &mut stdin,
+                &mut stdout,
+                clepsydra::todo_capture::capture_todo,
+            )
+            .await?;
             Ok(0)
         }
         Commands::New { title, body } => {
@@ -427,7 +499,7 @@ async fn main() {
 
 #[cfg(test)]
 mod cli_tests {
-    use clap::Parser;
+    use clap::{CommandFactory, Parser};
 
     use super::*;
 
@@ -508,6 +580,242 @@ mod cli_tests {
             } => trace,
             other => panic!("expected config path, got {other:?}"),
         }
+    }
+
+    struct PanicReader;
+
+    impl std::io::Read for PanicReader {
+        fn read(&mut self, _buffer: &mut [u8]) -> std::io::Result<usize> {
+            panic!("stdin must not be read when positional words are present");
+        }
+    }
+
+    #[test]
+    fn todo_parses_words_and_metadata() {
+        let cli = Cli::try_parse_from([
+            "clep",
+            "todo",
+            "Ship",
+            "the",
+            "release",
+            "--due",
+            "2026-09-01",
+            "--scheduled",
+            "2026-08-30",
+            "--priority",
+            "A",
+        ])
+        .unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Commands::Todo {
+                words,
+                due,
+                scheduled,
+                priority,
+            } if words == ["Ship", "the", "release"]
+                && due.as_deref() == Some("2026-09-01")
+                && scheduled.as_deref() == Some("2026-08-30")
+                && priority.as_deref() == Some("A")
+        ));
+    }
+
+    #[test]
+    fn todo_accepts_no_words_for_stdin() {
+        let cli = Cli::try_parse_from(["clep", "todo"]).unwrap();
+
+        assert!(matches!(
+            cli.command,
+            Commands::Todo {
+                words,
+                due: None,
+                scheduled: None,
+                priority: None,
+            } if words.is_empty()
+        ));
+    }
+
+    #[test]
+    fn todo_help_shows_each_input_form_and_metadata() {
+        let mut command = Cli::command();
+        let todo = command.find_subcommand_mut("todo").unwrap();
+        let help = todo.render_long_help().to_string();
+
+        assert!(help.contains("clep todo Buy milk"));
+        assert!(help.contains("clep todo \"Buy milk and eggs\""));
+        assert!(help.contains("echo \"Buy milk\" | clep todo"));
+        assert!(help.contains(
+            "clep todo Ship release --due 2026-09-01 --scheduled 2026-08-30 --priority A"
+        ));
+    }
+
+    #[tokio::test]
+    async fn todo_words_take_precedence_without_reading_stdin() {
+        let mut stdin = PanicReader;
+        let mut stdout = Vec::new();
+        let mut captured = None;
+
+        run_todo_command(
+            vec!["Buy".into(), "milk".into()],
+            None,
+            None,
+            None,
+            &mut stdin,
+            &mut stdout,
+            |input| {
+                captured = Some(input);
+                std::future::ready(Ok("journals/2026-08-26.md".to_string()))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            captured.unwrap(),
+            clepsydra::todo_capture::TodoCaptureInput {
+                text: "Buy milk".into(),
+                due: None,
+                scheduled: None,
+                priority: None,
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn todo_reads_stdin_to_eof_when_words_are_absent() {
+        let mut stdin = std::io::Cursor::new("Buy\nmilk\n");
+        let mut stdout = Vec::new();
+        let mut captured = None;
+
+        run_todo_command(
+            Vec::new(),
+            None,
+            None,
+            None,
+            &mut stdin,
+            &mut stdout,
+            |input| {
+                captured = Some(input);
+                std::future::ready(Ok("journals/2026-08-26.md".to_string()))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(captured.unwrap().text, "Buy\nmilk\n");
+    }
+
+    #[tokio::test]
+    async fn todo_passes_metadata_to_the_capture_module() {
+        let mut stdin = PanicReader;
+        let mut stdout = Vec::new();
+        let mut captured = None;
+
+        run_todo_command(
+            vec!["Plan".into()],
+            Some("2026-09-01".into()),
+            Some("2026-08-30".into()),
+            Some("B".into()),
+            &mut stdin,
+            &mut stdout,
+            |input| {
+                captured = Some(input);
+                std::future::ready(Ok("journals/2026-08-26.md".to_string()))
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            captured.unwrap(),
+            clepsydra::todo_capture::TodoCaptureInput {
+                text: "Plan".into(),
+                due: Some("2026-09-01".into()),
+                scheduled: Some("2026-08-30".into()),
+                priority: Some("B".into()),
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn todo_blank_stdin_flows_to_module_validation() {
+        let mut stdin = std::io::Cursor::new(" \n\t");
+        let mut stdout = Vec::new();
+
+        let error = run_todo_command(
+            Vec::new(),
+            None,
+            None,
+            None,
+            &mut stdin,
+            &mut stdout,
+            clepsydra::todo_capture::capture_todo,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error.downcast_ref::<clepsydra::todo_capture::TodoCaptureError>(),
+            Some(clepsydra::todo_capture::TodoCaptureError::BlankText)
+        ));
+        assert!(stdout.is_empty());
+    }
+
+    #[tokio::test]
+    async fn todo_prints_the_exact_success_message() {
+        let mut stdin = PanicReader;
+        let mut stdout = Vec::new();
+
+        run_todo_command(
+            vec!["Buy".into(), "milk".into()],
+            None,
+            None,
+            None,
+            &mut stdin,
+            &mut stdout,
+            |_| std::future::ready(Ok("journals/2026-08-26.md".to_string())),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(stdout, b"Captured Todo in journals/2026-08-26.md\n");
+    }
+
+    #[tokio::test]
+    async fn todo_propagates_server_errors_without_writing_success_output() {
+        let mut stdin = PanicReader;
+        let mut stdout = Vec::new();
+
+        let error = run_todo_command(
+            vec!["Buy".into(), "milk".into()],
+            None,
+            None,
+            None,
+            &mut stdin,
+            &mut stdout,
+            |_| {
+                std::future::ready(Err(clepsydra::todo_capture::TodoCaptureError::Api(
+                    clepsydra::mcp::client::ApiCallError::Api {
+                        status: 503,
+                        message: "server unavailable".into(),
+                    },
+                )))
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            error.downcast_ref::<clepsydra::todo_capture::TodoCaptureError>(),
+            Some(clepsydra::todo_capture::TodoCaptureError::Api(
+                clepsydra::mcp::client::ApiCallError::Api {
+                    status: 503,
+                    message,
+                }
+            )) if message == "server unavailable"
+        ));
+        assert!(stdout.is_empty());
     }
 
     #[test]
