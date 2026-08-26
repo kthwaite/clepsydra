@@ -82,6 +82,13 @@ pub(crate) fn api_error_message(status: u16, body: &str) -> String {
         Err(_) => (body.to_string(), None, None),
     };
 
+    let is_page_revision_conflict = detail
+        .as_ref()
+        .and_then(|detail| detail.get("code"))
+        .and_then(Value::as_str)
+        .is_some_and(|code| code == "revision_conflict")
+        && error.starts_with("page changed");
+
     let mut message = format!("API error {status}: {error}");
     if let Some(hint) = server_hint {
         message.push_str(&format!(" (hint: {hint})"));
@@ -98,8 +105,7 @@ pub(crate) fn api_error_message(status: u16, body: &str) -> String {
             " — the binned item changed; re-list with vault_list_rubbish and inspect it with \
              vault_get_rubbish_item before retrying",
         ),
-        409 if error.starts_with("restore destination is occupied:") => {}
-        409 => message
+        409 if is_page_revision_conflict => message
             .push_str(" — the page changed concurrently; re-read it with vault_get_page and retry"),
         _ => {}
     }
@@ -319,9 +325,24 @@ mod tests {
     }
 
     #[test]
-    fn api_error_message_adds_retry_hint_on_409() {
-        let msg = api_error_message(409, r#"{"status":409,"error":"page changed"}"#);
+    fn api_error_message_adds_retry_hint_on_revision_conflict() {
+        let msg = api_error_message(
+            409,
+            r#"{"status":409,"error":"page changed since it was loaded","detail":{"code":"revision_conflict","current_revision":"abc"}}"#,
+        );
         assert!(msg.contains("re-read"), "missing retry hint: {msg}");
+    }
+
+    #[test]
+    fn api_error_message_keeps_non_revision_conflicts_neutral() {
+        let msg = api_error_message(
+            409,
+            r#"{"status":409,"error":"cannot capture into a protected journal page"}"#,
+        );
+        assert_eq!(
+            msg,
+            "API error 409: cannot capture into a protected journal page"
+        );
     }
 
     #[test]

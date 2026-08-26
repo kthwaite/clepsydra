@@ -1,6 +1,8 @@
 //! Reusable Todo rendering and capture through the configured local server.
 
 use std::error::Error;
+use std::fmt::Write as _;
+use std::path::Path;
 
 use chrono::NaiveDate;
 use thiserror::Error;
@@ -28,8 +30,8 @@ pub enum TodoCaptureError {
     InvalidDate { field: &'static str, value: String },
     #[error("invalid priority \"{0}\": expected A, B, or C")]
     InvalidPriority(String),
-    #[error("failed to connect to the configured local clepsydra server: {0}")]
-    ClientSetup(#[source] Box<dyn Error>),
+    #[error("failed to configure the local clepsydra API client: {0}")]
+    Configuration(#[source] Box<dyn Error>),
     #[error(transparent)]
     Api(#[from] ApiCallError),
     #[error(
@@ -41,10 +43,10 @@ pub enum TodoCaptureError {
 
 /// Normalize, validate, and render one unchecked Markdown Todo.
 pub fn render_todo(input: &TodoCaptureInput) -> Result<String, TodoCaptureError> {
-    let text = input.text.split_whitespace().collect::<Vec<_>>().join(" ");
-    if text.is_empty() {
+    let mut words = input.text.split_whitespace();
+    let Some(first_word) = words.next() else {
         return Err(TodoCaptureError::BlankText);
-    }
+    };
 
     validate_optional_date("due", input.due.as_deref())?;
     validate_optional_date("scheduled", input.scheduled.as_deref())?;
@@ -54,25 +56,61 @@ pub fn render_todo(input: &TodoCaptureInput) -> Result<String, TodoCaptureError>
         return Err(TodoCaptureError::InvalidPriority(priority.to_string()));
     }
 
-    let mut rendered = format!("- [ ] {text}");
+    let property_capacity = input.due.as_ref().map_or(0, |value| 9 + value.len())
+        + input
+            .scheduled
+            .as_ref()
+            .map_or(0, |value| 15 + value.len())
+        + input
+            .priority
+            .as_ref()
+            .map_or(0, |value| 14 + value.len());
+    let mut rendered = String::with_capacity(6 + input.text.len() + property_capacity);
+    rendered.push_str("- [ ] ");
+    rendered.push_str(first_word);
+    for word in words {
+        rendered.push(' ');
+        rendered.push_str(word);
+    }
     if let Some(due) = input.due.as_deref() {
-        rendered.push_str(&format!(" [due:: {due}]"));
+        write!(rendered, " [due:: {due}]").expect("writing to a String cannot fail");
     }
     if let Some(scheduled) = input.scheduled.as_deref() {
-        rendered.push_str(&format!(" [scheduled:: {scheduled}]"));
+        write!(rendered, " [scheduled:: {scheduled}]").expect("writing to a String cannot fail");
     }
     if let Some(priority) = input.priority.as_deref() {
-        rendered.push_str(&format!(" [priority:: {priority}]"));
+        write!(rendered, " [priority:: {priority}]").expect("writing to a String cannot fail");
     }
     Ok(rendered)
 }
 
 /// Capture one Todo into today's journal through the configured local server.
 pub async fn capture_todo(input: TodoCaptureInput) -> Result<String, TodoCaptureError> {
+    let content = render_todo(&input)?;
     let cwd =
-        std::env::current_dir().map_err(|error| TodoCaptureError::ClientSetup(Box::new(error)))?;
-    let client = configured_api_client(&cwd, false).map_err(TodoCaptureError::ClientSetup)?;
-    capture_todo_with_client(&client, input).await
+        std::env::current_dir().map_err(|error| TodoCaptureError::Configuration(Box::new(error)))?;
+    capture_rendered_from(&cwd, content).await
+}
+
+/// Capture one Todo using configuration discovered from `base_dir`.
+///
+/// Remote server hosts remain refused. This entry point lets callers make the
+/// config lookup base explicit without bypassing the local-only policy.
+pub async fn capture_todo_from(
+    base_dir: &Path,
+    input: TodoCaptureInput,
+) -> Result<String, TodoCaptureError> {
+    let content = render_todo(&input)?;
+    capture_rendered_from(base_dir, content).await
+}
+
+async fn capture_rendered_from(
+    base_dir: &Path,
+    content: String,
+) -> Result<String, TodoCaptureError> {
+    let client =
+        configured_api_client(base_dir, false).map_err(TodoCaptureError::Configuration)?;
+    capture_rendered_with_client(&client, content).await
 }
 
 async fn capture_todo_with_client(
@@ -80,6 +118,13 @@ async fn capture_todo_with_client(
     input: TodoCaptureInput,
 ) -> Result<String, TodoCaptureError> {
     let content = render_todo(&input)?;
+    capture_rendered_with_client(client, content).await
+}
+
+async fn capture_rendered_with_client(
+    client: &ApiClient,
+    content: String,
+) -> Result<String, TodoCaptureError> {
     let response = client
         .post_json(CAPTURE_ENDPOINT, &serde_json::json!({ "content": content }))
         .await?;
@@ -205,6 +250,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn invalid_input_wins_before_config_lookup() {
+        let tmp = tempfile::TempDir::new().unwrap();
+
+        let error = capture_todo_from(tmp.path(), input(" \n\t "))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, TodoCaptureError::BlankText));
+    }
+
+    #[tokio::test]
+    async fn capture_from_refuses_a_configured_remote_host() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[server]\nhost = \"vault.example.com\"\nport = 16667\n",
+        )
+        .unwrap();
+
+        let error = capture_todo_from(tmp.path(), input("Review proposal"))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(error, TodoCaptureError::Configuration(_)));
+        assert!(
+            error
+                .to_string()
+                .contains("refusing to target non-loopback server host \"vault.example.com\""),
+            "{error}"
+        );
+    }
+
+    #[tokio::test]
     async fn posts_rendered_todo_and_returns_journal_path() {
         let server = MockServer::start().await;
         let mut todo = input("  Review\nproposal ");
@@ -245,10 +323,9 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, TodoCaptureError::Api(_)));
-        assert!(
-            error
-                .to_string()
-                .contains("cannot capture into a protected journal page")
+        assert_eq!(
+            error.to_string(),
+            "API error 409: cannot capture into a protected journal page"
         );
     }
 
