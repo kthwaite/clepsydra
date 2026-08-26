@@ -566,17 +566,3 @@ async fn agenda_returns_empty_classified_response() {
     );
 }
 
-#[tokio::test]
-async fn agenda_obsolete_endpoints_are_removed() {
-    let (server, _tmp) = setup_server();
-    for path in [
-        "/api/vault/agenda/today",
-        "/api/vault/agenda/week",
-        "/api/vault/agenda/overdue",
-    ] {
-        server
-            .get(path)
-            .await
-            .assert_status(axum::http::StatusCode::NOT_FOUND);
-    }
-}

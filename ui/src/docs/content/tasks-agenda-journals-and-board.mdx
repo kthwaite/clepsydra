@@ -15,7 +15,7 @@ views and mutations over those files, not separate stores.
 - Use checkbox list items such as `- [ ] Draft proposal`. Inline properties use
   the Markdown form `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
   `[priority:: A]`. Write them in Markdown, or set them on a Todo from the
-  **Task properties** popover in Folio
+  **Todo properties** popover in Folio
   ([Editor Workflows](/docs/editor-workflows)).
 - Todo priority values are `A`, `B`, and `C`, badged `HIGH`, `MED`, and `LOW`
   in Agenda lists and Folio chips. Another value is badged verbatim in
@@ -66,22 +66,23 @@ total returned by the Todo query, not merely the number of rows shown. Choose
 Choose **Stats →** in the Atrium to open `/stats`, which contains the vault
 inventory and subjects ranked by frequency.
 
-### Use Today, Upcoming, and Inbox
+### Use Overdue, Today, Upcoming, and Undated
 
-Open `/agenda`:
+Open `/agenda` to review Todos and dated Tasks in one consolidated Agenda.
+Agenda shows open Todos plus dated Tasks whose status is not Done:
 
-- **Today** obtains overdue Todos separately, but `/agenda/today` also includes
-  overdue work in its Todo list. The current UI can therefore show an overdue
-  Todo in both **Overdue** and **Due Today**; the latter also includes Todos due
-  or scheduled today and open Todos in today's journal.
-- **Upcoming** groups due strings from today through seven days ahead. It is a
-  due-property view; a merely scheduled future Todo is not included there.
-- **Inbox** shows open Todos without a `due` property. A scheduled-but-undated
-  Todo therefore still belongs to this query.
+- **Overdue** contains dated work before today and precedes **Today**.
+- **Today** contains work due today.
+- **Upcoming** contains work due tomorrow through seven days ahead.
+- **Undated** contains open Todos without a `due` property. A
+  scheduled-but-undated Todo remains here.
 
-The server computes these calendar boundaries in UTC. If your local day differs
-from UTC near midnight, the agenda boundary can differ from the date displayed
-by the browser.
+The browser’s local date defines these boundaries.
+
+Change a Todo checkbox or a Task status directly in Agenda. Edit Todo due dates
+with **Todo properties** in Folio. Edit Task due dates on the Task Board.
+Agenda uses the Task display labels listed below; their persisted status values
+remain unchanged.
 
 ### Open and capture into journals
 

@@ -87,13 +87,16 @@ fn openapi_defines_consolidated_agenda_contract() {
             && parameter["in"] == "query"
             && parameter["required"] == true
     }));
-    for obsolete in [
-        "/api/vault/agenda/today",
-        "/api/vault/agenda/week",
-        "/api/vault/agenda/overdue",
-    ] {
-        assert!(!paths.contains_key(obsolete));
-    }
+    let mut agenda_paths = paths
+        .keys()
+        .filter(|path| path.starts_with("/api/vault/agenda"))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    agenda_paths.sort_unstable();
+    assert_eq!(
+        agenda_paths,
+        ["/api/vault/agenda", "/api/vault/agenda/cycle-burndown"]
+    );
 
     let schemas = document["components"]["schemas"]
         .as_object()

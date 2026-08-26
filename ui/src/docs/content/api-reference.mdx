@@ -89,14 +89,13 @@ List annotations. Responses: `200` List annotations for work; `404` Work not fou
 
 ## Agenda
 
+### `GET /api/vault/agenda`
+Get the consolidated Overdue, Today, Upcoming, and Undated Agenda for the
+required browser-local `today` date. Responses: `200` Classified Todos and
+dated Tasks; `400` Missing or invalid `today`; `500` Internal server error.
+
 ### `GET /api/vault/agenda/cycle-burndown`
 Get cycle burndown. Responses: `200` Historical cycle burndown; `400` Invalid cycle dates or telemetry scope; `404` Cycle not found; `500` Internal server error.
-### `GET /api/vault/agenda/overdue`
-List overdue tasks. Responses: `200` Overdue tasks; `500` Internal server error.
-### `GET /api/vault/agenda/today`
-Get today's agenda. Responses: `200` Today's agenda; `500` Internal server error.
-### `GET /api/vault/agenda/week`
-Get the seven-day agenda. Responses: `200` Seven-day agenda; `500` Internal server error.
 
 ## Archive
 

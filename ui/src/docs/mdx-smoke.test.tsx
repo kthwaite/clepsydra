@@ -433,13 +433,24 @@ it("documents the SingleFile capture and server-side deconstruction pipeline", (
   }
 });
 
-it("documents task date, stale-span, and current Today projection boundaries", () => {
+it("documents consolidated local-date Agenda semantics and Todo controls", () => {
   const source = registeredGuideSource("tasks-agenda-journals-and-board");
+  const editorSource = registeredGuideSource("editor-workflows");
 
   expect(source).toContain("server does not validate them as dates");
   expect(source).toContain("compares indexed values lexicographically");
   expect(source).toMatch(/rewrite a different nearby\s+checkbox/);
-  expect(source).toContain("both **Overdue** and **Due Today**");
+  expect(source).toContain("Todos and dated Tasks");
+  expect(source).toContain("browser’s local date");
+  expect(source).toContain("**Undated**");
+  expect(source).not.toContain("both **Overdue** and **Due Today**");
+  expect(source).not.toContain("calendar boundaries in UTC");
+  expect(source).not.toContain("**Inbox** shows open Todos");
+  expect(source).toContain("Task `status`: Inbox (`INTAKE`)");
+  expect(source).toContain("**Todo properties**");
+  expect(editorSource).toContain("**Todo properties**");
+  expect(source).not.toContain("**Task properties**");
+  expect(editorSource).not.toContain("**Task properties**");
 });
 
 it("documents exact academic deduplication and Zotero status matrices", () => {

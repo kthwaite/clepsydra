@@ -190,8 +190,16 @@ async fn encrypted_body_projections_are_absent_from_content_blocks_tasks_and_age
     assert_eq!(blocks, json!([]));
     let tasks = get_json(&fixture, "/api/vault/tasks").await;
     assert_eq!(tasks["tasks"], json!([]));
-    let agenda = get_json(&fixture, "/api/vault/agenda/today").await;
-    assert_eq!(agenda["tasks"], json!([]));
+    let agenda = get_json(&fixture, "/api/vault/agenda?today=2026-08-26").await;
+    assert_eq!(
+        agenda,
+        json!({
+            "overdue": [],
+            "today": [],
+            "upcoming": [],
+            "undated": []
+        })
+    );
 }
 
 #[tokio::test]

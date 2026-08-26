@@ -685,13 +685,8 @@ Remove the old duplicate and UTC warnings. Change the documented Folio control f
 
 - [ ] **Step 4: Prove obsolete contracts are absent**
 
-Search the repository for these exact paths and remove every product, test, and documentation reference:
-
-```text
-/api/vault/agenda/today
-/api/vault/agenda/week
-/api/vault/agenda/overdue
-```
+Search the repository and remove every product, test, and documentation
+reference to the former split today, week, and overdue Agenda paths.
 
 Search visible Agenda copy for an `Inbox` tab and replace only the undated-Todo meaning; preserve Task status label Inbox.
 
