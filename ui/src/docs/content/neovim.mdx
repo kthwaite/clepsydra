@@ -1,0 +1,65 @@
+export const meta = {
+  slug: "neovim",
+  title: "Neovim Plugin",
+  description: "Install and use the bundled Neovim plugin for journal, search, and pickers."
+}
+
+The repository ships a Neovim plugin at `nvim/` that layers vault commands and
+pickers on top of the [LSP](/docs/lsp) and the running `clep serve` HTTP API.
+
+## Prerequisites
+
+- Neovim 0.11 or newer (0.12 recommended), `curl` on PATH.
+- `clep` on PATH; `clep serve` running for journal, capture, and pickers
+  (LSP features work without it).
+- [snacks.nvim](https://github.com/folke/snacks.nvim) with its picker enabled
+  (pickers only; commands work without it).
+
+## Install
+
+With lazy.nvim, point a `dir` spec at the repository checkout:
+
+```lua
+{
+  dir = "/path/to/clepsydra/nvim",
+  ---@type { server_url?: string, vault_root?: string }
+  opts = {},
+}
+```
+
+Options and defaults: `server_url = "http://localhost:3000"` (set this if your
+`[server].port` differs or you use a proxy hostname), `vault_root = nil`
+(auto-detected from the `.clepsydra` ancestor of the current buffer).
+
+The plugin ships the LSP definition on its runtimepath, so enabling the
+language server reduces to:
+
+```lua
+vim.lsp.enable("clepsydra")
+```
+
+## Commands
+
+| Command | Behavior |
+| --- | --- |
+| `:Clep today` | Ensure today's journal exists (server-side) and open it. |
+| `:Clep daily {spec}` | Open a journal by relative spec: `prev`, `next`, `+N`, `-N`, a weekday name, or `YYYY-MM-DD`. Relative specs resolve against the current buffer's journal date when it has one, else today. Pages are not created for non-today dates. |
+| `:Clep capture` | Append the current line (or visual range: `:'<,'>Clep capture`) to today's journal via the capture endpoint. |
+| `:Clep search` | Live full-text page search (snacks picker). |
+| `:Clep backlinks` | Backlinks of the current page with context (snacks picker). Opens the source file; the API returns context strings, not positions. |
+| `:Clep tags` | Vault tags; confirming a tag opens a picker of its pages. |
+
+The plugin also registers the `clepsydra.findReferences` client command that
+the LSP's reference code lens emits, so activating the lens runs a normal
+references request.
+
+## Health
+
+`:checkhealth clepsydra` reports: `clep` binary presence, vault root
+detection, `clep serve` reachability, and LSP attachment.
+
+## Related
+
+- [LSP](/docs/lsp) for the language-server capabilities
+- [Configuration](/docs/configuration) for `[server].port` and vault root
+- [Tasks, Agenda, Journals and Board](/docs/tasks-agenda-journals-and-board)

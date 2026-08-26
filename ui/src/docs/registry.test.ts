@@ -35,6 +35,7 @@ const CAPTURE_GUIDE_SLUGS = [
 const AI_INTEGRATION_GUIDE_SLUGS = [
   "codex-and-conversation-capture",
   "lsp",
+  "neovim",
   "mcp",
 ] as const;
 
@@ -59,7 +60,7 @@ it("declares the approved user-intent hierarchy", () => {
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(21);
+  expect(DOC_PAGES).toHaveLength(22);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -160,8 +161,16 @@ it("derives previous and next guides across group boundaries", () => {
     previous: { slug: "browser-extension" },
     next: { slug: "lsp" },
   });
-  expect(getDocNeighbors("mcp")).toMatchObject({
+  expect(getDocNeighbors("lsp")).toMatchObject({
+    previous: { slug: "codex-and-conversation-capture" },
+    next: { slug: "neovim" },
+  });
+  expect(getDocNeighbors("neovim")).toMatchObject({
     previous: { slug: "lsp" },
+    next: { slug: "mcp" },
+  });
+  expect(getDocNeighbors("mcp")).toMatchObject({
+    previous: { slug: "neovim" },
     next: { slug: "configuration" },
   });
   expect(getDocNeighbors("configuration")).toMatchObject({

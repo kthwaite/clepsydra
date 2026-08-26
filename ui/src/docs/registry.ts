@@ -16,6 +16,7 @@ import gettingStartedSource from "#/docs/content/getting-started.mdx?raw";
 import linksSearchGraphAndRepairSource from "#/docs/content/links-search-graph-and-repair.mdx?raw";
 import lspSource from "#/docs/content/lsp.mdx?raw";
 import mcpSource from "#/docs/content/mcp.mdx?raw";
+import neovimSource from "#/docs/content/neovim.mdx?raw";
 import pagesAndAuthoringSource from "#/docs/content/pages-and-authoring.mdx?raw";
 import recipesSource from "#/docs/content/recipes.mdx?raw";
 import tasksAgendaJournalsAndBoardSource from "#/docs/content/tasks-agenda-journals-and-board.mdx?raw";
@@ -72,6 +73,7 @@ const CodexAndConversationCaptureGuide = lazy(
 );
 const LspGuide = lazy(() => import("#/docs/content/lsp.mdx"));
 const McpGuide = lazy(() => import("#/docs/content/mcp.mdx"));
+const NeovimGuide = lazy(() => import("#/docs/content/neovim.mdx"));
 const BrowserExtensionGuide = lazy(
   () => import("#/docs/content/browser-extension.mdx"),
 );
@@ -257,6 +259,21 @@ const lspMeta = {
     "external edits",
   ],
 } satisfies DocMeta;
+const neovimMeta = {
+  slug: "neovim",
+  title: "Neovim Plugin",
+  description:
+    "Install and use the bundled Neovim plugin for journal, search, and pickers.",
+  keywords: [
+    "neovim",
+    "plugin",
+    "snacks",
+    "picker",
+    "journal",
+    "capture",
+    "Clep",
+  ],
+} satisfies DocMeta;
 const mcpMeta = {
   slug: "mcp",
   title: "MCP",
@@ -393,6 +410,7 @@ const codexAndConversationCapture = page(
   codexAndConversationCaptureSource,
 );
 const lsp = page("ai-integrations", lspMeta, LspGuide, lspSource);
+const neovim = page("ai-integrations", neovimMeta, NeovimGuide, neovimSource);
 const mcp = page("ai-integrations", mcpMeta, McpGuide, mcpSource);
 const browserExtension = page(
   "capture-feeds-archives",
@@ -446,7 +464,7 @@ export const DOC_GROUPS = [
   {
     id: "ai-integrations",
     label: "AI and integrations",
-    pages: [codexAndConversationCapture, lsp, mcp],
+    pages: [codexAndConversationCapture, lsp, neovim, mcp],
   },
   {
     id: "operations-reference",
