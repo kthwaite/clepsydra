@@ -63,7 +63,7 @@ describe("createFilterDiagnosticScope", () => {
     expect(scope.subtree()).toEqual(included);
   });
 
-  it("registers the exact control path and element", () => {
+  it("registers the exact control path for mount and cleanup", () => {
     const registerFocus = vi.fn();
     const element = document.createElement("input");
     const scope = createFilterDiagnosticScope({
@@ -74,21 +74,58 @@ describe("createFilterDiagnosticScope", () => {
     });
 
     scope.register("field", element);
+    scope.register("field", null);
 
-    expect(registerFocus).toHaveBeenCalledOnce();
-    expect(registerFocus).toHaveBeenCalledWith(
+    expect(registerFocus).toHaveBeenCalledTimes(2);
+    expect(registerFocus).toHaveBeenNthCalledWith(
+      1,
       "views[1].filter.not.field",
       element,
+    );
+    expect(registerFocus).toHaveBeenNthCalledWith(
+      2,
+      "views[1].filter.not.field",
+      null,
+    );
+  });
+
+  it("registers an exact diagnostic path for mount and cleanup", () => {
+    const registerFocus = vi.fn();
+    const element = document.createElement("div");
+    const scope = createFilterDiagnosticScope({
+      root: "filter",
+      path: [],
+      diagnostics: [],
+      registerFocus,
+    });
+
+    scope.registerPath("filter.all[1].value", element);
+    scope.registerPath("filter.all[1].value", null);
+
+    expect(registerFocus).toHaveBeenCalledTimes(2);
+    expect(registerFocus).toHaveBeenNthCalledWith(
+      1,
+      "filter.all[1].value",
+      element,
+    );
+    expect(registerFocus).toHaveBeenNthCalledWith(
+      2,
+      "filter.all[1].value",
+      null,
     );
   });
 
   it("allows registration when no registrar is supplied", () => {
+    const element = document.createElement("input");
     const scope = createFilterDiagnosticScope({
       root: "filter",
       path: [],
       diagnostics: [],
     });
 
-    expect(() => scope.register("value", null)).not.toThrow();
+    expect(() => {
+      scope.register("value", element);
+      scope.registerPath("filter.all[1].value", element);
+    }).not.toThrow();
   });
 });

@@ -35,7 +35,7 @@ function renderRow(value: BaseFilter, diagnostics: BaseDiagnostic[] = []) {
     diagnostics,
     registerFocus,
   });
-  render(
+  const { unmount } = render(
     <TagConditionEditor
       value={value}
       position={1}
@@ -44,7 +44,7 @@ function renderRow(value: BaseFilter, diagnostics: BaseDiagnostic[] = []) {
       diagnosticScope={diagnosticScope}
     />,
   );
-  return { onChange, registerFocus };
+  return { onChange, registerFocus, unmount };
 }
 
 async function chooseOption(user: UserEvent, trigger: RegExp, option: RegExp) {
@@ -179,8 +179,8 @@ describe("TagConditionEditor", () => {
     expect(onChange).not.toHaveBeenCalled();
   });
 
-  it("surfaces a diagnostic addressed to a node the row subsumes", () => {
-    const { registerFocus } = renderRow(
+  it("registers each subsumed diagnostic path to one compact-row target and cleans up", () => {
+    const { registerFocus, unmount } = renderRow(
       {
         all: [
           { field: "tags", op: "contains", value: "beer" },
@@ -190,16 +190,32 @@ describe("TagConditionEditor", () => {
       [
         {
           severity: "error",
+          message: "unknown tag `beer`",
+          path: "filter.all[0].value",
+        },
+        {
+          severity: "error",
           message: "unknown tag `wine`",
           path: "filter.all[1].value",
         },
       ] as BaseDiagnostic[],
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent("unknown tag `wine`");
-    expect(registerFocus).toHaveBeenCalledWith(
-      "filter.value",
-      expect.any(HTMLElement),
-    );
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    const firstTarget = registerFocus.mock.calls.find(
+      ([path, element]) =>
+        path === "filter.all[0].value" && element instanceof HTMLElement,
+    )?.[1];
+    const secondTarget = registerFocus.mock.calls.find(
+      ([path, element]) =>
+        path === "filter.all[1].value" && element instanceof HTMLElement,
+    )?.[1];
+    expect(firstTarget).toBeInstanceOf(HTMLElement);
+    expect(secondTarget).toBe(firstTarget);
+
+    unmount();
+
+    expect(registerFocus).toHaveBeenCalledWith("filter.all[0].value", null);
+    expect(registerFocus).toHaveBeenCalledWith("filter.all[1].value", null);
   });
 });

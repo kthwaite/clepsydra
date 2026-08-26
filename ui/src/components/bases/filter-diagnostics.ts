@@ -10,6 +10,7 @@ export interface FilterDiagnosticScope {
   path(control?: FilterControl): string;
   exact(control: FilterControl): BaseDiagnostic[];
   subtree(): BaseDiagnostic[];
+  registerPath(path: string, element: HTMLElement | null): void;
   register(control: FilterControl, element: HTMLElement | null): void;
 }
 
@@ -26,9 +27,16 @@ export function createFilterDiagnosticScope(options: {
   );
   const path = (control?: FilterControl) =>
     control === undefined ? nodePath : `${nodePath}.${control}`;
+  const registerPath = (
+    diagnosticPath: string,
+    element: HTMLElement | null,
+  ) => {
+    options.registerFocus?.(diagnosticPath, element);
+  };
 
   return {
     path,
+    registerPath,
     exact(control) {
       const controlPath = path(control);
       return options.diagnostics.filter(
@@ -45,7 +53,7 @@ export function createFilterDiagnosticScope(options: {
       );
     },
     register(control, element) {
-      options.registerFocus?.(path(control), element);
+      registerPath(path(control), element);
     },
   };
 }

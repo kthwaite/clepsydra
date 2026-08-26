@@ -159,15 +159,22 @@ export function TagConditionEditor({
       />
 
       {rowDiagnostics.length > 0 ? (
-        <div id={errorId} className="grid gap-1">
+        <div
+          id={errorId}
+          ref={(element) => {
+            for (const diagnostic of rowDiagnostics) {
+              if (typeof diagnostic.path === "string") {
+                diagnosticScope.registerPath(diagnostic.path, element);
+              }
+            }
+          }}
+          tabIndex={-1}
+          className="grid gap-1"
+        >
           {rowDiagnostics.map((diagnostic) => (
             <p
               key={`${diagnostic.path}:${diagnostic.message}`}
               role={diagnostic.severity === "error" ? "alert" : undefined}
-              ref={(element) =>
-                diagnosticScope.register("value", element)
-              }
-              tabIndex={-1}
               className={
                 diagnostic.severity === "error"
                   ? "text-xs text-destructive"
