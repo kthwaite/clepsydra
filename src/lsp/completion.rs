@@ -13,6 +13,19 @@ pub fn wikilink_prefix(line_text: &str, character: usize) -> Option<String> {
     Some(after_bracket.to_string())
 }
 
+/// Detect if the cursor is in a block-reference context.
+/// Returns the filter prefix (text between `((` and cursor) if found.
+pub fn block_ref_prefix(line_text: &str, character: usize) -> Option<String> {
+    let end = clamp_to_char_boundary(line_text, character);
+    let before = &line_text[..end];
+    let paren_pos = before.rfind("((")?;
+    let after_paren = &before[paren_pos + 2..];
+    if after_paren.contains("))") {
+        return None;
+    }
+    Some(after_paren.to_string())
+}
+
 /// Detect if the cursor is in a tag context (#word_boundary).
 pub fn tag_prefix(line_text: &str, character: usize) -> Option<String> {
     let end = clamp_to_char_boundary(line_text, character);
@@ -234,5 +247,38 @@ mod tests {
         // `[[` inside the string belongs to the relation completer.
         assert_eq!(property_value_prefix("series = [\"[[Sol", 16), None);
         assert_eq!(property_value_prefix("no equals here", 14), None);
+    }
+
+    // ---- block_ref_prefix tests ----
+
+    #[test]
+    fn block_ref_empty_prefix() {
+        assert_eq!(block_ref_prefix("see ((", 6), Some("".to_string()));
+    }
+
+    #[test]
+    fn block_ref_partial_prefix() {
+        assert_eq!(block_ref_prefix("see ((meet", 10), Some("meet".to_string()));
+    }
+
+    #[test]
+    fn block_ref_no_context() {
+        assert_eq!(block_ref_prefix("plain text", 10), None);
+    }
+
+    #[test]
+    fn block_ref_closed() {
+        assert_eq!(block_ref_prefix("((abc123XYZ99)) more", 20), None);
+    }
+
+    #[test]
+    fn block_ref_single_paren() {
+        assert_eq!(block_ref_prefix("call (arg", 9), None);
+    }
+
+    #[test]
+    fn block_ref_mid_codepoint_offset_is_safe() {
+        // Offset 1 is mid-codepoint of 你 (3 bytes) — must not panic.
+        assert!(block_ref_prefix("你((x", 1).is_none());
     }
 }
