@@ -89,7 +89,9 @@ impl<'a> Compiler<'a> {
                 let parameter = self.bind(Value::Text(value.clone()));
                 Ok(match field {
                     SearchField::Kind => format!("(p.kind = ?{parameter})"),
-                    SearchField::Project => format!("(p.project = ?{parameter})"),
+                    SearchField::Project => {
+                        format!("(COALESCE(p.project = ?{parameter}, 0))")
+                    }
                     SearchField::Tag => format!(
                         "(EXISTS (SELECT 1 FROM tags AS searched_tags \
                          WHERE searched_tags.page_id = p.id \
@@ -238,12 +240,7 @@ fn fts_expression(
     span: SearchSpan,
 ) -> Result<String, SearchQueryError> {
     let expression = match mode {
-        TextMode::Prefix => value
-            .split(|character: char| !character.is_alphanumeric())
-            .filter(|term| !term.is_empty())
-            .map(|term| format!("\"{}\"*", escape_fts_phrase(term)))
-            .collect::<Vec<_>>()
-            .join(" AND "),
+        TextMode::Prefix => prefix_fts_expression(value),
         TextMode::Phrase if value.chars().any(char::is_alphanumeric) => {
             format!("\"{}\"", escape_fts_phrase(value))
         }
@@ -263,6 +260,24 @@ fn fts_expression(
     }
 
     Ok(expression)
+}
+
+fn prefix_fts_expression(value: &str) -> String {
+    let mut expression = String::with_capacity(value.len().saturating_add(3));
+
+    for term in value
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|term| !term.is_empty())
+    {
+        if !expression.is_empty() {
+            expression.push_str(" AND ");
+        }
+        expression.push('"');
+        expression.push_str(term);
+        expression.push_str("\"*");
+    }
+
+    expression
 }
 
 fn escape_fts_phrase(value: &str) -> String {
@@ -310,9 +325,6 @@ mod tests {
         assert!(!compiled.sql.contains("beer"));
         assert!(!compiled.sql.contains("Kitchen Shelf"));
         assert!(!compiled.sql.contains("clep"));
-        assert!(compiled.sql.contains("ORDER BY (best_positive.page_id IS NOT NULL) DESC"));
-        assert!(compiled.sql.contains("p.path COLLATE NOCASE ASC"));
-        assert!(compiled.sql.contains("p.id ASC"));
         assert_eq!(
             compiled.parameters,
             [

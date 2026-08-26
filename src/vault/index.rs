@@ -3151,6 +3151,10 @@ mod tests {
                 "---\nid: 00000000-0000-0000-0000-000000000108\ntitle: Old Material\ntype: archive\nproject: Archive\ntags:\n  - historical\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-09T00:00:00Z\n---\nRetired material.\n",
             ),
             (
+                "notes/unassigned.md",
+                "---\nid: 00000000-0000-0000-0000-000000000110\ntitle: Unassigned Note\ntype: note\ntags:\n  - unassigned\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-07T00:00:00Z\n---\nA page without a project.\n",
+            ),
+            (
                 "notes/unicode.md",
                 "---\nid: 00000000-0000-0000-0000-000000000109\ntitle: Élan vital\ntype: note\nproject: Core\ntags:\n  - unicode\ncreated_at: 2026-08-01T00:00:00Z\nupdated_at: 2026-08-08T00:00:00Z\n---\nA Unicode search fixture.\n",
             ),
@@ -3191,6 +3195,26 @@ mod tests {
         actual.sort();
         expected.sort();
         assert_eq!(actual, expected);
+    }
+
+    fn insert_metadata_page(index: &VaultIndex, id: &str, path: &str, tag: &str) {
+        index
+            .connection()
+            .execute(
+                "INSERT INTO pages (
+                     id, path, title, canonical_name, updated_at, meta_json,
+                     content_hash, kind, kind_inferred, project
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, '{}', ?1, 'NOTE', 0, 'Ordering')",
+                params![id, path, path, path, "2026-08-15T00:00:00Z"],
+            )
+            .unwrap();
+        index
+            .connection()
+            .execute(
+                "INSERT INTO tags (page_id, tag, computed) VALUES (?1, ?2, 0)",
+                params![id, tag],
+            )
+            .unwrap();
     }
 
     #[test]
@@ -3266,9 +3290,29 @@ mod tests {
                 "notes/stray.md",
                 "notes/tasting-reference.md",
                 "notes/unicode.md",
+                "notes/unassigned.md",
                 "recipes/beer.md",
                 "recipes/wine.md",
             ],
+        );
+
+        let nested = index
+            .search("-(project:Archive | tag:reference)", 20)
+            .unwrap();
+        assert!(
+            nested
+                .iter()
+                .any(|result| result.path == "notes/unassigned.md")
+        );
+        assert!(
+            nested
+                .iter()
+                .all(|result| !matches!(
+                    result.path.as_str(),
+                    "archive/old.md"
+                        | "notes/reference.md"
+                        | "notes/tasting-reference.md"
+                ))
         );
     }
 
@@ -3305,9 +3349,93 @@ mod tests {
         assert_eq!(paths(&recipes), ["recipes/beer.md", "recipes/wine.md"]);
         assert!(recipes.iter().all(|result| result.snippet.is_empty()));
 
+
         let limited = index.search("tasting | tag:reference", 1).unwrap();
         assert_eq!(limited.len(), 1);
         assert_eq!(limited[0].page_id, mixed[0].page_id);
+    }
+
+    #[test]
+    fn search_uses_best_rank_and_its_corresponding_snippet() {
+        let index = search_index();
+        let fermentation = index
+            .search("fermentation", 20)
+            .unwrap()
+            .into_iter()
+            .find(|result| result.path == "recipes/beer.md")
+            .unwrap();
+        let tasting = index
+            .search("tasting", 20)
+            .unwrap()
+            .into_iter()
+            .find(|result| result.path == "recipes/beer.md")
+            .unwrap();
+        assert_ne!(fermentation.rank.to_bits(), tasting.rank.to_bits());
+        assert_ne!(fermentation.snippet, tasting.snippet);
+
+        let expected_best = if fermentation.rank <= tasting.rank {
+            &fermentation
+        } else {
+            &tasting
+        };
+        let combined = index
+            .search("fermentation | tasting", 20)
+            .unwrap()
+            .into_iter()
+            .find(|result| result.path == "recipes/beer.md")
+            .unwrap();
+
+        assert_eq!(combined.rank.to_bits(), expected_best.rank.to_bits());
+        assert_eq!(combined.snippet, expected_best.snippet);
+    }
+
+    #[test]
+    fn search_orders_equal_timestamps_by_nocase_path_then_id() {
+        let index = search_index();
+        insert_metadata_page(
+            &index,
+            "00000000-0000-0000-0000-000000000203",
+            "notes/Zebra-order.md",
+            "path-order",
+        );
+        insert_metadata_page(
+            &index,
+            "00000000-0000-0000-0000-000000000204",
+            "notes/alpha-order.md",
+            "path-order",
+        );
+        assert_eq!(
+            paths(&index.search("tag:path-order", 20).unwrap()),
+            ["notes/alpha-order.md", "notes/Zebra-order.md"]
+        );
+
+        insert_metadata_page(
+            &index,
+            "00000000-0000-0000-0000-000000000302",
+            "notes/Case-Tie.md",
+            "id-order",
+        );
+        insert_metadata_page(
+            &index,
+            "00000000-0000-0000-0000-000000000301",
+            "notes/case-tie.md",
+            "id-order",
+        );
+        let id_order = index.search("tag:id-order", 20).unwrap();
+        assert_eq!(
+            paths(&id_order),
+            ["notes/case-tie.md", "notes/Case-Tie.md"]
+        );
+        assert_eq!(
+            id_order
+                .iter()
+                .map(|result| result.page_id.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "00000000-0000-0000-0000-000000000301",
+                "00000000-0000-0000-0000-000000000302"
+            ]
+        );
     }
 
     #[test]
