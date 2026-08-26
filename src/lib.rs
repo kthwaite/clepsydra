@@ -7,6 +7,7 @@ pub mod feeds;
 pub mod lsp;
 pub mod macos_url_handler;
 pub mod mcp;
+pub mod todo_capture;
 pub mod vault;
 
 use std::path::{Path, PathBuf};

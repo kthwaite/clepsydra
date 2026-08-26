@@ -11,6 +11,7 @@ pub mod server;
 pub mod tasking;
 
 use std::net::IpAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use rmcp::ServiceExt;
@@ -66,18 +67,23 @@ fn load_tls_root_cert(tls: &TlsSettings) -> Result<Option<Vec<u8>>, Box<dyn std:
     Ok(Some(pem))
 }
 
-/// Run the MCP server on stdio until the client disconnects.
+/// Build an API client for the server discovered through the normal config
+/// lookup. Remote hosts are refused unless the caller explicitly opts in.
 ///
-/// No tracing subscriber is installed here on purpose: stdout belongs to the
-/// MCP protocol, and a default `fmt` subscriber would corrupt it.
-pub async fn run_mcp(allow_remote: bool) -> Result<(), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let (settings, _config_path) = Settings::load(&cwd)?;
+/// This is the shared local-client boundary for commands that proxy the
+/// running server. It owns config lookup, bind-host normalization, and local
+/// TLS certificate trust.
+pub fn configured_api_client(
+    base_dir: &Path,
+    allow_remote: bool,
+) -> Result<ApiClient, Box<dyn std::error::Error>> {
+    let (settings, _config_path) = Settings::load(base_dir)?;
 
     if !host_is_loopback(&settings.server.host) && !allow_remote {
         return Err(format!(
-            "refusing to target non-loopback server host \"{}\" — an MCP client would be \
-             operating on a remote vault. Pass --allow-remote if that is intended.",
+            "refusing to target non-loopback server host \"{}\" — this client would be \
+             operating on a remote vault. Configure server.host as a loopback host, or pass \
+             --allow-remote where supported if that is intended.",
             settings.server.host
         )
         .into());
@@ -85,7 +91,16 @@ pub async fn run_mcp(allow_remote: bool) -> Result<(), Box<dyn std::error::Error
 
     let base = base_url(&settings.server);
     let cert = load_tls_root_cert(&settings.server.tls)?;
-    let client = ApiClient::new(base, cert)?;
+    ApiClient::new(base, cert)
+}
+
+/// Run the MCP server on stdio until the client disconnects.
+///
+/// No tracing subscriber is installed here on purpose: stdout belongs to the
+/// MCP protocol, and a default `fmt` subscriber would corrupt it.
+pub async fn run_mcp(allow_remote: bool) -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    let client = configured_api_client(&cwd, allow_remote)?;
     let mcp = VaultMcpServer::new(Arc::new(client));
 
     let service = mcp.serve(rmcp::transport::stdio()).await?;
@@ -176,6 +191,30 @@ mod tests {
         })
         .unwrap();
         assert!(cert.is_none());
+    }
+
+    #[test]
+    fn configured_client_refuses_remote_host_unless_allowed() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[server]\nhost = \"vault.example.com\"\nport = 16667\n",
+        )
+        .unwrap();
+
+        let error = match configured_api_client(tmp.path(), false) {
+            Ok(_) => panic!("remote host should be refused by default"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("refusing to target non-loopback server host \"vault.example.com\""),
+            "{error}"
+        );
+
+        let client = configured_api_client(tmp.path(), true).unwrap();
+        assert_eq!(client.base(), "http://vault.example.com:16667");
     }
 
     /// The eval fixture (tests/mcp_evals/vault) must stay drift-free: its
