@@ -161,6 +161,52 @@ mod tests {
         }
     }
 
+    struct EnvGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let prior = std::env::var_os(key);
+            // SAFETY: proxy-environment tests are serialized.
+            unsafe { std::env::set_var(key, value) };
+            Self { key, prior }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let prior = std::env::var_os(key);
+            // SAFETY: proxy-environment tests are serialized.
+            unsafe { std::env::remove_var(key) };
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: proxy-environment tests are serialized.
+            unsafe {
+                match self.prior.take() {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    fn write_server_config(dir: &Path, server_uri: &str) {
+        let server = url::Url::parse(server_uri).unwrap();
+        std::fs::write(
+            dir.join("config.toml"),
+            format!(
+                "[server]\nhost = \"{}\"\nport = {}\n",
+                server.host_str().unwrap(),
+                server.port().unwrap()
+            ),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn renders_normalized_text_and_properties_in_canonical_order() {
         let mut todo = input("  Review\n\t the   proposal  ");
@@ -264,6 +310,92 @@ mod tests {
                 .to_string()
                 .contains("refusing to target non-loopback server host \"vault.example.com\""),
             "{error}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn configured_local_capture_ignores_proxy_environment() {
+        let proxy = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(502))
+            .mount(&proxy)
+            .await;
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/vault/journal/today/capture"))
+            .and(body_json(serde_json::json!({
+                "content": "- [ ] Review proposal"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "path": "journals/today.md"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        write_server_config(tmp.path(), &server.uri());
+        let proxy_uri = proxy.uri();
+        let client = {
+            let _env = [
+                EnvGuard::set("HTTP_PROXY", &proxy_uri),
+                EnvGuard::set("http_proxy", &proxy_uri),
+                EnvGuard::set("HTTPS_PROXY", &proxy_uri),
+                EnvGuard::set("https_proxy", &proxy_uri),
+                EnvGuard::set("ALL_PROXY", &proxy_uri),
+                EnvGuard::set("all_proxy", &proxy_uri),
+                EnvGuard::remove("NO_PROXY"),
+                EnvGuard::remove("no_proxy"),
+            ];
+            configured_api_client(tmp.path(), false).unwrap()
+        };
+        let content = render_todo(&input("Review proposal")).unwrap();
+        let path = capture_rendered_with_client(&client, content)
+            .await
+            .unwrap();
+
+        assert_eq!(path, "journals/today.md");
+        assert!(proxy.received_requests().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn configured_local_capture_never_follows_redirects_to_another_server() {
+        let second_server = MockServer::start().await;
+
+        for redirect_status in [307_u16, 308] {
+            let configured_server = MockServer::start().await;
+            let location = format!("{}/stolen", second_server.uri());
+            Mock::given(method("POST"))
+                .and(path("/api/vault/journal/today/capture"))
+                .respond_with(
+                    ResponseTemplate::new(redirect_status)
+                        .insert_header("Location", location.as_str()),
+                )
+                .expect(1)
+                .mount(&configured_server)
+                .await;
+            let tmp = tempfile::TempDir::new().unwrap();
+            write_server_config(tmp.path(), &configured_server.uri());
+
+            let error = capture_todo_from(tmp.path(), input("private Todo body"))
+                .await
+                .unwrap_err();
+
+            assert!(
+                matches!(
+                    error,
+                    TodoCaptureError::Api(ApiCallError::Api { status, .. })
+                        if status == redirect_status
+                ),
+                "unexpected redirect result: {error}"
+            );
+        }
+
+        assert!(
+            second_server.received_requests().await.unwrap().is_empty(),
+            "Todo body reached the redirect target"
         );
     }
 

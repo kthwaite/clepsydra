@@ -487,7 +487,13 @@ it("documents the clep todo capture contract", () => {
   expect(source).toMatch(/A[\s\S]*B[\s\S]*C/);
   expect(source).toContain("due, scheduled, priority");
   expect(source).toMatch(/clep serve[\s\S]*must be running/);
-  expect(source).toMatch(/configured\s+remote hosts are refused/i);
+  expect(source).toContain("configured `server.host` must be a loopback host");
+  expect(source).toMatch(
+    /Bind-all values such as `0\.0\.0\.0`, `::`, and `\[::\]`\s+count as non-loopback/,
+  );
+  expect(source).toMatch(
+    /TLS mode and certificate paths come from\s+that selected configuration/,
+  );
   expect(source).toContain("journal path");
 });
 

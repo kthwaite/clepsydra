@@ -70,9 +70,10 @@ fn load_tls_root_cert(tls: &TlsSettings) -> Result<Option<Vec<u8>>, Box<dyn std:
 /// Build an API client for the server discovered through the normal config
 /// lookup. Remote hosts are refused unless the caller explicitly opts in.
 ///
-/// This is the shared local-client boundary for commands that proxy the
-/// running server. It owns config lookup, bind-host normalization, and local
-/// TLS certificate trust.
+/// This is the shared client boundary for commands that proxy the running
+/// server. It owns config lookup, bind-host normalization, and local TLS
+/// certificate trust. Local-only clients ignore proxies and redirects;
+/// `allow_remote` retains the standard HTTP behavior used by MCP.
 pub fn configured_api_client(
     base_dir: &Path,
     allow_remote: bool,
@@ -91,7 +92,11 @@ pub fn configured_api_client(
 
     let base = base_url(&settings.server);
     let cert = load_tls_root_cert(&settings.server.tls)?;
-    ApiClient::new(base, cert)
+    if allow_remote {
+        ApiClient::new(base, cert)
+    } else {
+        ApiClient::new_local(base, cert)
+    }
 }
 
 /// Run the MCP server on stdio until the client disconnects.

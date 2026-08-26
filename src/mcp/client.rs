@@ -82,12 +82,13 @@ pub(crate) fn api_error_message(status: u16, body: &str) -> String {
         Err(_) => (body.to_string(), None, None),
     };
 
-    let is_page_revision_conflict = detail
+    let is_page_revision_conflict = (detail
         .as_ref()
         .and_then(|detail| detail.get("code"))
         .and_then(Value::as_str)
         .is_some_and(|code| code == "revision_conflict")
-        && error.starts_with("page changed");
+        && error.starts_with("page changed"))
+        || error.starts_with("page changed during mutation:");
 
     let mut message = format!("API error {status}: {error}");
     if let Some(hint) = server_hint {
@@ -126,7 +127,31 @@ impl ApiClient {
         base: String,
         extra_root_cert_pem: Option<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::build(base, extra_root_cert_pem, false)
+    }
+
+    /// Build a client that cannot use ambient proxies or follow redirects.
+    ///
+    /// Configured local commands use this policy so request bodies cannot be
+    /// forwarded away from the selected loopback server.
+    pub(super) fn new_local(
+        base: String,
+        extra_root_cert_pem: Option<Vec<u8>>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::build(base, extra_root_cert_pem, true)
+    }
+
+    fn build(
+        base: String,
+        extra_root_cert_pem: Option<Vec<u8>>,
+        local_only: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
+        if local_only {
+            builder = builder
+                .no_proxy()
+                .redirect(reqwest::redirect::Policy::none());
+        }
         if let Some(pem) = extra_root_cert_pem {
             builder = builder.add_root_certificate(reqwest::Certificate::from_pem(&pem)?);
         }
@@ -331,6 +356,19 @@ mod tests {
             r#"{"status":409,"error":"page changed since it was loaded","detail":{"code":"revision_conflict","current_revision":"abc"}}"#,
         );
         assert!(msg.contains("re-read"), "missing retry hint: {msg}");
+    }
+
+    #[test]
+    fn api_error_message_adds_retry_hint_on_unstructured_mutation_conflict() {
+        let msg = api_error_message(
+            409,
+            r#"{"status":409,"error":"page changed during mutation: notes/example.md"}"#,
+        );
+        assert!(msg.contains("re-read"), "missing retry hint: {msg}");
+        assert!(
+            msg.contains("vault_get_page"),
+            "missing MCP tool hint: {msg}"
+        );
     }
 
     #[test]
