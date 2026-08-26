@@ -8,8 +8,6 @@ import {
   isValidBaseSlug,
   moveItem,
   operatorsFor,
-  removeFilterAtPath,
-  replaceFilterAtPath,
   slugifyBaseName,
   toWire,
 } from "#/components/bases/definition-model";
@@ -340,65 +338,6 @@ describe("base definition model", () => {
     expect(moveItem(items, 1, 1)).toEqual(items);
     expect(moveItem(items, -1, 2)).toEqual(items);
     expect(moveItem(items, 0, 3)).toEqual(items);
-  });
-
-  it("replaces recursive filter nodes without mutating the source", () => {
-    const source = {
-      all: [
-        { field: "kind", op: "eq", value: "BOOK" },
-        {
-          any: [
-            { field: "status", op: "eq", value: "queued" },
-            { not: { field: "archived", op: "eq", value: true } },
-          ],
-        },
-      ],
-    } satisfies import("#/api/bases").BaseFilter;
-
-    const next = replaceFilterAtPath(source, ["all", 1, "any", 1, "not"], {
-      field: "archived",
-      op: "eq",
-      value: false,
-    });
-
-    expect(next).toEqual({
-      all: [
-        { field: "kind", op: "eq", value: "BOOK" },
-        {
-          any: [
-            { field: "status", op: "eq", value: "queued" },
-            { not: { field: "archived", op: "eq", value: false } },
-          ],
-        },
-      ],
-    });
-    expect(source.all[1]).toEqual({
-      any: [
-        { field: "status", op: "eq", value: "queued" },
-        { not: { field: "archived", op: "eq", value: true } },
-      ],
-    });
-  });
-
-  it("removes nested filters immutably and collapses empty ancestors", () => {
-    const source = {
-      all: [
-        { field: "kind", op: "eq", value: "BOOK" },
-        { any: [{ field: "status", op: "eq", value: "reading" }] },
-      ],
-    } satisfies import("#/api/bases").BaseFilter;
-
-    expect(removeFilterAtPath(source, ["all", 1, "any", 0])).toEqual({
-      all: [{ field: "kind", op: "eq", value: "BOOK" }],
-    });
-    expect(removeFilterAtPath(source, ["all", 0])).toEqual({
-      all: [{ any: [{ field: "status", op: "eq", value: "reading" }] }],
-    });
-    expect(
-      removeFilterAtPath({ all: [source.all[0]] }, ["all", 0]),
-    ).toBeUndefined();
-    expect(removeFilterAtPath(source, [])).toBeUndefined();
-    expect(source.all).toHaveLength(2);
   });
 
   it("generates and validates deterministic safe base slugs", () => {

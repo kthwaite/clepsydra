@@ -11,11 +11,8 @@ import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
-import {
-  type DraftProperty,
-  type FilterPath,
-  operatorsFor,
-} from "./definition-model";
+import { type DraftProperty, operatorsFor } from "./definition-model";
+import type { FilterPath } from "./filter-tree";
 
 interface FieldCapability {
   key: string;

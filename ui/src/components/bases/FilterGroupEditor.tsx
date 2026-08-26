@@ -3,13 +3,12 @@ import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
+import type { DraftProperty } from "./definition-model";
 import {
-  type DraftProperty,
   type FilterPath,
-  moveItem,
-  removeFilterAtPath,
-  replaceFilterAtPath,
-} from "./definition-model";
+  type FilterWrapKind,
+  updateFilterTree,
+} from "./filter-tree";
 import { FilterNodeMenu, FilterSeedMenu } from "./filter-actions";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
 import { useIdentifiedRows } from "./ordered-list";
@@ -26,15 +25,6 @@ interface FilterGroupEditorProps {
   registerFocus: RegisterFocusTarget;
   diagnostics?: BaseDiagnostic[];
   diagnosticRoot?: string;
-}
-
-function wrappedFilter(
-  kind: "all" | "any" | "not",
-  child: BaseFilter,
-): BaseFilter {
-  if (kind === "all") return { all: [child] };
-  if (kind === "any") return { any: [child] };
-  return { not: child };
 }
 
 export function FilterGroupEditor({
@@ -66,9 +56,12 @@ export function FilterGroupEditor({
         properties={properties}
         onChange={(next) =>
           onChange(
-            next === undefined
-              ? removeFilterAtPath(root, path)
-              : replaceFilterAtPath(root, path, next),
+            updateFilterTree(
+              root,
+              next === undefined
+                ? { type: "remove", path }
+                : { type: "replace", path, value: next },
+            ),
           )
         }
         registerFocus={registerFocus}
@@ -85,7 +78,9 @@ export function FilterGroupEditor({
         path={path}
         position={position}
         properties={properties}
-        onChange={(next) => onChange(replaceFilterAtPath(root, path, next))}
+        onChange={(next) =>
+          onChange(updateFilterTree(root, { type: "replace", path, value: next }))
+        }
         registerFocus={registerFocus}
         diagnostics={diagnostics}
         diagnosticRoot={diagnosticRoot}
@@ -117,11 +112,23 @@ export function FilterGroupEditor({
             triggerLabel="Excluded condition actions"
             replace
             onSeed={(seed) =>
-              onChange(replaceFilterAtPath(root, childPath, seed))
+              onChange(
+                updateFilterTree(root, {
+                  type: "replace",
+                  path: childPath,
+                  value: seed,
+                }),
+              )
             }
             clear={{
               label: "Remove excluded condition",
-              onAction: () => onChange(removeFilterAtPath(root, childPath)),
+              onAction: () =>
+                onChange(
+                  updateFilterTree(root, {
+                    type: "remove",
+                    path: childPath,
+                  }),
+                ),
             }}
           />
         </div>
@@ -139,24 +146,37 @@ export function FilterGroupEditor({
       : `${meaning} of ${children.length} ${children.length === 1 ? "condition" : "conditions"}`;
 
   function append(child: BaseFilter) {
-    const nextChildren = [...children, child];
     setChildRows((current) => [...current, createRow(child)]);
-    const next: BaseFilter =
-      kind === "all" ? { all: nextChildren } : { any: nextChildren };
-    onChange(replaceFilterAtPath(root, path, next));
+    onChange(
+      updateFilterTree(root, {
+        type: "append",
+        path,
+        value: child,
+      }),
+    );
   }
 
   function moveChild(childIndex: number, destination: number) {
-    const moving = children[childIndex];
-    const displaced = children[destination];
-    if (!moving || !displaced) return;
-    const nextChildren = [...children];
-    nextChildren[childIndex] = displaced;
-    nextChildren[destination] = moving;
-    setChildRows((current) => moveItem(current, childIndex, destination));
-    const next: BaseFilter =
-      kind === "all" ? { all: nextChildren } : { any: nextChildren };
-    onChange(replaceFilterAtPath(root, path, next));
+    if (
+      destination < 0 ||
+      destination >= children.length ||
+      destination === childIndex
+    ) {
+      return;
+    }
+    setChildRows((current) => {
+      const next = [...current];
+      next[childIndex] = current[destination];
+      next[destination] = current[childIndex];
+      return next;
+    });
+    onChange(
+      updateFilterTree(root, {
+        type: "move",
+        path: [...path, kind, childIndex],
+        offset: destination < childIndex ? -1 : 1,
+      }),
+    );
   }
 
   return (
@@ -193,8 +213,13 @@ export function FilterGroupEditor({
                     count: children.length,
                   }}
                   onMove={(destination) => moveChild(index, destination)}
-                  onWrap={(wrapKind) => {
-                    const wrapped = wrappedFilter(wrapKind, child);
+                  onWrap={(kind: FilterWrapKind) => {
+                    const wrapped = updateFilterTree(child, {
+                      type: "wrap",
+                      path: [],
+                      kind,
+                    });
+                    if (wrapped === undefined) return;
                     setChildRows((current) =>
                       current.map((row, position) =>
                         position === index
@@ -202,13 +227,24 @@ export function FilterGroupEditor({
                           : row,
                       ),
                     );
-                    onChange(replaceFilterAtPath(root, childPath, wrapped));
+                    onChange(
+                      updateFilterTree(root, {
+                        type: "wrap",
+                        path: childPath,
+                        kind,
+                      }),
+                    );
                   }}
                   onRemove={() => {
                     setChildRows((current) =>
                       current.filter((_, position) => position !== index),
                     );
-                    onChange(removeFilterAtPath(root, childPath));
+                    onChange(
+                      updateFilterTree(root, {
+                        type: "remove",
+                        path: childPath,
+                      }),
+                    );
                   }}
                 />
               </div>

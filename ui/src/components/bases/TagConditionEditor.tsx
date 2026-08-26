@@ -8,7 +8,8 @@ import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
-import type { DraftProperty, FilterPath } from "./definition-model";
+import type { DraftProperty } from "./definition-model";
+import type { FilterPath } from "./filter-tree";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
 import {
   readTagCondition,
