@@ -45,6 +45,7 @@ file's directory without `~` expansion. See [Configuration](/docs/configuration)
 | `clep serve` | `--tls`, `--port <PORT>` |
 | `clep lsp` | no options |
 | `clep mcp` | `--allow-remote` |
+| `clep todo` | words or stdin; optional `--due`, `--scheduled`, `--priority` |
 | `clep open-url` | `<URL>`, optional `--print` |
 | `clep relabel` | optional `--dry-run` |
 | `clep migrate` | optional `--write`; dry run by default |
@@ -225,6 +226,36 @@ After startup:
 - `GET /api/openapi.json` returns the OpenAPI document.
 - `GET /api/docs` opens Swagger UI.
 - [API Reference](/docs/api-reference) inventories every public operation.
+
+## `clep todo`
+
+```text
+clep todo [OPTIONS] [WORDS]...
+  --due <YYYY-MM-DD>
+  --scheduled <YYYY-MM-DD>
+  --priority <A|B|C>
+```
+
+Captures one unchecked Markdown Todo in today's journal through the configured
+local Clepsydra server. Provide the Todo text as positional words, or omit the
+words to read text from stdin through EOF. Positional words take precedence over
+stdin when both are present. The command normalizes all multiline input and
+extra whitespace to one Todo line.
+
+The optional `due` and `scheduled` values must be real dates in exact
+`YYYY-MM-DD` form. `priority` is `A`, `B`, or `C`. When properties are present,
+they are written in the order due, scheduled, priority.
+
+```bash
+clep todo Buy oat milk
+clep todo "Call the dentist"
+printf 'Review notes\n' | clep todo
+clep todo Ship release --due 2026-09-01 --scheduled 2026-08-30 --priority A
+```
+
+`clep serve` must be running with the same selected configuration. Configured
+remote hosts are refused; this command only captures through the local server.
+On success, it prints `Captured Todo in <journal path>`.
 
 ## `clep lsp`
 

@@ -161,6 +161,14 @@ Image heading body.
 describe("searchDocs", () => {
   it.each([
     {
+      query: "positional words stdin precedence",
+      expected: {
+        page: { slug: "cli" },
+        heading: "clep todo",
+        headingId: "clep-todo",
+      },
+    },
+    {
       query: "attaches then stops",
       expected: {
         page: { slug: "troubleshooting" },
