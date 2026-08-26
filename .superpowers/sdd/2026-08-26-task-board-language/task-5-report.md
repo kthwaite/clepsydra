@@ -43,9 +43,30 @@ Result: passed with no output.
 - Documented Inbox, Ready, In Progress, Review, Done, Critical, High, Medium, Low, and Blocked as user-facing labels.
 - Documented Create cycle, Start cycle, Close cycle, and the three close carryover choices.
 - Kept persisted status, priority, Cycle state, `BACKLOG`, `hold`, and `carry_to` values in a dedicated Markdown/API contract section only.
-- Replaced Tasking and register-era language only in Task Board documentation. Agenda, Atrium, editor, API, persistence, and unrelated use of “operation” remain unchanged.
+- Replaced Tasking and register-era language only in Task Board documentation. Agenda and Atrium behavior remained unchanged while directly related checkbox terminology was aligned to Todo. Editor, API, persistence, and unrelated use of “operation” remain unchanged.
 - Formatter, lint, typecheck, full suite, and project-wide validation were intentionally not run, per the task constraints.
 
 ## Commit
 
 `docs(tasking): document neutral board language` (this task commit)
+
+## Review Fix Round 1
+
+### Documentation-fix evidence
+
+- Set the guide title to the exact reviewed text: `Tasks, Todos, Agenda, Journals, and Task Board`.
+- Replaced the Scope rail explanation with the exact reviewed Project, Cycle, and Backlog sentence.
+- Changed the persisted `hold` explanation so clearing it removes the Blocked condition without assigning another Task state.
+- Corrected this report to distinguish unchanged Agenda and Atrium behavior from the directly related checkbox terminology aligned to Todo.
+- A focused exact-copy search found all three reviewed guide sentences.
+- `bun run test -- src/routes/__tests__/-docs.test.ts`: 1 test file passed; 28 tests passed.
+- `git diff --check`: passed with no output.
+
+### Self-review
+
+- The title names the Task Board rather than the generic Board.
+- The Scope rail sentence uses the required Project, Cycle, and Backlog language verbatim.
+- The `hold` contract now describes only the Blocked condition. It does not imply that clearing a blocker changes persisted workflow status.
+- The report no longer claims that Agenda and Atrium terminology was untouched. It states that their behavior stayed unchanged while checkbox terminology became Todo.
+- Changes remain limited to the assigned guide and report. No test framework or unrelated copy change was introduced.
+- Follow-up commit: `fix(docs): complete Task Board language`.

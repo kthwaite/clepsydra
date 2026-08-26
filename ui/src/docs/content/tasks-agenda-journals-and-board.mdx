@@ -1,6 +1,6 @@
 export const meta = {
   slug: "tasks-agenda-journals-and-board",
-  title: "Tasks, Todos, Agenda, Journals, and Board",
+  title: "Tasks, Todos, Agenda, Journals, and Task Board",
   description: "Plan Tasks, manage Markdown Todos, review agenda views, and run Cycles."
 }
 
@@ -120,9 +120,9 @@ The Task Board has four views:
   **Backlog** for Tasks that are not assigned to a Cycle.
 - **Timeline** lays out scheduled Tasks across Projects and Cycles.
 
-The Scope rail groups Tasks by **Project** and **Cycle**, with **Backlog** as
-the no-Cycle scope. Switching views does not change Task pages. Dragging a card
-or editing its panel updates the corresponding Task page metadata.
+The Scope rail groups Tasks by Project and Cycle, with Backlog for Tasks not assigned to a Cycle.
+Switching views does not change Task pages. Dragging a card or editing its
+panel updates the corresponding Task page metadata.
 
 ### Create, start, and close Cycles
 
@@ -154,8 +154,8 @@ Cycle Markdown, or calling the API, use these persisted values:
 - Cycle `state`: Planned (`PLANNED`), Active (`ACTIVE`), and Closed (`CLOSED`).
 - Backlog is represented in Markdown by an absent `cycle` value. APIs that
   accept a Cycle target use `BACKLOG` to clear the Cycle.
-- Blocked is represented by a non-empty `hold` value; clearing `hold` makes the
-  Task active again.
+- Blocked is represented by a non-empty `hold` value; clearing `hold` removes
+  the Blocked condition.
 - When closing a Cycle through the API, `carry_to: "BACKLOG"` moves unfinished
   Tasks to Backlog, a Cycle code reassigns them, and omitting `carry_to` leaves
   them in place. Tasks whose status is `SEALED` are never carried.
