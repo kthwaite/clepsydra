@@ -125,6 +125,7 @@ type AgendaTodo = {
 
 type AgendaTask = {
   kind: "task"
+  id: string
   code: string
   title: string
   status: "INTAKE" | "TRIAGE" | "FIELD" | "REVIEW"
