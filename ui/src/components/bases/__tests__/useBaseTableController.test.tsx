@@ -16,6 +16,7 @@ import type {
   QueryOutput,
   SortKey,
 } from "#/api/bases";
+import type { BaseMemberDraftValue } from "#/components/bases/member-draft";
 
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
@@ -242,6 +243,73 @@ describe("useBaseTableController embedded mode", () => {
     });
     await waitFor(() => expect(result.current.focusCreatedId).toBe("created"));
     expect(result.current.memberNotice).toBeUndefined();
+  });
+
+  it("omits nullish fields and preserves other falsey fields at the create adapter boundary", async () => {
+    const { result } = renderHook(() => useBaseTableController(options()));
+    const fields = {
+      absentNull: null,
+      absentUndefined: undefined,
+      zero: 0,
+      disabled: false,
+      empty: "",
+      list: [],
+    } as unknown as BaseMemberDraftValue["fields"];
+
+    act(() => result.current.onAddMember());
+    await act(async () => {
+      result.current.onSaveMember({ title: " Falsey values ", fields });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.createMember).toHaveBeenCalledWith({
+      params: { path: { slug: "reading" } },
+      body: {
+        base_revision: "evaluation-rev-1",
+        embed_filter: readingFilter,
+        view: "Continues",
+        title: "Falsey values",
+        fields: {
+          zero: 0,
+          disabled: false,
+          empty: "",
+          list: [],
+        },
+      },
+    });
+    expect(mocks.createMember.mock.calls[0][0].body.fields).not.toHaveProperty(
+      "absentUndefined",
+    );
+  });
+
+  it.each([
+    {
+      label: "loading",
+      state: { isLoading: true, isFetching: false, error: null },
+    },
+    {
+      label: "fetching",
+      state: { isLoading: false, isFetching: true, error: null },
+    },
+    {
+      label: "failed",
+      state: {
+        isLoading: false,
+        isFetching: false,
+        error: { error: "evaluation failed" },
+      },
+    },
+  ])("does not submit while the evaluation is $label", async ({ state }) => {
+    Object.assign(mocks.evaluationState, state);
+    const { result } = renderHook(() => useBaseTableController(options()));
+
+    await act(async () => {
+      result.current.onSaveMember({ title: "Not authoritative", fields: {} });
+      await Promise.resolve();
+    });
+
+    expect(mocks.createMember).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -577,6 +645,91 @@ describe("useBaseTableController embedded mode", () => {
     expect(result.current.memberError).toContain("revision conflict");
   });
 
+  it("reports conflict refresh failure and preserves the embedded draft", async () => {
+    mocks.createMember.mockRejectedValue({
+      status: 409,
+      error: "revision conflict",
+      detail: { code: "base_revision_conflict" },
+    });
+    mocks.evaluationRefetch.mockRejectedValue(
+      new Error("evaluation refresh failed"),
+    );
+    const { result } = renderHook(() => useBaseTableController(options()));
+
+    act(() => result.current.onAddMember());
+    await act(async () => {
+      result.current.onSaveMember({ title: "Still here", fields: {} });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.evaluationRefetch).toHaveBeenCalledTimes(1);
+    expect(result.current.memberDraftOpen).toBe(true);
+    expect(result.current.memberSaving).toBe(false);
+    expect(result.current.memberError).toBe("evaluation refresh failed");
+  });
+
+  it("redirects an old embedded query conflict refresh to the current query", async () => {
+    type RefreshResult = {
+      data?: BaseViewEvaluateResponse;
+      error?: { error: string };
+    };
+    const oldRefresh = deferred<RefreshResult>();
+    const currentRefresh = deferred<RefreshResult>();
+    const newSort: SortKey[] = [{ field: "title", dir: "desc" }];
+    const current = options();
+    mocks.createMember.mockRejectedValue({
+      status: 409,
+      error: "revision conflict",
+      detail: { code: "base_revision_conflict" },
+    });
+    mocks.evaluationRefetch.mockImplementation(
+      (config: { sort?: SortKey[] }) =>
+        config.sort === undefined ? oldRefresh.promise : currentRefresh.promise,
+    );
+    const { result, rerender } = renderHook(
+      ({ value }) => useBaseTableController(value),
+      { initialProps: { value: current } },
+    );
+
+    act(() => result.current.onAddMember());
+    await act(async () => {
+      result.current.onSaveMember({ title: "Still here", fields: {} });
+      await Promise.resolve();
+    });
+    await waitFor(() =>
+      expect(mocks.evaluationRefetch).toHaveBeenCalledTimes(1),
+    );
+
+    rerender({ value: { ...current, sort: newSort } });
+    oldRefresh.resolve({ data: evaluation() });
+    await act(async () => {
+      await oldRefresh.promise;
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mocks.evaluationRefetch).toHaveBeenCalledTimes(2),
+    );
+    expect(mocks.evaluationRefetch).toHaveBeenLastCalledWith({
+      base: "reading",
+      view: "Continues",
+      filter: readingFilter,
+      sort: newSort,
+      limit: undefined,
+    });
+    expect(result.current.memberSaving).toBe(true);
+
+    currentRefresh.resolve({ data: evaluation() });
+    await act(async () => {
+      await currentRefresh.promise;
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(result.current.memberSaving).toBe(false));
+    expect(result.current.memberDraftOpen).toBe(true);
+    expect(result.current.memberError).toBe("revision conflict");
+  });
+
   it.each([
     {
       label: "limit",
@@ -751,5 +904,38 @@ describe("useBaseTableController standalone mode", () => {
     expect(result.current.memberCapability).toEqual(
       definition.member_creation?.[0],
     );
+  });
+
+  it("uses the case-folded definition capability and detail revision", async () => {
+    const { result } = renderHook(() =>
+      useBaseTableController({
+        mode: "standalone",
+        slug: "reading",
+        activeView: "CONTINUES",
+        sort: undefined,
+        onViewChange: vi.fn(),
+        onSortChange: vi.fn(),
+      }),
+    );
+
+    expect(result.current.memberCapability).toEqual(
+      definition.member_creation?.[0],
+    );
+    act(() => result.current.onAddMember());
+    await act(async () => {
+      result.current.onSaveMember({ title: " Definition ", fields: {} });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mocks.createMember).toHaveBeenCalledWith({
+      params: { path: { slug: "reading" } },
+      body: {
+        base_revision: "detail-revision-must-not-own-embedded-creation",
+        view: "CONTINUES",
+        title: "Definition",
+        fields: {},
+      },
+    });
   });
 });

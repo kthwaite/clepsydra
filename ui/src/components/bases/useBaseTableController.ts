@@ -3,10 +3,8 @@ import {
   type BaseDetailResponse,
   type BaseFilter,
   type BaseMemberCapability,
-  type BaseMemberCreateResponse,
   type BaseMemberDiagnostic,
   type BaseViewEvaluateResponse,
-  decodeBaseMemberDiagnostics,
   type PropertyType,
   type QueryOutput,
   type QueryRow,
@@ -18,7 +16,6 @@ import {
   usePropertyCommit,
   type ViewOverrides,
 } from "#/api/bases";
-import { formatApiError, isApiError } from "#/api/error";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useProjects } from "#/lib/useProjects";
 import type { CellValue } from "./cells/types";
@@ -28,6 +25,11 @@ import {
   predicateIdentity,
   queryIdentity,
 } from "./embed-query";
+import {
+  type MemberCreationOutcome,
+  type MemberCreationSource,
+  resolveMemberCreationSession,
+} from "./member-creation";
 import { asciiCaseFold } from "./local-validation";
 import {
   type BaseMemberDraftField,
@@ -160,17 +162,6 @@ function placementNotice(
     : genericNotice(message);
 }
 
-function isRevisionConflict(error: unknown): boolean {
-  return (
-    isApiError(error) &&
-    error.status === 409 &&
-    typeof error.detail === "object" &&
-    error.detail !== null &&
-    "code" in error.detail &&
-    (error.detail.code === "base_revision_conflict" ||
-      error.detail.code === "revision_conflict")
-  );
-}
 
 /** Shared orchestration for standalone and embedded Base tables. */
 export function useBaseTableController(
@@ -214,9 +205,7 @@ export function useBaseTableController(
   const commit = usePropertyCommit();
   const { mutateAsync: createMemberAsync } = useCreateBaseMember();
   const projects = useProjects();
-  const detailRevision = detail.data?.revision;
   const detailRefetch = detail.refetch;
-  const evaluationRevision = evaluationQuery.data?.revision;
   const evaluationRefetch = evaluationQuery.refetch;
   const savedViewRefetch = savedViewQuery.refetch;
 
@@ -293,16 +282,49 @@ export function useBaseTableController(
   const output =
     mode === "standalone" ? savedViewQuery.data : exactEmbeddedSuccess?.output;
 
-  const memberCapability = useMemo(
+  const memberCreationSource = useMemo<MemberCreationSource | undefined>(() => {
+    if (mode === "standalone") {
+      return detail.data
+        ? {
+            kind: "definition",
+            baseSlug: slug,
+            requestedView: activeView,
+            detail: detail.data,
+          }
+        : undefined;
+    }
+    return embeddedAuthoritative && evaluationQuery.data
+      ? {
+          kind: "evaluation",
+          baseSlug: slug,
+          requestedView: activeView,
+          evaluation: evaluationQuery.data,
+          embedFilter: filter,
+        }
+      : undefined;
+  }, [
+    activeView,
+    detail.data,
+    detail.data?.revision,
+    embeddedAuthoritative,
+    evaluationQuery.data,
+    evaluationQuery.data?.revision,
+    filter,
+    mode,
+    slug,
+  ]);
+  const memberCreationSession = useMemo(
     () =>
-      mode === "embedded"
-        ? predicateEmbeddedSuccess?.member_creation
-        : detail.data?.member_creation?.find(
-            (candidate) =>
-              asciiCaseFold(candidate.view) === asciiCaseFold(activeView),
-          ),
-    [activeView, detail.data?.member_creation, mode, predicateEmbeddedSuccess],
+      memberCreationSource
+        ? resolveMemberCreationSession(memberCreationSource)
+        : undefined,
+    [memberCreationSource],
   );
+  const memberCapability =
+    memberCreationSession?.capability ??
+    (mode === "embedded"
+      ? predicateEmbeddedSuccess?.member_creation
+      : undefined);
   const activeViewDefinition = useMemo(
     () =>
       detail.data?.views?.find(
@@ -434,10 +456,7 @@ export function useBaseTableController(
 
   const createMember = useCallback(
     async (value: BaseMemberDraftValue) => {
-      if (mode === "embedded" && !embeddedAuthoritative) return;
-      const revision =
-        mode === "embedded" ? evaluationRevision : detailRevision;
-      if (!revision || !activeView) return;
+      if (!memberCreationSession) return;
 
       const operation = nextOperation.current + 1;
       nextOperation.current = operation;
@@ -452,53 +471,43 @@ export function useBaseTableController(
         creation: { phase: "submitting", operation, view: activeView },
       }));
 
-      const requestFields: BaseMemberDraftValue["fields"] = {};
-      for (const key in value.fields) {
-        if (!Object.hasOwn(value.fields, key)) continue;
-        const fieldValue = value.fields[key];
-        if (fieldValue !== null) requestFields[key] = fieldValue;
-      }
-
-      let created: BaseMemberCreateResponse;
-      try {
-        created = await createMemberAsync({
-          params: { path: { slug } },
-          body: {
-            base_revision: revision,
-            ...(mode === "embedded" ? { embed_filter: filter } : {}),
-            view: activeView,
-            title: value.title.trim(),
-            fields: requestFields,
+      const outcome: MemberCreationOutcome = await memberCreationSession.submit(
+        value,
+        {
+          create: (baseSlug, body) =>
+            createMemberAsync({
+              params: { path: { slug: baseSlug } },
+              body,
+            }),
+          refreshAfterConflict: async () => {
+            if (mode === "embedded") {
+              await refetchCurrentEmbeddedQuery(
+                operation,
+                operationGeneration,
+              );
+            } else {
+              const refreshed = await detailRefetch();
+              if (refreshed.error) throw refreshed.error;
+            }
           },
-        });
-      } catch (error) {
-        if (!operationIsCurrent(operation, operationGeneration)) return;
+        },
+      );
+      if (!operationIsCurrent(operation, operationGeneration)) return;
+      if (outcome.kind !== "created") {
         setStoredMemberState((current) =>
           current.generation === operationGeneration
             ? {
                 ...current,
-                error: formatApiError(error, "Member could not be created."),
-                diagnostics: decodeBaseMemberDiagnostics(error),
+                error: outcome.message,
+                diagnostics: outcome.diagnostics,
               }
             : current,
         );
-        if (isRevisionConflict(error)) {
-          try {
-            if (mode === "embedded") {
-              await refetchCurrentEmbeddedQuery(operation, operationGeneration);
-            } else {
-              await detailRefetch();
-            }
-          } finally {
-            finishMemberOperation(operation, operationGeneration);
-          }
-        } else {
-          finishMemberOperation(operation, operationGeneration);
-        }
+        finishMemberOperation(operation, operationGeneration);
         return;
       }
+      const created = outcome.member;
 
-      if (!operationIsCurrent(operation, operationGeneration)) return;
       setStoredMemberState((current) =>
         current.generation === operationGeneration
           ? {
@@ -603,17 +612,13 @@ export function useBaseTableController(
       activeViewDefinition?.columns,
       createMemberAsync,
       detailRefetch,
-      detailRevision,
-      embeddedAuthoritative,
-      evaluationRevision,
-      filter,
       finishMemberOperation,
       generation,
+      memberCreationSession,
       mode,
       operationIsCurrent,
       refetchCurrentEmbeddedQuery,
       savedViewRefetch,
-      slug,
     ],
   );
 

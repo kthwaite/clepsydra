@@ -422,7 +422,8 @@ describe("BaseTable member creation", () => {
 
   it("keeps Add disabled through refresh and resolves focus when the saved view omits title", async () => {
     const user = userEvent.setup();
-    const savedView = definition.views![0];
+    const savedView = definition.views?.[0];
+    if (!savedView) throw new Error("Continues view fixture is required");
     const originalColumns = savedView.columns;
     savedView.columns = ["kind", "status", "rating"];
     mocks.viewState.data = groupedOutput();
@@ -569,7 +570,7 @@ describe("BaseTable member creation", () => {
     expect(oldCreatedTitle).not.toHaveFocus();
   });
 
-  it("omits cleared project and nullable property values from the endpoint payload", async () => {
+  it("omits cleared and nullish values while preserving empty lists", async () => {
     const user = userEvent.setup();
     mocks.viewState.data = groupedOutput();
     mocks.viewState.error = null;
@@ -640,6 +641,7 @@ describe("BaseTable member creation", () => {
     expect(fields).not.toHaveProperty("optional_rating");
     expect(fields).not.toHaveProperty("optional_status");
     expect(Object.values(fields)).not.toContain(null);
+    expect(Object.values(fields)).not.toContain(undefined);
     expect(fields.tags).toEqual([]);
     expect(fields.aliases).toEqual([]);
     // Around twenty sequential userEvent interactions: 4s of the default 5s
