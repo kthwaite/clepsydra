@@ -44,7 +44,7 @@ press `Space` after the marker at the start of a paragraph.
 | `# ` through `###### ` | Headings 1 through 6 |
 | `1. ` | Numbered list (any digits before the period) |
 | `- ` or `* ` | Bulleted list |
-| `[] ` | Task item |
+| `[] ` | Todo list item |
 | `> ` | Blockquote |
 
 A third hyphen at the end of a line converts `---` into a divider and starts a
@@ -55,7 +55,7 @@ the end of the line. Nothing autoformats inside a code block.
 Only the empty `[] ` form can be typed: in a non-empty bracket pair the closing
 `]` fires the link scaffold or the inline-property rule described below instead.
 The `[ ] ` and `[x] ` forms are still recognized in pasted or loaded Markdown.
-Typing `[] ` or `[x] ` at the start of an existing bullet promotes it to a task
+Typing `[] ` or `[x] ` at the start of an existing bullet promotes it to a Todo
 and keeps its text.
 
 Inline triggers fire on their closing character.
@@ -76,7 +76,7 @@ selected wraps the selection in those literal characters and applies no mark.
 Typing `[`, a label, and then `]` inserts a `]()` scaffold with the caret
 between the parentheses. A completed `[key:: value]` pair is the one exception:
 it becomes a block property rather than text, as
-[Edit tasks and their properties](#edit-tasks-and-their-properties) describes.
+[Edit Todos and their properties](#edit-todos-and-their-properties) describes.
 
 `[^id]` inserts a footnote reference. When no definition with that identifier
 exists, Clepsydra appends an editable definition block at the end of the
@@ -118,10 +118,10 @@ editor.
 reveals a delete button.
 
 `Command+Enter` cycles the checkbox of a list item: plain bullet to unchecked
-task, unchecked to checked, checked back to unchecked. It never returns an item
+Todo, unchecked to checked, checked back to unchecked. It never returns an item
 to a plain bullet.
 
-`Command+Shift+P` opens the **Task properties** popover for the task item
+`Command+Shift+P` opens the **Todo properties** popover for the Todo list item
 holding the caret. With the caret anywhere else the editor leaves the chord to
 whatever else handles it rather than swallowing it.
 
@@ -138,38 +138,38 @@ item. `Shift+Tab` outdents an item, and the siblings that followed it become its
 children. `Alt+ArrowUp` and `Alt+ArrowDown` move an item together with its
 children past the sibling above or below it.
 
-`Enter` at the end of a non-empty item creates a sibling; from a task item that
-sibling is another unchecked task. `Enter` mid-text splits the item. `Enter` on
-an empty nested item outdents it one level, and on an empty top-level item it
-leaves the list for a paragraph.
+`Enter` at the end of a non-empty item creates a sibling; from a Todo list item
+that sibling is another unchecked Todo. `Enter` mid-text splits the item.
+`Enter` on an empty nested item outdents it one level, and on an empty top-level
+item it leaves the list for a paragraph.
 
 `Backspace` at the start of an item outdents a nested item, or unwraps a
 top-level item into a paragraph, preserving any nested sub-list.
 
 There is no outline folding.
 
-### Edit tasks and their properties
+### Edit Todos and their properties
 
-Create a task with the `[] ` trigger, the **Task list** slash command, or
+Create a Todo with the `[] ` trigger, the **Task list** slash command, or
 `Command+Enter` on an existing item, then click its checkbox to toggle it. The
 editor's checkbox has exactly two states, unchecked and checked. The cancelled
 status `[-]` in
 [Tasks, Agenda, Journals, and Board](/docs/tasks-agenda-journals-and-board) is
 recognized by the index, not by Folio's checkbox.
 
-A task item renders its `due`, `scheduled`, and `priority` properties as
+A Todo list item renders its `due`, `scheduled`, and `priority` properties as
 read-only chips after its text: `DUE 2026-08-20`, `SCHED 2026-08-15`, and the
 priority values `A`, `B`, and `C` as `HIGH`, `MED`, and `LOW`, the same mapping
-the agenda's task list uses. Another priority value is shown verbatim in
+the Agenda's Todo list uses. Another priority value is shown verbatim in
 capitals. The chips stay on the first line of an item that carries a nested
 sub-list. Plain bullets and other blocks show no chips, and property keys other
 than those three stay invisible everywhere. A read-only Folio shows the chips
 but they are inert there: the popover below does not open.
 
-Click a chip — or the `+` control that appears when you hover or focus a task
-item with none of the three properties set — to open the **Task properties**
+Click a chip — or the `+` control that appears when you hover or focus a Todo
+list item with none of the three properties set — to open the **Todo properties**
 popover. `Command+Shift+P` on macOS or `Ctrl+Shift+P` elsewhere opens the same
-popover for the task item holding the caret, including from vim normal mode.
+popover for the Todo list item holding the caret, including from vim normal mode.
 Due and Scheduled are date fields, each with a clear control, and Priority is a
 HIGH / MED / LOW toggle writing `A`, `B`, or `C`; pressing the level already set
 clears it. The popover buffers its edits: `Enter` commits them, as does clicking
@@ -181,16 +181,16 @@ clearing every property removes the record, and focus returns to the editor.
 Typing an inline property also works. In any block that can carry properties,
 `[key:: value]` converts on the closing `]`, for any key, as long as at least
 one space follows the `::`. The typed text disappears together with the
-whitespace before the `[`, and the pair becomes a block property: on a task line
+whitespace before the `[`, and the pair becomes a block property: on a Todo line
 its chip appears at once; elsewhere it is held invisibly, exactly as if it had
 been loaded from the file. Typing the same key again overwrites its value, and
 one undo reverses the whole conversion. Nothing converts inside a code block or
 inline code, `[key::value]` without that space still scaffolds a link, and so
 does a plain `[label]`.
 
-A trailing `^blockId` marker, properties on blocks other than task items, and
-keys outside those three remain Markdown-level constructs that Folio parses on
-load and re-emits on save without ever showing. Read or correct those outside
+A trailing `^blockId` marker, properties on blocks other than Todo list items,
+and keys outside those three remain Markdown-level constructs that Folio parses
+on load and re-emits on save without ever showing. Read or correct those outside
 the web editor — an external editor over the [LSP](/docs/lsp), the CLI, the
 API, or MCP tooling. The Tasks guide holds the syntax and how `due`,
 `scheduled`, and `priority` drive the agenda.
@@ -311,8 +311,8 @@ not retry automatically.
 - Pasting a URL over selected text replaces the selection instead of linking it.
 - Block IDs are invisible in Folio. They survive a save, but they cannot be read
   or corrected there. Of the inline properties, only `due`, `scheduled`, and
-  `priority` on a task item can be seen and edited, as chips; every other key,
-  and every property on a block that is not a task item, stays invisible.
+  `priority` on a Todo list item can be seen and edited, as chips; every other
+  key, and every property on a block that is not a Todo list item, stays invisible.
 - `Escape` in the wikilink chooser leaves the typed `[[query` text in the
   document.
 
@@ -328,7 +328,7 @@ protected bodies intentionally supply no such block content.
 
 - [Pages and Authoring](/docs/pages-and-authoring)
 - [Tasks, Agenda, Journals, and Board](/docs/tasks-agenda-journals-and-board)
-  for task syntax and how inline properties drive the agenda and board
+  for Todo syntax and how inline properties drive the agenda and board
 - [Links, Search, Graph, and Repair](/docs/links-search-graph-and-repair) for
   the `[[` wikilink chooser and create-from-link flow
 - [Bases](/docs/bases) for the complete embed format and table behavior

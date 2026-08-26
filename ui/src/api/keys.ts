@@ -24,9 +24,7 @@ export const queryKeys = {
 
   agenda: {
     all: ["agenda"] as const,
-    today: ["agenda", "today"] as const,
-    week: ["agenda", "week"] as const,
-    overdue: ["agenda", "overdue"] as const,
+    byDate: (today: string) => ["agenda", today] as const,
     cycleBurndown: (cycle: string | null, project?: string, unfiled = false) =>
       ["agenda", "cycle-burndown", cycle, project, unfiled] as const,
   },

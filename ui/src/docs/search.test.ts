@@ -201,6 +201,14 @@ describe("searchDocs", () => {
       },
     },
     {
+      query: "local date defines boundaries",
+      expected: {
+        page: { slug: "tasks-agenda-journals-and-board" },
+        heading: "Use Overdue, Today, Upcoming, and Undated",
+        headingId: "use-overdue-today-upcoming-and-undated",
+      },
+    },
+    {
       query: "whole Zotero BibTeX run not one",
       expected: {
         page: { slug: "academic-library-and-reading" },

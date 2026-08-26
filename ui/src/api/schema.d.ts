@@ -148,6 +148,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/agenda": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_agenda"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/agenda/cycle-burndown": {
         parameters: {
             query?: never;
@@ -156,54 +172,6 @@ export interface paths {
             cookie?: never;
         };
         get: operations["get_cycle_burndown"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/vault/agenda/overdue": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["agenda_overdue"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/vault/agenda/today": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["agenda_today"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/vault/agenda/week": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["agenda_week"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1576,17 +1544,61 @@ export interface components {
     schemas: {
         AgendaDay: {
             date: string;
-            tasks: components["schemas"]["TaskItem"][];
+            items: components["schemas"]["AgendaItem"][];
         };
-        AgendaOverdueResponse: {
-            tasks: components["schemas"]["TaskItem"][];
+        AgendaItem: components["schemas"]["AgendaTodo"] | components["schemas"]["AgendaTask"];
+        AgendaResponse: {
+            overdue: components["schemas"]["AgendaItem"][];
+            today: components["schemas"]["AgendaItem"][];
+            undated: components["schemas"]["AgendaTodo"][];
+            upcoming: components["schemas"]["AgendaDay"][];
         };
-        AgendaTodayResponse: {
-            tasks: components["schemas"]["TaskItem"][];
+        AgendaTask: {
+            code: string;
+            due: string;
+            hold?: string | null;
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "task";
+            path: string;
+            priority: components["schemas"]["AgendaTaskPriority"];
+            project?: string | null;
+            status: components["schemas"]["AgendaTaskStatus"];
+            title: string;
         };
-        AgendaWeekResponse: {
-            days: components["schemas"]["AgendaDay"][];
+        /** @enum {string} */
+        AgendaTaskKind: "task";
+        /** @enum {string} */
+        AgendaTaskPriority: "P0" | "P1" | "P2" | "P3";
+        /** @enum {string} */
+        AgendaTaskStatus: "INTAKE" | "TRIAGE" | "FIELD" | "REVIEW";
+        AgendaTodo: {
+            block_id?: string | null;
+            content: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "todo";
+            page_path: string;
+            page_title?: string | null;
+            properties: {
+                [key: string]: string;
+            };
+            /** Format: int64 */
+            span_end: number;
+            /** Format: int64 */
+            span_start: number;
+            status: components["schemas"]["AgendaTodoStatus"];
         };
+        /** @enum {string} */
+        AgendaTodoKind: "todo";
+        /** @enum {string} */
+        AgendaTodoStatus: "todo" | "doing";
         /** @description An aggregate over a group (or the whole result set). */
         Aggregate: {
             field?: string | null;
@@ -3685,6 +3697,46 @@ export interface operations {
             };
         };
     };
+    get_agenda: {
+        parameters: {
+            query: {
+                today: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Classified agenda */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgendaResponse"];
+                };
+            };
+            /** @description Invalid local date */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     get_cycle_burndown: {
         parameters: {
             query: {
@@ -3725,93 +3777,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    agenda_overdue: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Overdue tasks */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgendaOverdueResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    agenda_today: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Today's agenda */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgendaTodayResponse"];
-                };
-            };
-            /** @description Internal server error */
-            500: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ApiError"];
-                };
-            };
-        };
-    };
-    agenda_week: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Seven-day agenda */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AgendaWeekResponse"];
                 };
             };
             /** @description Internal server error */

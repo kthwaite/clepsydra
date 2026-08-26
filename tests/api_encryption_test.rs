@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::http::StatusCode;
-use base64::prelude::{BASE64_STANDARD, Engine as _};
+use base64::prelude::{Engine as _, BASE64_STANDARD};
 use chrono::{DateTime, Utc};
-use clepsydra::api::Clock;
 use clepsydra::api::openapi::ApiDoc;
+use clepsydra::api::Clock;
 use clepsydra::vault::keyring::MAX_WRAPPED_IDENTITY_BYTES;
-use clepsydra::vault::page::{Page, page_revision};
+use clepsydra::vault::page::{page_revision, Page};
 use clepsydra::vault::path::VaultPath;
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use support::ApiFixture;
 use utoipa::OpenApi;
 
@@ -190,8 +190,16 @@ async fn encrypted_body_projections_are_absent_from_content_blocks_tasks_and_age
     assert_eq!(blocks, json!([]));
     let tasks = get_json(&fixture, "/api/vault/tasks").await;
     assert_eq!(tasks["tasks"], json!([]));
-    let agenda = get_json(&fixture, "/api/vault/agenda/today").await;
-    assert_eq!(agenda["tasks"], json!([]));
+    let agenda = get_json(&fixture, "/api/vault/agenda?today=2026-08-26").await;
+    assert_eq!(
+        agenda,
+        json!({
+            "overdue": [],
+            "today": [],
+            "upcoming": [],
+            "undated": []
+        })
+    );
 }
 
 #[tokio::test]
@@ -751,22 +759,18 @@ async fn keyring_endpoints_validate_public_inputs_and_wrapped_armor() {
         .await
         .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 
-    assert!(
-        !fixture
-            .state
-            .vault
-            .root()
-            .join("escape.identity.age")
-            .exists()
-    );
-    assert!(
-        !fixture
-            .state
-            .vault
-            .root()
-            .join(".clepsydra/crypto/keyring.toml")
-            .exists()
-    );
+    assert!(!fixture
+        .state
+        .vault
+        .root()
+        .join("escape.identity.age")
+        .exists());
+    assert!(!fixture
+        .state
+        .vault
+        .root()
+        .join(".clepsydra/crypto/keyring.toml")
+        .exists());
 }
 
 #[test]

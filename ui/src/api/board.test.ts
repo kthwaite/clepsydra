@@ -191,7 +191,7 @@ describe("applyTaskPatch", () => {
 // Mutation Error Toast Tests
 // ---------------------------------------------------------------------------
 
-describe("Board mutation error toasts", () => {
+describe("Board mutations", () => {
   it("toasts when a patch fails and rolls back", async () => {
     const queryClient = freshQueryClient();
     const board: BoardResponse = {
@@ -226,6 +226,32 @@ describe("Board mutation error toasts", () => {
       queryKeys.board.all,
     );
     expect(cachedBoard?.tasks[0].status).toBe("BACKLOG");
+  });
+
+  it("invalidates every Agenda query after a successful task patch", async () => {
+    const queryClient = freshQueryClient();
+    queryClient.setQueryData(queryKeys.board.all, makeBoard([makeTask()]));
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    vi.spyOn(global, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify(makeTask({ status: "DOING" })), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    const { result } = renderHook(() => usePatchTask(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    await result.current.mutateAsync({
+      id: "task-1",
+      patch: { status: "DOING" },
+    });
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: queryKeys.agenda.all,
+      });
+    });
   });
 
   it("toasts when create task fails", async () => {

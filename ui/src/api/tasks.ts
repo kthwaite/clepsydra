@@ -4,10 +4,10 @@ import { fetchClient } from "./client";
 import { invalidatePageContent, queryKeys } from "./keys";
 
 export type TaskItem = components["schemas"]["TaskItem"];
-export type AgendaTodayResponse = components["schemas"]["AgendaTodayResponse"];
-export type AgendaWeekResponse = components["schemas"]["AgendaWeekResponse"];
-export type AgendaOverdueResponse =
-  components["schemas"]["AgendaOverdueResponse"];
+export type AgendaResponse = components["schemas"]["AgendaResponse"];
+export type AgendaItem = components["schemas"]["AgendaItem"];
+export type AgendaTodo = components["schemas"]["AgendaTodo"];
+export type AgendaTask = components["schemas"]["AgendaTask"];
 export type TaskListResponse = components["schemas"]["TaskListResponse"];
 type TaskCompletionHistoryResponse =
   components["schemas"]["TaskCompletionHistoryResponse"];
@@ -20,39 +20,15 @@ function apiError(error: components["schemas"]["ApiError"], fallback: string) {
   return new Error(error.error || fallback);
 }
 
-export function useAgendaToday() {
-  return useQuery<AgendaTodayResponse>({
-    queryKey: queryKeys.agenda.today,
+export function useAgenda(today: string) {
+  return useQuery<AgendaResponse>({
+    queryKey: queryKeys.agenda.byDate(today),
     queryFn: async () => {
-      const { data, error } = await fetchClient.GET("/api/vault/agenda/today");
-      if (error) throw apiError(error, "Failed to fetch agenda");
+      const { data, error } = await fetchClient.GET("/api/vault/agenda", {
+        params: { query: { today } },
+      });
+      if (error) throw apiError(error, "Failed to fetch Agenda");
       if (!data) throw new Error("Agenda response was empty");
-      return data;
-    },
-  });
-}
-
-export function useAgendaWeek() {
-  return useQuery<AgendaWeekResponse>({
-    queryKey: queryKeys.agenda.week,
-    queryFn: async () => {
-      const { data, error } = await fetchClient.GET("/api/vault/agenda/week");
-      if (error) throw apiError(error, "Failed to fetch weekly agenda");
-      if (!data) throw new Error("Weekly agenda response was empty");
-      return data;
-    },
-  });
-}
-
-export function useAgendaOverdue() {
-  return useQuery<AgendaOverdueResponse>({
-    queryKey: queryKeys.agenda.overdue,
-    queryFn: async () => {
-      const { data, error } = await fetchClient.GET(
-        "/api/vault/agenda/overdue",
-      );
-      if (error) throw apiError(error, "Failed to fetch overdue tasks");
-      if (!data) throw new Error("Overdue agenda response was empty");
       return data;
     },
   });

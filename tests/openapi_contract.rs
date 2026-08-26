@@ -1,5 +1,5 @@
-use clepsydra::FeatureFlags;
 use clepsydra::api::openapi::{self, ApiDoc};
+use clepsydra::FeatureFlags;
 use utoipa::OpenApi;
 
 const VAULT_OPERATIONS: &[(&str, &str)] = &[
@@ -18,9 +18,7 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/tasks", "get"),
     ("/api/vault/tasks/history", "get"),
     ("/api/vault/tasks/status", "put"),
-    ("/api/vault/agenda/today", "get"),
-    ("/api/vault/agenda/week", "get"),
-    ("/api/vault/agenda/overdue", "get"),
+    ("/api/vault/agenda", "get"),
     ("/api/vault/agenda/cycle-burndown", "get"),
     ("/api/vault/blocks/search", "get"),
     ("/api/vault/blocks/assign-id", "post"),
@@ -68,8 +66,106 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 117,
-        "OpenAPI should document all 117 registered /api/vault operations"
+        operation_count, 115,
+        "OpenAPI should document all 115 registered /api/vault operations"
+    );
+}
+
+#[test]
+fn openapi_defines_consolidated_agenda_contract() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let paths = document["paths"]
+        .as_object()
+        .expect("OpenAPI paths should be an object");
+    let operation = &paths["/api/vault/agenda"]["get"];
+    let parameters = operation["parameters"]
+        .as_array()
+        .expect("Agenda parameters should be an array");
+
+    assert!(parameters.iter().any(|parameter| {
+        parameter["name"] == "today" && parameter["in"] == "query" && parameter["required"] == true
+    }));
+    let mut agenda_paths = paths
+        .keys()
+        .filter(|path| path.starts_with("/api/vault/agenda"))
+        .map(String::as_str)
+        .collect::<Vec<_>>();
+    agenda_paths.sort_unstable();
+    assert_eq!(
+        agenda_paths,
+        ["/api/vault/agenda", "/api/vault/agenda/cycle-burndown"]
+    );
+
+    let schemas = document["components"]["schemas"]
+        .as_object()
+        .expect("OpenAPI schemas should be an object");
+    for schema in [
+        "AgendaResponse",
+        "AgendaDay",
+        "AgendaItem",
+        "AgendaTodo",
+        "AgendaTask",
+        "AgendaTodoKind",
+        "AgendaTaskKind",
+        "AgendaTodoStatus",
+        "AgendaTaskStatus",
+        "AgendaTaskPriority",
+    ] {
+        assert!(schemas.contains_key(schema), "missing {schema} schema");
+    }
+
+    assert_eq!(
+        schemas["AgendaTodoKind"]["enum"],
+        serde_json::json!(["todo"])
+    );
+    assert_eq!(
+        schemas["AgendaTaskKind"]["enum"],
+        serde_json::json!(["task"])
+    );
+    assert_eq!(
+        schemas["AgendaTodoStatus"]["enum"],
+        serde_json::json!(["todo", "doing"])
+    );
+    assert_eq!(
+        schemas["AgendaTaskStatus"]["enum"],
+        serde_json::json!(["INTAKE", "TRIAGE", "FIELD", "REVIEW"])
+    );
+    assert_eq!(
+        schemas["AgendaTaskPriority"]["enum"],
+        serde_json::json!(["P0", "P1", "P2", "P3"])
+    );
+
+    assert_eq!(
+        schemas["AgendaResponse"]["properties"]["undated"]["items"]["$ref"],
+        "#/components/schemas/AgendaTodo"
+    );
+    assert_eq!(
+        schemas["AgendaItem"]["discriminator"]["propertyName"],
+        "kind"
+    );
+    assert_eq!(
+        schemas["AgendaItem"]["discriminator"]["mapping"],
+        serde_json::json!({
+            "todo": "#/components/schemas/AgendaTodo",
+            "task": "#/components/schemas/AgendaTask"
+        })
+    );
+    let agenda_item_variants = schemas["AgendaItem"]["oneOf"]
+        .as_array()
+        .expect("AgendaItem should be a discriminated union")
+        .iter()
+        .map(|variant| {
+            variant["$ref"]
+                .as_str()
+                .expect("variant should be a schema ref")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agenda_item_variants,
+        [
+            "#/components/schemas/AgendaTodo",
+            "#/components/schemas/AgendaTask"
+        ]
     );
 }
 
@@ -79,8 +175,8 @@ fn openapi_defines_the_archive_view_get_resource_diagnostic() {
     let operation = &document["paths"]["/api/vault/archive/view/{snapshot_hash}"]["get"];
 
     assert_eq!(
-        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]["schema"]
-            ["type"],
+        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]
+            ["schema"]["type"],
         "integer"
     );
 }
@@ -101,16 +197,18 @@ fn openapi_defines_the_archive_view_head_contract() {
         );
     }
     assert_eq!(
-        operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]["type"],
+        operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]
+            ["type"],
         "string"
     );
     assert_eq!(
-        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]["schema"]
-            ["type"],
+        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]
+            ["schema"]["type"],
         "integer"
     );
     assert_eq!(
-        operation["responses"]["500"]["headers"]["X-Clepsydra-Archive-Diagnostic"]["schema"]["type"],
+        operation["responses"]["500"]["headers"]["X-Clepsydra-Archive-Diagnostic"]["schema"]
+            ["type"],
         "string"
     );
 }
@@ -304,22 +402,18 @@ fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
         schemas["SortKey"]["properties"]["dir"]["$ref"],
         "#/components/schemas/SortDir"
     );
-    assert!(
-        schemas["BaseMemberScope"]["enum"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("embed"))
-    );
+    assert!(schemas["BaseMemberScope"]["enum"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("embed")));
     assert_eq!(
         schemas["BaseMemberFieldRequirement"]["properties"]["embed"]["type"],
         "boolean"
     );
-    assert!(
-        schemas["BaseMemberFieldRequirement"]["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("embed"))
-    );
+    assert!(schemas["BaseMemberFieldRequirement"]["required"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("embed")));
 }
 
 #[test]
@@ -353,11 +447,15 @@ fn runtime_openapi_filters_disabled_features_without_narrowing_static_document()
 
         assert!(paths.contains_key("/api/features"));
         assert_eq!(
-            paths.keys().any(|path| path.starts_with("/api/vault/academic")),
+            paths
+                .keys()
+                .any(|path| path.starts_with("/api/vault/academic")),
             features.academic
         );
         assert_eq!(
-            paths.keys().any(|path| path.starts_with("/api/vault/feeds")),
+            paths
+                .keys()
+                .any(|path| path.starts_with("/api/vault/feeds")),
             features.feeds
         );
         assert_eq!(
@@ -372,11 +470,9 @@ fn runtime_openapi_filters_disabled_features_without_narrowing_static_document()
 
     let complete = ApiDoc::openapi();
     assert!(complete.paths.paths.contains_key("/api/features"));
-    assert!(
-        complete
-            .paths
-            .paths
-            .contains_key("/api/vault/academic/works")
-    );
+    assert!(complete
+        .paths
+        .paths
+        .contains_key("/api/vault/academic/works"));
     assert!(complete.paths.paths.contains_key("/api/vault/feeds"));
 }

@@ -28,6 +28,7 @@ export interface TaskStatusButtonProps {
   onToggle: () => void;
   isDisabled?: boolean;
   className?: string;
+  accessibleLabel?: string;
 }
 
 export function TaskStatusButton({
@@ -35,6 +36,7 @@ export function TaskStatusButton({
   onToggle,
   isDisabled,
   className,
+  accessibleLabel,
 }: TaskStatusButtonProps) {
   const Icon = STATUS_ICONS[status] ?? Circle;
   const next = nextStatus(status);
@@ -44,7 +46,7 @@ export function TaskStatusButton({
       type="button"
       onClick={onToggle}
       disabled={isDisabled}
-      aria-label={`Mark task ${next}`}
+      aria-label={accessibleLabel ?? `Mark Todo ${next}`}
       className={cn(
         "mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center border border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50",
         className,

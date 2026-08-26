@@ -1,7 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import { Component, type ReactNode } from "react";
 import { useTasks, useToggleTaskStatus } from "#/api/tasks";
-import { priorityLabel } from "#/components/TaskList";
+import { priorityLabel } from "#/components/agenda/AgendaItemList";
 import { TaskStatusButton } from "#/components/ui/task-status-button";
 import { cn } from "#/lib/cn";
 import { localDateKey } from "#/lib/time";

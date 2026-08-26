@@ -5,14 +5,14 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use tokio::sync::broadcast;
 
-use clepsydra::api::{AppState, api_router};
-use clepsydra::vault::Vault;
+use clepsydra::api::{api_router, AppState};
 use clepsydra::vault::academic_hook::AcademicMoveHook;
 use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
+use clepsydra::vault::Vault;
 use tempfile::TempDir;
 
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
@@ -256,304 +256,297 @@ async fn cycle_burndown_preserves_membership_after_api_carryover() {
     );
 }
 
-fn today_str() -> String {
-    Utc::now().format("%Y-%m-%d").to_string()
+const TODAY: &str = "2026-08-26";
+
+async fn get_agenda(server: &TestServer) -> serde_json::Value {
+    let response = server
+        .get(&format!("/api/vault/agenda?today={TODAY}"))
+        .await;
+    response.assert_status_ok();
+    response.json()
 }
 
-fn yesterday_str() -> String {
-    (Utc::now().date_naive() - Duration::days(1))
-        .format("%Y-%m-%d")
-        .to_string()
+fn assert_invalid_today(response: axum_test::TestResponse) {
+    response.assert_status_bad_request();
+    assert_eq!(response.header("content-type"), "application/json");
+    assert_eq!(
+        response.json::<serde_json::Value>(),
+        serde_json::json!({
+            "status": 400,
+            "error": "today must be a real date in YYYY-MM-DD format"
+        })
+    );
 }
-
-// ---------------------------------------------------------------------------
-// GET /agenda/today
-// ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn agenda_today_returns_due_today_tasks() {
+async fn agenda_rejects_missing_malformed_and_impossible_today_with_api_error() {
     let (server, _tmp) = setup_server();
-    let today = today_str();
+    assert_invalid_today(server.get("/api/vault/agenda").await);
+    assert_invalid_today(server.get("/api/vault/agenda?today=26-08-2026").await);
+    assert_invalid_today(server.get("/api/vault/agenda?today=2026-8-6").await);
+    assert_invalid_today(server.get("/api/vault/agenda?today=2026-02-30").await);
+}
 
-    // Create a page with a task due today
+#[tokio::test]
+async fn agenda_rejects_extended_upper_bound_without_panicking() {
+    let (server, _tmp) = setup_server();
     server
-        .post("/api/vault/pages/tasks.md")
+        .get("/api/vault/agenda?today=%2B262142-12-31")
+        .await
+        .assert_status_bad_request();
+}
+
+#[tokio::test]
+async fn agenda_classifies_each_open_todo_once() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/agenda-fixture.md")
         .json(&serde_json::json!({
-            "title": "Tasks",
-            "body": format!("- [ ] Buy milk [due:: {today}]\n")
+            "title": "Agenda fixture",
+            "body": "- [ ] overdue scheduled today [due:: 2026-08-25] [scheduled:: 2026-08-26]\n\
+                     - [ ] due today [due:: 2026-08-26]\n\
+                     - [ ] due tomorrow [due:: 2026-08-27]\n\
+                     - [ ] due at boundary [due:: 2026-09-02]\n\
+                     - [ ] beyond boundary [due:: 2026-09-03]\n\
+                     - [ ] undated [scheduled:: 2026-09-01]\n\
+                     - [x] completed [due:: 2026-08-26]\n\
+                     - [-] cancelled [due:: 2026-08-26]\n"
         }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);
 
-    let res = server.get("/api/vault/agenda/today").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "expected 1 task due today, got: {tasks:?}");
-    assert!(tasks[0]["content"].as_str().unwrap().contains("Buy milk"));
+    let body = get_agenda(&server).await;
+    assert_eq!(body["overdue"].as_array().unwrap().len(), 1);
+    assert_eq!(body["today"].as_array().unwrap().len(), 1);
+    assert_eq!(body["upcoming"].as_array().unwrap().len(), 2);
+    assert_eq!(body["upcoming"][0]["date"], "2026-08-27");
+    assert_eq!(body["upcoming"][1]["date"], "2026-09-02");
+    assert_eq!(body["undated"].as_array().unwrap().len(), 1);
+
+    let all_items = body["overdue"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(body["today"].as_array().unwrap())
+        .chain(
+            body["upcoming"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|day| day["items"].as_array().unwrap()),
+        )
+        .chain(body["undated"].as_array().unwrap())
+        .collect::<Vec<_>>();
+    let all_content = all_items
+        .iter()
+        .map(|item| item["content"].as_str().unwrap())
+        .collect::<Vec<_>>();
+
+    assert!(all_items
+        .iter()
+        .all(|item| item["kind"].as_str() == Some("todo")));
+    assert_eq!(
+        all_content
+            .iter()
+            .filter(|content| content.contains("overdue scheduled today"))
+            .count(),
+        1
+    );
+    assert!(!all_content
+        .iter()
+        .any(|content| content.contains("beyond boundary")));
+    assert!(!all_content
+        .iter()
+        .any(|content| content.contains("completed")));
+    assert!(!all_content
+        .iter()
+        .any(|content| content.contains("cancelled")));
 }
 
 #[tokio::test]
-async fn agenda_today_includes_scheduled_today() {
+async fn agenda_includes_scheduled_today_and_today_journal_todos() {
     let (server, _tmp) = setup_server();
-    let today = today_str();
-
     server
-        .post("/api/vault/pages/sched.md")
+        .post("/api/vault/pages/scheduled.md")
         .json(&serde_json::json!({
             "title": "Scheduled",
-            "body": format!("- [ ] Meeting [scheduled:: {today}]\n")
+            "body": "- [ ] scheduled today [scheduled:: 2026-08-26]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/journals/2026-08-26.md")
+        .json(&serde_json::json!({
+            "title": "2026-08-26",
+            "body": "- [ ] journal todo without dates\n"
         }))
         .await
         .assert_status(axum::http::StatusCode::CREATED);
 
-    let res = server.get("/api/vault/agenda/today").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
+    let body = get_agenda(&server).await;
+    let content = body["today"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["content"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(content.len(), 2);
+    assert!(content
+        .iter()
+        .any(|value| value.contains("scheduled today")));
+    assert!(content
+        .iter()
+        .any(|value| value.contains("journal todo without dates")));
+}
+
+#[tokio::test]
+async fn agenda_orders_todos_by_date_priority_path_and_span() {
+    let (server, _tmp) = setup_server();
+    server
+        .post("/api/vault/pages/zeta.md")
+        .json(&serde_json::json!({
+            "title": "Zeta",
+            "body": "- [ ] later overdue [due:: 2026-08-25] [priority:: A]\n\
+                     - [ ] second same-day todo [due:: 2026-08-27] [priority:: B]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({
+            "title": "Alpha",
+            "body": "- [ ] earlier overdue [due:: 2026-08-24] [priority:: C]\n\
+                     - [ ] first same-day todo [due:: 2026-08-27] [priority:: A]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let body = get_agenda(&server).await;
+    let overdue = body["overdue"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["content"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert!(overdue[0].contains("earlier overdue"));
+    assert!(overdue[1].contains("later overdue"));
+
+    let upcoming = body["upcoming"][0]["items"].as_array().unwrap();
+    assert!(upcoming[0]["content"]
+        .as_str()
+        .unwrap()
+        .contains("first same-day todo"));
+    assert!(upcoming[1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("second same-day todo"));
+}
+
+#[tokio::test]
+async fn agenda_includes_only_dated_not_done_tasks() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/clepsydra")).unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0200.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000200\"\ntitle = \"Overdue Task\"\ntype = \"TASK\"\nstatus = \"FIELD\"\npriority = \"P1\"\nproject = \"clepsydra\"\ndue = \"2026-08-25\"\nhold = \"Waiting for input\"\n+++\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0201.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000201\"\ntitle = \"Done Task\"\ntype = \"TASK\"\nstatus = \"SEALED\"\npriority = \"P2\"\nproject = \"clepsydra\"\ndue = \"2026-08-26\"\n+++\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0202.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000202\"\ntitle = \"Undated Task\"\ntype = \"TASK\"\nstatus = \"TRIAGE\"\npriority = \"P2\"\nproject = \"clepsydra\"\n+++\n",
+        )
+        .unwrap();
+    });
+
+    let body = get_agenda(&server).await;
+    let overdue = body["overdue"].as_array().unwrap();
+    assert_eq!(overdue.len(), 1);
+    assert_eq!(overdue[0]["kind"], "task");
+    assert_eq!(overdue[0]["id"], "01900000-0000-7000-8000-000000000200");
+    assert_eq!(overdue[0]["code"], "TSK-0200");
+    assert_eq!(overdue[0]["title"], "Overdue Task");
+    assert_eq!(overdue[0]["status"], "FIELD");
+    assert_eq!(overdue[0]["priority"], "P1");
+    assert_eq!(overdue[0]["project"], "clepsydra");
+    assert_eq!(overdue[0]["due"], "2026-08-25");
+    assert_eq!(overdue[0]["hold"], "Waiting for input");
+    assert_eq!(overdue[0]["path"], "tasks/clepsydra/TSK-0200.md");
+    assert!(body["today"].as_array().unwrap().is_empty());
+    assert!(body["undated"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn agenda_orders_mixed_sources_by_priority() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/clepsydra")).unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0210.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000210\"\ntitle = \"First Task\"\ntype = \"TASK\"\nstatus = \"FIELD\"\npriority = \"P1\"\nproject = \"clepsydra\"\ndue = \"2026-08-26\"\n+++\n",
+        )
+        .unwrap();
+    });
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({
+            "title": "Alpha",
+            "body": "- [ ] Second Todo [due:: 2026-08-26] [priority:: P2]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let body = get_agenda(&server).await;
+    let today = body["today"].as_array().unwrap();
+    assert_eq!(today.len(), 2);
+    assert_eq!(today[0]["kind"], "task");
+    assert_eq!(today[0]["code"], "TSK-0210");
+    assert_eq!(today[1]["kind"], "todo");
+    assert!(today[1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("Second Todo"));
+}
+
+#[tokio::test]
+async fn agenda_includes_tasks_through_seven_day_boundary() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/clepsydra")).unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0220.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000220\"\ntitle = \"Boundary Task\"\ntype = \"TASK\"\nstatus = \"TRIAGE\"\npriority = \"P2\"\nproject = \"clepsydra\"\ndue = \"2026-09-02\"\n+++\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0221.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000221\"\ntitle = \"Beyond Task\"\ntype = \"TASK\"\nstatus = \"TRIAGE\"\npriority = \"P2\"\nproject = \"clepsydra\"\ndue = \"2026-09-03\"\n+++\n",
+        )
+        .unwrap();
+    });
+
+    let body = get_agenda(&server).await;
+    assert_eq!(body["upcoming"].as_array().unwrap().len(), 1);
+    assert_eq!(body["upcoming"][0]["date"], "2026-09-02");
+    let items = body["upcoming"][0]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["code"], "TSK-0220");
+}
+
+#[tokio::test]
+async fn agenda_returns_empty_classified_response() {
+    let (server, _tmp) = setup_server();
+    let body = get_agenda(&server).await;
+
     assert_eq!(
-        tasks.len(),
-        1,
-        "expected 1 scheduled-today task, got: {tasks:?}"
+        body,
+        serde_json::json!({
+            "overdue": [],
+            "today": [],
+            "upcoming": [],
+            "undated": []
+        })
     );
-    assert!(tasks[0]["content"].as_str().unwrap().contains("Meeting"));
-}
-
-#[tokio::test]
-async fn agenda_today_includes_overdue() {
-    let (server, _tmp) = setup_server();
-    let yesterday = yesterday_str();
-
-    // Create a page with a task due yesterday (overdue)
-    server
-        .post("/api/vault/pages/overdue.md")
-        .json(&serde_json::json!({
-            "title": "Overdue",
-            "body": format!("- [ ] Overdue task [due:: {yesterday}]\n")
-        }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
-
-    let res = server.get("/api/vault/agenda/today").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "expected 1 overdue task, got: {tasks:?}");
-    assert!(
-        tasks[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("Overdue task")
-    );
-}
-
-#[tokio::test]
-async fn agenda_today_includes_journal_tasks() {
-    let (server, _tmp) = setup_server();
-
-    // Create today's journal with an incomplete task (no due date)
-    server.post("/api/vault/journal/today").await;
-    server
-        .post("/api/vault/journal/today/capture")
-        .json(&serde_json::json!({ "content": "- [ ] Journal task without due date" }))
-        .await
-        .assert_status_ok();
-
-    let res = server.get("/api/vault/agenda/today").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "expected 1 journal task, got: {tasks:?}");
-    assert!(
-        tasks[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("Journal task without due date")
-    );
-}
-
-#[tokio::test]
-async fn agenda_today_deduplicates() {
-    let (server, _tmp) = setup_server();
-    let today = today_str();
-
-    // Create today's journal with a task that is also due today.
-    // This matches BOTH the journal_date condition and the due condition,
-    // but should appear only once.
-    server.post("/api/vault/journal/today").await;
-    server
-        .post("/api/vault/journal/today/capture")
-        .json(&serde_json::json!({
-            "content": format!("- [ ] Dual match [due:: {today}]")
-        }))
-        .await
-        .assert_status_ok();
-
-    let res = server.get("/api/vault/agenda/today").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "expected deduplication, got: {tasks:?}");
-}
-
-// ---------------------------------------------------------------------------
-// GET /agenda/week
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn agenda_week_groups_by_date() {
-    let (server, _tmp) = setup_server();
-    let today = Utc::now().date_naive();
-    let d1 = today.format("%Y-%m-%d").to_string();
-    let d2 = (today + Duration::days(2)).format("%Y-%m-%d").to_string();
-    let d3 = (today + Duration::days(5)).format("%Y-%m-%d").to_string();
-
-    server
-        .post("/api/vault/pages/week-tasks.md")
-        .json(&serde_json::json!({
-            "title": "Week Tasks",
-            "body": format!(
-                "- [ ] Task A [due:: {d1}]\n\
-                 - [ ] Task B [due:: {d2}]\n\
-                 - [ ] Task C [due:: {d3}]\n"
-            )
-        }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
-
-    let res = server.get("/api/vault/agenda/week").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let days = body["days"].as_array().unwrap();
-    assert_eq!(days.len(), 3, "expected 3 distinct days, got: {days:?}");
-    assert_eq!(days[0]["date"], d1);
-    assert_eq!(days[1]["date"], d2);
-    assert_eq!(days[2]["date"], d3);
-    assert_eq!(days[0]["tasks"].as_array().unwrap().len(), 1);
-    assert_eq!(days[1]["tasks"].as_array().unwrap().len(), 1);
-    assert_eq!(days[2]["tasks"].as_array().unwrap().len(), 1);
-}
-
-#[tokio::test]
-async fn agenda_week_excludes_tasks_beyond_7_days() {
-    let (server, _tmp) = setup_server();
-    let far_future = (Utc::now().date_naive() + Duration::days(30))
-        .format("%Y-%m-%d")
-        .to_string();
-
-    server
-        .post("/api/vault/pages/far-future.md")
-        .json(&serde_json::json!({
-            "title": "Far Future",
-            "body": format!("- [ ] Far away [due:: {far_future}]\n")
-        }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
-
-    let res = server.get("/api/vault/agenda/week").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let days = body["days"].as_array().unwrap();
-    assert!(days.is_empty(), "expected no days, got: {days:?}");
-}
-
-// ---------------------------------------------------------------------------
-// GET /agenda/overdue
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn agenda_overdue_returns_past_due_incomplete_tasks() {
-    let (server, _tmp) = setup_server();
-
-    server
-        .post("/api/vault/pages/past-due.md")
-        .json(&serde_json::json!({
-            "title": "Past Due",
-            "body": "- [ ] Should appear [due:: 2020-01-01]\n"
-        }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
-
-    let res = server.get("/api/vault/agenda/overdue").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
-    assert_eq!(tasks.len(), 1, "expected 1 overdue task, got: {tasks:?}");
-    assert!(
-        tasks[0]["content"]
-            .as_str()
-            .unwrap()
-            .contains("Should appear")
-    );
-}
-
-#[tokio::test]
-async fn agenda_overdue_excludes_completed() {
-    let (server, _tmp) = setup_server();
-
-    // Create overdue task that is already done
-    server
-        .post("/api/vault/pages/done-overdue.md")
-        .json(&serde_json::json!({
-            "title": "Done Overdue",
-            "body": "- [x] Done task [due:: 2020-01-01]\n"
-        }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
-
-    let res = server.get("/api/vault/agenda/overdue").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
-    assert!(
-        tasks.is_empty(),
-        "completed overdue tasks should not appear, got: {tasks:?}"
-    );
-}
-
-#[tokio::test]
-async fn agenda_overdue_excludes_cancelled() {
-    let (server, _tmp) = setup_server();
-
-    server
-        .post("/api/vault/pages/cancelled-overdue.md")
-        .json(&serde_json::json!({
-            "title": "Cancelled Overdue",
-            "body": "- [-] Cancelled task [due:: 2020-01-01]\n"
-        }))
-        .await
-        .assert_status(axum::http::StatusCode::CREATED);
-
-    let res = server.get("/api/vault/agenda/overdue").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    let tasks = body["tasks"].as_array().unwrap();
-    assert!(
-        tasks.is_empty(),
-        "cancelled overdue tasks should not appear, got: {tasks:?}"
-    );
-}
-
-// ---------------------------------------------------------------------------
-// Edge cases
-// ---------------------------------------------------------------------------
-
-#[tokio::test]
-async fn agenda_returns_empty_when_no_tasks() {
-    let (server, _tmp) = setup_server();
-
-    let res = server.get("/api/vault/agenda/today").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    assert_eq!(body["tasks"].as_array().unwrap().len(), 0);
-
-    let res = server.get("/api/vault/agenda/week").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    assert_eq!(body["days"].as_array().unwrap().len(), 0);
-
-    let res = server.get("/api/vault/agenda/overdue").await;
-    res.assert_status_ok();
-    let body: serde_json::Value = res.json();
-    assert_eq!(body["tasks"].as_array().unwrap().len(), 0);
 }

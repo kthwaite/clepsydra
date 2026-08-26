@@ -173,10 +173,10 @@ export const SHORTCUTS = {
   },
   "editor.taskProperties": {
     chord: { key: "p", mod: true, shift: true },
-    label: "Task properties",
+    label: "Todo properties",
     group: "Editor",
     scope: "editor",
-    note: "on a task item",
+    note: "on a Todo",
   },
   "editor.mark.bold": {
     chord: { key: "b", mod: true },

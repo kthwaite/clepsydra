@@ -1,44 +1,190 @@
-//! Agenda-related endpoints: /agenda/today, /agenda/week, /agenda/overdue.
+//! Consolidated Agenda and cycle-burndown endpoints.
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use axum::Json;
-use axum::Router;
+use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use axum::routing::get;
-use chrono::{Duration, NaiveDate, Utc};
+use axum::Json;
+use axum::Router;
+use chrono::{Duration, NaiveDate};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::AppState;
 use super::error::ApiError;
 use super::tasks::TaskItem;
+use super::AppState;
+use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
 use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
 
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
 
-#[derive(Debug, Serialize, ToSchema)]
-pub struct AgendaTodayResponse {
-    pub tasks: Vec<TaskItem>,
+#[derive(Debug, Deserialize, IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct AgendaQuery {
+    pub today: String,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct AgendaWeekResponse {
-    pub days: Vec<AgendaDay>,
+pub struct AgendaResponse {
+    pub overdue: Vec<AgendaItem>,
+    pub today: Vec<AgendaItem>,
+    pub upcoming: Vec<AgendaDay>,
+    pub undated: Vec<AgendaTodo>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AgendaDay {
     pub date: String,
-    pub tasks: Vec<TaskItem>,
+    pub items: Vec<AgendaItem>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-pub struct AgendaOverdueResponse {
-    pub tasks: Vec<TaskItem>,
+#[serde(untagged)]
+#[schema(discriminator(
+    property_name = "kind",
+    mapping(
+        ("todo" = "#/components/schemas/AgendaTodo"),
+        ("task" = "#/components/schemas/AgendaTask")
+    )
+))]
+pub enum AgendaItem {
+    Todo(AgendaTodo),
+    Task(AgendaTask),
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AgendaTodo {
+    pub kind: AgendaTodoKind,
+    pub block_id: Option<String>,
+    pub content: String,
+    pub status: AgendaTodoStatus,
+    pub properties: HashMap<String, String>,
+    pub page_path: String,
+    pub page_title: Option<String>,
+    pub span_start: i64,
+    pub span_end: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AgendaTask {
+    pub kind: AgendaTaskKind,
+    pub id: uuid::Uuid,
+    pub code: String,
+    pub title: String,
+    pub status: AgendaTaskStatus,
+    pub priority: AgendaTaskPriority,
+    pub project: Option<String>,
+    pub due: String,
+    pub hold: Option<String>,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgendaTodoKind {
+    Todo,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgendaTaskKind {
+    Task,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgendaTodoStatus {
+    Todo,
+    Doing,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub enum AgendaTaskStatus {
+    #[serde(rename = "INTAKE")]
+    Intake,
+    #[serde(rename = "TRIAGE")]
+    Triage,
+    #[serde(rename = "FIELD")]
+    Field,
+    #[serde(rename = "REVIEW")]
+    Review,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub enum AgendaTaskPriority {
+    P0,
+    P1,
+    P2,
+    P3,
+}
+
+impl AgendaTodoStatus {
+    fn from_indexed(value: &str) -> Option<Self> {
+        match value {
+            "todo" => Some(Self::Todo),
+            "doing" => Some(Self::Doing),
+            _ => None,
+        }
+    }
+}
+
+impl AgendaTaskStatus {
+    fn from_indexed(value: &str) -> Option<Self> {
+        match value {
+            "INTAKE" => Some(Self::Intake),
+            "TRIAGE" => Some(Self::Triage),
+            "FIELD" => Some(Self::Field),
+            "REVIEW" => Some(Self::Review),
+            _ => None,
+        }
+    }
+}
+
+impl AgendaTaskPriority {
+    fn from_indexed(value: &str) -> Option<Self> {
+        match value {
+            "P0" => Some(Self::P0),
+            "P1" => Some(Self::P1),
+            "P2" => Some(Self::P2),
+            "P3" => Some(Self::P3),
+            _ => None,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::P0 => "P0",
+            Self::P1 => "P1",
+            Self::P2 => "P2",
+            Self::P3 => "P3",
+        }
+    }
+}
+
+const INVALID_TODAY_MESSAGE: &str = "today must be a real date in YYYY-MM-DD format";
+
+fn invalid_today() -> ApiError {
+    ApiError::bad_request(INVALID_TODAY_MESSAGE)
+}
+
+fn parse_today(value: &str) -> Result<NaiveDate, ApiError> {
+    let bytes = value.as_bytes();
+    let has_exact_shape = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit());
+    if !has_exact_shape {
+        return Err(invalid_today());
+    }
+
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| invalid_today())
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -69,9 +215,7 @@ pub struct CycleBurndownResponse {
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/today", get(agenda_today))
-        .route("/week", get(agenda_week))
-        .route("/overdue", get(agenda_overdue))
+        .route("/", get(get_agenda))
         .route("/cycle-burndown", get(get_cycle_burndown))
 }
 
@@ -293,187 +437,103 @@ fn fill_properties(
 }
 
 // ---------------------------------------------------------------------------
-// GET /agenda/today
+// GET /agenda
 // ---------------------------------------------------------------------------
 
 #[utoipa::path(
     get,
-    path = "/agenda/today",
+    path = "/agenda",
     context_path = "/api/vault",
     tag = "Agenda",
+    params(AgendaQuery),
     responses(
-        (status = 200, description = "Today's agenda", body = AgendaTodayResponse),
+        (status = 200, description = "Classified agenda", body = AgendaResponse),
+        (status = 400, description = "Invalid local date", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
-pub async fn agenda_today(
+pub async fn get_agenda(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<AgendaTodayResponse>, ApiError> {
-    let today = Utc::now().format("%Y-%m-%d").to_string();
+    query: Result<Query<AgendaQuery>, QueryRejection>,
+) -> Result<Json<AgendaResponse>, ApiError> {
+    let Query(query) = query.map_err(|_| invalid_today())?;
+    let today = parse_today(&query.today)?;
+    let tomorrow = today
+        .checked_add_signed(Duration::days(1))
+        .ok_or_else(|| ApiError::bad_request("today must allow a seven-day Agenda window"))?;
+    let end = today
+        .checked_add_signed(Duration::days(7))
+        .ok_or_else(|| ApiError::bad_request("today must allow a seven-day Agenda window"))?;
+    let today_key = today.format("%Y-%m-%d").to_string();
+    let tomorrow_key = tomorrow.format("%Y-%m-%d").to_string();
+    let end_key = end.format("%Y-%m-%d").to_string();
 
-    let tasks = state
+    let (todos, tasks) = state
         .index
-        .with_index(move |index, _vault| {
-            let conn = index.connection();
+        .with_index({
+            let today_key = today_key.clone();
+            let tomorrow_key = tomorrow_key.clone();
+            let end_key = end_key.clone();
+            move |index, _vault| {
+                let conn = index.connection();
+                let sql = "\
+                    SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
+                           status_prop.value AS status, p.path, p.title, p.journal_date \
+                    FROM blocks b \
+                    JOIN block_properties status_prop \
+                      ON status_prop.page_id = b.page_id \
+                     AND status_prop.span_start = b.span_start \
+                     AND status_prop.key = 'status' \
+                    JOIN pages p ON b.page_id = p.id \
+                    LEFT JOIN block_properties bp_due \
+                      ON bp_due.page_id = b.page_id \
+                     AND bp_due.span_start = b.span_start \
+                     AND bp_due.key = 'due' \
+                    LEFT JOIN block_properties bp_sched \
+                      ON bp_sched.page_id = b.page_id \
+                     AND bp_sched.span_start = b.span_start \
+                     AND bp_sched.key = 'scheduled' \
+                    WHERE status_prop.value IN ('todo', 'doing') \
+                      AND ( \
+                        bp_due.value < ?2 \
+                        OR (bp_due.value >= ?2 AND bp_due.value <= ?3) \
+                        OR bp_sched.value = ?1 \
+                        OR p.journal_date = ?1 \
+                        OR bp_due.value IS NULL \
+                      )";
 
-            // Union of:
-            //   1. Tasks with due = today
-            //   2. Tasks with scheduled = today
-            //   3. Tasks with due < today AND status IN ('todo', 'doing')  (overdue)
-            //   4. Incomplete tasks from today's journal page (journal_date = today)
-            let sql = "\
-                SELECT DISTINCT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
-                       status_prop.value AS status, p.path, p.title \
-                FROM blocks b \
-                JOIN block_properties status_prop \
-                  ON status_prop.page_id = b.page_id \
-                 AND status_prop.span_start = b.span_start \
-                 AND status_prop.key = 'status' \
-                JOIN pages p ON b.page_id = p.id \
-                LEFT JOIN block_properties bp_due \
-                  ON bp_due.page_id = b.page_id \
-                 AND bp_due.span_start = b.span_start \
-                 AND bp_due.key = 'due' \
-                LEFT JOIN block_properties bp_sched \
-                  ON bp_sched.page_id = b.page_id \
-                 AND bp_sched.span_start = b.span_start \
-                 AND bp_sched.key = 'scheduled' \
-                WHERE \
-                  (bp_due.value = ?1) \
-                  OR (bp_sched.value = ?1) \
-                  OR (bp_due.value < ?1 AND status_prop.value IN ('todo', 'doing')) \
-                  OR (p.journal_date = ?1 AND status_prop.value IN ('todo', 'doing')) \
-                ORDER BY p.path ASC, b.span_start ASC";
+                let mut stmt = conn.prepare(sql)?;
+                let rows = stmt.query_map(params![today_key, tomorrow_key, end_key], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                    ))
+                })?;
 
-            let mut stmt = conn.prepare(sql)?;
-            let rows = stmt.query_map(params![today], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,         // page_id (TEXT)
-                    row.get::<_, Option<String>>(1)?, // block_id
-                    row.get::<_, String>(2)?,         // content
-                    row.get::<_, i64>(3)?,            // span_start
-                    row.get::<_, i64>(4)?,            // span_end
-                    row.get::<_, String>(5)?,         // status
-                    row.get::<_, String>(6)?,         // path
-                    row.get::<_, Option<String>>(7)?, // title
-                ))
-            })?;
-
-            let mut tasks: Vec<TaskItem> = Vec::new();
-            let mut task_keys: Vec<(String, i64)> = Vec::new();
-
-            for row in rows {
-                let (
-                    page_id,
-                    block_id,
-                    content,
-                    span_start,
-                    span_end,
-                    status,
-                    page_path,
-                    page_title,
-                ) = row?;
-                task_keys.push((page_id, span_start));
-                tasks.push(TaskItem {
-                    block_id,
-                    content,
-                    status,
-                    properties: HashMap::new(),
-                    page_path,
-                    page_title,
-                    span_start,
-                    span_end,
-                });
-            }
-
-            fill_properties(conn, &mut tasks, &task_keys)?;
-
-            Ok::<_, rusqlite::Error>(tasks)
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    Ok(Json(AgendaTodayResponse { tasks }))
-}
-
-// ---------------------------------------------------------------------------
-// GET /agenda/week
-// ---------------------------------------------------------------------------
-
-#[utoipa::path(
-    get,
-    path = "/agenda/week",
-    context_path = "/api/vault",
-    tag = "Agenda",
-    responses(
-        (status = 200, description = "Seven-day agenda", body = AgendaWeekResponse),
-        (status = 500, description = "Internal server error", body = ApiError)
-    )
-)]
-pub async fn agenda_week(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<AgendaWeekResponse>, ApiError> {
-    let today_date = Utc::now().date_naive();
-    let end_date = today_date + Duration::days(7);
-    let today = today_date.format("%Y-%m-%d").to_string();
-    let end = end_date.format("%Y-%m-%d").to_string();
-
-    let tasks = state
-        .index
-        .with_index(move |index, _vault| {
-            let conn = index.connection();
-
-            let sql = "\
-                SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
-                       status_prop.value AS status, p.path, p.title, \
-                       bp_due.value AS due_date \
-                FROM blocks b \
-                JOIN block_properties status_prop \
-                  ON status_prop.page_id = b.page_id \
-                 AND status_prop.span_start = b.span_start \
-                 AND status_prop.key = 'status' \
-                JOIN pages p ON b.page_id = p.id \
-                JOIN block_properties bp_due \
-                  ON bp_due.page_id = b.page_id \
-                 AND bp_due.span_start = b.span_start \
-                 AND bp_due.key = 'due' \
-                WHERE bp_due.value >= ?1 AND bp_due.value <= ?2 \
-                ORDER BY bp_due.value ASC, p.path ASC, b.span_start ASC";
-
-            let mut stmt = conn.prepare(sql)?;
-            let rows = stmt.query_map(params![today, end], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,         // page_id (TEXT)
-                    row.get::<_, Option<String>>(1)?, // block_id
-                    row.get::<_, String>(2)?,         // content
-                    row.get::<_, i64>(3)?,            // span_start
-                    row.get::<_, i64>(4)?,            // span_end
-                    row.get::<_, String>(5)?,         // status
-                    row.get::<_, String>(6)?,         // path
-                    row.get::<_, Option<String>>(7)?, // title
-                    row.get::<_, String>(8)?,         // due_date
-                ))
-            })?;
-
-            let mut tasks: Vec<(TaskItem, String)> = Vec::new();
-            let mut task_keys: Vec<(String, i64)> = Vec::new();
-
-            for row in rows {
-                let (
-                    page_id,
-                    block_id,
-                    content,
-                    span_start,
-                    span_end,
-                    status,
-                    page_path,
-                    page_title,
-                    due_date,
-                ) = row?;
-                task_keys.push((page_id, span_start));
-                tasks.push((
-                    TaskItem {
+                let mut todo_items = Vec::new();
+                let mut todo_keys = Vec::new();
+                let mut journal_dates = Vec::new();
+                for row in rows {
+                    let (
+                        page_id,
+                        block_id,
+                        content,
+                        span_start,
+                        span_end,
+                        status,
+                        page_path,
+                        page_title,
+                        journal_date,
+                    ) = row?;
+                    todo_keys.push((page_id, span_start));
+                    todo_items.push(TaskItem {
                         block_id,
                         content,
                         status,
@@ -482,149 +542,306 @@ pub async fn agenda_week(
                         page_title,
                         span_start,
                         span_end,
-                    },
-                    due_date,
-                ));
+                    });
+                    journal_dates.push(journal_date);
+                }
+
+                fill_properties(conn, &mut todo_items, &todo_keys)?;
+
+                let todos = todo_items
+                    .into_iter()
+                    .zip(journal_dates)
+                    .collect::<Vec<_>>();
+
+                let mut task_stmt = conn.prepare(
+                    "SELECT p.id, p.path, p.title, p.meta_json, p.project \
+                     FROM pages p \
+                     WHERE p.kind = 'TASK' \
+                     ORDER BY p.path",
+                )?;
+                let task_rows = task_stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut tasks = Vec::new();
+                for (id, path, title, meta_json, project) in task_rows {
+                    let Ok(id) = uuid::Uuid::parse_str(&id) else {
+                        continue;
+                    };
+                    let metadata: serde_json::Value =
+                        serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
+                    let status_value = agenda_meta_string(&metadata, "status")
+                        .unwrap_or_else(|| DEFAULT_STATUS.to_string());
+                    let Some(status) = AgendaTaskStatus::from_indexed(&status_value) else {
+                        continue;
+                    };
+                    let priority_value = agenda_meta_string(&metadata, "priority")
+                        .unwrap_or_else(|| DEFAULT_PRIORITY.to_string());
+                    let Some(priority) = AgendaTaskPriority::from_indexed(&priority_value) else {
+                        continue;
+                    };
+                    let Some(due) = agenda_meta_string(&metadata, "due") else {
+                        continue;
+                    };
+                    let code = agenda_path_stem(&path).to_ascii_uppercase();
+                    tasks.push(AgendaTask {
+                        kind: AgendaTaskKind::Task,
+                        id,
+                        title: title.unwrap_or_else(|| code.clone()),
+                        code,
+                        status,
+                        priority,
+                        project,
+                        due,
+                        hold: agenda_meta_string(&metadata, "hold"),
+                        path,
+                    });
+                }
+
+                Ok::<_, rusqlite::Error>((todos, tasks))
             }
-
-            // Fill properties — extract TaskItems temporarily
-            let mut task_items: Vec<TaskItem> = tasks
-                .iter()
-                .map(|(t, _)| TaskItem {
-                    block_id: t.block_id.clone(),
-                    content: t.content.clone(),
-                    status: t.status.clone(),
-                    properties: HashMap::new(),
-                    page_path: t.page_path.clone(),
-                    page_title: t.page_title.clone(),
-                    span_start: t.span_start,
-                    span_end: t.span_end,
-                })
-                .collect();
-
-            fill_properties(conn, &mut task_items, &task_keys)?;
-
-            // Re-pair with due dates
-            let paired: Vec<(TaskItem, String)> = task_items
-                .into_iter()
-                .zip(tasks.into_iter().map(|(_, d)| d))
-                .collect();
-
-            Ok::<_, rusqlite::Error>(paired)
         })
         .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?;
 
-    // Group by due_date in Rust (rows are already sorted by due_date)
-    let mut day_map: Vec<(String, Vec<TaskItem>)> = Vec::new();
-    for (task, due_date) in tasks {
-        if let Some(last) = day_map.last_mut()
-            && last.0 == due_date
-        {
-            last.1.push(task);
+    let mut overdue = Vec::new();
+    let mut today_items = Vec::new();
+    let mut upcoming_by_date: BTreeMap<String, Vec<AgendaItem>> = BTreeMap::new();
+    let mut undated = Vec::new();
+
+    for (todo, journal_date) in todos {
+        let Some(todo) = todo_item(todo) else {
             continue;
-        }
-        day_map.push((due_date, vec![task]));
+        };
+        let due = todo.properties.get("due").map(String::as_str);
+        let scheduled = todo.properties.get("scheduled").map(String::as_str);
+        let bucket = classify_agenda_item(
+            due,
+            scheduled == Some(today_key.as_str())
+                || journal_date.as_deref() == Some(today_key.as_str()),
+            true,
+            &today_key,
+            &tomorrow_key,
+            &end_key,
+        );
+        push_agenda_todo(
+            bucket,
+            todo,
+            &mut overdue,
+            &mut today_items,
+            &mut upcoming_by_date,
+            &mut undated,
+        );
     }
 
-    let days = day_map
+    for task in tasks {
+        let bucket = classify_agenda_item(
+            Some(task.due.as_str()),
+            false,
+            false,
+            &today_key,
+            &tomorrow_key,
+            &end_key,
+        );
+        push_agenda_task(
+            bucket,
+            task,
+            &mut overdue,
+            &mut today_items,
+            &mut upcoming_by_date,
+        );
+    }
+
+    sort_agenda_items(&mut overdue);
+    sort_agenda_items(&mut today_items);
+    sort_agenda_todos(&mut undated);
+    let upcoming = upcoming_by_date
         .into_iter()
-        .map(|(date, tasks)| AgendaDay { date, tasks })
+        .map(|(date, mut items)| {
+            sort_agenda_items(&mut items);
+            AgendaDay { date, items }
+        })
         .collect();
 
-    Ok(Json(AgendaWeekResponse { days }))
+    Ok(Json(AgendaResponse {
+        overdue,
+        today: today_items,
+        upcoming,
+        undated,
+    }))
 }
 
-// ---------------------------------------------------------------------------
-// GET /agenda/overdue
-// ---------------------------------------------------------------------------
+fn todo_item(todo: TaskItem) -> Option<AgendaTodo> {
+    Some(AgendaTodo {
+        kind: AgendaTodoKind::Todo,
+        block_id: todo.block_id,
+        content: todo.content,
+        status: AgendaTodoStatus::from_indexed(&todo.status)?,
+        properties: todo.properties,
+        page_path: todo.page_path,
+        page_title: todo.page_title,
+        span_start: todo.span_start,
+        span_end: todo.span_end,
+    })
+}
 
-#[utoipa::path(
-    get,
-    path = "/agenda/overdue",
-    context_path = "/api/vault",
-    tag = "Agenda",
-    responses(
-        (status = 200, description = "Overdue tasks", body = AgendaOverdueResponse),
-        (status = 500, description = "Internal server error", body = ApiError)
-    )
-)]
-pub async fn agenda_overdue(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<AgendaOverdueResponse>, ApiError> {
-    let today = Utc::now().format("%Y-%m-%d").to_string();
+fn agenda_path_stem(path: &str) -> &str {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.strip_suffix(".md").unwrap_or(name)
+}
 
-    let tasks = state
-        .index
-        .with_index(move |index, _vault| {
-            let conn = index.connection();
+fn agenda_meta_string(metadata: &serde_json::Value, key: &str) -> Option<String> {
+    match metadata.get(key) {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(value)) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        }
+        Some(serde_json::Value::Number(value)) => Some(value.to_string()),
+        Some(serde_json::Value::Bool(value)) => Some(value.to_string()),
+        Some(value) => {
+            let value = value.to_string();
+            (!value.is_empty()).then_some(value)
+        }
+    }
+}
 
-            let sql = "\
-                SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
-                       status_prop.value AS status, p.path, p.title \
-                FROM blocks b \
-                JOIN block_properties status_prop \
-                  ON status_prop.page_id = b.page_id \
-                 AND status_prop.span_start = b.span_start \
-                 AND status_prop.key = 'status' \
-                JOIN pages p ON b.page_id = p.id \
-                JOIN block_properties bp_due \
-                  ON bp_due.page_id = b.page_id \
-                 AND bp_due.span_start = b.span_start \
-                 AND bp_due.key = 'due' \
-                WHERE bp_due.value < ?1 \
-                  AND status_prop.value IN ('todo', 'doing') \
-                ORDER BY bp_due.value ASC, p.path ASC, b.span_start ASC";
+enum AgendaBucket {
+    Overdue,
+    Today,
+    Upcoming(String),
+    Undated,
+    OutsideWindow,
+}
 
-            let mut stmt = conn.prepare(sql)?;
-            let rows = stmt.query_map(params![today], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,         // page_id (TEXT)
-                    row.get::<_, Option<String>>(1)?, // block_id
-                    row.get::<_, String>(2)?,         // content
-                    row.get::<_, i64>(3)?,            // span_start
-                    row.get::<_, i64>(4)?,            // span_end
-                    row.get::<_, String>(5)?,         // status
-                    row.get::<_, String>(6)?,         // path
-                    row.get::<_, Option<String>>(7)?, // title
-                ))
-            })?;
+fn classify_agenda_item(
+    due: Option<&str>,
+    is_today: bool,
+    include_undated: bool,
+    today: &str,
+    tomorrow: &str,
+    end: &str,
+) -> AgendaBucket {
+    if due.is_some_and(|due| due < today) {
+        AgendaBucket::Overdue
+    } else if due == Some(today) || is_today {
+        AgendaBucket::Today
+    } else if let Some(due) = due.filter(|due| *due >= tomorrow && *due <= end) {
+        AgendaBucket::Upcoming(due.to_owned())
+    } else if due.is_none() && include_undated {
+        AgendaBucket::Undated
+    } else {
+        AgendaBucket::OutsideWindow
+    }
+}
 
-            let mut tasks: Vec<TaskItem> = Vec::new();
-            let mut task_keys: Vec<(String, i64)> = Vec::new();
+fn push_agenda_todo(
+    bucket: AgendaBucket,
+    todo: AgendaTodo,
+    overdue: &mut Vec<AgendaItem>,
+    today: &mut Vec<AgendaItem>,
+    upcoming: &mut BTreeMap<String, Vec<AgendaItem>>,
+    undated: &mut Vec<AgendaTodo>,
+) {
+    match bucket {
+        AgendaBucket::Overdue => overdue.push(AgendaItem::Todo(todo)),
+        AgendaBucket::Today => today.push(AgendaItem::Todo(todo)),
+        AgendaBucket::Upcoming(date) => upcoming
+            .entry(date)
+            .or_default()
+            .push(AgendaItem::Todo(todo)),
+        AgendaBucket::Undated => undated.push(todo),
+        AgendaBucket::OutsideWindow => {}
+    }
+}
 
-            for row in rows {
-                let (
-                    page_id,
-                    block_id,
-                    content,
-                    span_start,
-                    span_end,
-                    status,
-                    page_path,
-                    page_title,
-                ) = row?;
-                task_keys.push((page_id, span_start));
-                tasks.push(TaskItem {
-                    block_id,
-                    content,
-                    status,
-                    properties: HashMap::new(),
-                    page_path,
-                    page_title,
-                    span_start,
-                    span_end,
-                });
+fn push_agenda_task(
+    bucket: AgendaBucket,
+    task: AgendaTask,
+    overdue: &mut Vec<AgendaItem>,
+    today: &mut Vec<AgendaItem>,
+    upcoming: &mut BTreeMap<String, Vec<AgendaItem>>,
+) {
+    match bucket {
+        AgendaBucket::Overdue => overdue.push(AgendaItem::Task(task)),
+        AgendaBucket::Today => today.push(AgendaItem::Task(task)),
+        AgendaBucket::Upcoming(date) => upcoming
+            .entry(date)
+            .or_default()
+            .push(AgendaItem::Task(task)),
+        AgendaBucket::Undated | AgendaBucket::OutsideWindow => {}
+    }
+}
+
+fn sort_agenda_items(items: &mut [AgendaItem]) {
+    items.sort_by(|left, right| {
+        match (item_due(left), item_due(right)) {
+            (Some(left), Some(right)) => {
+                let ordering = left.cmp(right);
+                if !ordering.is_eq() {
+                    return ordering;
+                }
             }
+            (Some(_), None) => return std::cmp::Ordering::Less,
+            (None, Some(_)) => return std::cmp::Ordering::Greater,
+            (None, None) => {}
+        }
 
-            fill_properties(conn, &mut tasks, &task_keys)?;
+        agenda_priority_key(left)
+            .cmp(agenda_priority_key(right))
+            .then_with(|| item_path(left).cmp(item_path(right)))
+            .then_with(|| match (left, right) {
+                (AgendaItem::Todo(left), AgendaItem::Todo(right)) => {
+                    left.span_start.cmp(&right.span_start)
+                }
+                (AgendaItem::Task(left), AgendaItem::Task(right)) => left.code.cmp(&right.code),
+                (AgendaItem::Todo(_), AgendaItem::Task(_)) => std::cmp::Ordering::Less,
+                (AgendaItem::Task(_), AgendaItem::Todo(_)) => std::cmp::Ordering::Greater,
+            })
+    });
+}
 
-            Ok::<_, rusqlite::Error>(tasks)
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+fn sort_agenda_todos(todos: &mut [AgendaTodo]) {
+    todos.sort_by(|left, right| {
+        todo_priority_key(left)
+            .cmp(todo_priority_key(right))
+            .then_with(|| left.page_path.cmp(&right.page_path))
+            .then_with(|| left.span_start.cmp(&right.span_start))
+    });
+}
 
-    Ok(Json(AgendaOverdueResponse { tasks }))
+fn item_due(item: &AgendaItem) -> Option<&str> {
+    match item {
+        AgendaItem::Todo(todo) => todo.properties.get("due").map(String::as_str),
+        AgendaItem::Task(task) => Some(&task.due),
+    }
+}
+
+fn todo_priority_key(todo: &AgendaTodo) -> &str {
+    todo.properties
+        .get("priority")
+        .map(String::as_str)
+        .unwrap_or("Z")
+}
+
+fn agenda_priority_key(item: &AgendaItem) -> &str {
+    match item {
+        AgendaItem::Todo(todo) => todo_priority_key(todo),
+        AgendaItem::Task(task) => task.priority.as_str(),
+    }
+}
+
+fn item_path(item: &AgendaItem) -> &str {
+    match item {
+        AgendaItem::Todo(todo) => &todo.page_path,
+        AgendaItem::Task(task) => &task.path,
+    }
 }

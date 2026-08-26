@@ -21,6 +21,7 @@ import {
   opKey,
   PRI_LABEL,
   PRI_ORDER,
+  taskStatusLabel,
 } from "./board-constants";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
@@ -79,7 +80,7 @@ const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
   },
 };
 
-const colLabel: ColLabelFn = (id) => COL_LABEL[id] ?? id;
+const colLabel: ColLabelFn = taskStatusLabel;
 // ── TaskingScreen ─────────────────────────────────────────────────────────────
 
 export function TaskingScreen({

@@ -129,14 +129,14 @@ describe("registry", () => {
     });
   });
 
-  it("registers Mod+Shift+P for the task property popover", () => {
+  it("registers Mod+Shift+P for the Todo property popover", () => {
     const shortcut = SHORTCUTS["editor.taskProperties"];
     expect(shortcut).toEqual({
       chord: { key: "p", mod: true, shift: true },
-      label: "Task properties",
+      label: "Todo properties",
       group: "Editor",
       scope: "editor",
-      note: "on a task item",
+      note: "on a Todo",
     });
     // Declared shift is enforced, so plain ⌘P stays the browser's print.
     expect(

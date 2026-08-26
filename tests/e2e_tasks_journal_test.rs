@@ -6,14 +6,14 @@ use axum_test::TestServer;
 use chrono::Utc;
 use tokio::sync::broadcast;
 
-use clepsydra::api::{AppState, api_router};
-use clepsydra::vault::Vault;
+use clepsydra::api::{api_router, AppState};
 use clepsydra::vault::academic_hook::AcademicMoveHook;
 use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
+use clepsydra::vault::Vault;
 use tempfile::TempDir;
 
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
@@ -118,18 +118,19 @@ async fn full_workflow_tasks_journal_agenda() {
     let tasks = body["tasks"].as_array().unwrap();
     assert_eq!(tasks.len(), 2, "should find 2 todo tasks: {body:?}");
 
-    // --- Step 2: Verify agenda/today includes yesterday's overdue tasks ---
-    let res = server.get("/api/vault/agenda/today").await;
+    // --- Step 2: Verify the consolidated Agenda includes yesterday's overdue tasks ---
+    let res = server
+        .get(&format!("/api/vault/agenda?today={today}"))
+        .await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
-    let agenda_tasks = body["tasks"].as_array().unwrap();
-    assert!(!agenda_tasks.is_empty(), "agenda/today should have tasks");
-    // The "Write proposal" task has due = yesterday, so it's overdue
+    let overdue = body["overdue"].as_array().unwrap();
+    assert!(!overdue.is_empty(), "Agenda should have overdue items");
     assert!(
-        agenda_tasks
+        overdue
             .iter()
-            .any(|t| t["content"].as_str().unwrap().contains("Write proposal")),
-        "agenda should contain the overdue 'Write proposal' task"
+            .any(|item| item["content"].as_str().unwrap().contains("Write proposal")),
+        "Agenda should contain the overdue 'Write proposal' Todo"
     );
 
     // --- Step 3: Mark "Write proposal" as done ---

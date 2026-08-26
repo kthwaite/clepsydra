@@ -174,9 +174,7 @@ impl Modify for SchemaOverrides {
         crate::api::tasks::list_tasks,
         crate::api::tasks::get_task_completion_history,
         crate::api::tasks::update_task_status,
-        crate::api::agenda::agenda_today,
-        crate::api::agenda::agenda_week,
-        crate::api::agenda::agenda_overdue,
+        crate::api::agenda::get_agenda,
         crate::api::agenda::get_cycle_burndown,
         // Blocks
         crate::api::blocks::search_blocks,
@@ -391,10 +389,16 @@ impl Modify for SchemaOverrides {
             crate::api::tasks::TaskItem,
             crate::api::tasks::TaskListResponse,
             crate::api::tasks::UpdateStatusRequest,
-            crate::api::agenda::AgendaTodayResponse,
-            crate::api::agenda::AgendaWeekResponse,
+            crate::api::agenda::AgendaResponse,
             crate::api::agenda::AgendaDay,
-            crate::api::agenda::AgendaOverdueResponse,
+            crate::api::agenda::AgendaItem,
+            crate::api::agenda::AgendaTodo,
+            crate::api::agenda::AgendaTask,
+            crate::api::agenda::AgendaTodoKind,
+            crate::api::agenda::AgendaTaskKind,
+            crate::api::agenda::AgendaTodoStatus,
+            crate::api::agenda::AgendaTaskStatus,
+            crate::api::agenda::AgendaTaskPriority,
             // Blocks
             crate::api::blocks::BlockResponse,
             crate::api::blocks::AssignIdRequest,
@@ -454,8 +458,7 @@ pub fn document(features: crate::FeatureFlags) -> utoipa::openapi::OpenApi {
     });
     if let Some(tags) = document.tags.as_mut() {
         tags.retain(|tag| {
-            (features.academic || tag.name != "Academic")
-                && (features.feeds || tag.name != "Feeds")
+            (features.academic || tag.name != "Academic") && (features.feeds || tag.name != "Feeds")
         });
     }
     document
@@ -731,11 +734,9 @@ mod tests {
         assert!(by_id.get("get").is_some());
         assert!(by_id.get("put").is_some());
 
-        assert!(
-            json["components"]["schemas"]
-                .get("CreateDefaultPageRequest")
-                .is_some()
-        );
+        assert!(json["components"]["schemas"]
+            .get("CreateDefaultPageRequest")
+            .is_some());
     }
 
     #[test]
@@ -799,28 +800,24 @@ mod tests {
         assert!(spec.paths.paths.contains_key("/api/vault/folders/{path}"));
         assert!(spec.paths.paths.contains_key("/api/vault/index/search"));
         assert!(spec.paths.paths.contains_key("/api/vault/academic/works"));
-        assert!(
-            spec.paths
-                .paths
-                .contains_key("/api/vault/archive/view/{snapshot_hash}")
-        );
-        assert!(
-            spec.paths
-                .paths
-                .contains_key("/api/vault/attachments/{path}")
-        );
-        assert!(
-            spec.paths
-                .paths
-                .contains_key("/api/vault/conversations/capture")
-        );
-        assert!(
-            spec.components
-                .as_ref()
-                .unwrap()
-                .schemas
-                .contains_key("CaptureConversationResponse")
-        );
+        assert!(spec
+            .paths
+            .paths
+            .contains_key("/api/vault/archive/view/{snapshot_hash}"));
+        assert!(spec
+            .paths
+            .paths
+            .contains_key("/api/vault/attachments/{path}"));
+        assert!(spec
+            .paths
+            .paths
+            .contains_key("/api/vault/conversations/capture"));
+        assert!(spec
+            .components
+            .as_ref()
+            .unwrap()
+            .schemas
+            .contains_key("CaptureConversationResponse"));
     }
 
     #[test]
@@ -1046,12 +1043,12 @@ mod tests {
             ("/api/vault/feeds/import", "post"),
         ] {
             let operation = &json["paths"][path][method];
-            let reference =
-                operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-                    .as_str()
-                    .unwrap_or_else(|| {
-                        panic!("{method} {path} should use a named JSON request schema")
-                    });
+            let reference = operation["requestBody"]["content"]["application/json"]["schema"]
+                ["$ref"]
+                .as_str()
+                .unwrap_or_else(|| {
+                    panic!("{method} {path} should use a named JSON request schema")
+                });
             let schema_name = reference
                 .strip_prefix("#/components/schemas/")
                 .unwrap_or_else(|| panic!("unexpected request schema reference {reference}"));

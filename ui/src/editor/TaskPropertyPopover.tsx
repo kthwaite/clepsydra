@@ -317,7 +317,7 @@ export function TaskPropertyPopover({
           })}
         >
           <p id={titleId} className="cl-cap text-[9px] text-ink-mute">
-            Task properties
+            Todo properties
           </p>
 
           <label className={cn(LABEL_CLASS, "mt-3")} htmlFor={dueId}>

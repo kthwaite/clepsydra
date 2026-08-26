@@ -4,31 +4,47 @@ import { describe, expect, it, vi } from "vitest";
 import { TaskStatusButton } from "#/components/ui/task-status-button";
 
 describe("TaskStatusButton", () => {
-  it("renders with aria-label for current action", () => {
+  it("uses canonical Todo copy for the current action", () => {
     render(<TaskStatusButton status="todo" onToggle={() => {}} />);
     expect(
-      screen.getByRole("button", { name: "Mark task done" }),
+      screen.getByRole("button", { name: "Mark Todo done" }),
+    ).toBeDefined();
+  });
+
+  it("uses an optional row-specific accessible label", () => {
+    render(
+      <TaskStatusButton
+        status="todo"
+        onToggle={() => {}}
+        accessibleLabel="Mark Todo done: Ship the source row (Source Folio)"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Mark Todo done: Ship the source row (Source Folio)",
+      }),
     ).toBeDefined();
   });
 
   it("renders done action for doing status", () => {
     render(<TaskStatusButton status="doing" onToggle={() => {}} />);
     expect(
-      screen.getByRole("button", { name: "Mark task done" }),
+      screen.getByRole("button", { name: "Mark Todo done" }),
     ).toBeDefined();
   });
 
   it("renders todo action for done status", () => {
     render(<TaskStatusButton status="done" onToggle={() => {}} />);
     expect(
-      screen.getByRole("button", { name: "Mark task todo" }),
+      screen.getByRole("button", { name: "Mark Todo todo" }),
     ).toBeDefined();
   });
 
   it("renders todo action for cancelled status", () => {
     render(<TaskStatusButton status="cancelled" onToggle={() => {}} />);
     expect(
-      screen.getByRole("button", { name: "Mark task todo" }),
+      screen.getByRole("button", { name: "Mark Todo todo" }),
     ).toBeDefined();
   });
 
