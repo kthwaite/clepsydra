@@ -63,7 +63,7 @@ type MemberCreationSource =
     };
 ```
 
-A resolver returns a session when its source is authoritative:
+A resolver returns a session only when the source is authoritative and supplies a non-empty active view, revision, and matching capability:
 
 ```ts
 interface MemberCreationSession {
@@ -77,7 +77,7 @@ interface MemberCreationSession {
 
 function resolveMemberCreationSession(
   source: MemberCreationSource,
-): MemberCreationSession;
+): MemberCreationSession | undefined;
 ```
 
 Callers only learn the selected view, capability, and one submit operation. Revision and request-shape mechanics remain implementation knowledge.
