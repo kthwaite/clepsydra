@@ -1,11 +1,9 @@
 import { useMemo, useState } from "react";
 import {
   type BaseMemberDiagnostic,
-  decodeBaseMemberDiagnostics,
   useBase,
   useCreateBaseMember,
 } from "#/api/bases";
-import { formatApiError } from "#/api/error";
 import { Select, SelectItem } from "#/components/ui/select";
 import { useProjects } from "#/lib/useProjects";
 import { BaseMemberDraft } from "./BaseMemberDraft";
@@ -13,6 +11,7 @@ import {
   type BaseMemberDraftValue,
   composeMemberDraftFields,
 } from "./member-draft";
+import { resolveMemberCreationSession } from "./member-creation";
 
 interface BaseMemberIntakeProps {
   slug: string;
@@ -32,11 +31,20 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
 
   const definition = detail.data;
   const views = definition?.views ?? [];
-  const activeView = view ?? views[0]?.name;
-  const capability = definition?.member_creation?.find(
-    (candidate) =>
-      candidate.view.toLowerCase() === (activeView ?? "").toLowerCase(),
+  const session = useMemo(
+    () =>
+      definition
+        ? resolveMemberCreationSession({
+            kind: "definition",
+            baseSlug: slug,
+            requestedView: view ?? "",
+            detail: definition,
+          })
+        : undefined,
+    [definition, slug, view],
   );
+  const activeView = session?.view;
+  const capability = session?.capability;
   const fields = useMemo(
     () =>
       definition && activeView && capability
@@ -63,31 +71,26 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
   const blocker = capability?.enabled === false ? capability.blockers[0] : null;
 
   async function save(value: BaseMemberDraftValue) {
-    if (!definition || !activeView) return;
+    if (!session) return;
     setError(undefined);
     setDiagnostics([]);
-    const requestFields: BaseMemberDraftValue["fields"] = {};
-    for (const key in value.fields) {
-      if (!Object.hasOwn(value.fields, key)) continue;
-      const fieldValue = value.fields[key];
-      if (fieldValue !== null) requestFields[key] = fieldValue;
+    const outcome = await session.submit(value, {
+      create: (baseSlug, request) =>
+        createMember.mutateAsync({
+          params: { path: { slug: baseSlug } },
+          body: request,
+        }),
+      refreshAfterConflict: async () => {
+        const refreshed = await detail.refetch();
+        if (refreshed.error) throw refreshed.error;
+      },
+    });
+    if (outcome.kind === "created") {
+      onCreated(outcome.member.path, outcome.member.title);
+      return;
     }
-    try {
-      const created = await createMember.mutateAsync({
-        params: { path: { slug } },
-        body: {
-          base_revision: definition.revision,
-          view: activeView,
-          title: value.title.trim(),
-          fields: requestFields,
-        },
-      });
-      onCreated(created.path, created.title);
-    } catch (failure) {
-      // The draft stays mounted with its values; only the report changes.
-      setError(formatApiError(failure, "Member could not be created."));
-      setDiagnostics(decodeBaseMemberDiagnostics(failure));
-    }
+    setError(outcome.message);
+    setDiagnostics(outcome.diagnostics);
   }
 
   return (
