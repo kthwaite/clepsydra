@@ -6,7 +6,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::routing::get;
-use chrono::{Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
@@ -15,6 +15,7 @@ use super::AppState;
 use super::error::ApiError;
 use super::tasks::TaskItem;
 use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
+use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -365,7 +366,7 @@ pub async fn get_agenda(
     let tomorrow_key = tomorrow.format("%Y-%m-%d").to_string();
     let end_key = end.format("%Y-%m-%d").to_string();
 
-    let todos = state
+    let (todos, tasks) = state
         .index
         .with_index({
             let today_key = today_key.clone();
@@ -445,12 +446,60 @@ pub async fn get_agenda(
                 }
 
                 fill_properties(conn, &mut todo_items, &todo_keys)?;
-                Ok::<_, rusqlite::Error>(
-                    todo_items
-                        .into_iter()
-                        .zip(journal_dates)
-                        .collect::<Vec<_>>(),
-                )
+
+                let todos = todo_items
+                    .into_iter()
+                    .zip(journal_dates)
+                    .collect::<Vec<_>>();
+
+                let mut task_stmt = conn.prepare(
+                    "SELECT p.id, p.path, p.title, p.meta_json, p.project \
+                     FROM pages p \
+                     WHERE p.kind = 'TASK' \
+                     ORDER BY p.path",
+                )?;
+                let task_rows = task_stmt
+                    .query_map([], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<String>>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, Option<String>>(4)?,
+                        ))
+                    })?
+                    .collect::<Result<Vec<_>, _>>()?;
+                let mut tasks = Vec::new();
+                for (id, path, title, meta_json, project) in task_rows {
+                    let Ok(id) = uuid::Uuid::parse_str(&id) else {
+                        continue;
+                    };
+                    let metadata: serde_json::Value =
+                        serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
+                    let status = agenda_meta_string(&metadata, "status")
+                        .unwrap_or_else(|| DEFAULT_STATUS.to_string());
+                    if status == "SEALED" {
+                        continue;
+                    }
+                    let Some(due) = agenda_meta_string(&metadata, "due") else {
+                        continue;
+                    };
+                    let code = agenda_path_stem(&path).to_ascii_uppercase();
+                    tasks.push(AgendaItem::Task {
+                        id,
+                        title: title.unwrap_or_else(|| code.clone()),
+                        code,
+                        status,
+                        priority: agenda_meta_string(&metadata, "priority")
+                            .unwrap_or_else(|| DEFAULT_PRIORITY.to_string()),
+                        project,
+                        due,
+                        hold: agenda_meta_string(&metadata, "hold"),
+                        path,
+                    });
+                }
+
+                Ok::<_, rusqlite::Error>((todos, tasks))
             }
         })
         .await
@@ -465,29 +514,42 @@ pub async fn get_agenda(
     for (todo, journal_date) in todos {
         let due = todo.properties.get("due").map(String::as_str);
         let scheduled = todo.properties.get("scheduled").map(String::as_str);
-        let is_overdue = due.is_some_and(|due| due < today_key.as_str());
-        let is_today = !is_overdue
-            && (due == Some(today_key.as_str())
-                || scheduled == Some(today_key.as_str())
-                || journal_date.as_deref() == Some(today_key.as_str()));
-        let upcoming_date = (!is_overdue && !is_today)
-            .then(|| {
-                due.filter(|due| *due >= tomorrow_key.as_str() && *due <= end_key.as_str())
-                    .map(str::to_owned)
-            })
-            .flatten();
-        let is_undated = due.is_none();
-        let item = todo_item(todo);
+        let bucket = classify_agenda_item(
+            due,
+            scheduled == Some(today_key.as_str())
+                || journal_date.as_deref() == Some(today_key.as_str()),
+            true,
+            &today_key,
+            &tomorrow_key,
+            &end_key,
+        );
+        push_agenda_item(
+            bucket,
+            todo_item(todo),
+            &mut overdue,
+            &mut today_items,
+            &mut upcoming_by_date,
+            &mut undated,
+        );
+    }
 
-        if is_overdue {
-            overdue.push(item);
-        } else if is_today {
-            today_items.push(item);
-        } else if let Some(date) = upcoming_date {
-            upcoming_by_date.entry(date).or_default().push(item);
-        } else if is_undated {
-            undated.push(item);
-        }
+    for task in tasks {
+        let bucket = classify_agenda_item(
+            item_due(&task),
+            false,
+            false,
+            &today_key,
+            &tomorrow_key,
+            &end_key,
+        );
+        push_agenda_item(
+            bucket,
+            task,
+            &mut overdue,
+            &mut today_items,
+            &mut upcoming_by_date,
+            &mut undated,
+        );
     }
 
     sort_agenda_items(&mut overdue);
@@ -522,6 +584,73 @@ fn todo_item(todo: TaskItem) -> AgendaItem {
     }
 }
 
+fn agenda_path_stem(path: &str) -> &str {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    name.strip_suffix(".md").unwrap_or(name)
+}
+
+fn agenda_meta_string(metadata: &serde_json::Value, key: &str) -> Option<String> {
+    match metadata.get(key) {
+        None | Some(serde_json::Value::Null) => None,
+        Some(serde_json::Value::String(value)) => {
+            let value = value.trim();
+            (!value.is_empty()).then(|| value.to_string())
+        }
+        Some(serde_json::Value::Number(value)) => Some(value.to_string()),
+        Some(serde_json::Value::Bool(value)) => Some(value.to_string()),
+        Some(value) => {
+            let value = value.to_string();
+            (!value.is_empty()).then_some(value)
+        }
+    }
+}
+
+enum AgendaBucket {
+    Overdue,
+    Today,
+    Upcoming(String),
+    Undated,
+    OutsideWindow,
+}
+
+fn classify_agenda_item(
+    due: Option<&str>,
+    is_today: bool,
+    include_undated: bool,
+    today: &str,
+    tomorrow: &str,
+    end: &str,
+) -> AgendaBucket {
+    if due.is_some_and(|due| due < today) {
+        AgendaBucket::Overdue
+    } else if due == Some(today) || is_today {
+        AgendaBucket::Today
+    } else if let Some(due) = due.filter(|due| *due >= tomorrow && *due <= end) {
+        AgendaBucket::Upcoming(due.to_owned())
+    } else if due.is_none() && include_undated {
+        AgendaBucket::Undated
+    } else {
+        AgendaBucket::OutsideWindow
+    }
+}
+
+fn push_agenda_item(
+    bucket: AgendaBucket,
+    item: AgendaItem,
+    overdue: &mut Vec<AgendaItem>,
+    today: &mut Vec<AgendaItem>,
+    upcoming: &mut BTreeMap<String, Vec<AgendaItem>>,
+    undated: &mut Vec<AgendaItem>,
+) {
+    match bucket {
+        AgendaBucket::Overdue => overdue.push(item),
+        AgendaBucket::Today => today.push(item),
+        AgendaBucket::Upcoming(date) => upcoming.entry(date).or_default().push(item),
+        AgendaBucket::Undated => undated.push(item),
+        AgendaBucket::OutsideWindow => {}
+    }
+}
+
 fn sort_agenda_items(items: &mut [AgendaItem]) {
     items.sort_by(|left, right| {
         match (item_due(left), item_due(right)) {
@@ -536,8 +665,8 @@ fn sort_agenda_items(items: &mut [AgendaItem]) {
             (None, None) => {}
         }
 
-        item_priority(left)
-            .cmp(item_priority(right))
+        agenda_priority_key(left)
+            .cmp(agenda_priority_key(right))
             .then_with(|| item_path(left).cmp(item_path(right)))
             .then_with(|| match (left, right) {
                 (
@@ -564,12 +693,13 @@ fn item_due(item: &AgendaItem) -> Option<&str> {
     }
 }
 
-fn item_priority(item: &AgendaItem) -> &str {
+fn agenda_priority_key(item: &AgendaItem) -> &str {
     match item {
-        AgendaItem::Todo { properties, .. } => {
-            properties.get("priority").map_or("Z", String::as_str)
-        }
-        AgendaItem::Task { priority, .. } => priority,
+        AgendaItem::Todo { properties, .. } => properties
+            .get("priority")
+            .map(String::as_str)
+            .unwrap_or("Z"),
+        AgendaItem::Task { priority, .. } => priority.as_str(),
     }
 }
 

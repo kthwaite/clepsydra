@@ -455,6 +455,102 @@ async fn agenda_orders_todos_by_date_priority_path_and_span() {
 }
 
 #[tokio::test]
+async fn agenda_includes_only_dated_not_done_tasks() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/clepsydra")).unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0200.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000200\"\ntitle = \"Overdue Task\"\ntype = \"TASK\"\nstatus = \"FIELD\"\npriority = \"P1\"\nproject = \"clepsydra\"\ndue = \"2026-08-25\"\nhold = \"Waiting for input\"\n+++\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0201.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000201\"\ntitle = \"Done Task\"\ntype = \"TASK\"\nstatus = \"SEALED\"\npriority = \"P2\"\nproject = \"clepsydra\"\ndue = \"2026-08-26\"\n+++\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0202.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000202\"\ntitle = \"Undated Task\"\ntype = \"TASK\"\nstatus = \"TRIAGE\"\npriority = \"P2\"\nproject = \"clepsydra\"\n+++\n",
+        )
+        .unwrap();
+    });
+
+    let body = get_agenda(&server).await;
+    let overdue = body["overdue"].as_array().unwrap();
+    assert_eq!(overdue.len(), 1);
+    assert_eq!(overdue[0]["kind"], "task");
+    assert_eq!(
+        overdue[0]["id"],
+        "01900000-0000-7000-8000-000000000200"
+    );
+    assert_eq!(overdue[0]["code"], "TSK-0200");
+    assert_eq!(overdue[0]["title"], "Overdue Task");
+    assert_eq!(overdue[0]["status"], "FIELD");
+    assert_eq!(overdue[0]["priority"], "P1");
+    assert_eq!(overdue[0]["project"], "clepsydra");
+    assert_eq!(overdue[0]["due"], "2026-08-25");
+    assert_eq!(overdue[0]["hold"], "Waiting for input");
+    assert_eq!(overdue[0]["path"], "tasks/clepsydra/TSK-0200.md");
+    assert!(body["today"].as_array().unwrap().is_empty());
+    assert!(body["undated"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn agenda_orders_mixed_sources_by_priority() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/clepsydra")).unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0210.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000210\"\ntitle = \"First Task\"\ntype = \"TASK\"\nstatus = \"FIELD\"\npriority = \"P1\"\nproject = \"clepsydra\"\ndue = \"2026-08-26\"\n+++\n",
+        )
+        .unwrap();
+    });
+    server
+        .post("/api/vault/pages/alpha.md")
+        .json(&serde_json::json!({
+            "title": "Alpha",
+            "body": "- [ ] Second Todo [due:: 2026-08-26] [priority:: P2]\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let body = get_agenda(&server).await;
+    let today = body["today"].as_array().unwrap();
+    assert_eq!(today.len(), 2);
+    assert_eq!(today[0]["kind"], "task");
+    assert_eq!(today[0]["code"], "TSK-0210");
+    assert_eq!(today[1]["kind"], "todo");
+    assert!(today[1]["content"]
+        .as_str()
+        .unwrap()
+        .contains("Second Todo"));
+}
+
+#[tokio::test]
+async fn agenda_includes_tasks_through_seven_day_boundary() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("tasks/clepsydra")).unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0220.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000220\"\ntitle = \"Boundary Task\"\ntype = \"TASK\"\nstatus = \"TRIAGE\"\npriority = \"P2\"\nproject = \"clepsydra\"\ndue = \"2026-09-02\"\n+++\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("tasks/clepsydra/TSK-0221.md"),
+            "+++\nid = \"01900000-0000-7000-8000-000000000221\"\ntitle = \"Beyond Task\"\ntype = \"TASK\"\nstatus = \"TRIAGE\"\npriority = \"P2\"\nproject = \"clepsydra\"\ndue = \"2026-09-03\"\n+++\n",
+        )
+        .unwrap();
+    });
+
+    let body = get_agenda(&server).await;
+    assert_eq!(body["upcoming"].as_array().unwrap().len(), 1);
+    assert_eq!(body["upcoming"][0]["date"], "2026-09-02");
+    let items = body["upcoming"][0]["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["code"], "TSK-0220");
+}
+
+#[tokio::test]
 async fn agenda_returns_empty_classified_response() {
     let (server, _tmp) = setup_server();
     let body = get_agenda(&server).await;
