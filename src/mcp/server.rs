@@ -37,7 +37,7 @@ fn rubbish_item_url(item_id: &str) -> Result<String, String> {
     Ok(format!("/api/vault/rubbish/{item_id}"))
 }
 
-/// The TASKING board read endpoint.
+/// The Task Board read endpoint.
 const BOARD_URL: &str = "/api/vault/board";
 
 /// Resolve where a new page lands, enforcing the metadata-projected layout
@@ -179,13 +179,13 @@ vault_capture_conversation for those dedicated intents instead of vault_create_p
 targeted edits with vault_edit_page or vault_append_page. Archive active pages with \
 vault_archive_page; their normal links remain unresolved while binned, and restore is \
 original-path-only. The vault relocates pages filed by kind/project itself; \
-vault_preview_mutation dry-runs moves. Orient on the TASKING board with vault_board; it lists \
-task TSK codes and cycle S codes. \
-Create board tasks with vault_task_create rather than vault_create_page so they receive TSK \
-codes; the `ai-generated` tag policy applies to LLM-authored tasks. Move tasks through INTAKE → \
-TRIAGE → FIELD → REVIEW → SEALED with vault_task_update, addressing them by code, path, or id. \
-Seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks. Page \
-paths are vault-relative; page kinds (NOTE, PROJECT, JOURNAL, ...) map to canonical top-level \
+vault_preview_mutation dry-runs moves. Orient on the Task Board with vault_board; it lists Task \
+TSK codes, Cycle S codes, Projects through the legacy operations response field, and the persisted \
+status values agents must send. Create Tasks with vault_task_create rather than vault_create_page \
+so they receive TSK codes; the `ai-generated` tag policy applies to LLM-authored tasks. Move Tasks \
+through Inbox (`INTAKE`) → Ready (`TRIAGE`) → In Progress (`FIELD`) → Review (`REVIEW`) → Done \
+(`SEALED`) with vault_task_update, addressing them by code, path, or id. Close Cycles with \
+vault_cycle_update, passing carry_to to move their unfinished Tasks. Page paths are vault-relative; \
 folders. An occupied-path restore conflict means the original path is occupied and the item \
 remains binned; resolve that path before retrying. A rubbish item drift conflict means the item \
 remains binned; re-list with vault_list_rubbish and inspect it with vault_get_rubbish_item. On \
@@ -374,8 +374,8 @@ pub struct CaptureConversationParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct BoardParams {
-    /// Only board tasks and operations declaring exactly this project.
-    /// Columns and cycles always come back in full.
+    /// Only Tasks and the legacy `operations` response field (Projects) declaring
+    /// exactly this Project. Columns and Cycles always come back in full.
     pub project: Option<String>,
 }
 
@@ -385,13 +385,13 @@ pub struct TaskCreateParams {
     pub title: String,
     /// Project slug; the task files under tasks/<project>/.
     pub project: Option<String>,
-    /// Board column (INTAKE, TRIAGE, FIELD, REVIEW, SEALED). Defaults to
-    /// INTAKE.
+    /// Task Board status: Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD),
+    /// Review (REVIEW), or Done (SEALED). Defaults to INTAKE.
     pub status: Option<String>,
-    /// Priority (P0, P1, P2, P3). Defaults to P2.
+    /// Priority: P0 Critical, P1 High, P2 Medium, or P3 Low. Defaults to P2.
     pub priority: Option<String>,
-    /// Cycle code the task belongs to; must match an existing cycle (e.g.
-    /// "S-13"). "BACKLOG" means no cycle, same as omitting the field.
+    /// Cycle code the Task belongs to; must match an existing Cycle (e.g.
+    /// "S-13"). "BACKLOG" means Backlog, same as omitting the field.
     pub cycle: Option<String>,
     /// Assignee name.
     pub assignee: Option<String>,
@@ -399,13 +399,14 @@ pub struct TaskCreateParams {
     pub estimate: Option<String>,
     /// Due date (YYYY-MM-DD).
     pub due: Option<String>,
-    /// Related link (URL or wikilink target).
+    /// Related Page (`link` wire field; URL or wikilink target).
     pub link: Option<String>,
     /// Frontmatter tags. Include `ai-generated` for LLM-authored tasks.
     pub tags: Option<Vec<String>>,
-    /// Prose brief; becomes the opening of the task body, above any checklist.
+    /// Description; the `body` wire field becomes the opening prose of the
+    /// Task page, above any Checklist Items.
     pub body: Option<String>,
-    /// Checklist items; each becomes a `- [ ]` line in the task body.
+    /// Checklist Items; each becomes a `- [ ]` Todo in the Task page body.
     pub checklist: Option<Vec<String>>,
 }
 
@@ -420,9 +421,10 @@ pub struct TaskUpdateParams {
     pub project: Option<String>,
     /// Clear the project instead of setting one.
     pub clear_project: Option<bool>,
-    /// Board column (INTAKE, TRIAGE, FIELD, REVIEW, SEALED). Absent = keep.
+    /// Task Board status: Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD),
+    /// Review (REVIEW), or Done (SEALED). Absent = keep.
     pub status: Option<String>,
-    /// Priority (P0, P1, P2, P3). Absent = keep.
+    /// Priority: P0 Critical, P1 High, P2 Medium, or P3 Low. Absent = keep.
     pub priority: Option<String>,
     /// Replacement tag list (replaces ALL existing tags). Absent = keep.
     pub tags: Option<Vec<String>>,
@@ -444,12 +446,13 @@ pub struct TaskUpdateParams {
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     #[schemars(with = "Option<String>")]
     pub due: Option<Option<String>>,
-    /// Hold reason. Tri-state: absent = keep, null or "" = clear, value = set.
+    /// Blocker reason; a non-empty `hold` wire value means Blocked. Tri-state:
+    /// absent = keep, null or "" = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     #[schemars(with = "Option<String>")]
     pub hold: Option<Option<String>>,
-    /// Related link. Tri-state: absent = keep, null or "" = clear, value =
-    /// set.
+    /// Related Page (`link` wire field). Tri-state: absent = keep, null or ""
+    /// = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     #[schemars(with = "Option<String>")]
     pub link: Option<Option<String>>,
@@ -466,10 +469,10 @@ pub struct CycleCreateParams {
     /// Explicit cycle code (e.g. "S-20"); conflicts if it already exists.
     /// Absent = auto-generated as S-{max+1}.
     pub code: Option<String>,
-    /// Sprint goal.
+    /// Cycle goal.
     pub goal: Option<String>,
-    /// Initial state: PLANNED (default) or ACTIVE. CLOSED is rejected at
-    /// creation time — seal a cycle later with vault_cycle_update.
+    /// Initial state: Planned (PLANNED, default) or Active (ACTIVE). CLOSED is
+    /// rejected at creation time — close a Cycle later with vault_cycle_update.
     pub state: Option<String>,
 }
 
@@ -477,17 +480,18 @@ pub struct CycleCreateParams {
 pub struct CycleUpdateParams {
     /// Cycle reference: S code (e.g. "S-13"), vault path, or page UUID.
     pub cycle: String,
-    /// Lifecycle state (PLANNED, ACTIVE, CLOSED). Absent = keep.
+    /// Lifecycle state: Planned (PLANNED), Active (ACTIVE), or Closed (CLOSED).
+    /// Absent = keep.
     pub state: Option<String>,
-    /// New sprint goal. Absent = keep.
+    /// New Cycle goal. Absent = keep.
     pub goal: Option<String>,
     /// New start date (YYYY-MM-DD). Absent = keep.
     pub start: Option<String>,
     /// New end date (YYYY-MM-DD). Absent = keep.
     pub end: Option<String>,
-    /// Carryover target for the cycle's unsealed tasks when sealing; only
-    /// valid with state CLOSED. "BACKLOG" clears their cycle, a cycle code
-    /// (e.g. "S-14") re-assigns them. Absent = leave tasks untouched.
+    /// Carryover target for the Cycle's unfinished Tasks when closing; only
+    /// valid with state CLOSED. "BACKLOG" moves them to Backlog, a Cycle code
+    /// (e.g. "S-14") reassigns them. Absent = leave Tasks in the closed Cycle.
     pub carry_to: Option<String>,
 }
 
@@ -1218,7 +1222,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_board",
-        description = "Orient on the TASKING kanban board: columns INTAKE → TRIAGE → FIELD → REVIEW → SEALED (with WIP limits), tasks with their TSK codes, cycles with their S codes, and board operations. The place to look up task and cycle codes before vault_task_update or vault_cycle_update. Optional 'project' filters tasks and operations to that exact project; columns and cycles always come back in full.",
+        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED), with WIP limits. Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1242,7 +1246,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a task on the TASKING board — preferred over vault_create_page for tasks: the board reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to INTAKE, priority to P2; a given cycle must match an existing cycle code (\"BACKLOG\" means none); a body becomes the task's prose brief and checklist items become `- [ ]` body lines beneath it. Include `ai-generated` in tags for LLM-authored tasks.",
+        description = "Create a Task on the Task Board — preferred over vault_create_page because it reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1281,7 +1285,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_update",
-        description = "Update a task on the TASKING board, addressed by TSK code, vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; clear_project: true clears the project instead. Clearable fields (cycle, assignee, estimate, due, hold, link) are tri-state: absent = keep, null or \"\" = clear, value = set; cycle \"BACKLOG\" also clears. Status moves through INTAKE, TRIAGE, FIELD, REVIEW, SEALED.",
+        description = "Update a Task on the Task Board, addressed by TSK code, vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED).",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1344,7 +1348,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_cycle_create",
-        description = "Create a sprint cycle for the TASKING board (a CYCLE page under cycles/). Omit 'code' to auto-generate the next S-{n}; an explicit code conflicts if it already exists. State defaults to PLANNED (ACTIVE also allowed); CLOSED is rejected at creation — seal a finished cycle with vault_cycle_update instead.",
+        description = "Create a Cycle for the Task Board (a CYCLE page under cycles/). Omit `code` to generate the next S-{n}; an explicit code conflicts if it exists. State defaults to Planned (`PLANNED`); Active (`ACTIVE`) is also allowed. Closed (`CLOSED`) is rejected at creation — close a finished Cycle with vault_cycle_update.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1377,7 +1381,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_cycle_update",
-        description = "Update a cycle on the TASKING board, addressed by S code, vault path, or page UUID. Fields update when present (state PLANNED/ACTIVE/CLOSED, goal, start, end). Sealing with carryover: set state CLOSED and pass carry_to to re-home the cycle's unsealed tasks — \"BACKLOG\" clears their cycle, a cycle code (e.g. \"S-14\") re-assigns them. carry_to is only valid with state CLOSED; without it, sealed cycles leave their tasks untouched.",
+        description = "Update a Cycle on the Task Board, addressed by S code, vault path, or page UUID. Fields update when present: state Planned (`PLANNED`), Active (`ACTIVE`), or Closed (`CLOSED`), plus goal, start, and end. To close with carryover, set state `CLOSED` and pass `carry_to` to move unfinished Tasks: `BACKLOG` moves them to Backlog, while a Cycle code reassigns them. `carry_to` is valid only with `CLOSED`; without it, Tasks remain in the closed Cycle.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1532,7 +1536,7 @@ mod tests {
     }
 
     #[test]
-    fn server_instructions_define_tasking_workflow() {
+    fn server_instructions_define_task_board_workflow() {
         let client = ApiClient::new("http://127.0.0.1:1".to_string(), None).unwrap();
         let instructions = VaultMcpServer::new(Arc::new(client))
             .get_info()
@@ -1547,11 +1551,11 @@ mod tests {
         for (policy, required_clause) in [
             (
                 "board orientation",
-                "orient on the tasking board with vault_board",
+                "orient on the task board with vault_board",
             ),
             (
                 "task creation routes through the board",
-                "create board tasks with vault_task_create rather than vault_create_page so they receive tsk codes",
+                "create tasks with vault_task_create rather than vault_create_page so they receive tsk codes",
             ),
             (
                 "task provenance",
@@ -1559,16 +1563,23 @@ mod tests {
             ),
             (
                 "status progression",
-                "move tasks through intake → triage → field → review → sealed with vault_task_update, addressing them by code, path, or id",
+                "move tasks through inbox (`intake`) → ready (`triage`) → in progress (`field`) → review (`review`) → done (`sealed`) with vault_task_update",
             ),
             (
-                "cycle sealing with carryover",
-                "seal cycles with vault_cycle_update, passing carry_to to re-home their unsealed tasks",
+                "cycle closure with carryover",
+                "close cycles with vault_cycle_update, passing carry_to to move their unfinished tasks",
             ),
         ] {
             assert!(
                 normalized.contains(required_clause),
                 "server instructions are missing the {policy} policy: {required_clause:?}"
+            );
+        }
+
+        for stale_term in ["tasking", "sprint", "seal cycles", "unsealed tasks"] {
+            assert!(
+                !normalized.contains(stale_term),
+                "server instructions still expose stale Task Board language: {stale_term:?}"
             );
         }
     }
@@ -3098,6 +3109,96 @@ mod tests {
                 "tri-state field {field} should stay a nullable string"
             );
         }
+    }
+
+    #[test]
+    fn task_board_tools_distinguish_display_language_from_wire_values() {
+        let tools = VaultMcpServer::tool_router().list_all();
+        let tool = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("{name} should be registered"))
+        };
+        let description = |name: &str| {
+            tool(name)
+                .description
+                .as_deref()
+                .unwrap_or_else(|| panic!("{name} should have a description"))
+                .to_lowercase()
+        };
+
+        let board = description("vault_board");
+        for term in [
+            "task board",
+            "inbox (intake)",
+            "ready (triage)",
+            "in progress (field)",
+            "done (sealed)",
+            "projects",
+            "operations",
+            "columns[].label",
+            "columns[].sub",
+            "checks",
+            "intake/unfiled",
+            "triage/staged",
+            "in-field/active",
+            "review/qa / seal",
+            "sealed/closed",
+            "checklist item",
+            "dossier",
+            "related page",
+        ] {
+            assert!(board.contains(term), "vault_board should describe {term:?}");
+        }
+
+        let create = description("vault_task_create");
+        assert!(create.contains("description"));
+        assert!(create.contains("body"));
+        assert!(create.contains("related page"));
+        assert!(create.contains("link"));
+        assert!(create.contains("inbox"));
+        assert!(create.contains("intake"));
+
+        let update = description("vault_task_update");
+        assert!(update.contains("blocked"));
+        assert!(update.contains("hold"));
+        assert!(update.contains("related page"));
+        assert!(update.contains("link"));
+        assert!(update.contains("clear_project: true"));
+        assert!(update.contains("inbox (intake)"));
+        assert!(update.contains("done (sealed)"));
+
+        for (tool_name, field, terms) in [
+            ("vault_task_create", "body", ["description", "body"]),
+            ("vault_task_create", "link", ["related page", "link"]),
+            ("vault_task_update", "hold", ["blocker reason", "hold"]),
+            ("vault_task_update", "link", ["related page", "link"]),
+        ] {
+            let field_description =
+                tool(tool_name).input_schema["properties"][field]["description"]
+                    .as_str()
+                    .unwrap_or_else(|| panic!("{tool_name}.{field} should have a description"))
+                    .to_lowercase();
+            for term in terms {
+                assert!(
+                    field_description.contains(term),
+                    "{tool_name}.{field} should describe {term:?}"
+                );
+            }
+        }
+
+        let cycle_create = description("vault_cycle_create");
+        assert!(cycle_create.contains("create a cycle"));
+        assert!(!cycle_create.contains("sprint"));
+        assert!(!cycle_create.contains("seal"));
+
+        let cycle_update = description("vault_cycle_update");
+        assert!(cycle_update.contains("close"));
+        assert!(cycle_update.contains("closed"));
+        assert!(cycle_update.contains("unfinished tasks"));
+        assert!(!cycle_update.contains("seal"));
+        assert!(!cycle_update.contains("unsealed"));
     }
 
     /// Serve a seeded vault and create one cycle + one task in it through the

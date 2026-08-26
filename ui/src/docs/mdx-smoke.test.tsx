@@ -385,6 +385,34 @@ it("documents conversation results and exact MCP stale-guard ownership", () => {
   expect(source).toContain("do not send a revision");
 });
 
+it("documents Task Board display language separately from MCP wire values", () => {
+  const source = registeredGuideSource("mcp");
+
+  expect(source).toContain("### Task Board");
+  expect(source).toMatch(/Inbox\s+\(`INTAKE`\)/);
+  expect(source).toMatch(/Ready\s+\(`TRIAGE`\)/);
+  expect(source).toMatch(/In Progress\s+\(`FIELD`\)/);
+  expect(source).toMatch(/Done\s+\(`SEALED`\)/);
+  expect(source).toContain("Description");
+  expect(source).toContain("Blocked");
+  expect(source).toContain("Projects");
+  expect(source).toContain("legacy `operations` response field");
+  expect(source).toContain("`columns[].label`");
+  expect(source).toContain("`columns[].sub`");
+  expect(source).toContain("`INTAKE`/`unfiled`");
+  expect(source).toContain("`TRIAGE`/`staged`");
+  expect(source).toContain("`IN-FIELD`/`active`");
+  expect(source).toContain("`REVIEW`/`qa / seal`");
+  expect(source).toContain("`SEALED`/`closed`");
+  expect(source).toContain("`tasks[].checks`");
+  expect(source).toContain("`operations[].dossier`");
+  expect(source).not.toContain("TASKING");
+  expect(source).not.toContain("sprint cycle");
+  expect(source).not.toContain("Seal a finished cycle");
+  expect(source).not.toContain("prose brief");
+  expect(source).not.toContain("unsealed tasks");
+});
+
 it("documents the SingleFile capture and server-side deconstruction pipeline", () => {
   const source = registeredGuideSource("browser-extension");
 

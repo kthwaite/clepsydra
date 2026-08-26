@@ -61,7 +61,7 @@ TLS verifies the server and protects transport; it does not add an agent login.
 | Discover and read | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` | Locate a page before acting; inspect content, structure, graph, and vocabulary. Oversized `vault_get_page` bodies are truncated and flagged. |
 | Create and edit | `vault_create_page`, `vault_update_page`, `vault_edit_page`, `vault_append_page` | Create in one projected mutation; replace whole fields; exact-match a body span; or append to the page/a heading section. |
 | Capture | `vault_journal_capture`, `vault_capture_conversation` | Add a fleeting journal entry or capture complete visible conversation turns. |
-| Tasking | `vault_board`, `vault_task_create`, `vault_task_update`, `vault_cycle_create`, `vault_cycle_update` | Inspect the board, create or update tasks, and create or atomically close and carry over cycles. |
+| Task Board | `vault_board`, `vault_task_create`, `vault_task_update`, `vault_cycle_create`, `vault_cycle_update` | Inspect the board, create or update Tasks, and create or atomically close and carry over Cycles. |
 | Organize | `vault_assign`, `vault_move_page`, `vault_folder` | Declare kind/project, explicitly move a page, or create/move/delete folders. |
 | Page lifecycle | `vault_archive_page`, `vault_list_rubbish`, `vault_get_rubbish_item`, `vault_restore_page`, `vault_purge_page`, `vault_empty_rubbish` | Archive without rewriting links; inspect retained items; restore to the original path; or permanently purge one/all retained items. |
 
@@ -87,11 +87,11 @@ for an explicit destination that assignment cannot express.
 | `vault_append_page` | write | Append to the page or to a heading's section (revision-guarded, one retry) |
 | `vault_journal_capture` | write | Quick-capture into today's journal |
 | `vault_capture_conversation` | write | Create or safely append a visible user/assistant chat as an `AI_CONVERSATION` Folio |
-| `vault_board` | read | The TASKING kanban board: columns with WIP limits, tasks with TSK codes, cycles with S codes, operations; optional `project` filter |
-| `vault_task_create` | write | New board task; reserves the next `TSK-NNNN` code and files the page under `tasks/<project>/` |
-| `vault_task_update` | write | Patch a task addressed by TSK code, path, or id; tri-state clearing for cycle, assignee, estimate, due, hold, link |
-| `vault_cycle_create` | write | New sprint cycle (a CYCLE page under `cycles/`); code auto-generates as `S-{n}` |
-| `vault_cycle_update` | write | Patch a cycle addressed by S code, path, or id; sealing with `carry_to` re-homes unsealed tasks |
+| `vault_board` | read | Task Board columns with WIP limits, Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field; optional `project` filter |
+| `vault_task_create` | write | New Task; reserves the next `TSK-NNNN` code and files the page under `tasks/<project>/` |
+| `vault_task_update` | write | Patch a Task addressed by TSK code, path, or id; tri-state clearing for Cycle, assignee, estimate, due, blocker reason (`hold`), and related page (`link`) |
+| `vault_cycle_create` | write | New Cycle (a CYCLE page under `cycles/`); code auto-generates as `S-{n}` |
+| `vault_cycle_update` | write | Patch a Cycle addressed by S code, path, or id; closing with `carry_to` moves unfinished Tasks |
 | `vault_assign` | organize | Declare kind/project (single or bulk); the vault relocates files |
 | `vault_move_page` | organize | Explicit rename/relocate with link rewriting |
 | `vault_folder` | organize | Create / delete (`recursive` opt-in) / move folders |
@@ -131,31 +131,41 @@ the real mutation. Bulk assignment is all-or-none. Recursive folder deletion
 is a separate permanent operation; folder contents do not enter the Rubbish
 Bin.
 
-### Tasking
+### Task Board
 
-The board tools mirror the TASKING kanban HTTP API. Statuses move through
-INTAKE → TRIAGE → FIELD → REVIEW → SEALED; priorities are P0–P3. Create
-tasks with `vault_task_create` rather than `vault_create_page`: the board
-reserves the next `TSK-NNNN` code and files the page under
-`tasks/<project>/`. Status defaults to INTAKE, priority to P2, `body`
-becomes the task's prose brief with checklist items as `- [ ]` lines
-beneath it, and the `ai-generated` tag requirement applies to LLM-authored
-tasks.
+The board tools mirror the Task Board HTTP API. Use display labels in
+agent-facing prose and persisted values in MCP calls: Inbox (`INTAKE`), Ready
+(`TRIAGE`), In Progress (`FIELD`), Review (`REVIEW`), and Done (`SEALED`).
+Priorities are P0 Critical, P1 High, P2 Medium, and P3 Low. `vault_board`
+returns Projects through the legacy `operations` response field.
+Legacy response fields remain unchanged. The raw `columns[].label` /
+`columns[].sub` pairs are `INTAKE`/`unfiled`, `TRIAGE`/`staged`,
+`IN-FIELD`/`active`, `REVIEW`/`qa / seal`, and `SEALED`/`closed`. Derive the
+display label from `columns[].id` using the persisted status mapping above.
+`tasks[].checks` is `[done, total]` Checklist Item counts.
+`tasks[].link` and `operations[].dossier` contain Related Page values.
 
-The update tools accept a code (`TSK-0012`, `S-13`), a vault path, or a
-page UUID; look codes up with `vault_board`. On `vault_task_update` the
-plain fields (title, project, status, priority, tags) update when present —
-`clear_project: true` clears the project — while the clearable fields
-(cycle, assignee, estimate, due, hold, link) are tri-state: absent keeps
-the value, `null` or `""` clears it, a value sets it. The cycle sentinel
-`"BACKLOG"` also clears (a task with no cycle sits in the backlog).
+Create Tasks with `vault_task_create` rather than `vault_create_page`: the
+board reserves the next `TSK-NNNN` code and files the page under
+`tasks/<project>/`. Status defaults to Inbox (`INTAKE`), priority to P2 Medium
+(`P2`), and the `body` wire field becomes the Task Description with Checklist
+Items as `- [ ]` Todos beneath it. The `ai-generated` tag requirement applies
+to LLM-authored Tasks.
 
-Cycles cannot be created CLOSED (`vault_cycle_create` accepts PLANNED, the
-default, or ACTIVE). Seal a finished cycle with `vault_cycle_update` by
-setting `state: "CLOSED"` and pass `carry_to` to re-home its unsealed
-tasks — `"BACKLOG"` clears their cycle, a cycle code (e.g. `"S-14"`)
-re-assigns them. `carry_to` is only valid with state CLOSED; without it, a
-sealed cycle leaves its tasks untouched.
+The update tools accept a code (`TSK-0012`, `S-13`), a vault path, or a page
+UUID; look codes up with `vault_board`. On `vault_task_update`, title, Project,
+status, priority, and tags update when present. `clear_project: true` clears
+the Project. Cycle, assignee, estimate, due, blocker reason (`hold`), and
+Related Page (`link`) are tri-state: absent keeps the value, `null` or `""`
+clears it, and a value sets it. A non-empty `hold` value means Blocked. The
+Cycle sentinel `"BACKLOG"` moves a Task to Backlog.
+
+Cycles cannot be created Closed: `vault_cycle_create` accepts Planned
+(`PLANNED`, the default) or Active (`ACTIVE`). Close a finished Cycle with
+`vault_cycle_update` by setting `state: "CLOSED"`. Pass `carry_to` to move
+unfinished Tasks: `"BACKLOG"` moves them to Backlog, while a Cycle code such
+as `"S-14"` reassigns them. `carry_to` is valid only with `state: "CLOSED"`;
+without it, Tasks remain in the closed Cycle.
 
 ### Capture a conversation
 

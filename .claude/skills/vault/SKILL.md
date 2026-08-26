@@ -44,11 +44,11 @@ files directly, which bypasses locking, link rewriting, and the index.
 | Folder create/delete/move | `vault_folder` |
 | Remove a page | `vault_delete_page` |
 | See what a move/delete would rewrite | `vault_preview_mutation` |
-| See the TASKING board / look up codes | `vault_board` |
-| New board task | `vault_task_create` — not create |
-| Move a task through the board / edit fields | `vault_task_update` |
-| New sprint cycle | `vault_cycle_create` |
-| Seal or edit a cycle | `vault_cycle_update` |
+| See the Task Board / look up codes | `vault_board` |
+| New Task | `vault_task_create` — not create |
+| Move a Task through the board / edit fields | `vault_task_update` |
+| New Cycle | `vault_cycle_create` |
+| Close or edit a Cycle | `vault_cycle_update` |
 | Find / read / orient | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` |
 
 ## Workflows
@@ -96,20 +96,33 @@ itself and rewrites links. Use `vault_move_page` only for destinations
 assignment can't express, and run `vault_preview_mutation` first when the
 page has backlinks or you're moving folders.
 
-**Tasking.** Orient with `vault_board`: columns INTAKE → TRIAGE → FIELD →
-REVIEW → SEALED, tasks with their TSK codes, cycles with their S codes. New
-board tasks go through `vault_task_create`, never `vault_create_page` — the
-board reserves the next `TSK-NNNN` code and files the page under
-`tasks/<project>/`; include `ai-generated` in tags for LLM-authored tasks.
-Move and edit with `vault_task_update`, addressing the task by code, path,
-or id: title/project/status/priority/tags update when present
-(`clear_project: true` clears the project), while cycle, assignee,
-estimate, due, hold, and link are tri-state — absent keeps, `null` or `""`
-clears, a value sets; cycle `"BACKLOG"` also clears. Create sprints with
-`vault_cycle_create` (omit `code` to auto-generate the next `S-{n}`; CLOSED
-is rejected at creation). Seal a finished cycle with `vault_cycle_update`
-state `CLOSED`, passing `carry_to` to re-home its unsealed tasks —
-`"BACKLOG"` clears their cycle, a cycle code re-assigns them.
+**Task Board.** Use display labels in prose and persisted values in MCP calls:
+Inbox (`INTAKE`) → Ready (`TRIAGE`) → In Progress (`FIELD`) → Review
+(`REVIEW`) → Done (`SEALED`). Priorities are P0 Critical, P1 High, P2 Medium,
+and P3 Low. Orient with `vault_board`; it lists Task TSK codes, Cycle S codes,
+and Projects through the legacy `operations` response field.
+Legacy `vault_board` response fields remain unchanged. The raw
+`columns[].label`/`columns[].sub` pairs are `INTAKE`/`unfiled`,
+`TRIAGE`/`staged`, `IN-FIELD`/`active`, `REVIEW`/`qa / seal`, and
+`SEALED`/`closed`. Derive display labels from `columns[].id` using the status
+mapping above. `tasks[].checks` is `[done, total]` Checklist Item counts.
+`tasks[].link` and `operations[].dossier` are Related Page values.
+
+Create Tasks with `vault_task_create`, never `vault_create_page` — the board
+reserves the next `TSK-NNNN` code and files the page under
+`tasks/<project>/`; include `ai-generated` in tags for LLM-authored Tasks.
+The `body` wire field is the Task Description. Checklist values become Todos.
+Move and edit with `vault_task_update`, addressing the Task by code, path, or
+id. Title/Project/status/priority/tags update when present
+(`clear_project: true` clears the Project). Cycle, assignee, estimate, due,
+blocker reason (`hold`), and Related Page (`link`) are tri-state — absent
+keeps, `null` or `""` clears, and a value sets. A non-empty `hold` means
+Blocked; Cycle `"BACKLOG"` moves the Task to Backlog.
+
+Create Cycles with `vault_cycle_create` (omit `code` to auto-generate the next
+`S-{n}`; `CLOSED` is rejected at creation). Close a finished Cycle with
+`vault_cycle_update` using state `CLOSED`. Pass `carry_to` to move unfinished
+Tasks: `"BACKLOG"` moves them to Backlog, while a Cycle code reassigns them.
 
 **Delete.** `vault_delete_page` without `force` first. If it refuses with a
 backlink list, show the user what links there and confirm before re-running
