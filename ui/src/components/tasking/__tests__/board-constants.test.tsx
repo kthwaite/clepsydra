@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import {
   COL_LABEL,
+  COL_SUBLABEL,
   cycleStateLabel,
   fmtCycleWindow,
   MODES,
@@ -27,6 +28,21 @@ describe("Task Board display vocabulary", () => {
       ["backlog", "List"],
       ["cycle", "Cycles"],
       ["timeline", "Timeline"],
+    ]);
+  });
+
+  it("uses neutral column sublabels without changing status ids", () => {
+    expect(
+      ["INTAKE", "TRIAGE", "FIELD", "REVIEW", "SEALED"].map((id) => [
+        id,
+        COL_SUBLABEL[id],
+      ]),
+    ).toEqual([
+      ["INTAKE", "Unassessed"],
+      ["TRIAGE", "Ready to start"],
+      ["FIELD", "Being worked on"],
+      ["REVIEW", "Awaiting review"],
+      ["SEALED", "Completed"],
     ]);
   });
 

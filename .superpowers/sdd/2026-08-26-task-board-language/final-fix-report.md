@@ -330,3 +330,54 @@ The browser-smoke fix is committed separately as:
 ```text
 fix(tasking): label initial cycle states
 ```
+
+## Browser-smoke column sublabels
+
+Real-browser screenshot verification found that server-provided Task status
+sublabels still rendered below the canonical Board headings.
+
+Tests were changed first to require the five approved sublabels, reject the
+retired server strings, preserve the raw status IDs, prove unknown IDs fall
+back to their raw value, and prove the input response is not mutated.
+
+Red:
+
+```text
+bun run test src/components/tasking/__tests__/board-constants.test.tsx src/components/tasking/__tests__/TaskingScreen.test.tsx src/components/tasking/__tests__/KanbanView.test.tsx
+```
+
+Result: expected failure, 2 tests failed. `COL_SUBLABEL` did not exist and the
+Inbox column still rendered `unfiled` instead of `Unassessed`. The Kanban
+interaction suite remained green.
+
+Implementation adds one shared `COL_SUBLABEL` presentation map and projects
+each server column into a new presentation object with its canonical `label`
+and `sub`. Unknown column IDs use the raw ID for both fallbacks. Server objects,
+IDs, WIP values, and DnD behavior remain unchanged.
+
+Green:
+
+```text
+bun run test src/components/tasking/__tests__/board-constants.test.tsx src/components/tasking/__tests__/TaskingScreen.test.tsx src/components/tasking/__tests__/KanbanView.test.tsx
+```
+
+Result: 3 test files passed; 101 tests passed.
+
+```text
+bun run typecheck
+```
+
+Result: passed (`tsc --noEmit --project tsconfig.app.json`).
+
+```text
+bunx biome lint src/components/tasking/board-constants.tsx src/components/tasking/TaskingScreen.tsx
+```
+
+Result: checked both changed production files with no errors. Biome reported
+one pre-existing `noNonNullAssertion` warning in `fmtCycleWindow`.
+
+The browser-smoke fix is committed separately as:
+
+```text
+fix(tasking): neutralize column sublabels
+```

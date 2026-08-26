@@ -730,6 +730,48 @@ describe("TaskingScreen — shared FilterBar composition", () => {
 // ── fixed human-facing status labels ──────────────────────────────────────────
 
 describe("TaskingScreen — fixed human-facing status labels", () => {
+  it("projects neutral Board sublabels without leaking or mutating server copy", async () => {
+    const retired = ["unfiled", "staged", "active", "qa / seal", "closed"];
+    const relabeled: BoardResponse = {
+      ...BOARD_FIXTURE,
+      columns: [
+        ...BOARD_FIXTURE.columns.map((column, index) => ({
+          ...column,
+          sub: retired[index],
+        })),
+        {
+          id: "PAUSED",
+          label: "SERVER PAUSED",
+          sub: "server paused",
+          wip: 0,
+        },
+      ],
+    };
+    stubBoardFetch(relabeled);
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    for (const [id, sublabel, retiredSublabel] of [
+      ["INTAKE", "Unassessed", "unfiled"],
+      ["TRIAGE", "Ready to start", "staged"],
+      ["FIELD", "Being worked on", "active"],
+      ["REVIEW", "Awaiting review", "qa / seal"],
+      ["SEALED", "Completed", "closed"],
+    ]) {
+      const column = screen.getByTestId(`kb-col-${id}`);
+      expect(within(column).getByText(sublabel)).toBeInTheDocument();
+      expect(within(column).queryByText(retiredSublabel)).not.toBeInTheDocument();
+    }
+
+    const unknown = screen.getByTestId("kb-col-PAUSED");
+    expect(within(unknown).getAllByText("PAUSED")).toHaveLength(2);
+    expect(within(unknown).queryByText("SERVER PAUSED")).not.toBeInTheDocument();
+    expect(within(unknown).queryByText("server paused")).not.toBeInTheDocument();
+    expect(relabeled.columns.map((column) => column.sub)).toEqual([
+      ...retired,
+      "server paused",
+    ]);
+  });
   it("keeps FIELD displayed as In Progress when the server sends DEPLOYED", async () => {
     const relabeled: BoardResponse = {
       ...BOARD_FIXTURE,

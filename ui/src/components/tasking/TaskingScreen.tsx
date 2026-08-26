@@ -16,6 +16,7 @@ import { BoardHeader } from "./BoardHeader";
 import {
   COL_ORDER,
   COL_LABEL,
+  COL_SUBLABEL,
   type ColLabelFn,
   opKey,
   PRI_LABEL,
@@ -227,6 +228,7 @@ export function TaskingScreen({
       data?.columns.map((column) => ({
         ...column,
         label: colLabel(column.id),
+        sub: COL_SUBLABEL[column.id] ?? column.id,
       })) ?? [],
     [data],
   );

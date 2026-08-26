@@ -53,6 +53,14 @@ export const COL_LABEL: Record<string, string> = {
   SEALED: "Done",
 };
 
+export const COL_SUBLABEL: Record<string, string> = {
+  INTAKE: "Unassessed",
+  TRIAGE: "Ready to start",
+  FIELD: "Being worked on",
+  REVIEW: "Awaiting review",
+  SEALED: "Completed",
+};
+
 export const PRI_ORDER = ["P0", "P1", "P2", "P3"] as const;
 
 export const PRI_LABEL: Record<string, string> = {
