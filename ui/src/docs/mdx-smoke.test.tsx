@@ -436,9 +436,9 @@ it("documents the SingleFile capture and server-side deconstruction pipeline", (
 it("documents task date, stale-span, and current Today projection boundaries", () => {
   const source = registeredGuideSource("tasks-agenda-journals-and-board");
 
-  expect(source).toContain("not validated as dates by the server");
-  expect(source).toContain("compares their indexed strings lexicographically");
-  expect(source).toContain("rewrite a different nearby checkbox");
+  expect(source).toContain("server does not validate them as dates");
+  expect(source).toContain("compares indexed values lexicographically");
+  expect(source).toMatch(/rewrite a different nearby\s+checkbox/);
   expect(source).toContain("both **Overdue** and **Due Today**");
 });
 

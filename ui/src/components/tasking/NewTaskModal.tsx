@@ -36,7 +36,7 @@ import {
   BoardModalFrame,
   ModalEscChip,
 } from "./BoardModalFrame";
-import { type ColLabelFn, opKey } from "./board-constants";
+import { type ColLabelFn, cycleStateLabel, opKey } from "./board-constants";
 import {
   DispositionRow,
   EdField,
@@ -116,8 +116,7 @@ export function NewTaskModal({
   // Derived display for the sub-header
   const opLabel = project
     ? (operations.find((op) => opKey(op) === project)?.code ?? project)
-    : "UNFILED";
-
+    : "No project";
   const dirty =
     title !== "" ||
     brief !== "" ||
@@ -176,7 +175,7 @@ export function NewTaskModal({
 
   return (
     <BoardModalFrame
-      ariaLabel="New Tasking"
+      ariaLabel="New task"
       widthClassName={BOARD_MODAL_WIDTHS.task}
       backdropTestId="new-task-modal-backdrop"
       modalTestId="new-task-modal"
@@ -191,10 +190,10 @@ export function NewTaskModal({
           +
         </span>
         <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-          NEW TASKING
+          New task
         </span>
-        <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {opLabel} · COMMIT TO REGISTER
+        <span className="cl-mono text-[var(--fs-xs)] tracking-[0.14em] text-[var(--ink-3)]">
+          {opLabel} · Create task
         </span>
         <ModalEscChip onClose={closeTaskModal} testId="new-task-close-btn" />
       </div>
@@ -202,13 +201,14 @@ export function NewTaskModal({
       {/* Body */}
       <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
         {/* TITLE */}
-        <EdField label="TASKING / TITLE">
+        <EdField label="Title">
           <input
             ref={titleRef}
             type="text"
+            aria-label="Title"
             className={INPUT_CLS}
             autoFocus
-            placeholder="describe the unit of work…"
+            placeholder="What needs to be done…"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             data-testid="new-task-title"
@@ -216,11 +216,12 @@ export function NewTaskModal({
         </EdField>
 
         {/* BRIEF — prose body, written above any checklist on the page. */}
-        <EdField label="BRIEF" hint="optional">
+        <EdField label="Description" hint="Optional">
           <textarea
+            aria-label="Description"
             className={`${INPUT_CLS} resize-none`}
             rows={3}
-            placeholder="what the work is, and why…"
+            placeholder="What the task is and why it matters…"
             value={brief}
             onChange={(e) => setBrief(e.target.value)}
             data-testid="new-task-brief"
@@ -229,16 +230,16 @@ export function NewTaskModal({
 
         {/* OPERATION + CYCLE */}
         <div className="grid grid-cols-2 gap-[12px]">
-          <EdField label="OPERATION">
+          <EdField label="Project">
             <Select
-              aria-label="Operation"
+              aria-label="Project"
               value={project}
               onChange={(key) =>
                 setProject(key === null ? "" : String(key))
               }
               data-testid="new-task-operation"
             >
-              <SelectItem id="">UNFILED / NONE</SelectItem>
+              <SelectItem id="">No project</SelectItem>
               {assignableOps.map((op) => (
                 <SelectItem
                   key={op.id}
@@ -250,7 +251,7 @@ export function NewTaskModal({
               ))}
             </Select>
           </EdField>
-          <EdField label="CYCLE">
+          <EdField label="Cycle">
             <Select
               aria-label="Cycle"
               value={cycle}
@@ -259,14 +260,14 @@ export function NewTaskModal({
               }
               data-testid="new-task-cycle"
             >
-              <SelectItem id="BACKLOG">BACKLOG / UNSCHEDULED</SelectItem>
+              <SelectItem id="BACKLOG">Backlog</SelectItem>
               {selectableCycles.map((c) => (
                 <SelectItem
                   key={c.id}
                   id={c.code}
-                  textValue={`${c.code} · ${c.label} (${c.state})`}
+                  textValue={`${c.code} · ${c.label} (${cycleStateLabel(c.state)})`}
                 >
-                  {c.code} · {c.label} ({c.state})
+                  {c.code} · {c.label} ({cycleStateLabel(c.state)})
                 </SelectItem>
               ))}
             </Select>
@@ -274,7 +275,7 @@ export function NewTaskModal({
         </div>
 
         {/* DISPOSITION */}
-        <EdField label="DISPOSITION">
+        <EdField label="Status">
           <DispositionRow
             value={status}
             onChange={setStatus}
@@ -284,7 +285,7 @@ export function NewTaskModal({
         </EdField>
 
         {/* PRIORITY */}
-        <EdField label="PRIORITY">
+        <EdField label="Priority">
           <PriorityRow
             value={priority}
             onChange={setPriority}
@@ -294,18 +295,20 @@ export function NewTaskModal({
 
         {/* OPERATOR / EST */}
         <div className="grid grid-cols-2 gap-[12px]">
-          <EdField label="OPERATOR">
+          <EdField label="Assignee">
             <input
               type="text"
+              aria-label="Assignee"
               className={INPUT_CLS}
               value={assignee}
               onChange={(e) => setAssignee(e.target.value)}
               data-testid="new-task-assignee"
             />
           </EdField>
-          <EdField label="EST">
+          <EdField label="Estimate">
             <input
               type="text"
+              aria-label="Estimate"
               className={INPUT_CLS}
               value={estimate}
               onChange={(e) => setEstimate(e.target.value)}
@@ -316,18 +319,20 @@ export function NewTaskModal({
 
         {/* START / DUE */}
         <div className="grid grid-cols-2 gap-[12px]">
-          <EdField label="START" hint="YYYY-MM-DD">
+          <EdField label="Start date" hint="YYYY-MM-DD">
             <input
               type="date"
+              aria-label="Start date"
               className={INPUT_CLS}
               value={start}
               onChange={(e) => setStart(e.target.value)}
               data-testid="new-task-start"
             />
           </EdField>
-          <EdField label="DUE" hint="YYYY-MM-DD">
+          <EdField label="Due date" hint="YYYY-MM-DD">
             <input
               type="date"
+              aria-label="Due date"
               className={INPUT_CLS}
               value={due}
               onChange={(e) => setDue(e.target.value)}
@@ -338,11 +343,12 @@ export function NewTaskModal({
 
         {/* TAGS + CHECKLIST */}
         <div className="grid grid-cols-2 gap-[12px]">
-          <EdField label="TAGS" hint="comma-sep">
+          <EdField label="Tags" hint="Comma-separated">
             <input
               type="text"
+              aria-label="Tags"
               className={INPUT_CLS}
-              placeholder="INFRA, PROCESS"
+              placeholder="tag-one, tag-two"
               value={tags}
               onChange={(e) => setTags(e.target.value)}
               data-testid="new-task-tags"
@@ -351,11 +357,12 @@ export function NewTaskModal({
           {/* CHECKLIST: one item per line → checklist[] array on POST.
                     Plan deviation: prototype used a count field; we use a
                     textarea so items carry actual text in the page body. */}
-          <EdField label="CHECKLIST" hint="one item per line">
+          <EdField label="Checklist" hint="One item per line">
             <textarea
+              aria-label="Checklist"
               className={`${INPUT_CLS} resize-none`}
               rows={3}
-              placeholder={"item 1\nitem 2"}
+              placeholder="One item per line"
               value={checklist}
               onChange={(e) => setChecklist(e.target.value)}
               data-testid="new-task-checklist"
@@ -364,11 +371,12 @@ export function NewTaskModal({
         </div>
 
         {/* DOSSIER LINK */}
-        <EdField label="DOSSIER LINK" hint="optional">
+        <EdField label="Related page" hint="Optional">
           <input
             type="text"
+            aria-label="Related page"
             className={INPUT_CLS}
-            placeholder="[[dossier]]"
+            placeholder="[[page]]"
             value={link}
             onChange={(e) => setLink(e.target.value)}
             data-testid="new-task-link"
@@ -378,15 +386,15 @@ export function NewTaskModal({
 
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
-        <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
+        <div className="cl-mono text-[var(--fs-xs)] tracking-[0.12em] text-[var(--ink-3)]">
           <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
             ⌘↵
           </span>{" "}
-          commit ·{" "}
+          Create task ·{" "}
           <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
             ESC
           </span>{" "}
-          cancel
+          Cancel
         </div>
         <div className="flex gap-[8px]">
           <button
@@ -395,7 +403,7 @@ export function NewTaskModal({
             onClick={closeTaskModal}
             data-testid="new-task-cancel"
           >
-            CANCEL
+            Cancel
           </button>
           <button
             type="button"
@@ -404,7 +412,7 @@ export function NewTaskModal({
             disabled={create.isPending || title.trim() === ""}
             data-testid="new-task-commit"
           >
-            {create.isPending ? "COMMITTING…" : "COMMIT TASK"}
+            {create.isPending ? "Creating…" : "Create task"}
           </button>
         </div>
       </div>

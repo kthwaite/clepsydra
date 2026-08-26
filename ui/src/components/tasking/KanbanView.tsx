@@ -21,7 +21,6 @@ import {
 } from "react";
 import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
-import { pad2 } from "#/lib/time";
 import {
   KANBAN_COL_DEFAULT,
   KANBAN_COL_MAX,
@@ -267,6 +266,11 @@ export function KanbanView({
               PRI_ORDER.indexOf(b.priority as (typeof PRI_ORDER)[number]),
           );
 
+        const displayLabel = colLabel(col.id);
+        const taskCount = `${items.length} ${
+          items.length === 1 ? "task" : "tasks"
+        }`;
+
         const over = col.wip > 0 && items.length > col.wip;
         const fill =
           col.wip > 0 ? Math.min(100, (items.length / col.wip) * 100) : 0;
@@ -275,14 +279,14 @@ export function KanbanView({
           <KanbanDropColumn
             key={col.id}
             status={col.id}
-            label={col.label}
+            label={displayLabel}
             onMoveTask={moveTask}
             taskStatusById={taskStatusById}
           >
             {/* Column header */}
             <div className="sticky top-0 z-[2] flex items-center gap-[8px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[8px]">
               <span className="cl-display whitespace-nowrap text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--ink)]">
-                {col.label}
+                {displayLabel}
               </span>
               {col.sub && (
                 <span className="cl-mono min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
@@ -292,7 +296,7 @@ export function KanbanView({
               <button
                 type="button"
                 className="inline-flex h-[16px] w-[16px] items-center justify-center border border-[var(--rule)] text-[13px] leading-[1] text-[var(--ink-3)] transition-[color,border-color] duration-[120ms] hover:border-[var(--hot)] hover:text-[var(--hot)]"
-                title={`New task in ${col.label}`}
+                title={`New task in ${displayLabel}`}
                 onClick={() =>
                   openTaskModal(
                     activeProject
@@ -319,8 +323,8 @@ export function KanbanView({
                 }
                 data-testid={`kb-cnt-${col.id}`}
               >
-                {pad2(items.length)}
-                {col.wip > 0 ? `/${col.wip}` : ""}
+                {taskCount}
+                {col.wip > 0 ? ` · limit ${col.wip}` : ""}
               </span>
             </div>
 
@@ -347,7 +351,7 @@ export function KanbanView({
                   className="cl-mono border border-dashed border-[var(--rule)] px-[8px] py-[16px] text-center text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-4)]"
                   data-testid={`kb-empty-${col.id}`}
                 >
-                  — NONE —
+                  No tasks
                 </div>
               ) : (
                 items.map((t) => (

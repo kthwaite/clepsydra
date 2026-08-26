@@ -196,8 +196,8 @@ describe("searchDocs", () => {
       query: "all original cycle task files restored",
       expected: {
         page: { slug: "tasks-agenda-journals-and-board" },
-        heading: "Plan on the Tasking board",
-        headingId: "plan-on-the-tasking-board",
+        heading: "Create, start, and close Cycles",
+        headingId: "create-start-and-close-cycles",
       },
     },
     {

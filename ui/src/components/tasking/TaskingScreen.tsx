@@ -15,8 +15,11 @@ import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import {
   COL_ORDER,
+  COL_LABEL,
+  COL_SUBLABEL,
   type ColLabelFn,
   opKey,
+  PRI_LABEL,
   PRI_ORDER,
 } from "./board-constants";
 import { CycleView, resolveCycle } from "./CycleView";
@@ -76,6 +79,7 @@ const BOARD_FILTER_CONFIG: ClientFilterConfig<BoardTask> = {
   },
 };
 
+const colLabel: ColLabelFn = (id) => COL_LABEL[id] ?? id;
 // ── TaskingScreen ─────────────────────────────────────────────────────────────
 
 export function TaskingScreen({
@@ -163,7 +167,7 @@ export function TaskingScreen({
       {
         id: "project",
         kind: "multi",
-        label: "PROJECT",
+        label: "Project",
         options: [
           ...new Set([
             ...operations
@@ -180,7 +184,7 @@ export function TaskingScreen({
       {
         id: "tags",
         kind: "multi",
-        label: "TAG",
+        label: "Tags",
         options: [...new Set(tasks.flatMap((t) => t.tags))]
           .sort()
           .map((value) => ({ value })),
@@ -188,16 +192,22 @@ export function TaskingScreen({
       {
         id: "pri",
         kind: "multi",
-        label: "PRI",
-        options: PRI_ORDER.map((value) => ({ value })),
+        label: "Priority",
+        options: PRI_ORDER.map((value) => ({
+          value,
+          label: `${value} ${PRI_LABEL[value]}`,
+        })),
       },
       {
         id: "status",
         kind: "multi",
-        label: "STATUS",
-        options: COL_ORDER.map((value) => ({ value })),
+        label: "Status",
+        options: COL_ORDER.map((value) => ({
+          value,
+          label: COL_LABEL[value] ?? value,
+        })),
       },
-      { id: "hold", kind: "flag", label: "ON HOLD", options: [] },
+      { id: "hold", kind: "flag", label: "Blocked", options: [] },
     ],
     [operations, tasks],
   );
@@ -212,13 +222,15 @@ export function TaskingScreen({
     telemetryUnfiled,
     telemetryEnabled,
   );
-  // Column labels are sourced from the server (BoardColumn.label), not
-  // hardcoded — built once here and threaded to every view that renders a
-  // disposition label.
-  const colLabel: ColLabelFn = useMemo(() => {
-    const m = new Map(data?.columns.map((c) => [c.id, c.label] as const) ?? []);
-    return (id) => m.get(id) ?? id;
-  }, [data]);
+  const columns = useMemo(
+    () =>
+      data?.columns.map((column) => ({
+        ...column,
+        label: colLabel(column.id),
+        sub: COL_SUBLABEL[column.id] ?? column.id,
+      })) ?? [],
+    [data],
+  );
 
   const selectedCycle = data ? resolveCycle(cycleSel, cycles) : null;
   const cycleBurndown = useCycleBurndown(
@@ -311,7 +323,7 @@ export function TaskingScreen({
           <div className="relative min-h-0 flex-1 overflow-hidden">
             {mode === "card" && (
               <KanbanView
-                columns={data.columns}
+                columns={columns}
                 tasks={visibleTasks}
                 cycles={cycles}
                 showOp={opFilter === "ALL"}

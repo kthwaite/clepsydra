@@ -370,7 +370,29 @@ describe("KanbanView — column rendering", () => {
     }
   });
 
-  it("renders — NONE — in columns with no tasks", () => {
+  it("uses canonical labels instead of server column labels", () => {
+    const labels: Record<string, string> = {
+      INTAKE: "Inbox",
+      TRIAGE: "Ready",
+      FIELD: "In Progress",
+      REVIEW: "Review",
+      SEALED: "Done",
+    };
+    wrap(
+      <KanbanView
+        colLabel={(id) => labels[id] ?? id}
+        columns={columns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    for (const label of Object.values(labels)) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it("renders No tasks in columns with no tasks", () => {
     wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
@@ -381,8 +403,7 @@ describe("KanbanView — column rendering", () => {
       />,
     );
     // TRIAGE has only t3, REVIEW has no tasks at all
-    expect(screen.getByTestId("kb-empty-REVIEW")).toBeInTheDocument();
-    expect(screen.getByTestId("kb-empty-REVIEW").textContent).toContain("NONE");
+    expect(screen.getByTestId("kb-empty-REVIEW")).toHaveTextContent("No tasks");
   });
 
   it("buckets tasks into the correct columns by status", () => {
@@ -461,7 +482,7 @@ describe("KanbanView — sealed-in-closed-cycle exclusion", () => {
 // ── WIP count and over-capacity styling ──────────────────────────────────────
 
 describe("KanbanView — WIP count and over-capacity", () => {
-  it("shows zero-padded count e.g. 02/wip", () => {
+  it("shows plural task count with the WIP limit", () => {
     const wipColumns = columns.map((c) =>
       c.id === "INTAKE" ? { ...c, wip: 3 } : c,
     );
@@ -475,7 +496,27 @@ describe("KanbanView — WIP count and over-capacity", () => {
       />,
     );
     // INTAKE has 2 tasks (t2, t4), wip=3
-    expect(screen.getByTestId("kb-cnt-INTAKE").textContent).toBe("02/3");
+    expect(screen.getByTestId("kb-cnt-INTAKE")).toHaveTextContent(
+      "2 tasks · limit 3",
+    );
+  });
+
+  it("shows singular task count with the WIP limit", () => {
+    const wipColumns = columns.map((c) =>
+      c.id === "TRIAGE" ? { ...c, wip: 4 } : c,
+    );
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={wipColumns}
+        tasks={tasks}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    expect(screen.getByTestId("kb-cnt-TRIAGE")).toHaveTextContent(
+      "1 task · limit 4",
+    );
   });
 
   it("shows over flag when count exceeds wip", () => {
@@ -493,12 +534,12 @@ describe("KanbanView — WIP count and over-capacity", () => {
     );
     // INTAKE has 2 tasks (t2, t4), wip=1 → over
     const cnt = screen.getByTestId("kb-cnt-INTAKE");
-    expect(cnt.textContent).toBe("02/1");
+    expect(cnt).toHaveTextContent("2 tasks · limit 1");
     // The over state uses var(--hot) colour
     expect(cnt).toHaveStyle({ color: "var(--hot)" });
   });
 
-  it("shows count without /wip when wip=0", () => {
+  it("shows plural task count without a limit when wip=0", () => {
     // BOARD_FIXTURE has wip=0 on all columns
     wrap(
       <KanbanView
@@ -509,8 +550,8 @@ describe("KanbanView — WIP count and over-capacity", () => {
         showOp={false}
       />,
     );
-    // INTAKE: 2 tasks, no wip suffix
-    expect(screen.getByTestId("kb-cnt-INTAKE").textContent).toBe("02");
+    // INTAKE: 2 tasks, no limit suffix
+    expect(screen.getByTestId("kb-cnt-INTAKE")).toHaveTextContent("2 tasks");
   });
 });
 
@@ -530,10 +571,10 @@ describe("TaskCard — card anatomy", () => {
     );
   }
 
-  it("renders HOLD stamp when task.hold is set", () => {
+  it("renders Blocked stamp when task.hold is set", () => {
     renderWithHold();
     expect(screen.getByTestId("hold-stamp-t2")).toBeInTheDocument();
-    expect(screen.getByTestId("hold-stamp-t2").textContent).toBe("HOLD");
+    expect(screen.getByTestId("hold-stamp-t2")).toHaveTextContent("Blocked");
   });
 
   it("renders hold reason line when task.hold is set", () => {
@@ -542,9 +583,25 @@ describe("TaskCard — card anatomy", () => {
     expect(screen.getByTestId("hold-line-t2")).toHaveTextContent("blocker");
   });
 
-  it("does not render HOLD stamp for tasks without hold", () => {
+  it("does not render Blocked stamp for tasks without hold", () => {
     renderWithHold();
     expect(screen.queryByTestId("hold-stamp-t1")).not.toBeInTheDocument();
+  });
+
+  it("labels due-date metadata as Due", () => {
+    const taskWithDue: BoardTask = { ...tasks[0], due: "2026-06-08" };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithDue]}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+    expect(screen.getByTestId("task-card-t1")).toHaveTextContent(
+      "Due 2026-06-08",
+    );
   });
 
   it("renders only a non-empty body excerpt with a fixed line clamp", () => {
@@ -1195,7 +1252,7 @@ describe("KanbanView — QuickAddRow wiring", () => {
       />,
     );
     const intakeRow = screen.getByTestId("qa-INTAKE");
-    expect(intakeRow).toHaveAttribute("placeholder", "+ ADD");
+    expect(intakeRow).toHaveAttribute("placeholder", "+ New task");
   });
 
   it("includes activeProject in the preset when provided", () => {

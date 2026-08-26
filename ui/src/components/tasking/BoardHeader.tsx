@@ -184,11 +184,12 @@ export function BoardHeader({
         {/* Title block */}
         <div className="flex flex-col gap-[1px]">
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-            OPS REGISTER / {operations.length} OPERATIONS · {cycles.length}{" "}
-            CYCLES
+            {operations.length}{" "}
+            {operations.length === 1 ? "project" : "projects"} · {cycles.length}{" "}
+            {cycles.length === 1 ? "cycle" : "cycles"}
           </span>
           <h1 className="font-sans text-[22px] font-black uppercase leading-none tracking-[0.04em] text-[var(--ink)]">
-            TASKING BOARD
+            Task Board
           </h1>
         </div>
 
@@ -219,20 +220,20 @@ export function BoardHeader({
 
         {/* Stats — pushed to the right */}
         <div className="ml-auto flex items-center gap-[22px]">
-          {/* OPEN */}
+          {/* Open */}
           <div className="flex flex-col gap-[1px] text-right">
             <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-              OPEN
+              Open
             </span>
             <span className="font-sans text-[20px] font-black leading-none tabular-nums text-[var(--ink)]">
               {pad2(open)}
             </span>
           </div>
 
-          {/* IN-FIELD */}
+          {/* In progress */}
           <div className="flex flex-col gap-[1px] text-right">
             <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-              IN-FIELD
+              In progress
             </span>
             <span
               className="font-sans text-[20px] font-black leading-none tabular-nums"
@@ -242,10 +243,10 @@ export function BoardHeader({
             </span>
           </div>
 
-          {/* ON HOLD */}
+          {/* Blocked */}
           <div className="flex flex-col gap-[1px] text-right">
             <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-              ON HOLD
+              Blocked
             </span>
             <span
               className="font-sans text-[20px] font-black leading-none tabular-nums"
@@ -255,31 +256,31 @@ export function BoardHeader({
             </span>
           </div>
 
-          {/* SEAL RATE 14d sparkline */}
+          {/* Completed over the last 14 days */}
           <div className="flex flex-col gap-[1px] pb-[2px] text-right">
             <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-              SEAL RATE 14d
+              Completed · 14 days
             </span>
             {!sealHistoryApplicable ? (
               <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
-                NOT APPLICABLE
+                Not applicable
               </span>
             ) : sealHistoryPending ? (
               <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
-                LOADING
+                Loading
               </span>
             ) : sealHistoryError ? (
               <span className="text-[var(--fs-xs)] text-[var(--hot)]">
-                UNAVAILABLE
+                Unavailable
               </span>
             ) : sealHistory.length === 0 ||
               sealHistory.every((count) => count === 0) ? (
               <span className="text-[var(--fs-xs)] text-[var(--ink-mute)]">
-                NO SEALS
+                No completed tasks
               </span>
             ) : (
               <div
-                aria-label={`14-day seal history: ${sealHistory.join(", ")}`}
+                aria-label={`14-day completed task history: ${sealHistory.join(", ")}`}
               >
                 <Spark
                   data={sealHistory}

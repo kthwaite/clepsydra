@@ -20,7 +20,7 @@ import {
   BoardModalFrame,
   ModalEscChip,
 } from "./BoardModalFrame";
-import { fmtCycleWindow } from "./board-constants";
+import { cycleStateLabel, fmtCycleWindow } from "./board-constants";
 import { EdField, INPUT_CLS, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
 
 // ── newCyclePrefill ───────────────────────────────────────────────────────────
@@ -152,7 +152,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
 
   return (
     <BoardModalFrame
-      ariaLabel="New Cycle"
+      ariaLabel="New cycle"
       widthClassName={BOARD_MODAL_WIDTHS.cycle}
       backdropTestId="new-cycle-modal-backdrop"
       modalTestId="new-cycle-modal"
@@ -171,10 +171,10 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
           ◴
         </span>
         <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-          NEW CYCLE
+          New cycle
         </span>
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {windowLabel} · OPEN A CADENCE WINDOW
+          {windowLabel}
         </span>
         <ModalEscChip onClose={closeCycleModal} testId="new-cycle-close-btn" />
       </div>
@@ -183,10 +183,11 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
       <div className="flex flex-1 flex-col gap-[12px] overflow-y-auto p-[14px]">
         {/* LABEL + CODE */}
         <div className="grid grid-cols-2 gap-[12px]">
-          <EdField label="CYCLE / LABEL">
+          <EdField label="Name">
             <input
               ref={labelRef}
               type="text"
+              aria-label="Name"
               className={INPUT_CLS}
               autoFocus
               value={label}
@@ -194,10 +195,11 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
               data-testid="new-cycle-label"
             />
           </EdField>
-          <EdField label="REGISTER ID" hint="S-NN">
+          <EdField label="ID" hint="S-NN">
             <input
               type="text"
               className={INPUT_CLS}
+              aria-label="ID"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               data-testid="new-cycle-code"
@@ -207,18 +209,20 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
 
         {/* WINDOW */}
         <div className="grid grid-cols-2 gap-[12px]">
-          <EdField label="WINDOW / OPEN" hint="start">
+          <EdField label="Start date" hint="start">
             <input
               type="date"
+              aria-label="Start date"
               className={INPUT_CLS}
               value={start}
               onChange={(e) => setStart(e.target.value)}
               data-testid="new-cycle-start"
             />
           </EdField>
-          <EdField label="WINDOW / SEAL" hint="end">
+          <EdField label="End date" hint="end">
             <input
               type="date"
+              aria-label="End date"
               className={INPUT_CLS}
               value={end}
               onChange={(e) => setEnd(e.target.value)}
@@ -228,28 +232,34 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
         </div>
 
         {/* INITIAL STATE */}
-        <EdField label="INITIAL STATE" hint="cadence">
-          <div className="flex gap-[6px]">
+        <EdField label="Status" hint="lifecycle">
+          <div
+            className="flex gap-[6px]"
+            role="group"
+            aria-label="Status"
+          >
             {["PLANNED", "ACTIVE"].map((st) => (
               <button
                 key={st}
                 type="button"
+                aria-label={cycleStateLabel(st)}
                 className={`${RADIO_CLS_BASE} ${state === st ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
                 onClick={() => setState(st)}
                 data-testid={`new-cycle-state-${st}`}
               >
-                {st}
+                {cycleStateLabel(st)}
               </button>
             ))}
           </div>
         </EdField>
 
         {/* GOAL */}
-        <EdField label="CYCLE GOAL" hint="one line">
+        <EdField label="Goal" hint="one line">
           <textarea
             className={`${INPUT_CLS} resize-none`}
+            aria-label="Goal"
             rows={2}
-            placeholder="what this cadence window is for…"
+            placeholder="What this cycle should achieve"
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             data-testid="new-cycle-goal"
@@ -263,7 +273,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
           <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
             ⌘↵
           </span>{" "}
-          open ·{" "}
+          create ·{" "}
           <span className="inline-block border border-[var(--rule)] px-[5px] py-[1px] text-[var(--fs-xs)]">
             ESC
           </span>{" "}
@@ -285,7 +295,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
             disabled={create.isPending}
             data-testid="new-cycle-commit"
           >
-            {create.isPending ? "OPENING…" : "◴ OPEN CYCLE"}
+            {create.isPending ? "Creating…" : "Create cycle"}
           </button>
         </div>
       </div>

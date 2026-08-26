@@ -284,11 +284,45 @@ describe("NewCycleModal — render", () => {
     expect(screen.queryByTestId("new-cycle-modal")).not.toBeInTheDocument();
   });
 
-  it("renders the modal when cycleModal.kind === 'new'", () => {
+  it("shows the creation title, fields, action, and goal placeholder", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={BOARD_FIXTURE.cycles} now={NOW} />);
-    expect(screen.getByTestId("new-cycle-modal")).toBeInTheDocument();
-    expect(screen.getByText("NEW CYCLE")).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("dialog", { name: "New cycle" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("New cycle")).toBeInTheDocument();
+    for (const field of [
+      "Name",
+      "ID",
+      "Start date",
+      "End date",
+      "Status",
+      "Goal",
+    ]) {
+      expect(screen.getByText(field, { exact: true })).toBeInTheDocument();
+    }
+    for (const field of ["Name", "ID", "Start date", "End date", "Goal"]) {
+      expect(screen.getByLabelText(field, { exact: true })).toBeInTheDocument();
+    }
+    expect(
+      screen.getByRole("group", { name: "Status" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText("What this cycle should achieve"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Create cycle" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders the lifecycle Status hint without cadence vocabulary", () => {
+    useBoardStore.setState({ cycleModal: { kind: "new" } });
+    wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
+
+    const modal = screen.getByTestId("new-cycle-modal");
+    expect(modal).toHaveTextContent("lifecycle");
+    expect(modal).not.toHaveTextContent(/cadence/i);
   });
 
   it("prefills label with CYCLE N", () => {
@@ -321,17 +355,29 @@ describe("NewCycleModal — render", () => {
     expect(end.value).toBe("2026-06-29");
   });
 
-  it("defaults INITIAL STATE to PLANNED", () => {
+  it("renders title-case initial state buttons while keeping PLANNED selected", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
-    const planned = screen.getByTestId("new-cycle-state-PLANNED");
-    expect(planned.className).toContain("bg-[var(--ink)]");
-  });
 
-  it("shows OPEN A CADENCE WINDOW in the sub-header", () => {
+    const planned = screen.getByRole("button", { name: "Planned" });
+    expect(planned).toHaveAttribute("aria-label", "Planned");
+    expect(planned).toHaveAttribute("data-testid", "new-cycle-state-PLANNED");
+    expect(planned.className).toContain("bg-[var(--ink)]");
+    const active = screen.getByRole("button", { name: "Active" });
+    expect(active).toHaveAttribute("aria-label", "Active");
+    expect(active).toHaveAttribute("data-testid", "new-cycle-state-ACTIVE");
+    expect(
+      screen.queryByRole("button", { name: "PLANNED" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "ACTIVE" }),
+    ).not.toBeInTheDocument();
+  });
+  it("shows only the formatted cycle window in the sub-header", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
-    expect(screen.getByText(/OPEN A CADENCE WINDOW/)).toBeInTheDocument();
+    expect(screen.getByText("06.12 — 06.18")).toBeInTheDocument();
+    expect(screen.queryByText(/cadence window/i)).not.toBeInTheDocument();
   });
 });
 
@@ -358,6 +404,23 @@ describe("NewCycleModal — submit payload", () => {
       expect(body.end).toBe("2026-06-29");
       expect(body.state).toBe("PLANNED");
     });
+  });
+
+  it("shows Creating… while the request is pending", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    useBoardStore.setState({ cycleModal: { kind: "new" } });
+    wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Create cycle" }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Creating…" }),
+    ).toBeDisabled();
   });
 
   it("includes goal when filled in", async () => {
@@ -485,13 +548,21 @@ describe("OpenCycleModal — render", () => {
     expect(screen.queryByTestId("open-cycle-modal")).not.toBeInTheDocument();
   });
 
-  it("renders the modal when cycleModal.kind === 'open'", () => {
+  it("shows the activation title, target state, and action", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
-    expect(screen.getByTestId("open-cycle-modal")).toBeInTheDocument();
-    expect(screen.getByText("OPEN CYCLE")).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("dialog", { name: "Start cycle" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Start cycle")).toHaveLength(2);
+    expect(screen.getByText("Target state")).toBeInTheDocument();
+    expect(screen.getByTestId("open-cycle-state")).toHaveTextContent("Active");
+    expect(
+      screen.getByRole("button", { name: "Start cycle" }),
+    ).toBeInTheDocument();
   });
 
   it("shows cycle label", () => {
@@ -504,44 +575,47 @@ describe("OpenCycleModal — render", () => {
     );
   });
 
-  it("shows COMMITTED count from cycle tasks", () => {
+  it("shows Tasks count from cycle tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={TASKS} />);
     // t3 has cycle "C-02"
+    expect(screen.getByText("Tasks", { exact: true })).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-committed")).toHaveTextContent("01");
   });
 
-  it("shows CHECKS total from cycle tasks", () => {
+  it("shows Checklist items total from cycle tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-111" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={TASKS} />);
-    // t1: checks [0,3], t2: checks [2,2] → tot = 5
+    // t1: checks [0,3], t2: checks [2,2] → total = 5
+    expect(
+      screen.getByText("Checklist items", { exact: true }),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-checks")).toHaveTextContent("05");
   });
 
-  it("→ STATE shows ACTIVE in cool colour", () => {
+  it("shows the target state as Active in cool colour", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
-    expect(screen.getByTestId("open-cycle-state")).toHaveTextContent("ACTIVE");
+    expect(screen.getByTestId("open-cycle-state")).toHaveTextContent("Active");
   });
 
-  it("shows empty-cycle callout when COMMITTED = 0", () => {
+  it("shows exact empty-cycle guidance when there are no tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
-    expect(screen.getByTestId("open-cycle-empty-callout")).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-empty-callout")).toHaveTextContent(
-      /No tasking committed/,
+      "No tasks in this cycle. It will start empty; you can add tasks after starting it.",
     );
   });
 
-  it("does NOT show empty-cycle callout when COMMITTED > 0", () => {
+  it("does NOT show empty-cycle callout when the cycle has tasks", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
@@ -552,7 +626,7 @@ describe("OpenCycleModal — render", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows clash callout when another cycle is ACTIVE", () => {
+  it("shows exact guidance when another cycle is Active", () => {
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "cyc-222" },
     });
@@ -563,10 +637,20 @@ describe("OpenCycleModal — render", () => {
         tasks={[]}
       />,
     );
-    expect(screen.getByTestId("open-cycle-clash-callout")).toBeInTheDocument();
     expect(screen.getByTestId("open-cycle-clash-callout")).toHaveTextContent(
-      "C-01",
+      "C-01 is already Active. Starting this cycle will leave two active cycles. Close C-01 first if that is not intended.",
     );
+  });
+
+  it("describes the active Cycle consequence without cadence vocabulary", () => {
+    useBoardStore.setState({
+      cycleModal: { kind: "open", cycleId: "cyc-222" },
+    });
+    wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
+
+    const modal = screen.getByTestId("open-cycle-modal");
+    expect(modal).toHaveTextContent("sets active Cycle to C-02");
+    expect(modal).not.toHaveTextContent(/cadence/i);
   });
 
   it("does NOT show clash callout when no other cycle is ACTIVE", () => {
@@ -607,6 +691,25 @@ describe("OpenCycleModal — submit payload", () => {
       ) as Record<string, unknown>;
       expect(body.state).toBe("ACTIVE");
     });
+  });
+
+  it("shows Starting… while the request is pending", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    useBoardStore.setState({
+      cycleModal: { kind: "open", cycleId: "cyc-222" },
+    });
+    wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Start cycle" }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Starting…" }),
+    ).toBeDisabled();
   });
 
   it("on success: closes modal and sets cycleSel to cycle code", async () => {
@@ -672,13 +775,20 @@ describe("SealCycleModal — render", () => {
     expect(screen.queryByTestId("seal-cycle-modal")).not.toBeInTheDocument();
   });
 
-  it("renders the modal when cycleModal.kind === 'seal'", () => {
+  it("shows the closure title, action, and destination state", () => {
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "cyc-111" },
     });
     wrapQC(<SealCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={[]} />);
-    expect(screen.getByTestId("seal-cycle-modal")).toBeInTheDocument();
-    expect(screen.getByText("SEAL CYCLE")).toBeInTheDocument();
+
+    expect(
+      screen.getByRole("dialog", { name: "Close cycle" }),
+    ).toBeInTheDocument();
+    expect(screen.getAllByText("Close cycle")).toHaveLength(2);
+    expect(screen.getByText("C-01 → Closed")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Close cycle" }),
+    ).toBeInTheDocument();
   });
 
   it("shows cycle label", () => {
@@ -691,12 +801,16 @@ describe("SealCycleModal — render", () => {
     );
   });
 
-  it("shows COMMITTED / SEALED / CARRYOVER / RATE stats", () => {
+  it("shows Tasks / Done / Incomplete tasks / Completion metrics", () => {
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "cyc-111" },
     });
     wrapQC(<SealCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={TASKS} />);
-    // C-01: t1 (FIELD), t2 (SEALED) → committed=2, sealed=1, carryover=1, 50%
+    // C-01: t1 (FIELD), t2 (SEALED) → tasks=2, done=1, incomplete=1, 50%
+    expect(screen.getByText("Tasks", { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Done", { exact: true })).toBeInTheDocument();
+    expect(screen.getAllByText("Incomplete tasks")).toHaveLength(2);
+    expect(screen.getByText("Completion", { exact: true })).toBeInTheDocument();
     expect(screen.getByTestId("seal-cycle-committed")).toHaveTextContent("02");
     expect(screen.getByTestId("seal-cycle-sealed")).toHaveTextContent("01");
     expect(screen.getByTestId("seal-cycle-carryover")).toHaveTextContent("01");
@@ -714,9 +828,8 @@ describe("SealCycleModal — render", () => {
     wrapQC(
       <SealCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={allSealed} />,
     );
-    expect(screen.getByTestId("seal-cycle-clean-callout")).toBeInTheDocument();
     expect(screen.getByTestId("seal-cycle-clean-callout")).toHaveTextContent(
-      /All committed tasking is SEALED/,
+      "All tasks are done. This cycle is ready to close.",
     );
     // No carry opts when clean
     expect(
@@ -724,15 +837,31 @@ describe("SealCycleModal — render", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows carryover radio group when carryover > 0", () => {
+  it("shows incomplete-task movement choices when tasks remain", () => {
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "cyc-111" },
     });
-    wrapQC(<SealCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={TASKS} />);
-    expect(screen.getByTestId("seal-cycle-carry-opts")).toBeInTheDocument();
-    // BACKLOG and LEAVE are always present
-    expect(screen.getByTestId("seal-cycle-carry-BACKLOG")).toBeInTheDocument();
-    expect(screen.getByTestId("seal-cycle-carry-LEAVE")).toBeInTheDocument();
+    wrapQC(
+      <SealCycleModal
+        cycle={CYCLE_ACTIVE}
+        cycles={[CYCLE_PLANNED]}
+        tasks={TASKS}
+      />,
+    );
+
+    expect(screen.getAllByText("Incomplete tasks")).toHaveLength(2);
+    expect(
+      screen.getByRole("group", { name: "Incomplete tasks" }),
+    ).toBeInTheDocument();
+    for (const choice of [
+      "Move to Backlog",
+      `Move to ${CYCLE_PLANNED.code}`,
+      "Keep in this cycle",
+    ]) {
+      expect(
+        screen.getByRole("button", { name: choice }),
+      ).toBeInTheDocument();
+    }
   });
 
   it("shows next PLANNED cycle option when one exists", () => {
@@ -801,6 +930,25 @@ describe("SealCycleModal — submit payloads", () => {
       expect(body.state).toBe("CLOSED");
       expect(body.carry_to).toBe("BACKLOG");
     });
+  });
+
+  it("shows Closing… while the request is pending", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise<Response>(() => {})),
+    );
+    useBoardStore.setState({
+      cycleModal: { kind: "seal", cycleId: "cyc-111" },
+    });
+    wrapQC(<SealCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={TASKS} />);
+
+    await userEvent.click(
+      screen.getByRole("button", { name: "Close cycle" }),
+    );
+
+    expect(
+      await screen.findByRole("button", { name: "Closing…" }),
+    ).toBeDisabled();
   });
 
   it("sends PATCH { state:'CLOSED', carry_to:'C-02' } when next-PLANNED selected", async () => {
@@ -930,7 +1078,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("mounts NewCycleModal when cycleModal.kind === 'new'", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     useBoardStore.setState({ cycleModal: { kind: "new" } });
 
@@ -940,7 +1088,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("does NOT mount NewCycleModal when cycleModal is null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     expect(screen.queryByTestId("new-cycle-modal")).not.toBeInTheDocument();
   });
@@ -948,7 +1096,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("mounts OpenCycleModal when cycleModal.kind === 'open' and cycleId resolves", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     // BOARD_FIXTURE has cyc-111 = ACTIVE (C-01) and cyc-222 = PLANNED (C-02)
     useBoardStore.setState({
@@ -961,7 +1109,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("does NOT mount OpenCycleModal when cycleId does not match any cycle", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     useBoardStore.setState({
       cycleModal: { kind: "open", cycleId: "ghost-id" },
@@ -973,7 +1121,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("mounts SealCycleModal when cycleModal.kind === 'seal' and cycleId resolves", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "cyc-111" },
@@ -985,7 +1133,7 @@ describe("TaskingScreen — cycle modal integration", () => {
   it("does NOT mount SealCycleModal when cycleId does not match any cycle", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     useBoardStore.setState({
       cycleModal: { kind: "seal", cycleId: "ghost-id" },

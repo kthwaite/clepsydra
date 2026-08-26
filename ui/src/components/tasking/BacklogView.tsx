@@ -21,7 +21,6 @@ import { useBoardStore } from "#/store/board";
 import {
   COL_ORDER,
   type ColLabelFn,
-  HoldTag,
   PRI_LABEL,
   PRI_ORDER,
   PriChip,
@@ -115,31 +114,31 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
         }}
       >
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          FILE-ID
+          ID
         </span>
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          TASKING
+          Task
         </span>
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          OP
+          Project
         </span>
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          DISPOSITION
+          Status
         </span>
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          OPR
+          Assignee
         </span>
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          EST
+          Estimate
         </span>
         <span
           className="overflow-hidden text-ellipsis whitespace-nowrap"
           style={{ textAlign: "right" }}
         >
-          DUE
+          Due
         </span>
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
-          CHK
+          Checklist
         </span>
       </div>
 
@@ -149,7 +148,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
           className="cl-mono border border-dashed border-[var(--rule)] px-[8px] py-[16px] text-center text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-4)]"
           data-testid="bk-empty"
         >
-          — NONE —
+          No tasks
         </div>
       )}
 
@@ -229,7 +228,9 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                       data-testid={`bk-hold-tag-${t.id}`}
                       className="flex-shrink-0"
                     >
-                      <HoldTag />
+                      <span className="inline-block border border-[var(--hot)] px-[4px] text-[var(--fs-xs)] leading-[14px] tracking-[0.12em] text-[var(--hot)]">
+                        Blocked
+                      </span>
                     </span>
                   )}
                   <span

@@ -91,7 +91,7 @@ export function TaskCard({
           style={{ transform: "rotate(-7deg)" }}
           data-testid={`hold-stamp-${t.id}`}
         >
-          HOLD
+          Blocked
         </span>
       )}
 
@@ -212,7 +212,7 @@ export function TaskCard({
           className="ml-auto font-variant-numeric"
           style={t.due ? { color: "var(--ink-2)" } : undefined}
         >
-          DUE {t.due ?? "—"}
+          Due {t.due ?? "—"}
         </span>
       </div>
     </div>

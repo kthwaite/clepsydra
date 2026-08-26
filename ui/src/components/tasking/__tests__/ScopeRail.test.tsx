@@ -56,16 +56,20 @@ describe("hasUnfiledTasks", () => {
 // ── ScopeRail render ──────────────────────────────────────────────────────────
 
 describe("ScopeRail", () => {
-  it("renders the SCOPE header when open", () => {
+  it("renders the approved scope and project labels when open", () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText("SCOPE")).toBeInTheDocument();
+    expect(screen.getByText("Scope")).toBeInTheDocument();
+    expect(screen.getByText("Projects")).toBeInTheDocument();
+    expect(screen.getByText("Cycles")).toBeInTheDocument();
   });
 
-  it("renders ALL OPS row with total task count", () => {
+  it("renders All projects row with total task count", () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText("ALL OPS")).toBeInTheDocument();
+    expect(screen.getByText("All projects")).toBeInTheDocument();
     // total tasks count appears as the badge (all 5)
-    expect(screen.getByRole("button", { name: /ALL OPS/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /All projects/ }),
+    ).toBeInTheDocument();
   });
 
   it("renders one row per operation with correct count", () => {
@@ -76,20 +80,20 @@ describe("ScopeRail", () => {
     expect(screen.getByText("OPS-2")).toBeInTheDocument();
   });
 
-  it("renders UNFILED row when unfiled tasks exist", () => {
+  it("renders No project row when unfiled tasks exist", () => {
     // BOARD_FIXTURE has t4 with project=null
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText("UNFILED")).toBeInTheDocument();
+    expect(screen.getByText("No project")).toBeInTheDocument();
   });
 
-  it("does NOT render UNFILED row when no unfiled tasks", () => {
+  it("does NOT render No project row when no unfiled tasks", () => {
     const cleanTasks = tasks.filter(
       (t) => t.project === "alpha" || t.project === "beta",
     );
     wrap(
       <ScopeRail operations={operations} cycles={cycles} tasks={cleanTasks} />,
     );
-    expect(screen.queryByText("UNFILED")).not.toBeInTheDocument();
+    expect(screen.queryByText("No project")).not.toBeInTheDocument();
   });
 
   it("renders a real cycle with its code, window, state pip, and task count", () => {
@@ -105,7 +109,7 @@ describe("ScopeRail", () => {
     });
   });
 
-  it("renders backlog as unscheduled and counts only tasks without a cycle", () => {
+  it("renders canonical Backlog copy and counts only tasks without a Cycle", () => {
     const taskWithAnotherCycle = {
       ...tasks[0],
       id: "task-with-another-cycle",
@@ -118,17 +122,18 @@ describe("ScopeRail", () => {
         tasks={[...tasks, taskWithAnotherCycle]}
       />,
     );
-    const row = screen.getByText("BKLG").closest("button");
+    const row = screen.getByText("Backlog").closest("button");
 
     expect(row).not.toBeNull();
-    expect(within(row!).getByText("BKLG")).toBeInTheDocument();
-    expect(within(row!).getByText("unscheduled")).toBeInTheDocument();
+    expect(within(row!).getByText("Backlog")).toBeInTheDocument();
+    expect(within(row!).getByText("Tasks without a Cycle")).toBeInTheDocument();
+    expect(within(row!).queryByText(/unscheduled/i)).not.toBeInTheDocument();
     expect(within(row!).getByText("2")).toBeInTheDocument();
   });
 
-  it("renders the + NEW TASKING button", () => {
+  it("renders the + New task button", () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText(/NEW TASKING/)).toBeInTheDocument();
+    expect(screen.getByText(/New task/)).toBeInTheDocument();
   });
 
   it("collapse button sets railOpen to false", async () => {
@@ -138,10 +143,10 @@ describe("ScopeRail", () => {
     expect(useBoardStore.getState().railOpen).toBe(false);
   });
 
-  it("collapsed state renders SCOPE › popout button", () => {
+  it("collapsed state renders Scope › popout button", () => {
     useBoardStore.setState({ railOpen: false });
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    expect(screen.getByText(/SCOPE/)).toBeInTheDocument();
+    expect(screen.getByText(/Scope/)).toBeInTheDocument();
     expect(screen.getByTitle("Open scope rail")).toBeInTheDocument();
   });
 
@@ -160,18 +165,18 @@ describe("ScopeRail", () => {
     expect(useBoardStore.getState().opFilter).toBe("alpha");
   });
 
-  it("clicking ALL OPS sets opFilter to ALL", async () => {
+  it("clicking All projects sets opFilter to ALL", async () => {
     useBoardStore.setState({ opFilter: "alpha" });
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    const allOpsRow = screen.getByText("ALL OPS").closest("button")!;
-    await userEvent.click(allOpsRow);
+    const allProjectsRow = screen.getByText("All projects").closest("button")!;
+    await userEvent.click(allProjectsRow);
     expect(useBoardStore.getState().opFilter).toBe("ALL");
   });
 
-  it("clicking UNFILED sets opFilter to UNFILED", async () => {
+  it("clicking No project sets opFilter to UNFILED", async () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    const unfiledRow = screen.getByText("UNFILED").closest("button")!;
-    await userEvent.click(unfiledRow);
+    const noProjectRow = screen.getByText("No project").closest("button")!;
+    await userEvent.click(noProjectRow);
     expect(useBoardStore.getState().opFilter).toBe("UNFILED");
   });
 
@@ -184,10 +189,10 @@ describe("ScopeRail", () => {
     expect(state.mode).toBe("cycle");
   });
 
-  it("clicking BKLG sets cycleSel=BACKLOG and mode=cycle", async () => {
+  it("clicking Backlog sets cycleSel=BACKLOG and mode=cycle", async () => {
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    const bklgRow = screen.getByText("BKLG").closest("button")!;
-    await userEvent.click(bklgRow);
+    const backlogRow = screen.getByText("Backlog").closest("button")!;
+    await userEvent.click(backlogRow);
     const state = useBoardStore.getState();
     expect(state.cycleSel).toBe("BACKLOG");
     expect(state.mode).toBe("cycle");
@@ -204,23 +209,23 @@ describe("ScopeRail", () => {
   it("applies active classes to the selected backlog row", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "BACKLOG" });
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    const row = screen.getByText("BKLG").closest("button");
+    const row = screen.getByText("Backlog").closest("button");
 
     expect(row).toHaveClass("border-l-[var(--hot)]", "bg-[var(--paper)]");
   });
 
-  it("+ NEW TASKING opens taskModal with no project when ALL", async () => {
+  it("+ New task opens taskModal with no project when ALL", async () => {
     useBoardStore.setState({ opFilter: "ALL" });
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    const btn = screen.getByText(/NEW TASKING/);
+    const btn = screen.getByText(/New task/);
     await userEvent.click(btn);
     expect(useBoardStore.getState().taskModal).toEqual({});
   });
 
-  it("+ NEW TASKING opens taskModal with project preset when op is selected", async () => {
+  it("+ New task opens taskModal with project preset when op is selected", async () => {
     useBoardStore.setState({ opFilter: "alpha" });
     wrap(<ScopeRail operations={operations} cycles={cycles} tasks={tasks} />);
-    const btn = screen.getByText(/NEW TASKING/);
+    const btn = screen.getByText(/New task/);
     await userEvent.click(btn);
     expect(useBoardStore.getState().taskModal).toEqual({ project: "alpha" });
   });
@@ -256,12 +261,12 @@ describe("ScopeRail — op with null project", () => {
     expect(row.className).toContain("border-l-[var(--hot)]");
   });
 
-  it("+ NEW TASKING omits the project preset (a code is not a project)", async () => {
+  it("+ New task omits the project preset (a code is not a project)", async () => {
     useBoardStore.setState({ opFilter: "OPS-3" });
     wrap(
       <ScopeRail operations={opsWithNoSlug} cycles={cycles} tasks={tasks} />,
     );
-    const btn = screen.getByText(/NEW TASKING/);
+    const btn = screen.getByText(/New task/);
     await userEvent.click(btn);
     expect(useBoardStore.getState().taskModal).toEqual({});
   });

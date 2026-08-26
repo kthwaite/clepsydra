@@ -167,7 +167,7 @@ export function TimelineView({
         className="cl-mono flex h-full items-center justify-center text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]"
         data-testid="tl-empty"
       >
-        — NOTHING SCHEDULED —
+        No scheduled tasks
       </div>
     );
   }
@@ -192,7 +192,7 @@ export function TimelineView({
       <div className="sticky top-0 z-[2] grid grid-cols-[240px_1fr] border-b border-[var(--rule)] bg-[var(--bg-2)]">
         <div className="flex items-center border-r border-[var(--rule)] px-[var(--pad)]">
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-3)]">
-            OPERATION / TASK
+            Project / Task
           </span>
         </div>
         <div className="relative h-[34px] overflow-hidden">
@@ -239,10 +239,10 @@ export function TimelineView({
               <div className="flex items-center gap-[8px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad)] py-[6px]">
                 <HealthDot health={g.op ? g.op.health : "NONE"} />
                 <span className="cl-mono text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
-                  {g.op ? g.op.code : "UNFILED"}
+                  {g.op ? g.op.code : "No project"}
                 </span>
                 <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.06em] text-[var(--ink-3)]">
-                  {g.op ? g.op.name : "UNFILED TASKS"}
+                  {g.op ? g.op.name : "Tasks with no project"}
                 </span>
               </div>
 
@@ -328,10 +328,10 @@ export function TimelineView({
           data-testid="tl-foot"
         >
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-2)]">
-            {pad2(unscheduled)} UNSCHEDULED
+            {pad2(unscheduled)} WITHOUT DUE DATE
           </span>
           <span className="cl-mono text-[var(--fs-xs)] text-[var(--ink-4)]">
-            — no due date · held in backlog / intake
+            No due date · in Backlog or Inbox
           </span>
         </div>
       )}

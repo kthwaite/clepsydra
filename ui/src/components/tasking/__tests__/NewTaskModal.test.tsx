@@ -13,15 +13,19 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
+import { COL_LABEL, type ColLabelFn } from "../board-constants";
 import { NewTaskModal } from "../NewTaskModal";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
-  FIXTURE_COL_LABEL,
   NO_SLUG_OP,
 } from "./fixtures";
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
+
 const { operations, cycles } = BOARD_FIXTURE;
+const NEUTRAL_COL_LABEL: ColLabelFn = (id) => COL_LABEL[id] ?? id;
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -40,7 +44,7 @@ function wrap(
   return render(
     <QueryClientProvider client={qc}>
       <NewTaskModal
-        colLabel={FIXTURE_COL_LABEL}
+        colLabel={NEUTRAL_COL_LABEL}
         operations={operations}
         cycles={cycles}
       />
@@ -87,6 +91,7 @@ beforeEach(() => {
     taskModal: null,
     cycleModal: null,
   });
+  toastError.mockReset();
 });
 
 afterEach(() => {
@@ -107,7 +112,7 @@ describe("NewTaskModal — render", () => {
     render(
       <QueryClientProvider client={qc}>
         <NewTaskModal
-          colLabel={FIXTURE_COL_LABEL}
+          colLabel={NEUTRAL_COL_LABEL}
           operations={operations}
           cycles={cycles}
         />
@@ -116,32 +121,64 @@ describe("NewTaskModal — render", () => {
     expect(screen.queryByTestId("new-task-modal")).not.toBeInTheDocument();
   });
 
-  it("renders the modal when taskModal is set", () => {
+  it("uses the approved task dialog and project context language", () => {
     wrap();
-    expect(screen.getByTestId("new-task-modal")).toBeInTheDocument();
-    expect(screen.getByText("NEW TASKING")).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New task" })).toBeInTheDocument();
+    expect(screen.getByText("New task")).toBeInTheDocument();
+    expect(screen.getByText(/No project · Create task/)).toBeInTheDocument();
   });
 
-  it("shows UNFILED in the sub-header when no project preset", () => {
-    wrap();
-    expect(
-      screen.getByText(/UNFILED · COMMIT TO REGISTER/),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the operation code in the sub-header when project preset matches an op", () => {
+  it("shows the project code in the sub-header when a project preset matches", () => {
     wrap(undefined, { project: "alpha" });
-    // OPS-1 has project "alpha"
-    expect(screen.getByText(/OPS-1 · COMMIT TO REGISTER/)).toBeInTheDocument();
+    expect(screen.getByText(/OPS-1 · Create task/)).toBeInTheDocument();
   });
 
-  it("presets the DISPOSITION radio to the given status", () => {
+  it("exposes approved field names, choices, and placeholders", async () => {
+    wrap();
+
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveAttribute(
+      "placeholder",
+      "What needs to be done…",
+    );
+    expect(
+      screen.getByRole("textbox", { name: "Description" }),
+    ).toHaveAttribute(
+      "placeholder",
+      "What the task is and why it matters…",
+    );
+    expect(screen.getByRole("radiogroup", { name: "Status" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radiogroup", { name: "Priority" }),
+    ).toBeInTheDocument();
+    for (const name of [
+      "Assignee",
+      "Estimate",
+      "Start date",
+      "Due date",
+      "Tags",
+      "Checklist",
+      "Related page",
+    ]) {
+      expect(screen.getByLabelText(name)).toBeInTheDocument();
+    }
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Project$/ }));
+    expect(
+      screen.getByRole("option", { name: "No project" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /Cycle$/ }));
+    expect(screen.getByRole("option", { name: "Backlog" })).toBeInTheDocument();
+  });
+
+  it("presets the Status radio to the given status", () => {
     wrap(undefined, { status: "FIELD" });
-    const disposition = screen.getByRole("radiogroup", {
-      name: "Disposition",
+    const status = screen.getByRole("radiogroup", {
+      name: "Status",
     });
-    const fieldRadio = within(disposition).getByRole("radio", {
-      name: /in-field/i,
+    const fieldRadio = within(status).getByRole("radio", {
+      name: "In Progress",
     });
     expect(fieldRadio).toBeChecked();
     const fieldLabel = fieldRadio.closest("label");
@@ -162,7 +199,7 @@ describe("NewTaskModal — render", () => {
     expect(fieldLabel?.className).toContain("bg-[var(--ink)]");
   });
 
-  it("defaults DISPOSITION to INTAKE when no status preset", () => {
+  it("defaults Status to Inbox when no status preset", () => {
     wrap();
     const intakeRadio = screen.getByTestId("new-task-status-INTAKE");
     expect(intakeRadio.closest("label")?.className).toContain(
@@ -173,14 +210,14 @@ describe("NewTaskModal — render", () => {
   it("presets CYCLE select to preset cycle code", () => {
     wrap(undefined, { cycle: "C-01" });
     expect(screen.getByRole("button", { name: /Cycle/ })).toHaveTextContent(
-      "C-01 · Cycle 01 (ACTIVE)",
+      "C-01 · Cycle 01 (Active)",
     );
   });
 
-  it("defaults CYCLE to BACKLOG when no cycle preset", () => {
+  it("defaults Cycle to Backlog when no cycle preset", () => {
     wrap();
-    expect(screen.getByRole("button", { name: /Cycle/ })).toHaveTextContent(
-      "BACKLOG / UNSCHEDULED",
+    expect(screen.getByRole("button", { name: /Cycle$/ })).toHaveTextContent(
+      "Backlog",
     );
   });
 
@@ -190,7 +227,7 @@ describe("NewTaskModal — render", () => {
       expect(screen.getByTestId("new-task-title")).toHaveFocus(),
     );
     const priority = screen.getByRole("radiogroup", { name: "Priority" });
-    const p2 = within(priority).getByRole("radio", { name: "P2" });
+    const p2 = within(priority).getByRole("radio", { name: "P2 Medium" });
     expect(p2).toBeChecked();
     const p2Label = p2.closest("label");
     // Active state: has cool background
@@ -212,13 +249,15 @@ describe("NewTaskModal — render", () => {
     p2.focus();
     expect(p2).toHaveFocus();
     await user.keyboard("{ArrowLeft}");
-    expect(within(priority).getByRole("radio", { name: "P1" })).toBeChecked();
+    expect(
+      within(priority).getByRole("radio", { name: "P1 High" }),
+    ).toBeChecked();
   });
 
-  it("lists all operations in the OPERATION select", async () => {
+  it("lists all projects in the Project select", async () => {
     wrap();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /Operation/ }));
+    await user.click(screen.getByRole("button", { name: /Project$/ }));
     expect(
       screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
     ).toBeInTheDocument();
@@ -227,15 +266,15 @@ describe("NewTaskModal — render", () => {
     ).toBeInTheDocument();
   });
 
-  it("lists all cycles in the CYCLE select", async () => {
+  it("lists cycles with neutral state labels while retaining code values", async () => {
     wrap();
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /Cycle/ }));
+    await user.click(screen.getByRole("button", { name: /Cycle$/ }));
     expect(
-      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (Active)" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "C-02 · Cycle 02 (PLANNED)" }),
+      screen.getByRole("option", { name: "C-02 · Cycle 02 (Planned)" }),
     ).toBeInTheDocument();
   });
 
@@ -247,19 +286,19 @@ describe("NewTaskModal — render", () => {
     render(
       <QueryClientProvider client={qc}>
         <NewTaskModal
-          colLabel={FIXTURE_COL_LABEL}
+          colLabel={NEUTRAL_COL_LABEL}
           operations={BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations}
           cycles={BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles}
         />
       </QueryClientProvider>,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /Cycle/ }));
+    await user.click(screen.getByRole("button", { name: /Cycle$/ }));
     expect(
-      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (Active)" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "C-02 · Cycle 02 (PLANNED)" }),
+      screen.getByRole("option", { name: "C-02 · Cycle 02 (Planned)" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("option", { name: /C-00/ }),
@@ -286,14 +325,14 @@ describe("NewTaskModal — render", () => {
     render(
       <QueryClientProvider client={qc}>
         <NewTaskModal
-          colLabel={FIXTURE_COL_LABEL}
+          colLabel={NEUTRAL_COL_LABEL}
           operations={[...operations, NO_SLUG_OP]}
           cycles={cycles}
         />
       </QueryClientProvider>,
     );
     const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /Operation/ }));
+    await user.click(screen.getByRole("button", { name: /Project$/ }));
     expect(
       screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
     ).toBeInTheDocument();
@@ -319,21 +358,19 @@ describe("NewTaskModal — submit payload", () => {
     await user.type(screen.getByTestId("new-task-title"), "My Task");
 
     // Select operation "alpha" (OPS-1)
-    await user.click(screen.getByRole("button", { name: /Operation/ }));
+    await user.click(screen.getByRole("button", { name: /Project$/ }));
     await user.click(
       screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
     );
 
-    await user.click(screen.getByRole("button", { name: /Cycle/ }));
+    await user.click(screen.getByRole("button", { name: /Cycle$/ }));
     await user.click(
-      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (Active)" }),
     );
 
-    // Set status to FIELD
-    await user.click(screen.getByTestId("new-task-status-FIELD"));
-
-    // Set priority to P1
-    await user.click(screen.getByTestId("new-task-priority-P1"));
+    // Rendered status and priority labels still submit raw IDs.
+    await user.click(screen.getByRole("radio", { name: "In Progress" }));
+    await user.click(screen.getByRole("radio", { name: "P1 High" }));
 
     // Fill text fields
     await user.type(screen.getByTestId("new-task-assignee"), "Kit");
@@ -454,16 +491,15 @@ describe("NewTaskModal — submit payload", () => {
     });
   });
 
-  it("sends project as null when UNFILED is selected", async () => {
+  it("sends project as null when No project is selected", async () => {
     const stub = makeCreateStub();
     wrap(stub);
 
-    // Add a title so commit is enabled
+    // Add a title so the action is enabled
     await userEvent.type(screen.getByTestId("new-task-title"), "Test Task");
 
-    // Select UNFILED (default empty)
-    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
-    await userEvent.click(screen.getByRole("option", { name: "UNFILED / NONE" }));
+    await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
+    await userEvent.click(screen.getByRole("option", { name: "No project" }));
     await userEvent.click(screen.getByTestId("new-task-commit"));
 
     await waitFor(() => {
@@ -503,6 +539,50 @@ describe("NewTaskModal — submit payload", () => {
       expect(body.link).toBeNull();
       expect(body.checklist).toBeNull();
     });
+  });
+});
+
+describe("NewTaskModal — action feedback", () => {
+  it("shows Create task and Cancel actions", () => {
+    wrap();
+    expect(
+      screen.getByRole("button", { name: "Create task" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("shows Creating… while the POST is pending", async () => {
+    const pending = new Promise<Response>(() => undefined);
+    const stub = vi.fn((_url: string, opts?: RequestInit) => {
+      if (opts?.method === "POST") return pending;
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(BOARD_FIXTURE),
+      } as Response);
+    });
+    wrap(stub);
+    await userEvent.type(screen.getByLabelText("Title"), "Pending task");
+    await userEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Creating…" }),
+      ).toBeDisabled(),
+    );
+  });
+
+  it("reports a create failure with action-specific feedback", async () => {
+    const stub = vi.fn((_url: string, opts?: RequestInit) =>
+      Promise.resolve({
+        ok: opts?.method !== "POST",
+        json: () => Promise.resolve(BOARD_FIXTURE),
+      } as Response),
+    );
+    wrap(stub);
+    await userEvent.type(screen.getByLabelText("Title"), "Failed task");
+    await userEvent.click(screen.getByRole("button", { name: "Create task" }));
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Couldn’t create task"),
+    );
   });
 });
 

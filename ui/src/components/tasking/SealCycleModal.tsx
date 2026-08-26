@@ -62,11 +62,13 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
   );
 
   const carryOpts: { v: CarryChoice; label: string }[] = [
-    { v: "BACKLOG", label: "→ BACKLOG" },
+    { v: "BACKLOG", label: "Move to Backlog" },
     ...(nextPlanned
-      ? [{ v: nextPlanned.code as CarryChoice, label: `→ ${nextPlanned.code}` }]
+      ? [
+          { v: nextPlanned.code as CarryChoice, label: `Move to ${nextPlanned.code}` },
+        ]
       : []),
-    { v: "LEAVE", label: "LEAVE IN CYCLE" },
+    { v: "LEAVE", label: "Keep in this cycle" },
   ];
 
   const windowLabel = fmtCycleWindow(cycle.start, cycle.end);
@@ -92,7 +94,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
 
   return (
     <BoardModalFrame
-      ariaLabel="Seal Cycle"
+      ariaLabel="Close cycle"
       widthClassName={BOARD_MODAL_WIDTHS.confirm}
       backdropTestId="seal-cycle-modal-backdrop"
       modalTestId="seal-cycle-modal"
@@ -104,7 +106,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
           ■
         </span>
         <span className="cl-display text-[14px] font-extrabold uppercase tracking-[0.06em] text-[var(--ink)]">
-          SEAL CYCLE
+          Close cycle
         </span>
         <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
           {cycle.code} · {windowLabel}
@@ -125,24 +127,24 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
         {/* Stats row */}
         <div className="flex gap-[20px]" data-testid="seal-cycle-stats">
           <CycleMetric
-            label="COMMITTED"
+            label="Tasks"
             value={committed}
             testId="seal-cycle-committed"
           />
           <CycleMetric
-            label="SEALED"
+            label="Done"
             value={sealed}
             color="var(--cool)"
             testId="seal-cycle-sealed"
           />
           <CycleMetric
-            label="CARRYOVER"
+            label="Incomplete tasks"
             value={carryover}
             color={carryover > 0 ? "var(--hot)" : undefined}
             testId="seal-cycle-carryover"
           />
           <CycleMetric
-            label="RATE"
+            label="Completion"
             value={`${pct}%`}
             testId="seal-cycle-rate"
           />
@@ -162,10 +164,14 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
         {/* Carryover routing OR clean-close callout */}
         {carryover > 0 ? (
           <EdField
-            label="UNSEALED CARRYOVER"
+            label="Incomplete tasks"
             hint={`${carryover} task${carryover === 1 ? "" : "s"}`}
           >
-            <div className="flex gap-[6px]" data-testid="seal-cycle-carry-opts">
+            <fieldset
+              className="flex gap-[6px]"
+              aria-label="Incomplete tasks"
+              data-testid="seal-cycle-carry-opts"
+            >
               {carryOpts.map((o) => (
                 <button
                   key={o.v}
@@ -177,7 +183,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
                   {o.label}
                 </button>
               ))}
-            </div>
+            </fieldset>
           </EdField>
         ) : (
           <div
@@ -186,7 +192,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
           >
             <div className="w-[3px] flex-shrink-0 bg-[var(--cool)]" />
             <div className="cl-mono text-[var(--fs-s)] leading-snug text-[var(--ink-2)]">
-              All committed tasking is SEALED. Clean close.
+              All tasks are done. This cycle is ready to close.
             </div>
           </div>
         )}
@@ -195,7 +201,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
         <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
-          {cycle.code} → <b>CLOSED</b>
+          {cycle.code} → Closed
         </div>
         <div className="flex gap-[8px]">
           <button
@@ -213,7 +219,7 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
             disabled={patch.isPending}
             data-testid="seal-cycle-commit"
           >
-            {patch.isPending ? "SEALING…" : "■ SEAL CYCLE"}
+            {patch.isPending ? "Closing…" : "Close cycle"}
           </button>
         </div>
       </div>

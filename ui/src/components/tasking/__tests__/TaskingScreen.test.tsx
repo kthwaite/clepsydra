@@ -224,51 +224,83 @@ describe("TaskingScreen smoke", () => {
   it("renders the board shell when data loads successfully", async () => {
     stubBoardFetch();
     renderScreen();
-    expect(await screen.findByText("TASKING BOARD")).toBeInTheDocument();
-    expect(screen.getByText("SCOPE")).toBeInTheDocument();
+    expect(await screen.findByText("Task Board")).toBeInTheDocument();
+    expect(screen.getByText("Scope")).toBeInTheDocument();
   });
 
-  it("renders all mode buttons after load", async () => {
+  it("renders neutral mode labels after load", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
-    expect(screen.getByRole("tab", { name: /CARD/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /BACKLOG/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /CYCLE/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /TIMELINE/ })).toBeInTheDocument();
+    await screen.findByText("Task Board");
+    expect(screen.getByRole("tab", { name: "Board" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "List" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Cycles" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Timeline" })).toBeInTheDocument();
   });
 
   it("renders ALL OPS rail row after load", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
-    expect(screen.getByText("ALL OPS")).toBeInTheDocument();
+    await screen.findByText("Task Board");
+    expect(screen.getByText("All projects")).toBeInTheDocument();
   });
 
-  it("shows kanban columns in card mode (default)", async () => {
+  it("shows fixed human-facing status labels in board mode", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
-    // KanbanView renders column labels from board.columns
-    expect(screen.getByTestId("kb-col-INTAKE")).toBeInTheDocument();
-    expect(screen.getByTestId("kb-col-FIELD")).toBeInTheDocument();
-    expect(screen.getByTestId("kb-col-SEALED")).toBeInTheDocument();
+    await screen.findByText("Task Board");
+
+    for (const [id, label] of [
+      ["INTAKE", "Inbox"],
+      ["TRIAGE", "Ready"],
+      ["FIELD", "In Progress"],
+      ["REVIEW", "Review"],
+      ["SEALED", "Done"],
+    ]) {
+      expect(
+        within(screen.getByTestId(`kb-col-${id}`)).getByText(label),
+      ).toBeInTheDocument();
+    }
   });
 
   it("shows the backlog register in backlog mode (not the placeholder)", async () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
     // BacklogView's header row is mounted
-    expect(screen.getByText("FILE-ID")).toBeInTheDocument();
+    expect(screen.getByText("ID")).toBeInTheDocument();
     expect(screen.queryByText(/COMING SOON/)).not.toBeInTheDocument();
+  });
+
+  it("shows neutral priority descriptions in list mode", async () => {
+    const priorityFixture: BoardResponse = {
+      ...BOARD_FIXTURE,
+      tasks: [
+        ...BOARD_FIXTURE.tasks,
+        {
+          ...BOARD_FIXTURE.tasks[0],
+          id: "priority-p0",
+          code: "TSK-P0",
+          title: "Critical task",
+          priority: "P0",
+        },
+      ],
+    };
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch(priorityFixture);
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    for (const label of ["Critical", "High", "Medium", "Low"]) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
   });
 
   it("op with null project: clicking its row highlights it, shows op-meta, zero tasks", async () => {
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     const row = screen.getByText("OPS-3").closest("button")!;
     await userEvent.click(row);
@@ -282,7 +314,7 @@ describe("TaskingScreen smoke", () => {
     expect(screen.getByText("Riva")).toBeInTheDocument();
 
     // no task carries the op code as a project → zero visible tasks
-    const openLabel = screen.getByText("OPEN");
+    const openLabel = screen.getByText("Open");
     const openStat = openLabel.parentElement!.querySelector("span:last-child");
     expect(openStat?.textContent).toBe("00");
   });
@@ -295,7 +327,7 @@ describe("TaskingScreen — kanban column + project preset", () => {
     useBoardStore.setState({ opFilter: "alpha" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     await userEvent.click(screen.getByTestId("kb-add-FIELD"));
     expect(useBoardStore.getState().taskModal).toEqual({
@@ -307,7 +339,7 @@ describe("TaskingScreen — kanban column + project preset", () => {
   it("ALL ops: + presets status only, no project key", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     await userEvent.click(screen.getByTestId("kb-add-FIELD"));
     const modal = useBoardStore.getState().taskModal;
@@ -319,7 +351,7 @@ describe("TaskingScreen — kanban column + project preset", () => {
     useBoardStore.setState({ opFilter: "OPS-3" });
     stubBoardFetch(BOARD_FIXTURE_WITH_NO_SLUG_OP);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     await userEvent.click(screen.getByTestId("kb-add-FIELD"));
     const modal = useBoardStore.getState().taskModal;
@@ -334,20 +366,20 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("mounts NewTaskModal when taskModal is non-null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     useBoardStore.setState({ taskModal: { status: "INTAKE" } });
 
     // The modal should appear and contain the title text
     const modal = await screen.findByTestId("new-task-modal");
     expect(modal).toBeInTheDocument();
-    expect(modal).toHaveTextContent("NEW TASKING");
+    expect(modal).toHaveTextContent("New task");
   });
 
   it("does not mount NewTaskModal when taskModal is null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     expect(screen.queryByTestId("new-task-modal")).not.toBeInTheDocument();
   });
@@ -355,7 +387,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("mounts TaskEditPanel when editTaskId matches a task in board data", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     // t1 exists in BOARD_FIXTURE
     useBoardStore.setState({ editTaskId: "t1" });
@@ -368,7 +400,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("does not mount TaskEditPanel when editTaskId is null", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     expect(screen.queryByTestId("edit-panel")).not.toBeInTheDocument();
   });
@@ -376,7 +408,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
   it("does not mount TaskEditPanel when editTaskId does not match any task", async () => {
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     useBoardStore.setState({ editTaskId: "ghost-task" });
 
@@ -405,7 +437,7 @@ describe("TaskingScreen — NewTaskModal + TaskEditPanel integration", () => {
     vi.stubGlobal("fetch", stub);
 
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     act(() => useBoardStore.setState({ editTaskId: "t1" }));
     await screen.findByTestId("edit-panel");
@@ -460,7 +492,7 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     const onOpenDossier = vi.fn();
     stubBoardFetch();
     renderScreenWithProps(onOpenPage, onOpenDossier);
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     // Open the edit panel for t1
     useBoardStore.setState({ editTaskId: "t1" });
@@ -491,7 +523,7 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     const onOpenPage = vi.fn();
     const onOpenDossier = vi.fn();
     renderScreenWithProps(onOpenPage, onOpenDossier);
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     useBoardStore.setState({ editTaskId: "t1" });
     await screen.findByTestId("edit-panel");
@@ -506,7 +538,7 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
     const onOpenDossier = vi.fn();
     stubBoardFetch();
     renderScreenWithProps(onOpenPage, onOpenDossier);
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     // Select OPS-1 via its ScopeRail row → the op-meta line renders
     await userEvent.click(screen.getByText("OPS-1").closest("button")!);
@@ -522,10 +554,77 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
 // ── filter strip: shared FilterBar composition ────────────────────────────────
 
 describe("TaskingScreen — shared FilterBar composition", () => {
+  it("offers neutral filter labels", async () => {
+    stubBoardFetch();
+    renderScreenWithFilter();
+    await screen.findByText("Task Board");
+
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+
+    for (const label of ["Project", "Tags", "Priority", "Status", "Blocked"]) {
+      expect(
+        screen.getByRole("button", { name: label }),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("renders priority filter labels while applying the raw priority id", async () => {
+    stubBoardFetch(FILTER_FIXTURE);
+    renderScreenWithFilter();
+    await screen.findByText("Task Board");
+
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-field-pri"));
+
+    for (const label of [
+      "P0 Critical",
+      "P1 High",
+      "P2 Medium",
+      "P3 Low",
+    ]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    await userEvent.click(
+      screen.getByRole("button", { name: "P0 Critical" }),
+    );
+
+    expect(screen.getByText("Alpha task")).toBeInTheDocument();
+    expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
+    expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-option-pri-P0")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
+  it("renders status filter labels while applying the raw status id", async () => {
+    stubBoardFetch();
+    renderScreenWithFilter();
+    await screen.findByText("Task Board");
+
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-field-status"));
+
+    for (const label of ["Inbox", "Ready", "In Progress", "Review", "Done"]) {
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+    }
+    await userEvent.click(
+      screen.getByRole("button", { name: "In Progress" }),
+    );
+
+    expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+    expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-option-status-FIELD")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+  });
+
   it("typing text filters visible cards and shows the N OF M count", async () => {
     stubBoardFetch(FILTER_FIXTURE);
     renderScreenWithFilter();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.getByText("Beta task")).toBeInTheDocument();
@@ -545,7 +644,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   it("adding a project facet chip narrows to that project's tasks", async () => {
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.getByText("Task Beta 1")).toBeInTheDocument();
@@ -571,7 +670,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   it("composes a project facet with the text filter", async () => {
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     await userEvent.click(screen.getByTestId("filter-bar-add"));
     await userEvent.click(screen.getByTestId("filter-bar-field-project"));
@@ -595,7 +694,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   it("clearing the filter restores all cards and hides the count line", async () => {
     stubBoardFetch(FILTER_FIXTURE);
     renderScreenWithFilter();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     await userEvent.type(screen.getByTestId("filter-bar-input"), "alpha");
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
@@ -612,7 +711,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     // t2 in BOARD_FIXTURE carries hold="blocker"
     stubBoardFetch();
     renderScreenWithFilter();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     await userEvent.click(screen.getByTestId("filter-bar-add"));
     await userEvent.click(screen.getByTestId("filter-bar-field-hold"));
@@ -628,10 +727,52 @@ describe("TaskingScreen — shared FilterBar composition", () => {
   });
 });
 
-// ── column labels sourced from the server ─────────────────────────────────────
+// ── fixed human-facing status labels ──────────────────────────────────────────
 
-describe("TaskingScreen — column labels come from the server", () => {
-  it("BACKLOG mode renders the server's FIELD column label, not a hardcoded one", async () => {
+describe("TaskingScreen — fixed human-facing status labels", () => {
+  it("projects neutral Board sublabels without leaking or mutating server copy", async () => {
+    const retired = ["unfiled", "staged", "active", "qa / seal", "closed"];
+    const relabeled: BoardResponse = {
+      ...BOARD_FIXTURE,
+      columns: [
+        ...BOARD_FIXTURE.columns.map((column, index) => ({
+          ...column,
+          sub: retired[index],
+        })),
+        {
+          id: "PAUSED",
+          label: "SERVER PAUSED",
+          sub: "server paused",
+          wip: 0,
+        },
+      ],
+    };
+    stubBoardFetch(relabeled);
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    for (const [id, sublabel, retiredSublabel] of [
+      ["INTAKE", "Unassessed", "unfiled"],
+      ["TRIAGE", "Ready to start", "staged"],
+      ["FIELD", "Being worked on", "active"],
+      ["REVIEW", "Awaiting review", "qa / seal"],
+      ["SEALED", "Completed", "closed"],
+    ]) {
+      const column = screen.getByTestId(`kb-col-${id}`);
+      expect(within(column).getByText(sublabel)).toBeInTheDocument();
+      expect(within(column).queryByText(retiredSublabel)).not.toBeInTheDocument();
+    }
+
+    const unknown = screen.getByTestId("kb-col-PAUSED");
+    expect(within(unknown).getAllByText("PAUSED")).toHaveLength(2);
+    expect(within(unknown).queryByText("SERVER PAUSED")).not.toBeInTheDocument();
+    expect(within(unknown).queryByText("server paused")).not.toBeInTheDocument();
+    expect(relabeled.columns.map((column) => column.sub)).toEqual([
+      ...retired,
+      "server paused",
+    ]);
+  });
+  it("keeps FIELD displayed as In Progress when the server sends DEPLOYED", async () => {
     const relabeled: BoardResponse = {
       ...BOARD_FIXTURE,
       columns: BOARD_FIXTURE.columns.map((c) =>
@@ -641,18 +782,14 @@ describe("TaskingScreen — column labels come from the server", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch(relabeled);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
-    // t1 is FIELD-status in BOARD_FIXTURE — its disposition cell must show
-    // the server-supplied label, not the old hardcoded "IN-FIELD". Scoped to
-    // the row itself: BoardHeader's unrelated "IN-FIELD" stat label is a
-    // separate, hardcoded metric name and out of scope here.
     const row = screen.getByTestId("bk-row-t1");
-    expect(within(row).getByText("DEPLOYED")).toBeInTheDocument();
-    expect(within(row).queryByText("IN-FIELD")).not.toBeInTheDocument();
+    expect(within(row).getByText("In Progress")).toBeInTheDocument();
+    expect(within(row).queryByText("DEPLOYED")).not.toBeInTheDocument();
   });
 
-  it("inline status popover on a backlog row shows the server's column label, not the raw id", async () => {
+  it("uses the fixed FIELD label in the inline status popover", async () => {
     const relabeled: BoardResponse = {
       ...BOARD_FIXTURE,
       columns: BOARD_FIXTURE.columns.map((c) =>
@@ -662,17 +799,14 @@ describe("TaskingScreen — column labels come from the server", () => {
     useBoardStore.setState({ mode: "backlog" });
     stubBoardFetch(relabeled);
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
-    // t1 is FIELD-status — open its inline status-edit popover chip
     await userEvent.click(screen.getByTestId("bk-inline-status-t1"));
 
-    // The testid is on the underlying <input>; its visible label text (the
-    // column-label span) is on the wrapping <label>.
     const fieldOption = screen.getByTestId("inline-status-FIELD");
     const fieldLabel = fieldOption.closest("label");
-    expect(fieldLabel).toHaveTextContent("DEPLOYED");
-    expect(fieldLabel).not.toHaveTextContent("FIELD");
+    expect(fieldLabel).toHaveTextContent("In Progress");
+    expect(fieldLabel).not.toHaveTextContent("DEPLOYED");
   });
 });
 
@@ -683,7 +817,7 @@ describe("TaskingScreen — stale opFilter self-heal", () => {
     useBoardStore.setState({ opFilter: "ghost-op" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
 
     // The effect resets the stale filter to ALL…
     await waitFor(() => expect(useBoardStore.getState().opFilter).toBe("ALL"));
@@ -696,7 +830,7 @@ describe("TaskingScreen — stale opFilter self-heal", () => {
     useBoardStore.setState({ opFilter: "UNFILED" });
     stubBoardFetch();
     renderScreen();
-    await screen.findByText("TASKING BOARD");
+    await screen.findByText("Task Board");
     expect(useBoardStore.getState().opFilter).toBe("UNFILED");
 
     act(() => useBoardStore.setState({ opFilter: "alpha" }));

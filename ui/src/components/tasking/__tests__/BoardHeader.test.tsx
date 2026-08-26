@@ -73,99 +73,112 @@ beforeEach(() => {
 describe("BoardHeader", () => {
   // ── title block ────────────────────────────────────────────────────────────
 
-  it("renders TASKING BOARD heading", () => {
+  it("renders the Task Board heading without register vocabulary", () => {
     renderHeader();
     expect(
-      screen.getByRole("heading", { name: /TASKING BOARD/i }),
+      screen.getByRole("heading", { name: "Task Board" }),
     ).toBeInTheDocument();
+    expect(screen.queryByText(/OPS REGISTER/)).not.toBeInTheDocument();
   });
 
-  it("renders OPS REGISTER label with correct counts", () => {
+  it("renders plural project and cycle counts", () => {
     renderHeader();
-    expect(screen.getByText(/2 OPERATIONS/)).toBeInTheDocument();
-    expect(screen.getByText(/2 CYCLES/)).toBeInTheDocument();
+    expect(screen.getByText("2 projects · 2 cycles")).toBeInTheDocument();
+  });
+
+  it("renders singular project and cycle counts", () => {
+    renderHeader({
+      operations: operations.slice(0, 1),
+      cycles: cycles.slice(0, 1),
+    });
+    expect(screen.getByText("1 project · 1 cycle")).toBeInTheDocument();
   });
 
   // ── stat computation ───────────────────────────────────────────────────────
 
-  it("computes OPEN count (non-SEALED tasks)", () => {
+  it("computes Open count (non-SEALED tasks)", () => {
     // tasks has 4 non-SEALED (t1 FIELD, t2 INTAKE, t3 TRIAGE, t4 INTAKE) + 1 SEALED (t5)
     renderHeader();
     // "04" = 4 open tasks
-    const openLabel = screen.getByText("OPEN");
+    const openLabel = screen.getByText("Open");
     const openStat = openLabel.parentElement!.querySelector("span:last-child");
     expect(openStat?.textContent).toBe("04");
   });
 
-  it("computes IN-FIELD count zero-padded", () => {
+  it("computes In progress count zero-padded", () => {
     // t1 has status=FIELD
     renderHeader();
-    const fieldLabel = screen.getByText("IN-FIELD");
+    const fieldLabel = screen.getByText("In progress");
     const fieldStat =
       fieldLabel.parentElement!.querySelector("span:last-child");
     expect(fieldStat?.textContent).toBe("01");
   });
 
-  it("computes ON HOLD count zero-padded", () => {
+  it("computes Blocked count zero-padded", () => {
     // t2 has hold='blocker'
     renderHeader();
-    const holdLabel = screen.getByText("ON HOLD");
+    const holdLabel = screen.getByText("Blocked");
     const holdStat = holdLabel.parentElement!.querySelector("span:last-child");
     expect(holdStat?.textContent).toBe("01");
   });
 
-  it("ON HOLD stat uses hot color when count > 0", () => {
+  it("Blocked stat uses hot color when count > 0", () => {
     renderHeader();
-    const holdLabel = screen.getByText("ON HOLD");
+    const holdLabel = screen.getByText("Blocked");
     const holdStat = holdLabel.parentElement!.querySelector(
       "span:last-child",
     ) as HTMLElement;
     expect(holdStat?.style.color).toBe("var(--hot)");
   });
 
-  it("ON HOLD stat uses ink color when count is 0", () => {
+  it("Blocked stat uses ink color when count is 0", () => {
     const noHoldTasks = tasks.filter((t) => !t.hold);
     renderHeader({
       tasks: noHoldTasks,
       filteredCount: noHoldTasks.length,
       opFilteredCount: noHoldTasks.length,
     });
-    const holdLabel = screen.getByText("ON HOLD");
+    const holdLabel = screen.getByText("Blocked");
     const holdStat = holdLabel.parentElement!.querySelector(
       "span:last-child",
     ) as HTMLElement;
     expect(holdStat?.style.color).toBe("var(--ink)");
   });
 
-  it("renders SEAL RATE 14d sparkline", () => {
+  it("renders Completed · 14 days sparkline", () => {
     renderHeader({ sealHistory: [0, 1, 2] });
-    expect(screen.getByText("SEAL RATE 14d")).toBeInTheDocument();
+    expect(screen.getByText("Completed · 14 days")).toBeInTheDocument();
     // SVG polyline is present
     expect(document.querySelector("polyline")).toBeInTheDocument();
+  });
+
+  it("renders No completed tasks when recent completion history is empty", () => {
+    renderHeader({ sealHistory: [0, 0, 0] });
+    expect(screen.getByText("No completed tasks")).toBeInTheDocument();
   });
 
   // ── mode toggles ───────────────────────────────────────────────────────────
 
   it("renders all 4 mode buttons", () => {
     renderHeader();
-    expect(screen.getByRole("tab", { name: /CARD/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /BACKLOG/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /CYCLE/ })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /TIMELINE/ })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Board" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "List" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Cycles" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Timeline" })).toBeInTheDocument();
   });
 
   it("clicking a mode button updates store mode", async () => {
     renderHeader();
-    const backlogBtn = screen.getByRole("tab", { name: /BACKLOG/ });
-    await userEvent.click(backlogBtn);
+    const listButton = screen.getByRole("tab", { name: "List" });
+    await userEvent.click(listButton);
     expect(useBoardStore.getState().mode).toBe("backlog");
   });
 
   it("active mode tab has aria-selected=true", () => {
     useBoardStore.setState({ mode: "backlog" });
     renderHeader();
-    const backlogBtn = screen.getByRole("tab", { name: /BACKLOG/ });
-    expect(backlogBtn).toHaveAttribute("aria-selected", "true");
+    const listButton = screen.getByRole("tab", { name: "List" });
+    expect(listButton).toHaveAttribute("aria-selected", "true");
   });
 
   // ── op-meta line ───────────────────────────────────────────────────────────
