@@ -35,7 +35,7 @@ This feature will not:
 
 ## Existing behavior
 
-`GET /api/vault/index/search` currently accepts `q` and `limit`. `Index::search` converts ordinary text into a safe FTS5 prefix expression, executes `pages_fts MATCH`, orders by FTS rank, and returns page ID, path, title, and an optional marked snippet.
+`GET /api/vault/index/search` currently accepts `q` and `limit`. `Index::search` converts ordinary text into a safe FTS5 prefix expression, executes `pages_fts MATCH`, orders by FTS rank, and returns page ID, path, title, and a marked snippet string.
 
 The command palette calls that endpoint through `useSearch`. The MCP `vault_search` tool forwards its `query` to the same endpoint. This existing shared path is the compatibility seam: structured behavior belongs before index execution, not in one client.
 
@@ -163,7 +163,7 @@ Each metadata leaf becomes an indexed predicate:
 
 Boolean nodes compile recursively to parenthesized `AND`, `OR`, and `NOT` expressions. Text leaves use FTS-backed page-ID predicates so text and metadata may appear in any boolean position. The compiler must preserve correctness for mixed expressions such as `(tag:beer | tasting) -project:archive`; it must not pre-limit one branch.
 
-For each result, the query also determines whether a positive, non-negated text leaf matched. When at least one does, ranking and snippet selection use the best matching positive text leaf. A metadata-only match or a result admitted solely by a metadata branch has no snippet.
+For each result, the query also determines whether a positive, non-negated text leaf matched. When at least one does, ranking and snippet selection use the best matching positive text leaf. To preserve the existing response shape, a metadata-only match or a result admitted solely by a metadata branch returns an empty snippet string rather than a fabricated excerpt.
 
 Ordering is deterministic:
 
@@ -278,7 +278,7 @@ Index tests use real indexed pages and cover:
 - FTS rank within text results;
 - updated-time ordering for metadata-only results;
 - deterministic tie-breakers;
-- snippet presence only for positive text matches;
+- non-empty snippets only for positive text matches;
 - result limits applied after the full expression.
 
 ### Boundary tests
