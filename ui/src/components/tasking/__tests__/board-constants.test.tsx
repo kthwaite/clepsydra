@@ -9,6 +9,7 @@ import {
   MODES,
   PRI_LABEL,
   PRI_ORDER,
+  taskStatusLabel,
 } from "../board-constants";
 import { DispositionRow, PriorityRow } from "../fields";
 
@@ -94,6 +95,12 @@ describe("Task Board display vocabulary", () => {
   it("uses neutral copy for an undated Cycle window", () => {
     expect(fmtCycleWindow(null, null)).toBe("No dates");
   });
+  it("maps Task status ids to display labels and falls back to the raw id", () => {
+    expect(taskStatusLabel("INTAKE")).toBe("Inbox");
+    expect(taskStatusLabel("FIELD")).toBe("In Progress");
+    expect(taskStatusLabel("UNKNOWN")).toBe("UNKNOWN");
+  });
+
   it("maps cycle state ids to display labels and falls back to the raw id", () => {
     expect(
       ["PLANNED", "ACTIVE", "CLOSED", "BACKLOG", "PAUSED"].map((state) => [

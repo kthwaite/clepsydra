@@ -97,6 +97,11 @@ export const PRI_COLOR: Record<string, { bar: string; text: string }> = {
 export function priColor(pri: string): { bar: string; text: string } {
   return PRI_COLOR[pri] ?? { bar: "var(--ink-3)", text: "var(--ink-mute)" };
 }
+/** Resolves a persisted Task status id to its fixed display label. */
+export function taskStatusLabel(status: string): string {
+  return COL_LABEL[status] ?? status;
+}
+
 
 /** Resolves a persisted board status id to its fixed display label. */
 export type ColLabelFn = (id: string) => string;

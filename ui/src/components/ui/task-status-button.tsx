@@ -44,7 +44,7 @@ export function TaskStatusButton({
       type="button"
       onClick={onToggle}
       disabled={isDisabled}
-      aria-label={`Mark task ${next}`}
+      aria-label={`Mark Todo ${next}`}
       className={cn(
         "mt-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center border border-border text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-50",
         className,
