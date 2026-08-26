@@ -320,9 +320,10 @@ export function useBaseTableController(
         : undefined,
     [memberCreationSource],
   );
-  const memberCapability =
-    memberCreationSession?.capability ??
-    (mode === "embedded"
+  const memberCapability = memberCreationSession?.capability;
+  const retainedDraftCapability =
+    memberCapability ??
+    (memberState.draftOpen && mode === "embedded"
       ? predicateEmbeddedSuccess?.member_creation
       : undefined);
   const activeViewDefinition = useMemo(
@@ -335,10 +336,14 @@ export function useBaseTableController(
   );
   const memberDraftFields = useMemo(
     () =>
-      detail.data && activeView && memberCapability
-        ? composeMemberDraftFields(detail.data, activeView, memberCapability)
+      detail.data && activeView && retainedDraftCapability
+        ? composeMemberDraftFields(
+            detail.data,
+            activeView,
+            retainedDraftCapability,
+          )
         : [],
-    [activeView, detail.data, memberCapability],
+    [activeView, detail.data, retainedDraftCapability],
   );
 
   const operationIsCurrent = useCallback(
@@ -481,10 +486,11 @@ export function useBaseTableController(
             }),
           refreshAfterConflict: async () => {
             if (mode === "embedded") {
-              await refetchCurrentEmbeddedQuery(
+              const refresh = await refetchCurrentEmbeddedQuery(
                 operation,
                 operationGeneration,
               );
+              if (refresh?.refreshed.error) throw refresh.refreshed.error;
             } else {
               const refreshed = await detailRefetch();
               if (refreshed.error) throw refreshed.error;

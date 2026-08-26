@@ -300,16 +300,58 @@ describe("useBaseTableController embedded mode", () => {
         error: { error: "evaluation failed" },
       },
     },
-  ])("does not submit while the evaluation is $label", async ({ state }) => {
+  ])(
+    "does not expose or submit member creation while the evaluation is $label",
+    async ({ state }) => {
+      Object.assign(mocks.evaluationState, state);
+      const { result } = renderHook(() => useBaseTableController(options()));
+
+      expect(result.current.memberCapability).toBeUndefined();
+      act(() => result.current.onAddMember());
+      expect(result.current.memberDraftOpen).toBe(false);
+
+      await act(async () => {
+        result.current.onSaveMember({
+          title: "Not authoritative",
+          fields: {},
+        });
+        await Promise.resolve();
+      });
+
+      expect(mocks.createMember).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    {
+      label: "loading",
+      state: { isLoading: true, isFetching: false, error: null },
+    },
+    {
+      label: "fetching",
+      state: { isLoading: false, isFetching: true, error: null },
+    },
+    {
+      label: "failed",
+      state: {
+        isLoading: false,
+        isFetching: false,
+        error: { error: "evaluation failed" },
+      },
+    },
+  ])("renders unavailable Add actions while the evaluation is $label", ({ state }) => {
     Object.assign(mocks.evaluationState, state);
-    const { result } = renderHook(() => useBaseTableController(options()));
 
-    await act(async () => {
-      result.current.onSaveMember({ title: "Not authoritative", fields: {} });
-      await Promise.resolve();
-    });
+    render(<ControllerTable value={options()} />);
 
-    expect(mocks.createMember).not.toHaveBeenCalled();
+    const addActions = screen.getAllByRole("button", { name: /Add member/ });
+    expect(addActions.length).toBeGreaterThan(0);
+    for (const add of addActions) {
+      expect(add).toBeDisabled();
+      expect(add).toHaveAccessibleDescription(
+        "Member creation is unavailable for this view.",
+      );
+    }
   });
 
   it.each([
@@ -473,7 +515,7 @@ describe("useBaseTableController embedded mode", () => {
     },
   );
 
-  it("retains same-predicate draft state and capability while a new exact query is pending, but disables Save", async () => {
+  it("retains same-predicate open-draft fields while a new exact query is pending, but hides current capability and disables Save", async () => {
     const firstSort: SortKey[] = [{ field: "title", dir: "asc" }];
     const current = options();
     const { result, rerender } = renderHook(
@@ -482,6 +524,7 @@ describe("useBaseTableController embedded mode", () => {
     );
 
     act(() => result.current.onAddMember());
+    const retainedDraftFields = result.current.memberDraftFields;
     expect(result.current.memberDraftOpen).toBe(true);
     expect(result.current.memberSaving).toBe(false);
 
@@ -491,7 +534,8 @@ describe("useBaseTableController embedded mode", () => {
 
     expect(result.current.output).toBeUndefined();
     expect(result.current.memberDraftOpen).toBe(true);
-    expect(result.current.memberCapability?.enabled).toBe(true);
+    expect(result.current.memberCapability).toBeUndefined();
+    expect(result.current.memberDraftFields).toBe(retainedDraftFields);
     expect(result.current.memberSaving).toBe(true);
 
     mocks.evaluationState.data = evaluation({ revision: "evaluation-rev-2" });
@@ -651,9 +695,10 @@ describe("useBaseTableController embedded mode", () => {
       error: "revision conflict",
       detail: { code: "base_revision_conflict" },
     });
-    mocks.evaluationRefetch.mockRejectedValue(
-      new Error("evaluation refresh failed"),
-    );
+    mocks.evaluationRefetch.mockResolvedValue({
+      data: undefined,
+      error: new Error("evaluation refresh failed"),
+    });
     const { result } = renderHook(() => useBaseTableController(options()));
 
     act(() => result.current.onAddMember());
