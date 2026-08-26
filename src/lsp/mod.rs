@@ -305,6 +305,25 @@ impl LanguageServer for LspBackend {
         };
 
         let state = self.state()?;
+
+        if link.kind == crate::vault::link::LinkKind::BlockRef {
+            let content = match crate::lsp::queries::block_by_id(&state.index, &link.target_raw)
+                .await
+            {
+                Some(hit) => {
+                    crate::lsp::hover::format_hover_block(&link.target_raw, &hit.path, &hit.content)
+                }
+                None => crate::lsp::hover::format_hover_block_unresolved(&link.target_raw),
+            };
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: content,
+                }),
+                range: Some(range),
+            }));
+        }
+
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
         let path =
             crate::lsp::queries::canonical_to_vault_path(&state.index, canonical.as_str()).await;
@@ -2432,5 +2451,53 @@ mod tests {
             .trigger_characters
             .unwrap();
         assert!(triggers.contains(&"(".to_string()));
+    }
+
+    #[tokio::test]
+    async fn hover_on_block_ref_shows_block_content() {
+        let (backend, _tmp) = make_backend(&[
+            ("Ref.md", "# Ref\n\nA fact worth citing ^blk123XYZ99\n"),
+            ("Src.md", "# Src\n\nsee ((blk123XYZ99))\n"),
+        ]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\nsee ((blk123XYZ99))\n").await;
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 8,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+        let hover = backend.hover(params).await.unwrap().expect("hover content");
+        let HoverContents::Markup(m) = hover.contents else {
+            panic!("expected markup");
+        };
+        assert!(m.value.contains("A fact worth citing"));
+        assert!(m.value.contains("Ref.md"));
+    }
+
+    #[tokio::test]
+    async fn hover_on_unknown_block_ref_reports_unresolved() {
+        let (backend, _tmp) = make_backend(&[("Src.md", "# Src\n\nsee ((nope1234567))\n")]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\nsee ((nope1234567))\n").await;
+        let params = HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 8,
+                },
+            },
+            work_done_progress_params: Default::default(),
+        };
+        let hover = backend.hover(params).await.unwrap().expect("hover content");
+        let HoverContents::Markup(m) = hover.contents else {
+            panic!("expected markup");
+        };
+        assert!(m.value.contains("Unresolved block reference"));
     }
 }

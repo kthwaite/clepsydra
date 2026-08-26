@@ -16,6 +16,16 @@ pub fn format_hover_unresolved(target_raw: &str) -> String {
     format!("*Unresolved link:* `{target_raw}`")
 }
 
+/// Markdown shown when hovering a `((block-id))` that resolves.
+pub fn format_hover_block(block_id: &str, path: &str, content: &str) -> String {
+    format!("**Block `(({block_id}))`**\n`{path}`\n\n---\n\n{content}")
+}
+
+/// Markdown shown when hovering a `((block-id))` with no indexed block.
+pub fn format_hover_block_unresolved(block_id: &str) -> String {
+    format!("*Unresolved block reference:* `(({block_id}))`")
+}
+
 /// Returns the first `max_lines` lines of `body`, joined with `\n`.
 /// Callers are responsible for stripping any frontmatter before calling.
 pub fn extract_preview(body: &str, max_lines: usize) -> String {
@@ -64,5 +74,17 @@ mod tests {
     fn preview_fewer_lines_than_max() {
         let p = extract_preview("a\nb", 10);
         assert_eq!(p, "a\nb");
+    }
+
+    #[test]
+    fn block_hover_format_exact() {
+        let s = format_hover_block("blk123XYZ99", "Ref.md", "A fact");
+        assert_eq!(s, "**Block `((blk123XYZ99))`**\n`Ref.md`\n\n---\n\nA fact");
+    }
+
+    #[test]
+    fn block_hover_unresolved_format_exact() {
+        let s = format_hover_block_unresolved("nope123456");
+        assert_eq!(s, "*Unresolved block reference:* `((nope123456))`");
     }
 }
