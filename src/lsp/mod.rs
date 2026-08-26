@@ -99,7 +99,11 @@ impl LanguageServer for LspBackend {
                     },
                 )),
                 completion_provider: Some(CompletionOptions {
-                    trigger_characters: Some(vec!["[".to_string(), "#".to_string()]),
+                    trigger_characters: Some(vec![
+                        "[".to_string(),
+                        "#".to_string(),
+                        "(".to_string(),
+                    ]),
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -376,6 +380,11 @@ impl LanguageServer for LspBackend {
         // values (`series = ["[[…`) delegate to the same completer.
         if let Some(prefix) = completion::wikilink_prefix(&line_text, character) {
             let items = self.complete_wikilinks(&prefix).await?;
+            return Ok(Some(CompletionResponse::Array(items)));
+        }
+
+        if let Some(prefix) = completion::block_ref_prefix(&line_text, character) {
+            let items = self.complete_block_refs(&prefix).await?;
             return Ok(Some(CompletionResponse::Array(items)));
         }
 
@@ -1187,6 +1196,56 @@ impl LspBackend {
                     kind: Some(CompletionItemKind::REFERENCE),
                     detail: Some(path),
                     insert_text: Some(label),
+                    ..Default::default()
+                }
+            })
+            .collect())
+    }
+
+    /// Complete block references by substring-matching block content.
+    /// Newest blocks first (block IDs are time-sorted base62).
+    async fn complete_block_refs(&self, prefix: &str) -> Result<Vec<CompletionItem>> {
+        let prefix = prefix.to_string();
+        let results: Vec<(String, String, String)> = self
+            .state()?
+            .index
+            .with_index({
+                let prefix = prefix.clone();
+                move |index, _| -> std::result::Result<Vec<_>, rusqlite::Error> {
+                    let mut stmt = index.connection().prepare(
+                        "SELECT b.block_id, b.content, p.path \
+                         FROM blocks b JOIN pages p ON p.id = b.page_id \
+                         WHERE b.block_id IS NOT NULL \
+                           AND b.content LIKE '%' || ?1 || '%' \
+                         ORDER BY b.block_id DESC LIMIT 50",
+                    )?;
+                    let rows = stmt
+                        .query_map(rusqlite::params![prefix], |row| {
+                            Ok((
+                                row.get::<_, String>(0)?,
+                                row.get::<_, String>(1)?,
+                                row.get::<_, String>(2)?,
+                            ))
+                        })?
+                        .filter_map(|r| r.ok())
+                        .collect();
+                    Ok(rows)
+                }
+            })
+            .await
+            .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?
+            .unwrap_or_default();
+
+        Ok(results
+            .into_iter()
+            .map(|(block_id, content, path)| {
+                let first_line = content.lines().next().unwrap_or("");
+                let label: String = first_line.chars().take(60).collect();
+                CompletionItem {
+                    label,
+                    kind: Some(CompletionItemKind::REFERENCE),
+                    detail: Some(path),
+                    insert_text: Some(format!("{block_id}))")),
                     ..Default::default()
                 }
             })
@@ -2291,5 +2350,87 @@ mod tests {
         assert_eq!(moves.len(), 1);
         assert_eq!(moves[0].0.as_str(), "notes/20260807.a.abc123.md");
         assert_eq!(moves[0].1.as_str(), "projects/x/20260807.a.abc123.md");
+    }
+
+    #[tokio::test]
+    async fn completion_suggests_block_refs_by_content() {
+        let (backend, _tmp) = make_backend(&[
+            ("Ref.md", "# Ref\n\nA fact worth citing ^blk123XYZ99\n"),
+            ("Src.md", "# Src\n\n((fact\n"),
+        ]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\n((fact\n").await;
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 6,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+        let resp = backend.completion(params).await.unwrap();
+        let items = match resp {
+            Some(CompletionResponse::Array(v)) => v,
+            other => panic!("expected completions, got {other:?}"),
+        };
+        let item = items
+            .iter()
+            .find(|i| i.label.contains("A fact worth citing"))
+            .expect("block content offered");
+        assert_eq!(item.insert_text.as_deref(), Some("blk123XYZ99))"));
+        assert_eq!(item.detail.as_deref(), Some("Ref.md"));
+    }
+
+    #[tokio::test]
+    async fn completion_block_refs_no_match_returns_empty() {
+        let (backend, _tmp) = make_backend(&[
+            ("Ref.md", "# Ref\n\nA fact worth citing ^blk123XYZ99\n"),
+            ("Src.md", "# Src\n\n((zzzz\n"),
+        ]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\n((zzzz\n").await;
+        let params = CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 6,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+            context: None,
+        };
+        let resp = backend.completion(params).await.unwrap();
+        let items = match resp {
+            Some(CompletionResponse::Array(v)) => v,
+            other => panic!("expected an (empty) array, got {other:?}"),
+        };
+        assert!(items.is_empty());
+    }
+
+    #[tokio::test]
+    async fn initialize_advertises_paren_trigger() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let backend = make_uninitialized_backend();
+        #[allow(deprecated)]
+        let params = InitializeParams {
+            root_uri: Some(Url::from_file_path(&root).unwrap()),
+            ..Default::default()
+        };
+        let result = backend.initialize(params).await.unwrap();
+        let triggers = result
+            .capabilities
+            .completion_provider
+            .unwrap()
+            .trigger_characters
+            .unwrap();
+        assert!(triggers.contains(&"(".to_string()));
     }
 }
