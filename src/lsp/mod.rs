@@ -265,6 +265,49 @@ impl LanguageServer for LspBackend {
             None => return Ok(None),
         };
 
+        if link.kind == crate::vault::link::LinkKind::BlockRef {
+            let state = self.state()?;
+            let Some(hit) = crate::lsp::queries::block_by_id(&state.index, &link.target_raw).await
+            else {
+                return Ok(None);
+            };
+            let vp = crate::vault::path::VaultPath::new(&hit.path)
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            let abs_path = state.vault.resolve(&vp);
+            let target_uri = Url::from_file_path(&abs_path)
+                .map_err(|_| tower_lsp::jsonrpc::Error::internal_error())?;
+            let range = match tokio::fs::read_to_string(&abs_path).await {
+                Ok(text) => {
+                    let doc = document::Document::from_text(&text, 0);
+                    // Search for the block anchor in the text to find the exact line
+                    let anchor_pattern = format!("^{}", link.target_raw);
+                    if let Some(anchor_pos) = text.find(&anchor_pattern) {
+                        // Convert file byte offset to body byte offset
+                        let body_anchor_pos = anchor_pos.saturating_sub(doc.body_byte_offset);
+                        // Find the start of the line containing the anchor
+                        let line_start = text[..anchor_pos]
+                            .rfind('\n')
+                            .map(|pos| pos + 1)
+                            .unwrap_or(0);
+                        let body_line_start = line_start.saturating_sub(doc.body_byte_offset);
+                        let range = doc.body_span_to_range(
+                            body_line_start,
+                            anchor_pos.saturating_sub(doc.body_byte_offset) + anchor_pattern.len(),
+                        );
+                        range
+                    } else {
+                        // Fallback to the indexed spans
+                        doc.body_span_to_range(hit.span_start, hit.span_end)
+                    }
+                }
+                Err(_) => Range::default(),
+            };
+            return Ok(Some(GotoDefinitionResponse::Scalar(Location {
+                uri: target_uri,
+                range,
+            })));
+        }
+
         let state = self.state()?;
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
         let target_path =
@@ -2499,5 +2542,35 @@ mod tests {
             panic!("expected markup");
         };
         assert!(m.value.contains("Unresolved block reference"));
+    }
+
+    #[tokio::test]
+    async fn goto_definition_jumps_to_block_span() {
+        let ref_text = "+++\ntitle = \"Ref\"\n+++\nintro line\nA fact worth citing ^blk123XYZ99\n";
+        let (backend, _tmp) = make_backend(&[
+            ("Ref.md", ref_text),
+            ("Src.md", "# Src\n\nsee ((blk123XYZ99))\n"),
+        ]);
+        let uri = uri_for(&backend, "Src.md");
+        open_doc(&backend, &uri, "# Src\n\nsee ((blk123XYZ99))\n").await;
+        let params = GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position {
+                    line: 2,
+                    character: 8,
+                },
+            },
+            work_done_progress_params: Default::default(),
+            partial_result_params: Default::default(),
+        };
+        let resp = backend.goto_definition(params).await.unwrap();
+        let Some(GotoDefinitionResponse::Scalar(loc)) = resp else {
+            panic!("expected a scalar location, got {resp:?}");
+        };
+        assert!(loc.uri.path().ends_with("Ref.md"));
+        // "A fact worth citing" is line 4 of the file (0-indexed), after the
+        // three frontmatter lines and "intro line".
+        assert_eq!(loc.range.start.line, 4);
     }
 }
