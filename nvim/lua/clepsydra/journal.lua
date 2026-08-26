@@ -6,12 +6,18 @@ local M = {}
 local DAY = 24 * 60 * 60
 
 --- Parse "YYYY-MM-DD" into a timestamp anchored at noon (DST-safe day math).
+--- Round-trips through os.date to reject calendar-invalid dates that mktime
+--- would silently normalize (e.g. 2026-02-30).
 local function parse_date(date)
 	local y, m, d = date:match("^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
 	if not y then
 		return nil
 	end
-	return os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+	local ts = os.time({ year = tonumber(y), month = tonumber(m), day = tonumber(d), hour = 12 })
+	if os.date("%Y-%m-%d", ts) ~= date then
+		return nil
+	end
+	return ts
 end
 
 local function format_date(ts)

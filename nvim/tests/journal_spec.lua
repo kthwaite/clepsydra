@@ -56,4 +56,13 @@ return {
 			eq(nil, journal.date_from_bufname("/v/notes/Design.md"))
 		end,
 	},
+	{
+		name = "calendar-invalid dates are rejected",
+		fn = function()
+			eq(nil, journal.resolve_spec("2026-02-30", BASE))
+			eq(nil, journal.resolve_spec("2026-13-01", BASE))
+			eq(nil, journal.resolve_spec("2026-08-00", BASE))
+			eq(nil, journal.resolve_spec("prev", "2026-02-30"), "invalid base is rejected too")
+		end,
+	},
 }
