@@ -45,6 +45,9 @@ vi.mock("#/api/board", () => ({
 }));
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => api.openTab }));
+vi.mock("#/lib/useProjects", () => ({
+  useProjects: () => ["Atlas", "Zephyr"],
+}));
 
 import { AGENDA_FILTER_URL, AgendaScreen, Route } from "#/routes/agenda";
 
@@ -278,12 +281,12 @@ describe("AgendaScreen", () => {
     expect(within(fridaySection).getByText("Friday Task")).toBeVisible();
   });
 
-  it("shows only Todos in the Undated tab", async () => {
+  it("renders the Todo-only Undated response", async () => {
     const user = userEvent.setup();
     render(
       <ControlledAgendaScreen
         data={response({
-          undated: [todo("Unscheduled Todo", 1), task("Unexpected Task", 2)],
+          undated: [todo("Unscheduled Todo", 1)],
         })}
       />,
     );
@@ -291,7 +294,6 @@ describe("AgendaScreen", () => {
     await user.click(screen.getByRole("tab", { name: "Undated" }));
 
     expect(screen.getByText("Unscheduled Todo")).toBeVisible();
-    expect(screen.queryByText("Unexpected Task")).toBeNull();
   });
 
   it("renders an explicit loading state", () => {
@@ -418,31 +420,60 @@ describe("AgendaScreen", () => {
     expect(screen.queryByText("Hidden Task")).toBeNull();
   });
 
-  it("offers the dynamic Project domain and every deterministic facet domain", async () => {
+  it("offers only the documented filter domains from the valid Project source", async () => {
     const user = userEvent.setup();
     render(
       <ControlledAgendaScreen
-        data={response({ today: [task("Atlas Task", 1, { project: "Atlas" })] })}
+        data={response({ today: [task("No Project Task", 1, { project: null })] })}
       />,
     );
 
-    const expectedOptions: Record<string, string[]> = {
-      type: ["todo", "task"],
-      todoStatus: ["open", "doing", "done", "cancelled"],
-      todoPriority: ["A", "B", "C"],
-      taskStatus: ["INTAKE", "TRIAGE", "FIELD", "REVIEW", "SEALED"],
-      taskPriority: ["P0", "P1", "P2", "P3"],
-      project: ["Atlas"],
+    const expectedOptions: Record<string, Array<[string, string]>> = {
+      type: [
+        ["todo", "Todo"],
+        ["task", "Task"],
+      ],
+      todoStatus: [
+        ["open", "Open"],
+        ["doing", "Doing"],
+      ],
+      todoPriority: [
+        ["A", "High (A)"],
+        ["B", "Medium (B)"],
+        ["C", "Low (C)"],
+      ],
+      taskStatus: [
+        ["INTAKE", "Inbox"],
+        ["TRIAGE", "Ready"],
+        ["FIELD", "In Progress"],
+        ["REVIEW", "Review"],
+      ],
+      taskPriority: [
+        ["P0", "Critical (P0)"],
+        ["P1", "High (P1)"],
+        ["P2", "Medium (P2)"],
+        ["P3", "Low (P3)"],
+      ],
+      project: [
+        ["Atlas", "Atlas"],
+        ["Zephyr", "Zephyr"],
+      ],
     };
 
     for (const [field, options] of Object.entries(expectedOptions)) {
       await user.click(screen.getByTestId("filter-bar-add"));
       await user.click(screen.getByTestId(`filter-bar-field-${field}`));
-      for (const option of options) {
-        expect(screen.getByTestId(`filter-bar-option-${field}-${option}`)).toBeVisible();
+      const renderedOptions = screen.getAllByTestId(
+        new RegExp(`^filter-bar-option-${field}-`),
+      );
+      expect(renderedOptions).toHaveLength(options.length);
+      for (const [value, label] of options) {
+        expect(
+          screen.getByTestId(`filter-bar-option-${field}-${value}`),
+        ).toHaveTextContent(label);
       }
       await user.click(
-        screen.getByTestId(`filter-bar-option-${field}-${options[0]}`),
+        screen.getByTestId(`filter-bar-option-${field}-${options[0][0]}`),
       );
       await user.click(screen.getByTestId("filter-bar-clear"));
     }

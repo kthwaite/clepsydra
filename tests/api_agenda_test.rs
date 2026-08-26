@@ -266,25 +266,25 @@ async fn get_agenda(server: &TestServer) -> serde_json::Value {
     response.json()
 }
 
+fn assert_invalid_today(response: axum_test::TestResponse) {
+    response.assert_status_bad_request();
+    assert_eq!(response.header("content-type"), "application/json");
+    assert_eq!(
+        response.json::<serde_json::Value>(),
+        serde_json::json!({
+            "status": 400,
+            "error": "today must be a real date in YYYY-MM-DD format"
+        })
+    );
+}
+
 #[tokio::test]
-async fn agenda_rejects_missing_malformed_and_impossible_today() {
+async fn agenda_rejects_missing_malformed_and_impossible_today_with_api_error() {
     let (server, _tmp) = setup_server();
-    server
-        .get("/api/vault/agenda")
-        .await
-        .assert_status_bad_request();
-    server
-        .get("/api/vault/agenda?today=26-08-2026")
-        .await
-        .assert_status_bad_request();
-    server
-        .get("/api/vault/agenda?today=2026-8-6")
-        .await
-        .assert_status_bad_request();
-    server
-        .get("/api/vault/agenda?today=2026-02-30")
-        .await
-        .assert_status_bad_request();
+    assert_invalid_today(server.get("/api/vault/agenda").await);
+    assert_invalid_today(server.get("/api/vault/agenda?today=26-08-2026").await);
+    assert_invalid_today(server.get("/api/vault/agenda?today=2026-8-6").await);
+    assert_invalid_today(server.get("/api/vault/agenda?today=2026-02-30").await);
 }
 
 #[tokio::test]

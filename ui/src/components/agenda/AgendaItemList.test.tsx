@@ -99,6 +99,49 @@ describe("AgendaItemList", () => {
     });
   });
 
+  it("gives each row mutation control a unique accessible name", () => {
+    const secondTodo: AgendaTodo = {
+      ...todoFixture,
+      content: "Review the journal row",
+      page_path: "journals/2026-08-26.md",
+      page_title: null,
+      span_start: 44,
+    };
+    const secondTask: AgendaTask = {
+      ...taskFixture,
+      code: "TSK-0201",
+      id: "01900000-0000-7000-8000-000000000201",
+      title: "Verify accessible controls",
+    };
+
+    render(
+      <AgendaItemList
+        items={[todoFixture, secondTodo, taskFixture, secondTask]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Mark Todo done: Ship the source row (Source Folio)",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "Mark Todo done: Review the journal row (journals/2026-08-26.md)",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "In Progress Status for TSK-0200: Render source-specific rows",
+      }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("button", {
+        name: "In Progress Status for TSK-0201: Verify accessible controls",
+      }),
+    ).toBeVisible();
+  });
+
   it("uses Todo priority ids and Task priority labels", () => {
     const todoB: AgendaTodo = {
       ...todoFixture,

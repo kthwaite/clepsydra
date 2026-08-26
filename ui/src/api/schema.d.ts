@@ -1546,10 +1546,43 @@ export interface components {
             date: string;
             items: components["schemas"]["AgendaItem"][];
         };
-        AgendaItem: {
+        AgendaItem: components["schemas"]["AgendaTodo"] | components["schemas"]["AgendaTask"];
+        AgendaResponse: {
+            overdue: components["schemas"]["AgendaItem"][];
+            today: components["schemas"]["AgendaItem"][];
+            undated: components["schemas"]["AgendaTodo"][];
+            upcoming: components["schemas"]["AgendaDay"][];
+        };
+        AgendaTask: {
+            code: string;
+            due: string;
+            hold?: string | null;
+            /** Format: uuid */
+            id: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            kind: "task";
+            path: string;
+            priority: components["schemas"]["AgendaTaskPriority"];
+            project?: string | null;
+            status: components["schemas"]["AgendaTaskStatus"];
+            title: string;
+        };
+        /** @enum {string} */
+        AgendaTaskKind: "task";
+        /** @enum {string} */
+        AgendaTaskPriority: "P0" | "P1" | "P2" | "P3";
+        /** @enum {string} */
+        AgendaTaskStatus: "INTAKE" | "TRIAGE" | "FIELD" | "REVIEW";
+        AgendaTodo: {
             block_id?: string | null;
             content: string;
-            /** @enum {string} */
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
             kind: "todo";
             page_path: string;
             page_title?: string | null;
@@ -1560,27 +1593,12 @@ export interface components {
             span_end: number;
             /** Format: int64 */
             span_start: number;
-            status: string;
-        } | {
-            code: string;
-            due: string;
-            hold?: string | null;
-            /** Format: uuid */
-            id: string;
-            /** @enum {string} */
-            kind: "task";
-            path: string;
-            priority: string;
-            project?: string | null;
-            status: string;
-            title: string;
+            status: components["schemas"]["AgendaTodoStatus"];
         };
-        AgendaResponse: {
-            overdue: components["schemas"]["AgendaItem"][];
-            today: components["schemas"]["AgendaItem"][];
-            undated: components["schemas"]["AgendaItem"][];
-            upcoming: components["schemas"]["AgendaDay"][];
-        };
+        /** @enum {string} */
+        AgendaTodoKind: "todo";
+        /** @enum {string} */
+        AgendaTodoStatus: "todo" | "doing";
         /** @description An aggregate over a group (or the whole result set). */
         Aggregate: {
             field?: string | null;

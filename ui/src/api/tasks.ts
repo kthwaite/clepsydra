@@ -6,8 +6,8 @@ import { invalidatePageContent, queryKeys } from "./keys";
 export type TaskItem = components["schemas"]["TaskItem"];
 export type AgendaResponse = components["schemas"]["AgendaResponse"];
 export type AgendaItem = components["schemas"]["AgendaItem"];
-export type AgendaTodo = Extract<AgendaItem, { kind: "todo" }>;
-export type AgendaTask = Extract<AgendaItem, { kind: "task" }>;
+export type AgendaTodo = components["schemas"]["AgendaTodo"];
+export type AgendaTask = components["schemas"]["AgendaTask"];
 export type TaskListResponse = components["schemas"]["TaskListResponse"];
 type TaskCompletionHistoryResponse =
   components["schemas"]["TaskCompletionHistoryResponse"];

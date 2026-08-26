@@ -13,7 +13,6 @@ import {
   TaskStatusButton,
 } from "#/components/ui/task-status-button";
 import { useOpenTab } from "#/hooks/useOpenTab";
-import { cn } from "#/lib/cn";
 
 export function priorityLabel(priority: string): string {
   switch (priority.toUpperCase()) {
@@ -31,9 +30,10 @@ export function priorityLabel(priority: string): string {
 function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
   const toggle = useToggleTaskStatus();
   const openTab = useOpenTab();
-  const isDone = todo.status === "done" || todo.status === "cancelled";
   const due = todo.properties.due;
   const priority = todo.properties.priority;
+  const next = nextStatus(todo.status);
+  const source = todo.page_title ?? todo.page_path;
 
   return (
     <li className="flex items-start gap-2 px-2 py-2">
@@ -43,23 +43,15 @@ function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
           toggle.mutate({
             pagePath: todo.page_path,
             spanStart: todo.span_start,
-            status: nextStatus(todo.status),
+            status: next,
           })
         }
         isDisabled={toggle.isPending}
+        accessibleLabel={`Mark Todo ${next}: ${todo.content} (${source})`}
       />
 
       <div className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "text-sm",
-            isDone
-              ? "text-muted-foreground line-through"
-              : "text-foreground",
-          )}
-        >
-          {todo.content}
-        </span>
+        <span className="text-sm text-foreground">{todo.content}</span>
 
         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
           {due && <Badge size="sm">{due}</Badge>}
@@ -69,7 +61,7 @@ function AgendaTodoRow({ todo }: { todo: AgendaTodo }) {
             onClick={() => openTab("page", todo.page_path)}
             className="text-[10px] text-muted-foreground underline decoration-border hover:text-foreground"
           >
-            {todo.page_title ?? todo.page_path}
+            {source}
           </button>
         </div>
       </div>
@@ -85,7 +77,7 @@ function AgendaTaskRow({ task }: { task: AgendaTask }) {
   return (
     <li className="flex items-start gap-2 px-2 py-2">
       <Select
-        aria-label="Status"
+        aria-label={`Status for ${task.code}: ${task.title}`}
         selectedKey={task.status}
         onSelectionChange={(status) => {
           if (status === null) return;

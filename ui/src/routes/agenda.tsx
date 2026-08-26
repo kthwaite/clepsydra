@@ -6,12 +6,9 @@ import {
 import { useCallback, useMemo } from "react";
 import type { AgendaItem, AgendaResponse } from "#/api/tasks";
 import { useAgenda } from "#/api/tasks";
+import { AgendaItemList } from "#/components/agenda/AgendaItemList";
 import {
-  AgendaItemList,
-  priorityLabel,
-} from "#/components/agenda/AgendaItemList";
-import {
-  COL_ORDER,
+  PRI_LABEL,
   PRI_ORDER,
   taskStatusLabel,
 } from "#/components/tasking/board-constants";
@@ -30,6 +27,7 @@ import {
   parseFilterSearch,
 } from "#/lib/filters/url";
 import { localDateKey, parseLocalDate } from "#/lib/time";
+import { useProjects } from "#/lib/useProjects";
 
 /** Route-level filter field specs for the Agenda's URL-backed filter. */
 export const AGENDA_FILTER_URL: FilterUrlOptions = {
@@ -44,8 +42,14 @@ export const AGENDA_FILTER_URL: FilterUrlOptions = {
   ],
 };
 
-const TODO_STATUS_VALUES = ["open", "doing", "done", "cancelled"] as const;
+const TODO_STATUS_VALUES = ["open", "doing"] as const;
 const TODO_PRIORITY_VALUES = ["A", "B", "C"] as const;
+const TASK_STATUS_VALUES = ["INTAKE", "TRIAGE", "FIELD", "REVIEW"] as const;
+const TODO_PRIORITY_LABELS = {
+  A: "High",
+  B: "Medium",
+  C: "Low",
+} as const;
 const FILTERED_EMPTY_MESSAGE = "No items match the filter.";
 
 interface AgendaQueryState {
@@ -170,21 +174,7 @@ export function AgendaScreen({
   filterState: FilterState;
   onFilterChange: (next: FilterState) => void;
 }) {
-  const projects = useMemo(() => {
-    const data = agenda.data;
-    if (!data) return [];
-    const values = new Set<string>();
-    const collect = (items: readonly AgendaItem[]) => {
-      for (const item of items) {
-        if (item.kind === "task" && item.project) values.add(item.project);
-      }
-    };
-    collect(data.overdue);
-    collect(data.today);
-    collect(data.undated);
-    for (const day of data.upcoming) collect(day.items);
-    return [...values].sort((a, b) => a.localeCompare(b));
-  }, [agenda.data]);
+  const projects = useProjects();
 
   const filterFields: FilterField[] = useMemo(
     () => [
@@ -193,8 +183,8 @@ export function AgendaScreen({
         kind: "single",
         label: "TYPE",
         options: [
-          { value: "todo", label: "TODO" },
-          { value: "task", label: "TASK" },
+          { value: "todo", label: "Todo" },
+          { value: "task", label: "Task" },
         ],
       },
       {
@@ -203,7 +193,7 @@ export function AgendaScreen({
         label: "TODO STATUS",
         options: TODO_STATUS_VALUES.map((value) => ({
           value,
-          label: value.toUpperCase(),
+          label: value === "open" ? "Open" : "Doing",
         })),
       },
       {
@@ -212,14 +202,14 @@ export function AgendaScreen({
         label: "TODO PRIORITY",
         options: TODO_PRIORITY_VALUES.map((value) => ({
           value,
-          label: priorityLabel(value),
+          label: `${TODO_PRIORITY_LABELS[value]} (${value})`,
         })),
       },
       {
         id: "taskStatus",
         kind: "single",
         label: "TASK STATUS",
-        options: COL_ORDER.map((value) => ({
+        options: TASK_STATUS_VALUES.map((value) => ({
           value,
           label: taskStatusLabel(value),
         })),
@@ -228,7 +218,10 @@ export function AgendaScreen({
         id: "taskPriority",
         kind: "single",
         label: "TASK PRIORITY",
-        options: PRI_ORDER.map((value) => ({ value })),
+        options: PRI_ORDER.map((value) => ({
+          value,
+          label: `${PRI_LABEL[value]} (${value})`,
+        })),
       },
       {
         id: "project",
@@ -257,7 +250,7 @@ export function AgendaScreen({
       upcoming: data.upcoming
         .map((day) => ({ ...day, items: apply(day.items) }))
         .filter((day) => day.items.length > 0),
-      undated: apply(data.undated.filter((item) => item.kind === "todo")),
+      undated: apply(data.undated),
     };
   }, [agenda.data, filterState]);
 

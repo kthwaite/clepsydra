@@ -72,7 +72,9 @@ Open `/agenda` to review Todos and dated Tasks in one consolidated Agenda.
 Agenda shows open Todos plus dated Tasks whose status is not Done:
 
 - **Overdue** contains dated work before today and precedes **Today**.
-- **Today** contains work due today.
+- **Today** contains work due today, open Todos scheduled today, and open Todos
+  in today’s journal. An overdue `due` date wins over both scheduled today and
+  membership in today’s journal, so that Todo remains in **Overdue**.
 - **Upcoming** contains work due tomorrow through seven days ahead.
 - **Undated** contains open Todos without a `due` property. A
   scheduled-but-undated Todo remains here.

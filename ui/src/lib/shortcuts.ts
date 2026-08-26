@@ -176,7 +176,7 @@ export const SHORTCUTS = {
     label: "Todo properties",
     group: "Editor",
     scope: "editor",
-    note: "on a task item",
+    note: "on a Todo",
   },
   "editor.mark.bold": {
     chord: { key: "b", mod: true },

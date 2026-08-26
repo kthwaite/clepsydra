@@ -99,9 +99,74 @@ fn openapi_defines_consolidated_agenda_contract() {
     let schemas = document["components"]["schemas"]
         .as_object()
         .expect("OpenAPI schemas should be an object");
-    for schema in ["AgendaResponse", "AgendaDay", "AgendaItem"] {
+    for schema in [
+        "AgendaResponse",
+        "AgendaDay",
+        "AgendaItem",
+        "AgendaTodo",
+        "AgendaTask",
+        "AgendaTodoKind",
+        "AgendaTaskKind",
+        "AgendaTodoStatus",
+        "AgendaTaskStatus",
+        "AgendaTaskPriority",
+    ] {
         assert!(schemas.contains_key(schema), "missing {schema} schema");
     }
+
+    assert_eq!(
+        schemas["AgendaTodoKind"]["enum"],
+        serde_json::json!(["todo"])
+    );
+    assert_eq!(
+        schemas["AgendaTaskKind"]["enum"],
+        serde_json::json!(["task"])
+    );
+    assert_eq!(
+        schemas["AgendaTodoStatus"]["enum"],
+        serde_json::json!(["todo", "doing"])
+    );
+    assert_eq!(
+        schemas["AgendaTaskStatus"]["enum"],
+        serde_json::json!(["INTAKE", "TRIAGE", "FIELD", "REVIEW"])
+    );
+    assert_eq!(
+        schemas["AgendaTaskPriority"]["enum"],
+        serde_json::json!(["P0", "P1", "P2", "P3"])
+    );
+
+    assert_eq!(
+        schemas["AgendaResponse"]["properties"]["undated"]["items"]["$ref"],
+        "#/components/schemas/AgendaTodo"
+    );
+    assert_eq!(
+        schemas["AgendaItem"]["discriminator"]["propertyName"],
+        "kind"
+    );
+    assert_eq!(
+        schemas["AgendaItem"]["discriminator"]["mapping"],
+        serde_json::json!({
+            "todo": "#/components/schemas/AgendaTodo",
+            "task": "#/components/schemas/AgendaTask"
+        })
+    );
+    let agenda_item_variants = schemas["AgendaItem"]["oneOf"]
+        .as_array()
+        .expect("AgendaItem should be a discriminated union")
+        .iter()
+        .map(|variant| {
+            variant["$ref"]
+                .as_str()
+                .expect("variant should be a schema ref")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        agenda_item_variants,
+        [
+            "#/components/schemas/AgendaTodo",
+            "#/components/schemas/AgendaTask"
+        ]
+    );
 }
 
 #[test]

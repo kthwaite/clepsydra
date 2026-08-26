@@ -3,15 +3,16 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { queryKeys } from "#/api/keys";
-import { useAgenda } from "#/api/tasks";
+import { useAgenda, useToggleTaskStatus } from "#/api/tasks";
 
-const { fetchMock, getMock } = vi.hoisted(() => ({
+const { fetchMock, getMock, putMock } = vi.hoisted(() => ({
   fetchMock: vi.fn(),
   getMock: vi.fn(),
+  putMock: vi.fn(),
 }));
 
 vi.mock("#/api/client", () => ({
-  fetchClient: { GET: getMock },
+  fetchClient: { GET: getMock, PUT: putMock },
 }));
 
 function wrapper(queryClient: QueryClient) {
@@ -28,6 +29,7 @@ function freshQueryClient() {
 afterEach(() => {
   fetchMock.mockReset();
   getMock.mockReset();
+  putMock.mockReset();
 });
 
 describe("useAgenda", () => {
@@ -53,7 +55,7 @@ describe("useAgenda", () => {
           id: "00000000-0000-0000-0000-000000000001",
           kind: "task",
           path: "tasks/TSK-0001.md",
-          priority: "HIGH",
+          priority: "P1",
           project: "clepsydra",
           status: "FIELD",
           title: "Ship Agenda",
@@ -107,5 +109,42 @@ describe("useAgenda", () => {
     expect(
       queryClient.getQueryData(queryKeys.agenda.byDate("2026-08-26")),
     ).toEqual(fixture);
+  });
+});
+
+describe("useToggleTaskStatus", () => {
+  it("invalidates every Agenda query after a successful Todo status mutation", async () => {
+    const updatedTodo = {
+      block_id: "todo-1",
+      content: "Ship Agenda",
+      page_path: "notes/agenda.md",
+      page_title: "Agenda",
+      properties: { status: "done" },
+      span_end: 24,
+      span_start: 8,
+      status: "done",
+    };
+    putMock.mockResolvedValue({
+      data: updatedTodo,
+      error: undefined,
+      response: new Response(null, { status: 200 }),
+    });
+    const queryClient = freshQueryClient();
+    const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
+    const { result } = renderHook(() => useToggleTaskStatus(), {
+      wrapper: wrapper(queryClient),
+    });
+
+    await result.current.mutateAsync({
+      pagePath: "notes/agenda.md",
+      spanStart: 8,
+      status: "done",
+    });
+
+    await waitFor(() => {
+      expect(invalidateQueries).toHaveBeenCalledWith({
+        queryKey: queryKeys.agenda.all,
+      });
+    });
   });
 });

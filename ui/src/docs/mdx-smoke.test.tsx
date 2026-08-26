@@ -443,6 +443,12 @@ it("documents consolidated local-date Agenda semantics and Todo controls", () =>
   expect(source).toContain("Todos and dated Tasks");
   expect(source).toContain("browser’s local date");
   expect(source).toContain("**Undated**");
+  expect(source).toMatch(
+    /\*\*Today\*\* contains[\s\S]*open Todos scheduled today[\s\S]*open Todos\s+in today’s journal/,
+  );
+  expect(source).toMatch(
+    /overdue `due` date wins[\s\S]*scheduled today[\s\S]*today’s journal/,
+  );
   expect(source).not.toContain("both **Overdue** and **Due Today**");
   expect(source).not.toContain("calendar boundaries in UTC");
   expect(source).not.toContain("**Inbox** shows open Todos");
@@ -451,6 +457,9 @@ it("documents consolidated local-date Agenda semantics and Todo controls", () =>
   expect(editorSource).toContain("**Todo properties**");
   expect(source).not.toContain("**Task properties**");
   expect(editorSource).not.toContain("**Task properties**");
+  expect(editorSource).not.toMatch(/\btask items?\b/i);
+  expect(editorSource).not.toContain("agenda's task list");
+  expect(editorSource).toContain("Todo list item");
 });
 
 it("documents exact academic deduplication and Zotero status matrices", () => {

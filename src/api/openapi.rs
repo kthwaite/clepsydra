@@ -392,6 +392,13 @@ impl Modify for SchemaOverrides {
             crate::api::agenda::AgendaResponse,
             crate::api::agenda::AgendaDay,
             crate::api::agenda::AgendaItem,
+            crate::api::agenda::AgendaTodo,
+            crate::api::agenda::AgendaTask,
+            crate::api::agenda::AgendaTodoKind,
+            crate::api::agenda::AgendaTaskKind,
+            crate::api::agenda::AgendaTodoStatus,
+            crate::api::agenda::AgendaTaskStatus,
+            crate::api::agenda::AgendaTaskPriority,
             // Blocks
             crate::api::blocks::BlockResponse,
             crate::api::blocks::AssignIdRequest,

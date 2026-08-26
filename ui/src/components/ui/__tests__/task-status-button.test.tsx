@@ -11,6 +11,22 @@ describe("TaskStatusButton", () => {
     ).toBeDefined();
   });
 
+  it("uses an optional row-specific accessible label", () => {
+    render(
+      <TaskStatusButton
+        status="todo"
+        onToggle={() => {}}
+        accessibleLabel="Mark Todo done: Ship the source row (Source Folio)"
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "Mark Todo done: Ship the source row (Source Folio)",
+      }),
+    ).toBeDefined();
+  });
+
   it("renders done action for doing status", () => {
     render(<TaskStatusButton status="doing" onToggle={() => {}} />);
     expect(

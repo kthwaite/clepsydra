@@ -2,6 +2,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use axum::routing::get;
 use axum::Json;
@@ -32,7 +33,7 @@ pub struct AgendaResponse {
     pub overdue: Vec<AgendaItem>,
     pub today: Vec<AgendaItem>,
     pub upcoming: Vec<AgendaDay>,
-    pub undated: Vec<AgendaItem>,
+    pub undated: Vec<AgendaTodo>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -42,29 +43,132 @@ pub struct AgendaDay {
 }
 
 #[derive(Debug, Serialize, ToSchema)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(untagged)]
+#[schema(discriminator(
+    property_name = "kind",
+    mapping(
+        ("todo" = "#/components/schemas/AgendaTodo"),
+        ("task" = "#/components/schemas/AgendaTask")
+    )
+))]
 pub enum AgendaItem {
-    Todo {
-        block_id: Option<String>,
-        content: String,
-        status: String,
-        properties: HashMap<String, String>,
-        page_path: String,
-        page_title: Option<String>,
-        span_start: i64,
-        span_end: i64,
-    },
-    Task {
-        id: uuid::Uuid,
-        code: String,
-        title: String,
-        status: String,
-        priority: String,
-        project: Option<String>,
-        due: String,
-        hold: Option<String>,
-        path: String,
-    },
+    Todo(AgendaTodo),
+    Task(AgendaTask),
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AgendaTodo {
+    pub kind: AgendaTodoKind,
+    pub block_id: Option<String>,
+    pub content: String,
+    pub status: AgendaTodoStatus,
+    pub properties: HashMap<String, String>,
+    pub page_path: String,
+    pub page_title: Option<String>,
+    pub span_start: i64,
+    pub span_end: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AgendaTask {
+    pub kind: AgendaTaskKind,
+    pub id: uuid::Uuid,
+    pub code: String,
+    pub title: String,
+    pub status: AgendaTaskStatus,
+    pub priority: AgendaTaskPriority,
+    pub project: Option<String>,
+    pub due: String,
+    pub hold: Option<String>,
+    pub path: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgendaTodoKind {
+    Todo,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgendaTaskKind {
+    Task,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum AgendaTodoStatus {
+    Todo,
+    Doing,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub enum AgendaTaskStatus {
+    #[serde(rename = "INTAKE")]
+    Intake,
+    #[serde(rename = "TRIAGE")]
+    Triage,
+    #[serde(rename = "FIELD")]
+    Field,
+    #[serde(rename = "REVIEW")]
+    Review,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub enum AgendaTaskPriority {
+    P0,
+    P1,
+    P2,
+    P3,
+}
+
+impl AgendaTodoStatus {
+    fn from_indexed(value: &str) -> Option<Self> {
+        match value {
+            "todo" => Some(Self::Todo),
+            "doing" => Some(Self::Doing),
+            _ => None,
+        }
+    }
+}
+
+impl AgendaTaskStatus {
+    fn from_indexed(value: &str) -> Option<Self> {
+        match value {
+            "INTAKE" => Some(Self::Intake),
+            "TRIAGE" => Some(Self::Triage),
+            "FIELD" => Some(Self::Field),
+            "REVIEW" => Some(Self::Review),
+            _ => None,
+        }
+    }
+}
+
+impl AgendaTaskPriority {
+    fn from_indexed(value: &str) -> Option<Self> {
+        match value {
+            "P0" => Some(Self::P0),
+            "P1" => Some(Self::P1),
+            "P2" => Some(Self::P2),
+            "P3" => Some(Self::P3),
+            _ => None,
+        }
+    }
+
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::P0 => "P0",
+            Self::P1 => "P1",
+            Self::P2 => "P2",
+            Self::P3 => "P3",
+        }
+    }
+}
+
+const INVALID_TODAY_MESSAGE: &str = "today must be a real date in YYYY-MM-DD format";
+
+fn invalid_today() -> ApiError {
+    ApiError::bad_request(INVALID_TODAY_MESSAGE)
 }
 
 fn parse_today(value: &str) -> Result<NaiveDate, ApiError> {
@@ -77,13 +181,10 @@ fn parse_today(value: &str) -> Result<NaiveDate, ApiError> {
             .enumerate()
             .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit());
     if !has_exact_shape {
-        return Err(ApiError::bad_request(
-            "today must be a real date in YYYY-MM-DD format",
-        ));
+        return Err(invalid_today());
     }
 
-    NaiveDate::parse_from_str(value, "%Y-%m-%d")
-        .map_err(|_| ApiError::bad_request("today must be a real date in YYYY-MM-DD format"))
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| invalid_today())
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
@@ -353,8 +454,9 @@ fn fill_properties(
 )]
 pub async fn get_agenda(
     State(state): State<Arc<AppState>>,
-    Query(query): Query<AgendaQuery>,
+    query: Result<Query<AgendaQuery>, QueryRejection>,
 ) -> Result<Json<AgendaResponse>, ApiError> {
+    let Query(query) = query.map_err(|_| invalid_today())?;
     let today = parse_today(&query.today)?;
     let tomorrow = today
         .checked_add_signed(Duration::days(1))
@@ -475,22 +577,27 @@ pub async fn get_agenda(
                     };
                     let metadata: serde_json::Value =
                         serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
-                    let status = agenda_meta_string(&metadata, "status")
+                    let status_value = agenda_meta_string(&metadata, "status")
                         .unwrap_or_else(|| DEFAULT_STATUS.to_string());
-                    if status == "SEALED" {
+                    let Some(status) = AgendaTaskStatus::from_indexed(&status_value) else {
                         continue;
-                    }
+                    };
+                    let priority_value = agenda_meta_string(&metadata, "priority")
+                        .unwrap_or_else(|| DEFAULT_PRIORITY.to_string());
+                    let Some(priority) = AgendaTaskPriority::from_indexed(&priority_value) else {
+                        continue;
+                    };
                     let Some(due) = agenda_meta_string(&metadata, "due") else {
                         continue;
                     };
                     let code = agenda_path_stem(&path).to_ascii_uppercase();
-                    tasks.push(AgendaItem::Task {
+                    tasks.push(AgendaTask {
+                        kind: AgendaTaskKind::Task,
                         id,
                         title: title.unwrap_or_else(|| code.clone()),
                         code,
                         status,
-                        priority: agenda_meta_string(&metadata, "priority")
-                            .unwrap_or_else(|| DEFAULT_PRIORITY.to_string()),
+                        priority,
                         project,
                         due,
                         hold: agenda_meta_string(&metadata, "hold"),
@@ -511,6 +618,9 @@ pub async fn get_agenda(
     let mut undated = Vec::new();
 
     for (todo, journal_date) in todos {
+        let Some(todo) = todo_item(todo) else {
+            continue;
+        };
         let due = todo.properties.get("due").map(String::as_str);
         let scheduled = todo.properties.get("scheduled").map(String::as_str);
         let bucket = classify_agenda_item(
@@ -522,9 +632,9 @@ pub async fn get_agenda(
             &tomorrow_key,
             &end_key,
         );
-        push_agenda_item(
+        push_agenda_todo(
             bucket,
-            todo_item(todo),
+            todo,
             &mut overdue,
             &mut today_items,
             &mut upcoming_by_date,
@@ -534,26 +644,25 @@ pub async fn get_agenda(
 
     for task in tasks {
         let bucket = classify_agenda_item(
-            item_due(&task),
+            Some(task.due.as_str()),
             false,
             false,
             &today_key,
             &tomorrow_key,
             &end_key,
         );
-        push_agenda_item(
+        push_agenda_task(
             bucket,
             task,
             &mut overdue,
             &mut today_items,
             &mut upcoming_by_date,
-            &mut undated,
         );
     }
 
     sort_agenda_items(&mut overdue);
     sort_agenda_items(&mut today_items);
-    sort_agenda_items(&mut undated);
+    sort_agenda_todos(&mut undated);
     let upcoming = upcoming_by_date
         .into_iter()
         .map(|(date, mut items)| {
@@ -570,17 +679,18 @@ pub async fn get_agenda(
     }))
 }
 
-fn todo_item(todo: TaskItem) -> AgendaItem {
-    AgendaItem::Todo {
+fn todo_item(todo: TaskItem) -> Option<AgendaTodo> {
+    Some(AgendaTodo {
+        kind: AgendaTodoKind::Todo,
         block_id: todo.block_id,
         content: todo.content,
-        status: todo.status,
+        status: AgendaTodoStatus::from_indexed(&todo.status)?,
         properties: todo.properties,
         page_path: todo.page_path,
         page_title: todo.page_title,
         span_start: todo.span_start,
         span_end: todo.span_end,
-    }
+    })
 }
 
 fn agenda_path_stem(path: &str) -> &str {
@@ -633,20 +743,41 @@ fn classify_agenda_item(
     }
 }
 
-fn push_agenda_item(
+fn push_agenda_todo(
     bucket: AgendaBucket,
-    item: AgendaItem,
+    todo: AgendaTodo,
     overdue: &mut Vec<AgendaItem>,
     today: &mut Vec<AgendaItem>,
     upcoming: &mut BTreeMap<String, Vec<AgendaItem>>,
-    undated: &mut Vec<AgendaItem>,
+    undated: &mut Vec<AgendaTodo>,
 ) {
     match bucket {
-        AgendaBucket::Overdue => overdue.push(item),
-        AgendaBucket::Today => today.push(item),
-        AgendaBucket::Upcoming(date) => upcoming.entry(date).or_default().push(item),
-        AgendaBucket::Undated => undated.push(item),
+        AgendaBucket::Overdue => overdue.push(AgendaItem::Todo(todo)),
+        AgendaBucket::Today => today.push(AgendaItem::Todo(todo)),
+        AgendaBucket::Upcoming(date) => upcoming
+            .entry(date)
+            .or_default()
+            .push(AgendaItem::Todo(todo)),
+        AgendaBucket::Undated => undated.push(todo),
         AgendaBucket::OutsideWindow => {}
+    }
+}
+
+fn push_agenda_task(
+    bucket: AgendaBucket,
+    task: AgendaTask,
+    overdue: &mut Vec<AgendaItem>,
+    today: &mut Vec<AgendaItem>,
+    upcoming: &mut BTreeMap<String, Vec<AgendaItem>>,
+) {
+    match bucket {
+        AgendaBucket::Overdue => overdue.push(AgendaItem::Task(task)),
+        AgendaBucket::Today => today.push(AgendaItem::Task(task)),
+        AgendaBucket::Upcoming(date) => upcoming
+            .entry(date)
+            .or_default()
+            .push(AgendaItem::Task(task)),
+        AgendaBucket::Undated | AgendaBucket::OutsideWindow => {}
     }
 }
 
@@ -668,43 +799,49 @@ fn sort_agenda_items(items: &mut [AgendaItem]) {
             .cmp(agenda_priority_key(right))
             .then_with(|| item_path(left).cmp(item_path(right)))
             .then_with(|| match (left, right) {
-                (
-                    AgendaItem::Todo {
-                        span_start: left, ..
-                    },
-                    AgendaItem::Todo {
-                        span_start: right, ..
-                    },
-                ) => left.cmp(right),
-                (AgendaItem::Task { code: left, .. }, AgendaItem::Task { code: right, .. }) => {
-                    left.cmp(right)
+                (AgendaItem::Todo(left), AgendaItem::Todo(right)) => {
+                    left.span_start.cmp(&right.span_start)
                 }
-                (AgendaItem::Todo { .. }, AgendaItem::Task { .. }) => std::cmp::Ordering::Less,
-                (AgendaItem::Task { .. }, AgendaItem::Todo { .. }) => std::cmp::Ordering::Greater,
+                (AgendaItem::Task(left), AgendaItem::Task(right)) => left.code.cmp(&right.code),
+                (AgendaItem::Todo(_), AgendaItem::Task(_)) => std::cmp::Ordering::Less,
+                (AgendaItem::Task(_), AgendaItem::Todo(_)) => std::cmp::Ordering::Greater,
             })
+    });
+}
+
+fn sort_agenda_todos(todos: &mut [AgendaTodo]) {
+    todos.sort_by(|left, right| {
+        todo_priority_key(left)
+            .cmp(todo_priority_key(right))
+            .then_with(|| left.page_path.cmp(&right.page_path))
+            .then_with(|| left.span_start.cmp(&right.span_start))
     });
 }
 
 fn item_due(item: &AgendaItem) -> Option<&str> {
     match item {
-        AgendaItem::Todo { properties, .. } => properties.get("due").map(String::as_str),
-        AgendaItem::Task { due, .. } => Some(due),
+        AgendaItem::Todo(todo) => todo.properties.get("due").map(String::as_str),
+        AgendaItem::Task(task) => Some(&task.due),
     }
+}
+
+fn todo_priority_key(todo: &AgendaTodo) -> &str {
+    todo.properties
+        .get("priority")
+        .map(String::as_str)
+        .unwrap_or("Z")
 }
 
 fn agenda_priority_key(item: &AgendaItem) -> &str {
     match item {
-        AgendaItem::Todo { properties, .. } => properties
-            .get("priority")
-            .map(String::as_str)
-            .unwrap_or("Z"),
-        AgendaItem::Task { priority, .. } => priority.as_str(),
+        AgendaItem::Todo(todo) => todo_priority_key(todo),
+        AgendaItem::Task(task) => task.priority.as_str(),
     }
 }
 
 fn item_path(item: &AgendaItem) -> &str {
     match item {
-        AgendaItem::Todo { page_path, .. } => page_path,
-        AgendaItem::Task { path, .. } => path,
+        AgendaItem::Todo(todo) => &todo.page_path,
+        AgendaItem::Task(task) => &task.path,
     }
 }
