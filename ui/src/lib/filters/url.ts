@@ -1,4 +1,9 @@
-import { type FilterFieldSpec, type FilterState, FLAG_ON } from "./model";
+import {
+  facetsEqual,
+  type FilterFieldSpec,
+  type FilterState,
+  FLAG_ON,
+} from "./model";
 
 export interface FilterUrlOptions {
   fields: readonly FilterFieldSpec[];
@@ -70,4 +75,31 @@ export function filterStateToSearch(
     }
   }
   return out;
+}
+
+export function canonicalizeFilterSearch<
+  TSearch extends Record<string, unknown>,
+>(search: TSearch, opts: FilterUrlOptions) {
+  return {
+    ...search,
+    ...filterStateToSearch(parseFilterSearch(search, opts), opts),
+  };
+}
+
+export function mergeFilterSearch<TSearch extends Record<string, unknown>>(
+  current: TSearch,
+  next: FilterState,
+  opts: FilterUrlOptions,
+) {
+  return {
+    ...current,
+    ...filterStateToSearch(next, opts),
+  };
+}
+
+export function shouldReplaceFilterHistory(
+  next: FilterState,
+  previous: FilterState,
+): boolean {
+  return facetsEqual(next.facets, previous.facets);
 }

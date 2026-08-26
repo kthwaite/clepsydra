@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { FLAG_ON } from "./model";
-import { filterStateToSearch, parseFilterSearch } from "./url";
+import {
+  canonicalizeFilterSearch,
+  filterStateToSearch,
+  mergeFilterSearch,
+  parseFilterSearch,
+  shouldReplaceFilterHistory,
+} from "./url";
 
 const opts = {
   fields: [
@@ -92,5 +98,64 @@ describe("filterStateToSearch", () => {
     };
     const rt = parseFilterSearch(filterStateToSearch(state, opts), opts);
     expect(rt).toEqual(state);
+  });
+});
+
+describe("canonicalizeFilterSearch", () => {
+  it("preserves unrelated and alias params while emitting canonical keys", () => {
+    expect(
+      canonicalizeFilterSearch({ tag: "legacy", page: 2 }, opts),
+    ).toEqual({
+      tag: "legacy",
+      page: 2,
+      q: undefined,
+      tags: ["legacy"],
+      kind: undefined,
+      hold: undefined,
+    });
+  });
+});
+
+describe("mergeFilterSearch", () => {
+  it("preserves unrelated params and clears stale configured keys", () => {
+    expect(
+      mergeFilterSearch(
+        { q: "old", tags: ["stale"], view: "grid" },
+        { text: "new", facets: { kind: ["NOTE"] } },
+        opts,
+      ),
+    ).toEqual({
+      q: "new",
+      tags: undefined,
+      view: "grid",
+      kind: "NOTE",
+      hold: undefined,
+    });
+  });
+});
+
+describe("shouldReplaceFilterHistory", () => {
+  it("replaces history when only text changes", () => {
+    expect(
+      shouldReplaceFilterHistory(
+        { text: "next", facets: { tags: ["a", "b"] } },
+        { text: "previous", facets: { tags: ["a", "b"] } },
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    [
+      "a facet is added",
+      { text: "next", facets: { tags: ["a"] } },
+      { text: "previous", facets: {} },
+    ],
+    [
+      "facet values are reordered",
+      { text: "next", facets: { tags: ["b", "a"] } },
+      { text: "next", facets: { tags: ["a", "b"] } },
+    ],
+  ])("pushes history when %s", (_case, next, previous) => {
+    expect(shouldReplaceFilterHistory(next, previous)).toBe(false);
   });
 });
