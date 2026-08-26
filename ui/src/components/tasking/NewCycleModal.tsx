@@ -232,7 +232,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
         </div>
 
         {/* INITIAL STATE */}
-        <EdField label="Status" hint="cadence">
+        <EdField label="Status" hint="lifecycle">
           <div
             className="flex gap-[6px]"
             role="group"

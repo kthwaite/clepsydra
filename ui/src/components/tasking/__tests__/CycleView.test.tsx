@@ -89,7 +89,7 @@ const BACKLOG_PSEUDO = {
   state: "OPEN",
   start: null,
   end: null,
-  goal: "Uncommitted tasking — not yet pulled into a cycle.",
+  goal: "Tasks not assigned to a Cycle.",
 } as const;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -103,11 +103,11 @@ describe("resolveCycle", () => {
     expect(result.label).toBe("Cycle 02");
   });
 
-  it("BACKLOG sentinel → backlog pseudo-cycle", () => {
+  it("BACKLOG sentinel resolves to the canonical Backlog presentation", () => {
     const result = resolveCycle("BACKLOG", cycles);
     expect(result.code).toBe("BACKLOG");
     expect(result.label).toBe("BACKLOG");
-    expect(result.goal).toMatch(/Uncommitted/);
+    expect(result.goal).toBe("Tasks not assigned to a Cycle.");
   });
 
   it('empty string "" → active cycle when one exists', () => {
@@ -262,60 +262,57 @@ function renderCycleView(
 
 // ── action buttons per cycle state ────────────────────────────────────────────
 
-describe("CycleView — action buttons per state", () => {
-  it("PLANNED cycle shows OPEN CYCLE button", () => {
+describe("CycleView — lifecycle entry points", () => {
+  it("Planned cycle renders Start cycle and opens the raw open modal target", async () => {
     renderCycleView(PLANNED_CYCLE, []);
-    expect(
-      screen.getByRole("button", { name: /OPEN CYCLE/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /SEAL CYCLE/i }),
-    ).not.toBeInTheDocument();
-  });
 
-  it("ACTIVE cycle shows SEAL CYCLE button", () => {
-    renderCycleView(ACTIVE_CYCLE, []);
+    const start = screen.getByRole("button", { name: "Start cycle" });
+    expect(start).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: /SEAL CYCLE/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /OPEN CYCLE/i }),
+      screen.queryByRole("button", { name: /Open cycle/i }),
     ).not.toBeInTheDocument();
-  });
 
-  it("CLOSED cycle shows static CYCLE SEALED tag (no buttons)", () => {
-    const closed = { ...ACTIVE_CYCLE, state: "CLOSED" };
-    renderCycleView(closed, []);
-    expect(screen.getByText(/CYCLE SEALED/)).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /SEAL CYCLE|OPEN CYCLE/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("BACKLOG pseudo-cycle shows no action buttons", () => {
-    renderCycleView(BACKLOG_PSEUDO, []);
-    expect(
-      screen.queryByRole("button", { name: /OPEN CYCLE|SEAL CYCLE/i }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText(/CYCLE SEALED/)).not.toBeInTheDocument();
-  });
-
-  it("PLANNED OPEN button calls openCycleModal with kind:open and cycleId", async () => {
-    renderCycleView(PLANNED_CYCLE, []);
-    await userEvent.click(screen.getByRole("button", { name: /OPEN CYCLE/i }));
+    await userEvent.click(start);
     expect(useBoardStore.getState().cycleModal).toEqual({
       kind: "open",
       cycleId: PLANNED_CYCLE.id,
     });
   });
 
-  it("ACTIVE SEAL button calls openCycleModal with kind:seal and cycleId", async () => {
+  it("Active cycle renders Close cycle and opens the raw seal modal target", async () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    await userEvent.click(screen.getByRole("button", { name: /SEAL CYCLE/i }));
+
+    const close = screen.getByRole("button", { name: "Close cycle" });
+    expect(close).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Seal cycle/i }),
+    ).not.toBeInTheDocument();
+
+    await userEvent.click(close);
     expect(useBoardStore.getState().cycleModal).toEqual({
       kind: "seal",
       cycleId: ACTIVE_CYCLE.id,
     });
+  });
+
+  it("Closed cycle renders Cycle closed without lifecycle buttons", () => {
+    const closed = { ...ACTIVE_CYCLE, state: "CLOSED" };
+    renderCycleView(closed, []);
+
+    expect(screen.getByText("Cycle closed")).toBeInTheDocument();
+    expect(screen.queryByText(/Cycle sealed/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Start cycle|Close cycle/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Backlog renders no lifecycle controls", () => {
+    renderCycleView(BACKLOG_PSEUDO, []);
+
+    expect(
+      screen.queryByRole("button", { name: /Start cycle|Close cycle/i }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Cycle closed")).not.toBeInTheDocument();
   });
 });
 
@@ -334,9 +331,11 @@ describe("CycleView — header", () => {
     expect(screen.getByText(/05\.26 — 06\.08/)).toBeInTheDocument();
   });
 
-  it("renders UNSCHEDULED window for BACKLOG pseudo-cycle", () => {
+  it("renders canonical Backlog copy without retired scheduling language", () => {
     renderCycleView(BACKLOG_PSEUDO, []);
-    expect(screen.getByText(/UNSCHEDULED/)).toBeInTheDocument();
+    expect(screen.getByText("No Cycle")).toBeInTheDocument();
+    expect(screen.getByText("Tasks not assigned to a Cycle.")).toBeInTheDocument();
+    expect(screen.queryByText(/unscheduled/i)).not.toBeInTheDocument();
   });
 
   it("renders goal text", () => {
@@ -344,9 +343,10 @@ describe("CycleView — header", () => {
     expect(screen.getByText(/Ship the board shell/)).toBeInTheDocument();
   });
 
-  it("renders cycle state label", () => {
+  it("renders the neutral cycle state label instead of the raw state id", () => {
     renderCycleView(ACTIVE_CYCLE, []);
-    expect(screen.getByText(/ACTIVE/)).toBeInTheDocument();
+    expect(screen.getByText("Active")).toBeInTheDocument();
+    expect(screen.queryByText("ACTIVE")).not.toBeInTheDocument();
   });
 });
 
@@ -681,7 +681,8 @@ describe("TaskingScreen integration — cycle mode", () => {
     expect(
       screen.getByRole("heading", { name: /BACKLOG/i }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/UNSCHEDULED/)).toBeInTheDocument();
+    expect(screen.getByText("No Cycle")).toBeInTheDocument();
+    expect(screen.queryByText(/unscheduled/i)).not.toBeInTheDocument();
   });
 
   it("op with slug active: New task presets {cycle, project}", async () => {

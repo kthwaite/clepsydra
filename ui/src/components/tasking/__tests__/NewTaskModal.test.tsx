@@ -210,7 +210,7 @@ describe("NewTaskModal — render", () => {
   it("presets CYCLE select to preset cycle code", () => {
     wrap(undefined, { cycle: "C-01" });
     expect(screen.getByRole("button", { name: /Cycle/ })).toHaveTextContent(
-      "C-01 · Cycle 01 (ACTIVE)",
+      "C-01 · Cycle 01 (Active)",
     );
   });
 
@@ -227,7 +227,7 @@ describe("NewTaskModal — render", () => {
       expect(screen.getByTestId("new-task-title")).toHaveFocus(),
     );
     const priority = screen.getByRole("radiogroup", { name: "Priority" });
-    const p2 = within(priority).getByRole("radio", { name: "P2" });
+    const p2 = within(priority).getByRole("radio", { name: "P2 Medium" });
     expect(p2).toBeChecked();
     const p2Label = p2.closest("label");
     // Active state: has cool background
@@ -249,7 +249,9 @@ describe("NewTaskModal — render", () => {
     p2.focus();
     expect(p2).toHaveFocus();
     await user.keyboard("{ArrowLeft}");
-    expect(within(priority).getByRole("radio", { name: "P1" })).toBeChecked();
+    expect(
+      within(priority).getByRole("radio", { name: "P1 High" }),
+    ).toBeChecked();
   });
 
   it("lists all projects in the Project select", async () => {
@@ -264,15 +266,15 @@ describe("NewTaskModal — render", () => {
     ).toBeInTheDocument();
   });
 
-  it("lists all cycles in the Cycle select", async () => {
+  it("lists cycles with neutral state labels while retaining code values", async () => {
     wrap();
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Cycle$/ }));
     expect(
-      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (Active)" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "C-02 · Cycle 02 (PLANNED)" }),
+      screen.getByRole("option", { name: "C-02 · Cycle 02 (Planned)" }),
     ).toBeInTheDocument();
   });
 
@@ -293,10 +295,10 @@ describe("NewTaskModal — render", () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole("button", { name: /Cycle$/ }));
     expect(
-      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (Active)" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "C-02 · Cycle 02 (PLANNED)" }),
+      screen.getByRole("option", { name: "C-02 · Cycle 02 (Planned)" }),
     ).toBeInTheDocument();
     expect(
       screen.queryByRole("option", { name: /C-00/ }),
@@ -363,14 +365,12 @@ describe("NewTaskModal — submit payload", () => {
 
     await user.click(screen.getByRole("button", { name: /Cycle$/ }));
     await user.click(
-      screen.getByRole("option", { name: "C-01 · Cycle 01 (ACTIVE)" }),
+      screen.getByRole("option", { name: "C-01 · Cycle 01 (Active)" }),
     );
 
-    // Set status to FIELD
-    await user.click(screen.getByTestId("new-task-status-FIELD"));
-
-    // Set priority to P1
-    await user.click(screen.getByTestId("new-task-priority-P1"));
+    // Rendered status and priority labels still submit raw IDs.
+    await user.click(screen.getByRole("radio", { name: "In Progress" }));
+    await user.click(screen.getByRole("radio", { name: "P1 High" }));
 
     // Fill text fields
     await user.type(screen.getByTestId("new-task-assignee"), "Kit");

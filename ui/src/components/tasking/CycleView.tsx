@@ -21,6 +21,7 @@ import { useBoardStore } from "#/store/board";
 import {
   COL_ORDER,
   type ColLabelFn,
+  cycleStateLabel,
   fmtCycleWindow,
   PRI_ORDER,
   PriChip,
@@ -41,7 +42,7 @@ export const BACKLOG_PSEUDO_CYCLE: Omit<BoardCycle, "id" | "path"> & {
   state: "OPEN",
   start: null,
   end: null,
-  goal: "Uncommitted tasking — not yet pulled into a cycle.",
+  goal: "Tasks not assigned to a Cycle.",
 };
 
 /**
@@ -161,7 +162,9 @@ export function CycleView({
   const isBacklog = cycle.code === "BACKLOG";
 
   // Window label
-  const windowLabel = fmtCycleWindow(cycle.start, cycle.end);
+  const windowLabel = isBacklog
+    ? "No Cycle"
+    : fmtCycleWindow(cycle.start, cycle.end);
 
   // State label color — mirrors .sp-state.* in styles-board.css
   // Note: "OPEN" is the BACKLOG pseudo-cycle state (uncommitted tasking).
@@ -194,7 +197,7 @@ export function CycleView({
             {windowLabel}
             <span className="mx-[6px] text-[var(--rule)]">·</span>
             <span style={{ color: stateColor, letterSpacing: "0.16em" }}>
-              {cycle.state}
+              {cycleStateLabel(isBacklog ? "BACKLOG" : cycle.state)}
             </span>
           </div>
 
@@ -224,7 +227,7 @@ export function CycleView({
                     })
                   }
                 >
-                  ▶ OPEN CYCLE
+                  <span aria-hidden="true">▶ </span>Start cycle
                 </button>
               )}
               {cycle.state === "ACTIVE" && isRealCycle(cycle) && (
@@ -238,12 +241,12 @@ export function CycleView({
                     })
                   }
                 >
-                  ■ SEAL CYCLE
+                  <span aria-hidden="true">■ </span>Close cycle
                 </button>
               )}
               {cycle.state === "CLOSED" && (
                 <span className="border border-[var(--ink-3)] px-[10px] py-[4px] text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-                  ✓ CYCLE SEALED
+                  <span aria-hidden="true">✓ </span>Cycle closed
                 </span>
               )}
             </div>

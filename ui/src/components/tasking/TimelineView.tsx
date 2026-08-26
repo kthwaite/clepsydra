@@ -328,7 +328,7 @@ export function TimelineView({
           data-testid="tl-foot"
         >
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-2)]">
-            {pad2(unscheduled)} UNSCHEDULED
+            {pad2(unscheduled)} WITHOUT DUE DATE
           </span>
           <span className="cl-mono text-[var(--fs-xs)] text-[var(--ink-4)]">
             No due date · in Backlog or Inbox

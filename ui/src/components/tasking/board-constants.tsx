@@ -7,13 +7,13 @@ import type { BoardMode } from "#/store/board";
 
 /**
  * Formats a cycle date window as "MM.DD — MM.DD" (half-open when only one
- * bound is set). Returns "UNSCHEDULED" when both start and end are absent.
+ * bound is set). Returns "No dates" when both start and end are absent.
  */
 export function fmtCycleWindow(
   start?: string | null,
   end?: string | null,
 ): string {
-  if (!start && !end) return "UNSCHEDULED";
+  if (!start && !end) return "No dates";
   const fmt = (s: string) => {
     // ISO date "YYYY-MM-DD" → "MM.DD"
     const parts = s.split("-");
@@ -61,6 +61,18 @@ export const PRI_LABEL: Record<string, string> = {
   P2: "Medium",
   P3: "Low",
 };
+
+export const CYCLE_STATE_LABEL: Record<string, string> = {
+  PLANNED: "Planned",
+  ACTIVE: "Active",
+  CLOSED: "Closed",
+  BACKLOG: "Backlog",
+};
+
+/** Resolves a persisted cycle state id to its display label. */
+export function cycleStateLabel(state: string): string {
+  return CYCLE_STATE_LABEL[state] ?? state;
+}
 
 /**
  * Single-sourced priority color map: bar (left rail / on-state fill) and

@@ -316,6 +316,15 @@ describe("NewCycleModal — render", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders the lifecycle Status hint without cadence vocabulary", () => {
+    useBoardStore.setState({ cycleModal: { kind: "new" } });
+    wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
+
+    const modal = screen.getByTestId("new-cycle-modal");
+    expect(modal).toHaveTextContent("lifecycle");
+    expect(modal).not.toHaveTextContent(/cadence/i);
+  });
+
   it("prefills label with CYCLE N", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[CYCLE_ACTIVE, CYCLE_PLANNED]} now={NOW} />);
@@ -619,6 +628,17 @@ describe("OpenCycleModal — render", () => {
     expect(screen.getByTestId("open-cycle-clash-callout")).toHaveTextContent(
       "C-01 is already Active. Starting this cycle will leave two active cycles. Close C-01 first if that is not intended.",
     );
+  });
+
+  it("describes the active Cycle consequence without cadence vocabulary", () => {
+    useBoardStore.setState({
+      cycleModal: { kind: "open", cycleId: "cyc-222" },
+    });
+    wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
+
+    const modal = screen.getByTestId("open-cycle-modal");
+    expect(modal).toHaveTextContent("sets active Cycle to C-02");
+    expect(modal).not.toHaveTextContent(/cadence/i);
   });
 
   it("does NOT show clash callout when no other cycle is ACTIVE", () => {

@@ -36,7 +36,7 @@ import {
   BoardModalFrame,
   ModalEscChip,
 } from "./BoardModalFrame";
-import { type ColLabelFn, opKey } from "./board-constants";
+import { type ColLabelFn, cycleStateLabel, opKey } from "./board-constants";
 import {
   DispositionRow,
   EdField,
@@ -265,9 +265,9 @@ export function NewTaskModal({
                 <SelectItem
                   key={c.id}
                   id={c.code}
-                  textValue={`${c.code} · ${c.label} (${c.state})`}
+                  textValue={`${c.code} · ${c.label} (${cycleStateLabel(c.state)})`}
                 >
-                  {c.code} · {c.label} ({c.state})
+                  {c.code} · {c.label} ({cycleStateLabel(c.state)})
                 </SelectItem>
               ))}
             </Select>

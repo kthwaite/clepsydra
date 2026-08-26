@@ -18,6 +18,7 @@ import {
   COL_LABEL,
   type ColLabelFn,
   opKey,
+  PRI_LABEL,
   PRI_ORDER,
 } from "./board-constants";
 import { CycleView, resolveCycle } from "./CycleView";
@@ -192,13 +193,19 @@ export function TaskingScreen({
         id: "pri",
         kind: "multi",
         label: "Priority",
-        options: PRI_ORDER.map((value) => ({ value })),
+        options: PRI_ORDER.map((value) => ({
+          value,
+          label: `${value} ${PRI_LABEL[value]}`,
+        })),
       },
       {
         id: "status",
         kind: "multi",
         label: "Status",
-        options: COL_ORDER.map((value) => ({ value })),
+        options: COL_ORDER.map((value) => ({
+          value,
+          label: COL_LABEL[value] ?? value,
+        })),
       },
       { id: "hold", kind: "flag", label: "Blocked", options: [] },
     ],

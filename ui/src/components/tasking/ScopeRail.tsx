@@ -330,7 +330,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
           code="BACKLOG"
           displayCode="Backlog"
           state="BACKLOG"
-          windowLabel="unscheduled"
+          windowLabel="Tasks without a Cycle"
           count={backlogCount}
           active={mode === "cycle" && cycleSel === "BACKLOG"}
           onSelect={() => {

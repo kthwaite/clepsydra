@@ -73,12 +73,12 @@ describe("tasking telemetry", () => {
     vi.restoreAllMocks();
   });
 
-  it("renders backend completion counts in the 14-day seal history", async () => {
+  it("renders backend completion counts in the 14-day history", async () => {
     const get = stubTelemetryFetch();
     renderScreen();
 
     expect(
-      await screen.findByLabelText("14-day seal history: 0, 2, 1"),
+      await screen.findByLabelText("14-day completed task history: 0, 2, 1"),
     ).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith("/api/vault/tasks/history", {
       params: {
@@ -93,7 +93,7 @@ describe("tasking telemetry", () => {
     renderScreen();
 
     expect(
-      await screen.findByLabelText("14-day seal history: 0, 2, 1"),
+      await screen.findByLabelText("14-day completed task history: 0, 2, 1"),
     ).toBeInTheDocument();
     expect(get).toHaveBeenCalledWith("/api/vault/tasks/history", {
       params: {
@@ -107,7 +107,7 @@ describe("tasking telemetry", () => {
     const get = stubTelemetryFetch({ board: BOARD_FIXTURE_WITH_NO_SLUG_OP });
     renderScreen();
 
-    expect(await screen.findByText("NOT APPLICABLE")).toBeInTheDocument();
+    expect(await screen.findByText("Not applicable")).toBeInTheDocument();
     expect(get).not.toHaveBeenCalled();
   });
 
@@ -117,16 +117,16 @@ describe("tasking telemetry", () => {
     renderScreen();
 
     expect(
-      await screen.findByLabelText("Cycle burndown: 4, 3, 1"),
+      await screen.findByLabelText("Cycle progress: 4, 3, 1"),
     ).toBeInTheDocument();
   });
 
-  it("shows honest empty states when no seals or cycle history exist", async () => {
+  it("shows honest empty states when no completed tasks or cycle history exist", async () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
     stubTelemetryFetch({ empty: true });
     renderScreen();
 
-    expect(await screen.findByText("NO SEALS")).toBeInTheDocument();
+    expect(await screen.findByText("No completed tasks")).toBeInTheDocument();
     expect(await screen.findByText("NO HISTORY")).toBeInTheDocument();
   });
 
@@ -150,9 +150,10 @@ describe("tasking telemetry", () => {
     useBoardStore.setState({ mode: "cycle", cycleSel: "C-01" });
     renderScreen();
 
-    expect(await screen.findByText("TASKING BOARD")).toBeInTheDocument();
+    expect(await screen.findByText("Task Board")).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getAllByText("UNAVAILABLE")).toHaveLength(2);
+      expect(screen.getByText("Unavailable")).toBeInTheDocument();
+      expect(screen.getByText("UNAVAILABLE")).toBeInTheDocument();
     });
   });
 });

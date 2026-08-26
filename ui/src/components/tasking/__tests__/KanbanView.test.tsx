@@ -1252,7 +1252,7 @@ describe("KanbanView — QuickAddRow wiring", () => {
       />,
     );
     const intakeRow = screen.getByTestId("qa-INTAKE");
-    expect(intakeRow).toHaveAttribute("placeholder", "+ ADD");
+    expect(intakeRow).toHaveAttribute("placeholder", "+ New task");
   });
 
   it("includes activeProject in the preset when provided", () => {

@@ -44,7 +44,12 @@ import type {
 import { useArchiveTask, usePatchTask } from "#/api/board";
 import { Select, SelectItem } from "#/components/ui/select";
 import { useBoardStore } from "#/store/board";
-import { type ColLabelFn, opKey, priColor } from "./board-constants";
+import {
+  type ColLabelFn,
+  cycleStateLabel,
+  opKey,
+  priColor,
+} from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
 import { checklistProgress } from "./board-stats";
 import {
@@ -593,9 +598,9 @@ export function TaskEditPanel({
                     <SelectItem
                       key={c.id}
                       id={c.code}
-                      textValue={`${c.code} (${c.state})`}
+                      textValue={`${c.code} (${cycleStateLabel(c.state)})`}
                     >
-                      {c.code} ({c.state})
+                      {c.code} ({cycleStateLabel(c.state)})
                     </SelectItem>
                   ))}
                 </Select>

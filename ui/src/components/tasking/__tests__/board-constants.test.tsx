@@ -1,6 +1,14 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { MODES, PRI_LABEL, PRI_ORDER } from "../board-constants";
+import {
+  COL_LABEL,
+  cycleStateLabel,
+  fmtCycleWindow,
+  MODES,
+  PRI_LABEL,
+  PRI_ORDER,
+} from "../board-constants";
 import { DispositionRow, PriorityRow } from "../fields";
 
 describe("Task Board display vocabulary", () => {
@@ -22,30 +30,66 @@ describe("Task Board display vocabulary", () => {
     ]);
   });
 
-  it("exposes task status and priority radio groups by neutral names", () => {
-    const { rerender } = render(
+  it("renders neutral status labels while preserving raw radio values", async () => {
+    const onChange = vi.fn();
+    render(
       <DispositionRow
         value="INTAKE"
-        onChange={vi.fn()}
+        onChange={onChange}
         testIdPrefix="vocabulary"
-        colLabel={(id) => id}
+        colLabel={(id) => COL_LABEL[id] ?? id}
       />,
     );
 
-    expect(
-      screen.getByRole("radiogroup", { name: "Status" }),
-    ).toBeInTheDocument();
+    const status = screen.getByRole("radiogroup", { name: "Status" });
+    for (const label of ["Inbox", "Ready", "In Progress", "Review", "Done"]) {
+      expect(screen.getByRole("radio", { name: label })).toBeInTheDocument();
+    }
 
-    rerender(
+    await userEvent.click(screen.getByRole("radio", { name: "In Progress" }));
+    expect(onChange).toHaveBeenCalledWith("FIELD");
+    expect(status).toBeInTheDocument();
+  });
+
+  it("renders approved priority labels while preserving raw radio values", async () => {
+    const onChange = vi.fn();
+    render(
       <PriorityRow
         value="P2"
-        onChange={vi.fn()}
+        onChange={onChange}
         testIdPrefix="vocabulary"
       />,
     );
 
+    for (const label of [
+      "P0 Critical",
+      "P1 High",
+      "P2 Medium",
+      "P3 Low",
+    ]) {
+      expect(screen.getByRole("radio", { name: label })).toBeInTheDocument();
+    }
+
+    await userEvent.click(screen.getByRole("radio", { name: "P0 Critical" }));
+    expect(onChange).toHaveBeenCalledWith("P0");
+  });
+
+
+  it("uses neutral copy for an undated Cycle window", () => {
+    expect(fmtCycleWindow(null, null)).toBe("No dates");
+  });
+  it("maps cycle state ids to display labels and falls back to the raw id", () => {
     expect(
-      screen.getByRole("radiogroup", { name: "Priority" }),
-    ).toBeInTheDocument();
+      ["PLANNED", "ACTIVE", "CLOSED", "BACKLOG", "PAUSED"].map((state) => [
+        state,
+        cycleStateLabel(state),
+      ]),
+    ).toEqual([
+      ["PLANNED", "Planned"],
+      ["ACTIVE", "Active"],
+      ["CLOSED", "Closed"],
+      ["BACKLOG", "Backlog"],
+      ["PAUSED", "PAUSED"],
+    ]);
   });
 });

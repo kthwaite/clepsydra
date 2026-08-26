@@ -312,7 +312,7 @@ describe("TaskEditPanel — render", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("omits CLOSED cycles from the CYCLE dropdown when task is not in that cycle", async () => {
+  it("renders neutral cycle state labels and omits unavailable Closed cycles", async () => {
     // FULL_TASK is in C-01, not C-00 (CLOSED)
     wrap({
       task: FULL_TASK,
@@ -321,28 +321,28 @@ describe("TaskEditPanel — render", () => {
     });
     await userEvent.click(screen.getByRole("button", { name: /Cycle/ }));
     expect(
-      screen.getByRole("option", { name: "C-01 (ACTIVE)" }),
+      screen.getByRole("option", { name: "C-01 (Active)" }),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("option", { name: "C-02 (PLANNED)" }),
+      screen.getByRole("option", { name: "C-02 (Planned)" }),
     ).toBeInTheDocument();
     expect(
-      screen.queryByRole("option", { name: "C-00 (CLOSED)" }),
+      screen.queryByRole("option", { name: "C-00 (Closed)" }),
     ).not.toBeInTheDocument();
   });
 
-  it("includes CLOSED cycle in dropdown when task is currently assigned to it", async () => {
-    // SEALED_IN_CLOSED_CYCLE_TASK is in C-00 (CLOSED), and it must stay representable
+  it("renders the current Closed cycle with a neutral state label", async () => {
+    // A closed Cycle must remain representable when it is the current value.
     wrap({
       task: SEALED_IN_CLOSED_CYCLE_TASK,
       operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
       cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
     });
     const trigger = screen.getByRole("button", { name: /Cycle/ });
-    expect(trigger).toHaveTextContent("C-00 (CLOSED)");
+    expect(trigger).toHaveTextContent("C-00 (Closed)");
     await userEvent.click(trigger);
     expect(
-      screen.getByRole("option", { name: "C-00 (CLOSED)" }),
+      screen.getByRole("option", { name: "C-00 (Closed)" }),
     ).toBeInTheDocument();
   });
 });
@@ -388,17 +388,15 @@ describe("TaskEditPanel — checklist read-only", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("TaskEditPanel — immediate patches", () => {
-  it("disposition radio change fires immediate PATCH {status}", async () => {
+  it("rendered status labels preserve the raw PATCH status", async () => {
     const stub = makeStub();
     wrap({ fetchStub: stub, seedBoard: true });
     const status = screen.getByRole("radiogroup", {
       name: "Status",
     });
-    expect(
-      within(status).getByTestId("edit-panel-status-REVIEW"),
-    ).toHaveRole("radio");
+    const review = within(status).getByRole("radio", { name: "Review" });
 
-    await userEvent.click(screen.getByTestId("edit-panel-status-REVIEW"));
+    await userEvent.click(review);
 
     await waitFor(() => {
       const patchCalls = stub.mock.calls.filter(
@@ -413,15 +411,15 @@ describe("TaskEditPanel — immediate patches", () => {
     });
   });
 
-  it("priority radio change fires immediate PATCH {priority}", async () => {
+  it("rendered priority labels preserve the raw PATCH priority", async () => {
     const stub = makeStub();
     wrap({ fetchStub: stub, seedBoard: true });
     const priority = screen.getByRole("radiogroup", { name: "Priority" });
-    expect(within(priority).getByTestId("edit-panel-priority-P0")).toHaveRole(
-      "radio",
-    );
+    const critical = within(priority).getByRole("radio", {
+      name: "P0 Critical",
+    });
 
-    await userEvent.click(screen.getByTestId("edit-panel-priority-P0"));
+    await userEvent.click(critical);
 
     await waitFor(() => {
       const patchCalls = stub.mock.calls.filter(
@@ -454,6 +452,28 @@ describe("TaskEditPanel — immediate patches", () => {
         unknown
       >;
       expect(body.cycle).toBeNull();
+    });
+  });
+
+  it("rendered cycle state labels preserve the raw PATCH cycle code", async () => {
+    const stub = makeStub();
+    wrap({ task: FULL_TASK, fetchStub: stub, seedBoard: true });
+
+    await userEvent.click(screen.getByRole("button", { name: /Cycle/ }));
+    await userEvent.click(
+      screen.getByRole("option", { name: "C-02 (Planned)" }),
+    );
+
+    await waitFor(() => {
+      const patchCalls = stub.mock.calls.filter(
+        ([, opts]) => opts?.method === "PATCH",
+      );
+      expect(patchCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(patchCalls[0][1]!.body as string) as Record<
+        string,
+        unknown
+      >;
+      expect(body.cycle).toBe("C-02");
     });
   });
 

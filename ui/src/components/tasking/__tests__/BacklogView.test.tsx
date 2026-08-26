@@ -562,6 +562,6 @@ describe("BacklogView — QuickAddRow wiring", () => {
   it("QuickAddRow has empty preset (no status/project/cycle)", () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
     const row = screen.getByTestId("qa-backlog");
-    expect(row).toHaveAttribute("placeholder", "+ ADD");
+    expect(row).toHaveAttribute("placeholder", "+ New task");
   });
 });

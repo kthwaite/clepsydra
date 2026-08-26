@@ -11,6 +11,7 @@ import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import {
   COL_ORDER,
   type ColLabelFn,
+  PRI_LABEL,
   PRI_ORDER,
   priColor,
 } from "./board-constants";
@@ -183,7 +184,7 @@ export function PriorityRow({
           style={value === p ? PRI_ON_STYLE[p] : PRI_OFF_STYLE[p]}
           data-testid={`${testIdPrefix}-priority-${p}`}
         >
-          {p}
+          {p} {PRI_LABEL[p]}
         </TaskRadio>
       ))}
     </RadioGroup>

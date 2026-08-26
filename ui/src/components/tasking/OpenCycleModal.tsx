@@ -158,7 +158,7 @@ export function OpenCycleModal({ cycle, cycles, tasks }: OpenCycleModalProps) {
       {/* Footer */}
       <div className="flex items-center justify-between border-t border-[var(--rule)] bg-[var(--bg-2)] px-[14px] py-[10px]">
         <div className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.12em] text-[var(--ink-3)]">
-          moves cadence head to <b>{cycle.code}</b>
+          sets active Cycle to <b>{cycle.code}</b>
         </div>
         <div className="flex gap-[8px]">
           <button

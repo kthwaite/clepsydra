@@ -611,11 +611,11 @@ describe("TimelineView — bar click", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// Unscheduled footer
+// No-due footer
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe("TimelineView — unscheduled footer", () => {
-  it("shows footer when there are unscheduled tasks", () => {
+describe("TimelineView — no-due footer", () => {
+  it("shows approved no-due copy when tasks have no due date", () => {
     wrap(
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
@@ -624,13 +624,14 @@ describe("TimelineView — unscheduled footer", () => {
         cycles={TL_CYCLES}
       />,
     );
-    expect(screen.getByTestId("tl-foot")).toBeInTheDocument();
-    expect(screen.getByTestId("tl-foot").textContent).toContain(
-      "01 UNSCHEDULED",
-    );
+    const footer = screen.getByTestId("tl-foot");
+    expect(footer).toBeInTheDocument();
+    expect(footer).toHaveTextContent("01 WITHOUT DUE DATE");
+    expect(footer).toHaveTextContent("No due date");
+    expect(footer).not.toHaveTextContent(/unscheduled/i);
   });
 
-  it("zero-pads the unscheduled count", () => {
+  it("zero-pads the count of tasks without a due date", () => {
     const twoUnscheduled: BoardTask[] = [
       TL_TASK_UNSCHEDULED,
       {
@@ -648,8 +649,8 @@ describe("TimelineView — unscheduled footer", () => {
         cycles={TL_CYCLES}
       />,
     );
-    expect(screen.getByTestId("tl-foot").textContent).toContain(
-      "02 UNSCHEDULED",
+    expect(screen.getByTestId("tl-foot")).toHaveTextContent(
+      "02 WITHOUT DUE DATE",
     );
   });
 

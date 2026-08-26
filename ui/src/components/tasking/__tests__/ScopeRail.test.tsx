@@ -109,7 +109,7 @@ describe("ScopeRail", () => {
     });
   });
 
-  it("renders Backlog as unscheduled and counts only tasks without a cycle", () => {
+  it("renders canonical Backlog copy and counts only tasks without a Cycle", () => {
     const taskWithAnotherCycle = {
       ...tasks[0],
       id: "task-with-another-cycle",
@@ -126,7 +126,8 @@ describe("ScopeRail", () => {
 
     expect(row).not.toBeNull();
     expect(within(row!).getByText("Backlog")).toBeInTheDocument();
-    expect(within(row!).getByText("unscheduled")).toBeInTheDocument();
+    expect(within(row!).getByText("Tasks without a Cycle")).toBeInTheDocument();
+    expect(within(row!).queryByText(/unscheduled/i)).not.toBeInTheDocument();
     expect(within(row!).getByText("2")).toBeInTheDocument();
   });
 
