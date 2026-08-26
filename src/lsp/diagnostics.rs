@@ -37,6 +37,12 @@ pub fn compute_link_diagnostics(
         if link.span.start == 0 && link.span.end == 0 {
             continue; // skip property ref links
         }
+        if link.kind == crate::vault::link::LinkKind::BlockRef {
+            // Block refs are resolved by id elsewhere (goto-definition,
+            // hover), never by canonical page name — flagging them here
+            // would misreport every valid `((block-id))` as unresolved.
+            continue;
+        }
         let canonical = crate::vault::canonical::CanonicalName::from_title(&link.target_raw);
         let cn_str = canonical.as_str();
 
@@ -319,6 +325,43 @@ mod tests {
         names.insert("target".to_string(), vec!["Target.md".to_string()]);
         let diags = compute_link_diagnostics(&doc, &names, Path::new("/v"));
         assert!(diags.is_empty());
+    }
+
+    #[test]
+    fn block_ref_yields_no_diagnostic_when_unresolved_in_index() {
+        // Block IDs never match page canonical names, so an unresolved
+        // block ref must not be reported as an unresolved link.
+        let doc = Document::from_text("# A\n\n((blk123XYZ99))\n", 1);
+        let names: HashMap<String, Vec<String>> = HashMap::new();
+        let diags = compute_link_diagnostics(&doc, &names, Path::new("/v"));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn block_ref_yields_no_diagnostic_when_resolved_in_index() {
+        // Even if some page's canonical name happens to coincide with the
+        // block id, block refs are resolved by id (elsewhere), never by
+        // canonical name, so this must stay silent too.
+        let doc = Document::from_text("# A\n\n((blk123XYZ99))\n", 1);
+        let mut names = HashMap::new();
+        names.insert("blk123xyz99".to_string(), vec!["Some Page.md".to_string()]);
+        let diags = compute_link_diagnostics(&doc, &names, Path::new("/v"));
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn wiki_unresolved_link_still_flagged_alongside_block_ref() {
+        // The block-ref skip must not swallow diagnostics for other link
+        // kinds in the same document.
+        let doc = Document::from_text("# A\n\n[[Ghost]]\n\n((blk123XYZ99))\n", 1);
+        let names: HashMap<String, Vec<String>> = HashMap::new();
+        let diags = compute_link_diagnostics(&doc, &names, Path::new("/v"));
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert_eq!(
+            diags[0].code,
+            Some(NumberOrString::String("unresolved-link".into()))
+        );
+        assert!(diags[0].message.contains("Ghost"));
     }
 
     fn registry_with(base_toml: &str) -> BaseRegistry {
