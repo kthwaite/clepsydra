@@ -2,20 +2,20 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
-use axum::Json;
-use axum::Router;
 use axum::extract::{Query, State};
 use axum::routing::get;
+use axum::Json;
+use axum::Router;
 use chrono::{Duration, NaiveDate};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use super::AppState;
 use super::error::ApiError;
 use super::tasks::TaskItem;
-use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
+use super::AppState;
 use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
+use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
 
 // ---------------------------------------------------------------------------
 // Response types
@@ -356,12 +356,12 @@ pub async fn get_agenda(
     Query(query): Query<AgendaQuery>,
 ) -> Result<Json<AgendaResponse>, ApiError> {
     let today = parse_today(&query.today)?;
-    let tomorrow = today.checked_add_signed(Duration::days(1)).ok_or_else(|| {
-        ApiError::bad_request("today must allow a seven-day Agenda window")
-    })?;
-    let end = today.checked_add_signed(Duration::days(7)).ok_or_else(|| {
-        ApiError::bad_request("today must allow a seven-day Agenda window")
-    })?;
+    let tomorrow = today
+        .checked_add_signed(Duration::days(1))
+        .ok_or_else(|| ApiError::bad_request("today must allow a seven-day Agenda window"))?;
+    let end = today
+        .checked_add_signed(Duration::days(7))
+        .ok_or_else(|| ApiError::bad_request("today must allow a seven-day Agenda window"))?;
     let today_key = today.format("%Y-%m-%d").to_string();
     let tomorrow_key = tomorrow.format("%Y-%m-%d").to_string();
     let end_key = end.format("%Y-%m-%d").to_string();
@@ -401,20 +401,19 @@ pub async fn get_agenda(
                       )";
 
                 let mut stmt = conn.prepare(sql)?;
-                let rows =
-                    stmt.query_map(params![today_key, tomorrow_key, end_key], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, Option<String>>(1)?,
-                            row.get::<_, String>(2)?,
-                            row.get::<_, i64>(3)?,
-                            row.get::<_, i64>(4)?,
-                            row.get::<_, String>(5)?,
-                            row.get::<_, String>(6)?,
-                            row.get::<_, Option<String>>(7)?,
-                            row.get::<_, Option<String>>(8)?,
-                        ))
-                    })?;
+                let rows = stmt.query_map(params![today_key, tomorrow_key, end_key], |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, Option<String>>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, String>(5)?,
+                        row.get::<_, String>(6)?,
+                        row.get::<_, Option<String>>(7)?,
+                        row.get::<_, Option<String>>(8)?,
+                    ))
+                })?;
 
                 let mut todo_items = Vec::new();
                 let mut todo_keys = Vec::new();

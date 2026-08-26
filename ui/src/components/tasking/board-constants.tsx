@@ -22,7 +22,8 @@ export function fmtCycleWindow(
   };
   if (start && end) return `${fmt(start)} — ${fmt(end)}`;
   if (start) return `${fmt(start)} —`;
-  return `— ${fmt(end!)}`;
+  if (!end) return "No dates";
+  return `— ${fmt(end)}`;
 }
 
 // ── canonical op key ─────────────────────────────────────────────────────────

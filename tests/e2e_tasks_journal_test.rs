@@ -6,14 +6,14 @@ use axum_test::TestServer;
 use chrono::Utc;
 use tokio::sync::broadcast;
 
-use clepsydra::api::{AppState, api_router};
-use clepsydra::vault::Vault;
+use clepsydra::api::{api_router, AppState};
 use clepsydra::vault::academic_hook::AcademicMoveHook;
 use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
+use clepsydra::vault::Vault;
 use tempfile::TempDir;
 
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {

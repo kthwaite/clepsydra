@@ -1,5 +1,5 @@
-use clepsydra::FeatureFlags;
 use clepsydra::api::openapi::{self, ApiDoc};
+use clepsydra::FeatureFlags;
 use utoipa::OpenApi;
 
 const VAULT_OPERATIONS: &[(&str, &str)] = &[
@@ -83,9 +83,7 @@ fn openapi_defines_consolidated_agenda_contract() {
         .expect("Agenda parameters should be an array");
 
     assert!(parameters.iter().any(|parameter| {
-        parameter["name"] == "today"
-            && parameter["in"] == "query"
-            && parameter["required"] == true
+        parameter["name"] == "today" && parameter["in"] == "query" && parameter["required"] == true
     }));
     let mut agenda_paths = paths
         .keys()
@@ -112,8 +110,8 @@ fn openapi_defines_the_archive_view_get_resource_diagnostic() {
     let operation = &document["paths"]["/api/vault/archive/view/{snapshot_hash}"]["get"];
 
     assert_eq!(
-        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]["schema"]
-            ["type"],
+        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]
+            ["schema"]["type"],
         "integer"
     );
 }
@@ -134,16 +132,18 @@ fn openapi_defines_the_archive_view_head_contract() {
         );
     }
     assert_eq!(
-        operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]["type"],
+        operation["responses"]["415"]["headers"]["X-Clepsydra-Archive-Content-Type"]["schema"]
+            ["type"],
         "string"
     );
     assert_eq!(
-        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]["schema"]
-            ["type"],
+        operation["responses"]["200"]["headers"]["X-Clepsydra-Archive-Uncaptured-Resource-Count"]
+            ["schema"]["type"],
         "integer"
     );
     assert_eq!(
-        operation["responses"]["500"]["headers"]["X-Clepsydra-Archive-Diagnostic"]["schema"]["type"],
+        operation["responses"]["500"]["headers"]["X-Clepsydra-Archive-Diagnostic"]["schema"]
+            ["type"],
         "string"
     );
 }
@@ -337,22 +337,18 @@ fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
         schemas["SortKey"]["properties"]["dir"]["$ref"],
         "#/components/schemas/SortDir"
     );
-    assert!(
-        schemas["BaseMemberScope"]["enum"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("embed"))
-    );
+    assert!(schemas["BaseMemberScope"]["enum"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("embed")));
     assert_eq!(
         schemas["BaseMemberFieldRequirement"]["properties"]["embed"]["type"],
         "boolean"
     );
-    assert!(
-        schemas["BaseMemberFieldRequirement"]["required"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("embed"))
-    );
+    assert!(schemas["BaseMemberFieldRequirement"]["required"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("embed")));
 }
 
 #[test]
@@ -386,11 +382,15 @@ fn runtime_openapi_filters_disabled_features_without_narrowing_static_document()
 
         assert!(paths.contains_key("/api/features"));
         assert_eq!(
-            paths.keys().any(|path| path.starts_with("/api/vault/academic")),
+            paths
+                .keys()
+                .any(|path| path.starts_with("/api/vault/academic")),
             features.academic
         );
         assert_eq!(
-            paths.keys().any(|path| path.starts_with("/api/vault/feeds")),
+            paths
+                .keys()
+                .any(|path| path.starts_with("/api/vault/feeds")),
             features.feeds
         );
         assert_eq!(
@@ -405,11 +405,9 @@ fn runtime_openapi_filters_disabled_features_without_narrowing_static_document()
 
     let complete = ApiDoc::openapi();
     assert!(complete.paths.paths.contains_key("/api/features"));
-    assert!(
-        complete
-            .paths
-            .paths
-            .contains_key("/api/vault/academic/works")
-    );
+    assert!(complete
+        .paths
+        .paths
+        .contains_key("/api/vault/academic/works"));
     assert!(complete.paths.paths.contains_key("/api/vault/feeds"));
 }

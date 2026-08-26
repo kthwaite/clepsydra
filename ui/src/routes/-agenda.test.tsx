@@ -230,8 +230,13 @@ describe("AgendaScreen", () => {
 
     const overdue = screen.getByRole("heading", { name: "Overdue" });
     const dueToday = screen.getByRole("heading", { name: "Due Today" });
-    expect(within(overdue.closest("section")!).getByText("Renew insurance")).toBeVisible();
-    expect(within(dueToday.closest("section")!).getByText("Ship Agenda")).toBeVisible();
+    const overdueSection = overdue.closest("section");
+    const dueTodaySection = dueToday.closest("section");
+    if (!overdueSection || !dueTodaySection) {
+      throw new Error("Agenda section heading is missing its section container");
+    }
+    expect(within(overdueSection).getByText("Renew insurance")).toBeVisible();
+    expect(within(dueTodaySection).getByText("Ship Agenda")).toBeVisible();
     expect(screen.getAllByText("Renew insurance")).toHaveLength(1);
     expect(screen.getAllByText("Ship Agenda")).toHaveLength(1);
   });
@@ -263,9 +268,14 @@ describe("AgendaScreen", () => {
     const friday = screen.getByRole("heading", {
       name: /Fri.*(?:Aug.*28|28.*Aug)/,
     });
-    expect(within(thursday.closest("section")!).getByText("Thursday Todo")).toBeVisible();
-    expect(within(thursday.closest("section")!).getByText("Thursday Task")).toBeVisible();
-    expect(within(friday.closest("section")!).getByText("Friday Task")).toBeVisible();
+    const thursdaySection = thursday.closest("section");
+    const fridaySection = friday.closest("section");
+    if (!thursdaySection || !fridaySection) {
+      throw new Error("Agenda day heading is missing its section container");
+    }
+    expect(within(thursdaySection).getByText("Thursday Todo")).toBeVisible();
+    expect(within(thursdaySection).getByText("Thursday Task")).toBeVisible();
+    expect(within(fridaySection).getByText("Friday Task")).toBeVisible();
   });
 
   it("shows only Todos in the Undated tab", async () => {
