@@ -245,10 +245,7 @@ describe("MemberCreationSession.submit", () => {
       requiredSession().submit(draft, { create, refreshAfterConflict }),
     ).resolves.toEqual({ kind: "created", member: createdMember });
     expect(create).toHaveBeenCalledOnce();
-    const request = create.mock.calls[0]?.[1] as
-      | BaseMemberCreateRequest
-      | undefined;
-    expect(request).toEqual({
+    const expectedRequest: BaseMemberCreateRequest = {
       base_revision: "detail-r1",
       view: "Reading",
       title: "Trim me",
@@ -259,7 +256,11 @@ describe("MemberCreationSession.submit", () => {
         featured: false,
         rating: 0,
       },
-    });
+    };
+    expect(create.mock.calls[0]).toEqual(["books", expectedRequest]);
+    const request = create.mock.calls[0]?.[1] as
+      | BaseMemberCreateRequest
+      | undefined;
     expect(Object.hasOwn(request ?? {}, "embed_filter")).toBe(false);
     expect(Object.hasOwn(request?.fields ?? {}, "inherited")).toBe(false);
     expect(request?.fields?.tags).toBe(retainedArray);
@@ -289,10 +290,7 @@ describe("MemberCreationSession.submit", () => {
     );
 
     expect(create).toHaveBeenCalledOnce();
-    const request = create.mock.calls[0]?.[1] as
-      | BaseMemberCreateRequest
-      | undefined;
-    expect(request).toEqual({
+    const expectedRequest: BaseMemberCreateRequest = {
       base_revision: "evaluator-r9",
       view: "Reading",
       title: "New book",
@@ -302,7 +300,11 @@ describe("MemberCreationSession.submit", () => {
         op: "eq",
         value: "reading",
       },
-    });
+    };
+    expect(create.mock.calls[0]).toEqual(["books", expectedRequest]);
+    const request = create.mock.calls[0]?.[1] as
+      | BaseMemberCreateRequest
+      | undefined;
     expect(request?.embed_filter).toBe(embedFilter);
     expect(refreshAfterConflict).not.toHaveBeenCalled();
   });
@@ -323,16 +325,17 @@ describe("MemberCreationSession.submit", () => {
     );
 
     expect(create).toHaveBeenCalledOnce();
-    const request = create.mock.calls[0]?.[1] as
-      | BaseMemberCreateRequest
-      | undefined;
-    expect(request).toEqual({
+    const expectedRequest: BaseMemberCreateRequest = {
       base_revision: "evaluation-r1",
       view: "Reading",
       title: "New book",
       fields: {},
       embed_filter: undefined,
-    });
+    };
+    expect(create.mock.calls[0]).toEqual(["books", expectedRequest]);
+    const request = create.mock.calls[0]?.[1] as
+      | BaseMemberCreateRequest
+      | undefined;
     expect(Object.hasOwn(request ?? {}, "embed_filter")).toBe(true);
     expect(refreshAfterConflict).not.toHaveBeenCalled();
   });

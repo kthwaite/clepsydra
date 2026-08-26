@@ -122,3 +122,40 @@ $ biome lint src/components/bases/member-creation.ts src/components/bases/__test
 Checked 2 files in 25ms. No fixes applied.
 exit 0
 ```
+
+## Round 2/5 quality fix
+
+Restored exact create-call tuple assertions for definition, populated-filter
+evaluation, and undefined-filter evaluation requests. Each assertion now pins
+the `"books"` base slug, exact two-argument arity, and full request body.
+The own-property and retained-reference assertions remain in place.
+
+Focused test:
+
+```text
+$ bun run test -- src/components/bases/__tests__/member-creation.test.ts
+Test Files  1 passed (1)
+Tests       20 passed (20)
+Duration    977ms
+exit 0
+```
+
+Typecheck:
+
+```text
+$ bun run typecheck
+$ tsc --noEmit --project tsconfig.app.json
+exit 0
+```
+
+Scoped lint:
+
+```text
+$ bun run lint -- src/components/bases/member-creation.ts src/components/bases/__tests__/member-creation.test.ts
+$ biome lint src/components/bases/member-creation.ts src/components/bases/__tests__/member-creation.test.ts
+Checked 2 files in 24ms. No fixes applied.
+exit 0
+```
+
+Concern: Vitest emitted the existing Vite native-config migration warnings
+for `__dirname` and the extensionless `./mdx-plugin` import.
