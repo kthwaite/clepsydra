@@ -96,6 +96,8 @@ function PreviewWindow({ win }: { win: PW }) {
 
   return (
     <div
+      role="dialog"
+      aria-label={`Preview ${title}`}
       style={{
         left: 0,
         top: 0,

@@ -446,7 +446,10 @@ export function Folio({ tabId, path }: FolioProps) {
   const [rawMarkdownSession, setRawMarkdownSession] =
     useState<RawMarkdownSession | null>(null);
   rawMarkdownSessionRef.current = rawMarkdownSession;
+  const modePathRef = useRef(path);
   useEffect(() => {
+    if (modePathRef.current === path) return;
+    modePathRef.current = path;
     setConversationMode("read");
     setRecipeMode("read");
     setRecipeProjection(null);
@@ -679,7 +682,6 @@ export function Folio({ tabId, path }: FolioProps) {
     if (!hadTabIndex) target.removeAttribute("tabindex");
   }, [
     conversationReadOnly,
-    editor.editorRevision,
     editor.isLoading,
     editor.isEditorSynchronized,
     focusRequestId,
@@ -726,10 +728,12 @@ export function Folio({ tabId, path }: FolioProps) {
   };
 
   useEffect(() => {
+    // A revision change can swap the mounted Slate editor without changing this effect's direct inputs.
+    void editor.editorRevision;
     if (folioEditorRef.current) {
       lastMountedFolioEditorRef.current = folioEditorRef.current;
     }
-  }, [editor.editorRevision, path]);
+  }, [editor.editorRevision]);
 
   useEffect(() => {
     if (!editor.isLoading && !restorationAvailable) {
@@ -758,6 +762,8 @@ export function Folio({ tabId, path }: FolioProps) {
   );
 
   useLayoutEffect(() => {
+    // A revision change remounts the keyed Slate editor and must retry any captured restoration.
+    void editor.editorRevision;
     if (
       pendingHistoryLocationId === null &&
       consumedHistoryLocationIdRef.current !== null
@@ -1387,7 +1393,7 @@ export function Folio({ tabId, path }: FolioProps) {
             const active = i === activeIndex;
             return (
               <button
-                key={`${h.text}-${i}`}
+                key={h.number}
                 type="button"
                 onClick={() => scrollTo(i)}
                 className={cn(
@@ -1830,7 +1836,7 @@ function ReadingTicks({
         const active = i === activeIndex;
         return (
           <button
-            key={`${h.text}-${i}`}
+            key={h.number}
             type="button"
             onClick={() => onJump(i)}
             aria-label={`${h.number} ${h.text}`}

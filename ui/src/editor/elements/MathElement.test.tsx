@@ -60,9 +60,11 @@ function MathEditingSurface({
 
   return (
     <MathEditingProvider value={controller}>
-      <div onKeyDown={onKeyDown}>
-        <Editable renderElement={renderElement} readOnly={readOnly} />
-      </div>
+      <Editable
+        renderElement={renderElement}
+        readOnly={readOnly}
+        onKeyDown={onKeyDown}
+      />
     </MathEditingProvider>
   );
 }

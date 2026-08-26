@@ -322,10 +322,8 @@ export function PropertyDefinitionEditor({
           {propertySummary(property.definition)}
         </td>
         <td className="w-28 px-1 py-2 sm:w-48 sm:px-2">
-          <div
-            className="flex flex-wrap justify-end gap-1"
-            aria-label={`Actions for ${property.key}`}
-          >
+          <fieldset className="m-0 flex flex-wrap justify-end gap-1 border-0 p-0">
+            <legend className="sr-only">Actions for {property.key}</legend>
             <MoveButtons
               label={property.key}
               index={index}
@@ -358,7 +356,7 @@ export function PropertyDefinitionEditor({
             >
               <Trash2 />
             </IconButton>
-          </div>
+          </fieldset>
         </td>
       </tr>
 

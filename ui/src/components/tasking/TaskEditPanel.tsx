@@ -457,9 +457,12 @@ export function TaskEditPanel({
   return (
     <>
       {/* Scrim */}
-      <div
+      <button
+        type="button"
+        aria-label="Close task editor"
         className="absolute inset-0 z-40 bg-black/28"
-        onClick={archiving ? undefined : onClose}
+        onClick={onClose}
+        disabled={archiving}
         data-testid="edit-panel-scrim"
       />
 
@@ -470,7 +473,6 @@ export function TaskEditPanel({
           tabIndex={-1}
           className="absolute bottom-0 right-0 top-0 z-50 flex w-[340px] max-w-[92%] flex-col bg-[var(--bg-2)] border-l border-[var(--ink-3)] outline-none"
           style={{ boxShadow: "-16px 0 40px rgba(0,0,0,0.45)" }}
-          onClick={(e) => e.stopPropagation()}
           data-testid="edit-panel"
           role="dialog"
           aria-modal="true"

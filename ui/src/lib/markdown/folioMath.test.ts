@@ -1,5 +1,5 @@
 import type { Nodes, Root } from "mdast";
-import type { InlineMath, Math } from "mdast-util-math";
+import type { InlineMath, Math as MdastMath } from "mdast-util-math";
 import { toMarkdown } from "mdast-util-to-markdown";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -11,7 +11,7 @@ import {
   remarkFolioMath,
 } from "./folioMath";
 
-type MathNode = (InlineMath | Math) & { data: FolioMathData };
+type MathNode = (InlineMath | MdastMath) & { data: FolioMathData };
 
 const processor = unified().use(remarkParse).use(remarkFolioMath);
 
@@ -49,12 +49,15 @@ function inlineNode(value: string, data?: Partial<FolioMathData>): InlineMath {
   } as InlineMath;
 }
 
-function blockNode(value: string, data?: Partial<FolioMathData>): Math {
+function blockNode(
+  value: string,
+  data?: Partial<FolioMathData>,
+): MdastMath {
   return {
     type: "math",
     value,
     ...(data ? { data } : {}),
-  } as Math;
+  } as MdastMath;
 }
 
 describe("remarkFolioMath", () => {

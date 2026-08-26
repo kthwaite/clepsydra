@@ -26,6 +26,7 @@ export function FootnoteRefElement({ attributes, children, element }: Props) {
 
   return (
     <span {...attributes}>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: Hover only reveals a noninteractive preview; this reference has no navigation target. */}
       <span
         contentEditable={false}
         className="relative inline cursor-default align-super text-[0.8em] text-accent pl-1"

@@ -62,7 +62,6 @@ export function CodeLangPicker({
   // The Plain text reset row always trails the (possibly empty) language list.
   const rows = useMemo(() => [...langs, PLAIN], [langs]);
 
-  useEffect(() => setSelectedIndex(0), [query]);
   useEffect(() => inputRef.current?.focus(), []);
   useEffect(() => refs.setPositionReference(reference), [reference, refs]);
   useEffect(() => {
@@ -126,7 +125,10 @@ export function CodeLangPicker({
       <input
         ref={inputRef}
         value={query}
-        onChange={(e) => setQuery(e.target.value)}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setSelectedIndex(0);
+        }}
         onKeyDown={onKeyDown}
         placeholder="Search language…"
         role="combobox"
@@ -151,6 +153,7 @@ export function CodeLangPicker({
               key={row}
               id={`${listboxId}-option-${index}`}
               role="option"
+              tabIndex={-1}
               aria-selected={isActive}
               onMouseDown={(e) => {
                 e.preventDefault();

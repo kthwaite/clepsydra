@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
+import { diagnosticRows } from "./diagnostic-rows";
 
 interface ValidationSummaryProps {
   diagnostics: BaseDiagnostic[];
@@ -57,8 +58,8 @@ export function ValidationSummary({
                 {sectionLabels[section]}
               </h3>
               <ul className="mt-1 grid gap-1">
-                {entries.map((diagnostic, index) => (
-                  <li key={`${diagnostic.path ?? "file"}-${index}`}>
+                {diagnosticRows(entries).map(({ diagnostic, key }) => (
+                  <li key={key}>
                     {diagnostic.path ? (
                       <button
                         type="button"

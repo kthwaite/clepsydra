@@ -89,10 +89,12 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof ReactQuery>();
   return {
     ...actual,
-    useInfiniteQuery: (options: never) =>
-      riverMocks.useRealHooks
-        ? actual.useInfiniteQuery(options)
-        : riverMocks.entriesQuery,
+    useInfiniteQuery: (options: never) => {
+      const useSelectedInfiniteQuery = riverMocks.useRealHooks
+        ? actual.useInfiniteQuery
+        : () => riverMocks.entriesQuery;
+      return useSelectedInfiniteQuery(options);
+    },
   };
 });
 
@@ -105,18 +107,22 @@ vi.mock("#/api/feeds", async (importOriginal) => {
         ? actual.feedEntriesInfiniteOptions(filters)
         : riverMocks.feedEntriesInfiniteOptions(filters),
     useFeeds: () => riverMocks.feedsQuery,
-    useFeedEntry: (id?: number) =>
-      riverMocks.useRealHooks
-        ? actual.useFeedEntry(id)
-        : riverMocks.detailQuery,
-    usePatchFeedEntry: () =>
-      riverMocks.useRealHooks
-        ? actual.usePatchFeedEntry()
-        : {
+    useFeedEntry: (id?: number) => {
+      const useSelectedFeedEntry = riverMocks.useRealHooks
+        ? actual.useFeedEntry
+        : () => riverMocks.detailQuery;
+      return useSelectedFeedEntry(id);
+    },
+    usePatchFeedEntry: () => {
+      const useSelectedPatchFeedEntry = riverMocks.useRealHooks
+        ? actual.usePatchFeedEntry
+        : () => ({
             mutate: riverMocks.patchEntry,
             mutateAsync: riverMocks.patchEntryAsync,
             ...riverMocks.patchState,
-          },
+          });
+      return useSelectedPatchFeedEntry();
+    },
     useMarkFeedEntriesRead: () => ({
       mutate: riverMocks.markEntriesRead,
       mutateAsync: riverMocks.markEntriesRead,

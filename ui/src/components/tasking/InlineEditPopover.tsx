@@ -44,7 +44,7 @@ export function InlineEditPopover({
     // reach the window-level useGlobalShortcuts dispatcher.
     <DialogTrigger isOpen={open} onOpenChange={setOpen}>
       <Button
-        className="cursor-pointer outline-none focus-visible:outline-[1px] focus-visible:outline-[var(--hot)]"
+        className="pointer-events-auto relative z-10 cursor-pointer outline-none focus-visible:outline-[1px] focus-visible:outline-[var(--hot)]"
         data-testid={`${testIdPrefix}-inline-${field}-${task.id}`}
         aria-label={`Change ${field}`}
       >

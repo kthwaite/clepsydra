@@ -214,6 +214,7 @@ export function BaseDefinitionWorkspace({
 
   useEffect(() => {
     if (!focusRequest) return;
+    if (selectedSection !== sectionForDiagnostic(focusRequest.path)) return;
     focusTargets.current.get(focusRequest.path)?.focus();
   }, [focusRequest, selectedSection]);
 

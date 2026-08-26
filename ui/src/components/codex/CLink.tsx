@@ -48,7 +48,7 @@ export function CLink({
   style,
 }: CLinkProps) {
   const [hover, setHover] = useState(false);
-  const ref = useRef<HTMLSpanElement | null>(null);
+  const ref = useRef<HTMLAnchorElement | null>(null);
   const delayRef = useRef<number | null>(null);
   const openTab = useOpenTab();
   const openHover = usePreviewStore((s) => s.openHover);
@@ -84,8 +84,10 @@ export function CLink({
   const handleClick = (e: ReactMouseEvent) => {
     if (onClick) {
       onClick(e);
+      e.preventDefault();
       return;
     }
+    e.preventDefault();
     if (path && !noNavigate) {
       closePath(path);
       openTab("page", path);
@@ -93,16 +95,12 @@ export function CLink({
   };
 
   return (
-    <span
+    <a
       ref={ref}
+      href={path ? `/pages/${path}` : "#"}
       onMouseEnter={enter}
       onMouseLeave={leave}
       onClick={handleClick}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") handleClick(e as unknown as ReactMouseEvent);
-      }}
-      role="link"
-      tabIndex={0}
       className={cn("cl-link relative cursor-pointer", className)}
       style={style}
     >
@@ -133,6 +131,6 @@ export function CLink({
           )}
         </span>
       )}
-    </span>
+    </a>
   );
 }

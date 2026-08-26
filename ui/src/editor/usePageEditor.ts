@@ -313,6 +313,9 @@ export function usePageEditor(
   }, [initialValue, page, plainBody]);
 
   const doSave = useCallback((): Promise<void> => {
+    // Capturing the path is intentional. It changes this callback's identity so
+    // the cleanup effect flushes the outgoing page before path-scoped refs reset.
+    void path;
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;

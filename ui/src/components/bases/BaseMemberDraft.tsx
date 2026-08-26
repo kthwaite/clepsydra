@@ -11,7 +11,7 @@ import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagInput } from "#/components/ui/tag-input";
 import type { Kind } from "#/lib/kind";
-import type { CellValue } from "./cells/types";
+import { type CellValue, useInitialFocus } from "./cells/types";
 import { EditableCell } from "./EditableCell";
 import {
   type BaseMemberDraftField,
@@ -236,6 +236,8 @@ export function BaseMemberDraft({
   const fieldNodes = useRef(new Map<string, HTMLElement>());
   const descriptionPrefix = useId();
 
+  const titleInputRef = useInitialFocus<HTMLInputElement>();
+
   const updateDraft = (next: BaseMemberDraftValue) => {
     draftRef.current = next;
     setDraft(next);
@@ -374,7 +376,7 @@ export function BaseMemberDraft({
                 </span>
                 {field.kind === "title" ? (
                   <input
-                    autoFocus
+                    ref={titleInputRef}
                     aria-label={label}
                     aria-describedby={describedBy}
                     value={draft.title}

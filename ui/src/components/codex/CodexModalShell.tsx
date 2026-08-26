@@ -49,6 +49,7 @@ export function CodexModalShell({
           )}
         >
           <div
+            role="document"
             className="contents"
             onKeyDown={(event) => {
               onKeyDown?.(event);

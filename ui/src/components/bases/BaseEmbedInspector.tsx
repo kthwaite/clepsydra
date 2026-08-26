@@ -19,6 +19,7 @@ import type {
   ConfiguredBaseEmbedElement,
 } from "#/editor/schema/types";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
+import { diagnosticRows } from "./diagnostic-rows";
 import type { DraftProperty } from "./definition-model";
 import {
   type BaseEmbedDisplay,
@@ -349,8 +350,8 @@ export function BaseEmbedInspector({
             role={diagnostics.length > 0 ? "alert" : undefined}
             className="mt-2 text-xs text-destructive"
           >
-            {diagnostics.map((diagnostic, index) => (
-              <p key={`${diagnostic.path}-${index}`}>{diagnostic.message}</p>
+            {diagnosticRows(diagnostics).map(({ diagnostic, key }) => (
+              <p key={key}>{diagnostic.message}</p>
             ))}
           </div>
         </div>

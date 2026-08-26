@@ -81,7 +81,12 @@ export function useMathEditingController(
   );
 
   return useMemo(
-    () => ({ begin, commit, close, isActive }),
+    () => {
+      // The revision makes the controller identity reflect session changes,
+      // while the callbacks themselves continue to read the live ref.
+      void sessionVersion;
+      return { begin, commit, close, isActive };
+    },
     [begin, close, commit, isActive, sessionVersion],
   );
 }

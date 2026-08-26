@@ -112,6 +112,35 @@ describe("EditorSuggestionPopover", () => {
     expect(options[2].getAttribute("aria-selected")).toBe("true");
   });
 
+  it("normalizes arrow navigation after an empty result set", () => {
+    const commonProps = {
+      query: "same-query",
+      reference: makeVirtualReference(100, 100),
+      onSelect: vi.fn(),
+      onClose: vi.fn(),
+      renderItem: (item: TestItem) => <span>{item.label}</span>,
+      getItemKey: (item: TestItem) => item.id,
+    };
+    const view = render(
+      <EditorSuggestionPopover
+        {...commonProps}
+        items={[]}
+        emptyMessage="Nothing found"
+      />,
+    );
+
+    fireEvent.keyDown(document, { key: "ArrowDown", bubbles: true });
+    view.rerender(
+      <EditorSuggestionPopover {...commonProps} items={items} />,
+    );
+    fireEvent.keyDown(document, { key: "ArrowDown", bubbles: true });
+
+    expect(screen.getAllByRole("option")[1]).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+
   it("Enter calls onSelect with active item", () => {
     const onSelect = vi.fn();
     renderPopover({ onSelect });
@@ -177,10 +206,11 @@ describe("EditorSuggestionPopover", () => {
     expect(options[0].getAttribute("aria-selected")).toBe("true");
   });
 
-  it("has aria-activedescendant", () => {
+  it("does not claim active descendant ownership from the editor", () => {
     renderPopover();
     const listbox = screen.getByRole("listbox");
     const options = screen.getAllByRole("option");
-    expect(listbox.getAttribute("aria-activedescendant")).toBe(options[0].id);
+    expect(listbox).not.toHaveAttribute("aria-activedescendant");
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
   });
 });

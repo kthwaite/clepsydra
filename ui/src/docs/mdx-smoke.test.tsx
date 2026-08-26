@@ -285,7 +285,7 @@ it("renders GFM tables as semantic HTML", () => {
   );
 
   const table = screen.getAllByRole("table")[1];
-  expect(table.closest('[role="region"]')).toHaveAccessibleName(
+  expect(table.closest("section")).toHaveAccessibleName(
     "Scrollable table",
   );
   expect(

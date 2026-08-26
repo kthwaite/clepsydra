@@ -1,5 +1,5 @@
 import type { Data as MdastData, Parents, Root } from "mdast";
-import type { InlineMath, Math } from "mdast-util-math";
+import type { InlineMath, Math as MdastMath } from "mdast-util-math";
 import { mathFromMarkdown } from "mdast-util-math";
 import type { Info, Options, State } from "mdast-util-to-markdown";
 import { math as mathSyntax } from "micromark-extension-math-extended";
@@ -25,7 +25,7 @@ export interface FolioMathData extends MdastData {
   };
 }
 
-type FolioMathNode = (Omit<InlineMath, "data"> | Omit<Math, "data">) & {
+type FolioMathNode = (Omit<InlineMath, "data"> | Omit<MdastMath, "data">) & {
   data?: MdastData;
 };
 type MutableParent = { children: MutableNode[] };
@@ -53,7 +53,7 @@ export function formatMathSource(
 }
 
 function delimiterFor(
-  node: InlineMath | Math,
+  node: InlineMath | MdastMath,
   kind: "inline" | "display",
 ): MathDelimiter {
   const delimiter = (node.data as FolioMathData | undefined)?.folioDelimiter;
@@ -65,7 +65,7 @@ function delimiterFor(
   return delimiter === "\\[" || delimiter === "$$" ? delimiter : "$$";
 }
 
-function sourceBody(node: InlineMath | Math): string {
+function sourceBody(node: InlineMath | MdastMath): string {
   const body = (node.data as FolioMathData | undefined)?.folioSourceBody;
   return typeof body === "string" ? body : node.value || "";
 }
@@ -266,9 +266,12 @@ export const remarkFolioMath: Plugin<[], Root> = function () {
   const data = this.data() as ProcessorData & {
     toMarkdownExtensions?: Options[];
   };
-  (data.micromarkExtensions ??= []).push(folioMathSyntax());
-  (data.fromMarkdownExtensions ??= []).push(mathFromMarkdown());
-  (data.toMarkdownExtensions ??= []).push(folioMathToMarkdown());
+  data.micromarkExtensions ??= [];
+  data.micromarkExtensions.push(folioMathSyntax());
+  data.fromMarkdownExtensions ??= [];
+  data.fromMarkdownExtensions.push(mathFromMarkdown());
+  data.toMarkdownExtensions ??= [];
+  data.toMarkdownExtensions.push(folioMathToMarkdown());
 
   return (tree, file) => annotateMathSource(tree, String(file.value));
 };
@@ -329,9 +332,9 @@ function serializeDollarInline(node: InlineMath, state: State): string {
     if (!pattern.atBreak) continue;
 
     const expression = state.compilePattern(pattern);
-    let match: RegExpExecArray | null;
+    let match = expression.exec(value);
 
-    while ((match = expression.exec(value))) {
+    while (match) {
       let position = match.index;
       if (
         value.codePointAt(position) === 10 &&
@@ -340,6 +343,7 @@ function serializeDollarInline(node: InlineMath, state: State): string {
         position--;
       }
       value = value.slice(0, position) + " " + value.slice(match.index + 1);
+      match = expression.exec(value);
     }
   }
 
@@ -364,7 +368,11 @@ function inlineMath(
 inlineMath.peek = (node: InlineMath): string =>
   inlineOutputDelimiter(node) === "\\(" ? "\\" : "$";
 
-function serializeDollarDisplay(node: Math, state: State, info: Info): string {
+function serializeDollarDisplay(
+  node: MdastMath,
+  state: State,
+  info: Info,
+): string {
   const raw = sourceBody(node);
   const tracker = state.createTracker(info);
   const sequence = "$$";
@@ -393,7 +401,7 @@ function serializeDollarDisplay(node: Math, state: State, info: Info): string {
 }
 
 function math(
-  node: Math,
+  node: MdastMath,
   _parent: Parents | undefined,
   state: State,
   info: Info,

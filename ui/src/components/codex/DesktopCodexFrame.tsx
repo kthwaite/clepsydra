@@ -187,9 +187,12 @@ export function DesktopCodexFrame({
                       "inline-block h-[6px] w-[6px]",
                       writing ? "animate-pulse bg-accent" : "bg-ink-mute/30",
                     )}
-                    aria-label={writing ? "Sending data to server" : undefined}
+                    aria-hidden
                     title={writing ? "Sending…" : undefined}
                   />
+                  {writing ? (
+                    <span className="sr-only">Sending data to server</span>
+                  ) : null}
                 </span>
               )}
               <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap px-3 py-[2px] opacity-80">

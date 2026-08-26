@@ -297,12 +297,12 @@ export function RepairWorkspace({
             <section
               ref={detailRef}
               aria-label="Repair detail"
-              role="region"
               tabIndex={-1}
               className="min-h-0 overflow-y-auto p-4 outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent lg:p-5"
             >
               {selectedIssue ? (
                 <RepairIssueDetail
+                  key={selectedIssue.fingerprint}
                   issue={selectedIssue}
                   onRefresh={() => issuesQuery.refetch()}
                   onApplied={coordinateAppliedFocus}
@@ -336,6 +336,7 @@ export function RepairWorkspace({
         >
           {selectedIssue ? (
             <RepairIssueDetail
+              key={selectedIssue.fingerprint}
               issue={selectedIssue}
               onRefresh={() => issuesQuery.refetch()}
               onApplied={closeMobileAfterApply}

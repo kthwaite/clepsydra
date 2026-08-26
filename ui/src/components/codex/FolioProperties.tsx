@@ -375,18 +375,15 @@ export function FolioProperties({
                             className="sr-only"
                             style={{ opacity: 0 }}
                           >
-                            {property.declarations.map(
-                              (declaration, declarationIndex) => (
-                                <li
-                                  key={`${declaration.base.slug}-${declarationIndex}`}
-                                  className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
-                                >
-                                  {declaration.base.name} (
-                                  {declaration.base.slug}) ·{" "}
-                                  {describeDefinition(declaration.definition)}
-                                </li>
-                              ),
-                            )}
+                            {property.declarations.map((declaration) => (
+                              <li
+                                key={declaration.base.slug}
+                                className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
+                              >
+                                {declaration.base.name} ({declaration.base.slug}){" "}
+                                · {describeDefinition(declaration.definition)}
+                              </li>
+                            ))}
                           </ul>
 
                           {savingKey === property.key ? (

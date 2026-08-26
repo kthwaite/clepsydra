@@ -63,6 +63,11 @@ export function DisplayLabelsEditor({
 
   useEffect(() => {
     if (!focusRequest) return;
+    if (
+      focusRequest.kind !== "selector" &&
+      !Object.hasOwn(labels, focusRequest.field)
+    )
+      return;
     if (focusRequest.kind === "field") {
       fieldSelectors.current.get(focusRequest.field)?.focus();
     } else if (focusRequest.kind === "label") {

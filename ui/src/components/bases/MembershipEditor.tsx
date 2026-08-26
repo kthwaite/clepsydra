@@ -38,7 +38,8 @@ export function MembershipEditor({
 
   if (!draftValue) {
     return (
-      <div aria-label={label}>
+      <fieldset className="m-0 min-w-0 border-0 p-0">
+        <legend className="sr-only">{label}</legend>
         <div className="border-y border-border py-5">
           <p className="text-sm font-medium text-foreground">All pages</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
@@ -52,12 +53,13 @@ export function MembershipEditor({
             onSeed={commit}
           />
         </div>
-      </div>
+      </fieldset>
     );
   }
 
   return (
-    <div aria-label={label}>
+    <fieldset className="m-0 min-w-0 border-0 p-0">
+      <legend className="sr-only">{label}</legend>
       <FilterGroupEditor
         value={draftValue}
         root={draftValue}
@@ -69,10 +71,8 @@ export function MembershipEditor({
         diagnostics={diagnostics}
         diagnosticRoot={diagnosticRoot}
       />
-      <div
-        aria-label="Root membership controls"
-        className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3"
-      >
+      <fieldset className="m-0 mt-4 flex min-w-0 flex-wrap gap-2 border-x-0 border-b-0 border-t border-border p-0 pt-3">
+        <legend className="sr-only">Root membership controls</legend>
         <FilterSeedMenu
           triggerLabel="Membership actions"
           replace
@@ -82,7 +82,7 @@ export function MembershipEditor({
             onAction: () => commit(undefined),
           }}
         />
-      </div>
-    </div>
+      </fieldset>
+    </fieldset>
   );
 }

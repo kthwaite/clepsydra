@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+import {
+  CELL_INPUT_CLASS,
+  type CellEditorProps,
+  useInitialFocus,
+} from "./types";
 
 export function DateCell({
   value,
@@ -12,6 +16,7 @@ export function DateCell({
   commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(typeof value === "string" ? value : "");
+  const inputRef = useInitialFocus<HTMLInputElement>();
   const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
     if (draft === "") {
       submit(null);
@@ -23,7 +28,7 @@ export function DateCell({
   };
   return (
     <input
-      autoFocus
+      ref={inputRef}
       aria-label={ariaLabel ?? "Edit date"}
       aria-describedby={ariaDescribedBy}
       type="date"

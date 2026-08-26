@@ -189,7 +189,6 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
               type="text"
               aria-label="Name"
               className={INPUT_CLS}
-              autoFocus
               value={label}
               onChange={(e) => setLabel(e.target.value)}
               data-testid="new-cycle-label"
@@ -232,17 +231,25 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
         </div>
 
         {/* INITIAL STATE */}
-        <EdField label="Status" hint="lifecycle">
-          <div
-            className="flex gap-[6px]"
-            role="group"
-            aria-label="Status"
-          >
+        <fieldset
+          aria-label="Status"
+          className="m-0 min-w-0 border-0 p-0"
+        >
+          <legend className="mb-[5px] flex w-full items-baseline justify-between gap-[8px]">
+            <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-[var(--ink-mute)]">
+              Status
+            </span>
+            <span className="cl-mono text-[9px] uppercase tracking-[0.1em] text-[var(--ink-4)]">
+              lifecycle
+            </span>
+          </legend>
+          <div className="flex gap-[6px]">
             {["PLANNED", "ACTIVE"].map((st) => (
               <button
                 key={st}
                 type="button"
                 aria-label={cycleStateLabel(st)}
+                aria-pressed={state === st}
                 className={`${RADIO_CLS_BASE} ${state === st ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
                 onClick={() => setState(st)}
                 data-testid={`new-cycle-state-${st}`}
@@ -251,7 +258,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
               </button>
             ))}
           </div>
-        </EdField>
+        </fieldset>
 
         {/* GOAL */}
         <EdField label="Goal" hint="one line">

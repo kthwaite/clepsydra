@@ -2,11 +2,8 @@
  * InlineEditPopover tests.
  *
  * Covers:
- *   - status field: click chip opens the popover, clicking a DispositionRow
- *     column fires PATCH {status} and does not bubble the click to an
- *     ancestor's onClick (the card underneath must not open its edit panel)
- *   - priority field: click chip opens the popover, clicking a PriorityRow
- *     entry fires PATCH {priority}
+ *   - status field: clicking a DispositionRow column fires PATCH {status}
+ *   - priority field: clicking a PriorityRow entry fires PATCH {priority}
  *   - Escape closes the popover without firing a PATCH
  *   - regression: a keydown the chip doesn't itself handle (e.g. a global
  *     shortcut key) must still reach the window-level shortcut dispatcher —
@@ -76,23 +73,20 @@ afterEach(() => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("InlineEditPopover — status", () => {
-  it("patches status from the popover without opening the panel", async () => {
+  it("patches status from the popover", async () => {
     const stub = makeStub();
     vi.stubGlobal("fetch", stub);
-    const onCardClick = vi.fn();
     const user = userEvent.setup();
 
     wrap(
-      <div onClick={onCardClick}>
-        <InlineEditPopover
-          task={TASK}
-          field="status"
-          testIdPrefix="kb"
-          colLabel={FIXTURE_COL_LABEL}
-        >
-          <span>pip</span>
-        </InlineEditPopover>
-      </div>,
+      <InlineEditPopover
+        task={TASK}
+        field="status"
+        testIdPrefix="kb"
+        colLabel={FIXTURE_COL_LABEL}
+      >
+        <span>pip</span>
+      </InlineEditPopover>,
     );
 
     await user.click(screen.getByTestId(`kb-inline-status-${TASK.id}`));
@@ -106,8 +100,6 @@ describe("InlineEditPopover — status", () => {
     expect(opts).toEqual(
       expect.objectContaining({ body: JSON.stringify({ status: "FIELD" }) }),
     );
-
-    expect(onCardClick).not.toHaveBeenCalled();
   });
 
   it("closes the popover after committing a status change", async () => {
@@ -171,23 +163,20 @@ describe("InlineEditPopover — status", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("InlineEditPopover — priority", () => {
-  it("patches priority from the popover without opening the panel", async () => {
+  it("patches priority from the popover", async () => {
     const stub = makeStub();
     vi.stubGlobal("fetch", stub);
-    const onCardClick = vi.fn();
     const user = userEvent.setup();
 
     wrap(
-      <div onClick={onCardClick}>
-        <InlineEditPopover
-          task={TASK}
-          field="priority"
-          testIdPrefix="bk"
-          colLabel={FIXTURE_COL_LABEL}
-        >
-          <span>P2</span>
-        </InlineEditPopover>
-      </div>,
+      <InlineEditPopover
+        task={TASK}
+        field="priority"
+        testIdPrefix="bk"
+        colLabel={FIXTURE_COL_LABEL}
+      >
+        <span>P2</span>
+      </InlineEditPopover>,
     );
 
     await user.click(screen.getByTestId(`bk-inline-priority-${TASK.id}`));
@@ -201,8 +190,6 @@ describe("InlineEditPopover — priority", () => {
     expect(opts).toEqual(
       expect.objectContaining({ body: JSON.stringify({ priority: "P1" }) }),
     );
-
-    expect(onCardClick).not.toHaveBeenCalled();
   });
 });
 

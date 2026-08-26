@@ -39,7 +39,7 @@ export interface BoardModalFrameProps {
   backdropTestId: string;
   modalTestId: string;
   onClose: () => void;
-  onKeyDown?: KeyboardEventHandler<HTMLDivElement>;
+  onKeyDown?: KeyboardEventHandler<HTMLFormElement>;
   constrainHeight?: boolean;
   isDismissable?: boolean;
   children: ReactNode;
@@ -68,7 +68,9 @@ export function BoardModalFrame({
     >
       <Modal className={cn(widthClassName, "max-w-[94vw]")}>
         <RACDialog aria-label={ariaLabel} className="outline-none">
-          <div
+          <form
+            onKeyDown={onKeyDown}
+            onSubmit={(event) => event.preventDefault()}
             className={cn(
               "flex flex-col border border-[var(--ink-3)] bg-[var(--bg)]",
               constrainHeight && "max-h-[82vh]",
@@ -76,11 +78,10 @@ export function BoardModalFrame({
             style={{
               boxShadow: "0 20px 80px rgba(0,0,0,0.7), 0 0 0 1px var(--rule)",
             }}
-            onKeyDown={onKeyDown}
             data-testid={modalTestId}
           >
             {children}
-          </div>
+          </form>
         </RACDialog>
       </Modal>
     </ModalOverlay>

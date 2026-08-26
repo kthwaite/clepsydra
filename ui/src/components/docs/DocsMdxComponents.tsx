@@ -175,9 +175,9 @@ function DocsPre({
 
 function DocsTable({ className, ...props }: ComponentPropsWithoutRef<"table">) {
   return (
-    <div
-      role="region"
+    <section
       aria-label="Scrollable table"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: This named overflow region must be focusable so keyboard users can scroll wide tables in browsers that do not focus scroll containers automatically.
       tabIndex={0}
       className="my-6 overflow-x-auto border border-rule focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
@@ -188,7 +188,7 @@ function DocsTable({ className, ...props }: ComponentPropsWithoutRef<"table">) {
           className,
         )}
       />
-    </div>
+    </section>
   );
 }
 

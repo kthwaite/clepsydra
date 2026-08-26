@@ -34,14 +34,17 @@ export function TaskCard({
   colLabel,
 }: TaskCardProps) {
   const cardRef = useRef<HTMLDivElement>(null);
+  const actionRef = useRef<HTMLButtonElement>(null);
   const [isDragging, setIsDragging] = useState(false);
 
   useEffect(() => {
     const element = cardRef.current;
-    if (!element) return;
+    const dragHandle = actionRef.current;
+    if (!element || !dragHandle) return;
 
     return draggable({
       element,
+      dragHandle,
       getInitialData: () => ({
         kind: "task-card",
         taskId: t.id,
@@ -63,20 +66,18 @@ export function TaskCard({
   return (
     <div
       ref={cardRef}
-      className="group relative cursor-grab border border-[var(--rule)] bg-[var(--bg)] p-[9px_11px_9px_14px] transition-[border-color,background,transform] duration-[80ms,120ms,80ms] hover:border-[var(--hot)] hover:bg-[var(--bg-3)] active:cursor-grabbing"
+      className="group pointer-events-none relative cursor-grab border border-[var(--rule)] bg-[var(--bg)] p-[9px_11px_9px_14px] transition-[border-color,background,transform] duration-[80ms,120ms,80ms] hover:border-[var(--hot)] hover:bg-[var(--bg-3)] active:cursor-grabbing"
       style={isDragging ? { opacity: 0.35, borderStyle: "dashed" } : undefined}
-      role="button"
-      tabIndex={0}
-      onClick={onClick}
-      onKeyDown={(e) => {
-        if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onClick();
-        }
-      }}
       data-testid={`task-card-${t.id}`}
     >
+      <button
+        ref={actionRef}
+        type="button"
+        aria-label={`Edit ${t.code}: ${t.title}`}
+        className="pointer-events-auto absolute inset-0 z-0 cursor-grab border-0 bg-transparent p-0 text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--hot)] focus-visible:outline-offset-[-1px] active:cursor-grabbing"
+        onClick={onClick}
+        data-testid={`task-action-${t.id}`}
+      />
       {/* Left priority bar */}
       <span
         className="absolute bottom-0 left-0 top-0 w-[3px]"
@@ -199,7 +200,7 @@ export function TaskCard({
         {t.link && (
           <button
             type="button"
-            className="cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
+            className="pointer-events-auto relative z-10 cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
             onClick={(e) => {
               e.stopPropagation();
               onOpenDossier?.(t.link!);

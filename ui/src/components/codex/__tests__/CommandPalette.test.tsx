@@ -397,7 +397,9 @@ describe("CommandPalette keyboard navigation", () => {
           refetch: searchRefetchMock,
         });
         revision += 1;
-        listeners.forEach((listener) => listener());
+        listeners.forEach((listener) => {
+          listener();
+        });
       });
     };
     publish("alpha", alpha.promise);

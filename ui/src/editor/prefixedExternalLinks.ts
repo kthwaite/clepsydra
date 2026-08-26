@@ -11,6 +11,7 @@ type ProviderRule = (
 ) => Omit<ExpandedPrefixedLink, "provider"> | null;
 
 const ASCII_PREFIX = /^[A-Za-z]+$/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: The C0/C1 ranges intentionally reject control code points before URL parsing.
 const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
 
 function isWellFormedUtf16(value: string): boolean {

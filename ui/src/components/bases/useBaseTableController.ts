@@ -3,6 +3,7 @@ import {
   type BaseDetailResponse,
   type BaseFilter,
   type BaseMemberCapability,
+  type BaseMemberCreateResponse,
   type BaseMemberDiagnostic,
   type BaseViewEvaluateResponse,
   decodeBaseMemberDiagnostics,
@@ -458,7 +459,7 @@ export function useBaseTableController(
         if (fieldValue !== null) requestFields[key] = fieldValue;
       }
 
-      let created;
+      let created: BaseMemberCreateResponse;
       try {
         created = await createMemberAsync({
           params: { path: { slug } },

@@ -28,6 +28,7 @@ export function InscribeModal() {
   // submit click the state update hasn't propagated by the time the submit
   // handler runs, so reads go through this ref.
   const tagsRef = useRef<string[]>(tags);
+  const projectComboRef = useRef<HTMLDivElement | null>(null);
   // One id per intake so the path preview is stable across keystrokes.
   const [shortId, setShortId] = useState(generateShortId);
   const [error, setError] = useState<string | null>(null);
@@ -116,7 +117,17 @@ export function InscribeModal() {
       maxWidthClassName="max-w-[520px]"
       onDismiss={dismiss}
     >
-      <form onSubmit={submit}>
+      <form
+        onSubmit={submit}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            projectComboRef.current?.contains(event.target as Node)
+          ) {
+            event.preventDefault();
+          }
+        }}
+      >
         {/* terminal header */}
         <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
           <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
@@ -168,12 +179,7 @@ export function InscribeModal() {
             <Field label="02 · Project · optional">
               {/* Enter commits the combobox draft; keep it from also
                   submitting the form before the state lands. */}
-              <div
-                className="mt-1"
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") e.preventDefault();
-                }}
-              >
+              <div ref={projectComboRef} className="mt-1">
                 <ProjectCombo
                   key={project ?? ""}
                   value={project}
@@ -189,6 +195,7 @@ export function InscribeModal() {
               aria-label="Title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
+              // biome-ignore lint/a11y/noAutofocus: the intake modal intentionally starts focus at its primary title field
               autoFocus
               placeholder="new folio title"
               className="cl-mono mt-1 w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"

@@ -21,6 +21,7 @@ import {
   TableHeader,
 } from "react-aria-components";
 import type {
+  Aggregate,
   BaseDetailResponse,
   BaseMemberCapability,
   BaseMemberDiagnostic,
@@ -38,10 +39,13 @@ import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import type { EmbedScrollCap } from "./embed-query";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
+import { useIdentifiedRows } from "./ordered-list";
 import type {
   BaseMemberDraftField,
   BaseMemberDraftValue,
 } from "./member-draft";
+
+const EMPTY_AGGREGATES: readonly Aggregate[] = [];
 
 export interface BaseTableViewHandle {
   /**
@@ -279,6 +283,10 @@ export const BaseTableView = forwardRef<
   const equivalentActiveView = asciiCaseFold(activeView);
   const view = definition.views?.find(
     (candidate) => asciiCaseFold(candidate.name) === equivalentActiveView,
+  );
+  const { rows: displayAggregateRows } = useIdentifiedRows(
+    view?.aggregates ?? EMPTY_AGGREGATES,
+    "table-aggregate",
   );
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
@@ -525,7 +533,7 @@ export const BaseTableView = forwardRef<
   useLayoutEffect(() => {
     activeViewIdentityRef.current = equivalentActiveView;
     const request = pendingForwardFocus.current;
-    if (!request) return;
+    if (!request || request.token !== forwardFocusRequest?.token) return;
 
     const requestRowIsRendered =
       output?.shape === "flat"
@@ -593,11 +601,21 @@ export const BaseTableView = forwardRef<
   const memberAddDisabled =
     memberDraftOpen || memberSaving || memberCapability?.enabled !== true;
 
+  const createdTitleCanReceiveFocus =
+    focusCreatedId !== undefined &&
+    !viewError &&
+    !viewLoading &&
+    (output?.shape === "flat"
+      ? output.rows.some((row) => String(row.id) === focusCreatedId)
+      : output?.shape === "grouped" &&
+        output.groups.some((group) =>
+          group.rows.some((row) => String(row.id) === focusCreatedId),
+        ));
   useEffect(() => {
-    if (focusCreatedId) {
+    if (createdTitleCanReceiveFocus) {
       setCreatedTitleRef(createdTitleRef.current);
     }
-  }, [focusCreatedId, output, setCreatedTitleRef, viewError, viewLoading]);
+  }, [createdTitleCanReceiveFocus, setCreatedTitleRef]);
 
   useEffect(
     () => () => {
@@ -858,9 +876,8 @@ export const BaseTableView = forwardRef<
   }, [rowWindow]);
 
   return (
-    <div
+    <section
       ref={viewRootRef}
-      role="region"
       aria-label={`${definition.name} table view`}
       tabIndex={-1}
       className="flex flex-col gap-3"
@@ -1019,12 +1036,12 @@ export const BaseTableView = forwardRef<
         <ScrollViewport enabled={compact} onApproachEnd={approachEnd}>
           {groups ? (
             <div className="flex flex-col gap-4">
-              {groups.map((group, index) => {
+              {groups.map((group) => {
                 const key =
                   group.key == null
                     ? "(empty)"
                     : formatCellValue(group.key as CellValue);
-                const groupIdentity = `${evaluationIdentity}:group:${index}:${JSON.stringify(group.key)}`;
+                const groupIdentity = `${evaluationIdentity}:group:${JSON.stringify(group.key)}`;
                 return (
                   <section key={groupIdentity}>
                     <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
@@ -1036,15 +1053,23 @@ export const BaseTableView = forwardRef<
                           ? `${group.rows.length} of ${group.total} rows`
                           : `${group.total} row${group.total === 1 ? "" : "s"}`}
                       </span>
-                      {group.aggregates.map((value, i) => (
-                        <span
-                          key={i}
-                          className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
-                        >
-                          {aggregateLabel(definition, activeView, i)}{" "}
-                          {formatCellValue(value as CellValue)}
-                        </span>
-                      ))}
+                      {group.aggregates.map((value, aggregateIndex) => {
+                        const label = aggregateLabel(
+                          definition,
+                          activeView,
+                          aggregateIndex,
+                        );
+                        const aggregateRow =
+                          displayAggregateRows[aggregateIndex];
+                        return (
+                          <span
+                            key={aggregateRow?.id ?? label}
+                            className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
+                          >
+                            {label} {formatCellValue(value as CellValue)}
+                          </span>
+                        );
+                      })}
                     </header>
                     {grid(
                       group.rows,
@@ -1078,6 +1103,6 @@ export const BaseTableView = forwardRef<
           + Add member…
         </Button>
       ) : null}
-    </div>
+    </section>
   );
 });

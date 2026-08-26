@@ -6,8 +6,8 @@
  * - Groups by priority P0→P3 (PRI_ORDER), empty groups dropped.
  * - Within each group: sorted by COL_ORDER index, then by due date asc;
  *   tasks with no due date sort last.
- * - Each row is a div[role=button]; click → setEditTaskId(task.id). Priority
- *   and disposition cells nest their own InlineEditPopover trigger.
+ * - Each row uses a native overlay button for click and keyboard activation.
+ *   Priority and disposition cells remain independent popover triggers.
  * - Checklist mini-dots: small squares, done=filled cool accent.
  *
  * Design source: docs/pkm-redesign/project/board-modes.jsx lines 128-193
@@ -190,24 +190,22 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
             return (
               <div
                 key={t.id}
-                role="button"
-                tabIndex={0}
                 data-testid={`bk-row-${t.id}`}
-                className="cl-mono grid w-full cursor-pointer border-b border-dotted border-[var(--rule)] px-[var(--pad)] py-[5px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
+                className="cl-mono pointer-events-none relative grid w-full cursor-pointer border-b border-dotted border-[var(--rule)] px-[var(--pad)] py-[5px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)]"
                 style={{
                   gridTemplateColumns: BK_COLS,
                   gap: "12px",
                   alignItems: "center",
                   minHeight: "var(--row-h)",
                 }}
-                onClick={() => setEditTaskId(t.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    setEditTaskId(t.id);
-                  }
-                }}
               >
+                <button
+                  type="button"
+                  aria-label={`Edit ${t.code}: ${t.title}`}
+                  className="pointer-events-auto absolute inset-0 z-0 cursor-pointer border-0 bg-transparent p-0 text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--hot)] focus-visible:outline-offset-[-1px]"
+                  onClick={() => setEditTaskId(t.id)}
+                  data-testid={`bk-action-${t.id}`}
+                />
                 {/* FILE-ID */}
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap tracking-[0.04em] text-[var(--ink)] [font-variant-numeric:tabular-nums]">
                   {t.code}
@@ -290,16 +288,20 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                     className="inline-grid gap-[2px]"
                     style={{ gridAutoFlow: "column" }}
                   >
-                    {Array.from({ length: total }, (_, i) => (
+                    {Array.from(
+                      { length: total },
+                      (_, position) => position + 1,
+                    ).map((position) => (
                       <i
-                        key={i}
-                        data-testid={`bk-dot-${t.id}-${i}`}
-                        data-done={i < done ? "true" : "false"}
+                        key={`${t.id}-check-${position}`}
+                        data-testid={`bk-dot-${t.id}-${position - 1}`}
+                        data-done={position <= done ? "true" : "false"}
                         className="not-italic"
                         style={{
                           width: "5px",
                           height: "5px",
-                          background: i < done ? "var(--cool)" : "var(--ink-4)",
+                          background:
+                            position <= done ? "var(--cool)" : "var(--ink-4)",
                           display: "block",
                         }}
                       />

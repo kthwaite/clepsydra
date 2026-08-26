@@ -6,7 +6,7 @@ import {
   useFloating,
   type VirtualElement,
 } from "@floating-ui/react";
-import { type ReactNode, useCallback, useEffect, useId, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useState } from "react";
 import { cn } from "#/lib/cn";
 
 export interface EditorSuggestionPopoverProps<T> {
@@ -32,8 +32,8 @@ export function EditorSuggestionPopover<T>({
   emptyMessage,
   isLoading,
 }: EditorSuggestionPopoverProps<T>) {
-  const listboxId = useId();
   const [selectedIndex, setSelectedIndex] = useState(0);
+  const [previousQuery, setPreviousQuery] = useState(query);
   const { refs, floatingStyles, update, isPositioned } = useFloating({
     placement: "bottom-start",
     strategy: "fixed",
@@ -46,26 +46,28 @@ export function EditorSuggestionPopover<T>({
   const positionedStyles = isPositioned
     ? floatingStyles
     : { ...floatingStyles, opacity: 0, pointerEvents: "none" as const };
-
-  useEffect(() => {
-    setSelectedIndex(0);
-  }, [query]);
+  const activeIndex = Math.min(
+    Math.max(selectedIndex, 0),
+    Math.max(items.length - 1, 0),
+  );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       switch (e.key) {
         case "ArrowDown":
+          if (items.length === 0) break;
           e.preventDefault();
-          setSelectedIndex((i) => Math.min(i + 1, items.length - 1));
+          setSelectedIndex(Math.min(activeIndex + 1, items.length - 1));
           break;
         case "ArrowUp":
+          if (items.length === 0) break;
           e.preventDefault();
-          setSelectedIndex((i) => Math.max(i - 1, 0));
+          setSelectedIndex(Math.max(activeIndex - 1, 0));
           break;
         case "Tab":
         case "Enter":
           e.preventDefault();
-          if (items[selectedIndex]) onSelect(items[selectedIndex]);
+          if (items[activeIndex]) onSelect(items[activeIndex]);
           break;
         case "Escape":
           e.preventDefault();
@@ -73,7 +75,7 @@ export function EditorSuggestionPopover<T>({
           break;
       }
     },
-    [items, selectedIndex, onSelect, onClose],
+    [items, activeIndex, onSelect, onClose],
   );
 
   useEffect(() => {
@@ -89,6 +91,12 @@ export function EditorSuggestionPopover<T>({
     if (!reference || !refs.floating.current) return;
     return autoUpdate(reference, refs.floating.current, update);
   }, [reference, refs.floating, update]);
+
+  // Reset before committing a new query so it never renders a stale option.
+  if (query !== previousQuery) {
+    setPreviousQuery(query);
+    setSelectedIndex(0);
+  }
 
   if (!reference) return null;
 
@@ -117,26 +125,22 @@ export function EditorSuggestionPopover<T>({
     );
   }
 
-  const activeOptionId = `${listboxId}-option-${selectedIndex}`;
-
   return (
     <div
       ref={refs.setFloating}
       role="listbox"
-      id={listboxId}
-      aria-activedescendant={activeOptionId}
       className="fixed z-50 max-h-64 overflow-y-auto border border-border bg-popover shadow-md"
       style={positionedStyles}
     >
       {items.map((item, index) => {
-        const optionId = `${listboxId}-option-${index}`;
-        const isActive = index === selectedIndex;
+        const itemKey = getItemKey(item);
+        const isActive = index === activeIndex;
         return (
           <div
-            key={getItemKey(item)}
-            id={optionId}
+            key={itemKey}
             role="option"
             aria-selected={isActive}
+            tabIndex={-1}
             className={cn(
               "cursor-pointer px-3 py-1.5 text-sm",
               isActive

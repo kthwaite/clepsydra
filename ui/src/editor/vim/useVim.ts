@@ -50,8 +50,11 @@ export function useVim(editor: Editor, enabled: boolean): VimHandle {
   const stateRef = useRef(state);
   stateRef.current = state;
   const escapePrefixAtRef = useRef<number | null>(null);
+  const previousEnabledRef = useRef(enabled);
 
   useEffect(() => {
+    if (previousEnabledRef.current === enabled) return;
+    previousEnabledRef.current = enabled;
     // Entering or leaving vim mode starts from a clean normal-mode slate.
     parserRef.current.reset();
     setState(INITIAL_VIM_STATE);
@@ -132,7 +135,7 @@ export function useVim(editor: Editor, enabled: boolean): VimHandle {
       setPending(parser.pending);
       return true;
     },
-    [enabled, runCommand],
+    [editor, enabled, runCommand],
   );
 
   const handleDOMBeforeInput = useCallback(

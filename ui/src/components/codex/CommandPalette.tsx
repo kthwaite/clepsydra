@@ -380,7 +380,7 @@ function CommandPaletteContent() {
           return (
             <button
               type="button"
-              key={`${c.kind}:${c.id}:${i}`}
+              key={`${c.kind}:${c.id}`}
               onMouseEnter={() => setSel(i)}
               onClick={() => {
                 c.action();

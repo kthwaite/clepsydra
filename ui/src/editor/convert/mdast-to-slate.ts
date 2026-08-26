@@ -643,9 +643,9 @@ function splitBlockRefs(value: string, marks: Marks): Descendant[] {
   const result: Descendant[] = [];
   let lastIndex = 0;
   BLOCK_REF_RE.lastIndex = 0;
-  let match: RegExpExecArray | null;
+  let match = BLOCK_REF_RE.exec(value);
 
-  while ((match = BLOCK_REF_RE.exec(value)) !== null) {
+  while (match !== null) {
     // Text before the match
     if (match.index > lastIndex) {
       result.push(textNode(value.slice(lastIndex, match.index), marks));
@@ -658,6 +658,7 @@ function splitBlockRefs(value: string, marks: Marks): Descendant[] {
     };
     result.push(element as unknown as Descendant);
     lastIndex = match.index + match[0].length;
+    match = BLOCK_REF_RE.exec(value);
   }
 
   // Remaining text after last match (or entire string if no matches)
@@ -760,9 +761,10 @@ function extractBlockMetadata<T extends Descendant>(element: T): T {
   for (const textChild of allTextNodes) {
     const scanner = inlinePropertyScanner();
     const matches: Array<{ full: string; key: string; value: string }> = [];
-    let match: RegExpExecArray | null;
-    while ((match = scanner.exec(textChild.text)) !== null) {
+    let match = scanner.exec(textChild.text);
+    while (match !== null) {
       matches.push({ full: match[0], key: match[1], value: match[2] });
+      match = scanner.exec(textChild.text);
     }
     for (const m of matches) {
       properties[m.key] = m.value;

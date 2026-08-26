@@ -207,7 +207,6 @@ export function NewTaskModal({
             type="text"
             aria-label="Title"
             className={INPUT_CLS}
-            autoFocus
             placeholder="What needs to be done…"
             value={title}
             onChange={(e) => setTitle(e.target.value)}

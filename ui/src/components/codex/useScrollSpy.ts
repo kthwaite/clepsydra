@@ -78,6 +78,9 @@ export function useScrollSpy(
   }, [containerRef, rootSelector, headingSelector]);
 
   useEffect(() => {
+    // These caller-provided tokens intentionally re-run observer attachment and recounting.
+    void recount;
+    void reattach;
     const el = containerRef.current;
     if (!el) return;
 

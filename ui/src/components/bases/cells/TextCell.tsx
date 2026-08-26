@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+import {
+  CELL_INPUT_CLASS,
+  type CellEditorProps,
+  useInitialFocus,
+} from "./types";
 
 export function TextCell({
   value,
@@ -11,12 +15,13 @@ export function TextCell({
   commitOnBlur,
 }: CellEditorProps) {
   const [draft, setDraft] = useState(typeof value === "string" ? value : "");
+  const inputRef = useInitialFocus<HTMLInputElement>();
   const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
     submit(draft === "" ? null : draft);
   };
   return (
     <input
-      autoFocus
+      ref={inputRef}
       aria-label={ariaLabel ?? "Edit text"}
       aria-describedby={ariaDescribedBy}
       className={CELL_INPUT_CLASS}

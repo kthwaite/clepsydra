@@ -13,6 +13,7 @@ import {
   MoveButtons,
   ReorderAnnouncement,
   ReorderHandle,
+  useIdentifiedRows,
   useReorderable,
   useReorderAnnouncement,
 } from "./ordered-list";
@@ -73,8 +74,18 @@ export function OrderedSortEditor({
   const fields = sortableFieldKeys(properties);
   const own = useReorderAnnouncement();
   const announce = announceMove ?? own.announce;
+  const {
+    createRow,
+    rows: sortRows,
+    setRows: setSortRows,
+  } = useIdentifiedRows(value, "sort");
 
   function replace(index: number, sort: SortKey) {
+    setSortRows((current) =>
+      current.map((row, position) =>
+        position === index ? { ...row, value: sort } : row,
+      ),
+    );
     onChange(
       value.map((current, position) => (position === index ? sort : current)),
     );
@@ -82,24 +93,36 @@ export function OrderedSortEditor({
 
   function move(from: number, to: number) {
     if (to < 0 || to >= value.length || from === to) return;
+    setSortRows((current) => moveItem(current, from, to));
     announce(`sort ${from + 1}`, to + 1, value.length);
     onChange(moveItem(value, from, to));
   }
 
-  /** Sort keys have no identity of their own, so the drag payload carries the
-   * row's position. */
   function dropSort(sourceId: string, targetId: string, edge: string) {
-    const from = Number(sourceId);
-    const target = Number(targetId);
-    if (!Number.isInteger(from) || !Number.isInteger(target)) return;
+    const from = sortRows.findIndex(({ id }) => id === sourceId);
+    const target = sortRows.findIndex(({ id }) => id === targetId);
+    if (from < 0 || target < 0) return;
     const to = edge === "bottom" && from > target ? target + 1 : target;
     move(from, from < to ? to - 1 : to);
+  }
+
+  function remove(index: number) {
+    setSortRows((current) =>
+      current.filter((_, position) => position !== index),
+    );
+    onChange(value.filter((_, position) => position !== index));
+  }
+
+  function append() {
+    const sort: SortKey = { field: fields[0] ?? "title", dir: "asc" };
+    setSortRows((current) => [...current, createRow(sort)]);
+    onChange([...value, sort]);
   }
 
   return (
     <>
       <ol className="mt-3 grid gap-2" aria-label="Ordered sort keys">
-        {value.map((sort, index) => {
+        {sortRows.map(({ id, value: sort }, index) => {
           const sortPath = `${diagnosticRoot}[${index}].field`;
           const sortDiagnostics = diagnostics.filter(
             (diagnostic) => diagnostic.path === sortPath,
@@ -111,7 +134,8 @@ export function OrderedSortEditor({
           const errorId = `${idPrefix}-sort-field-error-${index}`;
           return (
             <SortRow
-              key={index}
+              key={id}
+              id={id}
               index={index}
               count={value.length}
               onMove={move}
@@ -184,9 +208,7 @@ export function OrderedSortEditor({
                 <IconButton
                   aria-label={`Remove sort ${index + 1}`}
                   variant="ghost"
-                  onPress={() =>
-                    onChange(value.filter((_, position) => position !== index))
-                  }
+                  onPress={() => remove(index)}
                 >
                   <Trash2 />
                 </IconButton>
@@ -199,9 +221,7 @@ export function OrderedSortEditor({
         className="mt-3"
         size="sm"
         variant="secondary"
-        onPress={() =>
-          onChange([...value, { field: fields[0] ?? "title", dir: "asc" }])
-        }
+        onPress={append}
       >
         Add sort
       </Button>
@@ -213,12 +233,14 @@ export function OrderedSortEditor({
 /** One sort key row, carrying the shared grip so sorts reorder exactly as
  * properties and columns do. */
 function SortRow({
+  id,
   index,
   count,
   onMove,
   onReorder,
   children,
 }: {
+  id: string;
   index: number;
   count: number;
   onMove(from: number, to: number): void;
@@ -228,8 +250,8 @@ function SortRow({
   const { rowRef, setHandle, onHandleKeyDown } =
     useReorderable<HTMLLIElement>({
       kind: "base-sort",
-      idKey: "sortIndex",
-      id: String(index),
+      idKey: "sortId",
+      id,
       index,
       count,
       onMove,

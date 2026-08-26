@@ -42,11 +42,8 @@ export function MobileCodexFrame({
         <div className="flex min-w-0 flex-1 items-center overflow-hidden whitespace-nowrap px-3 py-2 font-sans text-sm font-black uppercase tracking-[0.08em] text-ink">
           <span className="text-accent">C</span>LEPSYDRA
         </div>
-        <div
-          role="group"
-          aria-label="Global actions"
-          className="flex shrink-0 items-stretch"
-        >
+        <fieldset className="m-0 flex min-w-0 shrink-0 items-stretch border-0 p-0">
+          <legend className="sr-only">Global actions</legend>
           <button
             type="button"
             onClick={openSearch}
@@ -80,7 +77,7 @@ export function MobileCodexFrame({
           >
             {dark ? "P" : "D"}
           </button>
-        </div>
+        </fieldset>
       </header>
 
       {bottomSlot

@@ -1,4 +1,4 @@
-import { type FormEvent, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useImportIsbn } from "#/api/academic";
 import { formatApiError } from "#/api/error";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
@@ -17,6 +17,10 @@ export function BookImportModal() {
   const [error, setError] = useState<string | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [scanMessage, setScanMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isOpen) inputRef.current?.focus();
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -86,7 +90,6 @@ export function BookImportModal() {
             aria-label="ISBN"
             aria-invalid={error ? true : undefined}
             autoComplete="off"
-            autoFocus
             className="cl-mono mt-1 w-full border border-rule bg-transparent p-1.5 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
             inputMode="text"
             onChange={(event) => {

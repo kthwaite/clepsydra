@@ -136,9 +136,9 @@ function validateTomlData(value: unknown, path: string): void {
         fail("Cyclic values cannot be persisted", entry.path);
       }
       seen.add(current);
-      current.forEach((child, index) =>
-        stack.push({ value: child, path: `${entry.path}[${index}]` }),
-      );
+      current.forEach((child, index) => {
+        stack.push({ value: child, path: `${entry.path}[${index}]` });
+      });
       continue;
     }
     if (isTable(current)) {
@@ -187,9 +187,9 @@ function validateFilter(
         `${path}.${key}`,
       );
     }
-    children.forEach((child, index) =>
-      validateFilter(child, depth + 1, state, `${path}.${key}[${index}]`),
-    );
+    children.forEach((child, index) => {
+      validateFilter(child, depth + 1, state, `${path}.${key}[${index}]`);
+    });
     return;
   }
 

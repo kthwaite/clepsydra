@@ -319,14 +319,25 @@ export function CycleView({
                 NO HISTORY
               </span>
             ) : (
-              <div aria-label={`Cycle progress: ${burndown.join(", ")}`}>
-                <Spark
-                  data={burndown}
-                  width={150}
-                  height={30}
-                  accent="var(--hot)"
-                />
-              </div>
+              <figure
+                className="m-0"
+                aria-labelledby={`cycle-progress-caption-${cycle.id}`}
+              >
+                <div aria-hidden="true">
+                  <Spark
+                    data={burndown}
+                    width={150}
+                    height={30}
+                    accent="var(--hot)"
+                  />
+                </div>
+                <figcaption
+                  id={`cycle-progress-caption-${cycle.id}`}
+                  className="sr-only"
+                >
+                  Cycle progress: {burndown.join(", ")}
+                </figcaption>
+              </figure>
             )}
           </div>
         </div>
@@ -391,18 +402,16 @@ export function CycleView({
                 return (
                   <div
                     key={t.id}
-                    role="button"
-                    tabIndex={0}
                     data-testid={`cv-row-${t.id}`}
-                    className="flex w-full cursor-pointer items-center gap-[8px] border-b border-dotted border-[var(--rule)] py-[5px] px-[2px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)] focus:outline-[1px] focus:outline-[var(--hot)] focus:outline-offset-[-1px]"
-                    onClick={() => handleEditTask(t.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        handleEditTask(t.id);
-                      }
-                    }}
+                    className="pointer-events-none relative flex w-full cursor-pointer items-center gap-[8px] border-b border-dotted border-[var(--rule)] py-[5px] px-[2px] text-left transition-colors duration-[120ms] hover:bg-[var(--bg-2)]"
                   >
+                    <button
+                      type="button"
+                      aria-label={`Edit ${t.code}: ${t.title}`}
+                      className="pointer-events-auto absolute inset-0 z-0 cursor-pointer border-0 bg-transparent p-0 text-left outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-[var(--hot)] focus-visible:outline-offset-[-1px]"
+                      onClick={() => handleEditTask(t.id)}
+                      data-testid={`cv-action-${t.id}`}
+                    />
                     {/* Priority chip */}
                     <span className="flex-shrink-0">
                       <InlineEditPopover

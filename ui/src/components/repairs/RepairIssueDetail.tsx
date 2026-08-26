@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   type ReferenceIssue,
   ReferenceRepairApiError,
@@ -39,15 +39,6 @@ export function RepairIssueDetail({
   const [status, setStatus] = useState<string | null>(null);
   const previewSequence = useRef(0);
 
-  useEffect(() => {
-    previewSequence.current += 1;
-    setPreview(null);
-    setPreviewRequest(null);
-    setFolder("");
-    setBody("");
-    setAlert(null);
-    setStatus(null);
-  }, [issue.fingerprint]);
 
   const canRepair = issue.actions.some(
     (action) => action === "replace" || action === "create",
@@ -303,7 +294,6 @@ export function RepairIssueDetail({
             </div>
           </div>
           <section
-            role="region"
             aria-label="Mutation plan"
             className="mt-3 border-t border-rule pt-3"
           >
@@ -312,9 +302,9 @@ export function RepairIssueDetail({
             </h4>
             {preview.plan.file_ops.length ? (
               <ul className="mt-2 divide-y divide-rule border border-rule">
-                {preview.plan.file_ops.map((operation, index) => (
+                {preview.plan.file_ops.map((operation) => (
                   <li
-                    key={`${operation.kind}-${operation.path}-${index}`}
+                    key={`${operation.kind}-${operation.path}-${operation.destination ?? ""}`}
                     className="grid gap-1 px-3 py-2 text-xs"
                   >
                     <span className="cl-mono uppercase text-cool">
@@ -334,9 +324,9 @@ export function RepairIssueDetail({
             )}
             {preview.plan.text_edits.length ? (
               <ul className="mt-2 space-y-2">
-                {preview.plan.text_edits.map((edit, index) => (
+                {preview.plan.text_edits.map((edit) => (
                   <li
-                    key={`${edit.path}-${index}`}
+                    key={`${edit.path}-${edit.old_text}-${edit.new_text}`}
                     className="border border-rule p-3"
                   >
                     <code className="break-all text-xs text-ink">

@@ -394,6 +394,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
                   <td
                     className="px-3 py-1.5"
                     onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
                   >
                     <input
                       type="checkbox"

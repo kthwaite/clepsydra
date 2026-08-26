@@ -495,7 +495,7 @@ describe("CycleView — lanes", () => {
 describe("CycleView — row click", () => {
   it("clicking a row sets editTaskId", async () => {
     renderCycleView(ACTIVE_CYCLE, [T_FIELD]);
-    await userEvent.click(screen.getByTestId("cv-row-tf1"));
+    await userEvent.click(screen.getByTestId("cv-action-tf1"));
     expect(useBoardStore.getState().editTaskId).toBe("tf1");
   });
 });

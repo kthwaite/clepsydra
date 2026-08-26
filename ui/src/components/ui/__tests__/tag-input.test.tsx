@@ -25,6 +25,15 @@ describe("TagInput", () => {
     expect(screen.getByPlaceholderText("Add tag...")).toBeDefined();
   });
 
+  it("focuses the input from the empty field surface", () => {
+    render(<TagInput label="Tags" values={[]} onChange={() => {}} />);
+    const input = screen.getByRole("textbox", { name: "Add tags" });
+
+    fireEvent.mouseDown(screen.getByRole("group", { name: "Tags" }));
+
+    expect(input).toHaveFocus();
+  });
+
   it("hides placeholder when values exist", () => {
     render(
       <TagInput
@@ -685,7 +694,8 @@ describe("TagInput", () => {
     const onChange = vi.fn();
     const containerKey = vi.fn();
     render(
-      <div
+      <fieldset
+        aria-label="Escape event boundary"
         onKeyDown={(event) => {
           if (event.key === "Escape") containerKey();
         }}
@@ -697,7 +707,7 @@ describe("TagInput", () => {
           valuePrefix="#"
           onChange={onChange}
         />
-      </div>,
+      </fieldset>,
     );
 
     await user.type(screen.getByRole("combobox", { name: "Add tags" }), "ru");

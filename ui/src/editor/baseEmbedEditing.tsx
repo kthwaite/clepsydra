@@ -267,18 +267,23 @@ export function useBaseEmbedEditingController(
   );
 
   return useMemo(
-    () => ({
-      begin,
-      commit,
-      cancel,
-      isActive,
-      registerEntryFocus,
-      focusEntry,
-      restoreFocus,
-      exit,
-      remove,
-      disposeNode,
-    }),
+    () => {
+      // The revision makes the controller identity reflect session changes,
+      // while the callbacks themselves continue to read the live refs.
+      void sessionVersion;
+      return {
+        begin,
+        commit,
+        cancel,
+        isActive,
+        registerEntryFocus,
+        focusEntry,
+        restoreFocus,
+        exit,
+        remove,
+        disposeNode,
+      };
+    },
     [
       begin,
       cancel,

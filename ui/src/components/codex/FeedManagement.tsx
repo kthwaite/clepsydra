@@ -406,8 +406,8 @@ function SubscribeFeedDialog({
             className="mt-1 block w-full min-w-0 border border-rule bg-paper px-2 py-2 text-[12px] normal-case tracking-normal text-ink outline-none placeholder:text-ink-mute focus:border-accent"
           />
         </label>
-        <label className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-          Group
+        <div className="cl-mono min-w-0 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          <span>Group</span>
           <FeedGroupComboBox
             value={group}
             groups={groups}
@@ -415,7 +415,7 @@ function SubscribeFeedDialog({
             disabled={isPending}
             onChange={setGroup}
           />
-        </label>
+        </div>
         {error ? (
           <MutationAlert
             error={error}
@@ -687,8 +687,8 @@ function EditFeedDialog({
           isDisabled={isPending}
           onChange={setNextTitle}
         />
-        <label className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-          Group
+        <div className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+          <span>Group</span>
           <FeedGroupComboBox
             value={nextGroup}
             groups={groups}
@@ -696,7 +696,7 @@ function EditFeedDialog({
             disabled={isPending}
             onChange={setNextGroup}
           />
-        </label>
+        </div>
         {error ? (
           <MutationAlert
             error={error}

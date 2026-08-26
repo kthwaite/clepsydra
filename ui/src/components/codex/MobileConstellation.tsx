@@ -172,6 +172,7 @@ export function MobileConstellation({
             <input
               type="checkbox"
               role="switch"
+              aria-checked={hideDaily}
               checked={hideDaily}
               onChange={(event) => onHideDailyChange(event.target.checked)}
             />
@@ -181,6 +182,7 @@ export function MobileConstellation({
             <input
               type="checkbox"
               role="switch"
+              aria-checked={orphansVisible}
               checked={orphansVisible}
               onChange={(event) => onOrphansVisibleChange(event.target.checked)}
             />

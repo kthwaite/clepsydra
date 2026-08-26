@@ -69,10 +69,10 @@ describe("useUploadAttachment", () => {
       >
     )[0];
     expect(request?.params?.path).toEqual({ path: "chart.png" });
-    expect(request?.body).toBeInstanceOf(FormData);
-    expect((request?.body as unknown as FormData).get("file")).toBe(file);
-    expect(
-      (request?.body as unknown as FormData).get("plaintext_acknowledged"),
-    ).toBe("true");
+    const body = request?.body;
+    expect(body).toBeInstanceOf(FormData);
+    const formData = body as FormData;
+    expect(formData.get("file")).toBe(file);
+    expect(formData.get("plaintext_acknowledged")).toBe("true");
   });
 });

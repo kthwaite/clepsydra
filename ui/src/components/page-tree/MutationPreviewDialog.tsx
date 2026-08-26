@@ -92,9 +92,9 @@ export function MutationPreviewDialog({
             <p className="mt-2 text-muted-foreground">No file operations.</p>
           ) : (
             <ul className="mt-2 space-y-2">
-              {preview.file_ops.map((operation, index) => (
+              {preview.file_ops.map((operation) => (
                 <li
-                  key={`${operation.kind}-${operation.path}-${index}`}
+                  key={`${operation.kind}-${operation.path}-${operation.destination ?? ""}`}
                   className="border border-border px-3 py-2"
                 >
                   <span className="cl-mono text-[10px] uppercase tracking-wider text-muted-foreground">
@@ -129,9 +129,9 @@ export function MutationPreviewDialog({
               Link rewrites
             </h3>
             <ul className="mt-2 space-y-2">
-              {preview.text_edits.map((edit, index) => (
+              {preview.text_edits.map((edit) => (
                 <li
-                  key={`${edit.path}-${index}`}
+                  key={`${edit.path}-${edit.old_text}-${edit.new_text}`}
                   className="border border-border px-3 py-2"
                 >
                   <div className="break-all font-mono text-xs font-semibold">

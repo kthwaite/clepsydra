@@ -1,11 +1,11 @@
-import type { InlineMath, Math } from "mdast-util-math";
+import type { InlineMath, Math as MdastMath } from "mdast-util-math";
 import type { FolioMathData } from "#/lib/markdown/folioMath";
 
 export type FolioInlineMathMdast = Omit<InlineMath, "data"> & {
   data: FolioMathData & { folioDelimiter: "$" | "\\(" };
 };
 
-export type FolioMathMdast = Omit<Math, "data"> & {
+export type FolioMathMdast = Omit<MdastMath, "data"> & {
   data: FolioMathData & { folioDelimiter: "$$" | "\\[" };
 };
 

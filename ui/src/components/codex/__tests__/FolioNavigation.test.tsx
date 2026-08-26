@@ -145,32 +145,31 @@ vi.mock("#/api/pages", () => ({
       () => pageEditorState.version,
       () => pageEditorState.version,
     );
-    const data = useMemo(
-      () =>
-        pageEditorState.isLoading
-          ? undefined
-          : {
-              path,
-              canonical_name:
-                path.split("/").at(-1)?.replace(/\.md$/, "") ?? path,
-              body: pageEditorState.body,
-              revision: pageEditorState.revision,
-              kind: pageEditorState.kind,
-              inferred: false,
-              project: null,
-              encrypted: false,
-              conversation: null,
-              meta: {
-                id: `page:${path}`,
-                title: "Alpha",
-                tags: ["mobile"],
-                aliases: [],
-                created_at: "2026-08-08T00:00:00Z",
-                updated_at: "2026-08-08T00:00:00Z",
-              },
+    const data = useMemo(() => {
+      void pageStateVersion;
+      return pageEditorState.isLoading
+        ? undefined
+        : {
+            path,
+            canonical_name:
+              path.split("/").at(-1)?.replace(/\.md$/, "") ?? path,
+            body: pageEditorState.body,
+            revision: pageEditorState.revision,
+            kind: pageEditorState.kind,
+            inferred: false,
+            project: null,
+            encrypted: false,
+            conversation: null,
+            meta: {
+              id: `page:${path}`,
+              title: "Alpha",
+              tags: ["mobile"],
+              aliases: [],
+              created_at: "2026-08-08T00:00:00Z",
+              updated_at: "2026-08-08T00:00:00Z",
             },
-      [path, pageStateVersion],
-    );
+          };
+    }, [pageStateVersion, path]);
     return {
       data,
       isLoading: pageEditorState.isLoading,

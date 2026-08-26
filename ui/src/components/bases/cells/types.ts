@@ -1,3 +1,5 @@
+import { useLayoutEffect, useRef } from "react";
+
 import type { PropertyDefinition, PropertyType } from "#/api/bases";
 
 /** A JSON property value as materialized by the view endpoint. */
@@ -36,6 +38,13 @@ export type CellEditorComponent = (props: CellEditorProps) => React.ReactNode;
 /** Shared Vessel styling for inline cell inputs. */
 export const CELL_INPUT_CLASS =
   "cl-mono w-full border border-accent bg-paper px-1 py-0.5 text-[12px] text-ink outline-none";
+
+/** Focus an editor after React has mounted its input. */
+export function useInitialFocus<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  useLayoutEffect(() => ref.current?.focus(), []);
+  return ref;
+}
 
 /** Render a cell value for display. */
 export function formatCellValue(value: CellValue | undefined): string {

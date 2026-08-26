@@ -362,6 +362,7 @@ function ReaderArticle({
         {entry.content_html ? (
           <div
             className="feed-entry-content"
+            // biome-ignore lint/security/noDangerouslySetInnerHtml: the backend sanitizes feed HTML with ammonia before storage, and the DTO returns that stored HTML unchanged
             dangerouslySetInnerHTML={{ __html: entry.content_html }}
           />
         ) : (

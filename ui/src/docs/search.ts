@@ -1,6 +1,6 @@
 import GithubSlugger from "github-slugger";
 import type { Nodes, Root } from "mdast";
-import { toString } from "mdast-util-to-string";
+import { toString as markdownToString } from "mdast-util-to-string";
 import remarkGfm from "remark-gfm";
 import remarkMdx from "remark-mdx";
 import remarkParse from "remark-parse";
@@ -57,14 +57,14 @@ function renderedBlockText(node: Nodes): string {
   }
 
   if (node.type === "paragraph") {
-    return toString(node, { includeHtml: false });
+    return markdownToString(node, { includeHtml: false });
   }
 
   if ("children" in node) {
     return node.children.map(renderedBlockText).filter(Boolean).join(" ");
   }
 
-  return toString(node, { includeHtml: false });
+  return markdownToString(node, { includeHtml: false });
 }
 
 export function buildDocsIndex(
@@ -106,7 +106,7 @@ export function buildDocsIndex(
         }
 
         emitSection();
-        const semanticHeading = toString(node, {
+        const semanticHeading = markdownToString(node, {
           includeHtml: false,
           includeImageAlt: false,
         });

@@ -127,11 +127,8 @@ export function FeedRiverPanel() {
           </div>
         ) : (
           <>
-            <div
-              role="group"
-              aria-label="Feed river view"
-              className="mb-3 flex border border-rule"
-            >
+            <fieldset className="mb-3 flex min-w-0 border border-rule p-0">
+              <legend className="sr-only">Feed river view</legend>
               <Button
                 aria-pressed={view === "unread"}
                 onPress={() =>
@@ -162,7 +159,7 @@ export function FeedRiverPanel() {
               >
                 Saved ({feedsQuery.data.counts.saved})
               </Button>
-            </div>
+            </fieldset>
             <FeedRiver compact filters={{ view }} />
           </>
         )}

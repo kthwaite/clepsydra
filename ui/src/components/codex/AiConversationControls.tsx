@@ -11,11 +11,8 @@ export function AiConversationControls({
 }: AiConversationControlsProps) {
   return (
     <div className="ai-conversation-controls">
-      <div
-        className="ai-conversation-controls__modes"
-        role="group"
-        aria-label="Conversation mode"
-      >
+      <fieldset className="ai-conversation-controls__modes m-0 min-w-0 border-0 p-0">
+        <legend className="sr-only">Conversation mode</legend>
         <button
           type="button"
           aria-pressed={mode === "read"}
@@ -30,7 +27,7 @@ export function AiConversationControls({
         >
           Edit
         </button>
-      </div>
+      </fieldset>
       {mode === "edit" ? (
         <button
           type="button"

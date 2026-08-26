@@ -130,6 +130,22 @@ export function RecipeFolioBody({
 const visibleGroups = (groups: RecipeGroup[]): RecipeGroup[] =>
   groups.filter((group, index) => index > 0 || group.items.length > 0);
 
+function withOccurrenceKeys<T>(
+  values: T[],
+  identity: (value: T) => string,
+): Array<{ key: string; value: T }> {
+  const occurrences = new Map<string, number>();
+  return values.map((value) => {
+    const base = identity(value);
+    const occurrence = occurrences.get(base) ?? 0;
+    occurrences.set(base, occurrence + 1);
+    return { key: `${base}\u0000${occurrence}`, value };
+  });
+}
+
+const recipeGroupIdentity = (group: RecipeGroup) =>
+  JSON.stringify([group.name, group.items]);
+
 function RecipeReadGroup({
   name,
   children,
@@ -176,17 +192,19 @@ function RecipeReadView({
           >
             Ingredients
           </h2>
-          {visibleGroups(document.ingredientGroups).map((group, index) => (
-            <RecipeReadGroup
-              key={`${index}:${group.name ?? ""}`}
-              name={group.name}
-            >
+          {withOccurrenceKeys(
+            visibleGroups(document.ingredientGroups),
+            recipeGroupIdentity,
+          ).map(({ key: groupKey, value: group }) => (
+            <RecipeReadGroup key={groupKey} name={group.name}>
               <ul className="m-0 list-disc space-y-2 py-4 pl-5 marker:text-accent">
-                {group.items.map((item, itemIndex) => (
-                  <li key={`${itemIndex}:${item}`} className="pl-1 text-ink-2">
-                    {item}
-                  </li>
-                ))}
+                {withOccurrenceKeys(group.items, (item) => item).map(
+                  ({ key: itemKey, value: item }) => (
+                    <li key={itemKey} className="pl-1 text-ink-2">
+                      {item}
+                    </li>
+                  ),
+                )}
               </ul>
             </RecipeReadGroup>
           ))}
@@ -199,20 +217,22 @@ function RecipeReadView({
           >
             Steps
           </h2>
-          {visibleGroups(document.stepGroups).map((group, index) => (
-            <RecipeReadGroup
-              key={`${index}:${group.name ?? ""}`}
-              name={group.name}
-            >
+          {withOccurrenceKeys(
+            visibleGroups(document.stepGroups),
+            recipeGroupIdentity,
+          ).map(({ key: groupKey, value: group }) => (
+            <RecipeReadGroup key={groupKey} name={group.name}>
               <ol className="m-0 list-decimal space-y-4 py-4 pl-7 marker:font-heading marker:text-base marker:font-bold marker:text-accent">
-                {group.items.map((item, itemIndex) => (
-                  <li
-                    key={`${itemIndex}:${item}`}
-                    className="whitespace-pre-line pl-2 text-ink-2"
-                  >
-                    {item}
-                  </li>
-                ))}
+                {withOccurrenceKeys(group.items, (item) => item).map(
+                  ({ key: itemKey, value: item }) => (
+                    <li
+                      key={itemKey}
+                      className="whitespace-pre-line pl-2 text-ink-2"
+                    >
+                      {item}
+                    </li>
+                  ),
+                )}
               </ol>
             </RecipeReadGroup>
           ))}

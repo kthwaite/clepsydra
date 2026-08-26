@@ -84,11 +84,11 @@ vi.mock("#/hooks/useMobileLayout", () => ({
 }));
 
 vi.mock("#/components/codex/DesktopCodexFrame", () => ({
-  DesktopCodexFrame: () => <header aria-label="Desktop Codex chrome" />,
+  DesktopCodexFrame: () => <header />,
 }));
 
 vi.mock("#/components/codex/MobileCodexFrame", () => ({
-  MobileCodexFrame: () => <header aria-label="Mobile Codex chrome" />,
+  MobileCodexFrame: () => <header />,
 }));
 
 vi.mock("#/api/feeds", () => ({
@@ -210,7 +210,7 @@ vi.mock("#/components/codex/FeedRiver", () => ({
 }));
 
 vi.mock("#/components/codex/FeedManagement", () => ({
-  FeedManagement: () => <div aria-label="Feed management fixture" />,
+  FeedManagement: () => <div />,
 }));
 
 import { CodexFrame } from "#/components/codex/CodexFrame";

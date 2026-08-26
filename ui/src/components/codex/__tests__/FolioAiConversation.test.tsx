@@ -119,6 +119,23 @@ vi.mock("#/editor/SlateEditor", () => ({
     onChangeRef.current = onChange;
     const editor = useMemo(() => createEditor() as CustomEditor, []);
     const [value, setValue] = useState<Descendant[]>(initialValue);
+    const nodeIdsRef = useRef(new WeakMap<object, string>());
+    const nextNodeIdRef = useRef(0);
+    const nodeKey = (node: object) => {
+      const existing = nodeIdsRef.current.get(node);
+      if (existing) return existing;
+      const created = `slate-node-${nextNodeIdRef.current}`;
+      nextNodeIdRef.current += 1;
+      nodeIdsRef.current.set(node, created);
+      return created;
+    };
+    const preserveNodeKey = (
+      previous: object,
+      replacement: Descendant,
+    ): Descendant => {
+      nodeIdsRef.current.set(replacement, nodeKey(previous));
+      return replacement;
+    };
 
     useEffect(() => {
       editor.children = initialValue;
@@ -149,14 +166,14 @@ vi.mock("#/editor/SlateEditor", () => ({
                   .split("\n", 1)[0]
                   .replace(/^> /, "");
                 return (
-                  <blockquote key={index}>
+                  <blockquote key={nodeKey(node)}>
                     <span>{marker}</span>
                     <textarea
                       aria-label="Page body"
                       value={Node.string(node)}
                       onChange={(event) => {
                         const next = [...editor.children] as Descendant[];
-                        next[index] = {
+                        next[index] = preserveNodeKey(node, {
                           ...node,
                           children: [
                             {
@@ -164,7 +181,7 @@ vi.mock("#/editor/SlateEditor", () => ({
                               children: [{ text: event.currentTarget.value }],
                             },
                           ],
-                        };
+                        } as Descendant);
                         editor.children = next;
                         editor.onChange();
                       }}
@@ -183,7 +200,7 @@ vi.mock("#/editor/SlateEditor", () => ({
                 const assistant =
                   provider === "claude" ? "Claude" : "Assistant";
                 return (
-                  <article key={`${role}-${index}`} data-role={role}>
+                  <article key={nodeKey(node)} data-role={role}>
                     <span>{role === "user" ? "You" : assistant}</span>
                     {!readOnly ? (
                       <div>
@@ -193,10 +210,10 @@ vi.mock("#/editor/SlateEditor", () => ({
                           onChange={(key) => {
                             if (key === null) return;
                             const next = [...editor.children] as Descendant[];
-                            next[index] = {
+                            next[index] = preserveNodeKey(node, {
                               ...node,
                               role: String(key) as "user" | "assistant",
-                            };
+                            } as Descendant);
                             editor.children = next;
                             editor.onChange();
                           }}
@@ -221,7 +238,7 @@ vi.mock("#/editor/SlateEditor", () => ({
                       onChange={(event) => {
                         if (readOnly) return;
                         const next = [...editor.children] as Descendant[];
-                        next[index] = {
+                        next[index] = preserveNodeKey(node, {
                           ...node,
                           children: [
                             {
@@ -229,7 +246,7 @@ vi.mock("#/editor/SlateEditor", () => ({
                               children: [{ text: event.currentTarget.value }],
                             },
                           ],
-                        };
+                        } as Descendant);
                         editor.children = next;
                         editor.onChange();
                       }}
@@ -239,17 +256,17 @@ vi.mock("#/editor/SlateEditor", () => ({
               }
               return (
                 <textarea
-                  key={index}
+                  key={nodeKey(node)}
                   aria-label="Page body"
                   readOnly={readOnly}
                   value={Node.string(node)}
                   onChange={(event) => {
                     if (readOnly) return;
                     const next = [...editor.children] as Descendant[];
-                    next[index] = {
+                    next[index] = preserveNodeKey(node, {
                       type: "paragraph",
                       children: [{ text: event.currentTarget.value }],
-                    };
+                    });
                     editor.children = next;
                     editor.onChange();
                   }}

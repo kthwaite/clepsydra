@@ -263,7 +263,8 @@ export function EncryptionSetupDialog({
         </form>
       ) : (
         <div className="space-y-4 px-4 py-4">
-          <div className="flex border border-rule" aria-label="Identity method">
+          <fieldset className="m-0 flex min-w-0 border border-rule p-0">
+            <legend className="sr-only">Identity method</legend>
             <MethodButton
               selected={method === "password"}
               onClick={() => selectMethod("password")}
@@ -276,7 +277,7 @@ export function EncryptionSetupDialog({
             >
               Import existing identity
             </MethodButton>
-          </div>
+          </fieldset>
 
           {!prepared && method === "password" ? (
             <div className="space-y-3">

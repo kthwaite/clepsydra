@@ -16,7 +16,13 @@ import {
   type DraftView,
   moveItem,
 } from "./definition-model";
-import { MoveButtons, ReorderHandle, useReorderable } from "./ordered-list";
+import { diagnosticRows } from "./diagnostic-rows";
+import {
+  MoveButtons,
+  ReorderHandle,
+  useIdentifiedRows,
+  useReorderable,
+} from "./ordered-list";
 import { DisplayLabelsEditor } from "./DisplayLabelsEditor";
 import { MembershipEditor } from "./MembershipEditor";
 import { OrderedSortEditor } from "./OrderedSortEditor";
@@ -134,10 +140,8 @@ function VisibleColumnRow({
         {row.column}
       </th>
       <td className="w-28 px-1 py-2 sm:w-36 sm:px-2">
-        <div
-          className="flex flex-wrap justify-end gap-1"
-          aria-label={`Actions for ${row.column}`}
-        >
+        <fieldset className="m-0 flex flex-wrap justify-end gap-1 border-0 p-0">
+          <legend className="sr-only">Actions for {row.column}</legend>
           <MoveButtons
             label={row.column}
             index={index}
@@ -151,7 +155,7 @@ function VisibleColumnRow({
           >
             <Trash2 />
           </IconButton>
-        </div>
+        </fieldset>
       </td>
     </tr>
   );
@@ -179,6 +183,11 @@ export function ViewDefinitionEditor({
       column,
     })),
   );
+  const {
+    createRow: createAggregateRow,
+    rows: aggregateRows,
+    setRows: setAggregateRows,
+  } = useIdentifiedRows(view.aggregates, "aggregate");
   const fields = fieldCapabilities(properties);
   const columnFields: FieldCapability[] = [
     ...fields,
@@ -234,11 +243,12 @@ export function ViewDefinitionEditor({
 
   useEffect(() => {
     if (!focusColumnId) return;
+    if (!columnRows.some(({ id }) => id === focusColumnId)) return;
     const handle = reorderHandles.current.get(focusColumnId);
     if (!handle) return;
     handle.focus();
     setFocusColumnId(undefined);
-  }, [focusColumnId, view.columns]);
+  }, [columnRows, focusColumnId]);
   function moveColumn(from: number, to: number) {
     if (
       from < 0 ||
@@ -285,11 +295,40 @@ export function ViewDefinitionEditor({
   }
 
   function replaceAggregate(index: number, aggregate: Aggregate) {
+    setAggregateRows((current) =>
+      current.map((row, position) =>
+        position === index ? { ...row, value: aggregate } : row,
+      ),
+    );
     onChange({
       ...view,
       aggregates: view.aggregates.map((current, position) =>
         position === index ? aggregate : current,
       ),
+    });
+  }
+
+  function removeAggregate(index: number) {
+    setAggregateRows((current) =>
+      current.filter((_, position) => position !== index),
+    );
+    onChange({
+      ...view,
+      aggregates: view.aggregates.filter(
+        (_, position) => position !== index,
+      ),
+    });
+  }
+
+  function appendAggregate() {
+    const aggregate: Aggregate = { fn: "count" };
+    setAggregateRows((current) => [
+      ...current,
+      createAggregateRow(aggregate),
+    ]);
+    onChange({
+      ...view,
+      aggregates: [...view.aggregates, aggregate],
     });
   }
 
@@ -381,8 +420,8 @@ export function ViewDefinitionEditor({
       ) : null}
       {viewDiagnostics.length > 0 ? (
         <ul className="mt-3 border-l-2 border-warn pl-3 text-xs text-warn">
-          {viewDiagnostics.map((diagnostic, index) => (
-            <li key={`${diagnostic.path}-${index}`}>{diagnostic.message}</li>
+          {diagnosticRows(viewDiagnostics).map(({ diagnostic, key }) => (
+            <li key={key}>{diagnostic.message}</li>
           ))}
         </ul>
       ) : null}
@@ -544,7 +583,7 @@ export function ViewDefinitionEditor({
           Aggregates
         </h4>
         <ol className="mt-3 grid gap-2">
-          {view.aggregates.map((aggregate, index) => {
+          {aggregateRows.map(({ id, value: aggregate }, index) => {
             const fn = aggregate.fn as AggregateFunction;
             const eligibleFields = fields.filter(({ type }) =>
               aggregateFunctions(
@@ -553,7 +592,7 @@ export function ViewDefinitionEditor({
             );
             return (
               <li
-                key={index}
+                key={id}
                 className="grid items-end gap-2 border-b border-border pb-3 sm:grid-cols-[10rem_minmax(0,1fr)_auto]"
               >
                 <Select
@@ -625,14 +664,7 @@ export function ViewDefinitionEditor({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onPress={() =>
-                    onChange({
-                      ...view,
-                      aggregates: view.aggregates.filter(
-                        (_, position) => position !== index,
-                      ),
-                    })
-                  }
+                  onPress={() => removeAggregate(index)}
                 >
                   Remove aggregate {index + 1}
                 </Button>
@@ -644,12 +676,7 @@ export function ViewDefinitionEditor({
           className="mt-3"
           size="sm"
           variant="secondary"
-          onPress={() =>
-            onChange({
-              ...view,
-              aggregates: [...view.aggregates, { fn: "count" }],
-            })
-          }
+          onPress={appendAggregate}
         >
           Add aggregate
         </Button>

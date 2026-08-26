@@ -118,6 +118,7 @@ export function PropertiesEditor({
 
   useEffect(() => {
     if (!focusPropertyId) return;
+    if (!properties.some(({ id }) => id === focusPropertyId)) return;
     const handle = reorderHandles.current.get(focusPropertyId);
     if (!handle) return;
     handle.focus();

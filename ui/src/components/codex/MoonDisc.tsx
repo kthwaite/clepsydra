@@ -1,3 +1,4 @@
+import { useId } from "react";
 import { Button, Tooltip, TooltipTrigger } from "react-aria-components";
 import { cn } from "#/lib/cn";
 import { MOON_GLYPHS, MOON_NAMES, type MoonInfo } from "./sky";
@@ -20,12 +21,16 @@ const SURFACE_BG = [
  */
 export function MoonDisc({ info }: { info: MoonInfo }) {
   const currentIdx = MOON_NAMES.indexOf(info.phaseName);
+  const labelId = useId();
   return (
-    <div
-      className="relative flex h-24 w-24 items-center justify-center border border-rule bg-paper"
+    <figure
+      aria-labelledby={labelId}
+      className="relative m-0 flex h-24 w-24 items-center justify-center border border-rule bg-paper"
       style={{ boxShadow: "0 0 22px 1px rgba(206,214,226,0.09)" }}
-      aria-label={`${info.phaseName} · ${info.illumPct}%`}
     >
+      <figcaption id={labelId} className="sr-only">
+        {info.phaseName} · {info.illumPct}%
+      </figcaption>
       <PhaseGauge edge="top" currentIdx={currentIdx} />
       <PhaseGauge edge="bottom" currentIdx={currentIdx} />
 
@@ -51,7 +56,7 @@ export function MoonDisc({ info }: { info: MoonInfo }) {
           }}
         />
       </div>
-    </div>
+    </figure>
   );
 }
 

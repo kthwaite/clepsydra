@@ -52,6 +52,7 @@ export function CaptureAsideModal() {
             aria-label="Aside"
             value={text}
             onChange={(e) => setText(e.target.value)}
+            // biome-ignore lint/a11y/noAutofocus: this single-field capture modal intentionally starts focus at its only text input
             autoFocus
             placeholder="capture an aside …"
             className="cl-mono w-full border border-rule bg-transparent p-1.5 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"

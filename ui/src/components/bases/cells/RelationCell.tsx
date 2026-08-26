@@ -3,6 +3,7 @@ import {
   CELL_INPUT_CLASS,
   type CellEditorProps,
   type CellValue,
+  useInitialFocus,
 } from "./types";
 
 /** Strip `[[Target|display]]` down to `Target` for editing. */
@@ -35,6 +36,7 @@ export function RelationCell({
   const [draft, setDraft] = useState(targetsOf(value).join(", "));
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const listId = useId();
+  const inputRef = useInitialFocus<HTMLInputElement>();
   const singleTarget = !draft.includes(",");
   const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
     const targets = draft
@@ -73,7 +75,7 @@ export function RelationCell({
   return (
     <>
       <input
-        autoFocus
+        ref={inputRef}
         aria-label={ariaLabel ?? "Edit relation"}
         aria-describedby={ariaDescribedBy}
         className={CELL_INPUT_CLASS}

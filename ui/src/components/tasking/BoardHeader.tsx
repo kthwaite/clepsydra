@@ -279,16 +279,25 @@ export function BoardHeader({
                 No completed tasks
               </span>
             ) : (
-              <div
-                aria-label={`14-day completed task history: ${sealHistory.join(", ")}`}
+              <figure
+                className="m-0"
+                aria-labelledby="board-completed-history-caption"
               >
-                <Spark
-                  data={sealHistory}
-                  width={96}
-                  height={26}
-                  accent="var(--cool)"
-                />
-              </div>
+                <div aria-hidden="true">
+                  <Spark
+                    data={sealHistory}
+                    width={96}
+                    height={26}
+                    accent="var(--cool)"
+                  />
+                </div>
+                <figcaption
+                  id="board-completed-history-caption"
+                  className="sr-only"
+                >
+                  14-day completed task history: {sealHistory.join(", ")}
+                </figcaption>
+              </figure>
             )}
           </div>
         </div>

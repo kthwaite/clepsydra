@@ -3,7 +3,6 @@ import {
   Children,
   type ReactNode,
   useCallback,
-  useEffect,
   useId,
   useState,
 } from "react";
@@ -40,6 +39,7 @@ export function CommandPaletteItem({
       id={id}
       role="option"
       aria-selected={isFocused}
+      tabIndex={-1}
       data-focused={isFocused ? "true" : undefined}
       className={cn(
         "block w-full cursor-default px-4 py-2 text-left text-sm",
@@ -47,6 +47,13 @@ export function CommandPaletteItem({
         className,
       )}
       onClick={onAction}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onAction();
+        }
+      }}
+      onMouseDown={(event) => event.preventDefault()}
       onMouseEnter={internal.onMouseEnter}
     >
       {children}
@@ -80,7 +87,6 @@ export function CommandPalette({
   className,
 }: CommandPaletteProps) {
   const listboxId = useId();
-  const [focusedIndex, setFocusedIndex] = useState(0);
 
   // Collect item data from children
   const items = Children.toArray(children).filter(
@@ -93,11 +99,8 @@ export function CommandPalette({
   );
 
   const itemCount = items.length;
-
-  // Reset focused index when children change
-  useEffect(() => {
-    setFocusedIndex(0);
-  }, [itemCount]);
+  const [focusedIndex, setFocusedIndex] = useState(0);
+  const [previousItemCount, setPreviousItemCount] = useState(itemCount);
 
   const focusedItemId = items[focusedIndex]
     ? (items[focusedIndex] as React.ReactElement<CommandPaletteItemProps>).props
@@ -124,6 +127,13 @@ export function CommandPalette({
     },
     [focusedIndex, items, itemCount],
   );
+
+  // Adjust state during render so a changed result set is committed with its
+  // first item active, rather than briefly retaining an obsolete option.
+  if (itemCount !== previousItemCount) {
+    setPreviousItemCount(itemCount);
+    setFocusedIndex(0);
+  }
 
   // Clone children to inject internal props
   const renderedItems = items.map((child, i) => {
@@ -166,8 +176,9 @@ export function CommandPalette({
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               aria-expanded={itemCount > 0}
-              aria-controls={listboxId}
+              aria-controls={itemCount > 0 ? listboxId : undefined}
               aria-activedescendant={focusedItemId}
+              aria-autocomplete="list"
               autoComplete="off"
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />

@@ -104,6 +104,11 @@ export function PreviewPropertiesEditor({
 
   useEffect(() => {
     if (!focusRequest) return;
+    if (
+      focusRequest.kind !== "selector" &&
+      !preview.some(({ id }) => id === focusRequest.id)
+    )
+      return;
     if (focusRequest.kind === "selector") {
       selector.current?.focus();
     } else if (focusRequest.kind === "field") {

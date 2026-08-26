@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+import {
+  CELL_INPUT_CLASS,
+  type CellEditorProps,
+  useInitialFocus,
+} from "./types";
 
 /** Split an ISO date-time into a datetime-local value and its zone suffix. */
 function splitIso(value: string): { local: string; suffix: string } {
@@ -27,6 +31,7 @@ export function DateTimeCell({
 }: CellEditorProps) {
   const initial = typeof value === "string" ? splitIso(value) : null;
   const [draft, setDraft] = useState(initial?.local ?? "");
+  const inputRef = useInitialFocus<HTMLInputElement>();
   const suffix = initial?.suffix ?? "";
 
   const commit = (submit: CellEditorProps["onCommit"] = onCommit) => {
@@ -40,7 +45,7 @@ export function DateTimeCell({
 
   return (
     <input
-      autoFocus
+      ref={inputRef}
       aria-label={ariaLabel ?? "Edit datetime"}
       aria-describedby={ariaDescribedBy}
       type="datetime-local"

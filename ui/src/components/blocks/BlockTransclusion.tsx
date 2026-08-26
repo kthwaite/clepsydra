@@ -20,10 +20,12 @@ function UnavailableBlock({
   onRetry?: () => void;
 }) {
   return (
+    // biome-ignore lint/a11y/useSemanticElements: This transclusion is phrasing content inside Slate and Markdown spans; a fieldset would create invalid HTML, so an ARIA group is the valid inline semantic.
     <span
       role="group"
+      aria-label="Referenced block"
       className={cn(
-        "inline-flex items-baseline gap-1 text-muted-foreground",
+        "inline-flex min-w-0 items-baseline gap-1 text-muted-foreground",
         className,
       )}
     >
@@ -81,8 +83,10 @@ export function BlockTransclusion({
 
   const sourceName = data.page_title || data.page_path;
   return (
+    // biome-ignore lint/a11y/useSemanticElements: This transclusion is phrasing content inside Slate and Markdown spans; a fieldset would create invalid HTML, so an ARIA group is the valid inline semantic.
     <span
       role="group"
+      aria-label="Referenced block"
       className={cn("inline-flex max-w-full items-baseline gap-1", className)}
     >
       <span className="max-w-full">{content}</span>

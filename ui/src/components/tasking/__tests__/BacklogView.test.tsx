@@ -454,8 +454,7 @@ describe("BacklogView — checklist dots", () => {
 describe("BacklogView — row click sets editTaskId", () => {
   it("clicking a row calls setEditTaskId with the task id", async () => {
     wrap(<BacklogView colLabel={FIXTURE_COL_LABEL} tasks={[T_P0_DUE]} />);
-    const row = screen.getByTestId("bk-row-bk-p0-due");
-    await userEvent.click(row);
+    await userEvent.click(screen.getByTestId("bk-action-bk-p0-due"));
     expect(useBoardStore.getState().editTaskId).toBe("bk-p0-due");
   });
 
@@ -466,7 +465,7 @@ describe("BacklogView — row click sets editTaskId", () => {
         tasks={[T_P0_DUE, T_P1_HOLD]}
       />,
     );
-    await userEvent.click(screen.getByTestId("bk-row-bk-p1-hold"));
+    await userEvent.click(screen.getByTestId("bk-action-bk-p1-hold"));
     expect(useBoardStore.getState().editTaskId).toBe("bk-p1-hold");
   });
 });

@@ -6,7 +6,7 @@ import type {
   Nodes,
   Root,
 } from "mdast";
-import { toString } from "mdast-util-to-string";
+import { toString as markdownToString } from "mdast-util-to-string";
 import remarkGfm from "remark-gfm";
 import remarkParse from "remark-parse";
 import { unified } from "unified";
@@ -51,7 +51,7 @@ function referenceFromNode(
 
   return {
     path,
-    label: toString(node),
+    label: markdownToString(node),
     image: node.type === "image" || node.type === "imageReference",
   };
 }

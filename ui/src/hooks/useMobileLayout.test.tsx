@@ -26,14 +26,14 @@ function installMatchMedia(initial: boolean) {
   );
   return (next: boolean) => {
     matches = next;
-    act(() =>
-      listeners.forEach((listener) =>
+    act(() => {
+      listeners.forEach((listener) => {
         listener({
           matches: next,
           media: MOBILE_LAYOUT_QUERY,
-        } as MediaQueryListEvent),
-      ),
-    );
+        } as MediaQueryListEvent);
+      });
+    });
   };
 }
 

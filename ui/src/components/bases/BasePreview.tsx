@@ -9,6 +9,7 @@ import { formatApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { BaseTableView } from "./BaseTableView";
 import { type BaseDraft, toWire } from "./definition-model";
+import { diagnosticRows } from "./diagnostic-rows";
 
 const MEMBERSHIP_SCOPE = "__membership__";
 
@@ -182,8 +183,8 @@ export function BasePreview({
         >
           <p className="font-medium">Preview could not be evaluated cleanly.</p>
           <ul className="mt-2 grid gap-1">
-            {diagnostics.map((diagnostic, index) => (
-              <li key={`${diagnostic.path}-${index}`}>
+            {diagnosticRows(diagnostics).map(({ diagnostic, key }) => (
+              <li key={key}>
                 {diagnostic.path && onDiagnosticFocus ? (
                   <Button
                     size="sm"

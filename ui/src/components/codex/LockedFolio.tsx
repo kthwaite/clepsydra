@@ -69,17 +69,20 @@ export function LockedFolio({
           {path}
         </p>
         {tags.length > 0 ? (
-          <p aria-label="Tags" className="cl-mono mt-2 text-[11px] text-accent">
+          <section
+            aria-label="Tags"
+            className="cl-mono mt-2 text-[11px] text-accent"
+          >
             {tags.map((tag) => `#${tag}`).join(" ")}
-          </p>
+          </section>
         ) : null}
         {derivedTags.length > 0 ? (
-          <p
+          <section
             aria-label="Read-only Tags"
             className="cl-mono mt-2 text-[11px] text-accent"
           >
             {derivedTags.map((tag) => `#${tag}`).join(" ")}
-          </p>
+          </section>
         ) : null}
 
         {properties}

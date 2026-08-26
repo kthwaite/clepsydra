@@ -11,7 +11,7 @@ import {
   useRole,
 } from "@floating-ui/react";
 import type React from "react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cn } from "#/lib/cn";
 import type { HeatmapDay } from "./atrium-data";
 
@@ -32,7 +32,15 @@ const HEAT_LEVEL = [
   "bg-warn",
   "bg-accent",
 ];
-const DOW_LABELS = ["M", "", "W", "", "F", "", "S"]; // Monday-first rows
+const DOW_LABELS = [
+  { key: "monday", label: "M" },
+  { key: "tuesday", label: "" },
+  { key: "wednesday", label: "W" },
+  { key: "thursday", label: "" },
+  { key: "friday", label: "F" },
+  { key: "saturday", label: "" },
+  { key: "sunday", label: "S" },
+]; // Monday-first rows
 const VISIBLE_PAGES = 5;
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-GB", {
   weekday: "long",
@@ -83,11 +91,11 @@ export function ActivityHeatmap({
   const role = useRole(context, { role: "dialog" });
   const { getFloatingProps } = useInteractions([dismiss, role]);
 
-  function cancelClose() {
+  const cancelClose = useCallback(() => {
     if (closeTimerRef.current === null) return;
     window.clearTimeout(closeTimerRef.current);
     closeTimerRef.current = null;
-  }
+  }, []);
 
   function openDay(
     day: HeatmapDay,
@@ -130,8 +138,12 @@ export function ActivityHeatmap({
     }, 100);
   }
 
-  useEffect(() => cancelClose, []);
+  useEffect(() => cancelClose, [cancelClose]);
   const activeDate = activeDay ? formatDate(activeDay.date) : "";
+  const labeledMonths = monthLabels.map((month, monthIndex) => ({
+    key: weeks[monthIndex]?.[0]?.date ?? `month:${month}`,
+    month,
+  }));
 
   return (
     <>
@@ -139,9 +151,9 @@ export function ActivityHeatmap({
         <div className="mb-1.5 grid grid-cols-[22px_1fr] gap-2">
           <span />
           <div className="flex gap-[3px]">
-            {monthLabels.map((month, index) => (
+            {labeledMonths.map(({ key, month }) => (
               <span
-                key={`m${index}`}
+                key={key}
                 className="cl-mono min-w-0 flex-1 whitespace-nowrap text-[9px] uppercase tracking-[0.16em] text-ink-mute"
               >
                 {month}
@@ -151,9 +163,9 @@ export function ActivityHeatmap({
         </div>
         <div className="grid grid-cols-[22px_1fr] gap-2">
           <div className="grid grid-rows-7 gap-[3px] pr-1 text-right text-[9px] text-ink-mute">
-            {DOW_LABELS.map((label, index) => (
+            {DOW_LABELS.map(({ key, label }) => (
               <span
-                key={`dow${index}`}
+                key={key}
                 className="flex items-center justify-end leading-none"
               >
                 {label}
@@ -161,9 +173,9 @@ export function ActivityHeatmap({
             ))}
           </div>
           <div className="flex gap-[3px]">
-            {weeks.map((week, weekIndex) => (
+            {weeks.map((week) => (
               <div
-                key={`w${weekIndex}`}
+                key={week[0]?.date ?? week.at(-1)?.date}
                 className="flex min-w-0 flex-1 flex-col gap-[3px]"
               >
                 {week.map((day) => {
@@ -227,9 +239,9 @@ export function ActivityHeatmap({
         </span>
         <span className="flex items-center gap-1.5">
           LESS
-          {HEAT_LEVEL.map((className, index) => (
+          {HEAT_LEVEL.map((className) => (
             <i
-              key={`leg${index}`}
+              key={className}
               className={cn(
                 "inline-block h-3 w-3 border border-rule",
                 className,
@@ -281,25 +293,23 @@ export function ActivityHeatmap({
               </div>
               {activeDay.pages.length > 0 ? (
                 <div className="flex flex-col py-1">
-                  {activeDay.pages
-                    .slice(0, VISIBLE_PAGES)
-                    .map((page, occurrenceIndex) => {
-                      const title = page.title || page.path;
-                      return (
-                        <button
-                          key={`${page.path}:${page.activityAt}:${occurrenceIndex}`}
-                          type="button"
-                          aria-label={`Open ${title}`}
-                          className="cl-mono cursor-pointer px-3 py-2 text-left text-[10px] text-ink-2 hover:bg-paper-edge hover:text-ink focus-visible:bg-paper-edge focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-[-1px]"
-                          onClick={() => {
-                            closeDay();
-                            onOpenPage(page.path, title);
-                          }}
-                        >
-                          {title}
-                        </button>
-                      );
-                    })}
+                  {activeDay.pages.slice(0, VISIBLE_PAGES).map((page) => {
+                    const title = page.title || page.path;
+                    return (
+                      <button
+                        key={`${page.path}:${page.activityAt}`}
+                        type="button"
+                        aria-label={`Open ${title}`}
+                        className="cl-mono cursor-pointer px-3 py-2 text-left text-[10px] text-ink-2 hover:bg-paper-edge hover:text-ink focus-visible:bg-paper-edge focus-visible:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent focus-visible:outline-offset-[-1px]"
+                        onClick={() => {
+                          closeDay();
+                          onOpenPage(page.path, title);
+                        }}
+                      >
+                        {title}
+                      </button>
+                    );
+                  })}
                   {activeDay.pages.length > VISIBLE_PAGES ? (
                     <span className="cl-mono px-3 py-2 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
                       +{activeDay.pages.length - VISIBLE_PAGES} more

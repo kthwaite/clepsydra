@@ -30,7 +30,10 @@ export function BootSequence() {
       timers.push(window.setTimeout(() => setShown(i), i * STEP));
     }
     timers.push(window.setTimeout(() => endBoot(), LINES.length * STEP + HOLD));
-    return () => timers.forEach((t) => window.clearTimeout(t));
+    return () =>
+      timers.forEach((timer) => {
+        window.clearTimeout(timer);
+      });
   }, [booting, endBoot]);
 
   useEffect(() => {

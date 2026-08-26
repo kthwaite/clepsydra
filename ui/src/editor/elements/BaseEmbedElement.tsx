@@ -105,7 +105,9 @@ export function BaseEmbedElement({
     exit(path, side);
   };
 
-  const handleInteractiveKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+  const handleInteractiveKeyDown = (
+    event: KeyboardEvent<HTMLFieldSetElement>,
+  ) => {
     if (event.defaultPrevented || event.key !== "Escape") return;
     event.preventDefault();
     event.stopPropagation();
@@ -140,7 +142,7 @@ export function BaseEmbedElement({
     undefined,
   );
   const [measuredWidth, setMeasuredWidth] = useState(0);
-  const bodyRef = useRef<HTMLDivElement | null>(null);
+  const bodyRef = useRef<HTMLFieldSetElement | null>(null);
   useEffect(() => {
     const node = bodyRef.current;
     if (!node || typeof ResizeObserver === "undefined") return;
@@ -205,9 +207,11 @@ export function BaseEmbedElement({
       }`}
       data-testid="base-embed"
     >
-      <div
+      <fieldset
         ref={bodyRef}
         contentEditable={false}
+        aria-label="Base embed controls"
+        className="m-0 min-w-0 border-0 p-0"
         onKeyDown={handleInteractiveKeyDown}
       >
         {element.status === "configured" ? (
@@ -223,12 +227,13 @@ export function BaseEmbedElement({
             onDragStart={widthDrag.onDragStart}
           />
         ) : null}
-        <span
+        <button
+          type="button"
           aria-label="Exit Base embed before"
           data-testid="base-embed-before-guard"
-          tabIndex={0}
           className="sr-only"
           onKeyDown={(event) => handleGuardKeyDown(event, "before")}
+          onClick={() => exit(path, "before")}
         />
         {compact ? null : (
           <header className="flex flex-wrap items-center gap-3 border-b border-rule px-3 py-2">
@@ -271,12 +276,13 @@ export function BaseEmbedElement({
           )}
         </div>
 
-        <span
+        <button
+          type="button"
           aria-label="Exit Base embed after"
           data-testid="base-embed-after-guard"
-          tabIndex={0}
           className="sr-only"
           onKeyDown={(event) => handleGuardKeyDown(event, "after")}
+          onClick={() => exit(path, "after")}
         />
 
         <BaseEmbedInspector
@@ -286,7 +292,7 @@ export function BaseEmbedElement({
           onCancel={cancel}
           onRestoreFocus={() => restoreFocus(path)}
         />
-      </div>
+      </fieldset>
       {children}
     </div>
   );

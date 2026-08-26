@@ -33,6 +33,7 @@ export function renderMathToHtml(
 }
 
 function KatexOutput({ html }: { html: string }) {
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: KaTeX generates this HTML with trust disabled at the only rendering boundary.
   return <span dangerouslySetInnerHTML={{ __html: html }} />;
 }
 

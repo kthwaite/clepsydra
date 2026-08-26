@@ -39,7 +39,7 @@ export function useDecryptedPageBody(
       : null;
 
   useEffect(() => {
-    if (!encrypted || !page || !identity || !decryptionKey) {
+    if (!encrypted || !identity || !decryptionKey) {
       cacheRef.current = null;
       return;
     }

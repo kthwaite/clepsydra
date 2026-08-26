@@ -13,12 +13,77 @@ import {
   useCallback,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { IconButton } from "#/components/ui/icon-button";
 
 export type ReorderEdge = "top" | "bottom";
+
+export interface IdentifiedRow<Value> {
+  id: string;
+  value: Value;
+}
+
+/**
+ * Keep UI-only row identities stable while controlled values are edited,
+ * reordered, or replaced by a fresh authoritative value.
+ */
+export function useIdentifiedRows<Value>(
+  values: readonly Value[],
+  name: string,
+) {
+  const idPrefix = useId();
+  const nextId = useRef(values.length);
+  const createRow = useCallback(
+    (value: Value): IdentifiedRow<Value> => {
+      const id = `${idPrefix}-${name}-${nextId.current}`;
+      nextId.current += 1;
+      return { id, value };
+    },
+    [idPrefix, name],
+  );
+  const [rows, setRows] = useState<IdentifiedRow<Value>[]>(() =>
+    values.map((value, index) => ({
+      id: `${idPrefix}-${name}-${index}`,
+      value,
+    })),
+  );
+
+  useLayoutEffect(() => {
+    setRows((current) => {
+      if (
+        current.length === values.length &&
+        current.every((row, index) => Object.is(row.value, values[index]))
+      ) {
+        return current;
+      }
+
+      const available = [...current];
+      return values.map((value, index) => {
+        const matchingIndex = available.findIndex((row) =>
+          Object.is(row.value, value),
+        );
+        if (matchingIndex >= 0) {
+          return available.splice(matchingIndex, 1)[0];
+        }
+
+        const positional = current[index];
+        const positionalIndex = positional
+          ? available.indexOf(positional)
+          : -1;
+        if (positional && positionalIndex >= 0) {
+          available.splice(positionalIndex, 1);
+          return { ...positional, value };
+        }
+        return createRow(value);
+      });
+    });
+  }, [createRow, values]);
+
+  return { createRow, rows, setRows };
+}
 
 const HANDLE_CLASS =
   "inline-flex h-7 w-7 cursor-grab items-center justify-center border border-transparent text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring focus-visible:outline-offset-2 active:cursor-grabbing [&_svg]:h-4 [&_svg]:w-4";

@@ -48,11 +48,13 @@ describe("useUpdateLocation", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("/api/vault/location");
-    expect(init?.method).toBe("PUT");
-    expect((init?.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/json",
-    );
-    expect(JSON.parse(init?.body as string)).toEqual({
+    expect(init).toBeDefined();
+    const requestInit = init as RequestInit;
+    expect(requestInit.method).toBe("PUT");
+    expect(
+      (requestInit.headers as Record<string, string>)["Content-Type"],
+    ).toBe("application/json");
+    expect(JSON.parse(requestInit.body as string)).toEqual({
       latitude: 51.5,
       longitude: -0.12,
       label: "London",

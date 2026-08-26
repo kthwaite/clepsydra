@@ -6,11 +6,13 @@ import type {
 import {
   type DraftProperty,
   type FilterPath,
+  moveItem,
   removeFilterAtPath,
   replaceFilterAtPath,
 } from "./definition-model";
 import { FilterNodeMenu, FilterSeedMenu } from "./filter-actions";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
+import { useIdentifiedRows } from "./ordered-list";
 import { readTagCondition } from "./tag-condition";
 import { TagConditionEditor } from "./TagConditionEditor";
 
@@ -46,6 +48,13 @@ export function FilterGroupEditor({
   diagnostics = [],
   diagnosticRoot = "filter",
 }: FilterGroupEditorProps) {
+  const logicalChildren =
+    "all" in value ? value.all : "any" in value ? value.any : [];
+  const {
+    createRow,
+    rows: childRows,
+    setRows: setChildRows,
+  } = useIdentifiedRows(logicalChildren, "filter");
   // A membership predicate over tags or aliases — however it is spelled in the
   // AST — authors as one row rather than a hand-nested group.
   if (readTagCondition(value)) {
@@ -87,14 +96,11 @@ export function FilterGroupEditor({
   if ("not" in value) {
     const childPath: FilterPath = [...path, "not"];
     return (
-      <div
-        role="group"
-        aria-label="Exclude matching condition"
-        className="border-l-2 border-primary/70 bg-card/40 pl-3"
-      >
-        <p className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-primary">
-          Not
-        </p>
+      <fieldset className="m-0 min-w-0 border-y-0 border-r-0 border-l-2 border-primary/70 bg-card/40 p-0 pl-3">
+        <legend className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-primary">
+          <span aria-hidden="true">Not</span>
+          <span className="sr-only">Exclude matching condition</span>
+        </legend>
         <FilterGroupEditor
           value={value.not}
           root={root}
@@ -119,13 +125,13 @@ export function FilterGroupEditor({
             }}
           />
         </div>
-      </div>
+      </fieldset>
     );
   }
 
   const isAll = "all" in value;
   const kind = isAll ? "all" : "any";
-  const children = isAll ? value.all : value.any;
+  const children = logicalChildren;
   const meaning = kind === "all" ? "Match all" : "Match any";
   const label =
     children.length === 0
@@ -133,10 +139,10 @@ export function FilterGroupEditor({
       : `${meaning} of ${children.length} ${children.length === 1 ? "condition" : "conditions"}`;
 
   function append(child: BaseFilter) {
+    const nextChildren = [...children, child];
+    setChildRows((current) => [...current, createRow(child)]);
     const next: BaseFilter =
-      kind === "all"
-        ? { all: [...children, child] }
-        : { any: [...children, child] };
+      kind === "all" ? { all: nextChildren } : { any: nextChildren };
     onChange(replaceFilterAtPath(root, path, next));
   }
 
@@ -147,27 +153,25 @@ export function FilterGroupEditor({
     const nextChildren = [...children];
     nextChildren[childIndex] = displaced;
     nextChildren[destination] = moving;
+    setChildRows((current) => moveItem(current, childIndex, destination));
     const next: BaseFilter =
       kind === "all" ? { all: nextChildren } : { any: nextChildren };
     onChange(replaceFilterAtPath(root, path, next));
   }
 
   return (
-    <div
-      role="group"
-      aria-label={label}
-      className="border-l-2 border-border bg-card/40 pl-3"
-    >
-      <p className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
-        {meaning}
-      </p>
+    <fieldset className="m-0 min-w-0 border-y-0 border-r-0 border-l-2 border-border bg-card/40 p-0 pl-3">
+      <legend className="mb-3 font-mono text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+        <span aria-hidden="true">{meaning}</span>
+        <span className="sr-only">{label}</span>
+      </legend>
       <div className="grid gap-4">
-        {children.map((child, index) => {
+        {childRows.map(({ id, value: child }, index) => {
           const childPath: FilterPath = [...path, kind, index];
           const childPosition = index + 1;
           return (
             <div
-              key={`${kind}-${index}`}
+              key={id}
               className="border-t border-border pt-3 first:border-t-0 first:pt-0"
             >
               <FilterGroupEditor
@@ -189,16 +193,23 @@ export function FilterGroupEditor({
                     count: children.length,
                   }}
                   onMove={(destination) => moveChild(index, destination)}
-                  onWrap={(wrapKind) =>
-                    onChange(
-                      replaceFilterAtPath(
-                        root,
-                        childPath,
-                        wrappedFilter(wrapKind, child),
+                  onWrap={(wrapKind) => {
+                    const wrapped = wrappedFilter(wrapKind, child);
+                    setChildRows((current) =>
+                      current.map((row, position) =>
+                        position === index
+                          ? { ...row, value: wrapped }
+                          : row,
                       ),
-                    )
-                  }
-                  onRemove={() => onChange(removeFilterAtPath(root, childPath))}
+                    );
+                    onChange(replaceFilterAtPath(root, childPath, wrapped));
+                  }}
+                  onRemove={() => {
+                    setChildRows((current) =>
+                      current.filter((_, position) => position !== index),
+                    );
+                    onChange(removeFilterAtPath(root, childPath));
+                  }}
                 />
               </div>
             </div>
@@ -211,6 +222,6 @@ export function FilterGroupEditor({
           onSeed={append}
         />
       </div>
-    </div>
+    </fieldset>
   );
 }

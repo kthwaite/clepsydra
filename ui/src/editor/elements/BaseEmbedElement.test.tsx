@@ -56,7 +56,7 @@ vi.mock("#/components/bases/BaseTableView", async () => {
       adapterState.tableProps = props;
       React.useImperativeHandle(ref, () => ({ focusEntry: () => false }));
       return (
-        <div role="region" aria-label="Mock Base table view">
+        <section aria-label="Mock Base table view">
           <button
             type="button"
             onClick={() =>
@@ -116,7 +116,7 @@ vi.mock("#/components/bases/BaseTableView", async () => {
             <p role="alert">{String(props.viewError)}</p>
           ) : null}
           {props.toolbarActions as React.ReactNode}
-        </div>
+        </section>
       );
     }),
   };

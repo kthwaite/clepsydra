@@ -1,5 +1,9 @@
 import { useState } from "react";
-import { CELL_INPUT_CLASS, type CellEditorProps } from "./types";
+import {
+  CELL_INPUT_CLASS,
+  type CellEditorProps,
+  useInitialFocus,
+} from "./types";
 
 export function NumberCell({
   value,
@@ -13,6 +17,7 @@ export function NumberCell({
   const [draft, setDraft] = useState(
     typeof value === "number" ? String(value) : "",
   );
+  const inputRef = useInitialFocus<HTMLInputElement>();
   const commit = (submit: CellEditorProps["onCommit"] = onCommit): boolean => {
     if (draft === "") {
       submit(null);
@@ -26,7 +31,7 @@ export function NumberCell({
   };
   return (
     <input
-      autoFocus
+      ref={inputRef}
       aria-label={ariaLabel ?? "Edit number"}
       aria-describedby={ariaDescribedBy}
       type="number"

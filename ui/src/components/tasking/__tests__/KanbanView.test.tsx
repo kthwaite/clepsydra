@@ -742,8 +742,8 @@ describe("KanbanView — card interactions", () => {
         showOp={false}
       />,
     );
-    const card = screen.getByTestId("task-card-t1");
-    await userEvent.click(card);
+    const cardAction = screen.getByTestId("task-action-t1");
+    await userEvent.click(cardAction);
     expect(useBoardStore.getState().editTaskId).toBe("t1");
   });
 
@@ -836,7 +836,7 @@ describe("TaskCard — inline editing", () => {
 // ── keyboard activation ──────────────────────────────────────────────────────────
 
 describe("TaskCard — keyboard activation", () => {
-  it("card has role=button and tabIndex=0", () => {
+  it("uses a native button for card activation", () => {
     wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
@@ -846,12 +846,13 @@ describe("TaskCard — keyboard activation", () => {
         showOp={false}
       />,
     );
-    const card = screen.getByTestId("task-card-t1");
-    expect(card).toHaveAttribute("role", "button");
-    expect(card).toHaveAttribute("tabindex", "0");
+    const cardAction = screen.getByTestId("task-action-t1");
+    expect(cardAction).toHaveRole("button");
+    expect(cardAction).toHaveAccessibleName("Edit TSK-0001: Task Alpha 1");
   });
 
-  it("Enter key on card opens the edit panel", () => {
+  it("Enter key on card opens the edit panel", async () => {
+    const user = userEvent.setup();
     wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
@@ -861,13 +862,14 @@ describe("TaskCard — keyboard activation", () => {
         showOp={false}
       />,
     );
-    const card = screen.getByTestId("task-card-t1");
-    card.focus();
-    fireEvent.keyDown(card, { key: "Enter" });
+    const cardAction = screen.getByTestId("task-action-t1");
+    cardAction.focus();
+    await user.keyboard("{Enter}");
     expect(useBoardStore.getState().editTaskId).toBe("t1");
   });
 
-  it("Space key on card opens the edit panel", () => {
+  it("Space key on card opens the edit panel", async () => {
+    const user = userEvent.setup();
     wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
@@ -877,9 +879,9 @@ describe("TaskCard — keyboard activation", () => {
         showOp={false}
       />,
     );
-    const card = screen.getByTestId("task-card-t2");
-    card.focus();
-    fireEvent.keyDown(card, { key: " " });
+    const cardAction = screen.getByTestId("task-action-t2");
+    cardAction.focus();
+    await user.keyboard(" ");
     expect(useBoardStore.getState().editTaskId).toBe("t2");
   });
 
@@ -948,7 +950,8 @@ describe("TaskCard — keyboard activation", () => {
     expect(useBoardStore.getState().editTaskId).toBeNull();
   });
 
-  it("card responds to Enter/Space only when card div itself is focused", () => {
+  it("card activation responds when the native action button is focused", async () => {
+    const user = userEvent.setup();
     wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
@@ -958,10 +961,9 @@ describe("TaskCard — keyboard activation", () => {
         showOp={false}
       />,
     );
-    const card = screen.getByTestId("task-card-t1");
-    card.focus();
-    fireEvent.keyDown(card, { key: "Enter" });
-    // Card div focused: edit panel should open
+    const cardAction = screen.getByTestId("task-action-t1");
+    cardAction.focus();
+    await user.keyboard("{Enter}");
     expect(useBoardStore.getState().editTaskId).toBe("t1");
   });
 });

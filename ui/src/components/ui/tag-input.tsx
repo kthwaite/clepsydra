@@ -65,6 +65,7 @@ export function TagInput({
   const hasSuggestions =
     suggestions !== undefined || onSuggestionQueryChange !== undefined;
   const listId = useId();
+  const inputId = useId();
   const stripValuePrefix = useCallback(
     (value: string) =>
       valuePrefix && value.startsWith(valuePrefix)
@@ -88,6 +89,17 @@ export function TagInput({
   const open = !dismissed && matches.length > 0;
   const selected = Math.min(highlight, Math.max(matches.length - 1, 0));
   const inputRef = useRef<HTMLInputElement>(null);
+  const suggestionInputProps = hasSuggestions
+    ? {
+        role: "combobox" as const,
+        "aria-expanded": open,
+        "aria-controls": open ? listId : undefined,
+        "aria-activedescendant": open
+          ? `${listId}-${encodeURIComponent(matches[selected])}`
+          : undefined,
+        "aria-autocomplete": "list" as const,
+      }
+    : {};
 
   const resolveCandidate = useCallback(
     (value: string): string | null => {
@@ -189,16 +201,24 @@ export function TagInput({
   );
 
   return (
-    <div
+    <fieldset
+      aria-label={label}
       className={cn(
-        "relative flex flex-wrap items-center gap-1",
+        "relative m-0 flex min-w-0 flex-wrap items-center gap-1 border-0 p-0",
         variant === "codex" &&
           "mt-1 border border-rule p-1 focus-within:border-accent",
         className,
       )}
-      onClick={() => inputRef.current?.focus()}
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          event.preventDefault();
+          inputRef.current?.focus();
+        }
+      }}
     >
-      <span className="text-xs text-muted-foreground">{label}:</span>
+      <label htmlFor={inputId} className="text-xs text-muted-foreground">
+        {label}:
+      </label>
       {readOnlyValues.length > 0 && (
         <TagGroup aria-label={`Read-only ${label}`} className="contents">
           <TagList
@@ -263,16 +283,11 @@ export function TagInput({
       <input
         ref={inputRef}
         type="text"
+        id={inputId}
+        {...suggestionInputProps}
         aria-label={ariaLabel ?? `Add ${label.toLowerCase()}`}
         aria-describedby={ariaDescribedBy}
         value={inputValue}
-        role={hasSuggestions ? "combobox" : undefined}
-        aria-expanded={hasSuggestions ? open : undefined}
-        aria-controls={hasSuggestions && open ? listId : undefined}
-        aria-activedescendant={
-          hasSuggestions && open ? `${listId}-${selected}` : undefined
-        }
-        aria-autocomplete={hasSuggestions ? "list" : undefined}
         onChange={(e) => {
           const nextValue = e.target.value;
           setInputValue(nextValue);
@@ -325,7 +340,7 @@ export function TagInput({
         </span>
       ) : null}
       {open && (
-        <ul
+        <div
           id={listId}
           role="listbox"
           aria-label="Tag suggestions"
@@ -335,11 +350,12 @@ export function TagInput({
           )}
         >
           {matches.map((suggestion, index) => (
-            <li
+            <div
               key={suggestion}
-              id={`${listId}-${index}`}
+              id={`${listId}-${encodeURIComponent(suggestion)}`}
               role="option"
               aria-selected={index === selected}
+              tabIndex={-1}
               onMouseDown={(event) => {
                 event.preventDefault();
                 addValue(suggestion);
@@ -355,10 +371,10 @@ export function TagInput({
               )}
             >
               {`${valuePrefix}${suggestion}`}
-            </li>
+            </div>
           ))}
-        </ul>
+        </div>
       )}
-    </div>
+    </fieldset>
   );
 }
