@@ -1,55 +1,67 @@
 export const meta = {
   slug: "tasks-agenda-journals-and-board",
-  title: "Tasks, Agenda, Journals, and Board",
-  description: "Plan work with Markdown tasks, agenda views, daily journals, and atomic board cycles."
+  title: "Tasks, Todos, Agenda, Journals, and Board",
+  description: "Plan Tasks, manage Markdown Todos, review agenda views, and run Cycles."
 }
 
-Clepsydra derives task and board views from Markdown in the vault. The page
-files remain authoritative; the agenda and Tasking workspace are indexed views
-and mutations over those files, not a second task store.
+Clepsydra derives Todo, agenda, and Task Board views from Markdown in the
+vault. Page files remain authoritative; Agenda and the Task Board are indexed
+views and mutations over those files, not separate stores.
 
 ## Prerequisites
 
 - Run the server and let the vault index finish.
-- Open `/agenda` for due work and `/tasking` for project and cycle planning.
+- Open `/agenda` for due Todos and `/tasking` for Project and Cycle planning.
 - Use checkbox list items such as `- [ ] Draft proposal`. Inline properties use
   the Markdown form `[due:: 2026-08-14]`, `[scheduled:: 2026-08-13]`, and
-  `[priority:: A]`. Write them in Markdown, or set them on a task item from the
+  `[priority:: A]`. Write them in Markdown, or set them on a Todo from the
   **Task properties** popover in Folio
   ([Editor Workflows](/docs/editor-workflows)).
-- The inline `priority` values the interface renders are `A`, `B`, and `C`,
-  badged `HIGH`, `MED`, and `LOW` in agenda task lists and in the Folio chips.
-  Another value is badged verbatim in capitals. These are the checkbox-task
-  priorities; the Tasking board's own `P0` through `P3` are separate.
-- Enter task `due` and `scheduled` values and board-cycle start and end strings
-  as exact `YYYY-MM-DD`. They are not validated as dates by the server. For
-  agenda tasks, the API compares their indexed strings lexicographically, so
-  another spelling can be misplaced instead of rejected.
+- Todo priority values are `A`, `B`, and `C`, badged `HIGH`, `MED`, and `LOW`
+  in Agenda lists and Folio chips. Another value is badged verbatim in
+  capitals. Task Board priorities are separate: Critical, High, Medium, and
+  Low.
+- Enter Todo `due` and `scheduled` values and Cycle start and end values as
+  exact `YYYY-MM-DD`. The server does not validate them as dates. For Todos,
+  the API compares indexed values lexicographically, so another spelling can be
+  misplaced instead of rejected.
+
+## Tasks, Todos, and Checklist Items
+
+A **Task** is a page-backed unit of planned work tracked on the Task Board. A
+Task can belong to a Project and a Cycle.
+
+A **Todo** is any Markdown checkbox item, whether it is open, done, or
+cancelled. Its status does not change what it is.
+
+A **Checklist Item** is a Todo inside a Task. The Task Board tracks the Task
+page as one unit of work and shows progress across its Checklist Items; it does
+not treat each Checklist Item as another Task.
 
 ## Workflow
 
-### Track Markdown tasks and statuses
+### Track Todos and statuses
 
-An unchecked checkbox is `todo`, `[x]` is `done`, and `[-]` is `cancelled`.
-Task queries can filter by status, due or scheduled bounds, priority, tag, source
-page, and whether a due date is absent. Changing a task status rewrites that
-checkbox in the source page and then reindexes it.
+An unchecked Todo has the persisted status `todo`, `[x]` is `done`, and `[-]`
+is `cancelled`. Todo queries can filter by status, due or scheduled bounds,
+priority, tag, source page, and whether a due date is absent. Changing a Todo's
+status rewrites its checkbox in the source page and then reindexes it.
 
-The status mutation addresses a checkbox by source path and indexed byte offset;
-it does not verify the task's identity at that offset. If an external edit shifts
-offsets before reindexing, the endpoint can rewrite a different nearby checkbox.
-Wait for reindexing, then reload the page, board, or agenda before changing
-status.
-Tasks inside protected pages are visible only according to the protected-page
-index boundary and cannot be changed through the task-status endpoint.
+The status mutation addresses a Todo by source path and indexed byte offset; it
+does not verify the Todo's identity at that offset. If an external edit shifts
+offsets before reindexing, the endpoint can rewrite a different nearby
+checkbox. Wait for reindexing, then reload the page, Task Board, or Agenda
+before changing status. Todos inside protected pages are visible only according
+to the protected-page index boundary and cannot be changed through the Todo
+status endpoint.
 
 ### Review the Atrium summary
 
-The Atrium's **Outstanding agenda** shows at most eight `todo` tasks. Dated
-tasks come before undated tasks; dated tasks are ordered by ascending `due`,
-then by inline priority with `A` before `B` before `C`. Its count is the
-authoritative total returned by the task query, not merely the number of rows
-shown. Choose **Agenda →** or open `/agenda` for the full agenda surface.
+The Atrium's **Outstanding agenda** shows at most eight open Todos. Dated Todos
+come before undated Todos; dated Todos are ordered by ascending `due`, then by
+inline priority with `A` before `B` before `C`. Its count is the authoritative
+total returned by the Todo query, not merely the number of rows shown. Choose
+**Agenda →** or open `/agenda` for the full Agenda surface.
 
 Choose **Stats →** in the Atrium to open `/stats`, which contains the vault
 inventory and subjects ranked by frequency.
@@ -58,14 +70,14 @@ inventory and subjects ranked by frequency.
 
 Open `/agenda`:
 
-- **Today** obtains overdue tasks separately, but `/agenda/today` also includes
-  overdue work in its task list. The current UI can therefore show an overdue
-  task in both **Overdue** and **Due Today**; the latter also includes work due
-  or scheduled today and incomplete tasks in today's journal.
+- **Today** obtains overdue Todos separately, but `/agenda/today` also includes
+  overdue work in its Todo list. The current UI can therefore show an overdue
+  Todo in both **Overdue** and **Due Today**; the latter also includes Todos due
+  or scheduled today and open Todos in today's journal.
 - **Upcoming** groups due strings from today through seven days ahead. It is a
-  due-property view; a merely scheduled future task is not included there.
-- **Inbox** shows `todo` tasks without a `due` property. A scheduled-but-undated
-  task therefore still belongs to this query.
+  due-property view; a merely scheduled future Todo is not included there.
+- **Inbox** shows open Todos without a `due` property. A scheduled-but-undated
+  Todo therefore still belongs to this query.
 
 The server computes these calendar boundaries in UTC. If your local day differs
 from UTC near midnight, the agenda boundary can differ from the date displayed
@@ -85,64 +97,97 @@ be opened as an unwritten draft from that rail; other journal API lookups accept
 an exact `YYYY-MM-DD`, not natural-language dates.
 
 Run **Capture aside** to append to today's journal. Plain prose becomes a timed
-list entry; an existing list item, task, heading, blockquote, or code fence keeps
-its Markdown shape. `GET /journal/today` also returns incomplete tasks from the
+list entry; an existing list item, Todo, heading, blockquote, or code fence
+keeps its Markdown shape. `GET /journal/today` also returns open Todos from the
 previous seven journal dates as `carried_forward`; it does not copy them into
 today's file.
 
-### Plan on the Tasking board
+### Plan on the Task Board
 
-Open `/tasking`, choose **NEW TASKING**, and set the project, disposition,
-priority, cycle, due date, and an optional brief and checklist. The brief
-opens the task page's markdown body, above the checklist, and is what board
-cards show beneath the title. The five persisted board
-statuses are `INTAKE`, `TRIAGE`, `FIELD`, `REVIEW`, and `SEALED`; priorities are
-`P0` through `P3`. Switch among **CARD**, **BACKLOG**, **CYCLE**, and **TIMELINE**
-without changing task files. Dragging a card or editing its panel persists the
-corresponding task-page metadata.
+Open `/tasking` and choose **New task**. Set the Project, status, priority,
+Cycle, dates, and optional Description and Checklist. The Description becomes
+the opening prose in the Task page, above the Checklist, and appears beneath
+the title on Board cards. Mark a Task **Blocked** and add a blocker reason when
+it cannot proceed.
 
-Create a cycle from the plus control beside the cycle list. A cycle can be
-`PLANNED`, `ACTIVE`, or `CLOSED`. When closing one, choose one of the shipped
-carryover outcomes:
+The Task Board has four views:
 
-- **BACKLOG** removes the cycle from every non-`SEALED` task in that cycle;
-- a next planned cycle reassigns those tasks to its cycle code;
-- leaving tasks in place closes the cycle without a `carry_to` value.
+- **Board** groups Task cards into **Inbox**, **Ready**, **In Progress**,
+  **Review**, and **Done**.
+- **List** groups Tasks by **Critical**, **High**, **Medium**, and **Low**
+  priority.
+- **Cycles** shows the selected Cycle, its progress, and its Tasks. Choose
+  **Backlog** for Tasks that are not assigned to a Cycle.
+- **Timeline** lays out scheduled Tasks across Projects and Cycles.
 
-The cycle close and every selected carryover update are one P1 atomic batch.
-They are all committed and indexed, or all original cycle and task files are
-restored; a failed batch emits no successful change notification. `SEALED`
-tasks are not carried. The guarantee covers this one server-side close request,
-not unrelated edits from other clients before or after it.
+The Scope rail groups Tasks by **Project** and **Cycle**, with **Backlog** as
+the no-Cycle scope. Switching views does not change Task pages. Dragging a card
+or editing its panel updates the corresponding Task page metadata.
+
+### Create, start, and close Cycles
+
+Choose the plus control beside **Cycles** to create a Cycle. Set its name,
+dates, status, and goal, then choose **Create cycle**. A new Cycle can be
+**Planned** or **Active**. In the Cycles view, choose **Start cycle** for a
+Planned Cycle or **Close cycle** for an Active Cycle.
+
+When closing a Cycle, choose a carryover outcome:
+
+- **Move to Backlog** removes the Cycle from every Task that is not Done.
+- **Move to _next Cycle_** reassigns those Tasks to the selected planned Cycle.
+- **Leave in place** closes the Cycle without changing its Tasks.
+
+Closing the Cycle and applying the selected carryover are one atomic server
+batch. They are all committed and indexed, or all original Cycle and Task files
+are restored. A failed batch emits no successful change notification. Done
+Tasks are not carried. This guarantee covers one accepted close request, not
+unrelated edits from other clients before or after it.
+
+### Task Board file and API values
+
+Use display labels in conversation and ordinary prose. When editing Task or
+Cycle Markdown, or calling the API, use these persisted values:
+
+- Task `status`: Inbox (`INTAKE`), Ready (`TRIAGE`), In Progress (`FIELD`),
+  Review (`REVIEW`), and Done (`SEALED`).
+- Task `priority`: Critical (`P0`), High (`P1`), Medium (`P2`), and Low (`P3`).
+- Cycle `state`: Planned (`PLANNED`), Active (`ACTIVE`), and Closed (`CLOSED`).
+- Backlog is represented in Markdown by an absent `cycle` value. APIs that
+  accept a Cycle target use `BACKLOG` to clear the Cycle.
+- Blocked is represented by a non-empty `hold` value; clearing `hold` makes the
+  Task active again.
+- When closing a Cycle through the API, `carry_to: "BACKLOG"` moves unfinished
+  Tasks to Backlog, a Cycle code reassigns them, and omitting `carry_to` leaves
+  them in place. Tasks whose status is `SEALED` are never carried.
 
 ## Failures and conflicts
 
-- Invalid task statuses, priorities, and relevant cycle codes are rejected, but
-  malformed date strings can instead sort incorrectly. Correct the source value,
-  wait for reindexing, and reload the board or agenda.
-- A task status update does not reject every stale span: a shifted offset can
+- Invalid Task statuses, priorities, and relevant Cycle codes are rejected, but
+  malformed date strings can instead sort incorrectly. Correct the source
+  value, wait for reindexing, and reload the Task Board or Agenda.
+- A Todo status update does not reject every stale span: a shifted offset can
   select another checkbox near that byte position. Reindex and reload before
   retrying after external edits.
-- A task status change returns a conflict for a protected page. Unlock and edit
+- A Todo status change returns a conflict for a protected page. Unlock and edit
   the source Folio instead; the endpoint does not decrypt it.
-- Board creation can reject a generated destination collision. Existing task
-  and cycle pages are not overwritten.
-- Carryover is valid only while closing a cycle. The target must be `BACKLOG` or
-  an existing, different cycle. Unknown or self-referential targets are rejected
-  before the batch starts.
-- If any filesystem commit or index step fails during cycle close, the atomic
-  batch rolls back the cycle and every carried task. Verify the returned
+- Task creation can reject a generated destination collision. Existing Task
+  and Cycle pages are not overwritten.
+- Carryover is valid only while closing a Cycle. The target must be Backlog or
+  an existing, different Cycle. Unknown or self-referential targets are
+  rejected before the batch starts.
+- If any filesystem commit or index step fails while closing a Cycle, the
+  atomic batch rolls back the Cycle and every carried Task. Verify the returned
   error, then reload before retrying.
-- Agenda and Tasking are projections. If files were edited outside Clepsydra,
-  wait for reindexing or run the documented index recovery before treating a
-  stale view as authoritative.
+- Agenda and the Task Board are projections. If files were edited outside
+  Clepsydra, wait for reindexing or run the documented index recovery before
+  treating a stale view as authoritative.
 
 ## Privacy
 
-Tasks, statuses, due dates, projects, assignees, journal dates, and board-cycle
+Todos, Tasks, statuses, due dates, Projects, assignees, journal dates, and Cycle
 metadata are plaintext in ordinary Markdown and in the local index. Journal
 capture is not a private inbox by default. Protect a Folio only when you accept
-that protected-page task mutation and indexing are deliberately limited.
+that protected-page Todo mutation and indexing are deliberately limited.
 
 The shipped work model is local file coordination. It does not provide CRDT or
 multi-user collaborative editing; concurrent clients can still race outside the

@@ -266,9 +266,9 @@ not expose the desktop bulk-assignment bar.
 
 ## Filtering
 
-Tasking, Gazetteer, Feeds, the Academic Library, Rubbish, and Agenda share one
-filter bar. Where a screen has a text field, it narrows by case-insensitive
-substring; **+ FILTER** opens a popover to pick a field and then pick (or
+The Task Board, Gazetteer, Feeds, the Academic Library, Rubbish, and Agenda
+share one filter bar. A screen's text field narrows by case-insensitive
+substring. **+ FILTER** opens a popover to pick a field and then pick (or
 search) its options, and each selection becomes a removable chip. **CLEAR**
 resets the text and every facet together. When a screen supplies its total
 and currently-matching counts, the bar also shows a trailing **N OF M** once
@@ -282,7 +282,7 @@ Each screen exposes its own fields over the shared bar:
 
 | Screen | Fields | Text search |
 | --- | --- | --- |
-| Tasking | Project, Tag, Pri (P0–P3), Status, On Hold | Yes |
+| Task Board | Project, Tag, Priority, Status, Blocked | Yes |
 | Gazetteer | Kind, Project, Tag | Yes |
 | Feeds | Group (including Ungrouped), Feed (narrows to the selected group), Tag | No — use Hide read / Saved instead |
 | Academic Library | Type, Status, Year, Tag, queried server-side | Yes — matches title, author, and citation key against already-loaded works |
@@ -291,8 +291,8 @@ Each screen exposes its own fields over the shared bar:
 
 Multi-value Tag facets are not uniform across screens: Gazetteer's Tag filter
 is applied server-side with AND semantics (a page must carry every selected
-tag), while Tasking's Tag facet is a client-side OR (a task matches if it
-carries any one of the selected tags).
+tag), while the Task Board's Tag facet is a client-side OR (a Task matches if
+it carries any one of the selected tags).
 
 Bases are excluded from this control: a Base's table views define their own
 membership and view filters in the Base's TOML definition rather than through
@@ -327,19 +327,19 @@ Sheaf tabs, link previews, and the Folio rails:
 | Red (hot) | TASK |
 | Ink / greys | CODE (brightest), CYCLE (dimmer), NOTE and ARCHIVE (most muted, shared shade) |
 
-### Board pips (TASKING)
+### Task Board pips
 
 | Pip | Meaning |
 | --- | --- |
-| Faint grey | INTAKE or SEALED column |
-| Grey | TRIAGE column |
-| Cyan | IN-FIELD column |
-| Amber | REVIEW column |
+| Faint grey | Inbox or Done column |
+| Grey | Ready column |
+| Cyan | In Progress column |
+| Amber | Review column |
 
-Cycle pips: outlined box = PLANNED, blinking cyan = ACTIVE, amber =
-BACKLOG, faint grey = CLOSED. Operation health dots: cyan = green, amber =
-attention, blinking red = critical. Priority chips: P0 red, P1 amber, P2
-cyan, P3 grey.
+Cycle pips: outlined box = Planned, blinking cyan = Active, amber = Backlog,
+faint grey = Closed. Project health dots: cyan = healthy, amber = needs
+attention, blinking red = critical. Priority chips: Critical is red, High is
+amber, Medium is cyan, and Low is grey.
 
 ### Dashboard card pips (Atrium)
 
