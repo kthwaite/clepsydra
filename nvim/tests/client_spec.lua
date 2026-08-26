@@ -92,4 +92,15 @@ return {
 			assert(err and err:find("JSON"), "expected JSON error, got: " .. tostring(err))
 		end,
 	},
+	{
+		name = "decode names timeout/unreachable when curl output is empty",
+		fn = function()
+			local client = fresh_client("http://localhost:3000")
+			local err = client.decode({ code = 124, stdout = "", stderr = "" })
+			assert(
+				err and err:find("exit 124") and err:find("unreachable or timed out"),
+				"expected actionable timeout message, got: " .. tostring(err)
+			)
+		end,
+	},
 }

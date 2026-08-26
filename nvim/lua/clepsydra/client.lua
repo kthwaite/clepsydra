@@ -58,6 +58,9 @@ function M.decode(out)
 		if detail == "" then
 			detail = out.stderr or ""
 		end
+		if detail == "" then
+			return ("clepsydra: request failed (exit %d, no output — server unreachable or timed out)"):format(out.code)
+		end
 		return ("clepsydra: request failed (%s)"):format((detail:gsub("%s+$", "")))
 	end
 	local ok, value = pcall(vim.json.decode, out.stdout)
