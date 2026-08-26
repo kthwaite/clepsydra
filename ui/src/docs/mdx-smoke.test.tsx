@@ -470,6 +470,32 @@ it("documents consolidated local-date Agenda semantics and Todo controls", () =>
   expect(editorSource).not.toContain("Edit tasks and their properties");
   expect(editorSource).toContain("**Task list** slash command");
 });
+it("documents the clep todo capture contract", () => {
+  const source = registeredGuideSource("cli");
+  expect(source).toContain("| `clep mcp` | `--allow-remote` |");
+  expect(source).toContain(
+    "| `clep todo` | words or stdin; optional `--due`, `--scheduled`, `--priority` |",
+  );
+
+  expect(source).toContain("## `clep todo`");
+  expect(source).toContain("clep todo Buy oat milk");
+  expect(source).toContain('clep todo "Call the dentist"');
+  expect(source).toContain("printf 'Review notes\\n' | clep todo");
+  expect(source).toMatch(/Positional words take precedence over\s+stdin/);
+  expect(source).toMatch(/one Todo line/);
+  expect(source).toContain("YYYY");
+  expect(source).toMatch(/A[\s\S]*B[\s\S]*C/);
+  expect(source).toContain("due, scheduled, priority");
+  expect(source).toMatch(/clep serve[\s\S]*must be running/);
+  expect(source).toContain("configured `server.host` must be a loopback host");
+  expect(source).toMatch(
+    /Bind-all values such as `0\.0\.0\.0`, `::`, and `\[::\]`\s+count as non-loopback/,
+  );
+  expect(source).toMatch(
+    /TLS mode and certificate paths come from\s+that selected configuration/,
+  );
+  expect(source).toContain("journal path");
+});
 
 it("documents exact academic deduplication and Zotero status matrices", () => {
   const source = registeredGuideSource("academic-library-and-reading");

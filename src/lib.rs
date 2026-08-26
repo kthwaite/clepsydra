@@ -7,6 +7,7 @@ pub mod feeds;
 pub mod lsp;
 pub mod macos_url_handler;
 pub mod mcp;
+pub mod todo_capture;
 pub mod vault;
 
 use std::path::{Path, PathBuf};
@@ -575,11 +576,7 @@ pub(crate) fn build_router(
         )
         .nest(
             "/api/vault",
-            api::api_router_with_archive_limit(
-                archive_body_limit,
-                archive_view_config,
-                features,
-            ),
+            api::api_router_with_archive_limit(archive_body_limit, archive_view_config, features),
         )
         .merge(api::openapi::router(features))
         .merge(api::deeplink::root_router())
@@ -920,8 +917,7 @@ async fn build_server_state(
         vault_root_config = %settings.vault.root,
         "resolved configuration; opening vault"
     );
-    let state =
-        build_app_state_with_settings(&vault_root, &settings.feeds, settings.features)
+    let state = build_app_state_with_settings(&vault_root, &settings.feeds, settings.features)
         .await
         .map_err(|e| explain_startup_error(e, &vault_root))?;
     Ok((state, settings))
@@ -1082,10 +1078,9 @@ pub(crate) mod state_test_support {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         crate::vault::init::init_vault(&root).unwrap();
-        let state =
-            build_app_state_with_settings(&root, &FeedsSettings::default(), features)
-                .await
-                .unwrap();
+        let state = build_app_state_with_settings(&root, &FeedsSettings::default(), features)
+            .await
+            .unwrap();
         (state, tmp)
     }
 }
@@ -1813,11 +1808,7 @@ mod settings_tests {
     fn settings_read_independent_feature_values() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config = tmp.path().join("config.toml");
-        std::fs::write(
-            &config,
-            "[features]\nacademic = false\nfeeds = true\n",
-        )
-        .unwrap();
+        std::fs::write(&config, "[features]\nacademic = false\nfeeds = true\n").unwrap();
 
         let features = Settings::load_from(&config).unwrap().features;
         assert!(!features.academic);
@@ -1834,7 +1825,6 @@ mod settings_tests {
 
         assert!(!Settings::load_from(&config).unwrap().features.feeds);
     }
-
 
     fn assert_feed_defaults(feeds: &FeedsSettings) {
         assert_eq!(feeds.fetch_interval_minutes, 30);
