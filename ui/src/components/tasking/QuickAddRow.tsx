@@ -57,7 +57,8 @@ export function QuickAddRow({ preset, testId, className }: QuickAddRowProps) {
         "cl-mono w-full border border-dashed border-[var(--rule)] bg-transparent px-[8px] py-[6px] text-[var(--fs-xs)] uppercase tracking-[0.08em] text-[var(--ink)] outline-none placeholder:text-[var(--ink-4)] focus:border-[var(--hot)] focus:border-solid",
         className,
       )}
-      placeholder="+ ADD"
+      aria-label="New task"
+      placeholder="+ New task"
       value={title}
       onChange={(e) => setTitle(e.target.value)}
       onKeyDown={(e) => {

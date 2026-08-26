@@ -60,10 +60,10 @@ afterEach(() => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("QuickAddRow", () => {
-  it("renders an input with placeholder '+ ADD'", () => {
+  it("renders an accessible New task input", () => {
     wrap(<QuickAddRow preset={{}} testId="qa-test" />);
-    const input = screen.getByTestId("qa-test");
-    expect(input).toHaveAttribute("placeholder", "+ ADD");
+    const input = screen.getByRole("textbox", { name: "New task" });
+    expect(input).toHaveAttribute("placeholder", "+ New task");
   });
 
   it("allows typing a title", async () => {

@@ -27,16 +27,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardOperation, BoardResponse, BoardTask } from "#/api/board";
 import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
+import { COL_LABEL, type ColLabelFn } from "../board-constants";
 import { TaskEditPanel } from "../TaskEditPanel";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
-  FIXTURE_COL_LABEL,
   NO_SLUG_OP,
   SEALED_IN_CLOSED_CYCLE_TASK,
 } from "./fixtures";
 
+const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
+vi.mock("sonner", () => ({ toast: { error: toastError } }));
+
 const { operations, cycles } = BOARD_FIXTURE;
+const NEUTRAL_COL_LABEL: ColLabelFn = (id) => COL_LABEL[id] ?? id;
 
 // A task with all optional fields populated for richer render tests
 const FULL_TASK: BoardTask = {
@@ -111,7 +115,7 @@ function wrap({
           task={task}
           operations={opsOverride}
           cycles={cyclesOverride}
-          colLabel={FIXTURE_COL_LABEL}
+          colLabel={NEUTRAL_COL_LABEL}
           onClose={onClose}
           onOpenPage={onOpenPage}
           onOpenDossier={onOpenDossier}
@@ -175,6 +179,7 @@ beforeEach(() => {
     taskModal: null,
     cycleModal: null,
   });
+  toastError.mockReset();
 });
 
 afterEach(() => {
@@ -191,6 +196,47 @@ describe("TaskEditPanel — render", () => {
     wrap();
     expect(screen.getByTestId("edit-panel-code")).toHaveTextContent("TSK-0042");
     expect(screen.getByTestId("edit-panel-title")).toHaveValue("FULL TASK");
+  });
+
+  it("uses approved accessible names and task field labels", () => {
+    wrap();
+    expect(screen.getByRole("dialog", { name: "Edit task" })).toBeInTheDocument();
+    expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: "Status" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radiogroup", { name: "Priority" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Project$/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Cycle$/ }),
+    ).toBeInTheDocument();
+    for (const name of [
+      "Assignee",
+      "Estimate",
+      "Start date",
+      "Due date",
+      "Tags",
+      "Related page",
+    ]) {
+      expect(screen.getByLabelText(name)).toBeInTheDocument();
+    }
+    expect(screen.getByText("Checklist")).toBeInTheDocument();
+    expect(screen.getByText("Blocker")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Active" })).toBeInTheDocument();
+  });
+
+  it("offers No project and Backlog without changing their select values", async () => {
+    wrap();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Project$/ }));
+    expect(
+      screen.getByRole("option", { name: "No project" }),
+    ).toBeInTheDocument();
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: /Cycle$/ }));
+    expect(screen.getByRole("option", { name: "Backlog" })).toBeInTheDocument();
   });
 
   it("renders priority chip with correct text", () => {
@@ -211,29 +257,31 @@ describe("TaskEditPanel — render", () => {
     );
   });
 
-  it("renders OPEN → button when task has link", () => {
+  it("renders an Open related page action when the task has a related page", () => {
     wrap();
-    expect(screen.getByTestId("edit-panel-open-dossier")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Open related page" }),
+    ).toBeInTheDocument();
   });
 
-  it("does not render OPEN → dossier button when task has no link", () => {
+  it("does not render the related-page action when the task has no link", () => {
     wrap({ task: { ...FULL_TASK, link: null } });
     expect(
-      screen.queryByTestId("edit-panel-open-dossier"),
+      screen.queryByRole("button", { name: "Open related page" }),
     ).not.toBeInTheDocument();
   });
 
-  it("shows UNFILED in the header when task has no project", () => {
+  it("shows No project in the header when task has no project", () => {
     wrap({ task: { ...FULL_TASK, project: null } });
-    expect(screen.getByTestId("edit-panel-op")).toHaveTextContent("UNFILED");
+    expect(screen.getByTestId("edit-panel-op")).toHaveTextContent("No project");
   });
 
-  it("shows hold reason input when task is held", () => {
+  it("shows an accessible editable blocker reason when task is blocked", () => {
     wrap({ task: HELD_TASK });
-    expect(screen.getByTestId("edit-panel-hold-reason")).toBeInTheDocument();
-    expect(
-      screen.getByTestId<HTMLInputElement>("edit-panel-hold-reason").value,
-    ).toBe("BLOCKED — waiting on API");
+    const blocker = screen.getByRole("textbox", { name: "Blocker" });
+    expect(blocker).toHaveValue("BLOCKED — waiting on API");
+    expect(blocker).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Blocked" })).toBeInTheDocument();
   });
 
   it("does not show hold reason input when task is not held", () => {
@@ -255,9 +303,9 @@ describe("TaskEditPanel — render", () => {
     expect(startInput).toHaveAttribute("type", "date");
   });
 
-  it("omits slug-less operations from the OPERATION dropdown", async () => {
+  it("omits slug-less operations from the Project dropdown", async () => {
     wrap({ operations: [...operations, NO_SLUG_OP] });
-    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
     expect(screen.getByRole("option", { name: "OPS-1" })).toBeInTheDocument();
     expect(
       screen.queryByRole("option", { name: "OPS-3" }),
@@ -343,11 +391,11 @@ describe("TaskEditPanel — immediate patches", () => {
   it("disposition radio change fires immediate PATCH {status}", async () => {
     const stub = makeStub();
     wrap({ fetchStub: stub, seedBoard: true });
-    const disposition = screen.getByRole("radiogroup", {
-      name: "Disposition",
+    const status = screen.getByRole("radiogroup", {
+      name: "Status",
     });
     expect(
-      within(disposition).getByTestId("edit-panel-status-REVIEW"),
+      within(status).getByTestId("edit-panel-status-REVIEW"),
     ).toHaveRole("radio");
 
     await userEvent.click(screen.getByTestId("edit-panel-status-REVIEW"));
@@ -394,7 +442,7 @@ describe("TaskEditPanel — immediate patches", () => {
     wrap({ task: FULL_TASK, fetchStub: stub, seedBoard: true });
 
     await userEvent.click(screen.getByRole("button", { name: /Cycle/ }));
-    await userEvent.click(screen.getByRole("option", { name: "BACKLOG" }));
+    await userEvent.click(screen.getByRole("option", { name: "Backlog" }));
 
     await waitFor(() => {
       const patchCalls = stub.mock.calls.filter(
@@ -413,8 +461,8 @@ describe("TaskEditPanel — immediate patches", () => {
     const stub = makeStub();
     wrap({ task: FULL_TASK, fetchStub: stub, seedBoard: true });
 
-    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
-    await userEvent.click(screen.getByRole("option", { name: "UNFILED" }));
+    await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
+    await userEvent.click(screen.getByRole("option", { name: "No project" }));
 
     await waitFor(() => {
       const patchCalls = stub.mock.calls.filter(
@@ -616,7 +664,7 @@ describe("TaskEditPanel — hold toggle", () => {
           task={updatedTask}
           operations={operations}
           cycles={cycles}
-          colLabel={FIXTURE_COL_LABEL}
+          colLabel={NEUTRAL_COL_LABEL}
           onClose={vi.fn()}
           onOpenPage={vi.fn()}
           onOpenDossier={vi.fn()}
@@ -630,6 +678,26 @@ describe("TaskEditPanel — hold toggle", () => {
     expect(document.activeElement).toBe(reason);
     expect(reason.selectionStart).toBe(0);
     expect(reason.selectionEnd).toBe("BLOCKED".length);
+  });
+
+  it("keeps the blocker reason editable and PATCHes the existing hold field", async () => {
+    vi.useFakeTimers();
+    const stub = makeStub(HELD_TASK);
+    wrap({ task: HELD_TASK, fetchStub: stub, seedBoard: true });
+
+    act(() => {
+      fireEvent.change(screen.getByRole("textbox", { name: "Blocker" }), {
+        target: { value: "Waiting on vendor" },
+      });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(350);
+    });
+
+    const patchCall = stub.mock.calls.find(([, opts]) => opts?.method === "PATCH");
+    expect(JSON.parse(patchCall?.[1]?.body as string)).toEqual({
+      hold: "Waiting on vendor",
+    });
   });
 
   it("does NOT focus the reason input when opening panel on an already-held task", () => {
@@ -647,15 +715,21 @@ describe("TaskEditPanel — hold toggle", () => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("TaskEditPanel — archive two-step", () => {
+  it("shows the approved idle archive and save feedback", () => {
+    wrap();
+    expect(screen.getByRole("button", { name: "Archive" })).toBeInTheDocument();
+    expect(screen.getByText("Changes saved automatically")).toBeInTheDocument();
+  });
+
   it("first click shows the archive confirmation without sending DELETE", async () => {
     const stub = makeStub();
     wrap({ fetchStub: stub });
 
     await userEvent.click(screen.getByTestId("edit-panel-archive"));
 
-    expect(screen.getByTestId("edit-panel-archive-confirm")).toHaveTextContent(
-      "CONFIRM ARCHIVE?",
-    );
+    expect(
+      screen.getByRole("button", { name: "Confirm archive" }),
+    ).toBeInTheDocument();
     expect(screen.queryByTestId("edit-panel-archive")).not.toBeInTheDocument();
     expect(
       stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
@@ -713,6 +787,10 @@ describe("TaskEditPanel — archive two-step", () => {
       stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
     ).toHaveLength(0);
     expect(useBoardStore.getState().editTaskId).toBe(FULL_TASK.id);
+    expect(
+      screen.getByRole("button", { name: "Archiving…" }),
+    ).toBeDisabled();
+    expect(screen.getByText("Moving to Rubbish Bin…")).toBeInTheDocument();
 
     resolvePatch(
       new Response(JSON.stringify({ ...FULL_TASK, priority: "P0" }), {
@@ -742,7 +820,7 @@ describe("TaskEditPanel — archive two-step", () => {
     useBoardStore.setState({ editTaskId: FULL_TASK.id });
     wrap({ fetchStub: stub, seedBoard: true });
 
-    await userEvent.click(screen.getByRole("button", { name: /Operation/ }));
+    await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
     await userEvent.click(screen.getByRole("option", { name: "OPS-2" }));
     await waitFor(() => {
       expect(
@@ -1098,7 +1176,29 @@ describe("TaskEditPanel — archive two-step", () => {
     });
   });
 
-  it("armed CONFIRM ARCHIVE? auto-disarms after 3s", async () => {
+  it("reports an archive failure with action-specific feedback", async () => {
+    const fallback = makeStub();
+    const stub = vi.fn((url: string, opts?: RequestInit) => {
+      if (opts?.method === "DELETE") {
+        return Promise.resolve(new Response(null, { status: 500 }));
+      }
+      return fallback(url, opts);
+    });
+    useBoardStore.setState({ editTaskId: FULL_TASK.id });
+    wrap({ fetchStub: stub, seedBoard: true });
+
+    await userEvent.click(screen.getByRole("button", { name: "Archive" }));
+    await userEvent.click(
+      screen.getByRole("button", { name: "Confirm archive" }),
+    );
+
+    await waitFor(() =>
+      expect(toastError).toHaveBeenCalledWith("Couldn’t archive task"),
+    );
+    expect(useBoardStore.getState().editTaskId).toBe(FULL_TASK.id);
+  });
+
+  it("armed Confirm archive auto-disarms after 3s", async () => {
     vi.useFakeTimers();
     wrap();
 

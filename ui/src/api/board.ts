@@ -122,7 +122,7 @@ export function useCreateTask() {
       if (!res.ok) throw new Error("Failed to create task");
       return res.json() as Promise<BoardTask>;
     },
-    onError: () => toast.error("TASK CREATION FAILED"),
+    onError: () => toast.error("Couldn’t create task"),
     onSuccess: () => invalidateTaskingTelemetry(qc),
   });
 }
@@ -188,7 +188,7 @@ export function useArchiveTask() {
       }
       return response.json() as Promise<ArchivedPage>;
     },
-    onError: () => toast.error("TASK ARCHIVE FAILED"),
+    onError: () => toast.error("Couldn’t archive task"),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.board.all });
       invalidatePageStructure(qc);

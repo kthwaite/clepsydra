@@ -416,7 +416,7 @@ export function TaskEditPanel({
   const opCode = task.project
     ? (operations.find((op) => op.project === task.project)?.code ??
       task.project)
-    : "UNFILED";
+    : "No project";
 
   const confirmArchive = async () => {
     if (archiving) return;
@@ -469,7 +469,7 @@ export function TaskEditPanel({
           data-testid="edit-panel"
           role="dialog"
           aria-modal="true"
-          aria-label="Edit Tasking"
+          aria-label="Edit task"
         >
           {/* Panel header */}
           <div className="relative flex items-center gap-[8px] bg-[var(--bg)] px-[12px] py-[10px] pl-[16px] border-b border-[var(--rule)]">
@@ -517,10 +517,11 @@ export function TaskEditPanel({
             data-testid="edit-panel-fields"
           >
             {/* TITLE */}
-            <EdField label="TASKING / TITLE">
+            <EdField label="Title">
               <textarea
                 className="cl-mono w-full resize-none border border-[var(--rule)] bg-transparent px-[9px] py-[7px] text-[var(--fs-s)] font-semibold uppercase tracking-[0.02em] text-[var(--ink)] leading-[1.3] outline-none focus:border-[var(--hot)]"
                 rows={2}
+                aria-label="Title"
                 value={titleVal}
                 onChange={(e) => setTitleVal(e.target.value)}
                 data-testid="edit-panel-title"
@@ -528,7 +529,7 @@ export function TaskEditPanel({
             </EdField>
 
             {/* DISPOSITION */}
-            <EdField label="DISPOSITION">
+            <EdField label="Status">
               <DispositionRow
                 value={task.status}
                 onChange={(colId) => patchNow("status", { status: colId })}
@@ -538,7 +539,7 @@ export function TaskEditPanel({
             </EdField>
 
             {/* PRIORITY */}
-            <EdField label="PRIORITY">
+            <EdField label="Priority">
               <PriorityRow
                 value={task.priority}
                 onChange={(p) => patchNow("priority", { priority: p })}
@@ -548,9 +549,9 @@ export function TaskEditPanel({
 
             {/* OPERATION + CYCLE */}
             <div className="grid grid-cols-2 gap-[12px]">
-              <EdField label="OPERATION">
+              <EdField label="Project">
                 <Select
-                  aria-label="Operation"
+                  aria-label="Project"
                   value={task.project ?? ""}
                   onChange={(key) =>
                     /* empty string is the sentinel for clear → UNFILED */
@@ -561,7 +562,7 @@ export function TaskEditPanel({
                   isDisabled={archiving}
                   data-testid="edit-panel-operation"
                 >
-                  <SelectItem id="">UNFILED</SelectItem>
+                  <SelectItem id="">No project</SelectItem>
                   {assignableOps.map((op) => (
                     <SelectItem
                       key={op.id}
@@ -573,7 +574,7 @@ export function TaskEditPanel({
                   ))}
                 </Select>
               </EdField>
-              <EdField label="CYCLE">
+              <EdField label="Cycle">
                 <Select
                   aria-label="Cycle"
                   value={task.cycle ?? "BACKLOG"}
@@ -587,7 +588,7 @@ export function TaskEditPanel({
                   isDisabled={archiving}
                   data-testid="edit-panel-cycle"
                 >
-                  <SelectItem id="BACKLOG">BACKLOG</SelectItem>
+                  <SelectItem id="BACKLOG">Backlog</SelectItem>
                   {selectableCycles.map((c) => (
                     <SelectItem
                       key={c.id}
@@ -603,18 +604,20 @@ export function TaskEditPanel({
 
             {/* OPERATOR / EST */}
             <div className="grid grid-cols-2 gap-[12px]">
-              <EdField label="OPERATOR">
+              <EdField label="Assignee">
                 <input
                   type="text"
+                  aria-label="Assignee"
                   className={INPUT_CLS}
                   value={assigneeVal}
                   onChange={(e) => setAssigneeVal(e.target.value)}
                   data-testid="edit-panel-assignee"
                 />
               </EdField>
-              <EdField label="EST">
+              <EdField label="Estimate">
                 <input
                   type="text"
+                  aria-label="Estimate"
                   className={INPUT_CLS}
                   value={estimateVal}
                   onChange={(e) => setEstimateVal(e.target.value)}
@@ -625,18 +628,20 @@ export function TaskEditPanel({
 
             {/* START / DUE */}
             <div className="grid grid-cols-2 gap-[12px]">
-              <EdField label="START" hint="YYYY-MM-DD">
+              <EdField label="Start date" hint="YYYY-MM-DD">
                 <input
                   type="date"
+                  aria-label="Start date"
                   className={INPUT_CLS}
                   value={startVal}
                   onChange={(e) => setStartVal(e.target.value)}
                   data-testid="edit-panel-start"
                 />
               </EdField>
-              <EdField label="DUE" hint="YYYY-MM-DD">
+              <EdField label="Due date" hint="YYYY-MM-DD">
                 <input
                   type="date"
+                  aria-label="Due date"
                   className={INPUT_CLS}
                   value={dueVal}
                   onChange={(e) => setDueVal(e.target.value)}
@@ -649,7 +654,7 @@ export function TaskEditPanel({
               The markdown body is the source of truth for checklist items.
               We show progress + an "OPEN PAGE →" affordance. */}
             <EdField
-              label="CHECKLIST"
+              label="Checklist"
               hint={total ? `${done} / ${total} done` : "none"}
             >
               <div className="flex flex-col gap-[8px]">
@@ -667,15 +672,16 @@ export function TaskEditPanel({
                   onClick={() => onOpenPage?.(task.path)}
                   data-testid="edit-panel-open-page"
                 >
-                  OPEN PAGE →
+                  Open page →
                 </button>
               </div>
             </EdField>
 
             {/* TAGS */}
-            <EdField label="TAGS" hint="comma-sep">
+            <EdField label="Tags" hint="Comma-separated">
               <input
                 type="text"
+                aria-label="Tags"
                 className={INPUT_CLS}
                 value={tagsVal}
                 onChange={(e) => setTagsVal(e.target.value)}
@@ -684,7 +690,7 @@ export function TaskEditPanel({
             </EdField>
 
             {/* HOLD / BLOCKER */}
-            <EdField label="HOLD / BLOCKER">
+            <EdField label="Blocker">
               <div className="flex flex-col gap-[7px]">
                 <button
                   type="button"
@@ -706,12 +712,13 @@ export function TaskEditPanel({
                   }}
                   data-testid="edit-panel-hold-toggle"
                 >
-                  {task.hold ? "▲ ON HOLD" : "ACTIVE"}
+                  {task.hold ? "Blocked" : "Active"}
                 </button>
                 {task.hold && (
                   <input
                     ref={holdReasonRef}
                     type="text"
+                    aria-label="Blocker"
                     className={INPUT_CLS}
                     value={holdReason}
                     onChange={(e) => setHoldReason(e.target.value)}
@@ -722,12 +729,13 @@ export function TaskEditPanel({
             </EdField>
 
             {/* DOSSIER LINK */}
-            <EdField label="DOSSIER LINK" hint="optional">
+            <EdField label="Related page" hint="Optional">
               <div className="flex gap-[8px]">
                 <input
                   type="text"
+                  aria-label="Related page"
                   className={`${INPUT_CLS} flex-1`}
-                  placeholder="[[dossier]]"
+                  placeholder="[[page]]"
                   value={linkVal}
                   onChange={(e) => setLinkVal(e.target.value)}
                   data-testid="edit-panel-link"
@@ -738,8 +746,9 @@ export function TaskEditPanel({
                     className="cl-btn whitespace-nowrap"
                     onClick={() => onOpenDossier?.(task.link!)}
                     data-testid="edit-panel-open-dossier"
+                    aria-label="Open related page"
                   >
-                    OPEN →
+                    Open →
                   </button>
                 )}
               </div>
@@ -763,7 +772,7 @@ export function TaskEditPanel({
                 disabled={archiving}
                 data-testid="edit-panel-archive-confirm"
               >
-                {archiving ? "SAVING + ARCHIVING…" : "CONFIRM ARCHIVE?"}
+                {archiving ? "Archiving…" : "Confirm archive"}
               </button>
             ) : (
               <button
@@ -772,11 +781,13 @@ export function TaskEditPanel({
                 onClick={armArchive}
                 data-testid="edit-panel-archive"
               >
-                ARCHIVE
+                Archive
               </button>
             )}
             <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.1em] text-[var(--ink-4)]">
-              {archiving ? "MOVING TO RUBBISH BIN" : "EDITS AUTO-SEALED"}
+              {archiving
+                ? "Moving to Rubbish Bin…"
+                : "Changes saved automatically"}
             </span>
           </div>
         </div>
