@@ -24,7 +24,7 @@ import {
   useReorderable,
 } from "./ordered-list";
 import { DisplayLabelsEditor } from "./DisplayLabelsEditor";
-import { MembershipEditor } from "./MembershipEditor";
+import { BaseFilterEditor } from "./BaseFilterEditor";
 import { OrderedSortEditor } from "./OrderedSortEditor";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 
@@ -693,7 +693,7 @@ export function ViewDefinitionEditor({
           Additional filter; always ANDed with base membership.
         </p>
         <div className="mt-3">
-          <MembershipEditor
+          <BaseFilterEditor
             value={view.filter}
             properties={properties}
             onChange={(filter) => onChange({ ...view, filter })}

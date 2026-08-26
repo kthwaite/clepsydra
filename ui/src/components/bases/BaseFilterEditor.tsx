@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import type { BaseFilter } from "#/api/bases";
 import type {
   BaseDiagnostic,
@@ -7,6 +8,7 @@ import type { DraftProperty } from "./definition-model";
 import { createFilterDiagnosticScope } from "./filter-diagnostics";
 import {
   type FilterPath,
+  type FilterTreeAction,
   type FilterWrapKind,
   updateFilterTree,
 } from "./filter-tree";
@@ -16,29 +18,37 @@ import { useIdentifiedRows } from "./ordered-list";
 import { readTagCondition } from "./tag-condition";
 import { TagConditionEditor } from "./TagConditionEditor";
 
-interface FilterGroupEditorProps {
-  value: BaseFilter;
-  root: BaseFilter;
-  path: FilterPath;
-  position: number;
+interface BaseFilterEditorProps {
+  value: BaseFilter | undefined;
   properties: DraftProperty[];
   onChange(value: BaseFilter | undefined): void;
-  registerFocus: RegisterFocusTarget;
+  registerFocus?: RegisterFocusTarget;
+  label?: string;
   diagnostics?: BaseDiagnostic[];
   diagnosticRoot?: string;
 }
 
-export function FilterGroupEditor({
+interface FilterNodeEditorProps {
+  value: BaseFilter;
+  path: FilterPath;
+  position: number;
+  properties: DraftProperty[];
+  dispatch(action: FilterTreeAction): void;
+  registerFocus?: RegisterFocusTarget;
+  diagnostics: BaseDiagnostic[];
+  diagnosticRoot: string;
+}
+
+function FilterNodeEditor({
   value,
-  root,
   path,
   position,
   properties,
-  onChange,
+  dispatch,
   registerFocus,
-  diagnostics = [],
-  diagnosticRoot = "filter",
-}: FilterGroupEditorProps) {
+  diagnostics,
+  diagnosticRoot,
+}: FilterNodeEditorProps) {
   const logicalChildren =
     "all" in value ? value.all : "any" in value ? value.any : [];
   const {
@@ -52,6 +62,7 @@ export function FilterGroupEditor({
     diagnostics,
     registerFocus,
   });
+
   // A membership predicate over tags or aliases — however it is spelled in the
   // AST — authors as one row rather than a hand-nested group.
   if (readTagCondition(value)) {
@@ -61,13 +72,10 @@ export function FilterGroupEditor({
         position={position}
         properties={properties}
         onChange={(next) =>
-          onChange(
-            updateFilterTree(
-              root,
-              next === undefined
-                ? { type: "remove", path }
-                : { type: "replace", path, value: next },
-            ),
+          dispatch(
+            next === undefined
+              ? { type: "remove", path }
+              : { type: "replace", path, value: next },
           )
         }
         diagnosticScope={diagnosticScope}
@@ -82,7 +90,7 @@ export function FilterGroupEditor({
         position={position}
         properties={properties}
         onChange={(next) =>
-          onChange(updateFilterTree(root, { type: "replace", path, value: next }))
+          dispatch({ type: "replace", path, value: next })
         }
         diagnosticScope={diagnosticScope}
       />
@@ -97,13 +105,12 @@ export function FilterGroupEditor({
           <span aria-hidden="true">Not</span>
           <span className="sr-only">Exclude matching condition</span>
         </legend>
-        <FilterGroupEditor
+        <FilterNodeEditor
           value={value.not}
-          root={root}
           path={childPath}
           position={1}
           properties={properties}
-          onChange={onChange}
+          dispatch={dispatch}
           registerFocus={registerFocus}
           diagnostics={diagnostics}
           diagnosticRoot={diagnosticRoot}
@@ -113,23 +120,19 @@ export function FilterGroupEditor({
             triggerLabel="Excluded condition actions"
             replace
             onSeed={(seed) =>
-              onChange(
-                updateFilterTree(root, {
-                  type: "replace",
-                  path: childPath,
-                  value: seed,
-                }),
-              )
+              dispatch({
+                type: "replace",
+                path: childPath,
+                value: seed,
+              })
             }
             clear={{
               label: "Remove excluded condition",
               onAction: () =>
-                onChange(
-                  updateFilterTree(root, {
-                    type: "remove",
-                    path: childPath,
-                  }),
-                ),
+                dispatch({
+                  type: "remove",
+                  path: childPath,
+                }),
             }}
           />
         </div>
@@ -148,13 +151,11 @@ export function FilterGroupEditor({
 
   function append(child: BaseFilter) {
     setChildRows((current) => [...current, createRow(child)]);
-    onChange(
-      updateFilterTree(root, {
-        type: "append",
-        path,
-        value: child,
-      }),
-    );
+    dispatch({
+      type: "append",
+      path,
+      value: child,
+    });
   }
 
   function moveChild(childIndex: number, destination: number) {
@@ -171,13 +172,11 @@ export function FilterGroupEditor({
       next[destination] = current[childIndex];
       return next;
     });
-    onChange(
-      updateFilterTree(root, {
-        type: "move",
-        path: [...path, kind, childIndex],
-        offset: destination < childIndex ? -1 : 1,
-      }),
-    );
+    dispatch({
+      type: "move",
+      path: [...path, kind, childIndex],
+      offset: destination < childIndex ? -1 : 1,
+    });
   }
 
   return (
@@ -195,13 +194,12 @@ export function FilterGroupEditor({
               key={id}
               className="border-t border-border pt-3 first:border-t-0 first:pt-0"
             >
-              <FilterGroupEditor
+              <FilterNodeEditor
                 value={child}
-                root={root}
                 path={childPath}
                 position={childPosition}
                 properties={properties}
-                onChange={onChange}
+                dispatch={dispatch}
                 registerFocus={registerFocus}
                 diagnostics={diagnostics}
                 diagnosticRoot={diagnosticRoot}
@@ -222,30 +220,24 @@ export function FilterGroupEditor({
                     });
                     if (wrapped === undefined) return;
                     setChildRows((current) =>
-                      current.map((row, position) =>
-                        position === index
-                          ? { ...row, value: wrapped }
-                          : row,
+                      current.map((row, rowIndex) =>
+                        rowIndex === index ? { ...row, value: wrapped } : row,
                       ),
                     );
-                    onChange(
-                      updateFilterTree(root, {
-                        type: "wrap",
-                        path: childPath,
-                        kind,
-                      }),
-                    );
+                    dispatch({
+                      type: "wrap",
+                      path: childPath,
+                      kind,
+                    });
                   }}
                   onRemove={() => {
                     setChildRows((current) =>
-                      current.filter((_, position) => position !== index),
+                      current.filter((_, rowIndex) => rowIndex !== index),
                     );
-                    onChange(
-                      updateFilterTree(root, {
-                        type: "remove",
-                        path: childPath,
-                      }),
-                    );
+                    dispatch({
+                      type: "remove",
+                      path: childPath,
+                    });
                   }}
                 />
               </div>
@@ -254,11 +246,83 @@ export function FilterGroupEditor({
         })}
       </div>
       <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-3">
-        <FilterSeedMenu
-          triggerLabel={`Add to ${meaning}`}
-          onSeed={append}
-        />
+        <FilterSeedMenu triggerLabel={`Add to ${meaning}`} onSeed={append} />
       </div>
+    </fieldset>
+  );
+}
+
+export function BaseFilterEditor({
+  value,
+  properties,
+  onChange,
+  registerFocus,
+  label = "Membership filter",
+  diagnostics = [],
+  diagnosticRoot = "filter",
+}: BaseFilterEditorProps) {
+  const [draftValue, setDraftValue] = useState(value);
+
+  useEffect(() => setDraftValue(value), [value]);
+
+  function commit(next: BaseFilter | undefined) {
+    setDraftValue(next);
+    onChange(next);
+  }
+
+  function dispatch(action: FilterTreeAction) {
+    if (!draftValue) return;
+    const next = updateFilterTree(draftValue, action);
+    setDraftValue(next);
+    onChange(next);
+  }
+
+  if (!draftValue) {
+    return (
+      <fieldset className="m-0 min-w-0 border-0 p-0">
+        <legend className="sr-only">{label}</legend>
+        <div className="border-y border-border py-5">
+          <p className="text-sm font-medium text-foreground">All pages</p>
+          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+            Add a rule to limit which pages belong to this base.
+          </p>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <FilterSeedMenu
+            triggerLabel="Add rule"
+            variant="primary"
+            onSeed={commit}
+          />
+        </div>
+      </fieldset>
+    );
+  }
+
+  return (
+    <fieldset className="m-0 min-w-0 border-0 p-0">
+      <legend className="sr-only">{label}</legend>
+      <FilterNodeEditor
+        value={draftValue}
+        path={[]}
+        position={1}
+        properties={properties}
+        dispatch={dispatch}
+        registerFocus={registerFocus}
+        diagnostics={diagnostics}
+        diagnosticRoot={diagnosticRoot}
+      />
+      <fieldset className="m-0 mt-4 flex min-w-0 flex-wrap gap-2 border-x-0 border-b-0 border-t border-border p-0 pt-3">
+        <legend className="sr-only">Root membership controls</legend>
+        <FilterSeedMenu
+          triggerLabel="Membership actions"
+          replace
+          onSeed={commit}
+          clear={{
+            label: "Clear membership",
+            onAction: () => commit(undefined),
+          }}
+        />
+      </fieldset>
     </fieldset>
   );
 }

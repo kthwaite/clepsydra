@@ -19,7 +19,7 @@ import {
 } from "./definition-model";
 import { GeneralEditor } from "./GeneralEditor";
 import { asciiCaseFold, validateBaseDraftStructure } from "./local-validation";
-import { MembershipEditor } from "./MembershipEditor";
+import { BaseFilterEditor } from "./BaseFilterEditor";
 import { PropertiesEditor } from "./PropertiesEditor";
 import { PreviewPropertiesEditor } from "./PreviewPropertiesEditor";
 import { ValidationSummary } from "./ValidationSummary";
@@ -541,7 +541,7 @@ export function BaseDefinitionWorkspace({
                 Membership rules choose the pages included in every view.
               </p>
               <div className="mt-5">
-                <MembershipEditor
+                <BaseFilterEditor
                   value={draft.filter}
                   properties={draft.properties}
                   onChange={(filter) =>

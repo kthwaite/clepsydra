@@ -28,7 +28,7 @@ import {
 } from "./embed-presentation";
 import { validateBaseEmbedSemantics } from "./embed-semantic-validation";
 import { asciiCaseFold } from "./local-validation";
-import { MembershipEditor } from "./MembershipEditor";
+import { BaseFilterEditor } from "./BaseFilterEditor";
 import { OrderedSortEditor } from "./OrderedSortEditor";
 
 interface StructuredDraft {
@@ -488,7 +488,7 @@ export function BaseEmbedInspector({
               This filter is combined with Base membership and the saved view.
             </p>
             <div className="mt-3">
-              <MembershipEditor
+              <BaseFilterEditor
                 label="Embed filter"
                 value={draft.filter}
                 properties={properties}
@@ -497,7 +497,6 @@ export function BaseEmbedInspector({
                 onChange={(filter) =>
                   setDraft((current) => ({ ...current, filter }))
                 }
-                registerFocus={() => {}}
               />
             </div>
             {filterSectionDiagnostics.length > 0 ? (

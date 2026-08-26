@@ -16,7 +16,7 @@ import {
   slugifyBaseName,
   toWire,
 } from "./definition-model";
-import { MembershipEditor } from "./MembershipEditor";
+import { BaseFilterEditor } from "./BaseFilterEditor";
 
 interface CreateBaseDialogProps {
   isOpen: boolean;
@@ -175,11 +175,10 @@ export function CreateBaseDialog({
             Membership
           </h3>
           <div className="mt-3">
-            <MembershipEditor
+            <BaseFilterEditor
               value={filter}
               properties={[]}
               onChange={setFilter}
-              registerFocus={() => {}}
             />
           </div>
           <p className="mt-3 text-xs text-muted-foreground">

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { BaseFilter } from "#/api/bases";
 import { CreateBaseDialog } from "#/components/bases/CreateBaseDialog";
 import type { DraftProperty } from "#/components/bases/definition-model";
-import { MembershipEditor } from "#/components/bases/MembershipEditor";
+import { BaseFilterEditor } from "#/components/bases/BaseFilterEditor";
 function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
@@ -80,7 +80,7 @@ function latest(mock: Mock): BaseFilter | undefined {
 function renderEditor(value?: BaseFilter, registerFocus = vi.fn()) {
   const onChange = vi.fn();
   const view = render(
-    <MembershipEditor
+    <BaseFilterEditor
       value={value}
       properties={properties}
       onChange={onChange}
@@ -90,8 +90,126 @@ function renderEditor(value?: BaseFilter, registerFocus = vi.fn()) {
   return { ...view, onChange, registerFocus };
 }
 
-describe("MembershipEditor", () => {
+describe("BaseFilterEditor", () => {
   beforeEach(() => navigateMock.mockReset());
+
+  it("authors a filter without an external focus registrar", async () => {
+    const onChange = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <BaseFilterEditor value={undefined} properties={[]} onChange={onChange} />,
+    );
+
+    await chooseMenuAction(user, "Add rule", "Condition");
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith({
+      field: "kind",
+      op: "eq",
+      value: "",
+    });
+  });
+
+  it("wraps a nested condition in not through one root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [{ field: "kind", op: "eq", value: "NOTE" }],
+    });
+
+    await chooseMenuAction(
+      user,
+      "Condition 1 actions",
+      "Negate condition",
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [{ not: { field: "kind", op: "eq", value: "NOTE" } }],
+    });
+  });
+
+  it("collapses nested not and group ancestors after removing their sole child", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [{ not: { field: "kind", op: "eq", value: "NOTE" } }],
+    });
+
+    await chooseMenuAction(
+      user,
+      "Excluded condition actions",
+      "Remove excluded condition",
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith(undefined);
+    expect(screen.getByText("All pages")).toBeInTheDocument();
+  });
+
+  it("appends a seeded condition to a nested group through one root change", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [{ field: "kind", op: "eq", value: "NOTE" }],
+    });
+
+    await chooseMenuAction(user, "Add to Match all", "Condition");
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [
+        { field: "kind", op: "eq", value: "NOTE" },
+        { field: "kind", op: "eq", value: "" },
+      ],
+    });
+  });
+
+  it("moves one group child while preserving the exact sibling order", async () => {
+    const user = userEvent.setup();
+    const { onChange } = renderEditor({
+      all: [
+        { field: "kind", op: "eq", value: "NOTE" },
+        { field: "status", op: "eq", value: "draft" },
+        { field: "title", op: "eq", value: "Third" },
+      ],
+    });
+
+    await chooseMenuAction(user, "Condition 2 actions", "Move down");
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenLastCalledWith({
+      all: [
+        { field: "kind", op: "eq", value: "NOTE" },
+        { field: "title", op: "eq", value: "Third" },
+        { field: "status", op: "eq", value: "draft" },
+      ],
+    });
+  });
+
+  it("replaces its controlled root without emitting an authoring change", () => {
+    const onChange = vi.fn();
+    const view = render(
+      <BaseFilterEditor
+        value={{ field: "kind", op: "eq", value: "NOTE" }}
+        properties={properties}
+        onChange={onChange}
+      />,
+    );
+
+    view.rerender(
+      <BaseFilterEditor
+        value={{ field: "title", op: "eq", value: "After" }}
+        properties={properties}
+        onChange={onChange}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: selectTriggerName("Field for condition 1"),
+      }),
+    ).toHaveTextContent("Title");
+    expect(screen.getByLabelText("Value for condition 1")).toHaveValue("After");
+    expect(onChange).not.toHaveBeenCalled();
+  });
 
   it("shows All pages and builds a field comparison", async () => {
     const user = userEvent.setup();
