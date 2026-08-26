@@ -39,7 +39,7 @@ end, {
 	range = true,
 	desc = "Clepsydra vault commands",
 	complete = function(_, cmdline)
-		local words = vim.split(vim.trim(cmdline), "%s+")
+		local words = vim.split(cmdline, "%s+")
 		if #words <= 2 then
 			return subcommand_names
 		end

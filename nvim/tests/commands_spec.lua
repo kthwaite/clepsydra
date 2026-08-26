@@ -34,11 +34,23 @@ return {
 		end,
 	},
 	{
+		name = "no subcommand completion after a complete subcommand",
+		fn = function()
+			load_plugin_file()
+			eq({}, vim.fn.getcompletion("Clep today ", "cmdline"))
+			eq({ "backlinks", "capture", "daily", "search", "tags", "today" }, vim.fn.getcompletion("Clep ", "cmdline"))
+		end,
+	},
+	{
 		name = "guard prevents double-loading",
 		fn = function()
 			load_plugin_file()
-			-- Second dofile with the guard set must be a no-op, not an error.
+			local sentinel = function() end
+			vim.lsp.commands["clepsydra.findReferences"] = sentinel
+			-- vim.g.loaded_clepsydra is set: a second dofile must return early
+			-- and therefore must NOT re-run lsp_commands.register().
 			dofile(plugin_root .. "/plugin/clepsydra.lua")
+			assert(vim.lsp.commands["clepsydra.findReferences"] == sentinel, "guard did not prevent re-registration")
 		end,
 	},
 	{
