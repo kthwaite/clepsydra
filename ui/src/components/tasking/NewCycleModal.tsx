@@ -20,7 +20,7 @@ import {
   BoardModalFrame,
   ModalEscChip,
 } from "./BoardModalFrame";
-import { fmtCycleWindow } from "./board-constants";
+import { cycleStateLabel, fmtCycleWindow } from "./board-constants";
 import { EdField, INPUT_CLS, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
 
 // ── newCyclePrefill ───────────────────────────────────────────────────────────
@@ -242,11 +242,12 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
               <button
                 key={st}
                 type="button"
+                aria-label={cycleStateLabel(st)}
                 className={`${RADIO_CLS_BASE} ${state === st ? RADIO_CLS_ON : "hover:text-[var(--ink)] hover:border-[var(--ink-3)]"}`}
                 onClick={() => setState(st)}
                 data-testid={`new-cycle-state-${st}`}
               >
-                {st === "PLANNED" ? "Planned" : "Active"}
+                {cycleStateLabel(st)}
               </button>
             ))}
           </div>

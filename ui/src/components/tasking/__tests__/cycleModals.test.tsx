@@ -355,11 +355,23 @@ describe("NewCycleModal — render", () => {
     expect(end.value).toBe("2026-06-29");
   });
 
-  it("defaults INITIAL STATE to PLANNED", () => {
+  it("renders title-case initial state buttons while keeping PLANNED selected", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
-    const planned = screen.getByTestId("new-cycle-state-PLANNED");
+
+    const planned = screen.getByRole("button", { name: "Planned" });
+    expect(planned).toHaveAttribute("aria-label", "Planned");
+    expect(planned).toHaveAttribute("data-testid", "new-cycle-state-PLANNED");
     expect(planned.className).toContain("bg-[var(--ink)]");
+    const active = screen.getByRole("button", { name: "Active" });
+    expect(active).toHaveAttribute("aria-label", "Active");
+    expect(active).toHaveAttribute("data-testid", "new-cycle-state-ACTIVE");
+    expect(
+      screen.queryByRole("button", { name: "PLANNED" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "ACTIVE" }),
+    ).not.toBeInTheDocument();
   });
   it("shows only the formatted cycle window in the sub-header", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });

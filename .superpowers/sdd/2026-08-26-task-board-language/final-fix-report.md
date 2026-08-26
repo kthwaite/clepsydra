@@ -281,3 +281,52 @@ The assertion fix is committed separately as:
 ```text
 test(docs): preserve stale-span boundary
 ```
+
+## Browser-smoke initial Cycle state labels
+
+Real-browser smoke verification reported that the New Cycle Status buttons
+exposed uppercase accessible names. The test was strengthened first to require
+explicit `aria-label=\"Planned\"` and `aria-label=\"Active\"` values while retaining
+the raw `new-cycle-state-PLANNED` and `new-cycle-state-ACTIVE` test IDs.
+
+Red:
+
+```text
+bun run test src/components/tasking/__tests__/cycleModals.test.tsx
+```
+
+Result: expected failure, 1 of 70 tests failed because the Planned button had
+no explicit `aria-label`.
+
+Implementation reuses `cycleStateLabel(st)` for both the visible button text
+and explicit accessible label. The raw `st` value remains the React key, test
+ID suffix, state setter argument, and create payload value.
+
+Green:
+
+```text
+bun run test src/components/tasking/__tests__/cycleModals.test.tsx
+```
+
+Result: 1 test file passed; 70 tests passed.
+
+```text
+bun run typecheck
+```
+
+Result: passed (`tsc --noEmit --project tsconfig.app.json`).
+
+```text
+bunx biome lint src/components/tasking/NewCycleModal.tsx
+```
+
+Result: the focused lint ran and reported two pre-existing diagnostics:
+`noAutofocus` on the existing Name input and `useSemanticElements` on the
+existing Status group wrapper. Neither diagnostic was introduced or changed
+by this fix, and both are outside this browser-smoke change.
+
+The browser-smoke fix is committed separately as:
+
+```text
+fix(tasking): label initial cycle states
+```
