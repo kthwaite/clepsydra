@@ -153,7 +153,7 @@ A case-insensitive audit covered Task Board production JSX and the Task Board gu
 - Cycle modal kinds, Cycle state IDs, Backlog/null sentinels, API fields, route names, test IDs, and mutation behavior remain unchanged.
 - Interaction assertions were preserved or strengthened. No interaction was replaced by a constants-only assertion.
 - No backend or unrelated product surface changed.
-- No formatter, lint, typecheck, full UI suite, Rust suite, or project-wide validation was run, per the final-fix assignment.
+- No formatter, lint, full UI suite, Rust suite, or project-wide validation was run.
 
 ## Commit
 
@@ -161,4 +161,31 @@ This report is included in the single final fix-wave commit with subject:
 
 ```text
 fix(tasking): finish language cutover
+```
+
+## Verification fix
+
+Main-agent verification found that `KanbanView.tsx` still imported `pad2`
+after the approved copy removed its final use. The unused import was removed
+without changing Kanban behavior.
+
+Verification:
+
+```text
+bun run typecheck
+```
+
+Result: passed (`tsc --noEmit --project tsconfig.app.json`).
+
+```text
+bun run test src/components/tasking/__tests__/KanbanView.test.tsx
+```
+
+Result: 1 test file passed; 53 tests passed. The run emitted only the existing
+Vite native-config warning.
+
+The verification fix is committed separately as:
+
+```text
+fix(tasking): remove stale Kanban import
 ```

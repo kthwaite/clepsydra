@@ -21,7 +21,6 @@ import {
 } from "react";
 import type { BoardColumn, BoardCycle, BoardTask } from "#/api/board";
 import { usePatchTask } from "#/api/board";
-import { pad2 } from "#/lib/time";
 import {
   KANBAN_COL_DEFAULT,
   KANBAN_COL_MAX,
