@@ -938,7 +938,17 @@ impl VaultIndex {
             raw_body.clone()
         };
         let body_links = extract_links(&body);
-        let blocks = crate::vault::block::parse_blocks(&body);
+        // Guards against upstream parser panics (see src/vault/markdown.rs).
+        let blocks = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::vault::block::parse_blocks(&body)
+        }))
+        .unwrap_or_else(|_| {
+            eprintln!(
+                "clepsydra: markdown parser panicked on {}; indexing page without blocks",
+                vault_path.as_str()
+            );
+            Vec::new()
+        });
 
         let prop_links = extract_prop_links(&meta, linkable_properties);
 
@@ -2312,8 +2322,17 @@ fn collect_indexed_pages(
         // Extract body links
         let body_links = extract_links(&body);
 
-        // Extract blocks
-        let blocks = crate::vault::block::parse_blocks(&body);
+        // Extract blocks. Guards against upstream parser panics (see
+        // src/vault/markdown.rs).
+        let blocks = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            crate::vault::block::parse_blocks(&body)
+        }))
+        .unwrap_or_else(|_| {
+            eprintln!(
+                "clepsydra: markdown parser panicked on {rel_str}; indexing page without blocks"
+            );
+            Vec::new()
+        });
 
         // Extract property ref links for configured linkable_properties
         let prop_links = extract_prop_links(&meta, linkable_properties);

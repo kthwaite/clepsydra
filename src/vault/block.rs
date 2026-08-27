@@ -1,8 +1,10 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd, TextMergeWithOffset};
+use pulldown_cmark::{Event, Parser, Tag, TagEnd, TextMergeWithOffset};
 use regex::Regex;
+
+use crate::vault::markdown::markdown_options;
 
 /// The structural type of a block.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -237,7 +239,7 @@ fn append_text(current: &mut Option<BlockBuilder>, text: String) {
 /// Follows the same `TextMergeWithOffset` pattern as `extract_links` in
 /// `src/vault/link.rs`.
 pub fn parse_blocks(markdown: &str) -> Vec<Block> {
-    let opts = Options::all();
+    let opts = markdown_options();
     let raw_iter = Parser::new_ext(markdown, opts).into_offset_iter();
     let parser = TextMergeWithOffset::new(raw_iter);
 
@@ -475,5 +477,13 @@ mod tests {
             blocks[0].span.end, 99,
             "paragraph range end should be retained"
         );
+    }
+
+    #[test]
+    fn parse_blocks_survives_blockquote_definition_marker() {
+        // pulldown-cmark 0.12.2 panics on this input when definition lists
+        // are enabled; the shared options mask keeps them off.
+        let blocks = parse_blocks("\n>.\n>:");
+        assert!(!blocks.is_empty());
     }
 }
