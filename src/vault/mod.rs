@@ -1,5 +1,6 @@
 pub mod academic;
 pub mod academic_hook;
+pub mod archive_backfill;
 pub mod archive_hook;
 pub mod archive_snapshot;
 pub mod atomic_file;

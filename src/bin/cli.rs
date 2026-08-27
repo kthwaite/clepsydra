@@ -26,6 +26,16 @@ struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+enum CasCommands {
+    #[command(about = "Fill {hash, type} blob entries in archive pages from cas.db")]
+    Backfill {
+        /// Apply changes (default is a dry run).
+        #[arg(long)]
+        write: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ConfigCommands {
     #[command(about = "Print the application config selected by normal lookup")]
     Show {
@@ -183,6 +193,14 @@ enum Commands {
         /// Apply the conversion (default is a dry run).
         #[arg(long)]
         write: bool,
+    },
+    #[command(
+        about = "CAS maintenance",
+        long_about = "Maintain the content-addressed store: backfill typed blob metadata into archive pages, or rebuild the derived cas.db from the vault."
+    )]
+    Cas {
+        #[command(subcommand)]
+        command: CasCommands,
     },
     #[command(
         about = "Register the clepsydra:// URL scheme with macOS",
@@ -453,6 +471,47 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             );
             Ok(if report.warnings.is_empty() { 0 } else { 1 })
         }
+        Commands::Cas { command } => match command {
+            CasCommands::Backfill { write } => {
+                let cwd = std::env::current_dir()?;
+                let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+                let vault_root =
+                    clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+                let vault = clepsydra::vault::Vault::open(&vault_root)?;
+                let cas_path_raw = &vault.config().archive.cas_path;
+                let cas_path = clepsydra::expand_tilde(cas_path_raw)
+                    .unwrap_or_else(|| PathBuf::from(cas_path_raw));
+                let cas_db = cas_path.join("cas.db");
+
+                println!(
+                    "Backfilling {{hash, type}} blob entries in archive pages from {}.",
+                    cas_db.display()
+                );
+                let report = clepsydra::vault::archive_backfill::backfill(&vault, &cas_db, write);
+                let verb = if report.dry_run {
+                    "would update"
+                } else {
+                    "updated"
+                };
+                for path in &report.updated {
+                    println!("  {verb} {path}");
+                }
+                for warning in &report.warnings {
+                    println!("  warning {warning}");
+                }
+                println!(
+                    "cas backfill: {} page(s) {verb}, {} warning(s){}",
+                    report.updated.len(),
+                    report.warnings.len(),
+                    if report.dry_run {
+                        " (dry run — pass --write to apply)"
+                    } else {
+                        ""
+                    }
+                );
+                Ok(if report.warnings.is_empty() { 0 } else { 1 })
+            }
+        },
         Commands::Grep {
             query,
             limit,
@@ -1064,5 +1123,30 @@ mod cli_tests {
     fn lsp_is_a_subcommand_and_serve_rejects_the_old_flag() {
         assert!(Cli::try_parse_from(["clep", "lsp"]).is_ok());
         assert!(Cli::try_parse_from(["clep", "serve", "--lsp"]).is_err());
+    }
+
+    fn cas_backfill_write(args: &[&str]) -> bool {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
+            Commands::Cas {
+                command: CasCommands::Backfill { write },
+            } => write,
+            other => panic!("expected cas backfill, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cas_backfill_defaults_write_off() {
+        assert!(!cas_backfill_write(&["clep", "cas", "backfill"]));
+    }
+
+    #[test]
+    fn cas_backfill_accepts_write() {
+        assert!(cas_backfill_write(&["clep", "cas", "backfill", "--write"]));
+    }
+
+    #[test]
+    fn cas_requires_a_subcommand() {
+        assert!(Cli::try_parse_from(["clep", "cas"]).is_err());
     }
 }

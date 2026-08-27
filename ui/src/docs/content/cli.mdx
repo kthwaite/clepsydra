@@ -49,6 +49,7 @@ file's directory without `~` expansion. See [Configuration](/docs/configuration)
 | `clep open-url` | `<URL>`, optional `--print` |
 | `clep relabel` | optional `--dry-run` |
 | `clep migrate` | optional `--write`; dry run by default |
+| `clep cas` | nested `backfill` command |
 | `clep register-url` | optional `--obsidian`; macOS only |
 | `clep grep` | `<QUERY>`, `-n/--limit <N>` (default `20`), `--raw`, `--json` |
 | `clep tree` | optional `--json` |
@@ -348,6 +349,45 @@ Config or vault-open failures also return `1`.
 ```bash
 clep migrate
 clep migrate --write
+```
+
+## `clep cas`
+
+```text
+clep cas <COMMAND>
+```
+
+This parent command requires one nested command. It maintains the vault's
+content-addressed blob store (the CAS).
+
+## `clep cas backfill`
+
+```text
+clep cas backfill [--write]
+```
+
+Sweeps the configured vault for archive pages whose `[archive] blobs` array
+still holds legacy hash-only string entries, and types each one as a
+`{ hash, type }` table by looking up its content type in the resolved
+`cas.db`. The CAS path is `[archive].cas_path` from the vault's
+`.clepsydra/config.toml`, `~`-expanded, the same resolution `clep serve` and
+`clep doctor` use. The default is a dry run; `--write` applies the change.
+
+A hash absent from `cas.db` is left as a string entry and reported as a
+warning; a page whose frontmatter cannot be fully read (merge conflict
+markers, malformed TOML) is reported and left untouched — the sweep never
+rewrites what it did not fully read. Entries already typed are left alone.
+`.clepsydra/` (including the rubbish bin) is never swept; legacy string
+entries there are tolerated indefinitely.
+
+The command prints each page it updates (or would update) and every warning.
+It returns `0` when there are no warnings and `1` when any warning is
+reported, even if other pages updated. Config, vault-open, or `cas.db`-open
+failures also return `1`.
+
+```bash
+clep cas backfill
+clep cas backfill --write
 ```
 
 ## `clep register-url`
