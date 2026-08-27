@@ -370,8 +370,36 @@ describe("Sheaf quire rendering", () => {
     useWorkspaceStore.setState({ activeTabId: "t1" });
     render(<Sheaf activeTabId="t1" />);
     const tabButton = screen.getByRole("button", { name: "Alpha" });
-    expect(tabButton.style.boxShadow).toContain("var(--quire-sepia)");
-    expect(tabButton.style.boxShadow).toContain("var(--accent)");
+    const wrapper = tabButton.parentElement;
+    if (!(wrapper instanceof HTMLElement)) {
+      throw new Error("Alpha tab wrapper was not rendered");
+    }
+    expect(wrapper.style.boxShadow).toContain("var(--quire-sepia)");
+    expect(wrapper.style.boxShadow).toContain("var(--accent)");
+  });
+
+  it("draws the quire and active rules across the close control too", () => {
+    seed(false);
+    useWorkspaceStore.setState({ activeTabId: "t1" });
+    render(<Sheaf activeTabId="t1" />);
+    const tabButton = screen.getByRole("button", { name: "Alpha" });
+    const wrapper = tabButton.parentElement;
+    if (!(wrapper instanceof HTMLElement)) {
+      throw new Error("Alpha tab wrapper was not rendered");
+    }
+    const close = within(wrapper).getByRole("button", {
+      name: "close folio",
+    });
+
+    // The rules live on the wrapper, which spans both the activation
+    // surface and the close control — not on the inner label button,
+    // which stops short of the ✕.
+    expect(wrapper).toContainElement(close);
+    expect(wrapper.style.boxShadow).toContain(
+      "inset 0 -2px 0 0 var(--accent)",
+    );
+    expect(tabButton.getAttribute("style")).toBeNull();
+    expect(close.getAttribute("style")).toBeNull();
   });
 
   it("clicking the label toggles collapse in the store", async () => {
@@ -747,34 +775,29 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     }
     const target = dropTargetFor(wrapper);
     expect(target.element).toBe(wrapper);
-    const idleActivationStyle = activation.getAttribute("style");
+    const idleWrapperStyle = wrapper.getAttribute("style");
     dispatchDragStart(source);
 
     dispatchTargetEnter(source, target, "left");
-    expect(activation.style.boxShadow).toContain(
+    expect(wrapper.style.boxShadow).toContain(
       "inset 2px 0 0 0 var(--accent)",
     );
-    expect(close.style.boxShadow).not.toContain("var(--accent)");
+    expect(close.getAttribute("style")).toBeNull();
 
     dispatchTargetDrag(source, target, "right");
-    expect(activation.style.boxShadow).not.toContain(
+    expect(wrapper.style.boxShadow).not.toContain(
       "inset 2px 0 0 0 var(--accent)",
     );
-    expect(activation.style.boxShadow).not.toContain(
-      "inset -2px 0 0 0 var(--accent)",
-    );
-    expect(close.style.boxShadow).toBe(
+    expect(wrapper.style.boxShadow).toContain(
       "inset -2px 0 0 0 var(--accent)",
     );
 
     dispatchTargetLeave(source, target);
-    expect(activation.getAttribute("style")).toBe(idleActivationStyle);
-    expect(close.style.boxShadow).toBe("");
+    expect(wrapper.getAttribute("style")).toBe(idleWrapperStyle);
 
     dispatchTargetEnter(source, target, "right");
     dispatchDrop({ source, target, edge: "right" });
-    expect(activation.getAttribute("style")).toBe(idleActivationStyle);
-    expect(close.style.boxShadow).toBe("");
+    expect(wrapper.getAttribute("style")).toBe(idleWrapperStyle);
   });
 
   it("highlights a quire join target distinctly and clears it on leave or drop", () => {
@@ -813,11 +836,15 @@ describe("Sheaf tab drag-and-drop wiring", () => {
       const alpha = screen.getByRole("button", { name: "Alpha" });
       const source = sourceFor(alpha);
       const gamma = screen.getByRole("button", { name: "Gamma" });
+      const gammaWrapper = gamma.parentElement;
+      if (!(gammaWrapper instanceof HTMLElement)) {
+        throw new Error("Gamma tab wrapper was not rendered");
+      }
       const target = dropTargetFor(gamma);
-      const idleStyle = gamma.getAttribute("style");
+      const idleStyle = gammaWrapper.getAttribute("style");
       dispatchDragStart(source);
       const targetRecord = dispatchTargetEnter(source, target, "left");
-      expect(gamma.style.boxShadow).toContain(
+      expect(gammaWrapper.style.boxShadow).toContain(
         "inset 2px 0 0 0 var(--accent)",
       );
       const close = source.registration.element.querySelector(
@@ -833,7 +860,7 @@ describe("Sheaf tab drag-and-drop wiring", () => {
       ).not.toBeInTheDocument();
       dispatchMonitorDrop(source, includeTarget ? [targetRecord] : []);
 
-      expect(gamma.getAttribute("style")).toBe(idleStyle);
+      expect(gammaWrapper.getAttribute("style")).toBe(idleStyle);
     },
   );
 });

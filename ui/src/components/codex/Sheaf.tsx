@@ -406,15 +406,14 @@ function FolioTab({
       }),
     );
   }, [moveTab, onDndEnd, onDndStart, setDropFeedback, t.id]);
+  // Rules paint on the wrapper so they span the full tab, close control
+  // included — the label button alone stops short of the ✕.
   const rules = [
     quire ? `inset 0 2px 0 0 ${quireColorVar(quire.color)}` : null,
     active ? "inset 0 -2px 0 0 var(--accent)" : null,
     dropEdge === "left" ? "inset 2px 0 0 0 var(--accent)" : null,
+    dropEdge === "right" ? "inset -2px 0 0 0 var(--accent)" : null,
   ].filter(Boolean);
-  const closeButtonStyle =
-    dropEdge === "right"
-      ? { boxShadow: "inset -2px 0 0 0 var(--accent)" }
-      : undefined;
 
   return (
     <div
@@ -423,6 +422,7 @@ function FolioTab({
         "group flex max-w-[240px] flex-shrink-0 items-stretch whitespace-nowrap border-r border-rule-soft",
         active ? "bg-paper text-ink" : "text-ink-mute hover:text-ink",
       )}
+      style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
     >
       <SheafContextMenu target={{ kind: "tab", tabId: t.id }}>
         <button
@@ -437,7 +437,6 @@ function FolioTab({
             "flex min-w-0 cursor-pointer items-center gap-2 py-1 pl-3",
             dragged && "opacity-50",
           )}
-          style={rules.length ? { boxShadow: rules.join(", ") } : undefined}
         >
           <span
             className="inline-block h-[6px] w-[6px] flex-shrink-0"
@@ -454,7 +453,6 @@ function FolioTab({
         onClick={onClose}
         aria-label="close folio"
         className="flex-shrink-0 cursor-pointer px-2 leading-none text-ink-mute opacity-0 transition-opacity group-hover:opacity-60 hover:!opacity-100"
-        style={closeButtonStyle}
       >
         <X size={11} />
       </button>
