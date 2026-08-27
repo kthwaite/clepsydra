@@ -85,6 +85,25 @@ pub(crate) enum SearchDiagnosticKind {
     ExpectedExpression,
 }
 
+impl SearchDiagnosticKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::UnknownField => "unknown_field",
+            Self::MissingFieldValue => "missing_field_value",
+            Self::UnknownKind => "unknown_kind",
+            Self::UnmatchedQuote => "unmatched_quote",
+            Self::UnexpectedParenthesis => "unexpected_parenthesis",
+            Self::UnmatchedParenthesis => "unmatched_parenthesis",
+            Self::DanglingOr => "dangling_or",
+            Self::DanglingNot => "dangling_not",
+            Self::EmptyGroup => "empty_group",
+            Self::EmptyValue => "empty_value",
+            Self::UnexpectedColon => "unexpected_colon",
+            Self::ExpectedExpression => "expected_expression",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SearchDiagnostic {
     pub(crate) message: String,
@@ -99,6 +118,10 @@ pub(crate) struct SearchQueryError {
 }
 
 impl SearchQueryError {
+    pub fn diagnostic(&self) -> &SearchDiagnostic {
+        &self.diagnostic
+    }
+
     fn new(
         input: &str,
         kind: SearchDiagnosticKind,
@@ -512,7 +535,7 @@ impl Parser<'_> {
                 return Err(self.error(
                     SearchDiagnosticKind::UnknownField,
                     name_span,
-                    format_args!("unknown field `{name}`"),
+                    format_args!("unknown search field '{name}'"),
                 ));
             }
         };
@@ -895,8 +918,57 @@ mod tests {
             "Kind:recipe",
             SearchDiagnosticKind::UnknownField,
             span(0, 4),
-            "unknown field",
+            "unknown search field",
         );
+    }
+
+    #[test]
+    fn exposes_stable_public_diagnostic_contract() {
+        let error = parse("knd:recipe").unwrap_err();
+        assert_eq!(
+            error.diagnostic().kind,
+            SearchDiagnosticKind::UnknownField
+        );
+        assert_eq!(error.diagnostic().span, span(0, 3));
+        assert_eq!(error.diagnostic().column, 1);
+        assert_eq!(
+            error.diagnostic().message,
+            "unknown search field 'knd' at column 1"
+        );
+        assert_eq!(
+            error.to_string(),
+            "unknown search field 'knd' at column 1"
+        );
+
+        let kinds = [
+            (SearchDiagnosticKind::UnknownField, "unknown_field"),
+            (
+                SearchDiagnosticKind::MissingFieldValue,
+                "missing_field_value",
+            ),
+            (SearchDiagnosticKind::UnknownKind, "unknown_kind"),
+            (SearchDiagnosticKind::UnmatchedQuote, "unmatched_quote"),
+            (
+                SearchDiagnosticKind::UnexpectedParenthesis,
+                "unexpected_parenthesis",
+            ),
+            (
+                SearchDiagnosticKind::UnmatchedParenthesis,
+                "unmatched_parenthesis",
+            ),
+            (SearchDiagnosticKind::DanglingOr, "dangling_or"),
+            (SearchDiagnosticKind::DanglingNot, "dangling_not"),
+            (SearchDiagnosticKind::EmptyGroup, "empty_group"),
+            (SearchDiagnosticKind::EmptyValue, "empty_value"),
+            (SearchDiagnosticKind::UnexpectedColon, "unexpected_colon"),
+            (
+                SearchDiagnosticKind::ExpectedExpression,
+                "expected_expression",
+            ),
+        ];
+        for (kind, token) in kinds {
+            assert_eq!(kind.as_str(), token);
+        }
     }
 
     #[test]
@@ -932,7 +1004,7 @@ mod tests {
                 "owner:kit",
                 SearchDiagnosticKind::UnknownField,
                 span(0, 5),
-                "unknown field",
+                "unknown search field",
             ),
             (
                 "tag:",
