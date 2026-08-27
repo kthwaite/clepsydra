@@ -5993,53 +5993,175 @@ async fn attachment_upload_with_long_valid_basename_uses_bounded_temporary_name(
 async fn search_pages() {
     let (server, _tmp) = setup_server();
 
-    server
-        .post("/api/vault/pages/rust.md")
-        .json(&serde_json::json!({
-            "title": "Rust Programming",
-            "body": "Rust is a systems programming language focused on safety."
-        }))
-        .await
-        .assert_status(StatusCode::CREATED);
+    for (path, page) in [
+        (
+            "rust.md",
+            serde_json::json!({
+                "title": "Rust Programming",
+                "kind": "NOTE",
+                "tags": ["research"],
+                "project": "languages",
+                "body": "Rust is a systems programming language focused on safety."
+            }),
+        ),
+        (
+            "python.md",
+            serde_json::json!({
+                "title": "Python Programming",
+                "kind": "NOTE",
+                "tags": ["scripting"],
+                "project": "languages",
+                "body": "Python is a dynamic scripting language."
+            }),
+        ),
+        (
+            "recipes/beer.md",
+            serde_json::json!({
+                "title": "Beer Tasting",
+                "kind": "RECIPE",
+                "tags": ["beer"],
+                "project": "cellar",
+                "body": "A tasting guide for malt."
+            }),
+        ),
+        (
+            "notes/wine.md",
+            serde_json::json!({
+                "title": "Wine Tasting",
+                "kind": "NOTE",
+                "tags": ["wine"],
+                "project": "cellar",
+                "body": "A tasting guide for grapes."
+            }),
+        ),
+        (
+            "notes/beer-only.md",
+            serde_json::json!({
+                "title": "Beer Fermentation",
+                "kind": "NOTE",
+                "tags": ["beer"],
+                "project": "brewery",
+                "body": "Fermentation notes."
+            }),
+        ),
+        (
+            "notes/tasting-only.md",
+            serde_json::json!({
+                "title": "Tasting Research",
+                "kind": "NOTE",
+                "tags": ["research"],
+                "project": "laboratory",
+                "body": "General tasting notes."
+            }),
+        ),
+    ] {
+        server
+            .post(&format!("/api/vault/pages/{path}"))
+            .json(&page)
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
 
-    server
-        .post("/api/vault/pages/python.md")
-        .json(&serde_json::json!({
-            "title": "Python Programming",
-            "body": "Python is a dynamic scripting language."
-        }))
-        .await
-        .assert_status(StatusCode::CREATED);
-
-    // Rebuild index to populate FTS
     server
         .post("/api/vault/index/rebuild")
         .await
         .assert_status_ok();
 
-    // Search for "safety"
+    // Plain text remains a compatible query.
     let res = server.get("/api/vault/index/search?q=safety").await;
     res.assert_status(StatusCode::OK);
     let body: serde_json::Value = res.json();
-    let results = body.as_array().unwrap();
-    assert_eq!(results.len(), 1);
-    assert_eq!(results[0]["path"], "rust.md");
+    assert_eq!(
+        body.as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["path"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        vec!["rust.md"]
+    );
 
-    // Search for "programming" matches both
     let res = server.get("/api/vault/index/search?q=programming").await;
     let body: serde_json::Value = res.json();
     assert_eq!(body.as_array().unwrap().len(), 2);
 
-    // Search with limit
     let res = server
         .get("/api/vault/index/search?q=programming&limit=1")
         .await;
     let body: serde_json::Value = res.json();
     assert_eq!(body.as_array().unwrap().len(), 1);
 
-    // Missing query param returns 400
+    let res = server
+        .get("/api/vault/index/search?q=kind%3ARECIPE")
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let paths = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(paths, vec!["recipes/beer.md"]);
+
+    let res = server
+        .get("/api/vault/index/search?q=%28tag%3Abeer+%7C+tag%3Awine%29+tasting")
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let mut paths = body
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|hit| hit["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    paths.sort_unstable();
+    assert_eq!(paths, vec!["notes/wine.md", "recipes/beer.md"]);
+}
+
+#[tokio::test]
+async fn search_query_errors_have_a_stable_contract() {
+    let (server, _tmp) = setup_server();
+
+    let res = server
+        .get("/api/vault/index/search?q=knd%3Arecipe")
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert_eq!(
+        body,
+        serde_json::json!({
+            "status": 400,
+            "error": "unknown search field 'knd' at column 1",
+            "detail": {
+                "code": "invalid_search_query",
+                "span": { "start": 0, "end": 3 },
+                "kind": "unknown_field"
+            }
+        })
+    );
+
+    for (query, span, kind) in [
+        ("kind%3Aunknown", (5, 12), "unknown_kind"),
+        ("%28", (0, 1), "unmatched_parenthesis"),
+        ("tasting+%7C", (8, 9), "dangling_or"),
+    ] {
+        let res = server
+            .get(&format!("/api/vault/index/search?q={query}"))
+            .await;
+        res.assert_status(StatusCode::BAD_REQUEST);
+        let body: serde_json::Value = res.json();
+        assert_eq!(body["status"], 400);
+        assert_eq!(body["detail"]["code"], "invalid_search_query");
+        assert_eq!(body["detail"]["span"]["start"], span.0);
+        assert_eq!(body["detail"]["span"]["end"], span.1);
+        assert_eq!(body["detail"]["kind"], kind);
+    }
+
     let res = server.get("/api/vault/index/search").await;
     res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["error"], "missing 'q' query parameter");
+    assert!(body.get("detail").is_none());
 }
 
 // ---------------------------------------------------------------------------

@@ -1879,12 +1879,12 @@ mod tests {
         std::fs::create_dir_all(&notes).unwrap();
         std::fs::write(
             notes.join("alpha.md"),
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntitle: Alpha\ntags:\n  - testing\n---\n\nzanzibar content linking to [[Beta]].\n",
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntitle: Alpha\ntype: NOTE\nproject: atlas\ntags:\n  - testing\n  - research\n  - beer\n---\n\nzanzibar tasting content linking to [[Beta]].\n",
         )
         .unwrap();
         std::fs::write(
             notes.join("beta.md"),
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000b2\ntitle: Beta\ntags:\n  - testing\n---\n\nbeta body.\n",
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000b2\ntitle: Beta\ntype: QUOTE\nproject: cellar\ntags:\n  - testing\n  - archive\n  - wine\n---\n\nbeta tasting body.\n",
         )
         .unwrap();
 
@@ -1910,6 +1910,17 @@ mod tests {
         serde_json::from_str(&result.expect("tool call should succeed")).unwrap()
     }
 
+    fn sorted_search_paths(value: &Value) -> Vec<String> {
+        let mut paths = value
+            .as_array()
+            .expect("search returns an array")
+            .iter()
+            .map(|hit| hit["path"].as_str().unwrap().to_string())
+            .collect::<Vec<_>>();
+        paths.sort_unstable();
+        paths
+    }
+
     #[tokio::test]
     async fn search_finds_seeded_content() {
         let (server, _tmp) = serve_seeded_vault().await;
@@ -1924,6 +1935,68 @@ mod tests {
         let hits = value.as_array().expect("search returns an array");
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0]["path"], "notes/alpha.md");
+    }
+
+    #[tokio::test]
+    async fn search_uses_structured_field_semantics() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_search(Parameters(SearchParams {
+                    query: "kind:note tag:research".to_string(),
+                    limit: None,
+                }))
+                .await,
+        );
+
+        assert_eq!(sorted_search_paths(&value), vec!["notes/alpha.md"]);
+    }
+
+    #[tokio::test]
+    async fn search_grouped_boolean_syntax_matches_http() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let query = "(tag:research | tag:archive) tasting";
+        let http_value = server
+            .client
+            .get_json(
+                "/api/vault/index/search",
+                &[("q", query.to_string())],
+            )
+            .await
+            .expect("HTTP search should succeed");
+        let mcp_value = parse(
+            server
+                .vault_search(Parameters(SearchParams {
+                    query: query.to_string(),
+                    limit: None,
+                }))
+                .await,
+        );
+
+        let expected = vec!["notes/alpha.md".to_string(), "notes/beta.md".to_string()];
+        assert_eq!(sorted_search_paths(&http_value), expected);
+        assert_eq!(
+            sorted_search_paths(&mcp_value),
+            sorted_search_paths(&http_value)
+        );
+    }
+
+    #[tokio::test]
+    async fn search_invalid_syntax_returns_the_parser_error() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let error = server
+            .vault_search(Parameters(SearchParams {
+                query: "knd:note".to_string(),
+                limit: None,
+            }))
+            .await
+            .expect_err("invalid search syntax must fail");
+
+        assert!(
+            error.contains("unknown search field 'knd' at column 1"),
+            "{error}"
+        );
+        assert!(!error.contains("[]"), "{error}");
     }
 
     #[tokio::test]

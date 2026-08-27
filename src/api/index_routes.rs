@@ -17,7 +17,7 @@ use super::error::{ApiError, parse_internal_path};
 use super::pages::page_detail;
 use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
-use crate::vault::index::UnresolvedReason;
+use crate::vault::index::{IndexError, UnresolvedReason};
 use crate::vault::kind::Kind;
 use crate::vault::mutation::{MutationOp, MutationPlan, MutationPlanner};
 use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
@@ -1936,11 +1936,24 @@ pub async fn search(
 
     let limit = query.limit.unwrap_or(20) as usize;
 
-    let results = state
-        .index
-        .search(q, limit)
-        .await
-        .map_err(|e| ApiError::internal(format!("search failed: {e}")))?;
+    let results = match state.index.search(q, limit).await {
+        Ok(results) => results,
+        Err(IndexError::SearchQuery(error)) => {
+            let diagnostic = error.diagnostic();
+            return Err(ApiError::bad_request_with_detail(
+                diagnostic.message.clone(),
+                serde_json::json!({
+                    "code": "invalid_search_query",
+                    "span": {
+                        "start": diagnostic.span.start,
+                        "end": diagnostic.span.end,
+                    },
+                    "kind": diagnostic.kind.as_str(),
+                }),
+            ));
+        }
+        Err(error) => return Err(ApiError::internal(format!("search failed: {error}"))),
+    };
 
     let entries: Vec<SearchResultEntry> = results
         .into_iter()
