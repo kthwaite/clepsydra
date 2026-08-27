@@ -1939,16 +1939,16 @@ pub async fn search(
     let results = match state.index.search(q, limit).await {
         Ok(results) => results,
         Err(IndexError::SearchQuery(error)) => {
-            let diagnostic = error.diagnostic();
+            let span = error.span();
             return Err(ApiError::bad_request_with_detail(
-                diagnostic.message.clone(),
+                error.message().to_owned(),
                 serde_json::json!({
                     "code": "invalid_search_query",
                     "span": {
-                        "start": diagnostic.span.start,
-                        "end": diagnostic.span.end,
+                        "start": span.start,
+                        "end": span.end,
                     },
-                    "kind": diagnostic.kind.as_str(),
+                    "kind": error.kind(),
                 }),
             ));
         }

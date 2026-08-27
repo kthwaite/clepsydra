@@ -186,8 +186,12 @@ async fn search_propagates_typed_query_errors() {
         .search("unknown:value".into(), 10)
         .await
         .unwrap_err();
-    assert!(format!("{error:?}").starts_with("SearchQuery("));
-    assert!(error.to_string().contains("unknown search field"));
+    let IndexError::SearchQuery(error) = error else {
+        panic!("expected a typed search query error");
+    };
+    assert_eq!(error.kind(), "unknown_field");
+    assert_eq!(error.span(), 0..7);
+    assert!(error.message().contains("unknown search field"));
 }
 
 // ---------------------------------------------------------------------------

@@ -1664,8 +1664,12 @@ fn fts_search_returns_typed_query_errors() {
     index.build(&vault).unwrap();
 
     let error = index.search("unknown:value", 10).unwrap_err();
-    assert!(format!("{error:?}").starts_with("SearchQuery("));
-    assert!(error.to_string().contains("unknown search field"));
+    let IndexError::SearchQuery(error) = error else {
+        panic!("expected a typed search query error");
+    };
+    assert_eq!(error.kind(), "unknown_field");
+    assert_eq!(error.span(), 0..7);
+    assert!(error.message().contains("unknown search field"));
 }
 
 #[test]

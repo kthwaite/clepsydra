@@ -8,9 +8,9 @@ const MAX_AST_NODES: usize = 128;
 const MAX_POSITIVE_TEXT_LEAVES: usize = 64;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct SearchSpan {
-    pub(crate) start: usize,
-    pub(crate) end: usize,
+pub(super) struct SearchSpan {
+    pub(super) start: usize,
+    pub(super) end: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -75,7 +75,7 @@ impl SearchExpr {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SearchDiagnosticKind {
+pub(super) enum SearchDiagnosticKind {
     UnknownField,
     MissingFieldValue,
     UnknownKind,
@@ -92,7 +92,7 @@ pub(crate) enum SearchDiagnosticKind {
 }
 
 impl SearchDiagnosticKind {
-    pub fn as_str(self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             Self::UnknownField => "unknown_field",
             Self::MissingFieldValue => "missing_field_value",
@@ -112,21 +112,29 @@ impl SearchDiagnosticKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SearchDiagnostic {
-    pub(crate) message: String,
-    pub(crate) kind: SearchDiagnosticKind,
-    pub(crate) span: SearchSpan,
-    pub(crate) column: usize,
+pub(super) struct SearchDiagnostic {
+    pub(super) message: String,
+    pub(super) kind: SearchDiagnosticKind,
+    pub(super) span: SearchSpan,
+    pub(super) column: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SearchQueryError {
-    pub(crate) diagnostic: SearchDiagnostic,
+pub struct SearchQueryError {
+    pub(super) diagnostic: SearchDiagnostic,
 }
 
 impl SearchQueryError {
-    pub fn diagnostic(&self) -> &SearchDiagnostic {
-        &self.diagnostic
+    pub fn message(&self) -> &str {
+        &self.diagnostic.message
+    }
+
+    pub fn kind(&self) -> &'static str {
+        self.diagnostic.kind.as_str()
+    }
+
+    pub fn span(&self) -> std::ops::Range<usize> {
+        self.diagnostic.span.start..self.diagnostic.span.end
     }
 
     fn new(
@@ -1051,14 +1059,10 @@ mod tests {
     #[test]
     fn exposes_stable_public_diagnostic_contract() {
         let error = parse("knd:recipe").unwrap_err();
+        assert_eq!(error.kind(), "unknown_field");
+        assert_eq!(error.span(), 0..3);
         assert_eq!(
-            error.diagnostic().kind,
-            SearchDiagnosticKind::UnknownField
-        );
-        assert_eq!(error.diagnostic().span, span(0, 3));
-        assert_eq!(error.diagnostic().column, 1);
-        assert_eq!(
-            error.diagnostic().message,
+            error.message(),
             "unknown search field 'knd' at column 1"
         );
         assert_eq!(

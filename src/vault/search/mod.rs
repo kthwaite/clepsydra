@@ -6,9 +6,7 @@ use super::index::SearchResult;
 pub(super) mod query;
 mod sql;
 
-pub(crate) use query::{
-    SearchDiagnostic, SearchDiagnosticKind, SearchQueryError, SearchSpan,
-};
+use query::SearchQueryError;
 
 #[derive(Debug, Error)]
 pub(super) enum SearchExecutionError {

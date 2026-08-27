@@ -24,7 +24,8 @@ use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
 use super::path::VaultPath;
 use super::reference_issues::{ReferenceIssueFilter, ReferenceIssuePage};
 use super::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
-use super::search::{self, SearchExecutionError, SearchQueryError};
+pub use super::search::query::SearchQueryError;
+use super::search::{self, SearchExecutionError};
 
 // ---------------------------------------------------------------------------
 // IndexError
