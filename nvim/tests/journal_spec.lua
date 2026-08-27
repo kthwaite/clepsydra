@@ -1,11 +1,4 @@
-local function eq(expected, actual, msg)
-	if not vim.deep_equal(expected, actual) then
-		error(
-			(msg or "not equal") .. "\n  expected: " .. vim.inspect(expected) .. "\n  actual:   " .. vim.inspect(actual),
-			2
-		)
-	end
-end
+local eq = dofile(vim.fs.dirname(debug.getinfo(1, "S").source:sub(2)) .. "/helpers.lua").eq
 
 local journal = require("clepsydra.journal")
 local BASE = "2026-08-26"
