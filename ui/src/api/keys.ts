@@ -35,6 +35,12 @@ export const queryKeys = {
     recent: (days: number) => ["journal", "recent", days] as const,
   },
 
+  aiJournal: {
+    all: ["ai-journal"] as const,
+    today: ["ai-journal", "today"] as const,
+    recent: (days: number) => ["ai-journal", "recent", days] as const,
+  },
+
   board: {
     all: ["board"] as const,
   },
@@ -175,6 +181,7 @@ export function invalidatePageContent(
   qc.invalidateQueries({ queryKey: queryKeys.tasks.all });
   qc.invalidateQueries({ queryKey: queryKeys.agenda.all });
   qc.invalidateQueries({ queryKey: queryKeys.journal.all });
+  qc.invalidateQueries({ queryKey: queryKeys.aiJournal.all });
 }
 
 /** Same as `invalidatePageContent` plus folder listings — for create/move/delete. */

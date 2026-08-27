@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  aiJournalDateFromPath,
+  aiJournalPathForDate,
   fastiRows,
   journalDateFromPath,
   journalDayLabel,
@@ -87,5 +89,30 @@ describe("shortDate / relativeDays", () => {
     expect(relativeDays("2026-08-07", "2026-08-07")).toBe("today");
     expect(relativeDays("2026-08-05", "2026-08-07")).toBe("2d");
     expect(relativeDays("2026-08-08", "2026-08-07")).toBe("—");
+  });
+});
+
+describe("ai journal paths", () => {
+  it("builds the draft path for a date", () => {
+    expect(aiJournalPathForDate("2026-08-27")).toBe(
+      "ai-journals/2026-08-27.md",
+    );
+  });
+  it("parses legacy and canonical ai-journal paths", () => {
+    expect(aiJournalDateFromPath("ai-journals/2026-08-27.md")).toBe(
+      "2026-08-27",
+    );
+    expect(
+      aiJournalDateFromPath("ai-journals/20260827.2026-08-27.Ab12Cd34.md"),
+    ).toBe("2026-08-27");
+    expect(aiJournalDateFromPath("journals/2026-08-27.md")).toBeNull();
+    expect(aiJournalDateFromPath("other/ai-journals/2026-08-27.md")).toBeNull();
+  });
+  it("keeps the human parser off ai paths and extends it to canonical", () => {
+    expect(journalDateFromPath("ai-journals/2026-08-27.md")).toBeNull();
+    expect(
+      journalDateFromPath("journals/20260827.2026-08-27.Ab12Cd34.md"),
+    ).toBe("2026-08-27");
+    expect(journalDateFromPath("journals/2026-08-27.md")).toBe("2026-08-27");
   });
 });

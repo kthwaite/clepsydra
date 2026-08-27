@@ -1,7 +1,15 @@
 import { isoAddDays, localDateKey, parseLocalDate } from "#/lib/time";
 
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
-const JOURNAL_PATH_RE = /^journals\/(\d{4}-\d{2}-\d{2})\.md$/;
+
+/** Matches `<prefix>/YYYY-MM-DD.md` (legacy) and
+ *  `<prefix>/<yyyymmdd>.YYYY-MM-DD.<shortid>.md` (canonical). */
+const streamPathRe = (prefix: string) =>
+  new RegExp(
+    `^${prefix}/(?:\\d{8}\\.)?(\\d{4}-\\d{2}-\\d{2})(?:\\.[A-Za-z0-9]{8})?\\.md$`,
+  );
+const JOURNAL_PATH_RE = streamPathRe("journals");
+const AI_JOURNAL_PATH_RE = streamPathRe("ai-journals");
 
 export function journalPathForDate(dateKey: string): string {
   return `journals/${dateKey}.md`;
@@ -19,11 +27,25 @@ export function journalDateFromPath(path: string): string | null {
   return m ? m[1] : null;
 }
 
-/** FOLIO title for JOURNAL pages: "Friday 7 August 2026". Falls back to the
- *  raw title when neither path nor title carries a journal date. */
-export function journalDayLabel(path: string, title: string): string {
-  const dateKey =
-    journalDateFromPath(path) ?? (DATE_KEY_RE.test(title) ? title : null);
+export function aiJournalPathForDate(dateKey: string): string {
+  return `ai-journals/${dateKey}.md`;
+}
+
+/** Deterministic draft path for today's AI journal — same accepted coupling
+ *  to the server vault layout as todayJournalPath. */
+export function todayAiJournalPath(): string {
+  return aiJournalPathForDate(localDateKey(new Date()));
+}
+
+export function aiJournalDateFromPath(path: string): string | null {
+  const m = path.match(AI_JOURNAL_PATH_RE);
+  return m ? m[1] : null;
+}
+
+/** Shared FOLIO day-label formatting: "Friday 7 August 2026" for a resolved
+ *  date key, falling back to the raw title when neither path nor title
+ *  carries a stream date. */
+function dayLabel(dateKey: string | null, title: string): string {
   if (!dateKey) return title;
   return parseLocalDate(dateKey).toLocaleDateString(undefined, {
     weekday: "long",
@@ -31,6 +53,21 @@ export function journalDayLabel(path: string, title: string): string {
     month: "long",
     year: "numeric",
   });
+}
+
+/** FOLIO title for JOURNAL pages: "Friday 7 August 2026". Falls back to the
+ *  raw title when neither path nor title carries a journal date. */
+export function journalDayLabel(path: string, title: string): string {
+  const dateKey =
+    journalDateFromPath(path) ?? (DATE_KEY_RE.test(title) ? title : null);
+  return dayLabel(dateKey, title);
+}
+
+/** FOLIO title for AI JOURNAL pages, same shape as journalDayLabel. */
+export function aiJournalDayLabel(path: string, title: string): string {
+  const dateKey =
+    aiJournalDateFromPath(path) ?? (DATE_KEY_RE.test(title) ? title : null);
+  return dayLabel(dateKey, title);
 }
 
 /** Nearest written day strictly before (-1) or after (+1) `from`, or null.
