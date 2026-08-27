@@ -488,23 +488,36 @@ describe("BaseMemberDraft", () => {
   it("disables only submission when no authoritative session is available", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
-    render(draftElement({ isSaveDisabled: true, onSave }));
+    const onCancel = vi.fn();
+    render(
+      draftElement({
+        isSaving: false,
+        isSaveDisabled: true,
+        onSave,
+        onCancel,
+      }),
+    );
 
     const title = screen.getByRole("textbox", {
       name: "New member — Title",
+    });
+    const saveButton = screen.getByRole("button", {
+      name: "Save new member",
     });
     expect(title).toBeEnabled();
     expect(
       screen.getByRole("button", { name: "Cancel new member" }),
     ).toBeEnabled();
-    expect(
-      screen.getByRole("button", { name: "Save new member" }),
-    ).toBeDisabled();
+    expect(saveButton).toBeDisabled();
 
     await user.type(title, "Authored while blocked");
     await user.keyboard("{Meta>}{Enter}{/Meta}");
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    await user.keyboard("{Escape}");
+    await user.click(saveButton);
 
     expect(onSave).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledOnce();
     expect(title).toHaveValue("Authored while blocked");
   });
 

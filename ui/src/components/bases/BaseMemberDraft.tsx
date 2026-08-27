@@ -307,12 +307,14 @@ export function BaseMemberDraft({
   }, [diagnostics]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    if (event.defaultPrevented || isSaving || isSaveDisabled) return;
+    if (isSaving) return;
+    if (event.defaultPrevented) return;
     if (event.key === "Escape") {
       event.preventDefault();
       onCancel();
       return;
     }
+    if (isSaveDisabled) return;
     if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
       event.preventDefault();
       commitActiveEditor();

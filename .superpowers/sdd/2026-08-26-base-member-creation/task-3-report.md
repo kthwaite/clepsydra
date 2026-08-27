@@ -139,3 +139,59 @@ exit 0
 ### Concerns
 
 Vitest still emits the existing Vite native-config migration warnings for `__dirname` and the extensionless `./mdx-plugin` import. Whole-file lint of the migrated `BaseTableView.tsx` caller exits successfully but reports its two pre-existing non-null-assertion warnings at lines 665 and 751.
+
+## Review round 2/5
+
+### Status
+
+Fixed the Important keyboard Cancel regression in `BaseMemberDraft`.
+
+- `isSaving` remains the first keyboard guard and continues to disable every draft action.
+- A non-prevented Escape now calls `onCancel` before `isSaveDisabled` is considered.
+- `isSaveDisabled` gates only pointer and Cmd/Ctrl+Enter submission.
+- The behavior test now covers enabled Cancel, disabled Save, blocked Cmd/Ctrl+Enter submission, and Escape cancellation while not saving.
+
+### TDD evidence
+
+RED:
+
+```text
+bun run test -- src/components/bases/__tests__/BaseMemberDraft.test.tsx -t "disables only submission"
+Test Files  1 failed (1)
+Tests       1 failed | 22 skipped (23)
+- expected onCancel to be called once after Escape, but it was called 0 times
+```
+
+GREEN:
+
+```text
+bun run test -- src/components/bases/__tests__/BaseMemberDraft.test.tsx -t "disables only submission"
+Test Files  1 passed (1)
+Tests       1 passed | 22 skipped (23)
+```
+
+Required regression suite:
+
+```text
+bun run test -- src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/bases/__tests__/BaseMemberIntake.test.tsx src/components/codex/__tests__/InscribeModal.test.tsx
+Test Files  3 passed (3)
+Tests       48 passed (48)
+```
+
+### Verification gates
+
+```text
+bun run typecheck
+$ tsc --noEmit --project tsconfig.app.json
+exit 0
+```
+
+```text
+bun run lint -- src/components/bases/BaseMemberDraft.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx
+Checked 2 files in 29ms. No fixes applied.
+exit 0
+```
+
+### Concerns
+
+No task-specific concern. Vitest still emits the existing Vite native-config migration warnings for `__dirname` and the extensionless `./mdx-plugin` import.
