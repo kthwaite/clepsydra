@@ -930,3 +930,82 @@ async fn concurrent_status_updates_on_one_page_preserve_both_tasks() {
         assert!(body.contains("- [-] Second"), "{body}");
     }
 }
+
+#[tokio::test]
+async fn update_task_status_handles_multibyte_task_text() {
+    // Regression: the checkbox search region was sliced at `span_start + 20`
+    // bytes. "- [ ] " plus twelve ASCII characters puts a four-byte character
+    // across that offset, so the slice landed mid-character and panicked.
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/multibyte-task.md")
+        .json(&serde_json::json!({
+            "title": "Multibyte Task",
+            "body": "- [ ] abcdefghijkl\u{1F570} wind the clepsydra\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let res = server.get("/api/vault/tasks?page=multibyte-task.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let tasks = body["tasks"].as_array().unwrap();
+    assert_eq!(tasks.len(), 1);
+    let span_start = tasks[0]["span_start"].as_i64().unwrap();
+
+    let res = server
+        .put("/api/vault/tasks/status")
+        .json(&serde_json::json!({
+            "page_path": "multibyte-task.md",
+            "span_start": span_start,
+            "status": "done"
+        }))
+        .await;
+    res.assert_status_ok();
+
+    let page_res = server.get("/api/vault/pages/multibyte-task.md").await;
+    page_res.assert_status_ok();
+    let page_body: serde_json::Value = page_res.json();
+    let body_text = page_body["body"].as_str().unwrap();
+    assert!(
+        body_text.contains("[x]"),
+        "expected [x] in body after marking done, got: {body_text}"
+    );
+    assert!(
+        body_text.contains('\u{1F570}'),
+        "task text should be preserved, got: {body_text}"
+    );
+}
+
+#[tokio::test]
+async fn update_task_status_rejects_span_inside_a_character() {
+    // A `span_start` that is in range but not on a character boundary must be
+    // rejected, not slice the body mid-character.
+    let (server, _tmp) = setup_server();
+
+    server
+        .post("/api/vault/pages/boundary-task.md")
+        .json(&serde_json::json!({
+            "title": "Boundary Task",
+            "body": "- [ ] abcdefghijkl\u{1F570} wind the clepsydra\n"
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+
+    let res = server.get("/api/vault/tasks?page=boundary-task.md").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let span_start = body["tasks"][0]["span_start"].as_i64().unwrap();
+
+    // +19 lands on a continuation byte of the four-byte character at +18.
+    let res = server
+        .put("/api/vault/tasks/status")
+        .json(&serde_json::json!({
+            "page_path": "boundary-task.md",
+            "span_start": span_start + 19,
+            "status": "done"
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
