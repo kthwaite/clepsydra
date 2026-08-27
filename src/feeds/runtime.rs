@@ -33,8 +33,7 @@ pub struct FeedRuntime {
     pub(crate) feed_after_list_snapshot_hook:
         parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(test)]
-    pub(crate) feed_before_opml_parse_hook:
-        parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    pub(crate) feed_before_opml_parse_hook: parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Feed scheduler limits resolved from the application configuration.
     pub feed_settings: FeedsSettings,
 }
