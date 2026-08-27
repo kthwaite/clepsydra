@@ -97,6 +97,21 @@ dated Tasks; `400` Missing or invalid `today`; `500` Internal server error.
 ### `GET /api/vault/agenda/cycle-burndown`
 Get cycle burndown. Responses: `200` Historical cycle burndown; `400` Invalid cycle dates or telemetry scope; `404` Cycle not found; `500` Internal server error.
 
+## AI Journal
+
+### `GET /api/vault/ai-journal/{date}`
+Get AI journal by date. Responses: `200` AI journal page; `400` Invalid date; `404` AI journal not found; `500` Internal server error.
+### `GET /api/vault/ai-journal/range`
+Get date range. Responses: `200` AI journals in date range; `400` Invalid date range; `500` Internal server error.
+### `GET /api/vault/ai-journal/recent`
+Get recent AI journals. Responses: `200` Recent AI journals; `500` Internal server error.
+### `GET /api/vault/ai-journal/today`
+Get today's AI journal. Responses: `200` Today's AI journal; `404` AI journal not found; `500` Internal server error.
+### `POST /api/vault/ai-journal/today`
+Ensure today's AI journal exists. Responses: `200` Existing AI journal; `201` Created AI journal; `500` Internal server error.
+### `POST /api/vault/ai-journal/today/capture`
+Capture into today's AI journal. Responses: `200` Updated AI journal; `400` Invalid author; `409` Protected AI journal; `500` Internal server error.
+
 ## Archive
 
 ### `POST /api/vault/archive`

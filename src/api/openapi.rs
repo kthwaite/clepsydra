@@ -73,6 +73,7 @@ impl Modify for SchemaOverrides {
         (name = "Academic", description = "Academic works, annotations and importers"),
         (name = "Archive", description = "Web archives and content-addressed blobs"),
         (name = "Journal", description = "Daily journal retrieval and capture"),
+        (name = "AI Journal", description = "Daily AI-assistant journal retrieval and capture"),
         (name = "Conversations", description = "Atomic AI conversation capture"),
         (name = "Agenda", description = "Today, week and overdue task views"),
         (name = "Blocks", description = "Block lookup, search and identifiers"),
@@ -170,6 +171,12 @@ impl Modify for SchemaOverrides {
         crate::api::journal::get_range,
         crate::api::journal::get_recent,
         crate::api::journal::get_by_date,
+        crate::api::ai_journal::get_today,
+        crate::api::ai_journal::ensure_today,
+        crate::api::ai_journal::capture_today,
+        crate::api::ai_journal::get_range,
+        crate::api::ai_journal::get_recent,
+        crate::api::ai_journal::get_by_date,
         // Tasks and agenda
         crate::api::tasks::list_tasks,
         crate::api::tasks::get_task_completion_history,
@@ -385,6 +392,7 @@ impl Modify for SchemaOverrides {
             crate::api::journal::CaptureRequest,
             crate::api::journal::JournalSummary,
             crate::api::journal::JournalTodayResponse,
+            crate::api::ai_journal::AiCaptureRequest,
             // Tasks and agenda
             crate::api::tasks::TaskItem,
             crate::api::tasks::TaskListResponse,
@@ -533,6 +541,7 @@ mod tests {
                 "ONE_ON_ONE",
                 "ARCHIVE",
                 "AI_CONVERSATION",
+                "AI_JOURNAL",
             ]
         );
     }

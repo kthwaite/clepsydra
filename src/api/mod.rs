@@ -1,5 +1,6 @@
 pub mod academic;
 pub mod agenda;
+pub mod ai_journal;
 pub mod archive;
 pub mod attachments;
 pub mod base_members;
@@ -206,6 +207,7 @@ pub fn api_router_with_archive_limit(
         .nest("/cas", archive::cas_router())
         .nest("/index", index_routes::router())
         .nest("/journal", journal::router())
+        .nest("/ai-journal", ai_journal::router())
         .nest("/tasks", tasks::router())
         .nest("/conversations", conversations::router())
         .nest("/board", board::router())
