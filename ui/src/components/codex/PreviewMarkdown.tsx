@@ -121,6 +121,23 @@ const components: Components = {
     </blockquote>
   ),
   hr: () => <hr className="my-1.5 border-0 border-t border-rule-soft" />,
+  table: ({ children }) => (
+    <div className="my-1 overflow-x-auto">
+      <table className="w-full border-collapse border border-rule-soft font-sans text-[10.5px] leading-[1.4]">
+        {children}
+      </table>
+    </div>
+  ),
+  th: ({ children }) => (
+    <th className="border border-rule-soft bg-paper-2 px-1.5 py-[2px] text-left font-bold text-ink">
+      {children}
+    </th>
+  ),
+  td: ({ children }) => (
+    <td className="border border-rule-soft px-1.5 py-[2px] align-top text-ink-mute">
+      {children}
+    </td>
+  ),
   img: ({ alt }) => (
     <span className="cl-mono text-[9px] text-ink-faint">
       🖼 {alt || "image"}

@@ -17,6 +17,11 @@ import {
 } from "./elements/list";
 import { inlineMathDescriptor, mathBlockDescriptor } from "./elements/math";
 import { paragraphDescriptor } from "./elements/paragraph";
+import {
+  tableCellDescriptor,
+  tableDescriptor,
+  tableRowDescriptor,
+} from "./elements/table";
 import { thematicBreakDescriptor } from "./elements/thematicBreak";
 import { wikilinkDescriptor } from "./elements/wikilink";
 import type { CustomElement, ElementType } from "./types";
@@ -40,6 +45,9 @@ const ALL: ElementDescriptor[] = [
   footnoteRefDescriptor,
   footnoteDefDescriptor,
   mathBlockDescriptor,
+  tableDescriptor,
+  tableRowDescriptor,
+  tableCellDescriptor,
   baseEmbedDescriptor,
 ];
 

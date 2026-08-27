@@ -51,7 +51,8 @@ function ensureTrailingParagraph(editor: Editor): boolean {
     !SlateElement.isElement(last) ||
     (last.type !== "base-embed" &&
       last.type !== "code-block" &&
-      last.type !== "journal-time")
+      last.type !== "journal-time" &&
+      last.type !== "table")
   ) {
     return false;
   }

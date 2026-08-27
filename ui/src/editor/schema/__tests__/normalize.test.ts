@@ -441,3 +441,161 @@ describe("Base embed integrity invariant", () => {
     });
   });
 });
+
+describe("table structure invariant", () => {
+  function tableEditor(children: unknown) {
+    const editor = withSchema(createEditor());
+    editor.children = children as never;
+    Editor.normalize(editor, { force: true });
+    return editor;
+  }
+
+  it("wraps a stray child of a table in a row and a cell", () => {
+    const editor = tableEditor([
+      {
+        type: "table",
+        children: [{ type: "paragraph", children: [{ text: "loose" }] }],
+      },
+    ]);
+    const table = editor.children[0] as unknown as {
+      type: string;
+      children: { type: string; children: { type: string }[] }[];
+    };
+    expect(table.type).toBe("table");
+    expect(table.children[0].type).toBe("table-row");
+    expect(table.children[0].children[0].type).toBe("table-cell");
+  });
+
+  it("gives an empty row a cell", () => {
+    const editor = tableEditor([
+      { type: "table", children: [{ type: "table-row", children: [] }] },
+    ]);
+    const row = (
+      editor.children[0] as unknown as { children: { children: unknown[] }[] }
+    ).children[0];
+    expect(row.children).toHaveLength(1);
+  });
+
+  it("marks only the leading row's cells as headers", () => {
+    const editor = tableEditor([
+      {
+        type: "table",
+        children: [
+          {
+            type: "table-row",
+            children: [
+              { type: "table-cell", header: true, children: [{ text: "h" }] },
+            ],
+          },
+          {
+            type: "table-row",
+            children: [
+              { type: "table-cell", header: true, children: [{ text: "b" }] },
+            ],
+          },
+        ],
+      },
+    ]);
+    const rows = (
+      editor.children[0] as unknown as {
+        children: { children: { header?: boolean }[] }[];
+      }
+    ).children;
+    expect(rows[0].children[0].header).toBe(true);
+    expect(rows[1].children[0].header).toBeUndefined();
+  });
+
+  it("mirrors the table's column alignment onto every cell", () => {
+    const editor = tableEditor([
+      {
+        type: "table",
+        align: ["right", null],
+        children: [
+          {
+            type: "table-row",
+            children: [
+              { type: "table-cell", children: [{ text: "a" }] },
+              {
+                type: "table-cell",
+                align: "center",
+                children: [{ text: "b" }],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const cells = (
+      editor.children[0] as unknown as {
+        children: { children: { align?: string }[] }[];
+      }
+    ).children[0].children;
+    expect(cells[0].align).toBe("right");
+    expect(cells[1].align).toBeUndefined();
+  });
+
+  it("flattens block content pasted into a cell to its inline children", () => {
+    const editor = tableEditor([
+      {
+        type: "table",
+        children: [
+          {
+            type: "table-row",
+            children: [
+              {
+                type: "table-cell",
+                children: [
+                  { type: "paragraph", children: [{ text: "pasted" }] },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const cell = (
+      editor.children[0] as unknown as {
+        children: { children: { children: { text?: string }[] }[] }[];
+      }
+    ).children[0].children[0];
+    expect(cell.children).toEqual([{ text: "pasted" }]);
+  });
+
+  it("keeps inline elements inside a cell", () => {
+    const editor = tableEditor([
+      {
+        type: "table",
+        children: [
+          {
+            type: "table-row",
+            children: [
+              {
+                type: "table-cell",
+                children: [
+                  { text: "" },
+                  {
+                    type: "wikilink",
+                    target: "Page",
+                    children: [{ text: "" }],
+                  },
+                  { text: "" },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+    const json = JSON.stringify(editor.children[0]);
+    expect(json).toContain('"type":"wikilink"');
+  });
+
+  it("removes a table left with no rows", () => {
+    const editor = tableEditor([
+      { type: "paragraph", children: [{ text: "keep" }] },
+      { type: "table", children: [] },
+    ]);
+    const types = editor.children.map((n) => (n as { type?: string }).type);
+    expect(types).not.toContain("table");
+  });
+});

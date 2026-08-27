@@ -122,6 +122,34 @@ export interface MathBlockElement {
   children: CustomText[];
 }
 
+/** Column alignment declared by a GFM table's delimiter row. */
+export type TableAlign = "left" | "center" | "right";
+
+export interface TableElement {
+  type: "table";
+  /**
+   * Per-column alignment from the delimiter row; `null` for an unaligned
+   * column. Authoritative — the table normalizer mirrors it onto each cell
+   * so a cell can style itself without walking back up to its table.
+   */
+  align?: (TableAlign | null)[];
+  children: TableRowElement[];
+}
+
+export interface TableRowElement {
+  type: "table-row";
+  children: TableCellElement[];
+}
+
+export interface TableCellElement {
+  type: "table-cell";
+  /** Set on the leading row's cells — a GFM table is always headed. */
+  header?: true;
+  /** Mirror of the owning table's column alignment; maintained by normalize. */
+  align?: TableAlign;
+  children: Descendant[];
+}
+
 export interface ConversationTurnElement {
   type: "conversation-turn";
   role: "user" | "assistant";
@@ -176,6 +204,9 @@ export type CustomElement =
   | MathBlockElement
   | ConversationTurnElement
   | FootnoteDefElement
+  | TableElement
+  | TableRowElement
+  | TableCellElement
   | BaseEmbedElement;
 
 export type ElementType = CustomElement["type"];

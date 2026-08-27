@@ -34,6 +34,7 @@ import {
   makeNumberedList,
 } from "./elements/list";
 import { makeParagraph } from "./elements/paragraph";
+import { makeTable, makeTableCell, makeTableRow } from "./elements/table";
 import { makeThematicBreak } from "./elements/thematicBreak";
 import { makeWikilink } from "./elements/wikilink";
 import { withSchema } from "./withSchema";
@@ -237,6 +238,52 @@ export const ThematicBreak: Story = {
       makeParagraph({ children: [{ text: "Above the divider." }] }),
       makeThematicBreak({}),
       makeParagraph({ children: [{ text: "Below the divider." }] }),
+    ]),
+};
+
+export const Table: Story = {
+  render: () =>
+    renderWithProviders([
+      makeTable({
+        align: [null, "right", "center"],
+        children: [
+          makeTableRow({
+            children: [
+              makeTableCell({ header: true, children: [{ text: "Vessel" }] }),
+              makeTableCell({
+                header: true,
+                align: "right",
+                children: [{ text: "Depth" }],
+              }),
+              makeTableCell({
+                header: true,
+                align: "center",
+                children: [{ text: "State" }],
+              }),
+            ],
+          }),
+          makeTableRow({
+            children: [
+              makeTableCell({ children: [{ text: "Clepsydra" }] }),
+              makeTableCell({ align: "right", children: [{ text: "12" }] }),
+              makeTableCell({
+                align: "center",
+                children: [{ text: "sealed", italic: true }],
+              }),
+            ],
+          }),
+          makeTableRow({
+            children: [
+              makeTableCell({ children: [{ text: "Astrolabe" }] }),
+              makeTableCell({ align: "right", children: [{ text: "4" }] }),
+              makeTableCell({
+                align: "center",
+                children: [{ text: "open", bold: true }],
+              }),
+            ],
+          }),
+        ],
+      }),
     ]),
 };
 
