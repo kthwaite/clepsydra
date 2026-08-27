@@ -806,7 +806,11 @@ mod tests {
         server.verify().await;
     }
 
-    #[tokio::test]
+    // Multi-threaded like the other deadline fixtures: the fixture server and
+    // the client under test both need to make progress, and on a current-thread
+    // runtime they compete for the same thread. Under a loaded test binary that
+    // starves the server past the deadline and the request never lands.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn one_deadline_covers_resolution_redirects_and_streaming_the_body() {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
             .await
@@ -836,7 +840,7 @@ mod tests {
                         body_hits.fetch_add(1, Ordering::SeqCst);
                         let (sender, receiver) = tokio::sync::mpsc::channel(1);
                         tokio::spawn(async move {
-                            tokio::time::sleep(Duration::from_millis(35)).await;
+                            tokio::time::sleep(Duration::from_millis(350)).await;
                             if sender
                                 .send(Ok::<_, Infallible>(Bytes::from_static(b"first")))
                                 .await
@@ -844,7 +848,7 @@ mod tests {
                             {
                                 return;
                             }
-                            tokio::time::sleep(Duration::from_millis(35)).await;
+                            tokio::time::sleep(Duration::from_millis(350)).await;
                             let _ = sender
                                 .send(Ok::<_, Infallible>(Bytes::from_static(b"second")))
                                 .await;
@@ -859,12 +863,12 @@ mod tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let resolver = Arc::new(RoutingResolver {
             address,
-            delay: Duration::from_millis(15),
+            delay: Duration::from_millis(150),
             calls,
         });
         let client = CheckedHttpClient::for_test_with_resolver(1024, resolver)
             .expect("fixture client should build")
-            .with_deadline(Duration::from_millis(80));
+            .with_deadline(Duration::from_millis(800));
         let started = Instant::now();
 
         let error = client
@@ -877,7 +881,7 @@ mod tests {
 
         assert!(matches!(error, CheckedHttpError::DeadlineExceeded));
         assert!(
-            started.elapsed() < Duration::from_millis(180),
+            started.elapsed() < Duration::from_millis(1800),
             "per-hop timeouts allowed the fixture to hold the request too long"
         );
         assert_eq!(route_hits.load(Ordering::SeqCst), 2);
