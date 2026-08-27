@@ -139,6 +139,12 @@ struct BlockBuilder {
     list_depth: usize,
     span_start: usize,
     span_end: usize,
+    /// Whether this block came from a true `Tag::Item` (a real list item) and
+    /// so should participate in `[-]` cancelled-checkbox extraction. Set only
+    /// by the `Event::Start(Tag::Item)` arm; definition-list titles/definitions
+    /// reuse `BlockType::ListItem` (see its doc comment) but are not list
+    /// items, so this stays `false` for them.
+    accepts_checkbox: bool,
 }
 
 /// Emit the in-progress builder (if any), clearing `current`.
@@ -156,6 +162,7 @@ fn start_block_builder(
     list_depth: usize,
     span_start: usize,
     span_end: usize,
+    accepts_checkbox: bool,
 ) {
     flush_current(blocks, current);
     *current = Some(BlockBuilder {
@@ -165,6 +172,7 @@ fn start_block_builder(
         list_depth,
         span_start,
         span_end,
+        accepts_checkbox,
     });
 }
 
@@ -206,6 +214,7 @@ fn handle_paragraph_start(
             list_depth: 0,
             span_start: range_start,
             span_end: range_end,
+            accepts_checkbox: false,
         });
     } else {
         start_block_builder(
@@ -215,6 +224,7 @@ fn handle_paragraph_start(
             0,
             range_start,
             range_end,
+            false,
         );
     }
 }
@@ -267,11 +277,19 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 list_depth.saturating_sub(1),
                 range.start,
                 range.end,
+                true,
             ),
             Event::End(TagEnd::Item) => finish_block(&mut blocks, &mut current, range.end),
             // A definition-list title/definition is its own block at the
             // same granularity as a list item; there's no dedicated
             // BlockType for it, so it reuses ListItem (see BlockType docs).
+            // Titles and definitions are deliberately modeled as flat
+            // siblings at the same depth (mirroring how List/Item is
+            // modeled), not as a term-parent with a definition-child.
+            // `accepts_checkbox` stays false here: only a true `Tag::Item`
+            // participates in `[-]` cancelled-checkbox extraction, so a
+            // definition whose text happens to start with `[-]` is never
+            // mistaken for a task (see `emit_block`).
             Event::Start(Tag::DefinitionListTitle) => start_block_builder(
                 &mut blocks,
                 &mut current,
@@ -279,6 +297,7 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 list_depth.saturating_sub(1),
                 range.start,
                 range.end,
+                false,
             ),
             Event::End(TagEnd::DefinitionListTitle) => {
                 finish_block(&mut blocks, &mut current, range.end)
@@ -290,6 +309,7 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 list_depth.saturating_sub(1),
                 range.start,
                 range.end,
+                false,
             ),
             Event::End(TagEnd::DefinitionListDefinition) => {
                 finish_block(&mut blocks, &mut current, range.end)
@@ -302,6 +322,7 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 0,
                 range.start,
                 range.end,
+                false,
             ),
             Event::End(TagEnd::Heading(_)) => finish_block(&mut blocks, &mut current, range.end),
             Event::Start(Tag::Paragraph) => handle_paragraph_start(
@@ -321,6 +342,7 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 0,
                 range.start,
                 range.end,
+                false,
             ),
             Event::End(TagEnd::CodeBlock) => finish_block(&mut blocks, &mut current, range.end),
             Event::Start(Tag::BlockQuote(_)) => {
@@ -349,8 +371,11 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
 fn emit_block(blocks: &mut Vec<Block>, builder: BlockBuilder) {
     let mut content = builder.text_parts.join("");
 
-    // For list items without a TaskListMarker, check for `[-]` cancelled pattern
-    let checkbox = if builder.block_type == BlockType::ListItem && builder.checkbox.is_none() {
+    // For true list items without a TaskListMarker, check for `[-]` cancelled
+    // pattern. `accepts_checkbox` excludes definition-list titles/definitions,
+    // which reuse BlockType::ListItem but are not list items (see BlockBuilder
+    // docs) — their content must never be mistaken for a task checkbox.
+    let checkbox = if builder.accepts_checkbox && builder.checkbox.is_none() {
         if extract_cancelled_checkbox(&mut content) {
             Some(CheckboxState::Cancelled)
         } else {
@@ -442,6 +467,7 @@ mod tests {
             list_depth: 0,
             span_start: 0,
             span_end: 2,
+            accepts_checkbox: false,
         });
         flush_current(&mut blocks, &mut current);
         assert!(current.is_none());
@@ -458,6 +484,7 @@ mod tests {
             list_depth: 0,
             span_start: 0,
             span_end: 0,
+            accepts_checkbox: true,
         });
         set_checkbox(&mut current, true);
         assert_eq!(
@@ -483,6 +510,7 @@ mod tests {
             list_depth: 0,
             span_start: 0,
             span_end: 5,
+            accepts_checkbox: false,
         });
         handle_paragraph_start(&mut blocks, &mut current, true, 20, 30);
         // The previous builder was dropped, not emitted.
@@ -502,6 +530,7 @@ mod tests {
             list_depth: 0,
             span_start: 10,
             span_end: 0,
+            accepts_checkbox: false,
         });
         handle_paragraph_end(&mut blocks, &mut current, 99);
         assert!(current.is_none());
@@ -526,6 +555,18 @@ mod tests {
         assert_eq!(blocks[1].block_type, BlockType::ListItem);
         assert_eq!(blocks[1].content, "Definition");
         assert_eq!(blocks[1].depth, 0);
+    }
+
+    #[test]
+    fn definition_content_is_never_a_checkbox() {
+        // A definition whose text starts with literal "[-]" must keep its text
+        // and must not be promoted to a cancelled task checkbox — only true
+        // list items participate in checkbox extraction.
+        let blocks = parse_blocks("Term\n: [-] not a task");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[1].content, "[-] not a task");
+        assert!(blocks[1].checkbox.is_none());
+        assert!(!blocks[1].properties.contains_key("status"));
     }
 
     #[test]
