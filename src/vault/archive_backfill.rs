@@ -287,4 +287,45 @@ mod tests {
         let report = backfill(&vault, &db, true);
         assert!(report.updated.is_empty() && report.warnings.is_empty());
     }
+
+    #[test]
+    fn publication_failure_preserves_page_and_continues() {
+        let (tmp, vault) = make_vault(&[
+            ("archive/x/a.md", &legacy_archive_page(&format!("\"{H2}\""))),
+            ("archive/x/b.md", &legacy_archive_page(&format!("\"{H2}\""))),
+        ]);
+        let db = make_cas_db(tmp.path(), &[(H2, "image/png")]);
+        let before_a = std::fs::read_to_string(vault.root().join("archive/x/a.md")).unwrap();
+
+        let report = backfill_with_publication(&vault, &db, true, |path, content| {
+            if path.ends_with("a.md") {
+                Err(
+                    crate::vault::atomic_file::AtomicPublicationError::NotPublished(
+                        std::io::Error::other("injected backfill publication failure"),
+                    ),
+                )
+            } else {
+                crate::vault::atomic_file::atomic_replace(path, content)
+            }
+        });
+
+        assert_eq!(report.updated, vec!["archive/x/b.md"]);
+        assert_eq!(report.warnings.len(), 1);
+        assert!(report.warnings[0].contains("injected backfill publication failure"));
+        assert_eq!(
+            std::fs::read_to_string(vault.root().join("archive/x/a.md")).unwrap(),
+            before_a,
+            "publication failure must leave the page untouched"
+        );
+
+        let after_b = std::fs::read_to_string(vault.root().join("archive/x/b.md")).unwrap();
+        let (meta, _, _, w) = crate::vault::page::parse_or_repair_frontmatter(&after_b);
+        assert!(w.is_none());
+        let types = crate::vault::archive_hook::captured_blob_types(&meta);
+        assert_eq!(
+            types.get(H2).map(String::as_str),
+            Some("image/png"),
+            "sibling page in the same sweep must still be written"
+        );
+    }
 }
