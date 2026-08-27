@@ -60,7 +60,13 @@ const queryClient = new QueryClient({
 // Stories import the grammar bundle eagerly — no lazy-loading ceremony here.
 const decorateCode = makeDecorateCode(refractor);
 
-function SchemaPreview({ value }: { value: Descendant[] }) {
+function SchemaPreview({
+  value,
+  editable = false,
+}: {
+  value: Descendant[];
+  editable?: boolean;
+}) {
   const editor = useMemo(
     () => withReact(withHistory(withSchema(createEditor()))),
     [],
@@ -70,7 +76,7 @@ function SchemaPreview({ value }: { value: Descendant[] }) {
     <Slate editor={editor} initialValue={value}>
       <BaseEmbedEditingProvider value={baseEmbedEditing}>
         <Editable
-          readOnly
+          readOnly={!editable}
           renderElement={renderElement}
           renderLeaf={renderLeaf}
           decorate={decorateCode}
@@ -82,11 +88,11 @@ function SchemaPreview({ value }: { value: Descendant[] }) {
 }
 
 /** Wrap a preview in the router + query providers the elements depend on. */
-function renderWithProviders(value: Descendant[]) {
+function renderWithProviders(value: Descendant[], editable = false) {
   const rootRoute = createRootRoute({
     component: () => (
       <>
-        <SchemaPreview value={value} />
+        <SchemaPreview value={value} editable={editable} />
         <Outlet />
       </>
     ),
@@ -167,6 +173,31 @@ export const CodeBlock: Story = {
         ],
       }),
     ]),
+};
+
+export const MermaidCodeBlock: Story = {
+  render: () =>
+    renderWithProviders(
+      [
+        makeCodeBlock({
+          language: "mermaid",
+          children: [
+            {
+              text: "flowchart LR\n  capture[Capture] --> parse[Parse]\n  parse --> index[(Index)]",
+            },
+          ],
+        }),
+      ],
+      true,
+    ),
+  parameters: {
+    docs: {
+      description: {
+        story:
+          "Editable: the DIAGRAM toggle swaps the picture for the source, and clicking the diagram puts the caret in that source.",
+      },
+    },
+  },
 };
 
 export const Blockquote: Story = {

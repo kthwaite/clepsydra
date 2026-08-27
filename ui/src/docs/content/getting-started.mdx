@@ -447,6 +447,28 @@ authored delimiters and source visible unchanged so you can repair it.
 
 Folio supports KaTeX-compatible TeX, not complete LaTeX documents or every MathJax extension.
 
+## Diagrams
+
+A fenced code block tagged `mermaid` renders as a diagram:
+
+````markdown
+```mermaid
+flowchart LR
+  capture[Capture] --> parse[Parse] --> index[(Index)]
+```
+````
+
+Every mermaid block carries a **DIAGRAM** toggle in its header that swaps the
+picture for the source it was written from, and back again. In the editor you
+can also click the diagram itself (or focus it and press `Enter`) to drop the
+caret into its source, and the source stays visible for as long as the caret is
+inside it — a diagram is never in the way of editing the block it came from.
+
+Diagrams follow the current theme and accent, and the mermaid renderer loads
+only when a page actually contains one. If mermaid cannot parse a block,
+Clepsydra shows the error above the authored source rather than an empty frame,
+and the Markdown on disk is the fence you typed either way.
+
 ## 9) Optional: Edit the vault from Neovim (LSP)
 
 `clep lsp` starts a standalone language server on stdio — completion for

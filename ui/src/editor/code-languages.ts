@@ -28,6 +28,14 @@ export const COMMON_LANGUAGES = [
  */
 export const CURATED_ALIASES = ["zsh"] as const;
 
+/**
+ * Languages with no Prism grammar that are still first-class in the picker.
+ * mermaid is a diagram language, not a highlighted one: a ```mermaid block
+ * renders as a diagram (see components/MermaidDiagram.tsx), so operators must
+ * be able to select it even though refractor has nothing to tokenize it with.
+ */
+export const DIAGRAM_LANGUAGES = ["mermaid"] as const;
+
 /** Uppercase display label for a language id (matches the code-block header). */
 export function displayLabel(id: string): string {
   return id.toUpperCase();
@@ -38,8 +46,9 @@ export function displayLabel(id: string): string {
  * COMMON_LANGUAGES pinned to the front (in COMMON order) and the rest
  * following alphabetically. Aliases are collapsed to a single canonical
  * name per grammar, so each grammar appears at most once — except the curated
- * aliases in CURATED_ALIASES (e.g. zsh), which get their own row. The plaintext
- * family (plain/plaintext/text/txt — all the same empty grammar) is
+ * aliases in CURATED_ALIASES (e.g. zsh), which get their own row, and the
+ * grammarless DIAGRAM_LANGUAGES (mermaid), pinned after the common block. The
+ * plaintext family (plain/plaintext/text/txt — all the same empty grammar) is
  * excluded; the picker's dedicated "Plain text" reset row covers it.
  *
  * The grammar bundle is injected (see refractor-lazy.ts). While it is still
@@ -47,7 +56,8 @@ export function displayLabel(id: string): string {
  * known to be registered once the bundle lands.
  */
 export function listLanguageIds(refractor: Refractor | null): string[] {
-  if (!refractor) return [...COMMON_LANGUAGES, ...CURATED_ALIASES];
+  if (!refractor)
+    return [...COMMON_LANGUAGES, ...DIAGRAM_LANGUAGES, ...CURATED_ALIASES];
   // Drop the plaintext family by grammar identity (plain/plaintext/text/txt
   // all map to the same empty grammar object), so they vanish in one filter.
   const grammars = refractor.languages as Record<string, object>;
@@ -60,7 +70,8 @@ export function listLanguageIds(refractor: Refractor | null): string[] {
   // Curated aliases intentionally share a grammar with a common entry (e.g.
   // zsh→bash) but get their own row; pin them right after the common block.
   const curated = CURATED_ALIASES.filter((id) => registeredSet.has(id));
-  const front = [...common, ...curated];
+  // Diagram languages carry no grammar, so they are never in `registered`.
+  const front = [...common, ...DIAGRAM_LANGUAGES, ...curated];
 
   // refractor.listLanguages() returns aliases (e.g. "js", "ts") as flat peers
   // of their canonical grammar ("javascript", "typescript"). Collapse them so
@@ -68,7 +79,9 @@ export function listLanguageIds(refractor: Refractor | null): string[] {
   // with their canonical name. Grammars already represented by a front entry
   // are claimed so they don't reappear (this also suppresses the host of a
   // curated alias, e.g. the remaining bash aliases sh/shell).
-  const claimed = new Set<object>(front.map((id) => grammars[id]));
+  const claimed = new Set<object>(
+    front.map((id) => grammars[id]).filter((grammar) => grammar !== undefined),
+  );
 
   const chosen = new Map<object, string>();
   for (const id of registered) {

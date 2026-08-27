@@ -18,6 +18,13 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
+vi.mock("mermaid", () => ({
+  default: {
+    initialize: vi.fn(),
+    render: vi.fn().mockResolvedValue({ svg: "<svg></svg>" }),
+  },
+}));
+
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
 }));
@@ -51,6 +58,29 @@ beforeEach(() => {
 });
 
 describe("MarkdownRenderer", () => {
+  it("renders a mermaid fence as a toggleable diagram", async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <MarkdownRenderer content={"```mermaid\ngraph TD;\n  a-->b;\n```"} />,
+    );
+
+    await screen.findByTestId("mermaid-diagram");
+    expect(container.querySelector("pre")).toHaveClass("sr-only");
+
+    await user.click(screen.getByRole("button", { name: "Show diagram" }));
+
+    expect(screen.queryByTestId("mermaid-diagram")).toBeNull();
+    expect(container.querySelector("pre")).toHaveTextContent("graph TD;");
+    expect(container.querySelector("pre")).not.toHaveClass("sr-only");
+  });
+
+  it("leaves other fenced languages as plain code blocks", () => {
+    render(<MarkdownRenderer content={"```rust\nfn main() {}\n```"} />);
+
+    expect(screen.queryByTestId("mermaid-block-header")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Show diagram" })).toBeNull();
+  });
+
   it("copies a fenced code block's text via its copy button", async () => {
     const user = userEvent.setup();
     const writeText = vi.spyOn(navigator.clipboard, "writeText");
