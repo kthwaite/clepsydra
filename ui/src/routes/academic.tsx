@@ -71,7 +71,7 @@ function AcademicRoute() {
   );
 }
 
-export const Route = createFileRoute(ACADEMIC_ROUTE_PATH)({
+export const Route = createFileRoute("/academic")({
   staticData: { codexView: "academic" },
   validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
     canonicalizeFilterSearch(search, ACADEMIC_FILTER_URL),

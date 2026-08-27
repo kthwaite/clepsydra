@@ -73,7 +73,7 @@ interface AgendaQueryState {
   isError: boolean;
 }
 
-export const Route = createFileRoute(AGENDA_ROUTE_PATH)({
+export const Route = createFileRoute("/agenda")({
   staticData: { codexView: "agenda" },
   validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
     canonicalizeFilterSearch(search, AGENDA_FILTER_URL),

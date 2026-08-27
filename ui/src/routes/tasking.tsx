@@ -104,7 +104,7 @@ function TaskingRoute() {
   );
 }
 
-export const Route = createFileRoute(TASKING_ROUTE_PATH)({
+export const Route = createFileRoute("/tasking")({
   staticData: { codexView: "tasking" },
   validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
     canonicalizeFilterSearch(search, TASKING_FILTER_URL),

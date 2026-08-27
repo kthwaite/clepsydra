@@ -54,7 +54,7 @@ function RubbishRoute() {
   );
 }
 
-export const Route = createFileRoute(RUBBISH_ROUTE_PATH)({
+export const Route = createFileRoute("/rubbish")({
   staticData: { codexView: "rubbish" },
   validateSearch: (search: Record<string, unknown> & SearchSchemaInput) =>
     canonicalizeFilterSearch(search, RUBBISH_FILTER_URL),
