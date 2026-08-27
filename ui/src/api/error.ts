@@ -13,6 +13,19 @@ export function isApiError(error: unknown): error is ApiError {
   );
 }
 
+export function isInvalidSearchQuery(error: unknown): boolean {
+  if (
+    !isApiError(error) ||
+    typeof error.detail !== "object" ||
+    error.detail === null
+  ) {
+    return false;
+  }
+  return (
+    "code" in error.detail && error.detail.code === "invalid_search_query"
+  );
+}
+
 export function formatApiError(error: unknown, fallback: string): string {
   if (isApiError(error) && error.error) return error.error;
   if (error instanceof Error && error.message) return error.message;

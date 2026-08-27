@@ -52,11 +52,63 @@ The index is authoritative for these panels. A recent file change can briefly le
 
 ## Full-text search
 
-The command palette searches the vault when its query is non-empty. The backing FTS index searches title and body with Porter stemming and Unicode tokenization, orders matches by FTS rank, and returns the folio path, title, and a marked body snippet. The stored path identifies a result but is not itself an FTS search column.
+The command palette searches indexed folio titles and bodies when its query is
+non-empty. The HTTP `GET /api/vault/index/search` endpoint's `q` parameter and
+the MCP `vault_search` tool's `query` parameter use the same grammar. Each
+consumer sends the query unchanged.
 
-Protected folios contribute their title but no body plaintext or ciphertext to FTS. A title query can therefore find a protected folio, while a phrase that exists only in its decrypted body cannot. Search results open the matching folio in the workspace; search does not modify files.
+```text
+kind:recipe
+kind:recipe tag:dinner
+(tag:beer | tag:wine) tasting
+-project:Archive
+project:"My Project"
+"local backup"
+```
 
-Full-text search and wikilink completion have different scopes. FTS searches title and body. The `[[` suggestion menu filters the page catalogue by title, canonical name, and path. Block search is described in [Block References and Transclusion](/docs/block-references-and-transclusion).
+A bare word is a full-text prefix term. Full-text matching uses Porter stemming
+and Unicode tokenization. A quoted text value is an exact phrase. The only
+fields are:
+
+- `kind` recognizes values case-insensitively and normalizes them to the
+  canonical Kind token.
+- `tag` matches an exact, case-sensitive stored or computed tag.
+- `project` matches the exact, case-sensitive stored project value.
+
+Field names must be lowercase. Fields do not use prefix or hierarchical
+matching. Separate expressions with whitespace for AND, use `|` for OR, prefix
+an expression with `-` for NOT, and use parentheses to group expressions.
+Precedence is NOT, then AND, then OR.
+
+Double quotes delimit phrases and field values that contain whitespace or
+operator characters. Within quotes, write `\"` for a literal double quote and
+`\\` for a literal backslash. Outside quotes, parentheses, `|`, leading `-`,
+`:`, whitespace, and `"` are syntax characters; quote literal text that
+resembles structured syntax. A hyphen inside an unquoted word remains part of
+the word.
+
+Results with a positive full-text match come first, ordered by best FTS rank.
+Metadata-only results follow in most-recently-updated order, with missing
+timestamps last, then case-insensitive path and page ID. A metadata-only query
+uses that same metadata order. Its results have an empty snippet, so the
+command palette displays the folio path instead. In a mixed OR query, a result
+admitted only by a metadata branch also has an empty snippet. The result limit
+applies after the complete expression and ordering.
+
+Protected folios contribute their title but no body plaintext, ciphertext, or
+body snippet to full-text search. A title query can find a protected folio, but
+a phrase that exists only in its decrypted body cannot. Search only reads index
+projections; it does not modify vault files.
+
+Invalid structured syntax returns HTTP `400` instead of falling back to plain
+text. The response message identifies the error and column. Its detail has
+`code: "invalid_search_query"` and the invalid UTF-8 byte span. The command
+palette announces that message as an alert without offering Retry; network and
+server failures remain retryable.
+
+Full-text search is distinct from wikilink and block search. The `[[` suggestion
+menu filters the page catalogue by title, canonical name, and path. Block search
+is described in [Block References and Transclusion](/docs/block-references-and-transclusion).
 
 ## Navigate the Constellation graph
 

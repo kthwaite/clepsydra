@@ -37,7 +37,7 @@ const {
       data: [] as unknown[] | undefined,
       isFetching: false,
       isError: false,
-      error: null as Error | null,
+      error: null as unknown,
       refetch: searchRefetchMock,
     })),
     useTagsMock: vi.fn(() => ({ data: [] })),
@@ -186,6 +186,31 @@ describe("CommandPalette keyboard navigation", () => {
     expect(useTagsMock).not.toHaveBeenCalled();
   });
 
+  it("guides structured search from the command-query placeholder", () => {
+    render(<CommandPalette />);
+
+    expect(
+      screen.getByRole("textbox", { name: "Command query" }),
+    ).toHaveAttribute(
+      "placeholder",
+      "Search pages · kind:recipe (tag:beer | tag:wine)",
+    );
+  });
+
+  it("forwards the raw structured query after debounce", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    await user.type(
+      screen.getByRole("textbox", { name: "Command query" }),
+      "kind:recipe",
+    );
+
+    await waitFor(() =>
+      expect(useSearchMock).toHaveBeenLastCalledWith("kind:recipe", 12),
+    );
+  });
+
   it("resets selection in the same commit as a query change", () => {
     const commits: string[] = [];
     render(
@@ -313,12 +338,70 @@ describe("CommandPalette keyboard navigation", () => {
     expect(screen.getByRole("status")).toHaveTextContent(/searching/i);
   });
 
-  it("announces a backend error only while it belongs to the current query", async () => {
+  it("shows a current syntax error without offering a retry", async () => {
     useSearchMock.mockImplementation((query: string) => ({
       data: undefined,
       isFetching: false,
+      isError: query === "knd:recipe",
+      error:
+        query === "knd:recipe"
+          ? {
+              status: 400,
+              error: "unknown search field 'knd' at column 1",
+              detail: {
+                code: "invalid_search_query",
+                span: { start: 0, end: 3 },
+                kind: "unknown_field",
+              },
+            }
+          : null,
+      refetch: searchRefetchMock,
+    }));
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+    const input = screen.getByRole("textbox", { name: "Command query" });
+
+    await user.type(input, "knd:recipe");
+    await waitFor(() =>
+      expect(useSearchMock).toHaveBeenLastCalledWith("knd:recipe", 12),
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "unknown search field 'knd' at column 1",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Retry search" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps a stale syntax error out of the current loading and results", async () => {
+    useSearchMock.mockImplementation((query: string) => ({
+      data:
+        query === "cleps"
+          ? [
+              {
+                page_id: "current",
+                path: "notes/current.md",
+                title: "Current result",
+                snippet: "",
+                rank: -1,
+              },
+            ]
+          : undefined,
+      isFetching: false,
       isError: query === "clep",
-      error: query === "clep" ? new Error("Search service unavailable") : null,
+      error:
+        query === "clep"
+          ? {
+              status: 400,
+              error: "unknown search field 'clep' at column 1",
+              detail: {
+                code: "invalid_search_query",
+                span: { start: 0, end: 4 },
+                kind: "unknown_field",
+              },
+            }
+          : null,
       refetch: searchRefetchMock,
     }));
     const user = userEvent.setup();
@@ -330,16 +413,18 @@ describe("CommandPalette keyboard navigation", () => {
       expect(useSearchMock).toHaveBeenLastCalledWith("clep", 12),
     );
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Search service unavailable",
+      "unknown search field 'clep' at column 1",
     );
 
     fireEvent.change(input, { target: { value: "cleps" } });
 
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /retry (vault )?search/i }),
-    ).not.toBeInTheDocument();
     expect(screen.getByRole("status")).toHaveTextContent(/searching/i);
+    await waitFor(() =>
+      expect(useSearchMock).toHaveBeenLastCalledWith("cleps", 12),
+    );
+    expect(await screen.findByText("Current result")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("offers an accessible retry for a failed vault search", async () => {

@@ -6,7 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { formatApiError } from "#/api/error";
+import { formatApiError, isInvalidSearchQuery } from "#/api/error";
 import { useSearch, useTags } from "#/api/index";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
@@ -90,6 +90,8 @@ function CommandPaletteContent() {
   const showSearchLoading =
     q.length > 0 && (!searchIsCurrent || searchIsFetching);
   const showSearchError = searchIsCurrent && searchIsError;
+  const searchSyntaxError =
+    showSearchError && isInvalidSearchQuery(searchError);
 
   useEffect(() => {
     if (open) {
@@ -335,7 +337,7 @@ function CommandPaletteContent() {
             setQ(e.target.value);
             setSel(0);
           }}
-          placeholder="grep | go | id | tag — ⏎ to dispatch · esc to close"
+          placeholder="Search pages · kind:recipe (tag:beer | tag:wine)"
           aria-label="Command query"
           className="cl-mono flex-1 border-none bg-transparent text-[14px] tracking-[0.02em] text-ink outline-none placeholder:text-ink-faint"
         />
@@ -360,14 +362,16 @@ function CommandPaletteContent() {
             className="cl-mono flex items-center justify-between gap-3 px-3 py-[16px] text-[11px] tracking-[0.08em] text-warn"
           >
             <span>{formatApiError(searchError, "Search failed.")}</span>
-            <button
-              type="button"
-              aria-label="Retry search"
-              onClick={() => void retrySearch()}
-              className="border border-current px-2 py-1 tracking-[0.12em]"
-            >
-              RETRY
-            </button>
+            {!searchSyntaxError && (
+              <button
+                type="button"
+                aria-label="Retry search"
+                onClick={() => void retrySearch()}
+                className="border border-current px-2 py-1 tracking-[0.12em]"
+              >
+                RETRY
+              </button>
+            )}
           </div>
         )}
         {!showSearchLoading && !showSearchError && filtered.length === 0 && (
