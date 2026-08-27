@@ -155,7 +155,7 @@ describe("DocsSidebar", () => {
       await screen.findByRole("searchbox", {
         name: "Search documentation",
       }),
-      "term-that-cannot-exist",
+      "zyxqv-no-doc-token-918273",
     );
 
     expect(screen.getByText("No documentation matches")).toBeInTheDocument();
