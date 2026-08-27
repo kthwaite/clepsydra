@@ -30,7 +30,7 @@ return {
 		fn = function()
 			load_plugin_file()
 			local completions = vim.fn.getcompletion("Clep ", "cmdline")
-			eq({ "backlinks", "capture", "daily", "search", "tags", "today" }, completions)
+			eq({ "backlinks", "capture", "daily", "search", "tags", "task", "tasks", "today" }, completions)
 		end,
 	},
 	{
@@ -38,14 +38,17 @@ return {
 		fn = function()
 			load_plugin_file()
 			eq({}, vim.fn.getcompletion("Clep today ", "cmdline"))
-			eq({ "backlinks", "capture", "daily", "search", "tags", "today" }, vim.fn.getcompletion("Clep ", "cmdline"))
+			eq(
+				{ "backlinks", "capture", "daily", "search", "tags", "task", "tasks", "today" },
+				vim.fn.getcompletion("Clep ", "cmdline")
+			)
 		end,
 	},
 	{
 		name = "completion filters by typed prefix",
 		fn = function()
 			load_plugin_file()
-			eq({ "tags", "today" }, vim.fn.getcompletion("Clep t", "cmdline"))
+			eq({ "tags", "task", "tasks", "today" }, vim.fn.getcompletion("Clep t", "cmdline"))
 			eq({ "daily" }, vim.fn.getcompletion("Clep da", "cmdline"))
 		end,
 	},
@@ -78,6 +81,35 @@ return {
 			eq({ "clep", "lsp" }, lsp_config.cmd)
 			eq({ "markdown" }, lsp_config.filetypes)
 			eq({ ".clepsydra" }, lsp_config.root_markers)
+		end,
+	},
+	{
+		name = "task action completion offers add and stage",
+		fn = function()
+			load_plugin_file()
+			eq({ "add", "stage" }, vim.fn.getcompletion("Clep task ", "cmdline"))
+			eq({ "stage" }, vim.fn.getcompletion("Clep task s", "cmdline"))
+			eq({}, vim.fn.getcompletion("Clep task add ", "cmdline"))
+			eq({}, vim.fn.getcompletion("Clep tasks ", "cmdline"))
+		end,
+	},
+	{
+		name = "Clep task add joins the title words and dispatches",
+		fn = function()
+			load_plugin_file()
+			local saved = package.loaded["clepsydra.tasks"]
+			local got
+			package.loaded["clepsydra.tasks"] = {
+				add = function(title)
+					got = title
+				end,
+			}
+			local ok, err = pcall(vim.api.nvim_cmd, { cmd = "Clep", args = { "task", "add", "Fix", "the", "thing" } }, {})
+			package.loaded["clepsydra.tasks"] = saved
+			if not ok then
+				error(err, 0)
+			end
+			eq("Fix the thing", got)
 		end,
 	},
 }
