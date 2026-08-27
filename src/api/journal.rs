@@ -17,6 +17,7 @@ use super::error::ApiError;
 use super::pages::{PageDetail, page_detail};
 use super::tasks::TaskItem;
 use crate::api::events::SyncNotification;
+use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
 };
@@ -34,14 +35,14 @@ pub struct CaptureRequest {
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
-pub struct RangeQuery {
+pub(crate) struct RangeQuery {
     pub from: String,
     pub to: String,
 }
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
-pub struct RecentQuery {
+pub(crate) struct RecentQuery {
     #[serde(default = "default_days")]
     pub days: u32,
 }
@@ -57,6 +58,24 @@ pub struct JournalSummary {
     pub title: Option<String>,
     pub journal_date: String,
 }
+
+/// A dated journal stream: the human journal or the AI-assistant journal.
+/// Both share the indexed `journal_date` column; the kind discriminates.
+#[derive(Clone, Copy)]
+pub(crate) struct JournalStream {
+    pub kind: Kind,
+    pub folder: &'static str,
+}
+
+pub(crate) const HUMAN_JOURNAL: JournalStream = JournalStream {
+    kind: Kind::Journal,
+    folder: "journals",
+};
+
+pub(crate) const AI_JOURNAL: JournalStream = JournalStream {
+    kind: Kind::AiJournal,
+    folder: "ai-journals",
+};
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct JournalTodayResponse {
@@ -84,7 +103,7 @@ pub fn router() -> Router<Arc<AppState>> {
 // ---------------------------------------------------------------------------
 
 /// Validate a date string as YYYY-MM-DD and return it parsed.
-fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
+pub(crate) fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").map_err(|_| {
         ApiError::bad_request(format!("invalid date format (expected YYYY-MM-DD): {s}"))
     })
@@ -95,19 +114,22 @@ fn parse_date(s: &str) -> Result<NaiveDate, ApiError> {
 static JOURNAL_ENSURE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Find the indexed journal page for a date, independent of filename shape.
-async fn find_journal_path(
+pub(crate) async fn find_journal_path(
     state: &Arc<AppState>,
+    stream: JournalStream,
     date: &str,
 ) -> Result<Option<VaultPath>, ApiError> {
     let date = date.to_string();
+    let kind = stream.kind.as_str();
     let path = state
         .index
         .with_index(move |index, _vault| {
             index
                 .connection()
                 .query_row(
-                    "SELECT path FROM pages WHERE journal_date = ?1 ORDER BY path LIMIT 1",
-                    [date],
+                    "SELECT path FROM pages WHERE journal_date = ?1 AND kind = ?2 \
+                     ORDER BY path LIMIT 1",
+                    params![date, kind],
                     |row| row.get::<_, String>(0),
                 )
                 .optional()
@@ -124,23 +146,31 @@ async fn find_journal_path(
 }
 
 /// Build a canonical VaultPath for a newly created journal.
-fn new_journal_path(date: &str, created: DateTime<Utc>) -> Result<VaultPath, ApiError> {
+fn new_journal_path(
+    stream: JournalStream,
+    date: &str,
+    created: DateTime<Utc>,
+) -> Result<VaultPath, ApiError> {
     let short_id = crate::vault::block_id::generate_short_id();
     let filename = crate::vault::page_filename::page_filename(created, date, &short_id);
-    VaultPath::new(&format!("journals/{filename}"))
+    VaultPath::new(&format!("{}/{filename}", stream.folder))
         .map_err(|error| ApiError::internal(format!("invalid journal path: {error}")))
 }
 
 /// Ensure a journal page exists for the given date. Returns the VaultPath and
 /// whether the page was newly created.
-async fn ensure_journal(state: &Arc<AppState>, date: &str) -> Result<(VaultPath, bool), ApiError> {
+pub(crate) async fn ensure_journal(
+    state: &Arc<AppState>,
+    stream: JournalStream,
+    date: &str,
+) -> Result<(VaultPath, bool), ApiError> {
     let _guard = JOURNAL_ENSURE_LOCK.lock().await;
-    if let Some(vault_path) = find_journal_path(state, date).await? {
+    if let Some(vault_path) = find_journal_path(state, stream, date).await? {
         return Ok((vault_path, false));
     }
 
     let now = state.clock.now();
-    let vault_path = new_journal_path(date, now)?;
+    let vault_path = new_journal_path(stream, date, now)?;
     let abs_path = state.vault.resolve(&vault_path);
 
     // Build template
@@ -195,7 +225,7 @@ pub async fn get_today(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<JournalTodayResponse>, ApiError> {
     let date = state.clock.now().format("%Y-%m-%d").to_string();
-    let vault_path = find_journal_path(&state, &date)
+    let vault_path = find_journal_path(&state, HUMAN_JOURNAL, &date)
         .await?
         .ok_or_else(|| ApiError::not_found(format!("journal not found: {date}")))?;
     let abs_path = state.vault.resolve(&vault_path);
@@ -230,6 +260,7 @@ pub async fn get_today(
                  AND status_prop.key = 'status' \
                 JOIN pages p ON b.page_id = p.id \
                 WHERE p.journal_date IS NOT NULL \
+                  AND p.kind = 'JOURNAL' \
                   AND p.journal_date < ?1 \
                   AND p.journal_date >= ?2 \
                   AND status_prop.value IN ('todo', 'doing') \
@@ -321,7 +352,7 @@ pub async fn get_today(
 )]
 pub async fn ensure_today(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
     let date = state.clock.now().format("%Y-%m-%d").to_string();
-    let (vault_path, created) = ensure_journal(&state, &date).await?;
+    let (vault_path, created) = ensure_journal(&state, HUMAN_JOURNAL, &date).await?;
 
     let abs_path = state.vault.resolve(&vault_path);
     let page = Page::from_file(&abs_path, vault_path)
@@ -356,7 +387,7 @@ pub async fn get_by_date(
     // Validate date format
     let _ = parse_date(&date)?;
 
-    let vault_path = find_journal_path(&state, &date)
+    let vault_path = find_journal_path(&state, HUMAN_JOURNAL, &date)
         .await?
         .ok_or_else(|| ApiError::not_found(format!("journal not found: {date}")))?;
     let abs_path = state.vault.resolve(&vault_path);
@@ -380,43 +411,14 @@ pub async fn get_by_date(
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
-pub async fn get_range(
+pub(crate) async fn get_range(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RangeQuery>,
 ) -> Result<Json<Vec<JournalSummary>>, ApiError> {
     let _ = parse_date(&query.from)?;
     let _ = parse_date(&query.to)?;
 
-    let from = query.from.clone();
-    let to = query.to.clone();
-
-    let journals = state
-        .index
-        .with_index(move |index, _vault| {
-            let mut stmt = index.connection().prepare(
-                "SELECT id, path, title, journal_date FROM pages \
-                 WHERE journal_date IS NOT NULL \
-                   AND journal_date >= ?1 AND journal_date <= ?2 \
-                 ORDER BY journal_date DESC",
-            )?;
-
-            let rows: Vec<JournalSummary> = stmt
-                .query_map(params![from, to], |row| {
-                    Ok(JournalSummary {
-                        id: row.get(0)?,
-                        path: row.get(1)?,
-                        title: row.get(2)?,
-                        journal_date: row.get(3)?,
-                    })
-                })?
-                .filter_map(|r| r.ok())
-                .collect();
-
-            Ok::<_, rusqlite::Error>(rows)
-        })
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let journals = journal_summaries(&state, HUMAN_JOURNAL, &query.from, &query.to).await?;
 
     Ok(Json(journals))
 }
@@ -433,7 +435,7 @@ pub async fn get_range(
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
-pub async fn get_recent(
+pub(crate) async fn get_recent(
     State(state): State<Arc<AppState>>,
     Query(query): Query<RecentQuery>,
 ) -> Result<Json<Vec<JournalSummary>>, ApiError> {
@@ -443,18 +445,36 @@ pub async fn get_recent(
     let from_str = from.format("%Y-%m-%d").to_string();
     let to_str = today.format("%Y-%m-%d").to_string();
 
+    let journals = journal_summaries(&state, HUMAN_JOURNAL, &from_str, &to_str).await?;
+
+    Ok(Json(journals))
+}
+
+/// Shared range/recent query: journal-page summaries for `stream` whose
+/// `journal_date` falls within `[from, to]`, most recent first.
+pub(crate) async fn journal_summaries(
+    state: &Arc<AppState>,
+    stream: JournalStream,
+    from: &str,
+    to: &str,
+) -> Result<Vec<JournalSummary>, ApiError> {
+    let from = from.to_string();
+    let to = to.to_string();
+    let kind = stream.kind.as_str();
+
     let journals = state
         .index
         .with_index(move |index, _vault| {
             let mut stmt = index.connection().prepare(
                 "SELECT id, path, title, journal_date FROM pages \
                  WHERE journal_date IS NOT NULL \
+                   AND kind = ?3 \
                    AND journal_date >= ?1 AND journal_date <= ?2 \
                  ORDER BY journal_date DESC",
             )?;
 
             let rows: Vec<JournalSummary> = stmt
-                .query_map(params![from_str, to_str], |row| {
+                .query_map(params![from, to, kind], |row| {
                     Ok(JournalSummary {
                         id: row.get(0)?,
                         path: row.get(1)?,
@@ -471,13 +491,13 @@ pub async fn get_recent(
         .map_err(|e| ApiError::internal(e.to_string()))?
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    Ok(Json(journals))
+    Ok(journals)
 }
 
 /// True when `line` already opens a markdown block construct (list item,
 /// task, ordered item, heading, blockquote, code fence). Such captures keep
 /// their syntax at line start; only plain prose gets a time stamp.
-fn is_block_construct(line: &str) -> bool {
+pub(crate) fn is_block_construct(line: &str) -> bool {
     if line.starts_with("- ")
         || line.starts_with("* ")
         || line.starts_with("+ ")
@@ -523,9 +543,21 @@ pub async fn capture_today(
     State(state): State<Arc<AppState>>,
     Json(req): Json<CaptureRequest>,
 ) -> Result<Response, ApiError> {
+    let entry = format_capture_entry(state.clock.now(), &req.content);
+    let detail = capture_into(&state, HUMAN_JOURNAL, &entry).await?;
+    Ok((StatusCode::OK, Json(detail)).into_response())
+}
+
+/// Append an already-formatted entry to today's page of `stream`,
+/// creating the page if absent. 409 when the page is encrypted.
+pub(crate) async fn capture_into(
+    state: &Arc<AppState>,
+    stream: JournalStream,
+    entry: &str,
+) -> Result<PageDetail, ApiError> {
     let now = state.clock.now();
     let date = now.format("%Y-%m-%d").to_string();
-    let (vault_path, _created) = ensure_journal(&state, &date).await?;
+    let (vault_path, _created) = ensure_journal(state, stream, &date).await?;
 
     let abs_path = state.vault.resolve(&vault_path);
 
@@ -545,7 +577,7 @@ pub async fn capture_today(
     if !new_body.is_empty() && !new_body.ends_with('\n') {
         new_body.push('\n');
     }
-    new_body.push_str(&format_capture_entry(now, &req.content));
+    new_body.push_str(entry);
     new_body.push('\n');
 
     let mut meta = page.meta;
@@ -575,5 +607,5 @@ pub async fn capture_today(
         .await
         .map_err(crate::api::mutation_error)?;
 
-    Ok((StatusCode::OK, Json(page_detail(result))).into_response())
+    Ok(page_detail(result))
 }
