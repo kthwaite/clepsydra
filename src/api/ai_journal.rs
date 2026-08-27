@@ -68,6 +68,7 @@ fn format_ai_capture_entry(now: DateTime<Utc>, content: &str, author: Option<&st
 /// GET /ai-journal/today — read today's AI journal page (404 when absent).
 #[utoipa::path(
     get,
+    operation_id = "ai_journal_get_today",
     path = "/ai-journal/today",
     context_path = "/api/vault",
     tag = "AI Journal",
@@ -93,6 +94,7 @@ pub async fn get_today(State(state): State<Arc<AppState>>) -> Result<Json<PageDe
 /// POST /ai-journal/today — create today's AI journal if missing (get-or-create).
 #[utoipa::path(
     post,
+    operation_id = "ai_journal_ensure_today",
     path = "/ai-journal/today",
     context_path = "/api/vault",
     tag = "AI Journal",
@@ -121,6 +123,7 @@ pub async fn ensure_today(State(state): State<Arc<AppState>>) -> Result<Response
 /// GET /ai-journal/:date — get an AI journal page by date.
 #[utoipa::path(
     get,
+    operation_id = "ai_journal_get_by_date",
     path = "/ai-journal/{date}",
     context_path = "/api/vault",
     tag = "AI Journal",
@@ -152,6 +155,7 @@ pub async fn get_by_date(
 /// GET /ai-journal/range?from=YYYY-MM-DD&to=YYYY-MM-DD — list AI journals in range.
 #[utoipa::path(
     get,
+    operation_id = "ai_journal_get_range",
     path = "/ai-journal/range",
     context_path = "/api/vault",
     tag = "AI Journal",
@@ -177,6 +181,7 @@ pub(crate) async fn get_range(
 /// GET /ai-journal/recent?days=7 — list recent AI journal pages.
 #[utoipa::path(
     get,
+    operation_id = "ai_journal_get_recent",
     path = "/ai-journal/recent",
     context_path = "/api/vault",
     tag = "AI Journal",
@@ -204,6 +209,7 @@ pub(crate) async fn get_recent(
 /// POST /ai-journal/today/capture — append content to today's AI journal.
 #[utoipa::path(
     post,
+    operation_id = "ai_journal_capture_today",
     path = "/ai-journal/today/capture",
     context_path = "/api/vault",
     tag = "AI Journal",
