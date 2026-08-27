@@ -49,6 +49,8 @@ end
 --- PATCH addresses tasks by UUID, so the code is resolved through GET /board.
 function M.stage()
 	local cword = ""
+	-- expand("<cWORD>") raises E348 ("No string under cursor") on a
+	-- cursor-less/empty buffer; default to "" so the file-name fallback runs.
 	local ok, result = pcall(function()
 		return vim.fn.expand("<cWORD>")
 	end)

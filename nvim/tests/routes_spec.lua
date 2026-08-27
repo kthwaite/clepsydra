@@ -10,9 +10,9 @@ end
 local real_client = require("clepsydra.client")
 local config = require("clepsydra.config")
 
--- Modules whose package.loaded entries the harness swaps and restores. Later
--- tasks append "clepsydra.tasks" here when that module exists.
-local MODULES = { "clepsydra.client", "clepsydra.journal", "clepsydra.picker", "clepsydra.tasks" }
+-- Modules whose package.loaded entries the harness reloads against the fake
+-- client, then restores afterwards.
+local MODULES = { "clepsydra.client", "clepsydra.journal", "clepsydra.picker", "clepsydra.tasks", "clepsydra.health" }
 
 --- Recording fake client. Pure helpers (api_url, encode_query, encode_path,
 --- build_args, decode) fall through to the real client via __index, so pinned
@@ -245,6 +245,49 @@ return {
 				eq("GET", fake.calls[1].method)
 				eq("/board", fake.calls[1].path)
 				eq(1, #picked)
+			end)
+		end,
+	},
+	{
+		name = "health check pins GET /index/stats",
+		fn = function()
+			with_stubs({
+				["GET /index/stats"] = {
+					pages = 42,
+					links_total = 100,
+					links_resolved = 90,
+					links_unresolved = 10,
+					orphan_pages = 2,
+					isolated_pages = 1,
+					tags = 8,
+					attachments = 3,
+					last_indexed_at = "2026-08-27T00:00:00Z",
+				},
+			}, function(fake)
+				local saved_health = rawget(vim, "health")
+				vim.health = {
+					start = function() end,
+					ok = function() end,
+					warn = function() end,
+					error = function() end,
+					info = function() end,
+				}
+				local ok, err = pcall(function()
+					require("clepsydra.health").check()
+				end)
+				vim.health = saved_health
+				if not ok then
+					error(err, 0)
+				end
+				local found = nil
+				for _, call in ipairs(fake.calls) do
+					if call.method == "GET" and call.path == "/index/stats" then
+						found = call
+					end
+				end
+				if not found then
+					error("expected GET /index/stats in fake.calls\n  calls: " .. vim.inspect(fake.calls))
+				end
 			end)
 		end,
 	},

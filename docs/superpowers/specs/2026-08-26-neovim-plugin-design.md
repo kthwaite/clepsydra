@@ -169,7 +169,7 @@ Routes used (all existing; no backend route changes expected):
 - `:Clep task add {title}` — create a Task (stage `INTAKE`); the server
   assigns the TSK code, which is echoed.
 - `:Clep task stage` — find the TSK code under the cursor (or in the current
-  page's frontmatter), show the five stages (`INTAKE` → `TRIAGE` → `FIELD` →
+  file's name), show the five stages (`INTAKE` → `TRIAGE` → `FIELD` →
   `REVIEW` → `SEALED`) in `vim.ui.select`, PATCH the choice.
 - `:Clep search | backlinks | tags | tasks` — open the corresponding picker.
 
