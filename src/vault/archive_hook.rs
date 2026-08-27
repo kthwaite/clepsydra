@@ -2,7 +2,7 @@ use crate::vault::cas::{CasError, ContentStore, ReleaseOutcome};
 use crate::vault::hooks::PostDeleteHook;
 use crate::vault::page::PageMeta;
 use crate::vault::path::VaultPath;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -22,14 +22,42 @@ pub(crate) fn captured_archive_hashes(meta: &PageMeta) -> BTreeSet<String> {
     if let Some(toml::Value::String(hash)) = archive.get("snapshot_hash") {
         hashes.insert(hash.clone());
     }
-    if let Some(toml::Value::Array(blob_hashes)) = archive.get("blobs") {
-        for value in blob_hashes {
-            if let toml::Value::String(hash) = value {
-                hashes.insert(hash.clone());
+    if let Some(toml::Value::Array(blob_entries)) = archive.get("blobs") {
+        for value in blob_entries {
+            match value {
+                toml::Value::String(hash) => {
+                    hashes.insert(hash.clone());
+                }
+                toml::Value::Table(entry) => {
+                    if let Some(toml::Value::String(hash)) = entry.get("hash") {
+                        hashes.insert(hash.clone());
+                    }
+                }
+                _ => {}
             }
         }
     }
     hashes
+}
+
+/// Hash → declared content type, from table-shaped `[archive] blobs` entries.
+/// Legacy string entries carry no type and are absent from the map.
+pub(crate) fn captured_blob_types(meta: &PageMeta) -> BTreeMap<String, String> {
+    let Some(toml::Value::Table(archive)) = meta.extra.get("archive") else {
+        return BTreeMap::new();
+    };
+    let mut types = BTreeMap::new();
+    if let Some(toml::Value::Array(blob_entries)) = archive.get("blobs") {
+        for value in blob_entries {
+            if let toml::Value::Table(entry) = value
+                && let (Some(toml::Value::String(hash)), Some(toml::Value::String(ct))) =
+                    (entry.get("hash"), entry.get("type"))
+            {
+                types.insert(hash.clone(), ct.clone());
+            }
+        }
+    }
+    types
 }
 
 /// Release only captured-archive references for one rubbish lifecycle item.
@@ -82,5 +110,44 @@ impl PostDeleteHook for ArchiveDeleteHook {
             )
             .into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captured_archive_hashes_accepts_string_and_table_blobs() {
+        let mut meta = PageMeta::new();
+        let mut archive = toml::Table::new();
+        archive.insert(
+            "snapshot_hash".into(),
+            toml::Value::String("sha256:1111".into()),
+        );
+        let mut typed = toml::Table::new();
+        typed.insert("hash".into(), toml::Value::String("sha256:2222".into()));
+        typed.insert("type".into(), toml::Value::String("image/png".into()));
+        archive.insert(
+            "blobs".into(),
+            toml::Value::Array(vec![
+                toml::Value::String("sha256:3333".into()),
+                toml::Value::Table(typed),
+            ]),
+        );
+        meta.extra
+            .insert("archive".into(), toml::Value::Table(archive));
+        let hashes = captured_archive_hashes(&meta);
+        assert!(
+            hashes.contains("sha256:1111")
+                && hashes.contains("sha256:2222")
+                && hashes.contains("sha256:3333")
+        );
+        let types = captured_blob_types(&meta);
+        assert_eq!(
+            types.get("sha256:2222").map(String::as_str),
+            Some("image/png")
+        );
+        assert!(!types.contains_key("sha256:3333"));
     }
 }
