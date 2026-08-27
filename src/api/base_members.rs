@@ -500,11 +500,8 @@ name = "All"
             delete_hooks: Arc::new(Vec::new()),
             mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
             feed_runtime: Some(
-                crate::feeds::runtime::FeedRuntime::open(
-                    &root,
-                    &crate::FeedsSettings::default(),
-                )
-                .unwrap(),
+                crate::feeds::runtime::FeedRuntime::open(&root, &crate::FeedsSettings::default())
+                    .unwrap(),
             ),
             archive_ingest_lock: tokio::sync::Mutex::new(()),
             archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),

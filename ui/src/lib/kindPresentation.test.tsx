@@ -26,9 +26,13 @@ describe("presentationFor", () => {
     expect(presentation.bodyPresentation).toBe("editor");
     expect(presentation.metaExtras).not.toBeNull();
     expect(presentation.metaExtrasLabel).toBe("Journal");
-    expect(presentation.readOnlyTitle?.("journals/2026-08-09.md", "")).toBe(
-      "Sunday, 9 August 2026",
-    );
+    // journalDayLabel formats via toLocaleDateString(undefined, ...), so the
+    // exact string follows the runtime locale; assert structurally.
+    const title = presentation.readOnlyTitle?.("journals/2026-08-09.md", "");
+    expect(title).toMatch(/Sunday/);
+    expect(title).toMatch(/August/);
+    expect(title).toMatch(/\b9\b/);
+    expect(title).toMatch(/2026/);
   });
 
   it("gives meetings and 1:1s the same bespoke rail block", () => {

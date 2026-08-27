@@ -5,14 +5,14 @@ use axum_test::TestServer;
 use chrono::{Duration, Utc};
 use tokio::sync::broadcast;
 
-use clepsydra::api::{api_router, AppState};
+use clepsydra::api::{AppState, api_router};
+use clepsydra::vault::Vault;
 use clepsydra::vault::academic_hook::AcademicMoveHook;
 use clepsydra::vault::cas::ContentStore;
 use clepsydra::vault::hooks::PostMoveHook;
 use clepsydra::vault::index::VaultIndex;
 use clepsydra::vault::index_handle::IndexHandle;
 use clepsydra::vault::init::init_vault;
-use clepsydra::vault::Vault;
 use tempfile::TempDir;
 
 fn production_hooks() -> Arc<Vec<Box<dyn PostMoveHook>>> {
@@ -342,9 +342,11 @@ async fn agenda_classifies_each_open_todo_once() {
         .map(|item| item["content"].as_str().unwrap())
         .collect::<Vec<_>>();
 
-    assert!(all_items
-        .iter()
-        .all(|item| item["kind"].as_str() == Some("todo")));
+    assert!(
+        all_items
+            .iter()
+            .all(|item| item["kind"].as_str() == Some("todo"))
+    );
     assert_eq!(
         all_content
             .iter()
@@ -352,15 +354,21 @@ async fn agenda_classifies_each_open_todo_once() {
             .count(),
         1
     );
-    assert!(!all_content
-        .iter()
-        .any(|content| content.contains("beyond boundary")));
-    assert!(!all_content
-        .iter()
-        .any(|content| content.contains("completed")));
-    assert!(!all_content
-        .iter()
-        .any(|content| content.contains("cancelled")));
+    assert!(
+        !all_content
+            .iter()
+            .any(|content| content.contains("beyond boundary"))
+    );
+    assert!(
+        !all_content
+            .iter()
+            .any(|content| content.contains("completed"))
+    );
+    assert!(
+        !all_content
+            .iter()
+            .any(|content| content.contains("cancelled"))
+    );
 }
 
 #[tokio::test]
@@ -391,12 +399,16 @@ async fn agenda_includes_scheduled_today_and_today_journal_todos() {
         .map(|item| item["content"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(content.len(), 2);
-    assert!(content
-        .iter()
-        .any(|value| value.contains("scheduled today")));
-    assert!(content
-        .iter()
-        .any(|value| value.contains("journal todo without dates")));
+    assert!(
+        content
+            .iter()
+            .any(|value| value.contains("scheduled today"))
+    );
+    assert!(
+        content
+            .iter()
+            .any(|value| value.contains("journal todo without dates"))
+    );
 }
 
 #[tokio::test]
@@ -432,14 +444,18 @@ async fn agenda_orders_todos_by_date_priority_path_and_span() {
     assert!(overdue[1].contains("later overdue"));
 
     let upcoming = body["upcoming"][0]["items"].as_array().unwrap();
-    assert!(upcoming[0]["content"]
-        .as_str()
-        .unwrap()
-        .contains("first same-day todo"));
-    assert!(upcoming[1]["content"]
-        .as_str()
-        .unwrap()
-        .contains("second same-day todo"));
+    assert!(
+        upcoming[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("first same-day todo")
+    );
+    assert!(
+        upcoming[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("second same-day todo")
+    );
 }
 
 #[tokio::test]
@@ -505,10 +521,12 @@ async fn agenda_orders_mixed_sources_by_priority() {
     assert_eq!(today[0]["kind"], "task");
     assert_eq!(today[0]["code"], "TSK-0210");
     assert_eq!(today[1]["kind"], "todo");
-    assert!(today[1]["content"]
-        .as_str()
-        .unwrap()
-        .contains("Second Todo"));
+    assert!(
+        today[1]["content"]
+            .as_str()
+            .unwrap()
+            .contains("Second Todo")
+    );
 }
 
 #[tokio::test]

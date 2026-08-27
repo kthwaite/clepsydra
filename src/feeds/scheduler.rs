@@ -244,8 +244,17 @@ mod tests {
 
         // Keep the deterministic fixture feed outside the due set. A scheduler
         // bug must not turn this local contract test into a network request.
-        if let Some(feed) = state.feed_runtime().feeds.list_feeds().await.unwrap().first() {
-            state.feed_runtime().feeds
+        if let Some(feed) = state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()
+            .first()
+        {
+            state
+                .feed_runtime()
+                .feeds
                 .apply_fetch(
                     feed.id,
                     FetchOutcome::Failure {
@@ -278,7 +287,13 @@ mod tests {
 
         tokio::time::timeout(Duration::from_secs(1), async {
             loop {
-                let feeds = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
+                let feeds = fixture
+                    .state
+                    .feed_runtime()
+                    .feeds
+                    .list_feeds()
+                    .await
+                    .unwrap();
                 if feeds.len() == 1 && feeds[0].group == "After" {
                     break;
                 }
@@ -299,11 +314,20 @@ mod tests {
              - [Periodic](http://127.0.0.1:9/periodic.xml)\n",
         )
         .await;
-        let feeds = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
+        let feeds = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap();
         assert_eq!(feeds.len(), 2);
         for feed in &feeds {
             let periodic = feed.url.ends_with("/periodic.xml");
-            fixture.state.feed_runtime().feeds
+            fixture
+                .state
+                .feed_runtime()
+                .feeds
                 .apply_fetch(
                     feed.id,
                     FetchOutcome::Failure {
@@ -324,7 +348,10 @@ mod tests {
             .find(|feed| feed.url.ends_with("/explicit.xml"))
             .unwrap()
             .id;
-        fixture.state.feed_runtime().feeds
+        fixture
+            .state
+            .feed_runtime()
+            .feeds
             .schedule_refresh(Some(explicit_id), Utc::now())
             .await
             .unwrap();
@@ -340,7 +367,13 @@ mod tests {
 
         run_due_sweep(&fixture.state).await.unwrap();
 
-        let persisted = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
+        let persisted = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap();
         assert_eq!(persisted.len(), 3);
         assert!(
             persisted.iter().all(|feed| {

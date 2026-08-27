@@ -642,5 +642,8 @@ describe("BaseTable member creation", () => {
     expect(Object.values(fields)).not.toContain(null);
     expect(fields.tags).toEqual([]);
     expect(fields.aliases).toEqual([]);
-  });
+    // Around twenty sequential userEvent interactions: 4s of the default 5s
+    // budget on an idle machine, and over it on a loaded CI runner. Same
+    // allowance the comparably long fixtures in this directory already take.
+  }, 15_000);
 });

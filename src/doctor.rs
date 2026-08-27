@@ -231,11 +231,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
                 "academic",
                 "skipped — config did not load",
             ));
-            report.push(skip(
-                "features",
-                "feeds",
-                "skipped — config did not load",
-            ));
+            report.push(skip("features", "feeds", "skipped — config did not load"));
         }
     }
 
@@ -1714,13 +1710,7 @@ mod tests {
         .unwrap();
     }
 
-    fn assert_record(
-        report: &Report,
-        section: &str,
-        name: &str,
-        status: Status,
-        detail: &str,
-    ) {
+    fn assert_record(report: &Report, section: &str, name: &str, status: Status, detail: &str) {
         let record = report
             .results
             .iter()
@@ -1738,8 +1728,7 @@ mod tests {
         crate::vault::init::init_vault(&enabled_vault).unwrap();
         write_top_level_config(enabled.path(), &enabled_vault);
 
-        let enabled_report =
-            run_with_cwd(enabled.path(), DoctorOpts::default()).await;
+        let enabled_report = run_with_cwd(enabled.path(), DoctorOpts::default()).await;
         let enabled_features: Vec<_> = enabled_report
             .results
             .iter()
@@ -1757,15 +1746,9 @@ mod tests {
         let disabled = TempDir::new().unwrap();
         let disabled_vault = disabled.path().join("vault");
         crate::vault::init::init_vault(&disabled_vault).unwrap();
-        write_top_level_config_with_features(
-            disabled.path(),
-            &disabled_vault,
-            false,
-            false,
-        );
+        write_top_level_config_with_features(disabled.path(), &disabled_vault, false, false);
 
-        let disabled_report =
-            run_with_cwd(disabled.path(), DoctorOpts::default()).await;
+        let disabled_report = run_with_cwd(disabled.path(), DoctorOpts::default()).await;
         let disabled_features: Vec<_> = disabled_report
             .results
             .iter()
@@ -1813,13 +1796,7 @@ mod tests {
                 "skipped — feature disabled",
             );
         }
-        assert_record(
-            &report,
-            "features",
-            "academic",
-            Status::Info,
-            "disabled",
-        );
+        assert_record(&report, "features", "academic", Status::Info, "disabled");
         assert_record(&report, "features", "feeds", Status::Info, "disabled");
     }
 
@@ -1939,13 +1916,7 @@ mod tests {
             .expect("expected vault initialized check");
         assert_eq!(init.status, Status::Err);
         assert!(init.hint.as_ref().unwrap().contains("clepsydra init"));
-        assert_record(
-            &report,
-            "features",
-            "academic",
-            Status::Info,
-            "enabled",
-        );
+        assert_record(&report, "features", "academic", Status::Info, "enabled");
         assert_record(
             &report,
             "academic",

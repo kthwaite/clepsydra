@@ -3,8 +3,6 @@ use std::cell::Cell;
 use std::collections::BTreeSet;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom};
-#[cfg(all(unix, not(target_vendor = "apple")))]
-use std::os::fd::AsRawFd;
 #[cfg(unix)]
 use std::os::fd::OwnedFd;
 use std::path::{Path, PathBuf};
@@ -489,6 +487,44 @@ fn open_or_create_regular_cas_file(
     Ok(file.into())
 }
 
+/// Verify that `display_path`, resolved from the filesystem root the way an
+/// external consumer resolves it, still names the same file as `file`.
+///
+/// [`verify_retained_cas_file_identity`] resolves through the retained
+/// directory descriptor, so it cannot see an ancestor of the CAS root being
+/// swapped: the descriptor keeps pointing at the directory we validated no
+/// matter what happens to the names above it. That is exactly what we want for
+/// our own descriptors, but SQLite opens the database by path and creates its
+/// journal and WAL sidecars by path, so path resolution is inside the trust
+/// boundary whether we like it or not. `SQLITE_OPEN_NOFOLLOW` rejects a path
+/// with a symlink component, which leaves the case it cannot see: a real
+/// directory renamed into place above the root between canonicalization and
+/// the open. Comparing the path-resolved file against the descriptor we hold
+/// catches that — the two only agree when nothing was swapped underneath us.
+#[cfg(unix)]
+fn verify_path_resolved_cas_file_identity(file: &File, display_path: &Path) -> io::Result<()> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let file_metadata = file.metadata()?;
+    // `symlink_metadata` is an lstat, so a symlinked final component fails the
+    // regular-file test rather than being followed.
+    let path_metadata = fs::symlink_metadata(display_path)?;
+    if !file_metadata.is_file()
+        || !path_metadata.is_file()
+        || file_metadata.dev() != path_metadata.dev()
+        || file_metadata.ino() != path_metadata.ino()
+    {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "{} does not resolve to the file it was opened from",
+                display_path.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(unix)]
 fn verify_retained_cas_file_identity(
     directory: &OwnedFd,
@@ -571,28 +607,6 @@ fn create_private_cas_database_copy(
         Err(error) => return Err(error.into()),
     }
     Ok((private_directory, database_path))
-}
-
-#[cfg(unix)]
-fn sqlite_path_in_open_directory(directory: &OwnedFd, filename: &str) -> io::Result<PathBuf> {
-    #[cfg(target_vendor = "apple")]
-    {
-        use std::ffi::OsStr;
-        use std::os::unix::ffi::OsStrExt as _;
-
-        let directory_path = rustix::fs::getpath(directory).map_err(io::Error::from)?;
-        Ok(PathBuf::from(OsStr::from_bytes(directory_path.to_bytes())).join(filename))
-    }
-    #[cfg(not(target_vendor = "apple"))]
-    {
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        let descriptor_root = Path::new("/proc/self/fd");
-        #[cfg(not(any(target_os = "linux", target_os = "android")))]
-        let descriptor_root = Path::new("/dev/fd");
-        Ok(descriptor_root
-            .join(directory.as_raw_fd().to_string())
-            .join(filename))
-    }
 }
 
 #[cfg(windows)]
@@ -732,11 +746,18 @@ impl ContentStore {
         let database_file = open_or_create_regular_cas_file(&database_path, create_root)?;
         #[cfg(unix)]
         let db = if create_root {
-            let connection_path = sqlite_path_in_open_directory(&root_directory, "cas.db")?;
+            // The connection must use the canonicalized path, not a
+            // /proc/self/fd/<dirfd> alias: SQLite's xFullPathname resolves the
+            // path itself and, under SQLITE_OPEN_NOFOLLOW, refuses any path
+            // containing a symlink component (SQLITE_CANTOPEN_SYMLINK) — which
+            // /proc/self/fd always is. A canonical path keeps NOFOLLOW
+            // meaningful for the final component.
             let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
                 | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
                 | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
-            Some(Connection::open_with_flags(&connection_path, flags)?)
+            let connection = Connection::open_with_flags(&database_path, flags)?;
+            verify_path_resolved_cas_file_identity(&database_file, &database_path)?;
+            Some(connection)
         } else {
             None
         };
@@ -2092,6 +2113,53 @@ mod tests {
         assert!(
             worker.join().unwrap().is_err(),
             "opening CAS followed a database replaced after path resolution"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_cas_connects_to_the_database_it_opened() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("cas");
+        let store = ContentStore::open(&root).unwrap();
+        let stored = store.store(b"canonical open", "text/plain").unwrap();
+
+        assert_eq!(store.ref_count(&stored.hash).unwrap(), 1);
+        // The connection has to be reachable by path for SQLite to resolve it,
+        // and the file it landed on has to be the one in the CAS root.
+        let database = fs::canonicalize(&root).unwrap().join("cas.db");
+        assert!(database.is_file());
+        assert!(fs::metadata(&database).unwrap().len() > 0);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_cas_rejects_root_ancestor_swap_before_the_database_open() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("cas");
+        drop(ContentStore::open(&root).unwrap());
+        let attacker = temp.path().join("attacker-cas");
+        drop(ContentStore::open(&attacker).unwrap());
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        install_after_database_path_resolved_barrier(root.join("cas.db"), barrier.clone());
+        let worker_root = root.clone();
+        let worker = std::thread::spawn(move || {
+            ContentStore::open(&worker_root)
+                .map(drop)
+                .map_err(|error| error.to_string())
+        });
+
+        barrier.wait();
+        // A rename, not a symlink: the retained directory descriptor still
+        // points at the real CAS, so every descriptor-relative check passes.
+        // Only SQLite resolves the name again, and it now lands elsewhere.
+        fs::rename(&root, temp.path().join("retained-cas")).unwrap();
+        fs::rename(&attacker, &root).unwrap();
+        barrier.wait();
+
+        assert!(
+            worker.join().unwrap().is_err(),
+            "opening CAS connected to a database beneath a swapped ancestor"
         );
     }
 

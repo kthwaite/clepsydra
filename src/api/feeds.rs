@@ -468,10 +468,7 @@ pub(crate) fn set_after_list_snapshot_hook(
     state: &AppState,
     hook: Option<Arc<dyn Fn() + Send + Sync>>,
 ) {
-    *state
-        .feed_runtime()
-        .feed_after_list_snapshot_hook
-        .lock() = hook;
+    *state.feed_runtime().feed_after_list_snapshot_hook.lock() = hook;
 }
 
 #[utoipa::path(
@@ -504,9 +501,9 @@ pub async fn subscribe_feed(
     let permit_deadline = deadline - MIN_DISCOVERY_NETWORK_BUDGET;
     let permit =
         tokio::time::timeout_at(permit_deadline, runtime.feed_discovery_semaphore.acquire())
-        .await
-        .map_err(|_| ApiError::bad_request("feed discovery deadline exceeded while queued"))?
-        .map_err(|_| ApiError::internal("feed discovery is unavailable"))?;
+            .await
+            .map_err(|_| ApiError::bad_request("feed discovery deadline exceeded while queued"))?
+            .map_err(|_| ApiError::internal("feed discovery is unavailable"))?;
     if deadline.saturating_duration_since(tokio::time::Instant::now())
         < MIN_DISCOVERY_NETWORK_BUDGET
     {
@@ -962,10 +959,7 @@ pub(crate) fn set_before_opml_parse_hook(
     state: &AppState,
     hook: Option<Arc<dyn Fn() + Send + Sync>>,
 ) {
-    *state
-        .feed_runtime()
-        .feed_before_opml_parse_hook
-        .lock() = hook;
+    *state.feed_runtime().feed_before_opml_parse_hook.lock() = hook;
 }
 
 #[utoipa::path(
@@ -1189,10 +1183,9 @@ mod tests {
         let root = temp.path().join("vault");
         crate::vault::init::init_vault(&root).unwrap();
         std::fs::write(root.join("feeds.md"), manifest.as_bytes()).unwrap();
-        let mut state =
-            build_app_state_with_settings(&root, &settings, FeatureFlags::default())
-                .await
-                .unwrap();
+        let mut state = build_app_state_with_settings(&root, &settings, FeatureFlags::default())
+            .await
+            .unwrap();
         Arc::get_mut(&mut state)
             .expect("fresh fixture state should be uniquely owned")
             .feed_runtime
@@ -1353,7 +1346,9 @@ mod tests {
     }
 
     async fn seed_unread_entries(state: &Arc<AppState>, entries: Vec<FetchedEntry>) -> i64 {
-        state.feed_runtime().feeds
+        state
+            .feed_runtime()
+            .feeds
             .reconcile(vec![ManifestFeed {
                 url: "https://fixture.example/rss".to_owned(),
                 title_override: Some("Fixture".to_owned()),
@@ -1364,7 +1359,9 @@ mod tests {
             .await
             .unwrap();
         let feed_id = state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
-        state.feed_runtime().feeds
+        state
+            .feed_runtime()
+            .feeds
             .apply_fetch(
                 feed_id,
                 FetchOutcome::Success {
@@ -1384,7 +1381,9 @@ mod tests {
     }
 
     async fn unread_entries(state: &Arc<AppState>) -> Vec<crate::feeds::types::Entry> {
-        state.feed_runtime().feeds
+        state
+            .feed_runtime()
+            .feeds
             .list_entries(EntryFilters {
                 view: EntryView::Unread,
                 feed_ids: Vec::new(),
@@ -1410,7 +1409,9 @@ mod tests {
     /// One entry per group: News, Work, Personal. Returns their feed ids in
     /// that order.
     async fn seed_grouped_feeds(state: &Arc<AppState>) -> [i64; 3] {
-        state.feed_runtime().feeds
+        state
+            .feed_runtime()
+            .feeds
             .reconcile(
                 ["News", "Work", "Personal"]
                     .iter()
@@ -1434,7 +1435,9 @@ mod tests {
                 .find(|feed| feed.group == *group)
                 .expect("reconciled feed");
             ids[index] = feed.id;
-            state.feed_runtime().feeds
+            state
+                .feed_runtime()
+                .feeds
                 .apply_fetch(
                     feed.id,
                     FetchOutcome::Success {
@@ -1628,7 +1631,10 @@ mod tests {
         }
         .encode();
 
-        fixture.state.feed_runtime().feeds
+        fixture
+            .state
+            .feed_runtime()
+            .feeds
             .apply_fetch(
                 feed_id,
                 FetchOutcome::Success {
@@ -1664,7 +1670,13 @@ mod tests {
     async fn warning_manifest_preserves_the_last_good_subscription_set() {
         let fixture =
             feed_test_app("## Stable\n- [Stable](https://stable.example/rss) #stable\n").await;
-        let before = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
+        let before = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap();
         assert_eq!(before.len(), 1);
 
         std::fs::write(
@@ -1674,7 +1686,13 @@ mod tests {
         .unwrap();
         reconcile_feed_manifest(&fixture.state).await.unwrap();
 
-        let after = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
+        let after = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap();
         assert_eq!(after.len(), 1);
         assert_eq!(after[0].url, "https://stable.example/rss");
         assert_eq!(after[0].group, "Stable");
@@ -1788,7 +1806,14 @@ mod tests {
     async fn membership_mutations_return_structured_current_revision_conflicts() {
         let manifest = "## Stable\n- [Stable](https://stable.example/rss)\n";
         let fixture = feed_test_app(manifest).await;
-        let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
+        let feed_id = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()[0]
+            .id;
         let current_revision = page_revision(manifest);
         let requests = [
             (
@@ -1839,7 +1864,14 @@ mod tests {
     #[tokio::test]
     async fn stale_revision_precedes_invalid_utf8_for_every_membership_mutation() {
         let fixture = feed_test_app("## Stable\n- [Stable](https://stable.example/rss)\n").await;
-        let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
+        let feed_id = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()[0]
+            .id;
         let invalid = b"## Invalid\n- \xff\n".to_vec();
         std::fs::write(fixture.state.vault.root().join("feeds.md"), &invalid).unwrap();
         let raw_revision = blake3::hash(&invalid).to_hex().to_string();
@@ -1892,7 +1924,14 @@ mod tests {
     #[tokio::test]
     async fn current_revision_with_invalid_utf8_is_a_bad_request() {
         let fixture = feed_test_app("## Stable\n- [Stable](https://stable.example/rss)\n").await;
-        let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
+        let feed_id = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()[0]
+            .id;
         let invalid = b"## Invalid\n- \xff\n".to_vec();
         std::fs::write(fixture.state.vault.root().join("feeds.md"), &invalid).unwrap();
         let raw_revision = blake3::hash(&invalid).to_hex().to_string();
@@ -1940,7 +1979,14 @@ mod tests {
     async fn publication_race_to_invalid_utf8_returns_the_raw_revision_conflict() {
         let manifest = "## Stable\n- [Stable](https://stable.example/rss)\n";
         let fixture = feed_test_app(manifest).await;
-        let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
+        let feed_id = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()[0]
+            .id;
         let invalid = b"## Invalid\n- \xff\n".to_vec();
         let external_path = fixture.state.vault.root().join("invalid-feeds.md");
         std::fs::write(&external_path, &invalid).unwrap();
@@ -1981,7 +2027,14 @@ mod tests {
     async fn older_reconcile_cannot_overwrite_a_newer_manifest_patch() {
         let manifest = "## Old\n- [Fixture](https://fixture.example/rss)\n";
         let fixture = feed_test_app(manifest).await;
-        let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
+        let feed_id = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()[0]
+            .id;
         let first_hook = Arc::new(std::sync::atomic::AtomicBool::new(true));
         let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
         let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -2039,7 +2092,13 @@ mod tests {
             "manifest mutation must wait for the older reconcile snapshot to commit"
         );
         assert_eq!(status, StatusCode::OK);
-        let feeds = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap();
+        let feeds = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap();
         assert_eq!(feeds.len(), 1);
         assert_eq!(feeds[0].group, "New");
     }
@@ -2125,7 +2184,14 @@ mod tests {
             let manifest = "## Existing\n- [Existing](https://existing.example/rss)\n";
             let fixture =
                 feed_test_app_with_client(manifest, FeedsSettings::default(), client).await;
-            let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
+            let feed_id = fixture
+                .state
+                .feed_runtime()
+                .feeds
+                .list_feeds()
+                .await
+                .unwrap()[0]
+                .id;
             let subscribe = tokio::spawn({
                 let app = fixture.app.clone();
                 let url = format!("http://feed.test:{}/slow", address.port());
@@ -2397,8 +2463,18 @@ mod tests {
     #[tokio::test]
     async fn targeted_refresh_schedules_the_feed_and_notifies_the_scheduler() {
         let fixture = feed_test_app("## Fixture\n- [Fixture](https://fixture.example/rss)\n").await;
-        let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
-        fixture.state.feed_runtime().feeds
+        let feed_id = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()[0]
+            .id;
+        fixture
+            .state
+            .feed_runtime()
+            .feeds
             .apply_fetch(
                 feed_id,
                 FetchOutcome::Failure {
@@ -2425,10 +2501,23 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(100), &mut notified)
             .await
             .expect("refresh handler did not notify the scheduler");
-        let due = fixture.state.feed_runtime().feeds.due_feeds(Utc::now()).await.unwrap();
+        let due = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .due_feeds(Utc::now())
+            .await
+            .unwrap();
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].id, feed_id);
-        let feed = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap().remove(0);
+        let feed = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()
+            .remove(0);
         assert_eq!(
             feed.last_fetch_at,
             Some(fixture_time(12)),
@@ -2485,7 +2574,14 @@ mod tests {
     async fn opml_parse_releases_manifest_lock_and_rechecks_revision_before_publish() {
         let manifest = "## Stable\n- [Stable](https://stable.example/rss)\n";
         let fixture = feed_test_app(manifest).await;
-        let feed_id = fixture.state.feed_runtime().feeds.list_feeds().await.unwrap()[0].id;
+        let feed_id = fixture
+            .state
+            .feed_runtime()
+            .feeds
+            .list_feeds()
+            .await
+            .unwrap()[0]
+            .id;
         let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));

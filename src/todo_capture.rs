@@ -361,6 +361,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::parallel]
     async fn configured_local_capture_never_follows_redirects_to_another_server() {
         let second_server = MockServer::start().await;
 
@@ -400,6 +401,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::parallel]
     async fn posts_rendered_todo_and_returns_journal_path() {
         let server = MockServer::start().await;
         let mut todo = input("  Review\nproposal ");
@@ -427,6 +429,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::parallel]
     async fn reports_api_failure_from_capture_endpoint() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
@@ -451,6 +454,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial_test::parallel]
     async fn reports_missing_path_in_success_response() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))

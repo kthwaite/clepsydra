@@ -2,19 +2,19 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
+use axum::Json;
+use axum::Router;
 use axum::extract::rejection::QueryRejection;
 use axum::extract::{Query, State};
 use axum::routing::get;
-use axum::Json;
-use axum::Router;
 use chrono::{Duration, NaiveDate};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use super::AppState;
 use super::error::ApiError;
 use super::tasks::TaskItem;
-use super::AppState;
 use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
 use crate::vault::task_history::{effective_indexed_history, matches_project_scope};
 

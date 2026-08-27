@@ -5,14 +5,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use axum::http::StatusCode;
-use base64::prelude::{Engine as _, BASE64_STANDARD};
+use base64::prelude::{BASE64_STANDARD, Engine as _};
 use chrono::{DateTime, Utc};
-use clepsydra::api::openapi::ApiDoc;
 use clepsydra::api::Clock;
+use clepsydra::api::openapi::ApiDoc;
 use clepsydra::vault::keyring::MAX_WRAPPED_IDENTITY_BYTES;
-use clepsydra::vault::page::{page_revision, Page};
+use clepsydra::vault::page::{Page, page_revision};
 use clepsydra::vault::path::VaultPath;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use support::ApiFixture;
 use utoipa::OpenApi;
 
@@ -759,18 +759,22 @@ async fn keyring_endpoints_validate_public_inputs_and_wrapped_armor() {
         .await
         .assert_status(StatusCode::UNPROCESSABLE_ENTITY);
 
-    assert!(!fixture
-        .state
-        .vault
-        .root()
-        .join("escape.identity.age")
-        .exists());
-    assert!(!fixture
-        .state
-        .vault
-        .root()
-        .join(".clepsydra/crypto/keyring.toml")
-        .exists());
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("escape.identity.age")
+            .exists()
+    );
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join(".clepsydra/crypto/keyring.toml")
+            .exists()
+    );
 }
 
 #[test]

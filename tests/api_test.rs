@@ -8,9 +8,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::Poll;
 
-use axum::{Router, routing::get};
 use axum::body::{Body, Bytes};
 use axum::http::{Request, StatusCode};
+use axum::{Router, routing::get};
 use axum_test::TestServer;
 use tokio::sync::{Barrier, mpsc};
 
