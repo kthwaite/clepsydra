@@ -7,6 +7,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { components, operations } from "#/api/schema";
+import { isInvalidSearchQuery } from "./error";
 import { $api, fetchClient } from "./client";
 import { invalidateByPath, invalidatePageStructure, queryKeys } from "./keys";
 
@@ -343,7 +344,12 @@ export function useSearch(query: string, limit?: number) {
     "get",
     "/api/vault/index/search",
     { params: { query: { q: query, limit } } },
-    { enabled: query.length > 0 },
+    {
+      enabled: query.length > 0,
+      retry: (failureCount, error) =>
+        !isInvalidSearchQuery(error) && failureCount < 3,
+      throwOnError: false,
+    },
   );
 }
 
