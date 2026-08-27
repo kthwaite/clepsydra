@@ -67,3 +67,11 @@ _Avoid_: Brief
 **Related Page**:
 A vault page associated with a task.
 _Avoid_: Dossier link
+
+**Code**:
+The stable identifier of a Task or Cycle: two short words and a five-character tail (e.g. `TSK-brave-finch-7q3zd`). A code never changes once minted; any unique prefix of it addresses the same page.
+_Avoid_: TSK number, sequential code, ticket number
+
+**Conflict Copy**:
+A sibling page holding the version of a page that lost an automatic merge after the same page was edited on two devices. It remains until the user reconciles or discards it.
+_Avoid_: conflicted file, merge artifact
