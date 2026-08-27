@@ -292,6 +292,9 @@ vi.mock("#/api/journal", () => ({
   useJournalEditorOptions: () => undefined,
   useJournalRecent: () => ({ data: [] }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalRecent: () => ({ data: [] }),
+}));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => [],
 }));
