@@ -3197,7 +3197,13 @@ mod tests {
         assert_eq!(actual, expected);
     }
 
-    fn insert_metadata_page(index: &VaultIndex, id: &str, path: &str, tag: &str) {
+    fn insert_metadata_page(
+        index: &VaultIndex,
+        id: &str,
+        path: &str,
+        tag: &str,
+        updated_at: Option<&str>,
+    ) {
         index
             .connection()
             .execute(
@@ -3205,7 +3211,7 @@ mod tests {
                      id, path, title, canonical_name, updated_at, meta_json,
                      content_hash, kind, kind_inferred, project
                  ) VALUES (?1, ?2, ?3, ?4, ?5, '{}', ?1, 'NOTE', 0, 'Ordering')",
-                params![id, path, path, path, "2026-08-15T00:00:00Z"],
+                params![id, path, path, path, updated_at],
             )
             .unwrap();
         index
@@ -3349,6 +3355,24 @@ mod tests {
         assert_eq!(paths(&recipes), ["recipes/beer.md", "recipes/wine.md"]);
         assert!(recipes.iter().all(|result| result.snippet.is_empty()));
 
+        let branch_sensitive = index
+            .search("(tasting kind:recipe) | tag:reference", 20)
+            .unwrap();
+        let metadata_results = &branch_sensitive[branch_sensitive.len() - 2..];
+        assert_eq!(
+            paths(metadata_results),
+            ["notes/tasting-reference.md", "notes/reference.md"]
+        );
+        assert!(
+            metadata_results
+                .iter()
+                .all(|result| result.snippet.is_empty() && result.rank == 0.0)
+        );
+        assert!(
+            branch_sensitive[..branch_sensitive.len() - 2]
+                .iter()
+                .all(|result| !result.snippet.is_empty())
+        );
 
         let limited = index.search("tasting | tag:reference", 1).unwrap();
         assert_eq!(limited.len(), 1);
@@ -3387,6 +3411,18 @@ mod tests {
 
         assert_eq!(combined.rank.to_bits(), expected_best.rank.to_bits());
         assert_eq!(combined.snippet, expected_best.snippet);
+
+        let required_together = index
+            .search("fermentation tasting", 20)
+            .unwrap()
+            .into_iter()
+            .find(|result| result.path == "recipes/beer.md")
+            .unwrap();
+        assert_eq!(
+            required_together.rank.to_bits(),
+            expected_best.rank.to_bits()
+        );
+        assert_eq!(required_together.snippet, expected_best.snippet);
     }
 
     #[test]
@@ -3397,12 +3433,14 @@ mod tests {
             "00000000-0000-0000-0000-000000000203",
             "notes/Zebra-order.md",
             "path-order",
+            Some("2026-08-15T00:00:00Z"),
         );
         insert_metadata_page(
             &index,
             "00000000-0000-0000-0000-000000000204",
             "notes/alpha-order.md",
             "path-order",
+            Some("2026-08-15T00:00:00Z"),
         );
         assert_eq!(
             paths(&index.search("tag:path-order", 20).unwrap()),
@@ -3414,12 +3452,14 @@ mod tests {
             "00000000-0000-0000-0000-000000000302",
             "notes/Case-Tie.md",
             "id-order",
+            Some("2026-08-15T00:00:00Z"),
         );
         insert_metadata_page(
             &index,
             "00000000-0000-0000-0000-000000000301",
             "notes/case-tie.md",
             "id-order",
+            Some("2026-08-15T00:00:00Z"),
         );
         let id_order = index.search("tag:id-order", 20).unwrap();
         assert_eq!(
@@ -3435,6 +3475,37 @@ mod tests {
                 "00000000-0000-0000-0000-000000000301",
                 "00000000-0000-0000-0000-000000000302"
             ]
+        );
+    }
+
+    #[test]
+    fn search_orders_metadata_by_newest_timestamp_with_null_last() {
+        let index = search_index();
+        insert_metadata_page(
+            &index,
+            "00000000-0000-0000-0000-000000000401",
+            "notes/older.md",
+            "recency-order",
+            Some("2026-08-10T00:00:00Z"),
+        );
+        insert_metadata_page(
+            &index,
+            "00000000-0000-0000-0000-000000000402",
+            "notes/newest.md",
+            "recency-order",
+            Some("2026-08-20T00:00:00Z"),
+        );
+        insert_metadata_page(
+            &index,
+            "00000000-0000-0000-0000-000000000403",
+            "notes/missing-date.md",
+            "recency-order",
+            None,
+        );
+
+        assert_eq!(
+            paths(&index.search("tag:recency-order", 20).unwrap()),
+            ["notes/newest.md", "notes/older.md", "notes/missing-date.md"]
         );
     }
 

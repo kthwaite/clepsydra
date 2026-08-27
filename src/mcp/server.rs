@@ -98,7 +98,9 @@ const DEFAULT_LIST_LIMIT: u32 = 50;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchParams {
-    /// Full-text search query, matched against page titles and bodies.
+    /// Structured vault search query. Bare terms prefix-match titles and bodies; quoted text is
+    /// a phrase. Use exact `kind:`, `tag:`, and `project:` fields. Whitespace AND, `|` OR, `-` NOT,
+    /// and parentheses compose expressions. Invalid syntax returns an error.
     pub query: String,
     /// Maximum number of results (default 20).
     pub limit: Option<u32>,
@@ -547,7 +549,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_search",
-        description = "Full-text search the vault. Returns matching pages with path, title, and a snippet. Use this before creating pages to avoid duplicates, and to locate pages whose path you don't know.",
+        description = "Structured vault search. Bare terms prefix-match titles and bodies; quoted text is a phrase. Exact kind:, tag:, and project: fields compose with whitespace AND, `|` OR, `-` NOT, and parentheses. Invalid syntax returns an error. Results include path, title, and a snippet; metadata-only branches have an empty snippet. Search before creating pages to avoid duplicates or when locating an unknown path.",
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     pub async fn vault_search(
@@ -1609,6 +1611,42 @@ mod tests {
         truncate_body(&mut value, 99);
         assert_eq!(value["body"].as_str().unwrap().len(), 98);
         assert_eq!(value["body_truncated"], true);
+    }
+
+    #[test]
+    fn mcp_search_contract_describes_structured_syntax_and_errors() {
+        let tool = VaultMcpServer::tool_router()
+            .list_all()
+            .into_iter()
+            .find(|tool| tool.name == "vault_search")
+            .expect("vault_search should be registered");
+        let description = tool
+            .description
+            .as_deref()
+            .expect("vault_search description")
+            .to_lowercase();
+        let query_description = tool.input_schema["properties"]["query"]["description"]
+            .as_str()
+            .expect("query parameter description")
+            .to_lowercase();
+
+        for required in [
+            "structured",
+            "kind",
+            "tag",
+            "project",
+            "quoted",
+            "whitespace and",
+            "`|` or",
+            "`-` not",
+            "parentheses",
+            "invalid",
+        ] {
+            assert!(
+                description.contains(required) || query_description.contains(required),
+                "vault_search contract is missing {required:?}: {description} / {query_description}"
+            );
+        }
     }
 
     #[test]

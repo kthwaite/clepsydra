@@ -187,7 +187,7 @@ async fn search_propagates_typed_query_errors() {
         .await
         .unwrap_err();
     assert!(format!("{error:?}").starts_with("SearchQuery("));
-    assert!(error.to_string().contains("unknown field"));
+    assert!(error.to_string().contains("unknown search field"));
 }
 
 // ---------------------------------------------------------------------------

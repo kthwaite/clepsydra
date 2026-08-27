@@ -2,6 +2,11 @@ use std::{collections::VecDeque, fmt};
 
 use crate::vault::kind::Kind;
 
+const MAX_QUERY_BYTES: usize = 4096;
+const MAX_NESTING_DEPTH: usize = 32;
+const MAX_AST_NODES: usize = 128;
+const MAX_POSITIVE_TEXT_LEAVES: usize = 64;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct SearchSpan {
     pub(crate) start: usize,
@@ -83,6 +88,7 @@ pub(crate) enum SearchDiagnosticKind {
     EmptyValue,
     UnexpectedColon,
     ExpectedExpression,
+    QueryTooComplex,
 }
 
 impl SearchDiagnosticKind {
@@ -99,6 +105,7 @@ impl SearchDiagnosticKind {
             Self::EmptyGroup => "empty_group",
             Self::EmptyValue => "empty_value",
             Self::UnexpectedColon => "unexpected_colon",
+            Self::QueryTooComplex => "query_too_complex",
             Self::ExpectedExpression => "expected_expression",
         }
     }
@@ -166,8 +173,127 @@ struct Token {
 }
 
 pub(super) fn parse(input: &str) -> Result<SearchExpr, SearchQueryError> {
+    if input.len() > MAX_QUERY_BYTES {
+        let (start, character) = input
+            .char_indices()
+            .find(|(start, character)| start + character.len_utf8() > MAX_QUERY_BYTES)
+            .expect("an over-limit input has a character crossing the byte limit");
+        return Err(SearchQueryError::new(
+            input,
+            SearchDiagnosticKind::QueryTooComplex,
+            SearchSpan {
+                start,
+                end: start + character.len_utf8(),
+            },
+            format_args!("search query exceeds {MAX_QUERY_BYTES}-byte limit"),
+        ));
+    }
+
     let tokens = lex(input)?;
-    Parser { input, tokens }.parse()
+    validate_nesting(input, &tokens)?;
+    let expression = Parser { input, tokens }.parse()?;
+    validate_expression(input, &expression)?;
+    Ok(expression)
+}
+
+fn validate_nesting(
+    input: &str,
+    tokens: &VecDeque<Token>,
+) -> Result<(), SearchQueryError> {
+    let mut depth = 0usize;
+    let mut pending_nots = 0usize;
+    let mut group_contributions = Vec::new();
+
+    for token in tokens {
+        match token.kind {
+            TokenKind::Minus => {
+                pending_nots += 1;
+                ensure_nesting_depth(input, token.span, depth + pending_nots)?;
+            }
+            TokenKind::LeftParenthesis => {
+                let contribution = pending_nots + 1;
+                depth += contribution;
+                ensure_nesting_depth(input, token.span, depth)?;
+                group_contributions.push(contribution);
+                pending_nots = 0;
+            }
+            TokenKind::RightParenthesis => {
+                pending_nots = 0;
+                if let Some(contribution) = group_contributions.pop() {
+                    depth -= contribution;
+                }
+            }
+            TokenKind::Word(_) | TokenKind::Quoted(_) => {
+                ensure_nesting_depth(input, token.span, depth + pending_nots)?;
+                pending_nots = 0;
+            }
+            TokenKind::Colon | TokenKind::Pipe => {
+                pending_nots = 0;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn ensure_nesting_depth(
+    input: &str,
+    span: SearchSpan,
+    depth: usize,
+) -> Result<(), SearchQueryError> {
+    if depth <= MAX_NESTING_DEPTH {
+        return Ok(());
+    }
+    Err(SearchQueryError::new(
+        input,
+        SearchDiagnosticKind::QueryTooComplex,
+        span,
+        format_args!("search query exceeds nesting depth limit of {MAX_NESTING_DEPTH}"),
+    ))
+}
+
+fn validate_expression(input: &str, expression: &SearchExpr) -> Result<(), SearchQueryError> {
+    let mut stack = vec![(expression, false)];
+    let mut nodes = 0usize;
+    let mut positive_text_leaves = 0usize;
+
+    while let Some((expression, negated)) = stack.pop() {
+        nodes += 1;
+        if nodes > MAX_AST_NODES {
+            return Err(SearchQueryError::new(
+                input,
+                SearchDiagnosticKind::QueryTooComplex,
+                expression.span(),
+                format_args!("search query exceeds AST node limit of {MAX_AST_NODES}"),
+            ));
+        }
+
+        match expression {
+            SearchExpr::Text { span, .. } => {
+                if !negated {
+                    positive_text_leaves += 1;
+                    if positive_text_leaves > MAX_POSITIVE_TEXT_LEAVES {
+                        return Err(SearchQueryError::new(
+                            input,
+                            SearchDiagnosticKind::QueryTooComplex,
+                            *span,
+                            format_args!(
+                                "search query exceeds positive text leaf limit of \
+                                 {MAX_POSITIVE_TEXT_LEAVES}"
+                            ),
+                        ));
+                    }
+                }
+            }
+            SearchExpr::Field { .. } => {}
+            SearchExpr::All { children, .. } | SearchExpr::Any { children, .. } => {
+                stack.extend(children.iter().rev().map(|child| (child, negated)));
+            }
+            SearchExpr::Not { child, .. } => stack.push((child, !negated)),
+        }
+    }
+
+    Ok(())
 }
 
 fn lex(input: &str) -> Result<VecDeque<Token>, SearchQueryError> {
@@ -444,9 +570,9 @@ impl Parser<'_> {
                 "unexpected `:`",
             )),
             TokenKind::Pipe => Err(self.error(
-                SearchDiagnosticKind::ExpectedExpression,
+                SearchDiagnosticKind::DanglingOr,
                 token.span,
-                "expected an expression",
+                "`|` must follow an expression",
             )),
             TokenKind::Minus => unreachable!("minus tokens are parsed by parse_unary"),
             TokenKind::Quoted(value) => {
@@ -957,6 +1083,10 @@ mod tests {
                 "unmatched_parenthesis",
             ),
             (SearchDiagnosticKind::DanglingOr, "dangling_or"),
+            (
+                SearchDiagnosticKind::QueryTooComplex,
+                "query_too_complex",
+            ),
             (SearchDiagnosticKind::DanglingNot, "dangling_not"),
             (SearchDiagnosticKind::EmptyGroup, "empty_group"),
             (SearchDiagnosticKind::EmptyValue, "empty_value"),
@@ -1043,6 +1173,18 @@ mod tests {
                 "followed by an expression",
             ),
             (
+                "| tag:x",
+                SearchDiagnosticKind::DanglingOr,
+                span(0, 1),
+                "`|`",
+            ),
+            (
+                "|",
+                SearchDiagnosticKind::DanglingOr,
+                span(0, 1),
+                "`|`",
+            ),
+            (
                 "-",
                 SearchDiagnosticKind::DanglingNot,
                 span(0, 1),
@@ -1077,6 +1219,79 @@ mod tests {
         for (input, kind, expected_span, message) in cases {
             assert_diagnostic(input, kind, expected_span, message);
         }
+    }
+
+    #[test]
+    fn enforces_exact_query_complexity_boundaries() {
+        let maximum_bytes = "a".repeat(MAX_QUERY_BYTES);
+        assert!(parse(&maximum_bytes).is_ok());
+        let too_many_bytes = "a".repeat(MAX_QUERY_BYTES + 1);
+        assert_diagnostic(
+            &too_many_bytes,
+            SearchDiagnosticKind::QueryTooComplex,
+            span(MAX_QUERY_BYTES, MAX_QUERY_BYTES + 1),
+            "4096-byte limit",
+        );
+
+        let maximum_groups = format!(
+            "{}a{}",
+            "(".repeat(MAX_NESTING_DEPTH),
+            ")".repeat(MAX_NESTING_DEPTH)
+        );
+        assert!(parse(&maximum_groups).is_ok());
+        let too_many_groups = format!(
+            "{}a{}",
+            "(".repeat(MAX_NESTING_DEPTH + 1),
+            ")".repeat(MAX_NESTING_DEPTH + 1)
+        );
+        assert_diagnostic(
+            &too_many_groups,
+            SearchDiagnosticKind::QueryTooComplex,
+            span(MAX_NESTING_DEPTH, MAX_NESTING_DEPTH + 1),
+            "nesting depth",
+        );
+
+        let maximum_nots = format!("{}a", "-".repeat(MAX_NESTING_DEPTH));
+        assert!(parse(&maximum_nots).is_ok());
+        let too_many_nots = format!("{}a", "-".repeat(MAX_NESTING_DEPTH + 1));
+        assert_diagnostic(
+            &too_many_nots,
+            SearchDiagnosticKind::QueryTooComplex,
+            span(MAX_NESTING_DEPTH, MAX_NESTING_DEPTH + 1),
+            "nesting depth",
+        );
+
+        let maximum_nodes = std::iter::repeat_n("tag:x", MAX_AST_NODES - 1)
+            .collect::<Vec<_>>()
+            .join(" ");
+        assert!(parse(&maximum_nodes).is_ok());
+        let too_many_nodes = std::iter::repeat_n("tag:x", MAX_AST_NODES)
+            .collect::<Vec<_>>()
+            .join(" ");
+        let final_node_start = too_many_nodes.rfind("tag:x").unwrap();
+        assert_diagnostic(
+            &too_many_nodes,
+            SearchDiagnosticKind::QueryTooComplex,
+            span(final_node_start, final_node_start + "tag:x".len()),
+            "AST node limit",
+        );
+
+        let maximum_positive_text =
+            std::iter::repeat_n("a", MAX_POSITIVE_TEXT_LEAVES)
+                .collect::<Vec<_>>()
+                .join(" | ");
+        assert!(parse(&maximum_positive_text).is_ok());
+        let too_many_positive_text =
+            std::iter::repeat_n("a", MAX_POSITIVE_TEXT_LEAVES + 1)
+                .collect::<Vec<_>>()
+                .join(" | ");
+        let final_text_start = too_many_positive_text.rfind('a').unwrap();
+        assert_diagnostic(
+            &too_many_positive_text,
+            SearchDiagnosticKind::QueryTooComplex,
+            span(final_text_start, final_text_start + 1),
+            "positive text leaf limit",
+        );
     }
 
     fn assert_diagnostic(

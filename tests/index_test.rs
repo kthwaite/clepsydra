@@ -1665,7 +1665,7 @@ fn fts_search_returns_typed_query_errors() {
 
     let error = index.search("unknown:value", 10).unwrap_err();
     assert!(format!("{error:?}").starts_with("SearchQuery("));
-    assert!(error.to_string().contains("unknown field"));
+    assert!(error.to_string().contains("unknown search field"));
 }
 
 #[test]

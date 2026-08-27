@@ -6157,11 +6157,43 @@ async fn search_query_errors_have_a_stable_contract() {
         assert_eq!(body["detail"]["kind"], kind);
     }
 
+    let oversized = "a".repeat(4097);
+    let res = server
+        .get(&format!("/api/vault/index/search?q={oversized}"))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["code"], "invalid_search_query");
+    assert_eq!(body["detail"]["kind"], "query_too_complex");
+    assert_eq!(body["detail"]["span"], serde_json::json!({
+        "start": 4096,
+        "end": 4097
+    }));
+
     let res = server.get("/api/vault/index/search").await;
     res.assert_status(StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json();
     assert_eq!(body["error"], "missing 'q' query parameter");
     assert!(body.get("detail").is_none());
+}
+
+#[tokio::test]
+async fn search_internal_errors_are_generic() {
+    let fixture = ApiFixture::builder().build();
+    let (server, _tmp, state) = fixture.into_parts();
+    state
+        .index
+        .with_index(|index, _vault| index.connection().execute_batch("DROP TABLE pages_fts"))
+        .await
+        .unwrap()
+        .unwrap();
+
+    let res = server.get("/api/vault/index/search?q=text").await;
+    res.assert_status(StatusCode::INTERNAL_SERVER_ERROR);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["error"], "search failed");
+    assert!(!body.to_string().contains("sqlite"));
+    assert!(!body.to_string().contains("no such table"));
 }
 
 // ---------------------------------------------------------------------------

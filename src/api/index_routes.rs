@@ -1952,7 +1952,7 @@ pub async fn search(
                 }),
             ));
         }
-        Err(error) => return Err(ApiError::internal(format!("search failed: {error}"))),
+        Err(_) => return Err(ApiError::internal("search failed".to_string())),
     };
 
     let entries: Vec<SearchResultEntry> = results
