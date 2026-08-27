@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   type BaseMemberDiagnostic,
   useBase,
@@ -8,6 +8,7 @@ import { Select, SelectItem } from "#/components/ui/select";
 import { useProjects } from "#/lib/useProjects";
 import { BaseMemberDraft } from "./BaseMemberDraft";
 import {
+  type BaseMemberDraftField,
   type BaseMemberDraftValue,
   composeMemberDraftFields,
 } from "./member-draft";
@@ -25,33 +26,63 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
   const detail = useBase(slug);
   const createMember = useCreateBaseMember();
   const projects = useProjects();
-  const [view, setView] = useState<string>();
+  const [selection, setSelection] = useState<{
+    slug: string;
+    view: string;
+  }>();
   const [error, setError] = useState<string>();
   const [diagnostics, setDiagnostics] = useState<BaseMemberDiagnostic[]>([]);
 
   const definition = detail.data;
   const views = definition?.views ?? [];
+  const selectedView =
+    selection?.slug === slug &&
+    views.some((candidate) => candidate.name === selection.view)
+      ? selection.view
+      : undefined;
+  const activeView = selectedView ?? views[0]?.name;
   const session = useMemo(
     () =>
-      definition
+      definition && activeView
         ? resolveMemberCreationSession({
             kind: "definition",
             baseSlug: slug,
-            requestedView: view ?? "",
+            requestedView: activeView,
             detail: definition,
           })
         : undefined,
-    [definition, slug, view],
+    [activeView, definition, slug],
   );
-  const activeView = session?.view;
   const capability = session?.capability;
-  const fields = useMemo(
+  const composedFields = useMemo(
     () =>
       definition && activeView && capability
         ? composeMemberDraftFields(definition, activeView, capability)
         : [],
-    [definition, activeView, capability],
+    [activeView, capability, definition],
   );
+  const [retainedDraftFields, setRetainedDraftFields] = useState<{
+    slug: string;
+    view: string;
+    fields: BaseMemberDraftField[];
+  }>();
+  const sessionEnabled = capability?.enabled === true;
+  useEffect(() => {
+    if (!sessionEnabled || !activeView) return;
+    setRetainedDraftFields({
+      slug,
+      view: activeView,
+      fields: composedFields,
+    });
+  }, [activeView, composedFields, sessionEnabled, slug]);
+  const retainedFieldsMatch =
+    retainedDraftFields?.slug === slug &&
+    retainedDraftFields.view === activeView;
+  const fields = sessionEnabled
+    ? composedFields
+    : retainedFieldsMatch
+      ? retainedDraftFields.fields
+      : [];
 
   if (detail.isLoading) {
     return (
@@ -68,10 +99,13 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
     );
   }
 
-  const blocker = capability?.enabled === false ? capability.blockers[0] : null;
+  const blocker = sessionEnabled
+    ? undefined
+    : (capability?.blockers[0]?.message ??
+      "Member creation is unavailable for this view.");
 
   async function save(value: BaseMemberDraftValue) {
-    if (!session) return;
+    if (!session || !sessionEnabled) return;
     setError(undefined);
     setDiagnostics([]);
     const outcome = await session.submit(value, {
@@ -101,7 +135,7 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
           value={activeView}
           onChange={(key) => {
             if (key == null) return;
-            setView(String(key));
+            setSelection({ slug, view: String(key) });
             setDiagnostics([]);
             setError(undefined);
           }}
@@ -115,14 +149,16 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
       ) : null}
       {blocker ? (
         <p role="alert" className="cl-mono text-[11px] text-hot">
-          {blocker.message}
+          {blocker}
         </p>
-      ) : (
+      ) : null}
+      {fields.length > 0 ? (
         <BaseMemberDraft
           fields={fields}
           titleTemplate={definition.title_template ?? undefined}
           projects={projects}
           isSaving={createMember.isPending}
+          isSaveDisabled={!sessionEnabled}
           diagnostics={diagnostics}
           summaryError={error}
           onSave={save}
@@ -131,7 +167,7 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
             setDiagnostics([]);
           }}
         />
-      )}
+      ) : null}
     </div>
   );
 }

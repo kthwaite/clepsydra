@@ -70,6 +70,7 @@ function draftElement(overrides: Partial<DraftProps> = {}) {
       fields={fields}
       projects={["clepsydra", "vessel"]}
       isSaving={false}
+      isSaveDisabled={false}
       diagnostics={[]}
       onSave={vi.fn()}
       onCancel={vi.fn()}
@@ -482,6 +483,29 @@ describe("BaseMemberDraft", () => {
     expect(
       screen.getByRole("button", { name: "Cancel new member" }),
     ).toBeDisabled();
+  });
+
+  it("disables only submission when no authoritative session is available", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn();
+    render(draftElement({ isSaveDisabled: true, onSave }));
+
+    const title = screen.getByRole("textbox", {
+      name: "New member — Title",
+    });
+    expect(title).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Cancel new member" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Save new member" }),
+    ).toBeDisabled();
+
+    await user.type(title, "Authored while blocked");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    expect(onSave).not.toHaveBeenCalled();
+    expect(title).toHaveValue("Authored while blocked");
   });
 
   it("uses command-enter and control-enter to save", async () => {

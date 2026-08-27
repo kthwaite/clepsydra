@@ -980,6 +980,7 @@ export const BaseTableView = forwardRef<
           titleTemplate={memberTitleTemplate}
           projects={projects}
           isSaving={memberSaving}
+          isSaveDisabled={memberCapability?.enabled !== true}
           diagnostics={memberDiagnostics}
           summaryError={memberError}
           onSave={onSaveMember}

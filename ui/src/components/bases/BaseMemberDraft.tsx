@@ -25,6 +25,7 @@ export interface BaseMemberDraftProps {
   titleTemplate?: string;
   projects: string[];
   isSaving: boolean;
+  isSaveDisabled: boolean;
   diagnostics: BaseMemberDiagnostic[];
   summaryError?: string;
   onSave(value: BaseMemberDraftValue): void;
@@ -221,6 +222,7 @@ export function BaseMemberDraft({
   fields,
   projects,
   isSaving,
+  isSaveDisabled,
   diagnostics,
   summaryError,
   titleTemplate,
@@ -267,7 +269,7 @@ export function BaseMemberDraft({
   };
 
   const submit = () => {
-    if (isSaving) return;
+    if (isSaving || isSaveDisabled) return;
     if (draftRef.current.title.trim() === "") {
       setTitleError("Title is required.");
       focusFirstControl(fieldNodes.current.get("title") ?? null);
@@ -305,7 +307,7 @@ export function BaseMemberDraft({
   }, [diagnostics]);
 
   const handleKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    if (event.defaultPrevented || isSaving) return;
+    if (event.defaultPrevented || isSaving || isSaveDisabled) return;
     if (event.key === "Escape") {
       event.preventDefault();
       onCancel();
@@ -423,6 +425,7 @@ export function BaseMemberDraft({
             <button
               type="button"
               aria-label="Save new member"
+              disabled={isSaveDisabled}
               onPointerDown={handleSavePointerDown}
               onClick={submit}
               className="cl-mono border border-accent px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink outline-none hover:bg-highlight focus-visible:outline focus-visible:outline-1 focus-visible:outline-accent disabled:cursor-not-allowed disabled:text-ink-mute"
