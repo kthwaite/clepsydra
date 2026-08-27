@@ -5,6 +5,16 @@ import {
   useInitialFocus,
 } from "./types";
 
+/**
+ * Give a datetime-local value its seconds. Browsers drop `:00` seconds from
+ * `<input type="datetime-local">` even at `step={1}`, and `2026-08-28T09:30`
+ * is not a TOML date-time — the frontmatter splice would silently fall back to
+ * storing a quoted string, which no date filter or sort can see.
+ */
+function withSeconds(local: string): string {
+  return /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(local) ? `${local}:00` : local;
+}
+
 /** Split an ISO date-time into a datetime-local value and its zone suffix. */
 function splitIso(value: string): { local: string; suffix: string } {
   const match = value.match(/^(.*?)(Z|[+-]\d{2}:\d{2})?$/);
@@ -40,7 +50,7 @@ export function DateTimeCell({
       return;
     }
     // Reattach the value's original zone suffix (none for local date-times).
-    submit(`${draft}${suffix}`, definition.type);
+    submit(`${withSeconds(draft)}${suffix}`, definition.type);
   };
 
   return (

@@ -50,12 +50,12 @@ const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
   MEETING: {
     bodyPresentation: "editor",
     metaExtras: MeetingMeta,
-    metaExtrasLabel: "Attendees",
+    metaExtrasLabel: "Meeting",
   },
   ONE_ON_ONE: {
     bodyPresentation: "editor",
     metaExtras: MeetingMeta,
-    metaExtrasLabel: "Attendees",
+    metaExtrasLabel: "Meeting",
   },
 };
 

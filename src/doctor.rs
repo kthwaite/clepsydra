@@ -269,7 +269,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
-        check_attendance(v, &mut report);
+        check_meetings(v, &mut report);
         check_bases(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
@@ -285,7 +285,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
             "legacy census",
             "skipped — vault unavailable",
         ));
-        report.push(skip("attendance", "census", "skipped — vault unavailable"));
+        report.push(skip("meetings", "census", "skipped — vault unavailable"));
         report.push(skip("bases", "registry", "skipped — vault unavailable"));
     }
 
@@ -1488,24 +1488,28 @@ fn check_frontmatter(vault: &Vault, report: &mut Report) {
 }
 
 // ---------------------------------------------------------------------------
-// Check 8b: meeting attendance
+// Check 8b: meeting frontmatter
 // ---------------------------------------------------------------------------
 
-/// Census of MEETING / ONE_ON_ONE pages whose `attendees` the API would refuse
-/// to write. Files are hand-editable, so nothing stops a page reaching this
-/// state; the doctor is where it surfaces.
-fn check_attendance(vault: &Vault, report: &mut Report) {
+/// Census of MEETING / ONE_ON_ONE pages whose `attendees` or `occurred_at` the
+/// API would refuse to write. Files are hand-editable, so nothing stops a page
+/// reaching this state; the doctor is where it surfaces. Pages that are merely
+/// unfinished — a 1:1 naming nobody, a meeting with no time — are reported
+/// separately, as information rather than breakage.
+fn check_meetings(vault: &Vault, report: &mut Report) {
     use crate::vault::attendance;
     use crate::vault::kind::resolve;
+    use crate::vault::meeting;
     use crate::vault::page::Page;
     use crate::vault::path::VaultPath;
 
-    const SECTION: &str = "attendance";
+    const SECTION: &str = "meetings";
     const LISTED: usize = 10;
 
     let mut meetings = 0usize;
     let mut invalid: Vec<String> = Vec::new();
-    let mut incomplete: Vec<String> = Vec::new();
+    let mut unnamed: Vec<String> = Vec::new();
+    let mut undated: Vec<String> = Vec::new();
 
     for entry in walkdir::WalkDir::new(vault.root())
         .into_iter()
@@ -1530,14 +1534,21 @@ fn check_attendance(vault: &Vault, report: &mut Report) {
             continue;
         };
         let (kind, _) = resolve(vault_path.as_str(), page.meta.kind);
-        if attendance::cardinality(kind).is_none() {
+        if attendance::cardinality(kind).is_none() && !meeting::records_occurrence(kind) {
             continue;
         }
         meetings += 1;
+
+        let path = vault_path.as_str();
         if let Err(error) = attendance::validate(kind, &page.meta) {
-            invalid.push(format!("{}: {error}", vault_path.as_str()));
+            invalid.push(format!("{path}: {error}"));
         } else if attendance::is_incomplete(kind, &page.meta) {
-            incomplete.push(vault_path.as_str().to_string());
+            unnamed.push(path.to_string());
+        }
+        if let Err(error) = meeting::validate(kind, &page.meta) {
+            invalid.push(format!("{path}: {error}"));
+        } else if meeting::is_undated(kind, &page.meta) {
+            undated.push(path.to_string());
         }
     }
 
@@ -1549,39 +1560,69 @@ fn check_attendance(vault: &Vault, report: &mut Report) {
     if invalid.is_empty() {
         report.push(ok(
             SECTION,
-            "attendees",
-            format!("{meetings} meeting page(s); every `attendees` list is well-formed"),
+            "frontmatter",
+            format!(
+                "{meetings} meeting page(s); every `attendees` and `occurred_at` is well-formed"
+            ),
         ));
     } else {
         invalid.sort();
-        let mut detail = format!("{} page(s) with unusable `attendees`:", invalid.len());
-        for line in invalid.iter().take(LISTED) {
-            detail.push_str("\n  ");
-            detail.push_str(line);
-        }
-        if invalid.len() > LISTED {
-            detail.push_str(&format!("\n  … and {} more", invalid.len() - LISTED));
-        }
-        report.push(warn(SECTION, "attendees", detail).with_hint(
-            "fix the frontmatter: `attendees` is a list of wikilinks, and a ONE_ON_ONE names one",
-        ));
-    }
-
-    if !incomplete.is_empty() {
-        incomplete.sort();
-        let mut detail = format!("{} 1:1 page(s) name nobody:", incomplete.len());
-        for path in incomplete.iter().take(LISTED) {
-            detail.push_str("\n  ");
-            detail.push_str(path);
-        }
-        if incomplete.len() > LISTED {
-            detail.push_str(&format!("\n  … and {} more", incomplete.len() - LISTED));
-        }
         report.push(
-            info(SECTION, "unnamed 1:1s", detail)
-                .with_hint("set `attendees = [\"[[Their Name]]\"]` on each"),
+            warn(
+                SECTION,
+                "frontmatter",
+                listing(&invalid, format!("{} unusable value(s):", invalid.len()), LISTED),
+            )
+            .with_hint(
+                "`attendees` is a list of wikilinks and a ONE_ON_ONE names one; `occurred_at` is an unquoted TOML date-time",
+            ),
         );
     }
+
+    if !unnamed.is_empty() {
+        unnamed.sort();
+        report.push(
+            info(
+                SECTION,
+                "unnamed 1:1s",
+                listing(
+                    &unnamed,
+                    format!("{} 1:1 page(s) name nobody:", unnamed.len()),
+                    LISTED,
+                ),
+            )
+            .with_hint("set `attendees = [\"[[Their Name]]\"]` on each"),
+        );
+    }
+
+    if !undated.is_empty() {
+        undated.sort();
+        report.push(
+            info(
+                SECTION,
+                "undated",
+                listing(
+                    &undated,
+                    format!("{} meeting page(s) record no time:", undated.len()),
+                    LISTED,
+                ),
+            )
+            .with_hint("set `occurred_at = 2026-08-27T14:00:00Z` on each"),
+        );
+    }
+}
+
+/// `headline` followed by up to `limit` indented entries, then an elision.
+fn listing(entries: &[String], headline: String, limit: usize) -> String {
+    let mut detail = headline;
+    for entry in entries.iter().take(limit) {
+        detail.push_str("\n  ");
+        detail.push_str(entry);
+    }
+    if entries.len() > limit {
+        detail.push_str(&format!("\n  … and {} more", entries.len() - limit));
+    }
+    detail
 }
 
 // ---------------------------------------------------------------------------
@@ -2259,7 +2300,7 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn attendance_check_is_quiet_without_meeting_pages() {
+    async fn meeting_check_is_quiet_without_meeting_pages() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
         crate::vault::init::init_vault(&vault_root).unwrap();
@@ -2270,7 +2311,7 @@ mod tests {
 
         assert_record(
             &report,
-            "attendance",
+            "meetings",
             "census",
             Status::Info,
             "no meeting or 1:1 pages",
@@ -2279,19 +2320,19 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn attendance_check_passes_well_formed_meetings() {
+    async fn meeting_check_passes_well_formed_pages() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
         crate::vault::init::init_vault(&vault_root).unwrap();
         write_page(
             &vault_root,
             "meetings/kickoff.md",
-            "title = \"Kickoff\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\n",
+            "title = \"Kickoff\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\noccurred_at = 2026-08-27T14:00:00Z\n",
         );
         write_page(
             &vault_root,
             "one-on-ones/ada.md",
-            "title = \"Ada\"\nattendees = [\"[[Ada]]\"]\n",
+            "title = \"Ada\"\nattendees = [\"[[Ada]]\"]\noccurred_at = 2026-08-27\n",
         );
         write_top_level_config(tmp.path(), &vault_root);
 
@@ -2299,24 +2340,26 @@ mod tests {
 
         assert_record(
             &report,
-            "attendance",
-            "attendees",
+            "meetings",
+            "frontmatter",
             Status::Ok,
-            "2 meeting page(s); every `attendees` list is well-formed",
+            "2 meeting page(s); every `attendees` and `occurred_at` is well-formed",
         );
-        assert!(
-            !report
-                .results
-                .iter()
-                .any(|record| record.section == "attendance" && record.name == "unnamed 1:1s"),
-            "a complete 1:1 should not be reported: {:#?}",
-            report.results
-        );
+        for name in ["unnamed 1:1s", "undated"] {
+            assert!(
+                !report
+                    .results
+                    .iter()
+                    .any(|record| record.section == "meetings" && record.name == name),
+                "a complete meeting should not be reported as {name}: {:#?}",
+                report.results
+            );
+        }
     }
 
     #[tokio::test]
     #[serial_test::serial]
-    async fn attendance_check_reports_hand_edited_breakage() {
+    async fn meeting_check_reports_hand_edited_breakage() {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
         crate::vault::init::init_vault(&vault_root).unwrap();
@@ -2324,35 +2367,68 @@ mod tests {
         write_page(
             &vault_root,
             "one-on-ones/crowd.md",
-            "title = \"Crowd\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\n",
+            "title = \"Crowd\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\noccurred_at = 2026-08-27\n",
         );
-        // A 1:1 that names nobody: unfinished, not broken.
+        // A quoted date-time is inert text the index never projects as a date.
+        write_page(
+            &vault_root,
+            "meetings/quoted.md",
+            "title = \"Quoted\"\nattendees = [\"[[Ada]]\"]\noccurred_at = \"2026-08-27T14:00:00Z\"\n",
+        );
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        let frontmatter = report
+            .results
+            .iter()
+            .find(|record| record.section == "meetings" && record.name == "frontmatter")
+            .expect("meetings.frontmatter should be reported");
+        assert_eq!(frontmatter.status, Status::Warn, "{frontmatter:#?}");
+        assert!(
+            frontmatter.detail.contains("one-on-ones/crowd.md"),
+            "{frontmatter:#?}"
+        );
+        assert!(
+            frontmatter.detail.contains("meetings/quoted.md"),
+            "{frontmatter:#?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn meeting_check_reports_unfinished_pages_as_information() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        // A 1:1 that names nobody and records no time: unfinished, not broken.
         write_page(&vault_root, "one-on-ones/blank.md", "title = \"Blank\"\n");
         write_top_level_config(tmp.path(), &vault_root);
 
         let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
 
-        let attendees = report
-            .results
-            .iter()
-            .find(|record| record.section == "attendance" && record.name == "attendees")
-            .expect("attendance.attendees should be reported");
-        assert_eq!(attendees.status, Status::Warn, "{attendees:#?}");
-        assert!(
-            attendees.detail.contains("one-on-ones/crowd.md"),
-            "{attendees:#?}"
+        assert_eq!(
+            report
+                .results
+                .iter()
+                .find(|record| record.section == "meetings" && record.name == "frontmatter")
+                .map(|record| record.status),
+            Some(Status::Ok),
+            "an unfinished page is not breakage: {:#?}",
+            report.results
         );
-
-        let unnamed = report
-            .results
-            .iter()
-            .find(|record| record.section == "attendance" && record.name == "unnamed 1:1s")
-            .expect("attendance.unnamed 1:1s should be reported");
-        assert_eq!(unnamed.status, Status::Info, "{unnamed:#?}");
-        assert!(
-            unnamed.detail.contains("one-on-ones/blank.md"),
-            "{unnamed:#?}"
-        );
+        for name in ["unnamed 1:1s", "undated"] {
+            let record = report
+                .results
+                .iter()
+                .find(|record| record.section == "meetings" && record.name == name)
+                .unwrap_or_else(|| panic!("meetings.{name} should be reported"));
+            assert_eq!(record.status, Status::Info, "{record:#?}");
+            assert!(
+                record.detail.contains("one-on-ones/blank.md"),
+                "{record:#?}"
+            );
+        }
     }
 }
 

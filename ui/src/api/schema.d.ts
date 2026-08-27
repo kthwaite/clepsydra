@@ -2123,6 +2123,12 @@ export interface components {
             body?: string | null;
             kind?: null | components["schemas"]["Kind"];
             /**
+             * @description When this MEETING or ONE_ON_ONE took place: `2026-08-27T14:00:00Z`, the
+             *     same without an offset, or a bare `2026-08-27` when only the day is
+             *     known. Written as a native TOML date-time.
+             */
+            occurred_at?: string | null;
+            /**
              * @description Declared project slug, written to the page's `project:` frontmatter as
              *     part of the same create mutation.
              */
@@ -2542,6 +2548,11 @@ export interface components {
             attendees?: string[] | null;
             created_at?: string | null;
             id: string;
+            /**
+             * @description When a MEETING or ONE_ON_ONE took place, as an ISO date-time. Stored as
+             *     a native TOML date-time, so it sorts and filters like one.
+             */
+            occurred_at?: string | null;
             tags?: string[] | null;
             title?: string | null;
             updated_at?: string | null;

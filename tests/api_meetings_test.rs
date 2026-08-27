@@ -25,11 +25,27 @@ async fn create(
     (status, response.json())
 }
 
-async fn attendees_of(server: &TestServer, path: &str) -> serde_json::Value {
+async fn meta_key(server: &TestServer, path: &str, key: &str) -> serde_json::Value {
     let response = server.get(&format!("/api/vault/pages/{path}")).await;
     response.assert_status_ok();
     let page: serde_json::Value = response.json();
-    page["meta"]["attendees"].clone()
+    page["meta"][key].clone()
+}
+
+async fn attendees_of(server: &TestServer, path: &str) -> serde_json::Value {
+    meta_key(server, path, "attendees").await
+}
+
+/// The frontmatter line for `key` as it sits on disk, so a native TOML
+/// date-time can be told apart from a quoted string — a distinction the JSON
+/// response erases.
+fn frontmatter_line(tmp: &TempDir, path: &str, key: &str) -> String {
+    let raw = std::fs::read_to_string(tmp.path().join("vault").join(path))
+        .unwrap_or_else(|error| panic!("page {path} should be readable: {error}"));
+    raw.lines()
+        .find(|line| line.trim_start().starts_with(key))
+        .unwrap_or_else(|| panic!("no `{key}` line in:\n{raw}"))
+        .to_string()
 }
 
 #[tokio::test]
@@ -271,4 +287,157 @@ async fn patching_attendees_is_held_to_the_kind_ceiling() {
     swapped.assert_status_ok();
     let patched: serde_json::Value = swapped.json();
     assert_eq!(patched["properties"]["attendees"], "[[Grace Hopper]]");
+}
+
+#[tokio::test]
+async fn a_meeting_records_when_it_took_place() {
+    let (server, _tmp) = setup_server();
+
+    let (status, created) = create(
+        &server,
+        "meetings/kickoff.md",
+        serde_json::json!({
+            "title": "Kickoff",
+            "kind": "MEETING",
+            "occurred_at": "2026-08-27T14:00:00Z",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let path = created["path"].as_str().unwrap().to_string();
+
+    assert_eq!(
+        meta_key(&server, &path, "occurred_at").await,
+        serde_json::json!("2026-08-27T14:00:00Z")
+    );
+}
+
+#[tokio::test]
+async fn an_occurrence_is_stored_as_a_native_toml_date_time() {
+    // Quoted, it would be inert text the index never projects as a date.
+    let (server, tmp) = setup_server();
+
+    let (status, created) = create(
+        &server,
+        "meetings/kickoff.md",
+        serde_json::json!({
+            "title": "Kickoff",
+            "kind": "MEETING",
+            "occurred_at": "2026-08-27T14:00:00Z",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let path = created["path"].as_str().unwrap().to_string();
+
+    let line = frontmatter_line(&tmp, &path, "occurred_at");
+    assert!(
+        line.contains("2026-08-27T14:00:00Z") && !line.contains('"'),
+        "occurred_at should be an unquoted TOML date-time, got: {line:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_day_without_an_hour_is_accepted_and_nonsense_is_not() {
+    let (server, _tmp) = setup_server();
+
+    let (status, _) = create(
+        &server,
+        "meetings/dayonly.md",
+        serde_json::json!({
+            "title": "Day Only",
+            "kind": "MEETING",
+            "occurred_at": "2026-08-27",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+
+    let (status, error) = create(
+        &server,
+        "meetings/nonsense.md",
+        serde_json::json!({
+            "title": "Nonsense",
+            "kind": "MEETING",
+            "occurred_at": "last tuesday",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(
+        error["error"].as_str().unwrap().contains("occurred_at"),
+        "unhelpful error: {error}"
+    );
+
+    // A time of day names no day, so it cannot say when a meeting happened.
+    let (status, _) = create(
+        &server,
+        "meetings/timeonly.md",
+        serde_json::json!({
+            "title": "Time Only",
+            "kind": "MEETING",
+            "occurred_at": "14:00:00",
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patching_the_occurrence_keeps_it_a_date_time() {
+    let (server, tmp) = setup_server();
+
+    let (status, created) = create(
+        &server,
+        "meetings/kickoff.md",
+        serde_json::json!({ "title": "Kickoff", "kind": "MEETING" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+    let path = created["path"].as_str().unwrap().to_string();
+    let revision = created["revision"].as_str().unwrap().to_string();
+
+    // The `datetime` hint is what turns the JSON string into a TOML date-time.
+    let patched = server
+        .patch(&format!("/api/vault/pages/by-id/{id}/properties"))
+        .json(&serde_json::json!({
+            "set": { "occurred_at": "2026-08-27T14:00:00Z" },
+            "types": { "occurred_at": "datetime" },
+            "expected_revision": revision,
+        }))
+        .await;
+    patched.assert_status_ok();
+
+    let line = frontmatter_line(&tmp, &path, "occurred_at");
+    assert!(
+        !line.contains('"'),
+        "patched occurred_at should stay unquoted, got: {line:?}"
+    );
+}
+
+#[tokio::test]
+async fn patching_an_unhinted_occurrence_is_refused() {
+    // Without the type hint the splice would store a string, which reads back
+    // as a date to nobody. Better a 400 than a silently inert value.
+    let (server, _tmp) = setup_server();
+
+    let (status, created) = create(
+        &server,
+        "meetings/kickoff.md",
+        serde_json::json!({ "title": "Kickoff", "kind": "MEETING" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["meta"]["id"].as_str().unwrap().to_string();
+    let revision = created["revision"].as_str().unwrap().to_string();
+
+    let refused = server
+        .patch(&format!("/api/vault/pages/by-id/{id}/properties"))
+        .json(&serde_json::json!({
+            "set": { "occurred_at": "2026-08-27T14:00:00Z" },
+            "expected_revision": revision,
+        }))
+        .await;
+    refused.assert_status(StatusCode::BAD_REQUEST);
 }

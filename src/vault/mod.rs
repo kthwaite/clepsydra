@@ -39,6 +39,7 @@ pub mod kind;
 pub mod legacy_yaml;
 pub mod link;
 pub mod location;
+pub mod meeting;
 pub mod migrate;
 pub mod mutation;
 pub mod mutation_coordinator;

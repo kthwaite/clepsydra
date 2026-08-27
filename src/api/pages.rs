@@ -22,6 +22,7 @@ use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, Expect
 use crate::vault::canonical::CanonicalName;
 use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
 use crate::vault::kind::{Kind, resolve};
+use crate::vault::meeting;
 use crate::vault::mutation::{MutationOp, MutationPlanner};
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationError, MutationNotification, ProjectAssignment, UpdatePageCommand,
@@ -132,6 +133,10 @@ pub struct PageMetaResponse {
     /// (`attendees = "[[Ada Lovelace]]"`) is read as a one-element list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attendees: Option<Vec<String>>,
+    /// When a MEETING or ONE_ON_ONE took place, as an ISO date-time. Stored as
+    /// a native TOML date-time, so it sorts and filters like one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub occurred_at: Option<String>,
 }
 /// OpenAPI schema for page detail responses.
 #[derive(Debug, Serialize, ToSchema)]
@@ -186,6 +191,11 @@ pub struct CreatePageRequest {
     /// written. A ONE_ON_ONE accepts at most one.
     #[serde(default)]
     pub attendees: Option<Vec<String>>,
+    /// When this MEETING or ONE_ON_ONE took place: `2026-08-27T14:00:00Z`, the
+    /// same without an offset, or a bare `2026-08-27` when only the day is
+    /// known. Written as a native TOML date-time.
+    #[serde(default)]
+    pub occurred_at: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -788,10 +798,18 @@ pub async fn create_page(
             attendance::attendees_value(&attendees),
         );
     }
+    if let Some(occurred_at) = &body.occurred_at {
+        let value = meeting::parse_occurred_at(occurred_at)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        meta.extra
+            .insert(meeting::OCCURRED_AT_KEY.to_string(), value);
+    }
     // The kind may be inferred from the path when none is declared, and an
-    // inferred MEETING / ONE_ON_ONE is bound by the same attendee rules.
+    // inferred MEETING / ONE_ON_ONE is bound by the same meeting rules.
     let (resolved_kind, _) = resolve(vault_path.as_str(), meta.kind);
     attendance::validate(resolved_kind, &meta)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    meeting::validate(resolved_kind, &meta)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
 
     let page_body = body.body.unwrap_or_default();
@@ -1445,6 +1463,8 @@ fn validate_kind_assignment(
     // would store a state no write path allows; the caller has to trim the
     // attendees first.
     attendance::validate(requested_kind, meta)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    meeting::validate(requested_kind, meta)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(())
 }

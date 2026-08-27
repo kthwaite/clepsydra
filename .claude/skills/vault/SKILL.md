@@ -25,6 +25,9 @@ files directly, which bypasses locking, link rewriting, and the index.
 - **Attendees** — MEETING and ONE_ON_ONE pages name people in `attendees`, a
   list of wikilinks to person pages. A MEETING names any number; a ONE_ON_ONE
   names one, and the server refuses a second.
+- **Occurred** — the same kinds record when they happened in `occurred_at`, an
+  unquoted TOML date-time (`2026-08-27T14:00:00Z`, or a bare date). Quoted, it
+  is refused: a string never sorts or filters as a date.
 - **Wikilinks** — `[[Canonical Name]]` links pages by title-derived name or
   alias. The server rewrites inbound links on moves/renames/deletes.
 - **Filenames** — authored pages use `yyyymmdd.slug.shortid.md`

@@ -76,11 +76,12 @@ mutation.
 
 ### Record a meeting or a 1:1
 
-MEETING and ONE_ON_ONE pages name the people who were there in an `attendees`
-frontmatter list of wikilinks:
+MEETING and ONE_ON_ONE pages record when they happened and name the people who
+were there:
 
 ```toml
 type = "MEETING"
+occurred_at = 2026-08-27T14:00:00Z
 attendees = ["[[Ada Lovelace]]", "[[Grace Hopper]]"]
 ```
 
@@ -96,8 +97,17 @@ in its backlinks. Nothing requires the target to exist or to be a PERSON page;
 a wikilink to a page you have not written yet behaves the way it does anywhere
 else in the vault.
 
+`occurred_at` is an **unquoted** TOML date-time, which is what lets Bases and
+queries sort and filter on it; a quoted string is inert text, so the server
+refuses one. Accepted forms are `2026-08-27T14:00:00Z`, the same without an
+offset, and a bare `2026-08-27` when only the day is known. Clepsydra never
+fills it in for you — an undated meeting is another unfinished note `clep
+doctor` lists.
+
 Both kinds open with an `## Agenda` / `## Notes` / `## Actions` scaffold when
-created without a body. The Folio's **Attendees** rail block edits the list.
+created without a body. The Folio's **Meeting** rail block edits both fields: a
+date-time picker for **Occurred** (with a **Now** button while it is unset)
+above the attendee list.
 
 ### Move or rename a page
 
