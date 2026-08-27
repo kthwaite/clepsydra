@@ -152,10 +152,9 @@ Routes used (all existing; no backend route changes expected):
 | Page search (FTS5) | `GET /api/vault/index/search` |
 | Backlinks with context | `GET /api/vault/index/backlinks/{*path}` |
 | Tags | `GET /api/vault/index/tags` |
-| Task list | `GET /api/vault/tasks/` |
+| Task list (board snapshot) | `GET /api/vault/board` |
 | Task create | `POST /api/vault/board/tasks` |
-| Task stage transition | `PATCH /api/vault/board/tasks/{id}` |
-| Board snapshot | `GET /api/vault/board/` |
+| Task stage transition | `PATCH /api/vault/board/tasks/{id}` (`{id}` = task page UUID from the board snapshot) |
 
 ### Commands (`:Clep` tree)
 

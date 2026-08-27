@@ -48,6 +48,9 @@ vim.lsp.enable("clepsydra")
 | `:Clep search` | Live full-text page search (snacks picker). |
 | `:Clep backlinks` | Backlinks of the current page with context (snacks picker). Opens the source file; the API returns context strings, not positions. |
 | `:Clep tags` | Vault tags; confirming a tag opens a picker of its pages. |
+| `:Clep task add {title}` | Create a Task on the board; the server assigns the TSK code (stage `INTAKE`) and the plugin echoes it. |
+| `:Clep task stage` | Find the TSK code under the cursor (or in the current file's name), pick one of the five stages (`INTAKE` → `TRIAGE` → `FIELD` → `REVIEW` → `SEALED`) via `vim.ui.select`, and apply it. |
+| `:Clep tasks` | Board tasks with code, stage, and title (snacks picker); confirming opens the task page. |
 
 The plugin also registers the `clepsydra.findReferences` client command that
 the LSP's reference code lens emits, so activating the lens runs a normal
