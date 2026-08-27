@@ -10,6 +10,10 @@ use crate::vault::markdown::markdown_options;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BlockType {
     Paragraph,
+    /// A list item, or a definition-list title/definition — both are one
+    /// block per child of their container tag, so they share this variant
+    /// rather than adding dedicated ones (`derivers/blocks.rs` maps
+    /// `BlockType` exhaustively to a stored string).
     ListItem,
     Heading,
     Code,
@@ -252,6 +256,10 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
         match event {
             Event::Start(Tag::List(_)) => list_depth += 1,
             Event::End(TagEnd::List(_)) => list_depth = list_depth.saturating_sub(1),
+            // Definition lists are container tags like List: they don't form
+            // a block themselves, only their title/definition children do.
+            Event::Start(Tag::DefinitionList) => list_depth += 1,
+            Event::End(TagEnd::DefinitionList) => list_depth = list_depth.saturating_sub(1),
             Event::Start(Tag::Item) => start_block_builder(
                 &mut blocks,
                 &mut current,
@@ -261,6 +269,31 @@ pub fn parse_blocks(markdown: &str) -> Vec<Block> {
                 range.end,
             ),
             Event::End(TagEnd::Item) => finish_block(&mut blocks, &mut current, range.end),
+            // A definition-list title/definition is its own block at the
+            // same granularity as a list item; there's no dedicated
+            // BlockType for it, so it reuses ListItem (see BlockType docs).
+            Event::Start(Tag::DefinitionListTitle) => start_block_builder(
+                &mut blocks,
+                &mut current,
+                BlockType::ListItem,
+                list_depth.saturating_sub(1),
+                range.start,
+                range.end,
+            ),
+            Event::End(TagEnd::DefinitionListTitle) => {
+                finish_block(&mut blocks, &mut current, range.end)
+            }
+            Event::Start(Tag::DefinitionListDefinition) => start_block_builder(
+                &mut blocks,
+                &mut current,
+                BlockType::ListItem,
+                list_depth.saturating_sub(1),
+                range.start,
+                range.end,
+            ),
+            Event::End(TagEnd::DefinitionListDefinition) => {
+                finish_block(&mut blocks, &mut current, range.end)
+            }
             Event::TaskListMarker(checked) => set_checkbox(&mut current, checked),
             Event::Start(Tag::Heading { .. }) => start_block_builder(
                 &mut blocks,
@@ -480,14 +513,33 @@ mod tests {
     }
 
     #[test]
+    fn parses_simple_definition_list() {
+        // Mirrors `parses_simple_list` in tests/block_parser_test.rs: each
+        // title/definition becomes its own block at the same granularity as
+        // a list item.
+        let blocks = parse_blocks("Term\n: Definition");
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].block_type, BlockType::ListItem);
+        assert_eq!(blocks[0].content, "Term");
+        assert_eq!(blocks[0].depth, 0);
+        assert!(blocks[0].parent_index.is_none());
+        assert_eq!(blocks[1].block_type, BlockType::ListItem);
+        assert_eq!(blocks[1].content, "Definition");
+        assert_eq!(blocks[1].depth, 0);
+    }
+
+    #[test]
     fn parse_blocks_survives_blockquote_definition_marker() {
         // pulldown-cmark 0.12.2 panicked on this input with definition lists
         // enabled; 0.13.4 fixes it (see vault::markdown::markdown_options).
-        // The point of this test is panic-freedom, not block shape: block.rs
-        // has no DefinitionList/DefinitionListTitle/DefinitionListDefinition
-        // arms, so those events fall through the catch-all and this input
-        // now yields no structural blocks at all.
+        // The blockquote's "." becomes a definition-list title and its ":"
+        // an empty definition; both are indexed as ListItem blocks by the
+        // DefinitionListTitle/DefinitionListDefinition arms above.
         let blocks = parse_blocks("\n>.\n>:");
-        assert!(blocks.is_empty());
+        assert_eq!(blocks.len(), 2);
+        assert_eq!(blocks[0].block_type, BlockType::ListItem);
+        assert_eq!(blocks[0].content, ".");
+        assert_eq!(blocks[1].block_type, BlockType::ListItem);
+        assert_eq!(blocks[1].content, "");
     }
 }
