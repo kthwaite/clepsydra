@@ -49,6 +49,9 @@ const ALL_TYPES: ElementType[] = [
   "math-block",
   "image",
   "base-embed",
+  "table",
+  "table-row",
+  "table-cell",
 ];
 
 describe("withSchema classification", () => {

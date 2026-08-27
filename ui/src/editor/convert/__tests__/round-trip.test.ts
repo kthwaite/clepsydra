@@ -401,3 +401,67 @@ describe("footnotes round-trip", () => {
     expect(back).toContain("[^1]: The source.");
   });
 });
+
+describe("tables round-trip", () => {
+  it("preserves a plain GFM table", () => {
+    const input = [
+      "| Vessel | Depth |",
+      "| ------ | ----- |",
+      "| Clepsydra | 12 |",
+    ].join("\n");
+    expect(normalize(roundTrip(input))).toBe(
+      normalize(
+        [
+          "| Vessel    | Depth |",
+          "| --------- | ----- |",
+          "| Clepsydra | 12    |",
+        ].join("\n"),
+      ),
+    );
+  });
+
+  it("preserves column alignment", () => {
+    const input = [
+      "| Left | Centre | Right |",
+      "| :--- | :----: | ----: |",
+      "| a | b | c |",
+    ].join("\n");
+    // Cell padding is the serializer's to choose; the delimiter row carries
+    // the alignment and is what has to survive.
+    expect(roundTrip(input).split("\n")[1]).toBe("| :--- | :----: | ----: |");
+  });
+
+  it("preserves inline formatting and links inside cells", () => {
+    const input = [
+      "| Name | Link |",
+      "| ---- | ---- |",
+      "| **bold** *and* `code` | [Example](https://example.com) |",
+    ].join("\n");
+    const back = roundTrip(input);
+    expect(back).toContain("**bold**");
+    expect(back).toContain("*and*");
+    expect(back).toContain("`code`");
+    expect(back).toContain("[Example](https://example.com)");
+  });
+
+  it("preserves a wikilink inside a cell", () => {
+    const input = ["| Page |", "| ---- |", "| [[Notes/Index]] |"].join("\n");
+    expect(roundTrip(input)).toContain("[[Notes/Index]]");
+  });
+
+  it("keeps a table that follows and precedes other blocks", () => {
+    const input = [
+      "Before",
+      "",
+      "| A | B |",
+      "| - | - |",
+      "| 1 | 2 |",
+      "",
+      "After",
+    ].join("\n");
+    const back = roundTrip(input);
+    expect(back).toContain("Before");
+    expect(back).toContain("| 1 | 2 |");
+    expect(back).toContain("After");
+  });
+});

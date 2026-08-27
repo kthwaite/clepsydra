@@ -18,6 +18,10 @@ import type {
   LinkElement,
   ListItemElement,
   MathBlockElement,
+  TableAlign,
+  TableCellElement,
+  TableElement,
+  TableRowElement,
   WikilinkElement,
 } from "#/editor/types";
 import { remarkFolioMath } from "#/lib/markdown/folioMath";
@@ -339,16 +343,58 @@ function convertBlockNode(
         ),
       };
 
+    case "table":
+      return convertTable(node, context);
+
     // Node types we intentionally skip
     case "definition":
     case "yaml":
-    case "table":
       return null;
 
     default:
       // Unknown block node: skip
       return null;
   }
+}
+
+/**
+ * Convert a GFM table to a Slate table element.
+ *
+ * The delimiter row's alignment is kept on the table (authoritative for
+ * serialization) and mirrored onto each cell so rendering needs no lookup;
+ * the table normalizer maintains that mirror from then on. Rows keep their
+ * source cell count — a short row stays short, exactly as GFM renders it.
+ */
+function convertTable(
+  node: Extract<RootContent, { type: "table" }>,
+  context: ConversionContext,
+): TableElement | null {
+  if (node.children.length === 0) return null;
+
+  const align: (TableAlign | null)[] = (node.align ?? []).map((a) =>
+    a === "left" || a === "center" || a === "right" ? a : null,
+  );
+
+  const rows = node.children.map(
+    (row, rowIndex): TableRowElement => ({
+      type: "table-row",
+      children: row.children.map((cell, columnIndex): TableCellElement => {
+        const columnAlign = align[columnIndex] ?? null;
+        return {
+          type: "table-cell",
+          ...(rowIndex === 0 ? { header: true as const } : {}),
+          ...(columnAlign ? { align: columnAlign } : {}),
+          children: convertPhrasingContent(cell.children, {}, context),
+        };
+      }),
+    }),
+  );
+
+  return {
+    type: "table",
+    ...(align.some((a) => a !== null) ? { align } : {}),
+    children: rows,
+  };
 }
 
 /**

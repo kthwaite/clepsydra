@@ -246,6 +246,21 @@ inserted literally with line endings normalized; Markdown marks are not
 interpreted there. File clipboard data follows the browser/editor default and
 is not an attachment upload—use **Manage attachments** for files.
 
+### Work in tables
+
+A GFM table in the file renders as a table in Folio, header row included, and
+saves back as Markdown. Column alignment from the delimiter row
+(`:---`, `:---:`, `---:`) is applied to the whole column and is preserved on
+save. Cell text is edited in place and takes the usual inline marks, links,
+wikilinks, and math.
+
+`Tab` moves the caret to the next cell and `Shift+Tab` to the previous one,
+wrapping across row boundaries. A cell is a single line of inline content, so
+`Enter` inside one does nothing, and a delete at a cell boundary stops there
+rather than merging two cells. Folio has no command for creating a table or
+adding rows and columns — paste the Markdown for the shape you want, then edit
+the cells.
+
 ### Embed a Base
 
 Choose **Base embed** from the slash menu. The **Configure Base embed**
@@ -289,9 +304,9 @@ not retry automatically.
 
 ## Failures and conflicts
 
-- Markdown tables are not supported and editing a page that contains one loses
-  it. A table in the file is invisible in Folio, and the next body edit saves
-  the page without it. Edit table-bearing pages outside Folio.
+- A table cell holds one line of inline content. `Enter` inside a cell does
+  nothing rather than splitting the cell, and there is no command to insert a
+  table or add a row or column; write the Markdown elsewhere and paste it in.
 - A normal save failure leaves the Folio in **Save failed**. Correct the server
   or network problem and save again.
 - If the page changed after it was loaded, the server returns a revision

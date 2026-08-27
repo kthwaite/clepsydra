@@ -770,3 +770,84 @@ x
     });
   });
 });
+
+describe("tables", () => {
+  it("converts a GFM table into table / table-row / table-cell nodes", () => {
+    const slate = markdownToSlate(
+      ["| A | B |", "| - | - |", "| 1 | 2 |"].join("\n"),
+    );
+    expect(slate).toEqual([
+      {
+        type: "table",
+        children: [
+          {
+            type: "table-row",
+            children: [
+              { type: "table-cell", header: true, children: [{ text: "A" }] },
+              { type: "table-cell", header: true, children: [{ text: "B" }] },
+            ],
+          },
+          {
+            type: "table-row",
+            children: [
+              { type: "table-cell", children: [{ text: "1" }] },
+              { type: "table-cell", children: [{ text: "2" }] },
+            ],
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("records column alignment on the table and mirrors it onto cells", () => {
+    const slate = markdownToSlate(
+      ["| L | C | R |", "| :- | :-: | -: |", "| 1 | 2 | 3 |"].join("\n"),
+    );
+    const table = slate[0] as unknown as {
+      align: (string | null)[];
+      children: { children: { align?: string }[] }[];
+    };
+    expect(table.align).toEqual(["left", "center", "right"]);
+    expect(table.children[0].children.map((c) => c.align)).toEqual([
+      "left",
+      "center",
+      "right",
+    ]);
+    expect(table.children[1].children.map((c) => c.align)).toEqual([
+      "left",
+      "center",
+      "right",
+    ]);
+  });
+
+  it("omits align entirely when no column declares one", () => {
+    const slate = markdownToSlate(["| A |", "| - |", "| 1 |"].join("\n"));
+    expect(slate[0]).not.toHaveProperty("align");
+  });
+
+  it("keeps inline content inside cells", () => {
+    const slate = markdownToSlate(
+      ["| A |", "| - |", "| **bold** and [[Page]] |"].join("\n"),
+    );
+    const cell = (
+      slate[0] as unknown as {
+        children: { children: { children: unknown[] }[] }[];
+      }
+    ).children[1].children[0];
+    expect(cell.children).toEqual([
+      { text: "bold", bold: true },
+      { text: " and " },
+      { type: "wikilink", target: "Page", children: [{ text: "" }] },
+    ]);
+  });
+
+  it("leaves a short row short rather than padding it", () => {
+    const slate = markdownToSlate(
+      ["| A | B |", "| - | - |", "| 1 |"].join("\n"),
+    );
+    const rows = (
+      slate[0] as unknown as { children: { children: unknown[] }[] }
+    ).children;
+    expect(rows[1].children).toHaveLength(1);
+  });
+});

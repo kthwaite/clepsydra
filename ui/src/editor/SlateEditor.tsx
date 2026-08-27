@@ -57,6 +57,7 @@ import {
   toggleCheckbox,
   withOutliner,
 } from "./plugins/withOutliner";
+import { moveToAdjacentCell, withTables } from "./plugins/withTables";
 import { useRefractor } from "./refractor-lazy";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import { makeBaseEmbed } from "./schema/elements/baseEmbed";
@@ -178,7 +179,9 @@ export function SlateEditor({
           withReact(
             withInlinePunctuationBoundary(
               withHistory(
-                withAutoformat(withOutliner(withSchema(createEditor()))),
+                withAutoformat(
+                  withOutliner(withTables(withSchema(createEditor()))),
+                ),
               ),
             ),
           ),
@@ -571,6 +574,19 @@ export function SlateEditor({
       if (selectedMath) {
         event.preventDefault();
         mathEditing.begin(selectedMath[1]);
+        return;
+      }
+    }
+
+    // Inside a table, Tab walks the cells; everywhere else it falls through to
+    // the outliner's indent/outdent below.
+    if (
+      matchesChord(event, SHORTCUTS["editor.indent"].chord) ||
+      matchesChord(event, SHORTCUTS["editor.outdent"].chord)
+    ) {
+      const direction = event.shiftKey ? "previous" : "next";
+      if (moveToAdjacentCell(editor, direction)) {
+        event.preventDefault();
         return;
       }
     }
