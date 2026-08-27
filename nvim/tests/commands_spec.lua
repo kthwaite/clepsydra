@@ -42,6 +42,14 @@ return {
 		end,
 	},
 	{
+		name = "completion filters by typed prefix",
+		fn = function()
+			load_plugin_file()
+			eq({ "tags", "today" }, vim.fn.getcompletion("Clep t", "cmdline"))
+			eq({ "daily" }, vim.fn.getcompletion("Clep da", "cmdline"))
+		end,
+	},
+	{
 		name = "guard prevents double-loading",
 		fn = function()
 			load_plugin_file()

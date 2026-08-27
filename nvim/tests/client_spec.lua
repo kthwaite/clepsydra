@@ -103,4 +103,16 @@ return {
 			)
 		end,
 	},
+	{
+		name = "decode returns the process exit code as a third value",
+		fn = function()
+			local client = fresh_client("http://localhost:3000")
+			local _, _, code = client.decode({ code = 22, stdout = '{"message":"nope"}', stderr = "" })
+			eq(22, code)
+			local err2, value2, code2 = client.decode({ code = 0, stdout = '{"path":"a.md"}', stderr = "" })
+			eq(nil, err2)
+			eq("a.md", value2.path)
+			eq(0, code2)
+		end,
+	},
 }

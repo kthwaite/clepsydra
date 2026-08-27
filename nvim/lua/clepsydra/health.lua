@@ -13,6 +13,12 @@ function M.check()
 		health.warn("clep binary not found on PATH", { "build clepsydra and add `clep` to PATH" })
 	end
 
+	if vim.fn.executable("curl") == 1 then
+		health.ok("curl found on PATH")
+	else
+		health.error("curl not found on PATH — all HTTP commands need it")
+	end
+
 	local root = config.vault_root(0)
 	if root then
 		health.ok("vault root: " .. root)

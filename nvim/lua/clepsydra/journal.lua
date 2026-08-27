@@ -103,9 +103,12 @@ function M.daily(spec)
 	if not date then
 		return vim.notify("clepsydra: invalid daily spec: " .. spec, vim.log.levels.ERROR)
 	end
-	client.get("/journal/" .. date, function(err, page)
-		if err then
+	client.get("/journal/" .. date, function(err, page, code)
+		if err and code == 22 then
 			return vim.notify(("clepsydra: no journal for %s"):format(date), vim.log.levels.WARN)
+		end
+		if err then
+			return vim.notify(err, vim.log.levels.ERROR)
 		end
 		open_vault_file(page.path)
 	end)

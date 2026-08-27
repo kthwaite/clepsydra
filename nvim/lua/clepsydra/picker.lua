@@ -96,13 +96,14 @@ local function vault_root_or_notify()
 	return root
 end
 
---- Live FTS page search. Each keystroke re-queries /search synchronously —
---- acceptable for a localhost server; async finders are a later refinement.
+--- Live FTS page search. Each keystroke re-queries /index/search synchronously
+--- — acceptable for a localhost server; async finders are a later refinement.
 function M.pages()
 	local root = vault_root_or_notify()
 	if not root then
 		return
 	end
+	local last_err
 	Snacks.picker.pick({
 		title = "Clepsydra Search",
 		live = true,
@@ -115,6 +116,12 @@ function M.pages()
 			end
 			local err, results = client.request_sync("GET", "/index/search" .. client.encode_query({ q = q, limit = 50 }))
 			if err then
+				if err ~= last_err then
+					last_err = err
+					vim.schedule(function()
+						vim.notify(err, vim.log.levels.ERROR)
+					end)
+				end
 				return {}
 			end
 			return M.search_items(results, root)

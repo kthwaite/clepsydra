@@ -149,9 +149,9 @@ Routes used (all existing; no backend route changes expected):
 | Today's journal (read / ensure-create) | `GET`/`POST /api/vault/journal/today` |
 | Capture to today | `POST /api/vault/journal/today/capture` |
 | Journal by date | `GET /api/vault/journal/{date}` |
-| Page search (FTS5) | `GET /api/vault/search` |
-| Backlinks with context | `GET /api/vault/backlinks/{*path}` |
-| Tags | `GET /api/vault/tags` |
+| Page search (FTS5) | `GET /api/vault/index/search` |
+| Backlinks with context | `GET /api/vault/index/backlinks/{*path}` |
+| Tags | `GET /api/vault/index/tags` |
 | Task list | `GET /api/vault/tasks/` |
 | Task create | `POST /api/vault/board/tasks` |
 | Task stage transition | `PATCH /api/vault/board/tasks/{id}` |
@@ -176,8 +176,9 @@ Routes used (all existing; no backend route changes expected):
 
 ### Pickers (snacks.nvim)
 
-`picker.lua` registers four sources into `Snacks.picker` (available as
-`Snacks.picker.clepsydra_pages()` etc. and via `:Clep`):
+Sources are built inline with `Snacks.picker.pick`; users wanting named
+`Snacks.picker.*` entry points can wrap the exported functions in their own
+snacks config.
 
 - `clepsydra_pages` — FTS5 search, live query against `/search`; confirm
   opens the file (vault-relative path joined to the detected vault root).
@@ -195,8 +196,8 @@ sets only source behavior.
 
 `lsp_commands.lua` registers `vim.lsp.commands["clepsydra.findReferences"]`,
 which the existing code lens emits but no stock client implements. The
-handler routes through the standard references flow rendered in the location
-list (or the snacks picker when available).
+handler routes through the standard references flow rendered via the
+client's default references UI (quickfix).
 
 ## Error handling
 

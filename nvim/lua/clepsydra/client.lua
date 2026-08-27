@@ -48,10 +48,11 @@ function M.encode_path(rel)
 	return table.concat(segments, "/")
 end
 
---- Decode a completed curl run into (err, value). Pure.
+--- Decode a completed curl run into (err, value, code). Pure.
 ---@param out vim.SystemCompleted
 ---@return string|nil err
 ---@return any value decoded JSON on success
+---@return integer code the process exit code
 function M.decode(out)
 	if out.code ~= 0 then
 		local detail = out.stdout or ""
@@ -59,24 +60,26 @@ function M.decode(out)
 			detail = out.stderr or ""
 		end
 		if detail == "" then
-			return ("clepsydra: request failed (exit %d, no output — server unreachable or timed out)"):format(out.code)
+			return ("clepsydra: request failed (exit %d, no output — server unreachable or timed out)"):format(out.code),
+				nil,
+				out.code
 		end
-		return ("clepsydra: request failed (%s)"):format((detail:gsub("%s+$", "")))
+		return ("clepsydra: request failed (%s)"):format((detail:gsub("%s+$", ""))), nil, out.code
 	end
 	local ok, value = pcall(vim.json.decode, out.stdout)
 	if not ok then
-		return "clepsydra: invalid JSON in response"
+		return "clepsydra: invalid JSON in response", nil, out.code
 	end
-	return nil, value
+	return nil, value, out.code
 end
 
---- Async request; cb(err, value) runs on the main loop.
+--- Async request; cb(err, value, code) runs on the main loop.
 function M.request(method, path, body, cb)
 	local encoded = body and vim.json.encode(body) or nil
 	vim.system(M.build_args(method, M.api_url(path), encoded), { text = true }, function(out)
-		local err, value = M.decode(out)
+		local err, value, code = M.decode(out)
 		vim.schedule(function()
-			cb(err, value)
+			cb(err, value, code)
 		end)
 	end)
 end
@@ -84,6 +87,7 @@ end
 --- Blocking request for picker finders and health checks.
 ---@return string|nil err
 ---@return any value
+---@return integer code
 function M.request_sync(method, path, body, timeout_ms)
 	local encoded = body and vim.json.encode(body) or nil
 	local out = vim.system(M.build_args(method, M.api_url(path), encoded), { text = true }):wait(timeout_ms or 2000)

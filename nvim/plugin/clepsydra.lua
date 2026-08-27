@@ -38,10 +38,12 @@ end, {
 	nargs = "+",
 	range = true,
 	desc = "Clepsydra vault commands",
-	complete = function(_, cmdline)
+	complete = function(arglead, cmdline)
 		local words = vim.split(cmdline, "%s+")
 		if #words <= 2 then
-			return subcommand_names
+			return vim.tbl_filter(function(name)
+				return vim.startswith(name, arglead)
+			end, subcommand_names)
 		end
 		return {}
 	end,

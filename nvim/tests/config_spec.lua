@@ -37,6 +37,15 @@ return {
 		end,
 	},
 	{
+		name = "vault_root strips trailing slashes",
+		fn = function()
+			package.loaded["clepsydra.config"] = nil
+			local config = require("clepsydra.config")
+			config.setup({ vault_root = "/tmp/somevault///" })
+			eq("/tmp/somevault", config.vault_root(0))
+		end,
+	},
+	{
 		name = "init.setup delegates to config",
 		fn = function()
 			package.loaded["clepsydra"] = nil

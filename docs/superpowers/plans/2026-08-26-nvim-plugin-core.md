@@ -1061,8 +1061,8 @@ local function vault_root_or_notify()
 	return root
 end
 
---- Live FTS page search. Each keystroke re-queries /search synchronously —
---- acceptable for a localhost server; async finders are a later refinement.
+--- Live FTS page search. Each keystroke re-queries /index/search synchronously
+--- — acceptable for a localhost server; async finders are a later refinement.
 function M.pages()
 	local root = vault_root_or_notify()
 	if not root then

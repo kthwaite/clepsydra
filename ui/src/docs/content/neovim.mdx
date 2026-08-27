@@ -43,7 +43,7 @@ vim.lsp.enable("clepsydra")
 | Command | Behavior |
 | --- | --- |
 | `:Clep today` | Ensure today's journal exists (server-side) and open it. |
-| `:Clep daily {spec}` | Open a journal by relative spec: `prev`, `next`, `+N`, `-N`, a weekday name, or `YYYY-MM-DD`. Relative specs resolve against the current buffer's journal date when it has one, else today. Pages are not created for non-today dates. |
+| `:Clep daily {spec}` | Open a journal by relative spec (default `prev`): `prev`, `next`, `+N`, `-N`, a weekday name, or `YYYY-MM-DD`. Relative specs resolve against the current buffer's journal date when it has one, else today. Pages are not created for non-today dates. |
 | `:Clep capture` | Append the current line (or visual range: `:'<,'>Clep capture`) to today's journal via the capture endpoint. |
 | `:Clep search` | Live full-text page search (snacks picker). |
 | `:Clep backlinks` | Backlinks of the current page with context (snacks picker). Opens the source file; the API returns context strings, not positions. |

@@ -16,10 +16,15 @@ end
 ---@param bufnr integer|nil
 ---@return string|nil
 function M.vault_root(bufnr)
-	if M.options.vault_root then
-		return M.options.vault_root
+	local root = M.options.vault_root
+	if root then
+		return (root:gsub("/+$", ""))
 	end
-	return vim.fs.root(bufnr or 0, ".clepsydra")
+	root = vim.fs.root(bufnr or 0, ".clepsydra")
+	if root then
+		return (root:gsub("/+$", ""))
+	end
+	return nil
 end
 
 return M
