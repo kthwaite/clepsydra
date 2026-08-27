@@ -3598,7 +3598,7 @@ async fn page_mutation_update_resolves_links_bidirectionally() {
 }
 
 #[tokio::test]
-async fn journal_kind_assignment_rejects_reclassification_but_allows_other_metadata() {
+async fn journal_kind_assignment_rejects_reclassification_and_project_assignment() {
     let source = "\
 ---
 id: 00000000-0000-0000-0000-000000000223
@@ -3643,15 +3643,24 @@ Daily body.
     let retained: serde_json::Value = retained.json();
     let retained_path = retained["path"].as_str().unwrap();
     assert_eq!(retained["kind"], "JOURNAL");
+    let before_project_attempt = fs::read(&source_path).unwrap();
 
-    let project_assigned = server
+    let project_rejected = server
         .post(&format!("/api/vault/pages-assign/{retained_path}"))
         .json(&serde_json::json!({ "project": "personal" }))
         .await;
-    project_assigned.assert_status_ok();
+    project_rejected.assert_status_bad_request();
+    let error: serde_json::Value = project_rejected.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal pages cannot join a project")),
+        "unexpected error payload: {error}"
+    );
     assert_eq!(
-        project_assigned.json::<serde_json::Value>()["kind"],
-        "JOURNAL"
+        fs::read(&source_path).unwrap(),
+        before_project_attempt,
+        "a rejected project assignment must not relocate the journal"
     );
 }
 

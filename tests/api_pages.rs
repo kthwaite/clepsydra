@@ -358,3 +358,126 @@ async fn computed_tags_cannot_be_removed_by_replacing_editable_tags() {
     let (meta, _) = clepsydra::vault::page::parse_frontmatter(&stored).unwrap();
     assert!(meta.tags.is_empty(), "only editable tags may be persisted");
 }
+
+#[tokio::test]
+async fn ai_journal_kind_cannot_be_changed() {
+    let fixture = ApiFixture::builder().build();
+    create_page(&fixture.server, "ai-journals/2026-08-27.md", &[], None).await;
+
+    let response = fixture
+        .server
+        .post("/api/vault/pages-assign/ai-journals/2026-08-27.md")
+        .json(&serde_json::json!({ "kind": "NOTE" }))
+        .await;
+
+    response.assert_status_bad_request();
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("AI journal kind cannot be changed")),
+        "unexpected error payload: {error}"
+    );
+    assert!(
+        fixture
+            .state
+            .vault
+            .root()
+            .join("ai-journals/2026-08-27.md")
+            .exists(),
+        "a rejected assignment must not relocate the AI journal"
+    );
+}
+
+#[tokio::test]
+async fn journal_pages_reject_project_assignment() {
+    let fixture = ApiFixture::builder().build();
+    create_page(&fixture.server, "journals/2026-08-27.md", &[], None).await;
+    create_page(&fixture.server, "ai-journals/2026-08-27.md", &[], None).await;
+
+    for path in ["journals/2026-08-27.md", "ai-journals/2026-08-27.md"] {
+        let response = fixture
+            .server
+            .post(&format!("/api/vault/pages-assign/{path}"))
+            .json(&serde_json::json!({ "project": "clepsydra" }))
+            .await;
+
+        response.assert_status_bad_request();
+        let error: serde_json::Value = response.json();
+        assert!(
+            error["error"]
+                .as_str()
+                .is_some_and(|message| message.contains("journal pages cannot join a project")),
+            "unexpected error payload for {path}: {error}"
+        );
+        assert!(
+            fixture.state.vault.root().join(path).exists(),
+            "a rejected project assignment must not relocate {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn journal_pages_accept_clear_project() {
+    let fixture = ApiFixture::builder().build();
+    create_page(&fixture.server, "journals/2026-08-27.md", &[], None).await;
+    create_page(&fixture.server, "ai-journals/2026-08-27.md", &[], None).await;
+
+    for path in ["journals/2026-08-27.md", "ai-journals/2026-08-27.md"] {
+        let response = fixture
+            .server
+            .post(&format!("/api/vault/pages-assign/{path}"))
+            .json(&serde_json::json!({ "clear_project": true }))
+            .await;
+
+        response.assert_status_ok();
+    }
+}
+
+#[tokio::test]
+async fn bulk_assign_rejects_project_on_journal_pages() {
+    let fixture = ApiFixture::builder().build();
+    create_page(&fixture.server, "notes/note.md", &[], None).await;
+    create_page(&fixture.server, "journals/2026-08-27.md", &[], None).await;
+
+    let note_before = std::fs::read(fixture.state.vault.root().join("notes/note.md")).unwrap();
+    let journal_before =
+        std::fs::read(fixture.state.vault.root().join("journals/2026-08-27.md")).unwrap();
+
+    let response = fixture
+        .server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["notes/note.md", "journals/2026-08-27.md"],
+            "project": "clepsydra"
+        }))
+        .await;
+
+    response.assert_status_bad_request();
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("journal pages cannot join a project")),
+        "unexpected error payload: {error}"
+    );
+    assert_eq!(
+        std::fs::read(fixture.state.vault.root().join("notes/note.md")).unwrap(),
+        note_before,
+        "a rejected bulk assignment must not modify the note"
+    );
+    assert_eq!(
+        std::fs::read(fixture.state.vault.root().join("journals/2026-08-27.md")).unwrap(),
+        journal_before,
+        "a rejected bulk assignment must not modify the journal"
+    );
+    assert!(
+        !fixture
+            .state
+            .vault
+            .root()
+            .join("notes/clepsydra/note.md")
+            .exists(),
+        "a rejected bulk assignment must not publish the note's project destination"
+    );
+}

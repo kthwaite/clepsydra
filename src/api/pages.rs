@@ -1459,6 +1459,9 @@ fn validate_kind_assignment(
     if current_kind == Kind::Journal && requested_kind != Kind::Journal {
         return Err(ApiError::bad_request("journal kind cannot be changed"));
     }
+    if current_kind == Kind::AiJournal && requested_kind != Kind::AiJournal {
+        return Err(ApiError::bad_request("AI journal kind cannot be changed"));
+    }
     // Declaring ONE_ON_ONE on a page that already names a roomful of people
     // would store a state no write path allows; the caller has to trim the
     // attendees first.
@@ -1466,6 +1469,17 @@ fn validate_kind_assignment(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     meeting::validate(requested_kind, meta)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    Ok(())
+}
+
+/// Journal pages are dateline streams keyed by their top-level folder;
+/// projecting one into `journals/<project>/…` would null its journal_date
+/// and silently drop it from every journal query.
+fn validate_project_assignment(path: &VaultPath, meta: &PageMeta) -> Result<(), ApiError> {
+    let (kind, _) = resolve(path.as_str(), meta.kind);
+    if matches!(kind, Kind::Journal | Kind::AiJournal) {
+        return Err(ApiError::bad_request("journal pages cannot join a project"));
+    }
     Ok(())
 }
 
@@ -1515,6 +1529,7 @@ pub async fn assign_page(
         page.meta.project = None;
         ProjectAssignment::Clear
     } else if let Some(project) = &body.project {
+        validate_project_assignment(&vp, &page.meta)?;
         validate_project_slug(project).map_err(ApiError::bad_request)?;
         page.meta.project = Some(project.clone());
         ProjectAssignment::Set(project.clone())
@@ -1623,6 +1638,13 @@ fn plan_bulk_assignment(
         let (expected, meta, page_body) = read_assignment_page_once(state, &path, indexed_paths)?;
         if let Some(kind) = assigned_kind {
             validate_kind_assignment(&path, &meta, kind)?;
+        }
+        if body.project.is_some() && !body.clear_project {
+            let mut effective = meta.clone();
+            if let Some(kind) = assigned_kind {
+                effective.kind = Some(kind);
+            }
+            validate_project_assignment(&path, &effective)?;
         }
         pages.push((path, expected, meta, page_body));
     }
