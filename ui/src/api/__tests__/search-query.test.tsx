@@ -1,38 +1,40 @@
-import {
-  QueryClientProvider,
-  useQuery,
-} from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { render, screen } from "@testing-library/react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
-const searchRequestMock = vi.hoisted(() => vi.fn());
-
-vi.mock("#/api/client", () => ({
-  $api: {
-    useQuery: (
-      method: string,
-      path: string,
-      init?: { params?: { query?: { q?: string; limit?: number } } },
-      options?: {
-        enabled?: boolean;
-        retry?: (failureCount: number, error: unknown) => boolean;
-        throwOnError?: boolean;
-      },
-    ) =>
-      useQuery({
-        queryKey: [method, path, init?.params?.query],
-        queryFn: searchRequestMock,
-        retryDelay: 0,
-        ...options,
-      }),
-  },
-  fetchClient: {},
-}));
+const transport = vi.hoisted(() => {
+  const fetch = vi.fn<typeof globalThis.fetch>();
+  const NativeRequest = globalThis.Request;
+  class SameOriginRequest extends NativeRequest {
+    constructor(input: RequestInfo | URL, init?: RequestInit) {
+      super(
+        typeof input === "string" && input.startsWith("/")
+          ? new URL(input, "http://localhost")
+          : input,
+        init,
+      );
+    }
+  }
+  vi.stubGlobal("Request", SameOriginRequest);
+  vi.stubGlobal("fetch", fetch);
+  return { fetch };
+});
 
 import { isInvalidSearchQuery } from "#/api/error";
 import { useSearch } from "#/api/index";
 import { queryClient } from "#/lib/queryClient";
+
+const originalDefaultOptions = queryClient.getDefaultOptions();
 
 class TestErrorBoundary extends Component<
   { children: ReactNode },
@@ -76,26 +78,52 @@ function renderSearchProbe() {
   );
 }
 
+function jsonResponse(body: unknown, status: number) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+beforeAll(() => {
+  queryClient.setDefaultOptions({
+    ...originalDefaultOptions,
+    queries: {
+      ...originalDefaultOptions.queries,
+      retryDelay: 0,
+    },
+  });
+});
+
 beforeEach(() => {
   queryClient.clear();
-  searchRequestMock.mockReset();
+  transport.fetch.mockReset();
 });
 
 afterEach(() => {
   queryClient.clear();
 });
 
+afterAll(() => {
+  queryClient.setDefaultOptions(originalDefaultOptions);
+});
+
 describe("useSearch query error policy", () => {
-  it("keeps invalid syntax in query state without retrying", async () => {
-    searchRequestMock.mockRejectedValue({
-      status: 400,
-      error: "unknown search field 'knd' at column 1",
-      detail: {
-        code: "invalid_search_query",
-        span: { start: 0, end: 3 },
-        kind: "unknown_field",
-      },
-    });
+  it("keeps an invalid-syntax response in query state without retrying", async () => {
+    transport.fetch.mockResolvedValue(
+      jsonResponse(
+        {
+          status: 400,
+          error: "unknown search field 'knd' at column 1",
+          detail: {
+            code: "invalid_search_query",
+            span: { start: 0, end: 3 },
+            kind: "unknown_field",
+          },
+        },
+        400,
+      ),
+    );
 
     renderSearchProbe();
 
@@ -103,11 +131,18 @@ describe("useSearch query error policy", () => {
       "Invalid search query.",
     );
     expect(screen.queryByText("Application route failed.")).not.toBeInTheDocument();
-    await waitFor(() => expect(searchRequestMock).toHaveBeenCalledOnce());
+    expect(transport.fetch).toHaveBeenCalledOnce();
   });
 
-  it("keeps ordinary failures retryable with the default retry bound", async () => {
-    searchRequestMock.mockRejectedValue(new Error("Search unavailable"));
+  it("keeps ordinary server failures retryable with the default bound", async () => {
+    transport.fetch.mockImplementation(() =>
+      Promise.resolve(
+        jsonResponse(
+          { status: 500, error: "Search unavailable", detail: null },
+          500,
+        ),
+      ),
+    );
 
     renderSearchProbe();
 
@@ -115,6 +150,6 @@ describe("useSearch query error policy", () => {
       "Search unavailable.",
     );
     expect(screen.queryByText("Application route failed.")).not.toBeInTheDocument();
-    await waitFor(() => expect(searchRequestMock).toHaveBeenCalledTimes(4));
+    expect(transport.fetch).toHaveBeenCalledTimes(4);
   });
 });
