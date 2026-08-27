@@ -3,13 +3,79 @@ use std::time::Duration;
 
 use notify_debouncer_mini::notify::RecommendedWatcher;
 use notify_debouncer_mini::{
-    DebouncedEvent, DebouncedEventKind, Debouncer, new_debouncer,
-    notify::{self, RecursiveMode},
+    DebouncedEvent, DebouncedEventKind, Debouncer, new_debouncer_opt,
+    notify::{
+        self, EventKind, RecursiveMode,
+        event::{AccessKind, AccessMode},
+    },
 };
 use tokio::sync::mpsc;
 
 use super::ChangeEvent;
 use crate::vault::path::VaultPath;
+
+/// A [`RecommendedWatcher`] that drops read-side access events before they
+/// reach the debouncer.
+///
+/// The inotify backend subscribes to `IN_OPEN`, so on Linux every read-only
+/// open of a watched file surfaces as `EventKind::Access(Open)`. The debouncer
+/// discards event kinds — every event it receives becomes a plain
+/// `DebouncedEventKind::Any` for its path — so those opens arrive here
+/// indistinguishable from real edits. The sync engine reads pages while
+/// indexing them, so forwarding them lets the engine's own reads re-trigger it
+/// in an endless loop, and because an upsert also re-resolves reverse
+/// dependencies the loop amplifies across the link graph rather than staying
+/// confined to one page. macOS (FSEvents) never reports opens, which is why
+/// the loop is Linux-only.
+///
+/// Write-side closes stay: `Access(Close(Write))` marks a completed write.
+/// Content changes themselves are covered by `Modify` events either way.
+struct AccessFilteredWatcher(RecommendedWatcher);
+
+fn is_read_side_access(event: &notify::Event) -> bool {
+    match event.kind {
+        EventKind::Access(AccessKind::Close(AccessMode::Write)) => false,
+        EventKind::Access(_) => true,
+        _ => false,
+    }
+}
+
+impl notify::Watcher for AccessFilteredWatcher {
+    fn new<F: notify::EventHandler>(
+        mut event_handler: F,
+        config: notify::Config,
+    ) -> notify::Result<Self> {
+        let inner = RecommendedWatcher::new(
+            move |result: notify::Result<notify::Event>| {
+                if !matches!(&result, Ok(event) if is_read_side_access(event)) {
+                    event_handler.handle_event(result);
+                }
+            },
+            config,
+        )?;
+        Ok(Self(inner))
+    }
+
+    fn watch(
+        &mut self,
+        path: &std::path::Path,
+        recursive_mode: RecursiveMode,
+    ) -> notify::Result<()> {
+        self.0.watch(path, recursive_mode)
+    }
+
+    fn unwatch(&mut self, path: &std::path::Path) -> notify::Result<()> {
+        self.0.unwatch(path)
+    }
+
+    fn configure(&mut self, option: notify::Config) -> notify::Result<bool> {
+        self.0.configure(option)
+    }
+
+    fn kind() -> notify::WatcherKind {
+        RecommendedWatcher::kind()
+    }
+}
 
 fn map_debounced_event(
     root: &std::path::Path,
@@ -57,7 +123,7 @@ fn map_debounced_event(
 /// Watches a vault directory for filesystem changes and emits [`ChangeEvent`]s.
 pub struct VaultWatcher {
     #[allow(dead_code)]
-    debouncer: Debouncer<RecommendedWatcher>,
+    debouncer: Debouncer<AccessFilteredWatcher>,
 }
 
 impl VaultWatcher {
@@ -73,8 +139,8 @@ impl VaultWatcher {
         tracing::info!("Starting vault watcher on {:?}", root);
         let root_clone = root.clone();
         let root_canonical = std::fs::canonicalize(&root).unwrap_or(root.clone());
-        let mut debouncer = new_debouncer(
-            debounce,
+        let mut debouncer = new_debouncer_opt::<_, AccessFilteredWatcher>(
+            notify_debouncer_mini::Config::default().with_timeout(debounce),
             move |result: Result<Vec<DebouncedEvent>, notify::Error>| {
                 let events = match result {
                     Ok(events) => events,
@@ -208,6 +274,93 @@ mod tests {
 
         let mapped = map_debounced_event(&root, &root, &event);
         assert!(matches!(mapped, Some(ChangeEvent::Upsert(vp)) if vp.as_str() == "notes.md"));
+    }
+
+    #[test]
+    fn write_side_closes_survive_the_access_filter() {
+        let event = notify::Event::new(EventKind::Access(AccessKind::Close(AccessMode::Write)));
+        assert!(!is_read_side_access(&event));
+    }
+
+    #[test]
+    fn read_side_access_is_filtered() {
+        // What inotify reports for a read-only open, and for the close that
+        // ends one. Both are the sync engine looking at a page, not a change.
+        for kind in [
+            AccessKind::Open(AccessMode::Any),
+            AccessKind::Open(AccessMode::Read),
+            AccessKind::Close(AccessMode::Read),
+            AccessKind::Read,
+            AccessKind::Any,
+            AccessKind::Other,
+        ] {
+            let event = notify::Event::new(EventKind::Access(kind));
+            assert!(
+                is_read_side_access(&event),
+                "{kind:?} reached the debouncer"
+            );
+        }
+    }
+
+    #[test]
+    fn non_access_events_survive_the_access_filter() {
+        for kind in [
+            EventKind::Create(notify::event::CreateKind::File),
+            EventKind::Modify(notify::event::ModifyKind::Data(
+                notify::event::DataChange::Any,
+            )),
+            EventKind::Remove(notify::event::RemoveKind::File),
+            EventKind::Any,
+        ] {
+            let event = notify::Event::new(kind);
+            assert!(!is_read_side_access(&event), "{kind:?} was filtered out");
+        }
+    }
+
+    /// End-to-end cover for the wiring: the filter is only worth anything if
+    /// `VaultWatcher::start` actually installs it. Linux-only because inotify
+    /// is the one backend that reports opens at all.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn indexer_style_reads_do_not_emit_events() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let _watcher = VaultWatcher::start(root.clone(), Duration::from_millis(50), tx).unwrap();
+        // Give the backend time to establish its watches.
+        std::thread::sleep(Duration::from_millis(200));
+
+        let page = root.join("note.md");
+        std::fs::write(&page, "# note\n").unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            match rx.try_recv() {
+                Ok(_) => break,
+                Err(_) => {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "watcher never reported the file creation"
+                    );
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+            }
+        }
+        // Drain any stragglers from the creation burst.
+        std::thread::sleep(Duration::from_millis(300));
+        while rx.try_recv().is_ok() {}
+
+        // Read-only opens are what the sync engine itself performs while
+        // indexing; if they surface as change events the engine re-triggers
+        // itself forever (inotify IN_OPEN).
+        for _ in 0..3 {
+            std::fs::read_to_string(&page).unwrap();
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(
+            rx.try_recv().is_err(),
+            "a read-only open emitted a change event"
+        );
     }
 
     #[test]
