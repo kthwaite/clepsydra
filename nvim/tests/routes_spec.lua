@@ -291,4 +291,70 @@ return {
 			end)
 		end,
 	},
+	{
+		name = "task add with an empty title notifies usage and makes no request",
+		fn = function()
+			with_stubs({}, function(fake)
+				local messages = {}
+				vim.notify = function(msg, level)
+					messages[#messages + 1] = { msg = msg, level = level }
+				end
+				require("clepsydra.tasks").add("")
+				eq(0, #fake.calls)
+				eq(1, #messages)
+				eq("clepsydra: usage: Clep task add {title}", messages[1].msg)
+				eq(vim.log.levels.ERROR, messages[1].level)
+			end)
+		end,
+	},
+	{
+		name = "task stage with a cancelled select stops after GET /board",
+		fn = function()
+			with_stubs({
+				["GET /board"] = {
+					tasks = { { id = "u9", code = "TSK-0021", title = "T", status = "INTAKE", path = "tasks/TSK-0021.md" } },
+				},
+			}, function(fake)
+				local buf = vim.api.nvim_create_buf(false, true)
+				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-0021.md")
+				vim.api.nvim_set_current_buf(buf)
+				local saved_select = vim.ui.select
+				vim.ui.select = function(_, _, on_choice)
+					on_choice(nil)
+				end
+				local ok, err = pcall(function()
+					require("clepsydra.tasks").stage()
+				end)
+				vim.ui.select = saved_select
+				if not ok then
+					error(err, 0)
+				end
+				eq(1, #fake.calls)
+				eq("GET", fake.calls[1].method)
+				eq("/board", fake.calls[1].path)
+			end)
+		end,
+	},
+	{
+		name = "task stage with a code missing from the board warns and stops",
+		fn = function()
+			with_stubs({
+				["GET /board"] = { tasks = {} },
+			}, function(fake)
+				local buf = vim.api.nvim_create_buf(false, true)
+				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-0099.md")
+				vim.api.nvim_set_current_buf(buf)
+				local messages = {}
+				vim.notify = function(msg, level)
+					messages[#messages + 1] = { msg = msg, level = level }
+				end
+				require("clepsydra.tasks").stage()
+				eq(1, #fake.calls)
+				eq("GET /board", fake.calls[1].method .. " " .. fake.calls[1].path)
+				eq(1, #messages)
+				eq("clepsydra: task not found on board: TSK-0099", messages[1].msg)
+				eq(vim.log.levels.WARN, messages[1].level)
+			end)
+		end,
+	},
 }
