@@ -152,6 +152,7 @@ interface WorkspaceActions {
   addTab: (tab: TabDescriptor) => void;
   closeTab: (tabId: string) => void;
   closeOtherTabs: (tabId: string) => void;
+  closeAllTabs: () => void;
   closeArchivedPageTabs: (pageId: string, path: string) => void;
   activateTab: (tabId: string) => void;
   /** Apply a router-approved history destination without re-entering guards. */
@@ -418,6 +419,20 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             { activeTabId: tabId },
           ),
         );
+      },
+
+      closeAllTabs() {
+        const state = get();
+        if (state.tabs.length === 0) return;
+        if (workspaceTransitionDepth === 0 && state.activeTabId !== null) {
+          runWorkspaceTransition(() => get().closeAllTabs());
+          return;
+        }
+        for (const tab of state.tabs) {
+          clearFolioRestoration(tab.id);
+          clearFolioHistoryForTab(tab.id);
+        }
+        set((s) => normalized([], s.quires, { activeTabId: null }));
       },
 
       closeArchivedPageTabs(pageId, path) {

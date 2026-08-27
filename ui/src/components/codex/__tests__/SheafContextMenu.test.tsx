@@ -2,10 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { useWorkspaceStore } from "#/store/workspace";
-import {
-  type MenuTarget,
-  SheafContextMenu,
-} from "../SheafContextMenu";
+import { type MenuTarget, SheafContextMenu } from "../SheafContextMenu";
 
 function seed() {
   useWorkspaceStore.setState({
@@ -84,6 +81,69 @@ describe("SheafContextMenu — tab target", () => {
     ]);
   });
 
+  it("CLOSE ALL dismisses the menu and opens a confirmation without mutating the store", async () => {
+    seed();
+    const user = await renderMenu({ kind: "tab", tabId: "t1" });
+
+    await user.click(
+      await screen.findByRole("menuitem", { name: "CLOSE ALL" }),
+    );
+
+    await expectRootMenuDismissed();
+    const dialog = await screen.findByRole("dialog", {
+      name: "Close all tabs",
+    });
+    expect(dialog).toBeVisible();
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "t1",
+      "t2",
+    ]);
+    expect(quireNames()).toEqual(["thesis"]);
+  });
+
+  it("cancelling the CLOSE ALL confirmation leaves tabs and quires unchanged", async () => {
+    seed();
+    const user = await renderMenu({ kind: "tab", tabId: "t1" });
+    await user.click(
+      await screen.findByRole("menuitem", { name: "CLOSE ALL" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Close all tabs",
+    });
+
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
+      "t1",
+      "t2",
+    ]);
+    expect(quireNames()).toEqual(["thesis"]);
+    expect(
+      screen.queryByRole("dialog", { name: "Close all tabs" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("confirming CLOSE ALL empties the workspace and closes the dialog", async () => {
+    seed();
+    const user = await renderMenu({ kind: "tab", tabId: "t1" });
+    await user.click(
+      await screen.findByRole("menuitem", { name: "CLOSE ALL" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Close all tabs",
+    });
+
+    await user.click(within(dialog).getByRole("button", { name: "Close all" }));
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs).toEqual([]);
+    expect(state.activeTabId).toBeNull();
+    expect(state.quires).toEqual({});
+    expect(
+      screen.queryByRole("dialog", { name: "Close all tabs" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("adds the tab through the ADD TO QUIRE submenu", async () => {
     seed();
     const user = await renderMenu({ kind: "tab", tabId: "t1" });
@@ -91,13 +151,10 @@ describe("SheafContextMenu — tab target", () => {
     await user.click(
       await screen.findByRole("menuitem", { name: "ADD TO QUIRE" }),
     );
-    await user.click(
-      await screen.findByRole("menuitem", { name: "THESIS" }),
-    );
+    await user.click(await screen.findByRole("menuitem", { name: "THESIS" }));
 
     expect(
-      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "t1")
-        ?.quireId,
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "t1")?.quireId,
     ).toBe("q1");
   });
 
@@ -110,8 +167,7 @@ describe("SheafContextMenu — tab target", () => {
     );
 
     expect(
-      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "t2")
-        ?.quireId,
+      useWorkspaceStore.getState().tabs.find((tab) => tab.id === "t2")?.quireId,
     ).toBeUndefined();
   });
 
@@ -139,7 +195,9 @@ describe("SheafContextMenu — tab target", () => {
 
     await user.type(within(dialog).getByRole("textbox"), "   ");
 
-    expect(within(dialog).getByRole("button", { name: "Create" })).toBeDisabled();
+    expect(
+      within(dialog).getByRole("button", { name: "Create" }),
+    ).toBeDisabled();
     expect(quireNames()).toEqual(["thesis"]);
   });
 
@@ -192,9 +250,7 @@ describe("SheafContextMenu — quire target", () => {
   it("opens a compact prefilled rename dialog and Escape leaves it unchanged", async () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
-    await user.click(
-      await screen.findByRole("menuitem", { name: "RENAME…" }),
-    );
+    await user.click(await screen.findByRole("menuitem", { name: "RENAME…" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Rename quire" });
     expect(dialog.parentElement).toHaveClass("max-w-sm");
@@ -213,9 +269,7 @@ describe("SheafContextMenu — quire target", () => {
   it("cancels a rename without mutating the quire", async () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
-    await user.click(
-      await screen.findByRole("menuitem", { name: "RENAME…" }),
-    );
+    await user.click(await screen.findByRole("menuitem", { name: "RENAME…" }));
     const dialog = await screen.findByRole("dialog", { name: "Rename quire" });
     const field = within(dialog).getByRole("textbox");
     await user.clear(field);
@@ -232,9 +286,7 @@ describe("SheafContextMenu — quire target", () => {
   it("trims and submits a renamed quire", async () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
-    await user.click(
-      await screen.findByRole("menuitem", { name: "RENAME…" }),
-    );
+    await user.click(await screen.findByRole("menuitem", { name: "RENAME…" }));
     const dialog = await screen.findByRole("dialog", { name: "Rename quire" });
     const field = within(dialog).getByRole("textbox");
     await user.clear(field);
@@ -272,9 +324,7 @@ describe("SheafContextMenu — quire target", () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
 
-    await user.click(
-      await screen.findByRole("menuitem", { name: "COLLAPSE" }),
-    );
+    await user.click(await screen.findByRole("menuitem", { name: "COLLAPSE" }));
     expect(useWorkspaceStore.getState().quires.q1.collapsed).toBe(true);
 
     await openMenu(user);
@@ -286,9 +336,7 @@ describe("SheafContextMenu — quire target", () => {
     seed();
     const user = await renderMenu({ kind: "quire", quireId: "q1" });
 
-    await user.click(
-      await screen.findByRole("menuitem", { name: "UNGROUP" }),
-    );
+    await user.click(await screen.findByRole("menuitem", { name: "UNGROUP" }));
 
     const state = useWorkspaceStore.getState();
     expect(state.quires.q1).toBeUndefined();
@@ -308,5 +356,23 @@ describe("SheafContextMenu — quire target", () => {
     expect(useWorkspaceStore.getState().tabs.map((tab) => tab.id)).toEqual([
       "t1",
     ]);
+  });
+
+  it("offers CLOSE ALL TABS and confirming empties the workspace", async () => {
+    seed();
+    const user = await renderMenu({ kind: "quire", quireId: "q1" });
+
+    await user.click(
+      await screen.findByRole("menuitem", { name: "CLOSE ALL TABS" }),
+    );
+    const dialog = await screen.findByRole("dialog", {
+      name: "Close all tabs",
+    });
+    await user.click(within(dialog).getByRole("button", { name: "Close all" }));
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs).toEqual([]);
+    expect(state.activeTabId).toBeNull();
+    expect(state.quires).toEqual({});
   });
 });

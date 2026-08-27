@@ -40,6 +40,7 @@ export function SheafContextMenu({
   const tabs = useWorkspaceStore((state) => state.tabs);
   const quires = useWorkspaceStore((state) => state.quires);
   const [namingAction, setNamingAction] = useState<NamingAction>(null);
+  const [confirmingCloseAll, setConfirmingCloseAll] = useState(false);
   const namingFormId = useId();
 
   const tab =
@@ -63,6 +64,9 @@ export function SheafContextMenu({
           break;
         case "close-others":
           state.closeOtherTabs(target.tabId);
+          break;
+        case "close-all":
+          setConfirmingCloseAll(true);
           break;
         case "new-quire":
           setNamingAction({ kind: "create", tabId: target.tabId, draft: "" });
@@ -93,6 +97,9 @@ export function SheafContextMenu({
         break;
       case "close-quire":
         state.closeQuireTabs(target.quireId);
+        break;
+      case "close-all":
+        setConfirmingCloseAll(true);
         break;
     }
   };
@@ -132,9 +139,7 @@ export function SheafContextMenu({
 
     const state = useWorkspaceStore.getState();
     if (namingAction.kind === "create") {
-      if (
-        state.tabs.some((candidate) => candidate.id === namingAction.tabId)
-      ) {
+      if (state.tabs.some((candidate) => candidate.id === namingAction.tabId)) {
         state.createQuire(namingAction.tabId, name);
       }
     } else if (state.quires[namingAction.quireId]) {
@@ -160,6 +165,7 @@ export function SheafContextMenu({
         >
           <MenuItem id="close">CLOSE</MenuItem>
           <MenuItem id="close-others">CLOSE OTHERS</MenuItem>
+          <MenuItem id="close-all">CLOSE ALL</MenuItem>
           <MenuSeparator />
           <MenuItem id="new-quire">NEW QUIRE…</MenuItem>
           {otherQuires.length > 0 && (
@@ -203,11 +209,7 @@ export function SheafContextMenu({
               onAction={handleColorAction}
             >
               {QUIRE_COLORS.map((color) => (
-                <MenuItem
-                  key={color}
-                  id={color}
-                  swatch={quireColorVar(color)}
-                >
+                <MenuItem key={color} id={color} swatch={quireColorVar(color)}>
                   {color.toUpperCase()}
                 </MenuItem>
               ))}
@@ -221,6 +223,7 @@ export function SheafContextMenu({
           <MenuItem id="close-quire" variant="destructive">
             CLOSE QUIRE
           </MenuItem>
+          <MenuItem id="close-all">CLOSE ALL TABS</MenuItem>
         </Menu>
       </ContextMenuTrigger>
     );
@@ -235,16 +238,11 @@ export function SheafContextMenu({
           onOpenChange={(isOpen) => {
             if (!isOpen) setNamingAction(null);
           }}
-          title={
-            namingAction.kind === "create" ? "New quire" : "Rename quire"
-          }
+          title={namingAction.kind === "create" ? "New quire" : "Rename quire"}
           size="sm"
           footer={
             <>
-              <Button
-                type="button"
-                onPress={() => setNamingAction(null)}
-              >
+              <Button type="button" onPress={() => setNamingAction(null)}>
                 Cancel
               </Button>
               <Button
@@ -266,6 +264,40 @@ export function SheafContextMenu({
               autoFocus
             />
           </form>
+        </Dialog>
+      )}
+      {confirmingCloseAll && (
+        <Dialog
+          isOpen
+          onOpenChange={(isOpen) => {
+            if (!isOpen) setConfirmingCloseAll(false);
+          }}
+          title="Close all tabs"
+          size="sm"
+          footer={
+            <>
+              <Button
+                type="button"
+                onPress={() => setConfirmingCloseAll(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="danger"
+                onPress={() => {
+                  useWorkspaceStore.getState().closeAllTabs();
+                  setConfirmingCloseAll(false);
+                }}
+              >
+                Close all
+              </Button>
+            </>
+          }
+        >
+          <p className="text-sm text-muted-foreground">
+            This closes every tab and dissolves all quires.
+          </p>
         </Dialog>
       )}
     </>

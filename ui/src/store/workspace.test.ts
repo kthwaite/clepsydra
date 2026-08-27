@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   captureFolioHistoryLocation,
   clearFolioHistoryState,
-  readFolioHistoryRestorationRequest,
   readFolioHistoryLocation,
+  readFolioHistoryRestorationRequest,
   readFolioRestoration,
   registerFolioHistoryCapture,
   requestFolioHistoryRestoration,
@@ -518,12 +518,7 @@ describe("moveTab drop semantics", () => {
       .moveTab("q-a", { tabId: "plain", position: "after" });
 
     const { tabs, quires } = useWorkspaceStore.getState();
-    expect(tabs.map((tab) => tab.id)).toEqual([
-      "q-b",
-      "plain",
-      "q-a",
-      "tail",
-    ]);
+    expect(tabs.map((tab) => tab.id)).toEqual(["q-b", "plain", "q-a", "tail"]);
     expect(tabs.find((tab) => tab.id === "q-a")?.quireId).toBeUndefined();
     expect(tabs.find((tab) => tab.id === "q-b")?.quireId).toBe("q1");
     expect(quires.q1).toBeDefined();
@@ -547,12 +542,7 @@ describe("moveTab drop semantics", () => {
     useWorkspaceStore.getState().moveTab("q-a", { position: "end" });
 
     const { tabs, quires } = useWorkspaceStore.getState();
-    expect(tabs.map((tab) => tab.id)).toEqual([
-      "q-b",
-      "plain",
-      "tail",
-      "q-a",
-    ]);
+    expect(tabs.map((tab) => tab.id)).toEqual(["q-b", "plain", "tail", "q-a"]);
     expect(tabs.find((tab) => tab.id === "q-a")?.quireId).toBeUndefined();
     expect(tabs.find((tab) => tab.id === "q-b")?.quireId).toBe("q1");
     expect(quires.q1).toBeDefined();
@@ -578,12 +568,7 @@ describe("moveTab drop semantics", () => {
       .moveTab("plain", { tabId: "q-b", position: "before" });
 
     const { tabs } = useWorkspaceStore.getState();
-    expect(tabs.map((tab) => tab.id)).toEqual([
-      "q-a",
-      "plain",
-      "q-b",
-      "tail",
-    ]);
+    expect(tabs.map((tab) => tab.id)).toEqual(["q-a", "plain", "q-b", "tail"]);
     expect(tabs.find((tab) => tab.id === "plain")?.quireId).toBe("q1");
   });
 
@@ -605,12 +590,7 @@ describe("moveTab drop semantics", () => {
     useWorkspaceStore.getState().moveTab("plain", { quireId: "q1" });
 
     const { tabs } = useWorkspaceStore.getState();
-    expect(tabs.map((tab) => tab.id)).toEqual([
-      "q-a",
-      "q-b",
-      "plain",
-      "tail",
-    ]);
+    expect(tabs.map((tab) => tab.id)).toEqual(["q-a", "q-b", "plain", "tail"]);
     expect(tabs.find((tab) => tab.id === "plain")?.quireId).toBe("q1");
   });
   it("expands a collapsed target quire when moving the active tab relative to a member", () => {
@@ -644,7 +624,6 @@ describe("moveTab drop semantics", () => {
     ]);
     expect(quires.q1.collapsed).toBe(false);
   });
-
 
   it("dissolves the source quire when its final member moves out", () => {
     resetStore();
@@ -1089,6 +1068,56 @@ describe("quire actions", () => {
     const state = useWorkspaceStore.getState();
     expect(state.activeTabId).toBe("t1");
     expect(state.quires.q1.collapsed).toBe(false);
+  });
+});
+
+describe("closeAllTabs", () => {
+  it("closes every tab, nulls activation, and prunes empty quires", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1"), pageTab("t2", "q1"), pageTab("t3", "q1")],
+      activeTabId: "t1",
+      quires: { q1: { id: "q1", name: "Q", color: "sepia", collapsed: false } },
+    });
+
+    useWorkspaceStore.getState().closeAllTabs();
+
+    const state = useWorkspaceStore.getState();
+    expect(state.tabs).toEqual([]);
+    expect(state.activeTabId).toBeNull();
+    expect(state.quires).toEqual({});
+  });
+
+  it("preserves openHistory", () => {
+    resetStore();
+    useWorkspaceStore.setState({
+      tabs: [pageTab("t1"), pageTab("t2")],
+      activeTabId: "t1",
+      openHistory: [
+        { path: "t1.md", openedAt: 2 },
+        { path: "t2.md", openedAt: 1 },
+      ],
+    });
+
+    useWorkspaceStore.getState().closeAllTabs();
+
+    expect(useWorkspaceStore.getState().openHistory).toEqual([
+      { path: "t1.md", openedAt: 2 },
+      { path: "t2.md", openedAt: 1 },
+    ]);
+  });
+
+  it("is a no-op on an empty workspace", () => {
+    resetStore();
+    const before = useWorkspaceStore.getState();
+
+    expect(() => useWorkspaceStore.getState().closeAllTabs()).not.toThrow();
+
+    const after = useWorkspaceStore.getState();
+    expect(after.tabs).toEqual([]);
+    expect(after.activeTabId).toBeNull();
+    expect(after.quires).toEqual(before.quires);
+    expect(after.openHistory).toEqual(before.openHistory);
   });
 });
 
