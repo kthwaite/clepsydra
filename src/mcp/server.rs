@@ -1917,12 +1917,12 @@ mod tests {
         std::fs::create_dir_all(&notes).unwrap();
         std::fs::write(
             notes.join("alpha.md"),
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntitle: Alpha\ntype: NOTE\nproject: atlas\ntags:\n  - testing\n  - research\n  - beer\n---\n\nzanzibar tasting content linking to [[Beta]].\n",
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000a1\ntitle: Alpha\ntags:\n  - testing\n---\n\nzanzibar content linking to [[Beta]].\n",
         )
         .unwrap();
         std::fs::write(
             notes.join("beta.md"),
-            "---\nid: 0190f8a0-0000-7000-8000-0000000000b2\ntitle: Beta\ntype: QUOTE\nproject: cellar\ntags:\n  - testing\n  - archive\n  - wine\n---\n\nbeta tasting body.\n",
+            "---\nid: 0190f8a0-0000-7000-8000-0000000000b2\ntitle: Beta\ntags:\n  - testing\n---\n\nbeta body.\n",
         )
         .unwrap();
 
@@ -1946,6 +1946,37 @@ mod tests {
 
     fn parse(result: Result<String, String>) -> Value {
         serde_json::from_str(&result.expect("tool call should succeed")).unwrap()
+    }
+
+    async fn seed_structured_search_pages(server: &VaultMcpServer) {
+        for (path, page) in [
+            (
+                "/api/vault/pages/notes/gamma.md",
+                json!({
+                    "title": "Gamma",
+                    "kind": "NOTE",
+                    "tags": ["research", "beer"],
+                    "project": "atlas",
+                    "body": "gamma tasting notes"
+                }),
+            ),
+            (
+                "/api/vault/pages/quotes/delta.md",
+                json!({
+                    "title": "Delta",
+                    "kind": "QUOTE",
+                    "tags": ["archive", "wine"],
+                    "project": "cellar",
+                    "body": "delta tasting notes"
+                }),
+            ),
+        ] {
+            server
+                .client
+                .post_json(path, &page)
+                .await
+                .expect("structured search page should be created");
+        }
     }
 
     fn sorted_search_paths(value: &Value) -> Vec<String> {
@@ -1978,6 +2009,7 @@ mod tests {
     #[tokio::test]
     async fn search_uses_structured_field_semantics() {
         let (server, _tmp) = serve_seeded_vault().await;
+        seed_structured_search_pages(&server).await;
         let value = parse(
             server
                 .vault_search(Parameters(SearchParams {
@@ -1987,12 +2019,13 @@ mod tests {
                 .await,
         );
 
-        assert_eq!(sorted_search_paths(&value), vec!["notes/alpha.md"]);
+        assert_eq!(sorted_search_paths(&value), vec!["notes/gamma.md"]);
     }
 
     #[tokio::test]
     async fn search_grouped_boolean_syntax_matches_http() {
         let (server, _tmp) = serve_seeded_vault().await;
+        seed_structured_search_pages(&server).await;
         let query = "(tag:research | tag:archive) tasting";
         let http_value = server
             .client
@@ -2011,7 +2044,10 @@ mod tests {
                 .await,
         );
 
-        let expected = vec!["notes/alpha.md".to_string(), "notes/beta.md".to_string()];
+        let expected = vec![
+            "notes/gamma.md".to_string(),
+            "quotes/delta.md".to_string(),
+        ];
         assert_eq!(sorted_search_paths(&http_value), expected);
         assert_eq!(
             sorted_search_paths(&mcp_value),
