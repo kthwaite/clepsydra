@@ -13,6 +13,9 @@ pub struct ArchiveRefScan {
     /// hash → content type (from typed blob entries; snapshot hashes map to "text/html").
     pub types: BTreeMap<String, String>,
     pub warnings: Vec<String>,
+    /// Track hashes seen (in walk order) to implement first-writer-wins for types.
+    #[doc(hidden)]
+    seen_hashes: std::collections::HashSet<String>,
 }
 
 /// Scan all live pages and rubbish items for captured-archive references.
@@ -33,6 +36,8 @@ pub fn scan_archive_refs(vault: &Vault) -> ArchiveRefScan {
 }
 
 fn scan_live_pages(vault: &Vault, scan: &mut ArchiveRefScan) {
+    // Collect and sort paths for deterministic first-writer-wins semantics
+    let mut paths = Vec::new();
     for entry in WalkDir::new(vault.root())
         .into_iter()
         .filter_map(Result::ok)
@@ -57,12 +62,16 @@ fn scan_live_pages(vault: &Vault, scan: &mut ArchiveRefScan) {
         if vault.is_excluded(&vault_path) {
             continue;
         }
+        paths.push(path.to_path_buf());
+    }
 
-        // Cheap pre-filter: skip pages without [archive]
-        if let Ok(content) = std::fs::read_to_string(path) {
-            if content.contains("[archive]") {
-                scan_page_content(&content, scan);
-            }
+    // Sort paths for deterministic order
+    paths.sort();
+
+    // Process in sorted order
+    for path in paths {
+        if let Ok(content) = std::fs::read_to_string(&path) {
+            scan_page_content(&content, scan);
         }
     }
 }
@@ -110,19 +119,38 @@ fn scan_page_content(content: &str, scan: &mut ArchiveRefScan) {
 
     // Count references for each unique hash
     let hashes = captured_archive_hashes(&meta);
-    for hash in hashes {
+    for hash in &hashes {
         *scan.refs.entry(hash.clone()).or_insert(0) += 1;
+    }
 
-        // Track content types: first writer wins
-        if !scan.types.contains_key(&hash) {
-            scan.types.insert(hash, "text/html".into());
+    // Merge blob types from the page: first writer wins (only type unseen hashes)
+    let blob_types = captured_blob_types(&meta);
+    for (hash, ct) in blob_types {
+        if !scan.seen_hashes.contains(hash.as_str()) {
+            scan.types.insert(hash.clone(), ct);
         }
     }
 
-    // Merge blob types from the page: typed entries override snapshot type
-    let blob_types = captured_blob_types(&meta);
-    for (hash, ct) in blob_types {
-        scan.types.insert(hash, ct);
+    // Add snapshot_hash type if present (defaults to "text/html", but only if not seen)
+    if let Some(toml::Value::String(snapshot)) = meta.extra.get("archive")
+        .and_then(|archive| {
+            if let toml::Value::Table(t) = archive {
+                t.get("snapshot_hash")
+            } else {
+                None
+            }
+        })
+    {
+        if !scan.seen_hashes.contains(snapshot.as_str()) {
+            scan.types
+                .entry(snapshot.clone())
+                .or_insert_with(|| "text/html".into());
+        }
+    }
+
+    // Mark all hashes as seen (even untyped ones from this page) after typing decisions
+    for hash in &hashes {
+        scan.seen_hashes.insert(hash.clone());
     }
 }
 
@@ -191,5 +219,47 @@ mod tests {
         std::fs::create_dir_all(&item).unwrap(); // no page.md
         let scan = scan_archive_refs(&vault);
         assert_eq!(scan.warnings.len(), 1);
+    }
+
+    #[test]
+    fn legacy_yaml_frontmatter_counts_refs() {
+        let legacy_page = format!(
+            "---\nid: 01900000-0000-7000-8000-000000000004\ntitle: \"Legacy\"\n\
+             archive:\n  url: https://example.com\n  \
+             snapshot_hash: {H1}\n---\nbody\n"
+        );
+        let (_tmp, vault) = make_vault(&[("legacy.md", &legacy_page)]);
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H1), Some(&1));
+        assert_eq!(scan.types.get(H1).map(String::as_str), Some("text/html"));
+        assert!(scan.warnings.is_empty());
+    }
+
+    #[test]
+    fn typed_entry_first_reader_wins_over_later_retype() {
+        let page_a = archive_page(&format!("{{ hash = \"{H2}\", type = \"image/png\" }}")); // typed as image
+        let page_b = archive_page(&format!("{{ hash = \"{H2}\", type = \"text/plain\" }}")); // tries to retype
+        let (_tmp, vault) = make_vault(&[
+            ("archive/01.md", &page_a),
+            ("archive/02.md", &page_b),
+        ]);
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H2), Some(&2));
+        // First writer's type wins
+        assert_eq!(scan.types.get(H2).map(String::as_str), Some("image/png"));
+    }
+
+    #[test]
+    fn untyped_legacy_blob_stays_absent_even_if_later_typed() {
+        let page_a = archive_page(&format!("\"{H2}\"")); // legacy string entry, no type
+        let page_b = archive_page(&format!("{{ hash = \"{H2}\", type = \"image/png\" }}")); // typed
+        let (_tmp, vault) = make_vault(&[
+            ("archive/01.md", &page_a),
+            ("archive/02.md", &page_b),
+        ]);
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H2), Some(&2));
+        // First writer's decision (no type) prevails
+        assert!(scan.types.get(H2).is_none());
     }
 }
