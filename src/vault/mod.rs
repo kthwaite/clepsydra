@@ -17,6 +17,7 @@ pub mod block_id;
 pub mod board_vocab;
 pub mod canonical;
 pub mod cas;
+pub mod cas_scan;
 pub mod checkpoint;
 pub mod config;
 pub mod conflict;
