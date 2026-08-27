@@ -68,6 +68,19 @@ function M.page_items(pages, root)
 	return items
 end
 
+--- Map board tasks to snacks items. Pure.
+function M.task_items(tasks, root)
+	local items = {}
+	for _, t in ipairs(tasks) do
+		items[#items + 1] = {
+			text = ("%s [%s] %s"):format(t.code, t.status, t.title),
+			file = abs(root, t.path),
+			code = t.code,
+		}
+	end
+	return items
+end
+
 --- Vault-relative path of a buffer under `root`, or nil when the buffer is
 --- outside the vault. Guards the prefix boundary so a sibling directory
 --- sharing root's prefix (e.g. /vault-backup) does not match /vault. Pure.
@@ -175,6 +188,27 @@ function M.tags()
 				format = "file",
 				items = M.page_items(resp.items, root),
 			})
+		end,
+	})
+end
+
+--- Board tasks with code, stage, and title; confirming opens the task page.
+function M.tasks()
+	local root = vault_root_or_notify()
+	if not root then
+		return
+	end
+	local err, board = client.request_sync("GET", "/board")
+	if err then
+		return vim.notify(err, vim.log.levels.ERROR)
+	end
+	Snacks.picker.pick({
+		title = "Tasks",
+		format = "text",
+		items = M.task_items(board.tasks, root),
+		confirm = function(picker, item)
+			picker:close()
+			vim.cmd.edit(vim.fn.fnameescape(item.file))
 		end,
 	})
 end

@@ -235,4 +235,17 @@ return {
 			end)
 		end,
 	},
+	{
+		name = "tasks picker pins GET /board",
+		fn = function()
+			with_stubs({
+				["GET /board"] = { tasks = {} },
+			}, function(fake, picked)
+				require("clepsydra.picker").tasks()
+				eq("GET", fake.calls[1].method)
+				eq("/board", fake.calls[1].path)
+				eq(1, #picked)
+			end)
+		end,
+	},
 }

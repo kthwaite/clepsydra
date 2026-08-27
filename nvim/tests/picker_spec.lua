@@ -64,4 +64,15 @@ return {
 			eq(nil, picker.rel_under_root("/vault", "/vault"))
 		end,
 	},
+	{
+		name = "task_items map board tasks with code, stage, and title",
+		fn = function()
+			local items = picker.task_items({
+				{ id = "u1", code = "TSK-0012", status = "FIELD", title = "Fix it", path = "tasks/TSK-0012.md" },
+			}, "/vault")
+			eq("TSK-0012 [FIELD] Fix it", items[1].text)
+			eq("/vault/tasks/TSK-0012.md", items[1].file)
+			eq("TSK-0012", items[1].code)
+		end,
+	},
 }
