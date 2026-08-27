@@ -2153,14 +2153,17 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
     Ok(())
 }
 
-/// Extract a journal date from either a legacy `journals/YYYY-MM-DD.md` path
-/// or a canonical `journals/<yyyymmdd>.YYYY-MM-DD.<shortid>.md` path.
+/// Extract a journal date from a `journals/` or `ai-journals/` path, in
+/// either the legacy `<prefix>/YYYY-MM-DD.md` or the canonical
+/// `<prefix>/<yyyymmdd>.YYYY-MM-DD.<shortid>.md` shape.
 ///
 /// Returns `Some("YYYY-MM-DD")` if the path matches, `None` otherwise.
-/// Only matches top-level `journals/` — e.g. `other/journals/2026-02-17.md` is
-/// rejected.
+/// Only matches the top-level prefix — e.g. `other/journals/2026-02-17.md`
+/// is rejected.
 fn extract_journal_date(path: &str) -> Option<String> {
-    let filename = path.strip_prefix("journals/")?;
+    let filename = path
+        .strip_prefix("journals/")
+        .or_else(|| path.strip_prefix("ai-journals/"))?;
     let stem = filename.strip_suffix(".md").unwrap_or(filename);
     let candidate = if stem.len() == 10 {
         stem

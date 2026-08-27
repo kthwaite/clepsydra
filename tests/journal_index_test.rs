@@ -100,3 +100,58 @@ fn journal_in_subfolder_not_matched() {
         .unwrap();
     assert!(date.is_none());
 }
+
+#[test]
+fn ai_journal_pages_get_a_journal_date() {
+    let legacy =
+        "---\nid: 00000000-0000-0000-0000-000000000005\ntitle: \"2026-08-27\"\n---\n- Notes\n";
+    let canonical =
+        "---\nid: 00000000-0000-0000-0000-000000000006\ntitle: \"2026-08-27\"\n---\n- Notes\n";
+    let (_tmp, vault) = setup_vault(&[
+        ("ai-journals/2026-08-27.md", legacy),
+        ("ai-journals/20260827.2026-08-27.Ab12Cd34.md", canonical),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let legacy_date: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT journal_date FROM pages WHERE id = ?1",
+            ["00000000-0000-0000-0000-000000000005"],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(legacy_date, Some("2026-08-27".to_string()));
+
+    let canonical_date: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT journal_date FROM pages WHERE id = ?1",
+            ["00000000-0000-0000-0000-000000000006"],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(canonical_date, Some("2026-08-27".to_string()));
+}
+
+#[test]
+fn nested_ai_journals_folder_is_not_a_journal() {
+    // A page at other/ai-journals/2026-08-27.md should NOT be a journal
+    let page = "---\nid: 00000000-0000-0000-0000-000000000007\ntitle: Fake\n---\n";
+    let (_tmp, vault) = setup_vault(&[("other/ai-journals/2026-08-27.md", page)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let date: Option<String> = index
+        .connection()
+        .query_row(
+            "SELECT journal_date FROM pages WHERE id = ?1",
+            ["00000000-0000-0000-0000-000000000007"],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(date.is_none());
+}
