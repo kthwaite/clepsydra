@@ -139,4 +139,23 @@ return {
 			}, args)
 		end,
 	},
+	{
+		name = "request_sync surfaces a curl spawn failure instead of throwing",
+		fn = function()
+			local client = fresh_client("http://localhost:3000")
+			local saved_system = vim.system
+			vim.system = function()
+				error("ENOENT: no curl")
+			end
+			local ok, results = pcall(function()
+				return { client.request_sync("GET", "/index/stats") }
+			end)
+			vim.system = saved_system
+			assert(ok, "request_sync must not throw: " .. tostring(results))
+			local err, value, code = results[1], results[2], results[3]
+			assert(err and err:find("could not run curl", 1, true), "expected spawn-failure error, got: " .. tostring(err))
+			eq(nil, value)
+			eq(-1, code)
+		end,
+	},
 }

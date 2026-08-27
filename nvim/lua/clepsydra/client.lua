@@ -76,12 +76,17 @@ end
 --- Async request; cb(err, value, code) runs on the main loop.
 function M.request(method, path, body, cb)
 	local encoded = body and vim.json.encode(body) or nil
-	vim.system(M.build_args(method, M.api_url(path), encoded), { text = true }, function(out)
+	local ok, spawn_err = pcall(vim.system, M.build_args(method, M.api_url(path), encoded), { text = true }, function(out)
 		local err, value, code = M.decode(out)
 		vim.schedule(function()
 			cb(err, value, code)
 		end)
 	end)
+	if not ok then
+		vim.schedule(function()
+			cb(("clepsydra: could not run curl (%s)"):format(spawn_err), nil, -1)
+		end)
+	end
 end
 
 --- Blocking request for picker finders and health checks.
@@ -90,7 +95,12 @@ end
 ---@return integer code
 function M.request_sync(method, path, body, timeout_ms)
 	local encoded = body and vim.json.encode(body) or nil
-	local out = vim.system(M.build_args(method, M.api_url(path), encoded), { text = true }):wait(timeout_ms or 2000)
+	local ok, out = pcall(function()
+		return vim.system(M.build_args(method, M.api_url(path), encoded), { text = true }):wait(timeout_ms or 2000)
+	end)
+	if not ok then
+		return ("clepsydra: could not run curl (%s)"):format(out), nil, -1
+	end
 	return M.decode(out)
 end
 
