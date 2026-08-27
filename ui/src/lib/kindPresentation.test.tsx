@@ -31,6 +31,15 @@ describe("presentationFor", () => {
     );
   });
 
+  it("gives meetings and 1:1s the same bespoke rail block", () => {
+    for (const kind of ["MEETING", "ONE_ON_ONE"] as const) {
+      const presentation = presentationFor(kind);
+      expect(presentation.bodyPresentation).toBe("editor");
+      expect(presentation.metaExtras).not.toBeNull();
+      expect(presentation.metaExtrasLabel).toBe("Meeting");
+    }
+  });
+
   it("resolves every known kind without throwing", () => {
     for (const kind of KINDS) {
       expect(() => presentationFor(kind)).not.toThrow();

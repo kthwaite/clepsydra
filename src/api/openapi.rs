@@ -529,6 +529,8 @@ mod tests {
                 "TASK",
                 "CYCLE",
                 "RECIPE",
+                "MEETING",
+                "ONE_ON_ONE",
                 "ARCHIVE",
                 "AI_CONVERSATION",
             ]

@@ -78,9 +78,16 @@ describe("intakePath", () => {
     expect(KIND_FOLDER.RECIPE).toBe("recipes");
   });
 
+  it("projects meetings and 1:1s into their own folders", () => {
+    expect(KIND_FOLDER.MEETING).toBe("meetings");
+    expect(KIND_FOLDER.ONE_ON_ONE).toBe("one-on-ones");
+  });
+
   it("has a folder for every kind", () => {
+    // Hyphens are allowed because `one-on-ones` has one; mirrors
+    // `Kind::canonical_folder` in src/vault/kind.rs.
     for (const k of KINDS) {
-      expect(KIND_FOLDER[k]).toMatch(/^[a-z]+$/);
+      expect(KIND_FOLDER[k]).toMatch(/^[a-z][a-z-]*[a-z]$/);
     }
   });
 });

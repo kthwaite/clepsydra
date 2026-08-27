@@ -30,6 +30,8 @@ export const KINDS = [
   "TASK",
   "CYCLE",
   "RECIPE",
+  "MEETING",
+  "ONE_ON_ONE",
   "ARCHIVE",
   "AI_CONVERSATION",
 ] as const satisfies readonly Kind[];
@@ -67,6 +69,10 @@ export const KIND_META: Record<Kind, KindMeta> = {
   TASK: { label: "TASK", color: "var(--hot)" },
   CYCLE: { label: "CYCLE", color: "var(--ink-2)" },
   RECIPE: { label: "RECIPE", color: "var(--accent-deep)" },
+  // Meetings are about people, so they take PERSON's cool pip. The 1:1 shares
+  // it and separates on its label, the way JOURNAL and CAPTURE already do.
+  MEETING: { label: "MEETING", color: "var(--cool)" },
+  ONE_ON_ONE: { label: "1:1", color: "var(--cool)" },
   // Archived pages are inert captures of someone else's writing; a muted ink
   // pip keeps them legible without competing with authored material.
   ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)" },
@@ -114,6 +120,18 @@ const FOLDER_KIND: Record<string, Kind> = {
   contacts: "PERSON",
   recipes: "RECIPE",
   recipe: "RECIPE",
+  meetings: "MEETING",
+  meeting: "MEETING",
+  "one-on-ones": "ONE_ON_ONE",
+  "one-on-one": "ONE_ON_ONE",
+  "one-to-ones": "ONE_ON_ONE",
+  "one-to-one": "ONE_ON_ONE",
+  "1-1s": "ONE_ON_ONE",
+  "1-1": "ONE_ON_ONE",
+  "1on1s": "ONE_ON_ONE",
+  "1on1": "ONE_ON_ONE",
+  "121s": "ONE_ON_ONE",
+  "121": "ONE_ON_ONE",
   conversations: "AI_CONVERSATION",
   conversation: "AI_CONVERSATION",
   chats: "AI_CONVERSATION",
