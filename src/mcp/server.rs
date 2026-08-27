@@ -123,7 +123,7 @@ pub struct ListPagesParams {
     pub offset: Option<u32>,
     /// Only pages of this resolved kind (NOTE, PROJECT, JOURNAL, TODO, QUOTE,
     /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE,
-    /// AI_CONVERSATION).
+    /// AI_CONVERSATION, AI_JOURNAL).
     pub kind: Option<String>,
     /// Only pages carrying this exact tag.
     pub tag: Option<String>,
