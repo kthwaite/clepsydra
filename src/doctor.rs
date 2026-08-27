@@ -265,6 +265,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
+        check_conflicts(v, &mut report);
         check_meetings(v, &mut report);
         check_bases(v, &mut report);
     } else {
@@ -1484,6 +1485,58 @@ fn check_frontmatter(vault: &Vault, report: &mut Report) {
 }
 
 // ---------------------------------------------------------------------------
+// Check: conflict markers and unparseable frontmatter
+// ---------------------------------------------------------------------------
+
+/// Report vault files containing git merge conflict markers. Such files are
+/// indexed read-only and never repaired (docs/adr/0004).
+fn check_conflicts(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "conflicts";
+    const LISTED: usize = 10;
+    let conflicted = crate::vault::conflict::conflicted_pages(vault);
+    if conflicted.is_empty() {
+        report.push(ok(
+            SECTION,
+            "markers",
+            "no files contain merge conflict markers",
+        ));
+    } else {
+        let mut detail = format!(
+            "{} file(s) contain merge conflict markers",
+            conflicted.len()
+        );
+        for path in conflicted.iter().take(LISTED) {
+            detail.push_str(&format!("\n  {}", path.as_str()));
+        }
+        if conflicted.len() > LISTED {
+            detail.push_str(&format!("\n  … and {} more", conflicted.len() - LISTED));
+        }
+        report.push(
+            warn(SECTION, "markers", detail).with_hint(
+                "resolve the merge conflicts by hand; conflicted files are indexed read-only and never auto-repaired",
+            ),
+        );
+    }
+
+    // Check for unparseable frontmatter
+    let unparseable = crate::vault::conflict::unparseable_pages(vault);
+    if unparseable.is_empty() {
+        report.push(ok(SECTION, "unparseable", "all frontmatter parseable"));
+    } else {
+        let mut detail = format!("{} file(s) have unparseable frontmatter", unparseable.len());
+        for (path, warning) in unparseable.iter().take(LISTED) {
+            detail.push_str(&format!("\n  {}: {}", path.as_str(), warning));
+        }
+        if unparseable.len() > LISTED {
+            detail.push_str(&format!("\n  … and {} more", unparseable.len() - LISTED));
+        }
+        report.push(warn(SECTION, "unparseable", detail).with_hint(
+            "these pages are indexed with default metadata; fix the frontmatter by hand",
+        ));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Check 8b: meeting frontmatter
 // ---------------------------------------------------------------------------
 
@@ -2400,6 +2453,79 @@ mod tests {
                 "{record:#?}"
             );
         }
+    }
+
+    #[test]
+    fn conflicts_check_warns_and_lists_files() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(
+            root.join("notes/clash.md"),
+            "<<<<<<< HEAD\n=======\n>>>>>>> x\n",
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "conflicts")
+            .unwrap();
+        assert!(matches!(result.status, Status::Warn));
+        assert!(result.detail.contains("notes/clash.md"));
+    }
+
+    #[test]
+    fn conflicts_check_ok_when_clean() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        assert!(matches!(report.results[0].status, Status::Ok));
+    }
+
+    #[test]
+    fn unparseable_check_warns_invalid_toml() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(
+            root.join("notes/broken.md"),
+            "+++\ninvalid toml here !!!\n+++\nSome body text\n",
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "conflicts" && r.name == "unparseable")
+            .unwrap();
+        assert!(matches!(result.status, Status::Warn));
+        assert!(result.detail.contains("notes/broken.md"));
+    }
+
+    #[test]
+    fn unparseable_check_ok_all_parseable() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "conflicts" && r.name == "unparseable")
+            .unwrap();
+        assert!(matches!(result.status, Status::Ok));
     }
 }
 
