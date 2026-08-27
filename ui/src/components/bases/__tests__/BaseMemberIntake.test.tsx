@@ -163,6 +163,14 @@ function useCreateBaseMemberResult(): UseCreateBaseMemberResult {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((accept) => {
+    resolve = accept;
+  });
+  return { promise, resolve };
+}
+
 function capability(
   view: string,
   fields: BaseMemberCapability["fields"],
@@ -282,50 +290,62 @@ describe("BaseMemberIntake", () => {
     mocks.refetchBase.mockImplementation(async () => useBaseResult());
   });
 
-  it("refreshes a revision conflict, preserves the draft, and resubmits with the new revision", async () => {
+  it("blocks duplicate submission for the full conflict refresh and resubmits with the new revision", async () => {
     const user = userEvent.setup();
     const onCreated = vi.fn();
-    const conflict = {
-      status: 409,
-      error: "The Base changed.",
-      detail: {
-        code: "base_revision_conflict",
-        diagnostics: [ratingDiagnostic],
-      },
-    };
+    const refresh = deferred<UseBaseResult>();
     mocks.createMember
-      .mockRejectedValueOnce(conflict)
-      .mockResolvedValueOnce(createdMember);
-    mocks.refetchBase.mockImplementationOnce(async () => {
-      const refreshed = definition({ revision: "detail-r2" });
-      mocks.detail.data = refreshed;
-      return useBaseResult({
-        data: refreshed,
-        error: null,
-        isLoading: false,
-        isFetching: false,
-      });
-    });
+      .mockRejectedValueOnce({
+        status: 409,
+        error: "The Base changed.",
+        detail: {
+          code: "base_revision_conflict",
+          diagnostics: [ratingDiagnostic],
+        },
+      })
+      .mockResolvedValue(createdMember);
+    mocks.refetchBase.mockReturnValueOnce(refresh.promise);
 
     render(<BaseMemberIntake slug="books" onCreated={onCreated} />);
     await enterTitle(user, "The Dispossessed");
     await enterRating(user, "9");
     await save(user);
+    await waitFor(() => expect(mocks.refetchBase).toHaveBeenCalledOnce());
+
+    const title = screen.getByRole("textbox", {
+      name: "New member — Title",
+    });
+    expect(title).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Cancel new member" }),
+    ).toBeEnabled();
+    expect(
+      screen.getByRole("button", { name: "Save new member" }),
+    ).toBeDisabled();
+    await user.type(title, " Revised");
+    await user.keyboard("{Escape}");
+    expect(title).toHaveValue("The Dispossessed Revised");
+    await user.keyboard("{Meta>}{Enter}{/Meta}");
+
+    const refreshed = definition({ revision: "detail-r2" });
+    mocks.detail.data = refreshed;
+    refresh.resolve(
+      useBaseResult({
+        data: refreshed,
+        error: null,
+        isLoading: false,
+        isFetching: false,
+      }),
+    );
 
     expect(await screen.findByText("The Base changed.")).toBeVisible();
     expect(screen.getByText(ratingDiagnostic.message)).toBeVisible();
     expect(
-      screen.getByRole("textbox", { name: "New member — Title" }),
-    ).toHaveValue("The Dispossessed");
-    await user.click(
-      screen.getByRole("button", { name: "Edit New member — Rating" }),
-    );
-    expect(
-      screen.getByRole("spinbutton", { name: "New member — Rating" }),
-    ).toHaveValue(9);
-
+      screen.getByRole("button", { name: "Save new member" }),
+    ).toBeEnabled();
     await save(user);
 
+    await waitFor(() => expect(onCreated).toHaveBeenCalledOnce());
     expect(mocks.createMember.mock.calls).toEqual([
       [
         {
@@ -344,14 +364,12 @@ describe("BaseMemberIntake", () => {
           body: {
             base_revision: "detail-r2",
             view: "Reading",
-            title: "The Dispossessed",
+            title: "The Dispossessed Revised",
             fields: { rating: 9 },
           },
         },
       ],
     ]);
-    expect(mocks.refetchBase).toHaveBeenCalledOnce();
-    expect(onCreated).toHaveBeenCalledOnce();
     expect(onCreated).toHaveBeenCalledWith(
       "books/the-dispossessed.md",
       "The Dispossessed",

@@ -195,3 +195,60 @@ exit 0
 ### Concerns
 
 No task-specific concern. Vitest still emits the existing Vite native-config migration warnings for `__dirname` and the extensionless `./mdx-plugin` import.
+
+## Final-review fix wave
+
+### Status
+
+Fixed duplicate global-intake submission during revision-conflict refresh.
+
+- `BaseMemberIntake` now tracks the complete `session.submit` lifetime locally.
+- A synchronous in-flight guard prevents repeated handlers from reusing the captured session before React rerenders.
+- TanStack mutation pending still disables the whole draft. The longer local submission state disables Save and Cmd/Ctrl+Enter only, so authored fields, Cancel, and Escape remain available while conflict refresh is pending.
+- Session capability gating remains combined with the local submission gate.
+- The deterministic intake test holds conflict refetch unresolved, verifies the draft stays editable and cancellable while Save is disabled, attempts Cmd+Enter, then resolves refreshed detail and proves the only resubmission uses the new revision.
+
+### TDD evidence
+
+RED:
+
+```text
+bun run test -- src/components/bases/__tests__/BaseMemberIntake.test.tsx -t "blocks duplicate submission"
+Test Files  1 failed (1)
+Tests       1 failed | 12 skipped (13)
+- Save new member was enabled while conflict refetch remained pending
+```
+
+GREEN:
+
+```text
+bun run test -- src/components/bases/__tests__/BaseMemberIntake.test.tsx -t "blocks duplicate submission"
+Test Files  1 passed (1)
+Tests       1 passed | 12 skipped (13)
+```
+
+Required regression suite:
+
+```text
+bun run test -- src/components/bases/__tests__/BaseMemberIntake.test.tsx src/components/bases/__tests__/BaseMemberDraft.test.tsx src/components/codex/__tests__/InscribeModal.test.tsx src/components/bases/__tests__/member-creation.test.ts
+Test Files  4 passed (4)
+Tests       68 passed (68)
+```
+
+### Verification gates
+
+```text
+bun run typecheck
+$ tsc --noEmit --project tsconfig.app.json
+exit 0
+```
+
+```text
+bun run lint -- src/components/bases/BaseMemberIntake.tsx src/components/bases/__tests__/BaseMemberIntake.test.tsx
+Checked 2 files in 28ms. No fixes applied.
+exit 0
+```
+
+### Concerns
+
+No task-specific concern. Vitest still emits the existing Vite native-config migration warnings for `__dirname` and the extensionless `./mdx-plugin` import.

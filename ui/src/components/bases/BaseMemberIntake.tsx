@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   type BaseMemberDiagnostic,
   useBase,
@@ -32,6 +32,8 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
   }>();
   const [error, setError] = useState<string>();
   const [diagnostics, setDiagnostics] = useState<BaseMemberDiagnostic[]>([]);
+  const submitInFlightRef = useRef(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const definition = detail.data;
   const views = definition?.views ?? [];
@@ -105,26 +107,40 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
       "Member creation is unavailable for this view.");
 
   async function save(value: BaseMemberDraftValue) {
-    if (!session || !sessionEnabled) return;
-    setError(undefined);
-    setDiagnostics([]);
-    const outcome = await session.submit(value, {
-      create: (baseSlug, request) =>
-        createMember.mutateAsync({
-          params: { path: { slug: baseSlug } },
-          body: request,
-        }),
-      refreshAfterConflict: async () => {
-        const refreshed = await detail.refetch();
-        if (refreshed.error) throw refreshed.error;
-      },
-    });
-    if (outcome.kind === "created") {
-      onCreated(outcome.member.path, outcome.member.title);
+    if (
+      !session ||
+      !sessionEnabled ||
+      createMember.isPending ||
+      submitInFlightRef.current
+    ) {
       return;
     }
-    setError(outcome.message);
-    setDiagnostics(outcome.diagnostics);
+    submitInFlightRef.current = true;
+    setIsSubmitting(true);
+    setError(undefined);
+    setDiagnostics([]);
+    try {
+      const outcome = await session.submit(value, {
+        create: (baseSlug, request) =>
+          createMember.mutateAsync({
+            params: { path: { slug: baseSlug } },
+            body: request,
+          }),
+        refreshAfterConflict: async () => {
+          const refreshed = await detail.refetch();
+          if (refreshed.error) throw refreshed.error;
+        },
+      });
+      if (outcome.kind === "created") {
+        onCreated(outcome.member.path, outcome.member.title);
+        return;
+      }
+      setError(outcome.message);
+      setDiagnostics(outcome.diagnostics);
+    } finally {
+      submitInFlightRef.current = false;
+      setIsSubmitting(false);
+    }
   }
 
   return (
@@ -158,7 +174,7 @@ export function BaseMemberIntake({ slug, onCreated }: BaseMemberIntakeProps) {
           titleTemplate={definition.title_template ?? undefined}
           projects={projects}
           isSaving={createMember.isPending}
-          isSaveDisabled={!sessionEnabled}
+          isSaveDisabled={!sessionEnabled || isSubmitting}
           diagnostics={diagnostics}
           summaryError={error}
           onSave={save}
