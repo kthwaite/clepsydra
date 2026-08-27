@@ -204,10 +204,7 @@ pub(super) fn parse(input: &str) -> Result<SearchExpr, SearchQueryError> {
     Ok(expression)
 }
 
-fn validate_nesting(
-    input: &str,
-    tokens: &VecDeque<Token>,
-) -> Result<(), SearchQueryError> {
+fn validate_nesting(input: &str, tokens: &VecDeque<Token>) -> Result<(), SearchQueryError> {
     let mut depth = 0usize;
     let mut pending_nots = 0usize;
     let mut group_contributions = Vec::new();
@@ -611,10 +608,7 @@ impl Parser<'_> {
         }
     }
 
-    fn parse_group(
-        &mut self,
-        opening_span: SearchSpan,
-    ) -> Result<SearchExpr, SearchQueryError> {
+    fn parse_group(&mut self, opening_span: SearchSpan) -> Result<SearchExpr, SearchQueryError> {
         if matches!(self.current_kind(), Some(TokenKind::RightParenthesis)) {
             let closing_span = self.advance().span;
             return Err(self.error(
@@ -683,10 +677,7 @@ impl Parser<'_> {
             ));
         };
         let value_span = current.span;
-        if !matches!(
-            current.kind,
-            TokenKind::Word(_) | TokenKind::Quoted(_)
-        ) {
+        if !matches!(current.kind, TokenKind::Word(_) | TokenKind::Quoted(_)) {
             return Err(self.error(
                 SearchDiagnosticKind::MissingFieldValue,
                 value_span,
@@ -839,10 +830,7 @@ mod tests {
 
     #[test]
     fn parses_prefix_text() {
-        assert_eq!(
-            parse("clep").unwrap(),
-            text("clep", TextMode::Prefix, 0, 4)
-        );
+        assert_eq!(parse("clep").unwrap(), text("clep", TextMode::Prefix, 0, 4));
     }
 
     #[test]
@@ -899,11 +887,7 @@ mod tests {
                     all(
                         vec![
                             field(SearchField::Kind, "RECIPE", 0, 11),
-                            not(
-                                field(SearchField::Project, "archive", 13, 28),
-                                12,
-                                28,
-                            ),
+                            not(field(SearchField::Project, "archive", 13, 28), 12, 28,),
                         ],
                         0,
                         28,
@@ -1040,7 +1024,10 @@ mod tests {
     #[test]
     fn reports_byte_spans_and_unicode_columns_separately() {
         let error = parse("é tag:").unwrap_err();
-        assert_eq!(error.diagnostic.kind, SearchDiagnosticKind::MissingFieldValue);
+        assert_eq!(
+            error.diagnostic.kind,
+            SearchDiagnosticKind::MissingFieldValue
+        );
         assert_eq!(error.diagnostic.span, span(7, 7));
         assert_eq!(error.diagnostic.column, 7);
         assert!(error.diagnostic.message.contains("at column 7"));
@@ -1061,14 +1048,8 @@ mod tests {
         let error = parse("knd:recipe").unwrap_err();
         assert_eq!(error.kind(), "unknown_field");
         assert_eq!(error.span(), 0..3);
-        assert_eq!(
-            error.message(),
-            "unknown search field 'knd' at column 1"
-        );
-        assert_eq!(
-            error.to_string(),
-            "unknown search field 'knd' at column 1"
-        );
+        assert_eq!(error.message(), "unknown search field 'knd' at column 1");
+        assert_eq!(error.to_string(), "unknown search field 'knd' at column 1");
 
         let kinds = [
             (SearchDiagnosticKind::UnknownField, "unknown_field"),
@@ -1087,10 +1068,7 @@ mod tests {
                 "unmatched_parenthesis",
             ),
             (SearchDiagnosticKind::DanglingOr, "dangling_or"),
-            (
-                SearchDiagnosticKind::QueryTooComplex,
-                "query_too_complex",
-            ),
+            (SearchDiagnosticKind::QueryTooComplex, "query_too_complex"),
             (SearchDiagnosticKind::DanglingNot, "dangling_not"),
             (SearchDiagnosticKind::EmptyGroup, "empty_group"),
             (SearchDiagnosticKind::EmptyValue, "empty_value"),
@@ -1182,24 +1160,14 @@ mod tests {
                 span(0, 1),
                 "`|`",
             ),
-            (
-                "|",
-                SearchDiagnosticKind::DanglingOr,
-                span(0, 1),
-                "`|`",
-            ),
+            ("|", SearchDiagnosticKind::DanglingOr, span(0, 1), "`|`"),
             (
                 "-",
                 SearchDiagnosticKind::DanglingNot,
                 span(0, 1),
                 "followed by an expression",
             ),
-            (
-                "()",
-                SearchDiagnosticKind::EmptyGroup,
-                span(0, 2),
-                "empty",
-            ),
+            ("()", SearchDiagnosticKind::EmptyGroup, span(0, 2), "empty"),
             (
                 "\"\"",
                 SearchDiagnosticKind::EmptyValue,
@@ -1280,15 +1248,13 @@ mod tests {
             "AST node limit",
         );
 
-        let maximum_positive_text =
-            std::iter::repeat_n("a", MAX_POSITIVE_TEXT_LEAVES)
-                .collect::<Vec<_>>()
-                .join(" | ");
+        let maximum_positive_text = std::iter::repeat_n("a", MAX_POSITIVE_TEXT_LEAVES)
+            .collect::<Vec<_>>()
+            .join(" | ");
         assert!(parse(&maximum_positive_text).is_ok());
-        let too_many_positive_text =
-            std::iter::repeat_n("a", MAX_POSITIVE_TEXT_LEAVES + 1)
-                .collect::<Vec<_>>()
-                .join(" | ");
+        let too_many_positive_text = std::iter::repeat_n("a", MAX_POSITIVE_TEXT_LEAVES + 1)
+            .collect::<Vec<_>>()
+            .join(" | ");
         let final_text_start = too_many_positive_text.rfind('a').unwrap();
         assert_diagnostic(
             &too_many_positive_text,
@@ -1306,10 +1272,7 @@ mod tests {
     ) {
         let error = parse(input).unwrap_err();
         assert_eq!(error.diagnostic.kind, kind, "input: {input:?}");
-        assert_eq!(
-            error.diagnostic.span, expected_span,
-            "input: {input:?}"
-        );
+        assert_eq!(error.diagnostic.span, expected_span, "input: {input:?}");
         assert!(
             error.diagnostic.message.contains(message_fragment),
             "input: {input:?}, message: {:?}",

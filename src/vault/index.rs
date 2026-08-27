@@ -3277,9 +3277,7 @@ mod tests {
         let index = search_index();
 
         assert_paths(
-            index
-                .search("(tag:beer | tag:wine) tasting", 20)
-                .unwrap(),
+            index.search("(tag:beer | tag:wine) tasting", 20).unwrap(),
             &["recipes/beer.md", "recipes/wine.md"],
         );
         assert_paths(
@@ -3311,16 +3309,10 @@ mod tests {
                 .iter()
                 .any(|result| result.path == "notes/unassigned.md")
         );
-        assert!(
-            nested
-                .iter()
-                .all(|result| !matches!(
-                    result.path.as_str(),
-                    "archive/old.md"
-                        | "notes/reference.md"
-                        | "notes/tasting-reference.md"
-                ))
-        );
+        assert!(nested.iter().all(|result| !matches!(
+            result.path.as_str(),
+            "archive/old.md" | "notes/reference.md" | "notes/tasting-reference.md"
+        )));
     }
 
     #[test]
@@ -3463,10 +3455,7 @@ mod tests {
             Some("2026-08-15T00:00:00Z"),
         );
         let id_order = index.search("tag:id-order", 20).unwrap();
-        assert_eq!(
-            paths(&id_order),
-            ["notes/case-tie.md", "notes/Case-Tie.md"]
-        );
+        assert_eq!(paths(&id_order), ["notes/case-tie.md", "notes/Case-Tie.md"]);
         assert_eq!(
             id_order
                 .iter()

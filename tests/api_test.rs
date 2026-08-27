@@ -6090,9 +6090,7 @@ async fn search_pages() {
     let body: serde_json::Value = res.json();
     assert_eq!(body.as_array().unwrap().len(), 1);
 
-    let res = server
-        .get("/api/vault/index/search?q=kind%3ARECIPE")
-        .await;
+    let res = server.get("/api/vault/index/search?q=kind%3ARECIPE").await;
     res.assert_status_ok();
     let body: serde_json::Value = res.json();
     let paths = body
@@ -6122,9 +6120,7 @@ async fn search_pages() {
 async fn search_query_errors_have_a_stable_contract() {
     let (server, _tmp) = setup_server();
 
-    let res = server
-        .get("/api/vault/index/search?q=knd%3Arecipe")
-        .await;
+    let res = server.get("/api/vault/index/search?q=knd%3Arecipe").await;
     res.assert_status(StatusCode::BAD_REQUEST);
     let body: serde_json::Value = res.json();
     assert_eq!(
@@ -6165,10 +6161,13 @@ async fn search_query_errors_have_a_stable_contract() {
     let body: serde_json::Value = res.json();
     assert_eq!(body["detail"]["code"], "invalid_search_query");
     assert_eq!(body["detail"]["kind"], "query_too_complex");
-    assert_eq!(body["detail"]["span"], serde_json::json!({
-        "start": 4096,
-        "end": 4097
-    }));
+    assert_eq!(
+        body["detail"]["span"],
+        serde_json::json!({
+            "start": 4096,
+            "end": 4097
+        })
+    );
 
     let res = server.get("/api/vault/index/search").await;
     res.assert_status(StatusCode::BAD_REQUEST);

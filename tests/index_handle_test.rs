@@ -182,10 +182,7 @@ async fn search_propagates_typed_query_errors() {
     let (_tmp, vault) = setup_vault(&[]);
     let handle = build_handle(&vault);
 
-    let error = handle
-        .search("unknown:value".into(), 10)
-        .await
-        .unwrap_err();
+    let error = handle.search("unknown:value".into(), 10).await.unwrap_err();
     let IndexError::SearchQuery(error) = error else {
         panic!("expected a typed search query error");
     };

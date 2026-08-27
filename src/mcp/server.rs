@@ -2029,10 +2029,7 @@ mod tests {
         let query = "(tag:research | tag:archive) tasting";
         let http_value = server
             .client
-            .get_json(
-                "/api/vault/index/search",
-                &[("q", query.to_string())],
-            )
+            .get_json("/api/vault/index/search", &[("q", query.to_string())])
             .await
             .expect("HTTP search should succeed");
         let mcp_value = parse(
@@ -2044,10 +2041,7 @@ mod tests {
                 .await,
         );
 
-        let expected = vec![
-            "notes/gamma.md".to_string(),
-            "quotes/delta.md".to_string(),
-        ];
+        let expected = vec!["notes/gamma.md".to_string(), "quotes/delta.md".to_string()];
         assert_eq!(sorted_search_paths(&http_value), expected);
         assert_eq!(
             sorted_search_paths(&mcp_value),

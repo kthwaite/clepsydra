@@ -1,10 +1,10 @@
 use rusqlite::{Connection, params_from_iter, types::Value};
 
+use super::SearchExecutionError;
 use super::query::{
     SearchDiagnostic, SearchDiagnosticKind, SearchExpr, SearchField, SearchQueryError, SearchSpan,
     TextMode,
 };
-use super::SearchExecutionError;
 use crate::vault::index::SearchResult;
 
 struct TextLeaf {
@@ -24,9 +24,7 @@ enum CompiledExpression {
 impl CompiledExpression {
     fn render(&self) -> String {
         match self {
-            Self::Predicate(predicate) | Self::PositiveText { predicate, .. } => {
-                predicate.clone()
-            }
+            Self::Predicate(predicate) | Self::PositiveText { predicate, .. } => predicate.clone(),
             Self::All(children) => format!(
                 "({})",
                 children
@@ -162,9 +160,7 @@ impl<'a> Compiler<'a> {
                      WHERE text_{ordinal}.page_id = p.id))"
                 );
                 if negated {
-                    Ok(CompiledExpression::Predicate(format!(
-                        "(NOT {predicate})"
-                    )))
+                    Ok(CompiledExpression::Predicate(format!("(NOT {predicate})")))
                 } else {
                     Ok(CompiledExpression::PositiveText { ordinal, predicate })
                 }
@@ -270,7 +266,7 @@ impl<'a> Compiler<'a> {
                      SELECT CAST(NULL AS TEXT), CAST(NULL AS REAL), CAST(NULL AS INTEGER)\n\
                      WHERE 0\n\
                  )"
-                    .to_owned(),
+                .to_owned(),
             );
         } else {
             expressions.push(format!(
@@ -294,7 +290,7 @@ impl<'a> Compiler<'a> {
                      )\n\
                      WHERE match_order = 1\n\
                  )"
-                    .to_owned(),
+                .to_owned(),
             );
         }
 
@@ -377,9 +373,7 @@ fn compile_ordinary_text(
     debug_assert!(!leaves.is_empty());
     let mut parameters = leaves
         .iter()
-        .map(|(value, mode, span)| {
-            fts_expression(input, value, *mode, *span).map(Value::Text)
-        })
+        .map(|(value, mode, span)| fts_expression(input, value, *mode, *span).map(Value::Text))
         .collect::<Result<Vec<_>, _>>()?;
     let text_ctes = leaves
         .iter()
@@ -410,11 +404,7 @@ fn compile_ordinary_text(
         format!("SELECT text_0.page_id FROM text_0\n                     {joins}")
     };
     let positive_ranks = (0..leaves.len())
-        .map(|ordinal| {
-            format!(
-                "SELECT page_id, rank, {ordinal} AS ordinal FROM text_{ordinal}"
-            )
-        })
+        .map(|ordinal| format!("SELECT page_id, rank, {ordinal} AS ordinal FROM text_{ordinal}"))
         .collect::<Vec<_>>()
         .join("\n                     UNION ALL\n");
     let snippet_cases = (0..leaves.len())
@@ -431,9 +421,7 @@ fn compile_ordinary_text(
         })
         .collect::<Vec<_>>()
         .join("\n");
-    parameters.push(Value::Integer(
-        i64::try_from(limit).unwrap_or(i64::MAX),
-    ));
+    parameters.push(Value::Integer(i64::try_from(limit).unwrap_or(i64::MAX)));
     let limit_parameter = parameters.len();
     let sql = format!(
         "WITH {text_ctes},\n\
@@ -651,7 +639,9 @@ mod tests {
             .unwrap();
 
         assert!(
-            details.iter().any(|detail| detail.contains("MATERIALIZE ranked")),
+            details
+                .iter()
+                .any(|detail| detail.contains("MATERIALIZE ranked")),
             "{details:#?}"
         );
         assert!(
