@@ -458,6 +458,31 @@ pub async fn list_tasks(
 // PUT /tasks/status — update_task_status
 // ---------------------------------------------------------------------------
 
+/// Byte offset of the checkbox marker relative to `span_start`.
+///
+/// `span_start` points at the beginning of the list item, which looks like
+/// `- [ ] ...`, `- [x] ...` or `- [-] ...`, so the marker sits within the first
+/// few characters. `span_start` must be a character boundary in `body_text`.
+///
+/// The search window is capped in bytes but trimmed back to a character
+/// boundary: task text is arbitrary Markdown, and a multi-byte character
+/// straddling the cap would otherwise panic the slice.
+fn find_checkbox_offset(body_text: &str, span_start: usize) -> Option<usize> {
+    const SEARCH_WINDOW_BYTES: usize = 20;
+
+    let mut region_end = body_text.len().min(span_start + SEARCH_WINDOW_BYTES);
+    while !body_text.is_char_boundary(region_end) {
+        region_end -= 1;
+    }
+    let search_region = &body_text[span_start..region_end];
+
+    search_region
+        .find("[ ]")
+        .or_else(|| search_region.find("[x]"))
+        .or_else(|| search_region.find("[X]"))
+        .or_else(|| search_region.find("[-]"))
+}
+
 #[utoipa::path(
     put,
     path = "/tasks/status",
@@ -518,21 +543,15 @@ pub async fn update_task_status(
             body_text.len()
         )));
     }
+    if !body_text.is_char_boundary(span_start) {
+        return Err(ApiError::bad_request(format!(
+            "span_start {span_start} is not a character boundary"
+        )));
+    }
 
-    // Search for the checkbox pattern near span_start.
-    // The span_start points to the beginning of the list item, which looks like
-    // "- [ ] ...", "- [x] ...", or "- [-] ...".
-    // We need to find the `[ ]` / `[x]` / `[-]` within the first few characters.
-    let search_region = &body_text[span_start..body_text.len().min(span_start + 20)];
-
-    let checkbox_offset = search_region
-        .find("[ ]")
-        .or_else(|| search_region.find("[x]"))
-        .or_else(|| search_region.find("[X]"))
-        .or_else(|| search_region.find("[-]"))
-        .ok_or_else(|| {
-            ApiError::bad_request(format!("no checkbox found near span_start {span_start}"))
-        })?;
+    let checkbox_offset = find_checkbox_offset(body_text, span_start).ok_or_else(|| {
+        ApiError::bad_request(format!("no checkbox found near span_start {span_start}"))
+    })?;
 
     let replacement = match new_status {
         "done" => "[x]",
@@ -643,4 +662,73 @@ pub async fn update_task_status(
         })?;
 
     Ok(Json(task))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_checkbox_offset;
+
+    #[test]
+    fn finds_each_checkbox_marker() {
+        for (body, expected) in [
+            ("- [ ] todo", 2),
+            ("- [x] done", 2),
+            ("- [X] done", 2),
+            ("- [-] cancelled", 2),
+            ("  - [ ] indented", 4),
+        ] {
+            assert_eq!(
+                find_checkbox_offset(body, 0),
+                Some(expected),
+                "body: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn finds_checkbox_at_a_nonzero_span_start() {
+        let body = "intro\n\n- [ ] todo\n";
+        let span_start = body.find("- [ ]").unwrap();
+        assert_eq!(find_checkbox_offset(body, span_start), Some(2));
+    }
+
+    #[test]
+    fn reports_no_checkbox_when_the_window_holds_none() {
+        assert_eq!(find_checkbox_offset("- plain list item", 0), None);
+        assert_eq!(find_checkbox_offset("", 0), None);
+    }
+
+    #[test]
+    fn window_end_never_splits_a_character() {
+        // Regression: the window was sliced at `span_start + 20` bytes. Here a
+        // four-byte character occupies bytes 18..22, so that cap lands inside
+        // it and the slice used to panic.
+        let body = "- [ ] abcdefghijkl\u{1F570} wind the clepsydra";
+        assert!(!body.is_char_boundary(20));
+        assert_eq!(find_checkbox_offset(body, 0), Some(2));
+    }
+
+    #[test]
+    fn window_end_never_splits_a_character_at_any_offset() {
+        // Sweep multi-byte fillers so the cap lands on every possible
+        // continuation-byte position within the window.
+        for filler in ["\u{00e9}", "\u{2192}", "\u{1F570}"] {
+            for pad in 0..12usize {
+                let body = format!("{}- [ ] {}", filler.repeat(pad), filler.repeat(12));
+                let span_start = body.find("- [ ]").unwrap();
+                assert_eq!(
+                    find_checkbox_offset(&body, span_start),
+                    Some(2),
+                    "filler={filler:?} pad={pad}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn window_shorter_than_the_cap_is_handled() {
+        let body = "- [ ]";
+        assert_eq!(find_checkbox_offset(body, 0), Some(2));
+        assert_eq!(find_checkbox_offset(body, body.len()), None);
+    }
 }

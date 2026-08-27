@@ -120,7 +120,8 @@ pub struct ListPagesParams {
     /// Offset into the path-ordered page list, for pagination.
     pub offset: Option<u32>,
     /// Only pages of this resolved kind (NOTE, PROJECT, JOURNAL, TODO, QUOTE,
-    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION).
+    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE,
+    /// AI_CONVERSATION).
     pub kind: Option<String>,
     /// Only pages carrying this exact tag.
     pub tag: Option<String>,
@@ -165,7 +166,7 @@ pub struct LinksParams {
 }
 
 /// The kind vocabulary, spelled out for tool schemas and error messages.
-const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION";
+const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION";
 
 const MCP_INSTRUCTIONS: &str = "Work with a clepsydra vault (a markdown personal knowledge base) \
 through its running server. Orient with vault_tree and vault_tags, locate pages with vault_search \
@@ -196,7 +197,8 @@ pub struct CreatePageParams {
     /// Page title. Required; also drives the generated filename slug.
     pub title: String,
     /// Kind token (NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE,
-    /// PERSON, TASK, CYCLE, RECIPE, AI_CONVERSATION). Defaults to NOTE.
+    /// PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION).
+    /// Defaults to NOTE.
     /// Declared in frontmatter and used to pick the canonical folder.
     pub kind: Option<String>,
     /// Folder override, vault-relative. With a declared kind it must be the
@@ -266,8 +268,8 @@ pub struct AssignParams {
     /// use the bulk endpoint and report per-path successes and failures.
     pub paths: Vec<String>,
     /// Kind token to declare in frontmatter (NOTE, PROJECT, JOURNAL, TODO,
-    /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE,
-    /// AI_CONVERSATION).
+    /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING,
+    /// ONE_ON_ONE, AI_CONVERSATION).
     pub kind: Option<String>,
     /// Project to declare in frontmatter.
     pub project: Option<String>,

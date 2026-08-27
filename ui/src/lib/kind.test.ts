@@ -32,6 +32,18 @@ describe("resolveKindFromPath", () => {
     expect(resolveKindFromPath("chats/example.md")).toBe("AI_CONVERSATION");
     expect(resolveKindFromPath("recipes/pho-ga.md")).toBe("RECIPE");
     expect(resolveKindFromPath("recipe/pho-ga.md")).toBe("RECIPE");
+    expect(resolveKindFromPath("meetings/20260827.standup.ab12cd34.md")).toBe(
+      "MEETING",
+    );
+    for (const folder of [
+      "one-on-ones",
+      "one-on-one",
+      "1-1s",
+      "1on1",
+      "121s",
+    ]) {
+      expect(resolveKindFromPath(`${folder}/x.md`)).toBe("ONE_ON_ONE");
+    }
   });
 
   it("tolerates leading slashes and nested paths", () => {
@@ -114,6 +126,16 @@ describe("KIND_META", () => {
 
   it("includes recipes in the runtime kind list", () => {
     expect(KINDS).toContain("RECIPE");
+  });
+
+  it("includes meetings and 1:1s in the runtime kind list", () => {
+    expect(KINDS).toContain("MEETING");
+    expect(KINDS).toContain("ONE_ON_ONE");
+  });
+
+  it("labels a one-on-one the way it is spoken", () => {
+    expect(kindLabel("ONE_ON_ONE")).toBe("1:1");
+    expect(kindLabel("MEETING")).toBe("MEETING");
   });
 
   it("uses the exact AI conversation label", () => {

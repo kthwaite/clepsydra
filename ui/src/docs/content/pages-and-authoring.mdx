@@ -61,6 +61,10 @@ can move the same file so the folder follows its declared metadata.
 | `PERSON` | `people` |
 | `TASK` | `tasks` |
 | `CYCLE` | `cycles` |
+| `RECIPE` | `recipes` |
+| `MEETING` | `meetings` |
+| `ONE_ON_ONE` | `one-on-ones` |
+| `ARCHIVE` | `archive` |
 | `AI_CONVERSATION` | `conversations` |
 
 Without a declared `type`, Clepsydra infers Kind from the top-level folder and
@@ -69,6 +73,41 @@ Kind keeps the current top-level folder, and no declared Project keeps the
 current subfolder. Explicitly clearing Project removes its subfolder. A
 successful projected move keeps the filename and updates links as one planned
 mutation.
+
+### Record a meeting or a 1:1
+
+MEETING and ONE_ON_ONE pages record when they happened and name the people who
+were there:
+
+```toml
+type = "MEETING"
+occurred_at = 2026-08-27T14:00:00Z
+attendees = ["[[Ada Lovelace]]", "[[Grace Hopper]]"]
+```
+
+A MEETING names any number of people. A ONE_ON_ONE names one: writing a second
+attendee onto one is refused, whether you patch the property, declare the Kind
+on a page that already lists several, or create the page that way. A 1:1 that
+names nobody yet is accepted — it is an unfinished note, and `clep doctor`
+lists them under `attendance`.
+
+Because `attendees` is a linkable property, each entry links the meeting to
+that person's page, and the person's Folio collects every meeting naming them
+in its backlinks. Nothing requires the target to exist or to be a PERSON page;
+a wikilink to a page you have not written yet behaves the way it does anywhere
+else in the vault.
+
+`occurred_at` is an **unquoted** TOML date-time, which is what lets Bases and
+queries sort and filter on it; a quoted string is inert text, so the server
+refuses one. Accepted forms are `2026-08-27T14:00:00Z`, the same without an
+offset, and a bare `2026-08-27` when only the day is known. Clepsydra never
+fills it in for you — an undated meeting is another unfinished note `clep
+doctor` lists.
+
+Both kinds open with an `## Agenda` / `## Notes` / `## Actions` scaffold when
+created without a body. The Folio's **Meeting** rail block edits both fields: a
+date-time picker for **Occurred** (with a **Now** button while it is unset)
+above the attendee list.
 
 ### Move or rename a page
 

@@ -20,10 +20,13 @@ use uuid::Uuid;
 use super::AppState;
 use super::error::ApiError;
 use super::events::SyncNotification;
+use crate::vault::attendance;
 use crate::vault::base::{
     BODY_COLUMN, BaseDefinition, BaseRegistry, Filter, Op, PropertyDefinition, PropertyType,
     SYSTEM_FIELDS,
 };
+use crate::vault::kind::resolve;
+use crate::vault::meeting;
 use crate::vault::mutation_coordinator::{MutationNotification, ReplacePageContentCommand};
 use crate::vault::page::{Page, page_revision, parse_or_repair_frontmatter, write_page_content};
 use crate::vault::path::VaultPath;
@@ -613,6 +616,22 @@ pub async fn patch_properties(
             return Err(ApiError::bad_request(format!("invalid patch value: {e}")));
         }
     };
+
+    // Attendees are a schema-blind property like any other, so the cardinality
+    // a MEETING / ONE_ON_ONE carries is checked here, against the page as it
+    // would be after the splice — that covers `set` and `clear` in one place,
+    // whatever the base registry does or does not declare.
+    let touches = |key: &str| {
+        request.set.contains_key(key) || request.clear.iter().any(|cleared| cleared == key)
+    };
+    if touches(attendance::ATTENDEES_KEY) || touches(meeting::OCCURRED_AT_KEY) {
+        let (patched_meta, _, _, _) = parse_or_repair_frontmatter(&new_content);
+        let (kind, _) = resolve(vault_path.as_str(), patched_meta.kind);
+        attendance::validate(kind, &patched_meta)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+        meeting::validate(kind, &patched_meta)
+            .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    }
 
     let notify = |notification: MutationNotification| {
         let _ = state.change_tx.send(SyncNotification::IndexChanged {

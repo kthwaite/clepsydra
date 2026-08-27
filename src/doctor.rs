@@ -265,6 +265,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
+        check_meetings(v, &mut report);
         check_bases(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
@@ -280,6 +281,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
             "legacy census",
             "skipped — vault unavailable",
         ));
+        report.push(skip("meetings", "census", "skipped — vault unavailable"));
         report.push(skip("bases", "registry", "skipped — vault unavailable"));
     }
 
@@ -1482,6 +1484,144 @@ fn check_frontmatter(vault: &Vault, report: &mut Report) {
 }
 
 // ---------------------------------------------------------------------------
+// Check 8b: meeting frontmatter
+// ---------------------------------------------------------------------------
+
+/// Census of MEETING / ONE_ON_ONE pages whose `attendees` or `occurred_at` the
+/// API would refuse to write. Files are hand-editable, so nothing stops a page
+/// reaching this state; the doctor is where it surfaces. Pages that are merely
+/// unfinished — a 1:1 naming nobody, a meeting with no time — are reported
+/// separately, as information rather than breakage.
+fn check_meetings(vault: &Vault, report: &mut Report) {
+    use crate::vault::attendance;
+    use crate::vault::kind::resolve;
+    use crate::vault::meeting;
+    use crate::vault::page::Page;
+    use crate::vault::path::VaultPath;
+
+    const SECTION: &str = "meetings";
+    const LISTED: usize = 10;
+
+    let mut meetings = 0usize;
+    let mut invalid: Vec<String> = Vec::new();
+    let mut unnamed: Vec<String> = Vec::new();
+    let mut undated: Vec<String> = Vec::new();
+
+    for entry in walkdir::WalkDir::new(vault.root())
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "md"))
+    {
+        let Ok(rel_path) = entry.path().strip_prefix(vault.root()) else {
+            continue;
+        };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if rel.starts_with(".clepsydra/") {
+            continue;
+        }
+        let Ok(vault_path) = VaultPath::new(&rel) else {
+            continue;
+        };
+        if vault.is_excluded(&vault_path) {
+            continue;
+        }
+        let Ok(page) = Page::from_file(entry.path(), vault_path.clone()) else {
+            continue;
+        };
+        let (kind, _) = resolve(vault_path.as_str(), page.meta.kind);
+        if attendance::cardinality(kind).is_none() && !meeting::records_occurrence(kind) {
+            continue;
+        }
+        meetings += 1;
+
+        let path = vault_path.as_str();
+        if let Err(error) = attendance::validate(kind, &page.meta) {
+            invalid.push(format!("{path}: {error}"));
+        } else if attendance::is_incomplete(kind, &page.meta) {
+            unnamed.push(path.to_string());
+        }
+        if let Err(error) = meeting::validate(kind, &page.meta) {
+            invalid.push(format!("{path}: {error}"));
+        } else if meeting::is_undated(kind, &page.meta) {
+            undated.push(path.to_string());
+        }
+    }
+
+    if meetings == 0 {
+        report.push(info(SECTION, "census", "no meeting or 1:1 pages"));
+        return;
+    }
+
+    if invalid.is_empty() {
+        report.push(ok(
+            SECTION,
+            "frontmatter",
+            format!(
+                "{meetings} meeting page(s); every `attendees` and `occurred_at` is well-formed"
+            ),
+        ));
+    } else {
+        invalid.sort();
+        report.push(
+            warn(
+                SECTION,
+                "frontmatter",
+                listing(&invalid, format!("{} unusable value(s):", invalid.len()), LISTED),
+            )
+            .with_hint(
+                "`attendees` is a list of wikilinks and a ONE_ON_ONE names one; `occurred_at` is an unquoted TOML date-time",
+            ),
+        );
+    }
+
+    if !unnamed.is_empty() {
+        unnamed.sort();
+        report.push(
+            info(
+                SECTION,
+                "unnamed 1:1s",
+                listing(
+                    &unnamed,
+                    format!("{} 1:1 page(s) name nobody:", unnamed.len()),
+                    LISTED,
+                ),
+            )
+            .with_hint("set `attendees = [\"[[Their Name]]\"]` on each"),
+        );
+    }
+
+    if !undated.is_empty() {
+        undated.sort();
+        report.push(
+            info(
+                SECTION,
+                "undated",
+                listing(
+                    &undated,
+                    format!("{} meeting page(s) record no time:", undated.len()),
+                    LISTED,
+                ),
+            )
+            .with_hint("set `occurred_at = 2026-08-27T14:00:00Z` on each"),
+        );
+    }
+}
+
+/// `headline` followed by up to `limit` indented entries, then an elision.
+fn listing(entries: &[String], headline: String, limit: usize) -> String {
+    let mut detail = headline;
+    for entry in entries.iter().take(limit) {
+        detail.push_str("\n  ");
+        detail.push_str(entry);
+    }
+    if entries.len() > limit {
+        detail.push_str(&format!("\n  … and {} more", entries.len() - limit));
+    }
+    detail
+}
+
+// ---------------------------------------------------------------------------
 // Check 9: runtime / build info
 // ---------------------------------------------------------------------------
 
@@ -2114,6 +2254,152 @@ mod tests {
             "expected detail to mention indexed pages: {}",
             r.detail
         );
+    }
+
+    /// Write a page with the given frontmatter body under `vault_root`.
+    fn write_page(vault_root: &Path, relative: &str, frontmatter: &str) {
+        let path = vault_root.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            format!(
+                "+++\nid = \"01930000-0000-7000-8000-000000000000\"\n{frontmatter}+++\n\nbody\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn meeting_check_is_quiet_without_meeting_pages() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(&vault_root, "notes/plain.md", "title = \"Plain\"\n");
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_record(
+            &report,
+            "meetings",
+            "census",
+            Status::Info,
+            "no meeting or 1:1 pages",
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn meeting_check_passes_well_formed_pages() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(
+            &vault_root,
+            "meetings/kickoff.md",
+            "title = \"Kickoff\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\noccurred_at = 2026-08-27T14:00:00Z\n",
+        );
+        write_page(
+            &vault_root,
+            "one-on-ones/ada.md",
+            "title = \"Ada\"\nattendees = [\"[[Ada]]\"]\noccurred_at = 2026-08-27\n",
+        );
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_record(
+            &report,
+            "meetings",
+            "frontmatter",
+            Status::Ok,
+            "2 meeting page(s); every `attendees` and `occurred_at` is well-formed",
+        );
+        for name in ["unnamed 1:1s", "undated"] {
+            assert!(
+                !report
+                    .results
+                    .iter()
+                    .any(|record| record.section == "meetings" && record.name == name),
+                "a complete meeting should not be reported as {name}: {:#?}",
+                report.results
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn meeting_check_reports_hand_edited_breakage() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        // Two people on a 1:1 — the API refuses this, a text editor does not.
+        write_page(
+            &vault_root,
+            "one-on-ones/crowd.md",
+            "title = \"Crowd\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\noccurred_at = 2026-08-27\n",
+        );
+        // A quoted date-time is inert text the index never projects as a date.
+        write_page(
+            &vault_root,
+            "meetings/quoted.md",
+            "title = \"Quoted\"\nattendees = [\"[[Ada]]\"]\noccurred_at = \"2026-08-27T14:00:00Z\"\n",
+        );
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        let frontmatter = report
+            .results
+            .iter()
+            .find(|record| record.section == "meetings" && record.name == "frontmatter")
+            .expect("meetings.frontmatter should be reported");
+        assert_eq!(frontmatter.status, Status::Warn, "{frontmatter:#?}");
+        assert!(
+            frontmatter.detail.contains("one-on-ones/crowd.md"),
+            "{frontmatter:#?}"
+        );
+        assert!(
+            frontmatter.detail.contains("meetings/quoted.md"),
+            "{frontmatter:#?}"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn meeting_check_reports_unfinished_pages_as_information() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        // A 1:1 that names nobody and records no time: unfinished, not broken.
+        write_page(&vault_root, "one-on-ones/blank.md", "title = \"Blank\"\n");
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_eq!(
+            report
+                .results
+                .iter()
+                .find(|record| record.section == "meetings" && record.name == "frontmatter")
+                .map(|record| record.status),
+            Some(Status::Ok),
+            "an unfinished page is not breakage: {:#?}",
+            report.results
+        );
+        for name in ["unnamed 1:1s", "undated"] {
+            let record = report
+                .results
+                .iter()
+                .find(|record| record.section == "meetings" && record.name == name)
+                .unwrap_or_else(|| panic!("meetings.{name} should be reported"));
+            assert_eq!(record.status, Status::Info, "{record:#?}");
+            assert!(
+                record.detail.contains("one-on-ones/blank.md"),
+                "{record:#?}"
+            );
+        }
     }
 }
 

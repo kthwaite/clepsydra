@@ -23,7 +23,7 @@ excluded_patterns = [
 
 default_page_folder = ""
 
-linkable_properties = ["tags", "aliases", "link"]
+linkable_properties = ["tags", "aliases", "link", "attendees"]
 "#;
 
 /// Initialize a new vault at the given root directory.
@@ -77,7 +77,7 @@ mod tests {
         // Written template must match the serde defaults for linkable_properties.
         assert_eq!(
             config.vault.linkable_properties,
-            vec!["tags", "aliases", "link"]
+            vec!["tags", "aliases", "link", "attendees"]
         );
     }
 

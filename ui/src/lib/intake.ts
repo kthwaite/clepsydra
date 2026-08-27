@@ -19,6 +19,8 @@ export const KIND_FOLDER: Record<Kind, string> = {
   TASK: "tasks",
   CYCLE: "cycles",
   RECIPE: "recipes",
+  MEETING: "meetings",
+  ONE_ON_ONE: "one-on-ones",
   ARCHIVE: "archive",
   AI_CONVERSATION: "conversations",
 };
