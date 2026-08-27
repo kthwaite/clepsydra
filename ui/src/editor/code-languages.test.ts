@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMMON_LANGUAGES,
   CURATED_ALIASES,
+  DIAGRAM_LANGUAGES,
   displayLabel,
   filterLanguages,
   listLanguageIds,
@@ -65,7 +66,7 @@ describe("code-languages", () => {
   });
 
   it("lists each grammar at most once (curated aliases excepted)", () => {
-    const curated = new Set<string>(CURATED_ALIASES);
+    const curated = new Set<string>([...CURATED_ALIASES, ...DIAGRAM_LANGUAGES]);
     const ids = listLanguageIds(refractor).filter((id) => !curated.has(id));
     const grammars = refractor.languages as Record<string, object>;
     const seen = new Set<object>();
@@ -89,9 +90,18 @@ describe("code-languages", () => {
     expect(filterLanguages(refractor, "zsh")).toContain("zsh");
   });
 
+  it("offers mermaid even though refractor has no grammar for it", () => {
+    const ids = listLanguageIds(refractor);
+    const grammars = refractor.languages as Record<string, object>;
+    expect(grammars.mermaid).toBeUndefined();
+    expect(ids).toContain("mermaid");
+    expect(filterLanguages(refractor, "merm")).toEqual(["mermaid"]);
+  });
+
   it("falls back to the curated set while the grammar bundle loads", () => {
     expect(listLanguageIds(null)).toEqual([
       ...COMMON_LANGUAGES,
+      ...DIAGRAM_LANGUAGES,
       ...CURATED_ALIASES,
     ]);
     expect(filterLanguages(null, "rus")).toEqual(["rust"]);

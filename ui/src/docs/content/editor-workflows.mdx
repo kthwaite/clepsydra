@@ -50,7 +50,10 @@ press `Space` after the marker at the start of a paragraph.
 A third hyphen at the end of a line converts `---` into a divider and starts a
 fresh paragraph below it. A fence of three backticks, optionally followed by a
 language name, becomes a code block in that language when you press `Enter` at
-the end of the line. Nothing autoformats inside a code block.
+the end of the line. Nothing autoformats inside a code block. A code block whose
+language is `mermaid` renders as a diagram: its header toggle swaps the picture
+for the source, clicking the diagram puts the caret in that source, and the
+source stays visible while the caret is inside the block.
 
 Only the empty `[] ` form can be typed: in a non-empty bracket pair the closing
 `]` fires the link scaffold or the inline-property rule described below instead.

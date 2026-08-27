@@ -8,6 +8,7 @@ import wikiLinkPlugin from "remark-wiki-link";
 import type { PluggableList } from "unified";
 import { BlockTransclusion } from "#/components/blocks/BlockTransclusion";
 import { MathExpression } from "#/components/MathExpression";
+import { MermaidCodeBlock } from "#/components/MermaidCodeBlock";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { classifyLinkResource } from "#/lib/linkResource";
@@ -17,6 +18,7 @@ import {
   remarkBlockReferences,
 } from "#/lib/markdown/blockReferences";
 import { type MathDelimiter, remarkFolioMath } from "#/lib/markdown/folioMath";
+import { mermaidFenceSource } from "#/lib/markdown/mermaidFence";
 import { isCasResource, resolveResourceUrl } from "#/lib/resourceUrl";
 
 interface MarkdownRendererProps {
@@ -181,9 +183,11 @@ export function MarkdownRenderer({ content }: MarkdownRendererProps) {
             {children}
           </td>
         ),
-        pre: ({ children }) => (
-          <MarkdownCodeBlock>{children}</MarkdownCodeBlock>
-        ),
+        pre: ({ children, node }) => {
+          const mermaid = mermaidFenceSource(node);
+          if (mermaid !== null) return <MermaidCodeBlock code={mermaid} />;
+          return <MarkdownCodeBlock>{children}</MarkdownCodeBlock>;
+        },
         code: ({ children, className: codeClassName, ...props }) => {
           if (codeClassName) {
             return (
