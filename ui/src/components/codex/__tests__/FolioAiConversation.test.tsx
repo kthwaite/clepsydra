@@ -403,7 +403,7 @@ describe("Folio AI conversation presentation", () => {
     expect(screen.getByText("atlas")).toBeVisible();
     expect(screen.queryByRole("textbox", { name: "Page title" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Add tags" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Kind" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "Kind" })).toBeNull();
     expect(screen.queryByRole("combobox", { name: "Project" })).toBeNull();
     expect(
       screen.queryByRole("button", { name: /plaintext · protect/i }),
@@ -424,7 +424,7 @@ describe("Folio AI conversation presentation", () => {
 
     expect(screen.getByRole("textbox", { name: "Page title" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Add tags" })).toBeVisible();
-    expect(screen.getByRole("button", { name: "Kind" })).toBeVisible();
+    expect(screen.getByRole("combobox", { name: "Kind" })).toBeVisible();
     expect(screen.getByRole("combobox", { name: "Project" })).toBeVisible();
     expect(
       screen.getByRole("button", { name: /plaintext · protect/i }),

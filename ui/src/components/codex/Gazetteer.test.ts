@@ -2,7 +2,12 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { KINDS, kindLabel } from "#/lib/kind";
+import {
+  ASSIGNABLE_KINDS,
+  KINDS,
+  kindLabel,
+  sortKindsByLabel,
+} from "#/lib/kind";
 import { useGazetteerStore } from "#/store/gazetteer";
 import { Gazetteer, toggleInSet } from "./Gazetteer";
 
@@ -311,6 +316,12 @@ describe("Gazetteer controller", () => {
         screen.getByTestId(`filter-bar-option-kind-${kind}`),
       ).toHaveTextContent(kindLabel(kind));
     }
+    const kindOptionIds = screen
+      .getAllByTestId(/^filter-bar-option-kind-/)
+      .map((el) => el.getAttribute("data-testid"));
+    expect(kindOptionIds).toEqual(
+      sortKindsByLabel(KINDS).map((k) => `filter-bar-option-kind-${k}`),
+    );
     await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
     expect(onFilterChange).toHaveBeenCalledWith({
       text: "",
@@ -361,18 +372,32 @@ describe("Gazetteer controller", () => {
     expect(onFilterChange).toHaveBeenCalledWith({ text: "", facets: {} });
   });
 
-  it("excludes quotation from bulk kind assignment", async () => {
+  it("offers bulk kind assignment as an alphabetical combobox without quotation", async () => {
     const user = userEvent.setup();
     layoutState.mobile = false;
     render(createElement(Gazetteer));
 
     await user.click(screen.getByRole("checkbox", { name: "Select Alpha" }));
     await user.click(
-      screen.getByRole("button", { name: "Set kind for selection" }),
+      screen.getByRole("combobox", { name: "Set kind for selection" }),
     );
 
     expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
-    expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
+    const options = await screen.findAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(
+      sortKindsByLabel(ASSIGNABLE_KINDS).map((k) => kindLabel(k)),
+    );
+
+    await user.click(screen.getByRole("option", { name: "BOOK" }));
+    expect(bulkMutateMock).toHaveBeenCalledWith(
+      {
+        body: {
+          paths: ["notes/alpha.md"],
+          kind: "BOOK",
+        },
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
   });
 
   it("accepts an atomic moved-and-unchanged bulk response and clears the selection", async () => {

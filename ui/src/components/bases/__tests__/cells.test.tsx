@@ -484,7 +484,7 @@ describe("metadata control accessibility", () => {
       </>,
     );
 
-    expect(screen.getByRole("button", { name: "Kind" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Kind" })).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "Project" }),
     ).toBeInTheDocument();
@@ -525,7 +525,7 @@ describe("metadata control accessibility", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: "Draft kind" }),
+      screen.getByRole("combobox", { name: "Draft kind" }),
     ).toHaveAccessibleDescription("Kind help");
     expect(
       screen.getByRole("combobox", { name: "Draft project" }),

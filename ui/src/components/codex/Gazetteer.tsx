@@ -1,16 +1,10 @@
 import { useLayoutEffect, useMemo, useState } from "react";
-import {
-  ListBox,
-  ListBoxItem,
-  Popover,
-  Select,
-  Button as SelectButton,
-} from "react-aria-components";
 import { formatApiError } from "#/api/error";
 import { useContentIndex, useTags } from "#/api/index";
 import { useAssignBulk } from "#/api/pages";
 import type { BulkAssignResponse } from "#/api/types";
 import { shortFolio } from "#/components/codex/folio-utils";
+import { KindSelect } from "#/components/codex/KindSelect";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { FilterBar } from "#/components/filters/FilterBar";
@@ -19,12 +13,12 @@ import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import type { FilterField, FilterState } from "#/lib/filters/model";
 import {
-  ASSIGNABLE_KINDS,
   KINDS,
   type Kind,
   kindColorVar,
   kindLabel,
   resolveKind,
+  sortKindsByLabel,
 } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { useProjects } from "#/lib/useProjects";
@@ -117,7 +111,10 @@ export function Gazetteer({ initialTag, filters }: Props) {
         id: "kind",
         kind: "single",
         label: "KIND",
-        options: KINDS.map((k) => ({ value: k, label: kindLabel(k) })),
+        options: sortKindsByLabel(KINDS).map((k) => ({
+          value: k,
+          label: kindLabel(k),
+        })),
       },
       {
         id: "project",
@@ -311,39 +308,16 @@ export function Gazetteer({ initialTag, filters }: Props) {
           <span className="cl-mono text-[9px] uppercase tracking-[0.12em] text-ink-mute">
             ↦ assign
           </span>
-          <Select
-            aria-label="Set kind for selection"
-            isDisabled={bulk.isPending}
-            onSelectionChange={(k) => k && applyKind(k as Kind)}
-          >
-            <SelectButton
-              className={cn(
-                "cl-mono inline-flex cursor-pointer items-center gap-1.5 border border-rule px-1.5 py-[2px] text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none transition-colors",
-                "data-[hovered]:border-accent data-[hovered]:text-ink",
-                "data-[focus-visible]:outline data-[focus-visible]:outline-1 data-[focus-visible]:outline-accent",
-                "data-[disabled]:cursor-default data-[disabled]:text-ink-mute",
-              )}
-            >
-              Set kind…
-            </SelectButton>
-            <Popover className="border border-rule bg-paper outline-none">
-              <ListBox className="cl-mono max-h-[280px] overflow-auto p-0.5 outline-none">
-                {ASSIGNABLE_KINDS.map((k) => (
-                  <ListBoxItem
-                    key={k}
-                    id={k}
-                    className={cn(
-                      "cursor-pointer px-2 py-1 text-[11px] uppercase tracking-[0.08em] text-ink-2 outline-none",
-                      "data-[hovered]:bg-highlight data-[hovered]:text-ink",
-                      "data-[focused]:bg-highlight data-[focused]:text-ink",
-                    )}
-                  >
-                    {kindLabel(k)}
-                  </ListBoxItem>
-                ))}
-              </ListBox>
-            </Popover>
-          </Select>
+          <div className="w-[140px]">
+            <KindSelect
+              value={null}
+              inferred={false}
+              ariaLabel="Set kind for selection"
+              placeholder="Set kind…"
+              isDisabled={bulk.isPending}
+              onAssign={applyKind}
+            />
+          </div>
           <div className="w-[180px]">
             <ProjectCombo
               value={null}

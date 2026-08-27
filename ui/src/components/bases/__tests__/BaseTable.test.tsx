@@ -180,7 +180,7 @@ function groupedOutput(rows = [existingRow]): QueryOutput {
 async function fillMemberDraft(user: UserEvent) {
   const title = screen.getByRole("textbox", { name: "New member — Title" });
   await user.type(title, "The Dispossessed");
-  await user.click(screen.getByRole("button", { name: "New member — Kind" }));
+  await user.click(screen.getByRole("combobox", { name: "New member — Kind" }));
   await user.click(screen.getByRole("option", { name: "BOOK" }));
   await user.click(
     screen.getByRole("button", { name: "Edit New member — Status" }),

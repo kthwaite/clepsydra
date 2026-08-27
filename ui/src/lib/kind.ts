@@ -82,6 +82,11 @@ export const KIND_META: Record<Kind, KindMeta> = {
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
 export const kindColorVar = (kind: Kind): string => KIND_META[kind].color;
 
+/** Alphabetical picker order — by display label, since "1:1" is what the user
+ * scans for ONE_ON_ONE. */
+export const sortKindsByLabel = <K extends Kind>(kinds: readonly K[]): K[] =>
+  [...kinds].sort((a, b) => kindLabel(a).localeCompare(kindLabel(b)));
+
 // Top-level folder → kind. Keys are lowercased folder names; several synonyms
 // map to the same kind.
 const FOLDER_KIND: Record<string, Kind> = {

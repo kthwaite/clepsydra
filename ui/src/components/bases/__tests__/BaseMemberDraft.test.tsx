@@ -256,7 +256,7 @@ describe("BaseMemberDraft", () => {
     render(draftElement());
 
     await user.click(
-      screen.getByRole("button", { name: "New member — Kind" }),
+      screen.getByRole("combobox", { name: "New member — Kind" }),
     );
     expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
     expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
@@ -335,7 +335,9 @@ describe("BaseMemberDraft", () => {
       screen.getByRole("textbox", { name: "New member — Title" }),
       "Namespaced",
     );
-    await user.click(screen.getByRole("button", { name: "New member — Kind" }));
+    await user.click(
+      screen.getByRole("combobox", { name: "New member — Kind" }),
+    );
     await user.click(screen.getByRole("option", { name: "BOOK" }));
     await user.click(
       screen.getByRole("button", { name: "Edit New member — Kind" }),
@@ -400,7 +402,7 @@ describe("BaseMemberDraft", () => {
       screen.getByRole("textbox", { name: "New member — Title" }),
     ).toHaveAccessibleDescription("Required for base membership.");
     expect(
-      screen.getByRole("button", { name: "New member — Kind" }),
+      screen.getByRole("combobox", { name: "New member — Kind" }),
     ).toHaveAccessibleDescription("Required for base membership.");
     expect(
       screen.getByRole("combobox", { name: "New member — Project" }),
@@ -472,7 +474,7 @@ describe("BaseMemberDraft", () => {
       screen.getByRole("textbox", { name: "New member — Title" }),
     ).toBeDisabled();
     expect(
-      screen.getByRole("button", { name: "New member — Kind" }),
+      screen.getByRole("combobox", { name: "New member — Kind" }),
     ).toBeDisabled();
     expect(
       screen.getByRole("combobox", { name: "New member — Project" }),

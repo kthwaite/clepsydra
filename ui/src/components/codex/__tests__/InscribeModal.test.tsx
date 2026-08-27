@@ -75,7 +75,9 @@ describe("InscribeModal", () => {
 
   it("offers kind + project controls instead of a designation textbox", () => {
     render(<InscribeModal />);
-    expect(screen.getByRole("button", { name: "Kind" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Kind" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "Project" }),
     ).toBeInTheDocument();
@@ -128,7 +130,7 @@ describe("InscribeModal", () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
 
-    await user.click(screen.getByRole("button", { name: "Kind" }));
+    await user.click(screen.getByRole("combobox", { name: "Kind" }));
     expect(screen.queryByRole("option", { name: "QUOTE" })).toBeNull();
     expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
   });
@@ -191,7 +193,7 @@ describe("InscribeModal", () => {
       opts?.onSuccess?.({ path: vars.params.path.path }),
     );
     render(<InscribeModal />);
-    await user.click(screen.getByRole("button", { name: "Kind" }));
+    await user.click(screen.getByRole("combobox", { name: "Kind" }));
     await user.click(screen.getByRole("option", { name: "RECIPE" }));
     await user.type(screen.getByRole("textbox", { name: "Title" }), "Soup");
     await user.click(screen.getByRole("button", { name: /commit to archive/ }));

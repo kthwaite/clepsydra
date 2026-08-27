@@ -8,6 +8,7 @@ import {
   parseFrontmatterKind,
   resolveKind,
   resolveKindFromPath,
+  sortKindsByLabel,
 } from "#/lib/kind";
 import type { Kind } from "#/lib/kind";
 
@@ -116,6 +117,35 @@ describe("assignable kinds", () => {
     expect(KINDS).toContain(backendKind);
     expect(ASSIGNABLE_KINDS).not.toContain(backendKind);
     expect(ASSIGNABLE_KINDS).toContain("NOTE");
+  });
+});
+
+describe("sortKindsByLabel", () => {
+  it("orders kinds alphabetically by display label, not token", () => {
+    expect(sortKindsByLabel(ASSIGNABLE_KINDS)).toEqual([
+      "ONE_ON_ONE", // "1:1" — digits sort before letters
+      "AI_CONVERSATION",
+      "ARCHIVE",
+      "BOOK",
+      "CAPTURE",
+      "CODE",
+      "CYCLE",
+      "JOURNAL",
+      "MEETING",
+      "NOTE",
+      "PERSON",
+      "PROJECT",
+      "RECIPE",
+      "TASK",
+      "TODO",
+    ]);
+  });
+
+  it("returns a new array and leaves the input order intact", () => {
+    const input = [...ASSIGNABLE_KINDS];
+    const sorted = sortKindsByLabel(input);
+    expect(sorted).not.toBe(input);
+    expect(input).toEqual([...ASSIGNABLE_KINDS]);
   });
 });
 
