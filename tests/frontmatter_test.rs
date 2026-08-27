@@ -445,5 +445,8 @@ fn conflicted_valid_frontmatter_keeps_metadata_without_rewrite() {
 fn conflicted_missing_id_is_not_repaired_on_disk() {
     let content = "+++\ntitle = \"No id\"\n+++\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> x\n";
     let (_meta, _body, rewrote, _warning) = parse_or_repair_frontmatter(content);
-    assert!(!rewrote, "id minting must stay in memory for conflicted files");
+    assert!(
+        !rewrote,
+        "id minting must stay in memory for conflicted files"
+    );
 }

@@ -1956,5 +1956,8 @@ fn conflicted_file_survives_index_build_byte_identical() {
     let mut index = VaultIndex::open(&tmp.path().join("cache.db")).unwrap();
     index.build(&vault).unwrap();
     let on_disk = std::fs::read_to_string(vault.root().join("notes/clash.md")).unwrap();
-    assert_eq!(on_disk, conflicted, "index build must not rewrite a conflicted file");
+    assert_eq!(
+        on_disk, conflicted,
+        "index build must not rewrite a conflicted file"
+    );
 }
