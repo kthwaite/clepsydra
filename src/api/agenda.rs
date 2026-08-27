@@ -478,7 +478,8 @@ pub async fn get_agenda(
                 let conn = index.connection();
                 let sql = "\
                     SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
-                           status_prop.value AS status, p.path, p.title, p.journal_date \
+                           status_prop.value AS status, p.path, p.title, \
+                           CASE WHEN p.kind = 'JOURNAL' THEN p.journal_date ELSE NULL END AS journal_date \
                     FROM blocks b \
                     JOIN block_properties status_prop \
                       ON status_prop.page_id = b.page_id \
@@ -498,9 +499,10 @@ pub async fn get_agenda(
                         bp_due.value < ?2 \
                         OR (bp_due.value >= ?2 AND bp_due.value <= ?3) \
                         OR bp_sched.value = ?1 \
-                        OR p.journal_date = ?1 \
+                        OR (p.journal_date = ?1 AND p.kind = 'JOURNAL') \
                         OR bp_due.value IS NULL \
-                      )";
+                      ) \
+                      AND p.kind != 'AI_JOURNAL'";
 
                 let mut stmt = conn.prepare(sql)?;
                 let rows = stmt.query_map(params![today_key, tomorrow_key, end_key], |row| {

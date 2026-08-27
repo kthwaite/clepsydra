@@ -412,6 +412,58 @@ async fn agenda_includes_scheduled_today_and_today_journal_todos() {
 }
 
 #[tokio::test]
+async fn ai_journal_todos_never_reach_the_agenda() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::create_dir_all(root.join("ai-journals")).unwrap();
+        std::fs::create_dir_all(root.join("journals")).unwrap();
+        std::fs::write(
+            root.join("ai-journals/2026-08-26.md"),
+            "---\nid: 00000000-0000-0000-0000-0000000000a1\ntitle: \"2026-08-26\"\n---\n- [ ] agent chore\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("ai-journals/2026-08-25.md"),
+            "---\nid: 00000000-0000-0000-0000-0000000000a2\ntitle: \"2026-08-25\"\n---\n- [ ] undated agent item\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("journals/2026-08-26.md"),
+            "---\nid: 00000000-0000-0000-0000-0000000000a3\ntitle: \"2026-08-26\"\n---\n- [ ] human item\n",
+        )
+        .unwrap();
+    });
+
+    let body = get_agenda(&server).await;
+
+    let today_content = body["today"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|item| item["content"].as_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(today_content.len(), 1);
+    assert!(today_content.iter().any(|value| value.contains("human item")));
+
+    let all_items = body["overdue"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .chain(body["today"].as_array().unwrap())
+        .chain(
+            body["upcoming"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|day| day["items"].as_array().unwrap()),
+        )
+        .chain(body["undated"].as_array().unwrap())
+        .collect::<Vec<_>>();
+    assert!(!all_items
+        .iter()
+        .any(|item| item["content"].as_str().unwrap().contains("agent")));
+}
+
+#[tokio::test]
 async fn agenda_orders_todos_by_date_priority_path_and_span() {
     let (server, _tmp) = setup_server();
     server
