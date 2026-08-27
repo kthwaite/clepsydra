@@ -27,7 +27,10 @@ pub fn has_conflict_markers(content: &str) -> bool {
 /// `.clepsydra/` and excluded paths, sorts by path. Read-only.
 pub fn conflicted_pages(vault: &Vault) -> Vec<VaultPath> {
     let mut out = Vec::new();
-    for entry in WalkDir::new(vault.root()).into_iter().filter_map(Result::ok) {
+    for entry in WalkDir::new(vault.root())
+        .into_iter()
+        .filter_map(Result::ok)
+    {
         if !entry.file_type().is_file() {
             continue;
         }
@@ -35,12 +38,16 @@ pub fn conflicted_pages(vault: &Vault) -> Vec<VaultPath> {
         if path.extension().is_none_or(|e| e != "md") {
             continue;
         }
-        let Ok(rel) = path.strip_prefix(vault.root()) else { continue };
-        let rel_str = rel.to_string_lossy();
+        let Ok(rel) = path.strip_prefix(vault.root()) else {
+            continue;
+        };
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
         if rel_str.starts_with(".clepsydra/") {
             continue;
         }
-        let Ok(vault_path) = VaultPath::new(&rel_str) else { continue };
+        let Ok(vault_path) = VaultPath::new(&rel_str) else {
+            continue;
+        };
         if vault.is_excluded(&vault_path) {
             continue;
         }
@@ -70,14 +77,17 @@ mod tests {
 
     #[test]
     fn plain_page_clean() {
-        assert!(!has_conflict_markers("+++\ntitle = \"x\"\n+++\nSeven = signs ==== here\n"));
+        assert!(!has_conflict_markers(
+            "+++\ntitle = \"x\"\n+++\nSeven = signs ==== here\n"
+        ));
     }
 
     #[test]
     fn markers_inside_code_block_still_flag() {
         // Documented benign false positive (ADR 0004): flagging costs only
         // "no auto-repair + diagnostic".
-        let content = "+++\ntitle = \"git notes\"\n+++\n```\n<<<<<<< HEAD\n=======\n>>>>>>> x\n```\n";
+        let content =
+            "+++\ntitle = \"git notes\"\n+++\n```\n<<<<<<< HEAD\n=======\n>>>>>>> x\n```\n";
         assert!(has_conflict_markers(content));
     }
 
@@ -87,12 +97,31 @@ mod tests {
         let root = tmp.path().join("vault");
         crate::vault::init::init_vault(&root).unwrap();
         std::fs::create_dir_all(root.join("notes")).unwrap();
-        std::fs::write(root.join("notes/b.md"), "<<<<<<< HEAD\n=======\n>>>>>>> x\n").unwrap();
-        std::fs::write(root.join("notes/a.md"), "<<<<<<< HEAD\n=======\n>>>>>>> x\n").unwrap();
-        std::fs::write(root.join("notes/clean.md"), "+++\ntitle = \"ok\"\n+++\nfine\n").unwrap();
-        std::fs::write(root.join(".clepsydra/skip.md"), "<<<<<<< HEAD\n=======\n>>>>>>> x\n").unwrap();
+        std::fs::write(
+            root.join("notes/b.md"),
+            "<<<<<<< HEAD\n=======\n>>>>>>> x\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("notes/a.md"),
+            "<<<<<<< HEAD\n=======\n>>>>>>> x\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("notes/clean.md"),
+            "+++\ntitle = \"ok\"\n+++\nfine\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".clepsydra/skip.md"),
+            "<<<<<<< HEAD\n=======\n>>>>>>> x\n",
+        )
+        .unwrap();
         let vault = Vault::open(&root).unwrap();
-        let paths: Vec<String> = conflicted_pages(&vault).iter().map(|p| p.as_str().to_string()).collect();
+        let paths: Vec<String> = conflicted_pages(&vault)
+            .iter()
+            .map(|p| p.as_str().to_string())
+            .collect();
         assert_eq!(paths, vec!["notes/a.md", "notes/b.md"]);
     }
 }
