@@ -3,6 +3,7 @@ pub mod academic_hook;
 pub mod archive_hook;
 pub mod archive_snapshot;
 pub mod atomic_file;
+pub mod attendance;
 pub mod backup;
 pub mod base;
 pub mod base_document;

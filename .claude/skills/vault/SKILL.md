@@ -18,9 +18,13 @@ files directly, which bypasses locking, link rewriting, and the index.
   folders: NOTE→`notes/`, PROJECT→`projects/`, JOURNAL→`journals/`,
   TODO→`todos/`, QUOTE→`quotes/`, BOOK→`books/`, CAPTURE→`captures/`,
   CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`,
+  RECIPE→`recipes/`, MEETING→`meetings/`, ONE_ON_ONE→`one-on-ones/`,
   AI_CONVERSATION→`conversations/`.
 - **Frontmatter** — `id` (UUID, never touch), `title`, `type`, `tags`,
   `aliases`, `project`, `created_at`/`updated_at`.
+- **Attendees** — MEETING and ONE_ON_ONE pages name people in `attendees`, a
+  list of wikilinks to person pages. A MEETING names any number; a ONE_ON_ONE
+  names one, and the server refuses a second.
 - **Wikilinks** — `[[Canonical Name]]` links pages by title-derived name or
   alias. The server rewrites inbound links on moves/renames/deletes.
 - **Filenames** — authored pages use `yyyymmdd.slug.shortid.md`

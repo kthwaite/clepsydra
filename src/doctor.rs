@@ -269,6 +269,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
+        check_attendance(v, &mut report);
         check_bases(v, &mut report);
     } else {
         report.push(skip("index", "cache.db", "skipped — vault unavailable"));
@@ -284,6 +285,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
             "legacy census",
             "skipped — vault unavailable",
         ));
+        report.push(skip("attendance", "census", "skipped — vault unavailable"));
         report.push(skip("bases", "registry", "skipped — vault unavailable"));
     }
 
@@ -1486,6 +1488,103 @@ fn check_frontmatter(vault: &Vault, report: &mut Report) {
 }
 
 // ---------------------------------------------------------------------------
+// Check 8b: meeting attendance
+// ---------------------------------------------------------------------------
+
+/// Census of MEETING / ONE_ON_ONE pages whose `attendees` the API would refuse
+/// to write. Files are hand-editable, so nothing stops a page reaching this
+/// state; the doctor is where it surfaces.
+fn check_attendance(vault: &Vault, report: &mut Report) {
+    use crate::vault::attendance;
+    use crate::vault::kind::resolve;
+    use crate::vault::page::Page;
+    use crate::vault::path::VaultPath;
+
+    const SECTION: &str = "attendance";
+    const LISTED: usize = 10;
+
+    let mut meetings = 0usize;
+    let mut invalid: Vec<String> = Vec::new();
+    let mut incomplete: Vec<String> = Vec::new();
+
+    for entry in walkdir::WalkDir::new(vault.root())
+        .into_iter()
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.file_type().is_file())
+        .filter(|entry| entry.path().extension().is_some_and(|ext| ext == "md"))
+    {
+        let Ok(rel_path) = entry.path().strip_prefix(vault.root()) else {
+            continue;
+        };
+        let rel = rel_path.to_string_lossy().replace('\\', "/");
+        if rel.starts_with(".clepsydra/") {
+            continue;
+        }
+        let Ok(vault_path) = VaultPath::new(&rel) else {
+            continue;
+        };
+        if vault.is_excluded(&vault_path) {
+            continue;
+        }
+        let Ok(page) = Page::from_file(entry.path(), vault_path.clone()) else {
+            continue;
+        };
+        let (kind, _) = resolve(vault_path.as_str(), page.meta.kind);
+        if attendance::cardinality(kind).is_none() {
+            continue;
+        }
+        meetings += 1;
+        if let Err(error) = attendance::validate(kind, &page.meta) {
+            invalid.push(format!("{}: {error}", vault_path.as_str()));
+        } else if attendance::is_incomplete(kind, &page.meta) {
+            incomplete.push(vault_path.as_str().to_string());
+        }
+    }
+
+    if meetings == 0 {
+        report.push(info(SECTION, "census", "no meeting or 1:1 pages"));
+        return;
+    }
+
+    if invalid.is_empty() {
+        report.push(ok(
+            SECTION,
+            "attendees",
+            format!("{meetings} meeting page(s); every `attendees` list is well-formed"),
+        ));
+    } else {
+        invalid.sort();
+        let mut detail = format!("{} page(s) with unusable `attendees`:", invalid.len());
+        for line in invalid.iter().take(LISTED) {
+            detail.push_str("\n  ");
+            detail.push_str(line);
+        }
+        if invalid.len() > LISTED {
+            detail.push_str(&format!("\n  … and {} more", invalid.len() - LISTED));
+        }
+        report.push(warn(SECTION, "attendees", detail).with_hint(
+            "fix the frontmatter: `attendees` is a list of wikilinks, and a ONE_ON_ONE names one",
+        ));
+    }
+
+    if !incomplete.is_empty() {
+        incomplete.sort();
+        let mut detail = format!("{} 1:1 page(s) name nobody:", incomplete.len());
+        for path in incomplete.iter().take(LISTED) {
+            detail.push_str("\n  ");
+            detail.push_str(path);
+        }
+        if incomplete.len() > LISTED {
+            detail.push_str(&format!("\n  … and {} more", incomplete.len() - LISTED));
+        }
+        report.push(
+            info(SECTION, "unnamed 1:1s", detail)
+                .with_hint("set `attendees = [\"[[Their Name]]\"]` on each"),
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Check 9: runtime / build info
 // ---------------------------------------------------------------------------
 
@@ -2142,6 +2241,117 @@ mod tests {
             r.detail.contains("indexed"),
             "expected detail to mention indexed pages: {}",
             r.detail
+        );
+    }
+
+    /// Write a page with the given frontmatter body under `vault_root`.
+    fn write_page(vault_root: &Path, relative: &str, frontmatter: &str) {
+        let path = vault_root.join(relative);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(
+            &path,
+            format!(
+                "+++\nid = \"01930000-0000-7000-8000-000000000000\"\n{frontmatter}+++\n\nbody\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn attendance_check_is_quiet_without_meeting_pages() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(&vault_root, "notes/plain.md", "title = \"Plain\"\n");
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_record(
+            &report,
+            "attendance",
+            "census",
+            Status::Info,
+            "no meeting or 1:1 pages",
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn attendance_check_passes_well_formed_meetings() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(
+            &vault_root,
+            "meetings/kickoff.md",
+            "title = \"Kickoff\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\n",
+        );
+        write_page(
+            &vault_root,
+            "one-on-ones/ada.md",
+            "title = \"Ada\"\nattendees = [\"[[Ada]]\"]\n",
+        );
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_record(
+            &report,
+            "attendance",
+            "attendees",
+            Status::Ok,
+            "2 meeting page(s); every `attendees` list is well-formed",
+        );
+        assert!(
+            !report
+                .results
+                .iter()
+                .any(|record| record.section == "attendance" && record.name == "unnamed 1:1s"),
+            "a complete 1:1 should not be reported: {:#?}",
+            report.results
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn attendance_check_reports_hand_edited_breakage() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        // Two people on a 1:1 — the API refuses this, a text editor does not.
+        write_page(
+            &vault_root,
+            "one-on-ones/crowd.md",
+            "title = \"Crowd\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\n",
+        );
+        // A 1:1 that names nobody: unfinished, not broken.
+        write_page(&vault_root, "one-on-ones/blank.md", "title = \"Blank\"\n");
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        let attendees = report
+            .results
+            .iter()
+            .find(|record| record.section == "attendance" && record.name == "attendees")
+            .expect("attendance.attendees should be reported");
+        assert_eq!(attendees.status, Status::Warn, "{attendees:#?}");
+        assert!(
+            attendees.detail.contains("one-on-ones/crowd.md"),
+            "{attendees:#?}"
+        );
+
+        let unnamed = report
+            .results
+            .iter()
+            .find(|record| record.section == "attendance" && record.name == "unnamed 1:1s")
+            .expect("attendance.unnamed 1:1s should be reported");
+        assert_eq!(unnamed.status, Status::Info, "{unnamed:#?}");
+        assert!(
+            unnamed.detail.contains("one-on-ones/blank.md"),
+            "{unnamed:#?}"
         );
     }
 }

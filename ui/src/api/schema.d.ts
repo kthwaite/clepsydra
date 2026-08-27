@@ -2113,6 +2113,13 @@ export interface components {
         };
         CreatePageRequest: {
             aliases?: string[] | null;
+            /**
+             * @description Person pages this MEETING or ONE_ON_ONE names, written to the page's
+             *     `attendees:` frontmatter as part of the same create mutation. Bare
+             *     names are wrapped as wikilinks; `[[Already Linked]]` is kept as
+             *     written. A ONE_ON_ONE accepts at most one.
+             */
+            attendees?: string[] | null;
             body?: string | null;
             kind?: null | components["schemas"]["Kind"];
             /**
@@ -2415,7 +2422,7 @@ export interface components {
          *     vocabulary instead of hardcoding it.
          * @enum {string}
          */
-        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "ARCHIVE" | "AI_CONVERSATION";
+        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "MEETING" | "ONE_ON_ONE" | "ARCHIVE" | "AI_CONVERSATION";
         LocationResponse: {
             /** @description Optional human-readable label (e.g. `"London"`). */
             label?: string | null;
@@ -2527,6 +2534,12 @@ export interface components {
         PageMetaResponse: {
             aliases?: string[] | null;
             archive?: null | components["schemas"]["ArchiveMetaResponse"];
+            /**
+             * @description Person pages a MEETING or ONE_ON_ONE names, as wikilink strings.
+             *     Clepsydra always writes an array; a hand-written single wikilink
+             *     (`attendees = "[[Ada Lovelace]]"`) is read as a one-element list.
+             */
+            attendees?: string[] | null;
             created_at?: string | null;
             id: string;
             tags?: string[] | null;

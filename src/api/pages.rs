@@ -17,6 +17,7 @@ use super::AppState;
 use super::error::ApiError;
 use super::pagination::PaginatedResponse;
 use crate::api::events::SyncNotification;
+use crate::vault::attendance;
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
 use crate::vault::canonical::CanonicalName;
 use crate::vault::encryption::{EncryptionFormat, EncryptionMeta, validate_age_armor};
@@ -126,6 +127,11 @@ pub struct PageMetaResponse {
     pub updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive: Option<ArchiveMetaResponse>,
+    /// Person pages a MEETING or ONE_ON_ONE names, as wikilink strings.
+    /// Clepsydra always writes an array; a hand-written single wikilink
+    /// (`attendees = "[[Ada Lovelace]]"`) is read as a one-element list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attendees: Option<Vec<String>>,
 }
 /// OpenAPI schema for page detail responses.
 #[derive(Debug, Serialize, ToSchema)]
@@ -174,6 +180,12 @@ pub struct CreatePageRequest {
     /// part of the same create mutation.
     #[serde(default)]
     pub project: Option<String>,
+    /// Person pages this MEETING or ONE_ON_ONE names, written to the page's
+    /// `attendees:` frontmatter as part of the same create mutation. Bare
+    /// names are wrapped as wikilinks; `[[Already Linked]]` is kept as
+    /// written. A ONE_ON_ONE accepts at most one.
+    #[serde(default)]
+    pub attendees: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -632,6 +644,11 @@ const BY_ID_PATH_ATTEMPTS: usize = 8;
 /// because the codec needs all three sections present to read a recipe.
 const RECIPE_SCAFFOLD: &str = "## Ingredients\n\n## Steps\n\n## Notes\n";
 
+/// Body written for a MEETING or ONE_ON_ONE created without one. Unlike the
+/// recipe scaffold nothing parses these headings; they are here because a
+/// meeting note that opens empty is a meeting note nobody takes minutes in.
+const MEETING_SCAFFOLD: &str = "## Agenda\n\n## Notes\n\n## Actions\n";
+
 async fn indexed_page_path_by_id(state: &AppState, uuid: &str) -> Result<VaultPath, ApiError> {
     let indexed_uuid = uuid.to_string();
     let page_path = state
@@ -763,9 +780,29 @@ pub async fn create_page(
         validate_project_slug(&project).map_err(ApiError::bad_request)?;
         meta.project = Some(project);
     }
+    // An empty list writes nothing: absence is the only empty state this
+    // vault's frontmatter has (see `derivers::properties::project`).
+    if let Some(attendees) = body.attendees.filter(|names| !names.is_empty()) {
+        meta.extra.insert(
+            attendance::ATTENDEES_KEY.to_string(),
+            attendance::attendees_value(&attendees),
+        );
+    }
+    // The kind may be inferred from the path when none is declared, and an
+    // inferred MEETING / ONE_ON_ONE is bound by the same attendee rules.
+    let (resolved_kind, _) = resolve(vault_path.as_str(), meta.kind);
+    attendance::validate(resolved_kind, &meta)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+
     let page_body = body.body.unwrap_or_default();
-    let page_body = if page_body.trim().is_empty() && matches!(meta.kind, Some(Kind::Recipe)) {
-        RECIPE_SCAFFOLD.to_string()
+    // Scaffolds follow the *declared* kind, as the recipe scaffold always has:
+    // a caller who names the kind is asking for the shape that goes with it.
+    let page_body = if page_body.trim().is_empty() {
+        match meta.kind {
+            Some(Kind::Recipe) => RECIPE_SCAFFOLD.to_string(),
+            Some(Kind::Meeting | Kind::OneOnOne) => MEETING_SCAFFOLD.to_string(),
+            _ => page_body,
+        }
     } else {
         page_body
     };
@@ -1397,13 +1434,18 @@ pub(super) fn validate_project_slug(p: &str) -> Result<(), String> {
 
 fn validate_kind_assignment(
     path: &VaultPath,
-    declared_kind: Option<Kind>,
+    meta: &PageMeta,
     requested_kind: Kind,
 ) -> Result<(), ApiError> {
-    let (current_kind, _) = resolve(path.as_str(), declared_kind);
+    let (current_kind, _) = resolve(path.as_str(), meta.kind);
     if current_kind == Kind::Journal && requested_kind != Kind::Journal {
         return Err(ApiError::bad_request("journal kind cannot be changed"));
     }
+    // Declaring ONE_ON_ONE on a page that already names a roomful of people
+    // would store a state no write path allows; the caller has to trim the
+    // attendees first.
+    attendance::validate(requested_kind, meta)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
     Ok(())
 }
 
@@ -1446,7 +1488,7 @@ pub async fn assign_page(
     if let Some(token) = &body.kind {
         let parsed = Kind::from_token(token)
             .ok_or_else(|| ApiError::bad_request(format!("unknown kind: {token}")))?;
-        validate_kind_assignment(&vp, page.meta.kind, parsed)?;
+        validate_kind_assignment(&vp, &page.meta, parsed)?;
         page.meta.kind = Some(parsed);
     }
     let project = if body.clear_project {
@@ -1560,7 +1602,7 @@ fn plan_bulk_assignment(
         let path = path.clone();
         let (expected, meta, page_body) = read_assignment_page_once(state, &path, indexed_paths)?;
         if let Some(kind) = assigned_kind {
-            validate_kind_assignment(&path, meta.kind, kind)?;
+            validate_kind_assignment(&path, &meta, kind)?;
         }
         pages.push((path, expected, meta, page_body));
     }

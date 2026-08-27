@@ -61,6 +61,10 @@ can move the same file so the folder follows its declared metadata.
 | `PERSON` | `people` |
 | `TASK` | `tasks` |
 | `CYCLE` | `cycles` |
+| `RECIPE` | `recipes` |
+| `MEETING` | `meetings` |
+| `ONE_ON_ONE` | `one-on-ones` |
+| `ARCHIVE` | `archive` |
 | `AI_CONVERSATION` | `conversations` |
 
 Without a declared `type`, Clepsydra infers Kind from the top-level folder and
@@ -69,6 +73,31 @@ Kind keeps the current top-level folder, and no declared Project keeps the
 current subfolder. Explicitly clearing Project removes its subfolder. A
 successful projected move keeps the filename and updates links as one planned
 mutation.
+
+### Record a meeting or a 1:1
+
+MEETING and ONE_ON_ONE pages name the people who were there in an `attendees`
+frontmatter list of wikilinks:
+
+```toml
+type = "MEETING"
+attendees = ["[[Ada Lovelace]]", "[[Grace Hopper]]"]
+```
+
+A MEETING names any number of people. A ONE_ON_ONE names one: writing a second
+attendee onto one is refused, whether you patch the property, declare the Kind
+on a page that already lists several, or create the page that way. A 1:1 that
+names nobody yet is accepted — it is an unfinished note, and `clep doctor`
+lists them under `attendance`.
+
+Because `attendees` is a linkable property, each entry links the meeting to
+that person's page, and the person's Folio collects every meeting naming them
+in its backlinks. Nothing requires the target to exist or to be a PERSON page;
+a wikilink to a page you have not written yet behaves the way it does anywhere
+else in the vault.
+
+Both kinds open with an `## Agenda` / `## Notes` / `## Actions` scaffold when
+created without a body. The Folio's **Attendees** rail block edits the list.
 
 ### Move or rename a page
 

@@ -1,5 +1,6 @@
 import type { ComponentType } from "react";
 import { JournalMeta } from "#/components/codex/JournalMeta";
+import { MeetingMeta } from "#/components/codex/MeetingMeta";
 import { journalDayLabel } from "#/lib/journal";
 import type { Kind } from "#/lib/kind";
 
@@ -45,6 +46,16 @@ const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
     metaExtras: JournalMeta,
     metaExtrasLabel: "Journal",
     readOnlyTitle: journalDayLabel,
+  },
+  MEETING: {
+    bodyPresentation: "editor",
+    metaExtras: MeetingMeta,
+    metaExtrasLabel: "Attendees",
+  },
+  ONE_ON_ONE: {
+    bodyPresentation: "editor",
+    metaExtras: MeetingMeta,
+    metaExtrasLabel: "Attendees",
   },
 };
 
