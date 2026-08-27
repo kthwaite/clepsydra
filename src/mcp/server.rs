@@ -168,7 +168,7 @@ pub struct LinksParams {
 }
 
 /// The kind vocabulary, spelled out for tool schemas and error messages.
-const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION";
+const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION, AI_JOURNAL";
 
 const MCP_INSTRUCTIONS: &str = "Work with a clepsydra vault (a markdown personal knowledge base) \
 through its running server. Orient with vault_tree and vault_tags, locate pages with vault_search \
@@ -177,8 +177,10 @@ Before creating a page, search for an existing page and extend it instead of dup
 Every standalone page authored by an LLM must include the `ai-generated` tag. Do not add that tag \
 merely for an edit, a journal capture, or a conversation capture. Declare the page's real kind \
 and project; use vault_assign to refile existing pages rather than inventing folders. Substantial \
-project documentation must wikilink its project or hub page. Use vault_journal_capture and \
-vault_capture_conversation for those dedicated intents instead of vault_create_page. Make \
+project documentation must wikilink its project or hub page. Use vault_journal_capture (the \
+user's own journal, only on the user's explicit request), vault_ai_journal_capture \
+(agent-initiated notes and work logs), and vault_capture_conversation for those dedicated \
+intents instead of vault_create_page. Make \
 targeted edits with vault_edit_page or vault_append_page. Archive active pages with \
 vault_archive_page; their normal links remain unresolved while binned, and restore is \
 original-path-only. The vault relocates pages filed by kind/project itself; \
@@ -199,8 +201,8 @@ pub struct CreatePageParams {
     /// Page title. Required; also drives the generated filename slug.
     pub title: String,
     /// Kind token (NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE,
-    /// PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION).
-    /// Defaults to NOTE.
+    /// PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION,
+    /// AI_JOURNAL). Defaults to NOTE.
     /// Declared in frontmatter and used to pick the canonical folder.
     pub kind: Option<String>,
     /// Folder override, vault-relative. With a declared kind it must be the
@@ -265,13 +267,22 @@ pub struct JournalCaptureParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+pub struct AiJournalCaptureParams {
+    /// Markdown to append to today's AI journal page (created if absent).
+    pub content: String,
+    /// Optional short label naming the writing agent (e.g. `claude-code`),
+    /// rendered as an entry prefix. Single line, 1-64 characters.
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 pub struct AssignParams {
     /// Page paths to assign. One path returns the updated page; several paths
     /// use the bulk endpoint and report per-path successes and failures.
     pub paths: Vec<String>,
     /// Kind token to declare in frontmatter (NOTE, PROJECT, JOURNAL, TODO,
     /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING,
-    /// ONE_ON_ONE, AI_CONVERSATION).
+    /// ONE_ON_ONE, AI_CONVERSATION, AI_JOURNAL).
     pub kind: Option<String>,
     /// Project to declare in frontmatter.
     pub project: Option<String>,
@@ -874,7 +885,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_journal_capture",
-        description = "Quick-capture markdown into today's journal page (journals/YYYY-MM-DD.md), creating it if needed. The inbox verb: use for fleeting notes and log entries; use vault_create_page for substantial standalone content. Do not add `ai-generated` merely because an LLM performed the journal capture.",
+        description = "Quick-capture markdown into today's journal page (journals/<yyyymmdd>.<YYYY-MM-DD>.<shortid>.md), creating it if needed. This is the user's own journal: use it only when the user explicitly asks for a journal capture. Agent-initiated notes, work logs, and observations belong in vault_ai_journal_capture instead. Do not add `ai-generated` merely because an LLM performed the journal capture.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -890,6 +901,32 @@ impl VaultMcpServer {
             .post_json(
                 "/api/vault/journal/today/capture",
                 &serde_json::json!({ "content": params.content }),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        truncate_body(&mut value, MAX_BODY_BYTES);
+
+        render(&value)
+    }
+
+    #[tool(
+        name = "vault_ai_journal_capture",
+        description = "Append an agent-initiated note to today's AI journal (ai-journals/<yyyymmdd>.<YYYY-MM-DD>.<shortid>.md), creating it if needed. The default destination for assistant observations, work logs, session notes, and asides — it never writes to the user's own journal. Pass `author` (e.g. `claude-code`) to attribute the entry. Do not add `ai-generated` for an AI journal capture.",
+        annotations(
+            read_only_hint = false,
+            destructive_hint = false,
+            idempotent_hint = false
+        )
+    )]
+    pub async fn vault_ai_journal_capture(
+        &self,
+        Parameters(params): Parameters<AiJournalCaptureParams>,
+    ) -> Result<String, String> {
+        let mut value = self
+            .client
+            .post_json(
+                "/api/vault/ai-journal/today/capture",
+                &serde_json::json!({ "content": params.content, "author": params.author }),
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -1540,6 +1577,44 @@ mod tests {
     }
 
     #[test]
+    fn capture_tools_state_the_split_journal_contract() {
+        let tools = VaultMcpServer::tool_router().list_all();
+        let description = |name: &str| {
+            tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("{name} should be registered"))
+                .description
+                .clone()
+                .unwrap_or_default()
+        };
+        let human = description("vault_journal_capture");
+        for required in [
+            "user's own journal",
+            "explicitly asks",
+            "vault_ai_journal_capture",
+        ] {
+            assert!(
+                human.contains(required),
+                "human capture contract missing {required:?}: {human}"
+            );
+        }
+        let ai = description("vault_ai_journal_capture");
+        for required in [
+            "agent-initiated",
+            "never writes to the user's own journal",
+            "author",
+        ] {
+            assert!(
+                ai.contains(required),
+                "ai capture contract missing {required:?}: {ai}"
+            );
+        }
+        assert!(MCP_INSTRUCTIONS.contains("vault_ai_journal_capture"));
+        assert!(KIND_TOKENS.contains("AI_JOURNAL"));
+    }
+
+    #[test]
     fn server_instructions_define_task_board_workflow() {
         let client = ApiClient::new("http://127.0.0.1:1".to_string(), None).unwrap();
         let instructions = VaultMcpServer::new(Arc::new(client))
@@ -1661,6 +1736,7 @@ mod tests {
         assert_eq!(
             names,
             [
+                "vault_ai_journal_capture",
                 "vault_append_page",
                 "vault_archive_page",
                 "vault_assign",
@@ -2717,6 +2793,37 @@ mod tests {
             server
                 .vault_journal_capture(Parameters(JournalCaptureParams {
                     content: "- another thought".to_string(),
+                }))
+                .await,
+        );
+        let body = value["body"].as_str().unwrap();
+        assert!(body.contains("captured thought"), "{body:?}");
+        assert!(body.contains("another thought"), "{body:?}");
+    }
+
+    #[tokio::test]
+    async fn ai_journal_capture_posts_to_the_ai_endpoint() {
+        let (server, _tmp) = serve_seeded_vault().await;
+        let value = parse(
+            server
+                .vault_ai_journal_capture(Parameters(AiJournalCaptureParams {
+                    content: "captured thought".to_string(),
+                    author: Some("claude-code".to_string()),
+                }))
+                .await,
+        );
+        let path = value["path"].as_str().unwrap();
+        assert!(path.starts_with("ai-journals/"), "unexpected path: {path}");
+        let body = value["body"].as_str().unwrap();
+        assert!(body.contains("captured thought"), "{body:?}");
+        assert!(body.contains("[claude-code]"), "{body:?}");
+
+        // A second capture appends rather than replacing.
+        let value = parse(
+            server
+                .vault_ai_journal_capture(Parameters(AiJournalCaptureParams {
+                    content: "another thought".to_string(),
+                    author: Some("claude-code".to_string()),
                 }))
                 .await,
         );
