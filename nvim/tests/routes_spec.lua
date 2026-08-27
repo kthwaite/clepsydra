@@ -12,7 +12,7 @@ local config = require("clepsydra.config")
 
 -- Modules whose package.loaded entries the harness swaps and restores. Later
 -- tasks append "clepsydra.tasks" here when that module exists.
-local MODULES = { "clepsydra.client", "clepsydra.journal", "clepsydra.picker" }
+local MODULES = { "clepsydra.client", "clepsydra.journal", "clepsydra.picker", "clepsydra.tasks" }
 
 --- Recording fake client. Pure helpers (api_url, encode_query, encode_path,
 --- build_args, decode) fall through to the real client via __index, so pinned
@@ -37,6 +37,12 @@ local function make_fake(responses)
 	end
 	function fake.post(path, body, cb)
 		local err, value, code = respond("POST", path, body)
+		if cb then
+			cb(err, value, code)
+		end
+	end
+	function fake.patch(path, body, cb)
+		local err, value, code = respond("PATCH", path, body)
 		if cb then
 			cb(err, value, code)
 		end
@@ -170,6 +176,62 @@ return {
 				picked[1].confirm({ close = function() end }, { tag = "rust" })
 				eq("GET", fake.calls[2].method)
 				eq("/pages?limit=200&tag=rust", fake.calls[2].path)
+			end)
+		end,
+	},
+	{
+		name = "task add pins POST /board/tasks with a title body",
+		fn = function()
+			with_stubs({
+				["POST /board/tasks"] = {
+					id = "u1",
+					code = "TSK-0055",
+					title = "Fix it",
+					status = "INTAKE",
+					path = "tasks/TSK-0055.md",
+				},
+			}, function(fake)
+				require("clepsydra.tasks").add("Fix it")
+				eq("POST", fake.calls[1].method)
+				eq("/board/tasks", fake.calls[1].path)
+				eq({ title = "Fix it" }, fake.calls[1].body)
+			end)
+		end,
+	},
+	{
+		name = "task stage pins GET /board then PATCH /board/tasks/{uuid} with a status body",
+		fn = function()
+			with_stubs({
+				["GET /board"] = {
+					tasks = { { id = "u1", code = "TSK-0012", title = "T", status = "INTAKE", path = "tasks/TSK-0012.md" } },
+				},
+				["PATCH /board/tasks/u1"] = {
+					id = "u1",
+					code = "TSK-0012",
+					title = "T",
+					status = "FIELD",
+					path = "tasks/TSK-0012.md",
+				},
+			}, function(fake)
+				local buf = vim.api.nvim_create_buf(false, true)
+				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-0012.md")
+				vim.api.nvim_set_current_buf(buf)
+				local saved_select = vim.ui.select
+				vim.ui.select = function(_, _, on_choice)
+					on_choice("FIELD")
+				end
+				local ok, err = pcall(function()
+					require("clepsydra.tasks").stage()
+				end)
+				vim.ui.select = saved_select
+				if not ok then
+					error(err, 0)
+				end
+				eq("GET", fake.calls[1].method)
+				eq("/board", fake.calls[1].path)
+				eq("PATCH", fake.calls[2].method)
+				eq("/board/tasks/u1", fake.calls[2].path)
+				eq({ status = "FIELD" }, fake.calls[2].body)
 			end)
 		end,
 	},

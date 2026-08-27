@@ -102,4 +102,8 @@ function M.post(path, body, cb)
 	M.request("POST", path, body, cb)
 end
 
+function M.patch(path, body, cb)
+	M.request("PATCH", path, body, cb)
+end
+
 return M

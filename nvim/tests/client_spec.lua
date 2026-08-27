@@ -115,4 +115,28 @@ return {
 			eq(0, code2)
 		end,
 	},
+	{
+		name = "build_args PATCH carries the method and JSON body",
+		fn = function()
+			local args = fresh_client("http://localhost:3000").build_args(
+				"PATCH",
+				"http://x/api/vault/board/tasks/u1",
+				'{"status":"FIELD"}'
+			)
+			eq({
+				"curl",
+				"-sS",
+				"--fail-with-body",
+				"-X",
+				"PATCH",
+				"--max-time",
+				"5",
+				"-H",
+				"Content-Type: application/json",
+				"--data-binary",
+				'{"status":"FIELD"}',
+				"http://x/api/vault/board/tasks/u1",
+			}, args)
+		end,
+	},
 }
