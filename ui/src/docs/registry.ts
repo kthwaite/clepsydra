@@ -271,7 +271,7 @@ const neovimMeta = {
     "picker",
     "journal",
     "capture",
-    "Clep",
+    "clep",
   ],
 } satisfies DocMeta;
 const mcpMeta = {
