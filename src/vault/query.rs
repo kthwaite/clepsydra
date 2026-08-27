@@ -10,7 +10,7 @@
 
 use std::collections::HashMap;
 
-use pulldown_cmark::{Event, Options, Parser, TagEnd};
+use pulldown_cmark::{Event, Parser, TagEnd};
 use rusqlite::Connection;
 use thiserror::Error;
 
@@ -20,6 +20,7 @@ use super::base::{
 };
 use super::canonical::CanonicalName;
 use super::link::normalize_links_to_target;
+use super::markdown::markdown_options;
 use super::page::Page;
 use super::toml_json::toml_value_to_json;
 
@@ -1101,7 +1102,7 @@ pub(crate) fn body_excerpt(markdown: &str) -> String {
     let mut excerpt = String::with_capacity(BODY_EXCERPT_MAX_CHARS);
     let mut scalar_count = 0;
     let mut pending_space = false;
-    for event in Parser::new_ext(markdown, Options::all()) {
+    for event in Parser::new_ext(markdown, markdown_options()) {
         let full = match event {
             Event::Text(text)
             | Event::Code(text)
@@ -1116,6 +1117,9 @@ pub(crate) fn body_excerpt(markdown: &str) -> String {
                 pending_space |= !excerpt.is_empty();
                 false
             }
+            // DefinitionList/DefinitionListTitle/DefinitionListDefinition are
+            // inert while markdown_options() masks definition lists; kept
+            // for a future re-enable after the upstream parser fix.
             Event::End(
                 TagEnd::Paragraph
                 | TagEnd::Heading(_)
@@ -2523,9 +2527,12 @@ moment  = { type = "datetime" }
             body_excerpt("| first | second |\n| --- | --- |\n| third | fourth |\n"),
             "first second third fourth"
         );
+        // Definition lists are masked out of parsing (see
+        // vault::markdown::markdown_options), so `:` markers now pass
+        // through excerpts as literal text instead of being stripped.
         assert_eq!(
             body_excerpt("Term\n: Definition\n\nOther\n: Meaning\n"),
-            "Term Definition Other Meaning"
+            "Term : Definition Other : Meaning"
         );
     }
 

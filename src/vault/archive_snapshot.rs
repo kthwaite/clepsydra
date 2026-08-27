@@ -14,13 +14,14 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use lol_html::html_content::Element;
 use lol_html::{HtmlRewriter, MemorySettings, Settings, element};
-use pulldown_cmark::{Event, Options, Parser, Tag};
+use pulldown_cmark::{Event, Parser, Tag};
 use regex::Regex;
 use std::collections::BTreeMap;
 use std::ops::Range;
 use url::Url;
 
 use crate::vault::cas::ContentStore;
+use crate::vault::markdown::markdown_options;
 
 const OCTET_STREAM: &str = "application/octet-stream";
 
@@ -847,7 +848,7 @@ pub fn rewrite_markdown_images(
     base_url: &str,
 ) -> String {
     let mut candidates = Vec::new();
-    for (event, source) in Parser::new_ext(markdown, Options::all()).into_offset_iter() {
+    for (event, source) in Parser::new_ext(markdown, markdown_options()).into_offset_iter() {
         let Event::Start(Tag::Image { dest_url, .. }) = event else {
             continue;
         };
