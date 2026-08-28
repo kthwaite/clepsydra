@@ -16,7 +16,7 @@ use thiserror::Error;
 
 use super::base::{
     Aggregate, AggregateFn, BODY_COLUMN, BaseDefinition, Filter, Op, PropertyType, SortDir,
-    SortKey, is_body_field_reference,
+    SortKey, is_body_field_reference, relative_date_window,
 };
 use super::canonical::CanonicalName;
 use super::link::normalize_links_to_target;
@@ -118,6 +118,21 @@ impl SysField {
     pub(crate) fn supports_contains(self) -> bool {
         self.property_type().supports_contains()
     }
+
+    /// `created_at` / `updated_at` compare as text everywhere else, but they
+    /// hold ISO timestamps, so relative-date predicates are defined for them.
+    pub(crate) fn supports_relative_date(self) -> bool {
+        matches!(
+            self,
+            SysField::CreatedAt | SysField::UpdatedAt | SysField::JournalDate
+        )
+    }
+
+    /// Affix matching needs one scalar text column: `tags` / `aliases` are
+    /// membership sets, where a prefix or suffix has no meaning.
+    pub(crate) fn supports_affix(self) -> bool {
+        self.column().is_some() && self.property_type() == PropertyType::Text
+    }
 }
 
 /// Canonical identity for fields that may be projected for presentation.
@@ -141,18 +156,36 @@ pub enum ResolvedField {
 
 /// Everything field resolution needs: the enclosing base (view queries) and
 /// an inline type map (the generic endpoint has no base context).
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct QueryContext<'a> {
     pub base: Option<&'a BaseDefinition>,
     pub types: HashMap<String, PropertyType>,
+    /// Evaluation date for relative-date operators. API handlers set it from
+    /// `state.clock`; the constructors default to the UTC date now.
+    pub today: chrono::NaiveDate,
+}
+
+impl Default for QueryContext<'_> {
+    fn default() -> Self {
+        Self {
+            base: None,
+            types: HashMap::new(),
+            today: chrono::Utc::now().date_naive(),
+        }
+    }
 }
 
 impl<'a> QueryContext<'a> {
     pub fn for_base(base: &'a BaseDefinition) -> Self {
         Self {
             base: Some(base),
-            types: HashMap::new(),
+            ..Self::default()
         }
+    }
+
+    pub fn with_today(mut self, today: chrono::NaiveDate) -> Self {
+        self.today = today;
+        self
     }
 
     fn property_type(&self, key: &str) -> PropertyType {
@@ -410,15 +443,19 @@ fn bind_value(
     }
 }
 
+/// Bind a literal for the substring-shaped operators (`contains`,
+/// `not_contains`, `starts_with`, `ends_with`), escaping the `LIKE`
+/// metacharacters so the pattern matches the value as written.
 fn bind_literal_contains_value(
     field: &str,
     ty: PropertyType,
+    op: Op,
     value: &serde_json::Value,
 ) -> Result<SqlValue, QueryError> {
     let SqlValue::Text(value) = bind_value(field, ty, value)? else {
         return Err(QueryError::InvalidOp {
             field: field.to_string(),
-            op: Op::Contains,
+            op,
         });
     };
     let mut escaped = String::with_capacity(value.len());
@@ -429,6 +466,17 @@ fn bind_literal_contains_value(
         escaped.push(character);
     }
     Ok(SqlValue::Text(escaped))
+}
+
+/// Bind the half-open `[start, end)` bounds of a relative-date window as
+/// `YYYY-MM-DD` text. Every date-bearing column stores an ISO string whose
+/// first ten characters are the date face, so lexicographic bounds select the
+/// window for `value_date`, `created_at`/`updated_at`, and `journal_date`
+/// alike.
+fn bind_relative_window(op: Op, today: chrono::NaiveDate, params: &mut Vec<SqlValue>) {
+    let (start, end) = relative_date_window(op, today).expect("caller checked is_relative_date");
+    params.push(SqlValue::Text(start.format("%Y-%m-%d").to_string()));
+    params.push(SqlValue::Text(end.format("%Y-%m-%d").to_string()));
 }
 
 fn sql_op(op: Op) -> Option<&'static str> {
@@ -533,9 +581,59 @@ fn compile_cmp(
                     params.push(bind_literal_contains_value(
                         field,
                         PropertyType::Text,
+                        op,
                         value,
                     )?);
                     Ok(format!("{column} LIKE '%' || ? || '%' ESCAPE '\\'"))
+                }
+                op if op.is_relative_date() => {
+                    if !sys.supports_relative_date() {
+                        return Err(QueryError::InvalidOp {
+                            field: field.to_string(),
+                            op,
+                        });
+                    }
+                    bind_relative_window(op, ctx.today, params);
+                    Ok(format!("({column} >= ? AND {column} < ?)"))
+                }
+                Op::NotContains if !sys.supports_contains() => Err(QueryError::InvalidOp {
+                    field: field.to_string(),
+                    op,
+                }),
+                Op::NotContains => {
+                    params.push(bind_literal_contains_value(
+                        field,
+                        PropertyType::Text,
+                        op,
+                        value,
+                    )?);
+                    Ok(format!(
+                        "({column} IS NULL OR {column} NOT LIKE '%' || ? || '%' ESCAPE '\\')"
+                    ))
+                }
+                Op::StartsWith | Op::EndsWith if !sys.supports_affix() => {
+                    Err(QueryError::InvalidOp {
+                        field: field.to_string(),
+                        op,
+                    })
+                }
+                Op::StartsWith => {
+                    params.push(bind_literal_contains_value(
+                        field,
+                        PropertyType::Text,
+                        op,
+                        value,
+                    )?);
+                    Ok(format!("{column} LIKE ? || '%' ESCAPE '\\'"))
+                }
+                Op::EndsWith => {
+                    params.push(bind_literal_contains_value(
+                        field,
+                        PropertyType::Text,
+                        op,
+                        value,
+                    )?);
+                    Ok(format!("{column} LIKE '%' || ? ESCAPE '\\'"))
                 }
                 Op::LinksTo => Err(QueryError::InvalidOp {
                     field: field.to_string(),
@@ -552,7 +650,9 @@ fn compile_cmp(
                 }
             }
         }
-        ResolvedField::Prop { key, ty } => compile_prop(field, &key, ty, op, value, params),
+        ResolvedField::Prop { key, ty } => {
+            compile_prop(field, &key, ty, op, value, ctx.today, params)
+        }
     }
 }
 
@@ -586,7 +686,7 @@ fn compile_membership(
             params.push(to_param(text(value)?)?);
             Ok(format!("EXISTS ({exists_prefix} = ?)"))
         }
-        Op::Ne => {
+        Op::Ne | Op::NotContains => {
             params.push(to_param(text(value)?)?);
             Ok(format!("NOT EXISTS ({exists_prefix} = ?)"))
         }
@@ -620,6 +720,7 @@ fn compile_prop(
     ty: PropertyType,
     op: Op,
     value: &serde_json::Value,
+    today: chrono::NaiveDate,
     params: &mut Vec<SqlValue>,
 ) -> Result<String, QueryError> {
     let column = typed_column(ty);
@@ -687,11 +788,57 @@ fn compile_prop(
                 // Membership on multi-valued: any element matches exactly.
                 Ok(exists(&format!("pp.{column} = ?")))
             } else {
-                params.push(bind_literal_contains_value(field, ty, value)?);
+                params.push(bind_literal_contains_value(field, ty, op, value)?);
                 Ok(exists(&format!(
                     "pp.{column} LIKE '%' || ? || '%' ESCAPE '\\'"
                 )))
             }
+        }
+        op if op.is_relative_date() => {
+            if !ty.supports_relative_date() {
+                return Err(QueryError::InvalidOp {
+                    field: field.to_string(),
+                    op,
+                });
+            }
+            params.push(SqlValue::Text(key.to_string()));
+            bind_relative_window(op, today, params);
+            Ok(exists("pp.value_date >= ? AND pp.value_date < ?"))
+        }
+        Op::NotContains if !ty.supports_contains() => Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op,
+        }),
+        Op::NotContains => {
+            params.push(SqlValue::Text(key.to_string()));
+            let predicate = if matches!(
+                ty,
+                PropertyType::MultiSelect | PropertyType::Select | PropertyType::Relation
+            ) {
+                params.push(bind_value(field, ty, value)?);
+                format!("pp.{column} = ?")
+            } else {
+                params.push(bind_literal_contains_value(field, ty, op, value)?);
+                format!("pp.{column} LIKE '%' || ? || '%' ESCAPE '\\'")
+            };
+            // "No element matches": pages without the key also match.
+            Ok(format!(
+                "NOT EXISTS (SELECT 1 FROM page_properties pp WHERE pp.page_id = p.id AND pp.key = ? AND {predicate})"
+            ))
+        }
+        Op::StartsWith | Op::EndsWith if !ty.supports_affix() => Err(QueryError::InvalidOp {
+            field: field.to_string(),
+            op,
+        }),
+        Op::StartsWith => {
+            params.push(SqlValue::Text(key.to_string()));
+            params.push(bind_literal_contains_value(field, ty, op, value)?);
+            Ok(exists(&format!("pp.{column} LIKE ? || '%' ESCAPE '\\'")))
+        }
+        Op::EndsWith => {
+            params.push(SqlValue::Text(key.to_string()));
+            params.push(bind_literal_contains_value(field, ty, op, value)?);
+            Ok(exists(&format!("pp.{column} LIKE '%' || ? ESCAPE '\\'")))
         }
         Op::Ne => {
             params.push(SqlValue::Text(key.to_string()));
@@ -1852,18 +1999,440 @@ moment  = { type = "datetime" }
                 serde_json::json!({ "field": "aliases", "op": "contains", "value": "SCIENCE FICTION" }),
                 true,
             ),
+            // -- not_contains --------------------------------------------
+            (
+                serde_json::json!({ "field": "author", "op": "not_contains", "value": "OLF" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "not_contains", "value": "Borges" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "not_contains", "value": "%" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "not_contains", "value": "reading" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "status", "op": "not_contains", "value": "queued" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "not_contains", "value": "memory" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "themes", "op": "not_contains", "value": "identity" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "series", "op": "not_contains", "value": "[[Solar Cycle]]" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "tags", "op": "not_contains", "value": "sf" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "tags", "op": "not_contains", "value": "zzz" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "aliases", "op": "not_contains", "value": "SCIENCE FICTION" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "title", "op": "not_contains", "value": "Book" }),
+                false,
+            ),
+            // An absent property matches a negation, like `ne`.
+            (
+                serde_json::json!({ "field": "absent", "op": "not_contains", "value": "x" }),
+                true,
+            ),
+            // -- starts_with / ends_with ---------------------------------
+            (
+                serde_json::json!({ "field": "author", "op": "starts_with", "value": "wol" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "starts_with", "value": "olf" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "ends_with", "value": "FE" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "author", "op": "ends_with", "value": "Wolf" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "starts_with", "value": "100%" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "pattern", "op": "ends_with", "value": "_done" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "title", "op": "starts_with", "value": "book" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "title", "op": "ends_with", "value": "a" }),
+                true,
+            ),
+            // -- relative dates (today = 2026-08-09) ---------------------
+            (
+                serde_json::json!({ "field": "moment", "op": "is_today" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "is_this_week" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "is_past_week" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "is_next_week" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "moment", "op": "is_this_month" }),
+                true,
+            ),
+            (
+                serde_json::json!({ "field": "started", "op": "is_today" }),
+                false,
+            ),
+            (
+                serde_json::json!({ "field": "started", "op": "is_this_month" }),
+                false,
+            ),
         ];
 
+        let today = chrono::NaiveDate::from_ymd_opt(2026, 8, 9).unwrap();
         for (filter_json, expected) in cases {
             let filter: Filter = serde_json::from_value(filter_json.clone()).unwrap();
             base.file.filter = Some(filter);
-            let in_memory = crate::vault::base::base_matches_meta(&base, &meta, "a.md");
-            let sql = flat_paths(&run(&index, &base, filter_json))
-                .iter()
-                .any(|path| path == "a.md");
+            let in_memory = crate::vault::base::base_matches_meta_on(&base, &meta, "a.md", today);
+            let spec = QuerySpec {
+                filter: Some(serde_json::from_value(filter_json.clone()).unwrap()),
+                ..Default::default()
+            };
+            let output = evaluate(
+                index.connection(),
+                &spec,
+                &QueryContext::for_base(&base).with_today(today),
+            )
+            .unwrap_or_else(|error| panic!("{filter_json} failed to compile: {error}"));
+            let sql = flat_paths(&output).iter().any(|path| path == "a.md");
 
             assert_eq!(sql, expected, "unexpected SQL fixture result");
             assert_eq!(in_memory, sql, "in-memory matcher diverged from SQL");
+        }
+    }
+
+    // -- Relative-date and text operators ---------------------------------
+
+    const DATES_BASE: &str = r#"
+name = "Dates"
+
+[filter]
+all = [ { field = "kind", op = "eq", value = "BOOK" } ]
+
+[properties]
+started = { type = "datetime" }
+status  = { type = "select", options = ["queued", "reading", "finished"] }
+"#;
+
+    /// Friday.
+    fn relative_today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 8, 28).unwrap()
+    }
+
+    /// Books straddling every window around Friday 2026-08-28, plus two
+    /// journal pages with explicit `created_at` for the system-field cases.
+    fn relative_date_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("books")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("journals")).unwrap();
+        std::fs::write(tmp.path().join("bases/dates.base.toml"), DATES_BASE).unwrap();
+        let write = |name: &str, content: String| {
+            std::fs::write(tmp.path().join(name), content).unwrap();
+        };
+        // Every page pins `created_at` so the system-field cases do not drift
+        // with the wall clock (a page without one is stamped "now").
+        let book = |letter: char, title: &str, extras: &str| {
+            (
+                format!("books/{letter}.md"),
+                page(
+                    &format!("0190f8a0-0000-7000-8000-0000000000{:02x}", letter as u32),
+                    "BOOK",
+                    title,
+                    &format!("created_at = 2026-06-01T00:00:00Z\n{extras}"),
+                ),
+            )
+        };
+        for (name, content) in [
+            book(
+                'a',
+                "Alpha Wolf",
+                "started = 2026-08-28\nstatus = \"reading\"\n",
+            ),
+            book('b', "Beta", "started = 2026-08-24\nstatus = \"queued\"\n"),
+            book(
+                'c',
+                "Gamma alpha",
+                "started = 2026-08-21\nstatus = \"reading\"\n",
+            ),
+            book(
+                'd',
+                "Delta",
+                "started = 2026-08-29T09:00:00Z\nstatus = \"finished\"\n",
+            ),
+            book(
+                'e',
+                "Epsilon",
+                "started = 2026-07-31\nstatus = \"reading\"\n",
+            ),
+            book('f', "Zeta", ""),
+        ] {
+            write(&name, content);
+        }
+        write(
+            "journals/2026-08-28.md",
+            page(
+                "0190f8a0-0000-7000-8000-00000000aa01",
+                "JOURNAL",
+                "Today",
+                "created_at = 2026-08-28T08:00:00Z\n",
+            ),
+        );
+        write(
+            "journals/2026-08-01.md",
+            page(
+                "0190f8a0-0000-7000-8000-00000000aa02",
+                "JOURNAL",
+                "Month start",
+                "created_at = 2026-08-01T08:00:00Z\n",
+            ),
+        );
+        write(
+            "old.md",
+            page(
+                "0190f8a0-0000-7000-8000-00000000aa03",
+                "NOTE",
+                "Last month",
+                "created_at = 2026-07-15T08:00:00Z\n",
+            ),
+        );
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("dates").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    fn dated_paths(
+        index: &VaultIndex,
+        base: &BaseDefinition,
+        filter: serde_json::Value,
+    ) -> Vec<String> {
+        let spec = QuerySpec {
+            filter: Some(serde_json::from_value(filter).unwrap()),
+            ..Default::default()
+        };
+        let output = evaluate(
+            index.connection(),
+            &spec,
+            &QueryContext::for_base(base).with_today(relative_today()),
+        )
+        .unwrap();
+        flat_paths(&output)
+    }
+
+    #[test]
+    fn relative_date_ops_select_by_window() {
+        let (_tmp, index, base) = relative_date_fixture();
+        let paths = |op: &str| {
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "field": "started", "op": op }),
+            )
+        };
+
+        assert_eq!(paths("is_today"), ["books/a.md"]);
+        // `books/d.md` (Saturday 2026-08-29) sits in the ISO week that started
+        // Monday 2026-08-24 *and* in the rolling seven days after today; the
+        // two windows are meant to overlap.
+        assert_eq!(
+            paths("is_this_week"),
+            ["books/a.md", "books/b.md", "books/d.md"]
+        );
+        assert_eq!(
+            paths("is_past_week"),
+            ["books/a.md", "books/b.md", "books/c.md"]
+        );
+        assert_eq!(paths("is_next_week"), ["books/d.md"]);
+        assert_eq!(
+            paths("is_this_month"),
+            ["books/a.md", "books/b.md", "books/c.md", "books/d.md"]
+        );
+    }
+
+    #[test]
+    fn relative_date_ops_reject_non_date_fields() {
+        let (_tmp, index, base) = relative_date_fixture();
+        for field in ["status", "title", "word_count"] {
+            let filter: Filter =
+                serde_json::from_value(serde_json::json!({ "field": field, "op": "is_today" }))
+                    .unwrap();
+            let spec = QuerySpec {
+                filter: Some(filter),
+                ..Default::default()
+            };
+            assert!(
+                matches!(
+                    evaluate(
+                        index.connection(),
+                        &spec,
+                        &QueryContext::for_base(&base).with_today(relative_today()),
+                    ),
+                    Err(QueryError::InvalidOp { .. })
+                ),
+                "`{field} is_today` must be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn relative_date_ops_work_on_created_at_and_journal_date() {
+        let (_tmp, index, base) = relative_date_fixture();
+
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "field": "journal_date", "op": "is_today" })
+            ),
+            ["journals/2026-08-28.md"]
+        );
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "field": "journal_date", "op": "is_this_month" })
+            ),
+            ["journals/2026-08-01.md", "journals/2026-08-28.md"]
+        );
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "field": "created_at", "op": "is_today" })
+            ),
+            ["journals/2026-08-28.md"]
+        );
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "field": "created_at", "op": "is_this_month" })
+            ),
+            ["journals/2026-08-01.md", "journals/2026-08-28.md"]
+        );
+    }
+
+    #[test]
+    fn text_affix_and_not_contains_ops() {
+        let (_tmp, index, base) = relative_date_fixture();
+        let books = [
+            "books/a.md",
+            "books/b.md",
+            "books/c.md",
+            "books/d.md",
+            "books/e.md",
+            "books/f.md",
+        ];
+
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "field": "title", "op": "starts_with", "value": "alpha" })
+            ),
+            ["books/a.md"]
+        );
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "field": "title", "op": "ends_with", "value": "alpha" })
+            ),
+            ["books/c.md"]
+        );
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "all": [
+                    { "field": "kind", "op": "eq", "value": "BOOK" },
+                    { "field": "title", "op": "not_contains", "value": "alpha" }
+                ] })
+            ),
+            ["books/b.md", "books/d.md", "books/e.md", "books/f.md"]
+        );
+        // Membership negation on a select: the page without `status` matches.
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "all": [
+                    { "field": "kind", "op": "eq", "value": "BOOK" },
+                    { "field": "status", "op": "not_contains", "value": "reading" }
+                ] })
+            ),
+            ["books/b.md", "books/d.md", "books/f.md"]
+        );
+        // Membership negation on tags: no page carries the tag.
+        assert_eq!(
+            dated_paths(
+                &index,
+                &base,
+                serde_json::json!({ "all": [
+                    { "field": "kind", "op": "eq", "value": "BOOK" },
+                    { "field": "tags", "op": "not_contains", "value": "x" }
+                ] })
+            ),
+            books
+        );
+
+        for filter in [
+            serde_json::json!({ "field": "status", "op": "starts_with", "value": "read" }),
+            serde_json::json!({ "field": "started", "op": "ends_with", "value": "28" }),
+            serde_json::json!({ "field": "word_count", "op": "not_contains", "value": "1" }),
+            serde_json::json!({ "field": "tags", "op": "starts_with", "value": "x" }),
+        ] {
+            let filter: Filter = serde_json::from_value(filter.clone()).unwrap();
+            assert!(
+                matches!(
+                    compile_filter(&filter, &QueryContext::for_base(&base)),
+                    Err(QueryError::InvalidOp { .. })
+                ),
+                "{filter:?} must be rejected"
+            );
         }
     }
 

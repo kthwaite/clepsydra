@@ -85,6 +85,18 @@ impl PropertyType {
     pub fn is_scalar_sortable(self) -> bool {
         !matches!(self, PropertyType::MultiSelect | PropertyType::Relation)
     }
+
+    /// Whether a relative-date predicate (`is_today`, …) is defined for the type.
+    pub fn supports_relative_date(self) -> bool {
+        matches!(self, PropertyType::Date | PropertyType::Datetime)
+    }
+
+    /// Whether `starts_with` / `ends_with` are defined: substring types only.
+    /// Categorical and multi-valued types treat `contains` as membership, so
+    /// affix matching has no meaning for them.
+    pub fn supports_affix(self) -> bool {
+        matches!(self, PropertyType::Text | PropertyType::Url)
+    }
 }
 
 /// A declared property in a base's schema.
@@ -115,18 +127,109 @@ pub enum Op {
     Gte,
     /// Substring on text; membership on multi-valued.
     Contains,
+    /// Negation of `contains`; a missing property matches, like `ne`.
+    NotContains,
+    /// Prefix match on substring-typed values (ASCII case-insensitive).
+    StartsWith,
+    /// Suffix match on substring-typed values (ASCII case-insensitive).
+    EndsWith,
     /// Value is an array of candidates.
     In,
     /// Relation → links table, canonical-name (or UUID) match.
     LinksTo,
     IsEmpty,
     NotEmpty,
+    /// Value-less relative-date predicates anchored on the evaluation date.
+    IsToday,
+    IsThisWeek,
+    IsPastWeek,
+    IsNextWeek,
+    IsThisMonth,
 }
 
 impl Op {
     pub fn is_ordering(self) -> bool {
         matches!(self, Op::Lt | Op::Lte | Op::Gt | Op::Gte)
     }
+
+    pub fn is_relative_date(self) -> bool {
+        matches!(
+            self,
+            Op::IsToday | Op::IsThisWeek | Op::IsPastWeek | Op::IsNextWeek | Op::IsThisMonth
+        )
+    }
+
+    /// Operators that take no `value`.
+    pub fn is_valueless(self) -> bool {
+        matches!(self, Op::IsEmpty | Op::NotEmpty) || self.is_relative_date()
+    }
+
+    /// `starts_with` / `ends_with`: substring-shaped, never membership.
+    pub fn is_affix(self) -> bool {
+        matches!(self, Op::StartsWith | Op::EndsWith)
+    }
+
+    /// The wire name (snake_case), for diagnostics.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Op::Eq => "eq",
+            Op::Ne => "ne",
+            Op::Lt => "lt",
+            Op::Lte => "lte",
+            Op::Gt => "gt",
+            Op::Gte => "gte",
+            Op::Contains => "contains",
+            Op::NotContains => "not_contains",
+            Op::StartsWith => "starts_with",
+            Op::EndsWith => "ends_with",
+            Op::In => "in",
+            Op::LinksTo => "links_to",
+            Op::IsEmpty => "is_empty",
+            Op::NotEmpty => "not_empty",
+            Op::IsToday => "is_today",
+            Op::IsThisWeek => "is_this_week",
+            Op::IsPastWeek => "is_past_week",
+            Op::IsNextWeek => "is_next_week",
+            Op::IsThisMonth => "is_this_month",
+        }
+    }
+}
+
+/// Half-open `[start, end)` date window for a relative-date operator.
+/// Weeks start on Monday; `is_past_week` and `is_next_week` are rolling
+/// seven-day windows anchored on `today`.
+pub fn relative_date_window(
+    op: Op,
+    today: chrono::NaiveDate,
+) -> Option<(chrono::NaiveDate, chrono::NaiveDate)> {
+    use chrono::{Datelike, Duration, NaiveDate};
+    let days = |n: i64| Duration::days(n);
+    Some(match op {
+        Op::IsToday => (today, today + days(1)),
+        Op::IsThisWeek => {
+            let monday = today - days(i64::from(today.weekday().num_days_from_monday()));
+            (monday, monday + days(7))
+        }
+        Op::IsPastWeek => (today - days(7), today + days(1)),
+        Op::IsNextWeek => (today + days(1), today + days(8)),
+        Op::IsThisMonth => {
+            let first = NaiveDate::from_ymd_opt(today.year(), today.month(), 1)?;
+            let next = if today.month() == 12 {
+                NaiveDate::from_ymd_opt(today.year() + 1, 1, 1)?
+            } else {
+                NaiveDate::from_ymd_opt(today.year(), today.month() + 1, 1)?
+            };
+            (first, next)
+        }
+        _ => return None,
+    })
+}
+
+/// The `YYYY-MM-DD` face of an ISO date or date-time string, as written
+/// (no time-zone conversion).
+pub fn date_face(text: &str) -> Option<chrono::NaiveDate> {
+    let head = text.get(..10)?;
+    chrono::NaiveDate::parse_from_str(head, "%Y-%m-%d").ok()
 }
 
 /// The filter AST. Deserializes identically from base files (TOML — inline
@@ -438,16 +541,31 @@ pub(crate) struct MetaFilterContext<'a> {
     pub word_count: Option<u32>,
     pub journal_date: Option<chrono::NaiveDate>,
     pub link_targets: Option<&'a CandidateLinkTargets>,
+    /// Evaluation date the relative-date operators anchor on.
+    pub today: chrono::NaiveDate,
 }
 
 /// Evaluate a base's membership filter against a parsed page's metadata —
 /// the completion/diagnostics path, where hitting SQLite per keystroke is
 /// not warranted. Semantics mirror the SQL compilation for the common ops;
 /// anything unresolvable is conservatively `false`.
+///
+/// Relative-date operators anchor on the wall clock; callers that own an
+/// evaluation date (an API request's clock) call [`base_matches_meta_on`].
 pub fn base_matches_meta(
     base: &BaseDefinition,
     meta: &crate::vault::page::PageMeta,
     path: &str,
+) -> bool {
+    base_matches_meta_on(base, meta, path, chrono::Utc::now().date_naive())
+}
+
+/// [`base_matches_meta`] with an explicit evaluation date.
+pub fn base_matches_meta_on(
+    base: &BaseDefinition,
+    meta: &crate::vault::page::PageMeta,
+    path: &str,
+    today: chrono::NaiveDate,
 ) -> bool {
     let context = MetaFilterContext {
         base,
@@ -456,6 +574,7 @@ pub fn base_matches_meta(
         word_count: None,
         journal_date: None,
         link_targets: None,
+        today,
     };
     match &base.file.filter {
         Some(filter) => filter_matches_meta(filter, &context),
@@ -481,6 +600,7 @@ pub(crate) fn fixed_candidate_comparison_matches(
     field: &str,
     op: Op,
     value: &serde_json::Value,
+    today: chrono::NaiveDate,
 ) -> Option<bool> {
     use crate::vault::query::{QueryContext, ResolvedField, SysField, resolve_field};
 
@@ -501,15 +621,41 @@ pub(crate) fn fixed_candidate_comparison_matches(
             op,
             value,
             false,
+            today,
         )),
-        ResolvedField::Sys(SysField::JournalDate) => {
-            Some(scalar_matches(None, PropertyType::Date, op, value, false))
+        ResolvedField::Sys(SysField::JournalDate) => Some(scalar_matches(
+            None,
+            PropertyType::Date,
+            op,
+            value,
+            false,
+            today,
+        )),
+        // A blank member is written now, so its timestamps are fixed to the
+        // evaluation date: relative-date predicates on them decide outright.
+        ResolvedField::Sys(sys @ (SysField::CreatedAt | SysField::UpdatedAt))
+            if op.is_relative_date() =>
+        {
+            Some(scalar_matches(
+                Some(Comparable::Text(Cow::Owned(today.to_string()))),
+                system_match_type(sys, op),
+                op,
+                value,
+                false,
+                today,
+            ))
         }
-        ResolvedField::Prop { ty, .. } if op == Op::Contains && !ty.supports_contains() => {
+        ResolvedField::Prop { ty, .. }
+            if matches!(op, Op::Contains | Op::NotContains) && !ty.supports_contains() =>
+        {
             Some(false)
         }
+        ResolvedField::Prop { ty, .. } if op.is_relative_date() && !ty.supports_relative_date() => {
+            Some(false)
+        }
+        ResolvedField::Prop { ty, .. } if op.is_affix() && !ty.supports_affix() => Some(false),
         ResolvedField::Prop { key, ty } if base.property(&key).is_none() => {
-            Some(property_matches(None, ty, op, value, None))
+            Some(property_matches(None, ty, op, value, None, today))
         }
         _ => None,
     }
@@ -538,10 +684,11 @@ fn cmp_matches_meta(
         }
         ResolvedField::Sys(sys) => scalar_matches(
             system_scalar(sys, context),
-            system_property_type(sys),
+            system_match_type(sys, op),
             op,
             value,
             false,
+            context.today,
         ),
         ResolvedField::Prop { key, ty } => property_matches(
             context.meta.extra.get(&key),
@@ -551,11 +698,24 @@ fn cmp_matches_meta(
             context
                 .link_targets
                 .and_then(|targets| targets.get(&key).map(Vec::as_slice)),
+            context.today,
         ),
     }
 }
 
-fn system_property_type(sys: crate::vault::query::SysField) -> PropertyType {
+/// The property type a system field compares as under `op`. `created_at` and
+/// `updated_at` are text everywhere else, but they hold ISO timestamps, so
+/// relative-date predicates read them as datetimes — mirroring
+/// `SysField::supports_relative_date` so SQL and in-memory stay in parity.
+fn system_match_type(sys: crate::vault::query::SysField, op: Op) -> PropertyType {
+    use crate::vault::query::SysField;
+
+    if op.is_relative_date() && sys.supports_relative_date() {
+        return match sys {
+            SysField::JournalDate => PropertyType::Date,
+            _ => PropertyType::Datetime,
+        };
+    }
     sys.property_type()
 }
 
@@ -612,7 +772,7 @@ fn membership_matches(
     let contains = |expected: &str| membership_contains(current, expected, canonicalize);
     match op {
         Op::Eq | Op::Contains => value.as_str().is_some_and(contains),
-        Op::Ne => value.as_str().is_some_and(|expected| !contains(expected)),
+        Op::Ne | Op::NotContains => value.as_str().is_some_and(|expected| !contains(expected)),
         Op::In => value.as_array().is_some_and(|values| {
             values.iter().all(serde_json::Value::is_string)
                 && values
@@ -649,6 +809,7 @@ fn property_matches(
     op: Op,
     value: &serde_json::Value,
     link_targets: Option<&[CandidateLinkTarget]>,
+    today: chrono::NaiveDate,
 ) -> bool {
     let present = current.is_some_and(|current| !toml_value_is_empty(current));
     match op {
@@ -672,19 +833,24 @@ fn property_matches(
         });
     }
     let Some(current) = current.filter(|current| !toml_value_is_empty(current)) else {
-        return op == Op::Ne && expected_scalar(property_type, value).is_some();
+        return matches!(op, Op::Ne | Op::NotContains)
+            && expected_scalar(property_type, value).is_some();
     };
     if let toml::Value::Array(items) = current {
+        // Negations hold only when *no* element matches the positive form.
         return match op {
-            Op::Ne => items
-                .iter()
-                .all(|item| !property_scalar_matches(item, property_type, Op::Eq, value)),
+            Op::Ne | Op::NotContains => {
+                let positive = if op == Op::Ne { Op::Eq } else { Op::Contains };
+                items.iter().all(|item| {
+                    !property_scalar_matches(item, property_type, positive, value, today)
+                })
+            }
             _ => items
                 .iter()
-                .any(|item| property_scalar_matches(item, property_type, op, value)),
+                .any(|item| property_scalar_matches(item, property_type, op, value, today)),
         };
     }
-    property_scalar_matches(current, property_type, op, value)
+    property_scalar_matches(current, property_type, op, value, today)
 }
 
 fn property_scalar_matches(
@@ -692,6 +858,7 @@ fn property_scalar_matches(
     property_type: PropertyType,
     op: Op,
     value: &serde_json::Value,
+    today: chrono::NaiveDate,
 ) -> bool {
     if op == Op::LinksTo {
         return false;
@@ -705,6 +872,7 @@ fn property_scalar_matches(
             property_type,
             PropertyType::Select | PropertyType::MultiSelect | PropertyType::Relation
         ),
+        today,
     )
 }
 
@@ -758,14 +926,28 @@ fn scalar_matches(
     op: Op,
     value: &serde_json::Value,
     contains_is_membership: bool,
+    today: chrono::NaiveDate,
 ) -> bool {
     match op {
         Op::IsEmpty => return current.is_none(),
         Op::NotEmpty => return current.is_some(),
         _ => {}
     }
+    if op.is_relative_date() {
+        if !property_type.supports_relative_date() {
+            return false;
+        }
+        let Some((start, end)) = relative_date_window(op, today) else {
+            return false;
+        };
+        return current
+            .as_ref()
+            .and_then(|value| date_face(&comparable_sql_text(value)))
+            .is_some_and(|day| start <= day && day < end);
+    }
     let Some(current) = current else {
-        return op == Op::Ne && expected_scalar(property_type, value).is_some();
+        return matches!(op, Op::Ne | Op::NotContains)
+            && expected_scalar(property_type, value).is_some();
     };
     match op {
         Op::In => value
@@ -785,6 +967,19 @@ fn scalar_matches(
                 sql_contains(&current, &expected)
             }
         }),
+        Op::NotContains if !property_type.supports_contains() => false,
+        Op::NotContains => expected_scalar(property_type, value).is_some_and(|expected| {
+            if contains_is_membership {
+                !scalar_equal(&current, &expected)
+            } else {
+                !sql_contains(&current, &expected)
+            }
+        }),
+        Op::StartsWith | Op::EndsWith if !property_type.supports_affix() => false,
+        Op::StartsWith => expected_scalar(property_type, value)
+            .is_some_and(|expected| sql_affix(&current, &expected, true)),
+        Op::EndsWith => expected_scalar(property_type, value)
+            .is_some_and(|expected| sql_affix(&current, &expected, false)),
         Op::LinksTo => false,
         _ => expected_scalar(property_type, value).is_some_and(|expected| {
             let ordering = scalar_ordering(&current, &expected);
@@ -825,6 +1020,22 @@ fn sql_contains(current: &Comparable<'_>, expected: &Comparable<'_>) -> bool {
         .as_bytes()
         .windows(expected.len())
         .any(|window| window.eq_ignore_ascii_case(expected.as_bytes()))
+}
+
+/// SQLite `LIKE ? || '%'` / `LIKE '%' || ?` semantics: ASCII case-insensitive
+/// prefix or suffix match on the value's text face.
+fn sql_affix(current: &Comparable<'_>, expected: &Comparable<'_>, prefix: bool) -> bool {
+    let current = comparable_sql_text(current);
+    let expected = comparable_sql_text(expected);
+    if expected.len() > current.len() {
+        return false;
+    }
+    let window = if prefix {
+        &current.as_bytes()[..expected.len()]
+    } else {
+        &current.as_bytes()[current.len() - expected.len()..]
+    };
+    window.eq_ignore_ascii_case(expected.as_bytes())
 }
 
 fn comparable_sql_text<'a>(value: &'a Comparable<'_>) -> Cow<'a, str> {
@@ -1400,7 +1611,14 @@ fn validate_filter(
                 );
                 return;
             }
-            if *op == Op::Contains {
+            if op.is_valueless() && !value.is_null() {
+                push(
+                    BaseDiagnosticSeverity::Warning,
+                    Some(format!("{path}.value")),
+                    format!("{context}: op `{}` does not accept a value", op.as_str()),
+                );
+            }
+            if matches!(op, Op::Contains | Op::NotContains) {
                 use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 
                 let query_context = QueryContext::for_base(base);
@@ -1414,7 +1632,48 @@ fn validate_filter(
                         BaseDiagnosticSeverity::Error,
                         Some(format!("{path}.op")),
                         format!(
-                            "{context}: op `contains` is not valid for non-text field `{field}`"
+                            "{context}: op `{}` is not valid for non-text field `{field}`",
+                            op.as_str()
+                        ),
+                    );
+                    return;
+                }
+            }
+            if op.is_relative_date() {
+                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+
+                let supported = match resolve_field(field, &QueryContext::for_base(base)) {
+                    Ok(ResolvedField::Sys(sys)) => sys.supports_relative_date(),
+                    Ok(ResolvedField::Prop { ty, .. }) => ty.supports_relative_date(),
+                    Err(_) => false,
+                };
+                if !supported {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.op")),
+                        format!(
+                            "{context}: op `{}` is only valid for date fields, not `{field}`",
+                            op.as_str()
+                        ),
+                    );
+                    return;
+                }
+            }
+            if op.is_affix() {
+                use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
+
+                let supported = match resolve_field(field, &QueryContext::for_base(base)) {
+                    Ok(ResolvedField::Sys(sys)) => sys.supports_affix(),
+                    Ok(ResolvedField::Prop { ty, .. }) => ty.supports_affix(),
+                    Err(_) => false,
+                };
+                if !supported {
+                    push(
+                        BaseDiagnosticSeverity::Error,
+                        Some(format!("{path}.op")),
+                        format!(
+                            "{context}: op `{}` is only valid for text fields, not `{field}`",
+                            op.as_str()
                         ),
                     );
                     return;
@@ -2206,6 +2465,213 @@ relation = { type = "relation" }
     }
 
     #[test]
+    fn relative_date_validation_rejects_non_date_fields() {
+        let content = r#"
+name = "Relative dates"
+[filter]
+all = [
+  { field = "status", op = "is_today" },
+  { field = "title", op = "is_this_week" },
+  { field = "count", op = "is_this_month" }
+]
+[properties]
+status = { type = "select", options = ["reading"] }
+count = { type = "number" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            errors
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some("filter.all[0].op"),
+                Some("filter.all[1].op"),
+                Some("filter.all[2].op"),
+            ]
+        );
+        assert!(errors.iter().all(|diagnostic| {
+            diagnostic
+                .message
+                .contains("is only valid for date fields, not")
+        }));
+    }
+
+    #[test]
+    fn relative_date_validation_accepts_date_properties_and_timestamp_system_fields() {
+        let content = r#"
+name = "Relative dates"
+[filter]
+all = [
+  { field = "started", op = "is_today" },
+  { field = "started", op = "is_this_week" },
+  { field = "started", op = "is_past_week" },
+  { field = "started", op = "is_next_week" },
+  { field = "started", op = "is_this_month" },
+  { field = "created_at", op = "is_today" },
+  { field = "created_at", op = "is_this_week" },
+  { field = "created_at", op = "is_past_week" },
+  { field = "created_at", op = "is_next_week" },
+  { field = "created_at", op = "is_this_month" },
+  { field = "updated_at", op = "is_today" },
+  { field = "journal_date", op = "is_today" }
+]
+[properties]
+started = { type = "datetime" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(base.is_some());
+        assert!(diagnostics.is_empty(), "no diagnostics: {diagnostics:?}");
+    }
+
+    #[test]
+    fn a_value_on_a_valueless_op_is_a_warning() {
+        let content = r#"
+name = "Valueless"
+[filter]
+all = [
+  { field = "started", op = "is_today", value = "x" },
+  { field = "started", op = "is_empty", value = "x" }
+]
+[properties]
+started = { type = "date" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(base.is_some());
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|diagnostic| (diagnostic.severity, diagnostic.path.as_deref()))
+                .collect::<Vec<_>>(),
+            vec![
+                (BaseDiagnosticSeverity::Warning, Some("filter.all[0].value")),
+                (BaseDiagnosticSeverity::Warning, Some("filter.all[1].value")),
+            ]
+        );
+        assert!(
+            diagnostics[0]
+                .message
+                .contains("op `is_today` does not accept a value")
+        );
+    }
+
+    #[test]
+    fn affix_validation_rejects_categorical_and_numeric_fields() {
+        let content = r#"
+name = "Affixes"
+[filter]
+all = [
+  { field = "multi", op = "starts_with", value = "x" },
+  { field = "select", op = "ends_with", value = "x" },
+  { field = "count", op = "starts_with", value = "1" },
+  { field = "started", op = "starts_with", value = "2026" },
+  { field = "tags", op = "starts_with", value = "x" },
+  { field = "aliases", op = "ends_with", value = "x" }
+]
+[properties]
+multi = { type = "multi_select", options = ["x"] }
+select = { type = "select", options = ["x"] }
+count = { type = "number" }
+started = { type = "date" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            errors
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![
+                Some("filter.all[0].op"),
+                Some("filter.all[1].op"),
+                Some("filter.all[2].op"),
+                Some("filter.all[3].op"),
+                Some("filter.all[4].op"),
+                Some("filter.all[5].op"),
+            ]
+        );
+        assert!(errors.iter().all(|diagnostic| {
+            diagnostic
+                .message
+                .contains("is only valid for text fields, not")
+        }));
+    }
+
+    #[test]
+    fn affix_and_not_contains_validation_accept_their_supported_fields() {
+        let content = r#"
+name = "Affixes"
+[filter]
+all = [
+  { field = "text", op = "starts_with", value = "x" },
+  { field = "url", op = "ends_with", value = "x" },
+  { field = "title", op = "starts_with", value = "x" },
+  { field = "path", op = "ends_with", value = ".md" },
+  { field = "text", op = "not_contains", value = "x" },
+  { field = "select", op = "not_contains", value = "x" },
+  { field = "multi", op = "not_contains", value = "x" },
+  { field = "tags", op = "not_contains", value = "x" }
+]
+[properties]
+text = { type = "text" }
+url = { type = "url" }
+select = { type = "select", options = ["x"] }
+multi = { type = "multi_select", options = ["x"] }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+
+        assert!(base.is_some());
+        assert!(diagnostics.is_empty(), "no diagnostics: {diagnostics:?}");
+    }
+
+    #[test]
+    fn not_contains_validation_rejects_non_text_fields() {
+        let content = r#"
+name = "Not contains"
+[filter]
+all = [
+  { field = "count", op = "not_contains", value = "1" },
+  { field = "done", op = "not_contains", value = "true" }
+]
+[properties]
+count = { type = "number" }
+done = { type = "bool" }
+"#;
+        let (base, diagnostics) = parse_base(&path("bases/x.base.toml"), content);
+        assert!(base.is_some());
+        let errors = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.severity == BaseDiagnosticSeverity::Error)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            errors
+                .iter()
+                .map(|diagnostic| diagnostic.path.as_deref())
+                .collect::<Vec<_>>(),
+            vec![Some("filter.all[0].op"), Some("filter.all[1].op")]
+        );
+        assert!(errors.iter().all(|diagnostic| {
+            diagnostic
+                .message
+                .contains("op `not_contains` is not valid for non-text field")
+        }));
+    }
+
+    #[test]
     fn links_to_validation_rejects_non_relation_properties() {
         let content = r#"
 name = "Invalid links"
@@ -2553,5 +3019,48 @@ columns = ["body"]
                 "views[0].aggregates[0].field",
             ]
         );
+    }
+
+    #[test]
+    fn relative_date_windows_anchor_on_today() {
+        use chrono::NaiveDate;
+        let today = NaiveDate::from_ymd_opt(2026, 8, 28).unwrap(); // a Friday
+        let d = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).unwrap();
+        assert_eq!(
+            relative_date_window(Op::IsToday, today),
+            Some((d(2026, 8, 28), d(2026, 8, 29)))
+        );
+        assert_eq!(
+            relative_date_window(Op::IsThisWeek, today),
+            Some((d(2026, 8, 24), d(2026, 8, 31)))
+        );
+        assert_eq!(
+            relative_date_window(Op::IsPastWeek, today),
+            Some((d(2026, 8, 21), d(2026, 8, 29)))
+        );
+        assert_eq!(
+            relative_date_window(Op::IsNextWeek, today),
+            Some((d(2026, 8, 29), d(2026, 9, 5)))
+        );
+        assert_eq!(
+            relative_date_window(Op::IsThisMonth, today),
+            Some((d(2026, 8, 1), d(2026, 9, 1)))
+        );
+        // December rolls into the next year.
+        let dec = d(2026, 12, 15);
+        assert_eq!(
+            relative_date_window(Op::IsThisMonth, dec),
+            Some((d(2026, 12, 1), d(2027, 1, 1)))
+        );
+        // A Monday is the start of its own week.
+        assert_eq!(
+            relative_date_window(Op::IsThisWeek, d(2026, 8, 24)),
+            Some((d(2026, 8, 24), d(2026, 8, 31)))
+        );
+        assert_eq!(relative_date_window(Op::Eq, today), None);
+        assert_eq!(date_face("2026-08-28"), Some(d(2026, 8, 28)));
+        assert_eq!(date_face("2026-08-28T23:59:00+05:00"), Some(d(2026, 8, 28)));
+        assert_eq!(date_face("reading"), None);
+        assert_eq!(date_face("2026-08"), None);
     }
 }

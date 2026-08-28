@@ -470,6 +470,101 @@ fn seed_many(root: &Path) {
     }
 }
 
+/// Books straddling every relative-date window around the fixed clock's
+/// Sunday 2026-08-09 (Monday of its ISO week is 2026-08-03).
+fn seed_relative_dates(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::create_dir_all(root.join("books")).unwrap();
+    fs::write(
+        root.join("bases/dates.base.toml"),
+        r#"
+name = "Dates"
+filter = { field = "kind", op = "eq", value = "BOOK" }
+
+[properties]
+started = { type = "date" }
+note = { type = "text" }
+status = { type = "select", options = ["queued", "reading", "finished"] }
+
+[[views]]
+name = "today"
+filter = { field = "started", op = "is_today" }
+columns = ["title", "started"]
+
+[[views]]
+name = "this-week"
+filter = { field = "started", op = "is_this_week" }
+
+[[views]]
+name = "past-week"
+filter = { field = "started", op = "is_past_week" }
+
+[[views]]
+name = "next-week"
+filter = { field = "started", op = "is_next_week" }
+
+[[views]]
+name = "this-month"
+filter = { field = "started", op = "is_this_month" }
+
+[[views]]
+name = "prefix"
+filter = { field = "note", op = "starts_with", value = "ab" }
+
+[[views]]
+name = "no-reading"
+filter = { field = "status", op = "not_contains", value = "reading" }
+"#,
+    )
+    .unwrap();
+    let page = |slug: &str, index: u8, extras: &str| {
+        fs::write(
+            root.join(format!("books/{slug}.md")),
+            format!(
+                "+++\nid = \"0190f8a0-0000-7000-8000-0000000000{index:02}\"\ntitle = \"Book {slug}\"\ntype = \"BOOK\"\n{extras}+++\nbody\n"
+            ),
+        )
+        .unwrap();
+    };
+    page(
+        "s1",
+        1,
+        "started = 2026-08-09\nnote = \"Abacus\"\nstatus = \"reading\"\n",
+    );
+    page(
+        "s2",
+        2,
+        "started = 2026-08-03\nnote = \"cab\"\nstatus = \"queued\"\n",
+    );
+    page("s3", 3, "started = 2026-08-02\nnote = \"ABBEY\"\n");
+    page("s4", 4, "started = 2026-08-12\n");
+    page("s5", 5, "started = 2026-07-31\n");
+    page("s6", 6, "");
+}
+
+/// A base whose membership requires the member be created today.
+fn seed_created_today_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/fresh.base.toml"),
+        r#"
+name = "Fresh"
+
+[filter]
+all = [
+  { field = "kind", op = "eq", value = "BOOK" },
+  { field = "created_at", op = "is_today" }
+]
+
+[[views]]
+name = "All"
+layout = "table"
+columns = ["title"]
+"#,
+    )
+    .unwrap();
+}
+
 fn seed_with_unevaluable_base(root: &Path) {
     seed(root);
     fs::write(
@@ -918,6 +1013,186 @@ async fn view_evaluation_honors_view_filter_and_sort() {
         .get("/api/vault/bases/reading/views/nope")
         .await
         .assert_status_not_found();
+}
+
+async fn view_paths(fixture: &ApiFixture, slug: &str, view: &str) -> Vec<String> {
+    let response = fixture
+        .server
+        .get(&format!("/api/vault/bases/{slug}/views/{view}"))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let mut paths = body["rows"]
+        .as_array()
+        .unwrap_or_else(|| panic!("flat rows for `{view}`: {body}"))
+        .iter()
+        .map(|row| row["path"].as_str().unwrap().to_owned())
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths
+}
+
+#[tokio::test]
+async fn saved_views_evaluate_relative_date_and_text_operators_against_the_request_clock() {
+    let fixture = member_fixture(seed_relative_dates);
+
+    // The fixed clock reads 2026-08-09 (a Sunday).
+    assert_eq!(
+        view_paths(&fixture, "dates", "today").await,
+        ["books/s1.md"]
+    );
+    assert_eq!(
+        view_paths(&fixture, "dates", "this-week").await,
+        ["books/s1.md", "books/s2.md"]
+    );
+    assert_eq!(
+        view_paths(&fixture, "dates", "past-week").await,
+        ["books/s1.md", "books/s2.md", "books/s3.md"]
+    );
+    assert_eq!(
+        view_paths(&fixture, "dates", "next-week").await,
+        ["books/s4.md"]
+    );
+    assert_eq!(
+        view_paths(&fixture, "dates", "this-month").await,
+        ["books/s1.md", "books/s2.md", "books/s3.md", "books/s4.md"]
+    );
+    // `starts_with` is case-insensitive and anchored: "cab" does not match.
+    assert_eq!(
+        view_paths(&fixture, "dates", "prefix").await,
+        ["books/s1.md", "books/s3.md"]
+    );
+    // A page without `status` matches the negation.
+    assert_eq!(
+        view_paths(&fixture, "dates", "no-reading").await,
+        [
+            "books/s2.md",
+            "books/s3.md",
+            "books/s4.md",
+            "books/s5.md",
+            "books/s6.md"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn embedded_evaluation_composes_a_not_contains_override_over_a_relative_date_view() {
+    let fixture = member_fixture(seed_relative_dates);
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/dates/views/today/evaluate")
+        .json(&serde_json::json!({
+            "filter": { "field": "status", "op": "not_contains", "value": "queued" }
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let paths = body["output"]["rows"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["path"].as_str().unwrap())
+        .collect::<Vec<_>>();
+
+    assert_eq!(paths, ["books/s1.md"], "{body}");
+}
+
+#[tokio::test]
+async fn preview_reports_relative_date_field_errors_and_stray_value_warnings() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_relative_dates)
+        .build()
+        .into_server_and_temp();
+    let definition = |filter: serde_json::Value| {
+        serde_json::json!({
+            "name": "Dates Preview",
+            "filter": filter,
+            "properties": [
+                { "key": "started", "definition": { "type": "date" } },
+                { "key": "note", "definition": { "type": "text" } }
+            ],
+            "views": [{ "name": "All", "layout": "table" }]
+        })
+    };
+    let diagnostics = |body: &serde_json::Value| {
+        body["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|diagnostic| {
+                (
+                    diagnostic["severity"].as_str().unwrap().to_owned(),
+                    diagnostic["path"].as_str().unwrap_or_default().to_owned(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+
+    let response = server
+        .post("/api/vault/bases/preview")
+        .json(&serde_json::json!({
+            "definition": definition(serde_json::json!({ "field": "note", "op": "is_today" })),
+            "view": null
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert!(
+        diagnostics(&body).contains(&("error".to_owned(), "filter.op".to_owned())),
+        "{body}"
+    );
+
+    let response = server
+        .post("/api/vault/bases/preview")
+        .json(&serde_json::json!({
+            "definition": definition(
+                serde_json::json!({ "field": "started", "op": "is_today", "value": "x" })
+            ),
+            "view": null
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    assert!(
+        diagnostics(&body).contains(&("warning".to_owned(), "filter.value".to_owned())),
+        "{body}"
+    );
+}
+
+#[tokio::test]
+async fn a_created_at_is_today_membership_still_admits_a_new_member() {
+    let fixture = member_fixture(seed_created_today_base);
+
+    let detail: serde_json::Value = fixture.server.get("/api/vault/bases/fresh").await.json();
+    assert_eq!(detail["member_creation"][0]["enabled"], true, "{detail}");
+
+    let response = fixture
+        .server
+        .post("/api/vault/bases/fresh/members")
+        .json(&serde_json::json!({
+            "base_revision": detail["revision"].as_str().unwrap(),
+            "view": "All",
+            "title": "Written Today",
+            "fields": { "kind": "BOOK" }
+        }))
+        .await;
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+
+    let view: serde_json::Value = fixture
+        .server
+        .get("/api/vault/bases/fresh/views/all")
+        .await
+        .json();
+    assert!(
+        view["rows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["id"] == body["id"]),
+        "{view}"
+    );
 }
 
 #[tokio::test]

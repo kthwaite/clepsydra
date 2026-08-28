@@ -328,18 +328,18 @@ fn validate_comparison(
         diagnostics.push(diagnostic(
             Some(&canonical),
             Some(&format!("{path}.op")),
-            format!("op `{}` is not valid for field `{canonical}`", op_name(op)),
+            format!("op `{}` is not valid for field `{canonical}`", op.as_str()),
         ));
         return;
     }
 
     match op {
-        Op::IsEmpty | Op::NotEmpty => {
+        op if op.is_valueless() => {
             if !value.is_null() {
                 diagnostics.push(diagnostic(
                     Some(&canonical),
                     Some(&format!("{path}.value")),
-                    format!("op `{}` does not accept a value", op_name(op)),
+                    format!("op `{}` does not accept a value", op.as_str()),
                 ));
             }
         }
@@ -452,17 +452,21 @@ fn supports_operator(field: &ResolvedField, op: Op) -> bool {
     match field {
         ResolvedField::Sys(SysField::Tags | SysField::Aliases) => matches!(
             op,
-            Op::Eq | Op::Ne | Op::Contains | Op::In | Op::IsEmpty | Op::NotEmpty
+            Op::Eq | Op::Ne | Op::Contains | Op::NotContains | Op::In | Op::IsEmpty | Op::NotEmpty
         ),
         ResolvedField::Sys(sys) => match op {
             Op::LinksTo => false,
-            Op::Contains => sys.supports_contains(),
+            Op::Contains | Op::NotContains => sys.supports_contains(),
+            op if op.is_relative_date() => sys.supports_relative_date(),
+            op if op.is_affix() => sys.supports_affix(),
             op if op.is_ordering() => sys.property_type() != PropertyType::Bool,
             _ => true,
         },
         ResolvedField::Prop { ty, .. } => match op {
             Op::LinksTo => ty.supports_links_to(),
-            Op::Contains => ty.supports_contains(),
+            Op::Contains | Op::NotContains => ty.supports_contains(),
+            op if op.is_relative_date() => ty.supports_relative_date(),
+            op if op.is_affix() => ty.supports_affix(),
             op if op.is_ordering() => ty.is_ordered(),
             _ => true,
         },
@@ -521,22 +525,6 @@ fn diagnostic(
         field: field.map(str::to_string),
         filter_path: filter_path.map(str::to_string),
         message: message.into(),
-    }
-}
-
-fn op_name(op: Op) -> &'static str {
-    match op {
-        Op::Eq => "eq",
-        Op::Ne => "ne",
-        Op::Lt => "lt",
-        Op::Lte => "lte",
-        Op::Gt => "gt",
-        Op::Gte => "gte",
-        Op::Contains => "contains",
-        Op::In => "in",
-        Op::LinksTo => "links_to",
-        Op::IsEmpty => "is_empty",
-        Op::NotEmpty => "not_empty",
     }
 }
 
