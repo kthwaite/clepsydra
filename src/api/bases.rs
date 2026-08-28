@@ -318,6 +318,8 @@ where
     })
 }
 
+/// For the `POST .../evaluate` embed endpoint, whose wire field is literally
+/// named `embed_filter`.
 pub(super) fn invalid_embed_query(diagnostics: Vec<EmbedValidationDiagnostic>) -> ApiError {
     ApiError::invalid_embed_query(
         diagnostics
@@ -327,11 +329,38 @@ pub(super) fn invalid_embed_query(diagnostics: Vec<EmbedValidationDiagnostic>) -
     )
 }
 
+/// For the `GET .../views/{view}` standalone endpoint, whose query parameter
+/// is literally named `filter` — the same name `validate_embed_overrides`
+/// already seeds `filter_path` with, so it must not be remapped.
+pub(super) fn invalid_view_query(diagnostics: Vec<EmbedValidationDiagnostic>) -> ApiError {
+    ApiError::invalid_embed_query(
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| public_diagnostic(diagnostic, None))
+            .collect(),
+    )
+}
+
 fn public_embed_diagnostic(diagnostic: EmbedValidationDiagnostic) -> BaseMemberDiagnostic {
-    let filter_path = diagnostic.filter_path.map(|path| {
-        path.strip_prefix("filter")
-            .map_or(path.clone(), |suffix| format!("embed_filter{suffix}"))
-    });
+    public_diagnostic(diagnostic, Some("embed_filter"))
+}
+
+/// Build the public diagnostic shape, optionally remapping a `filter…` path
+/// prefix to `remapped_filter_prefix…` (the embed endpoint's own field name).
+/// `None` leaves `filter_path` exactly as `validate_embed_overrides` produced
+/// it, which is already correct for a caller whose own parameter is `filter`.
+fn public_diagnostic(
+    diagnostic: EmbedValidationDiagnostic,
+    remapped_filter_prefix: Option<&str>,
+) -> BaseMemberDiagnostic {
+    let filter_path = diagnostic
+        .filter_path
+        .map(|path| match remapped_filter_prefix {
+            Some(replacement) => path
+                .strip_prefix("filter")
+                .map_or(path.clone(), |suffix| format!("{replacement}{suffix}")),
+            None => path,
+        });
     BaseMemberDiagnostic {
         scope: BaseMemberScope::Embed,
         field: diagnostic.field,
@@ -726,7 +755,7 @@ pub async fn evaluate_view(
     let filter = match params.filter.as_deref() {
         None => None,
         Some(raw) => Some(serde_json::from_str::<Filter>(raw).map_err(|_| {
-            invalid_embed_query(vec![EmbedValidationDiagnostic {
+            invalid_view_query(vec![EmbedValidationDiagnostic {
                 field: Some("filter".to_owned()),
                 filter_path: None,
                 message: "filter is not valid JSON".to_owned(),
@@ -742,7 +771,7 @@ pub async fn evaluate_view(
             group_by: params.group_by.as_deref(),
         },
     )
-    .map_err(invalid_embed_query)?;
+    .map_err(invalid_view_query)?;
     let group_by = group_override(params.group_by.as_deref());
 
     let spec = query_spec(

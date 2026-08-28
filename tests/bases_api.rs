@@ -1088,6 +1088,32 @@ async fn view_evaluation_rejects_a_malformed_request_filter() {
 }
 
 #[tokio::test]
+async fn view_evaluation_keeps_semantic_filter_diagnostics_addressed_to_the_filter_parameter() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed)
+        .build()
+        .into_server_and_temp();
+
+    // `rating` is a number property; `contains` is not a valid op for it.
+    let filter = serde_json::json!({ "field": "rating", "op": "contains", "value": "9" });
+    let res = server
+        .get("/api/vault/bases/reading/views/continues")
+        .add_query_param("filter", filter.to_string())
+        .await;
+    res.assert_status_bad_request();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["code"], "invalid_embed_query");
+    let diagnostic = &body["detail"]["diagnostics"][0];
+    assert_eq!(diagnostic["field"], "rating");
+    // The GET query parameter is literally named `filter`; the diagnostic
+    // must point back at it, not at `embed_filter` (the POST wire name).
+    assert_eq!(diagnostic["filter_path"], "filter.op");
+    let filter_path = diagnostic["filter_path"].as_str().unwrap();
+    assert!(filter_path.starts_with("filter"));
+    assert!(!filter_path.starts_with("embed_filter"));
+}
+
+#[tokio::test]
 async fn view_evaluation_honors_a_group_override() {
     let (server, _tmp) = ApiFixture::builder()
         .pre_index_seed(seed_with_grouped_shelf)
