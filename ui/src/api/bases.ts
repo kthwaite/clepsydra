@@ -14,6 +14,10 @@ import {
   nextWindowSize,
   queryIdentity,
 } from "#/components/bases/embed-query";
+import {
+  type GroupOverride,
+  groupOverrideParam,
+} from "#/components/bases/view-overrides";
 import { $api, fetchClient } from "./client";
 import { isApiError } from "./error";
 import {
@@ -210,6 +214,8 @@ export function usePageBaseProperties(uuid: string) {
 export interface ViewOverrides {
   sort?: string;
   dir?: "asc" | "desc";
+  filter?: BaseFilter;
+  groupBy?: GroupOverride;
 }
 
 export function useBaseView(
@@ -226,6 +232,11 @@ export function useBaseView(
         query: {
           sort: overrides.sort,
           dir: overrides.dir,
+          filter:
+            overrides.filter === undefined
+              ? undefined
+              : JSON.stringify(overrides.filter),
+          group_by: groupOverrideParam(overrides.groupBy),
         },
       },
     },

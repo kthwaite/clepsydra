@@ -160,4 +160,30 @@ describe("embedded Base configuration identity", () => {
     expect(empty.sort).toEqual([]);
     expect(explicit.sort).toEqual([{ field: "rating", dir: "desc" }]);
   });
+
+  it("carries a group override into the body and the query identity, not the predicate", () => {
+    const base = { base: "reading", view: "Continues" };
+    const grouped = {
+      ...base,
+      groupBy: { kind: "by", field: "status" } as const,
+    };
+    const flat = { ...base, groupBy: { kind: "flat" } as const };
+    expect(baseViewEvaluationBody(base, { limit: 50, offset: 0 })).toEqual({
+      limit: 50,
+      offset: 0,
+    });
+    expect(baseViewEvaluationBody(grouped, { limit: 50, offset: 0 })).toEqual({
+      group_by: "status",
+      limit: 50,
+      offset: 0,
+    });
+    expect(baseViewEvaluationBody(flat, { limit: 50, offset: 0 })).toEqual({
+      group_by: "",
+      limit: 50,
+      offset: 0,
+    });
+    expect(predicateIdentity(grouped)).toBe(predicateIdentity(base));
+    expect(queryIdentity(grouped)).not.toBe(queryIdentity(base));
+    expect(queryIdentity(flat)).not.toBe(queryIdentity(grouped));
+  });
 });

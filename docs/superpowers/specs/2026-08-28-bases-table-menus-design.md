@@ -104,8 +104,8 @@ Embedded data path: the controller composes the **effective filter** = `all([fen
 | `select`, `text`, `url`, `number`, system scalar (`kind`, `project`) | scalar | `eq value` | `<col> is <value>` (text/url quoted) |
 | `multi_select`, `tags`, `aliases` | array | one item per element, `contains e` | `<col> has <e>` |
 | `relation` | array of wikilinks | one item per element, `links_to e` | `<col> links to <e>` |
-| `date`, `created_at`, `updated_at`, `journal_date` | string | `eq <first 10 chars>` | `<col> is <date>` |
-| `datetime` | string | no equality item (presets only) | — |
+| `date`, `journal_date` | string | `eq <first 10 chars>` | `<col> is <date>` |
+| `datetime`, `created_at`, `updated_at` | string | no equality item (presets only) | — |
 | `word_count`, `id`, `title`, `path`, `body`, undeclared columns | — | none (row items only) | — |
 
 `datePresets` = the five relative operators with labels Today, This week, Past week, Next week, This month, offered as a **Filter by date ▸** submenu for `date`, `datetime`, `created_at`, `updated_at`, `journal_date`.
