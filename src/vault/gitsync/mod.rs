@@ -7,9 +7,12 @@
 //! ADR 0004.
 
 pub mod config_writer;
+pub mod conflict_copy;
+pub mod engine;
 pub mod git;
 pub mod init;
 pub mod managed_block;
+pub mod state;
 #[cfg(test)]
 pub(crate) mod testing;
 

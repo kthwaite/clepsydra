@@ -287,6 +287,15 @@ impl Git {
         self.run(&args).map(|_| ())
     }
 
+    /// `git add -A -- <paths>`: stage each path as the working tree has it,
+    /// including its removal when the file is gone. `add` alone refuses a
+    /// path that no longer exists.
+    pub fn add_including_removals(&self, paths: &[&str]) -> Result<(), GitError> {
+        let mut args = vec!["add", "-A", "--"];
+        args.extend_from_slice(paths);
+        self.run(&args).map(|_| ())
+    }
+
     /// `git commit -q -m <message>` under `author`'s identity for both the
     /// author and committer. Returns the new commit's sha.
     pub fn commit(&self, message: &str, author: &Author) -> Result<String, GitError> {

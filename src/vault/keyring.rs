@@ -354,3 +354,56 @@ fn set_owner_only_file(path: &Path) -> Result<(), KeyringError> {
 fn set_owner_only_file(_path: &Path) -> Result<(), KeyringError> {
     Ok(())
 }
+
+/// Re-tighten `.clepsydra/crypto` (0700) and its files (0600).
+///
+/// A git checkout recreates those paths with the process umask, so every
+/// sync that touches the tree calls this afterwards. A no-op when the
+/// directory is absent, and on platforms where the owner-only helpers are
+/// themselves no-ops.
+pub(crate) fn tighten_crypto_permissions(vault_root: &Path) -> Result<(), KeyringError> {
+    let dir = crypto_dir(vault_root);
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    set_owner_only_directory(&dir)?;
+    for entry in fs::read_dir(&dir).map_err(KeyringError::Io)? {
+        let entry = entry.map_err(KeyringError::Io)?;
+        if entry.file_type().map_err(KeyringError::Io)?.is_file() {
+            set_owner_only_file(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tighten_crypto_permissions_is_a_no_op_without_a_crypto_dir() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        tighten_crypto_permissions(tmp.path()).unwrap();
+        assert!(!crypto_dir(tmp.path()).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tighten_crypto_permissions_makes_the_dir_and_files_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = crypto_dir(tmp.path());
+        fs::create_dir_all(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let file = dir.join(KEYRING_FILE);
+        fs::write(&file, "keys = []\n").unwrap();
+        fs::set_permissions(&file, fs::Permissions::from_mode(0o644)).unwrap();
+
+        tighten_crypto_permissions(tmp.path()).unwrap();
+
+        let mode = |path: &Path| fs::metadata(path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode(&dir), 0o700);
+        assert_eq!(mode(&file), 0o600);
+    }
+}
