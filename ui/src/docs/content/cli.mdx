@@ -575,7 +575,9 @@ commands.
 address. If one answers, the sync runs *there* — inside the server's quiesce
 window, followed by its index rebuild — and this command prints the report it
 gets back. If nothing answers, the sync runs here, directly against the
-configured vault. The output is identical either way.
+configured vault. The output is identical either way. A sync over a large
+vault and a slow remote is minutes of honest work, so the server-side call is
+given a 15-minute budget rather than the ordinary 30-second one.
 
 Output — one aligned row per phase, with each Conflict Copy named under the
 merge row and each warning on its own line:
@@ -661,8 +663,13 @@ worktree:        clean | 3 uncommitted files | 1 unmerged file (!)
 conflict copies: 0
 last sync:       2026-08-28T18:20:11Z — committed 2 files; merged; pushed
                  | never
-autocommit:      idle | pending      (only when a server answered)
+autocommit:      idle | pending | pending (sync running)
 ```
+
+The `autocommit:` row appears only when a server answered — it is the one
+fact this command cannot read off the repository. It says `pending` while a
+change is waiting out its quiet period and `idle` otherwise, with
+` (sync running)` appended while a sync is actually in progress.
 
 `ahead/behind` reads `unknown (no upstream)` until the branch has been pushed
 once. `last sync` comes from this device's own record (`.git/clep-sync.toml`),

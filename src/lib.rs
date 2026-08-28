@@ -1134,10 +1134,27 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     let archive_view_config =
         api::archive::ArchiveViewConfig::from_server_settings(&settings.server)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    // Installed before the startup sync, which can take minutes: without it a
+    // Ctrl-C during that window would have nothing to talk to.
+    let handle = ServerHandle::new();
+    tokio::spawn(shutdown_signal(handle.clone()));
     if let Some(sync) = &state.sync {
-        match sync.run_full_sync(&state).await {
-            Ok(report) => info!("startup sync: {}", report.one_line()),
-            Err(e) => tracing::warn!("startup sync failed: {e}"),
+        // Bounded wait, not a bounded sync: on a timeout the window keeps
+        // running in its own task (gate held, watcher paused, both released by
+        // its own guards) and startup carries on rather than blocking the
+        // listener behind a slow remote.
+        match tokio::time::timeout(
+            crate::sync_runtime::STARTUP_SYNC_BUDGET,
+            sync.run_full_sync(&state),
+        )
+        .await
+        {
+            Ok(Ok(report)) => info!("startup sync: {}", report.one_line()),
+            Ok(Err(e)) => tracing::warn!("startup sync failed: {e}"),
+            Err(_) => info!(
+                "startup sync still running in the background after {}s; continuing startup",
+                crate::sync_runtime::STARTUP_SYNC_BUDGET.as_secs()
+            ),
         }
     }
     run_startup_reconcile(&state).await;
@@ -1154,8 +1171,6 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
         archive_view_config,
         settings.server.dev_mode,
     );
-    let handle = ServerHandle::new();
-    tokio::spawn(shutdown_signal(handle.clone()));
     let sync_tasks = state
         .sync
         .as_ref()
@@ -1165,15 +1180,20 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     let served =
         serve_with_optional_feed_scheduler(Arc::clone(&state), serve(app, &settings, handle)).await;
 
-    for task in sync_tasks {
-        task.abort();
-    }
-    if let Some(sync) = &state.sync {
+    // Cadence first, committer last: see `SyncTasks::abort_cadence`.
+    sync_tasks.abort_cadence();
+    // A server that never started serving has nothing of its own to push, and
+    // the most likely reason it failed is that another process already owns
+    // this vault's repository.
+    if served.is_ok()
+        && let Some(sync) = &state.sync
+    {
         match sync.shutdown_push(&state).await {
             Ok(report) => info!("shutdown sync: {}", report.one_line()),
             Err(e) => tracing::warn!("shutdown sync failed: {e}"),
         }
     }
+    sync_tasks.abort_all();
     served
 }
 

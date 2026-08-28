@@ -8,6 +8,7 @@
 
 use std::fmt::Write as _;
 use std::path::Path;
+use std::time::Duration;
 
 use crate::api::sync::{SyncReportDto, SyncStatusDto};
 use crate::mcp::client::{ApiCallError, ApiClient};
@@ -27,6 +28,14 @@ pub struct RenderedSync {
 
 /// Column the value of every `clep sync` row starts in.
 const REPORT_INDENT: &str = "           ";
+
+/// How long `clep sync` waits on the server's `POST /api/vault/sync`.
+///
+/// A sync is one HTTP request that holds the vault still while it commits,
+/// fetches, merges and pushes; on a large vault over a slow remote that is
+/// minutes of honest work. The client's ordinary 30 s budget would abandon the
+/// request — reporting a failure for a sync the server went on to finish.
+const SYNC_REQUEST_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 
 /// `Ok(Some(client))` when a server answers `/api/vault/uptime`, `Ok(None)`
 /// when nothing listens on the configured address, `Err` for any other
@@ -105,6 +114,7 @@ pub async fn run_sync() -> Result<RenderedSync, Box<dyn std::error::Error>> {
     let report = match reachable_server(&cwd).await? {
         Some(client) => {
             let value = client
+                .with_timeout(SYNC_REQUEST_TIMEOUT)?
                 .post_json("/api/vault/sync", &serde_json::json!({}))
                 .await?;
             serde_json::from_value::<SyncReportDto>(value)?

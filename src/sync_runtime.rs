@@ -29,6 +29,33 @@ use crate::vault::gitsync::{self, SyncError};
 /// gives up and exits anyway (D11).
 const SHUTDOWN_PUSH_BUDGET: Duration = Duration::from_secs(30);
 
+/// How long `serve` waits for the startup sync before it stops blocking on it
+/// and gets on with opening the listener (D11). The sync itself keeps running
+/// in its own task; only the wait is bounded.
+pub(crate) const STARTUP_SYNC_BUDGET: Duration = Duration::from_secs(120);
+
+/// Holds an [`AtomicBool`] set for exactly as long as it lives.
+///
+/// Every flag a sync window raises has to come back down on *every* exit —
+/// the early error returns, an unwind, and the future simply being dropped.
+/// Clearing by hand needs one line per exit and silently misses the last two,
+/// which is how a cancelled sync used to leave the watcher paused for the rest
+/// of the process's life.
+struct FlagGuard(Arc<AtomicBool>);
+
+impl FlagGuard {
+    fn set(flag: &Arc<AtomicBool>) -> Self {
+        flag.store(true, Ordering::SeqCst);
+        Self(Arc::clone(flag))
+    }
+}
+
+impl Drop for FlagGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Drives [`SyncEngine`] on behalf of the running server.
 pub struct SyncRuntime {
     engine: Arc<SyncEngine>,
@@ -43,8 +70,9 @@ pub struct SyncRuntime {
     dirty: tokio::sync::Notify,
     /// A change is waiting for its quiet period to elapse.
     pending: AtomicBool,
-    /// A full sync is running right now.
-    syncing: AtomicBool,
+    /// A full sync is running right now. `Arc` so a [`FlagGuard`] can own a
+    /// handle to it and clear it however the window ends.
+    syncing: Arc<AtomicBool>,
     last: parking_lot::Mutex<Option<SyncReport>>,
 }
 
@@ -105,39 +133,42 @@ impl SyncRuntime {
             sync_lock: tokio::sync::Mutex::new(()),
             dirty: tokio::sync::Notify::new(),
             pending: AtomicBool::new(false),
-            syncing: AtomicBool::new(false),
+            syncing: Arc::new(AtomicBool::new(false)),
             last: parking_lot::Mutex::new(None),
         })
     }
 
     /// One whole sync inside the quiesce window (D10): commit, fetch, merge,
     /// resolve, push — then, when the tree changed, rebuild the index once.
-    pub async fn run_full_sync(&self, state: &AppState) -> Result<SyncReport, SyncError> {
-        let _window = self.sync_lock.lock().await;
-        self.syncing.store(true, Ordering::SeqCst);
-        let result = self.run_full_sync_inner(state).await;
-        self.syncing.store(false, Ordering::SeqCst);
-        result
+    ///
+    /// The window runs in its own task, so dropping this future cannot cut it
+    /// in half. Axum drops a handler future the moment its client disconnects,
+    /// and `clep sync` posts through an HTTP client with a request timeout —
+    /// were the window inline, a slow sync would abandon a held mutation gate,
+    /// a paused watcher and a still-running `git` child. Cancelling the caller
+    /// now only stops it *waiting*: the vault is left settled either way.
+    pub async fn run_full_sync(
+        self: &Arc<Self>,
+        state: &Arc<AppState>,
+    ) -> Result<SyncReport, SyncError> {
+        let runtime = Arc::clone(self);
+        let state = Arc::clone(state);
+        match tokio::spawn(async move { runtime.run_full_sync_window(&state).await }).await {
+            Ok(result) => result,
+            Err(join) => Err(SyncError::Config(format!("sync task panicked: {join}"))),
+        }
     }
 
-    async fn run_full_sync_inner(&self, state: &AppState) -> Result<SyncReport, SyncError> {
+    async fn run_full_sync_window(&self, state: &AppState) -> Result<SyncReport, SyncError> {
+        let _window = self.sync_lock.lock().await;
+        let _syncing = FlagGuard::set(&self.syncing);
         let exclusion = state.mutation_coordinator.exclude_mutations().await;
-        state.watcher_paused.store(true, Ordering::SeqCst);
+        let _paused = FlagGuard::set(&state.watcher_paused);
 
         let engine = Arc::clone(&self.engine);
-        let outcome = tokio::task::spawn_blocking(move || engine.full_sync()).await;
-        let report = match outcome {
-            Ok(Ok(report)) => report,
-            Ok(Err(error)) => {
-                state.watcher_paused.store(false, Ordering::SeqCst);
-                drop(exclusion);
-                return Err(error);
-            }
-            Err(join) => {
-                state.watcher_paused.store(false, Ordering::SeqCst);
-                drop(exclusion);
-                return Err(SyncError::Config(format!("sync task panicked: {join}")));
-            }
+        let report = match tokio::task::spawn_blocking(move || engine.full_sync()).await {
+            Ok(result) => result?,
+            Err(join) => return Err(SyncError::Config(format!("sync task panicked: {join}"))),
         };
 
         if report.tree_changed() {
@@ -145,7 +176,6 @@ impl SyncRuntime {
         }
         // Whatever was outstanding is in the commit this sync just made.
         self.pending.store(false, Ordering::SeqCst);
-        state.watcher_paused.store(false, Ordering::SeqCst);
         drop(exclusion);
         *self.last.lock() = Some(report.clone());
         Ok(report)
@@ -223,12 +253,12 @@ impl SyncRuntime {
     /// marks the vault dirty from the change stream, one commits after the
     /// quiet period, and one (only with `interval_secs > 0`) runs scheduled
     /// full syncs.
-    pub fn spawn_background(self: &Arc<Self>, state: Arc<AppState>) -> Vec<JoinHandle<()>> {
-        let mut handles = Vec::with_capacity(3);
+    pub fn spawn_background(self: &Arc<Self>, state: Arc<AppState>) -> SyncTasks {
+        let mut others = Vec::with_capacity(2);
 
         let listener = Arc::clone(self);
         let listener_state = Arc::clone(&state);
-        handles.push(tokio::spawn(async move {
+        others.push(tokio::spawn(async move {
             let mut rx = listener_state.change_tx.subscribe();
             loop {
                 match rx.recv().await {
@@ -248,6 +278,11 @@ impl SyncRuntime {
                         tracing::debug!(
                             "sync: autocommit listener lagged {missed} notification(s)"
                         );
+                        // The dropped notifications were changes too, and one
+                        // of them may have been the last: mark dirty rather
+                        // than leave the vault uncommitted until the next one.
+                        listener.pending.store(true, Ordering::SeqCst);
+                        listener.dirty.notify_one();
                         rx = listener_state.change_tx.subscribe();
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
@@ -257,7 +292,7 @@ impl SyncRuntime {
 
         let committer = Arc::clone(self);
         let committer_state = Arc::clone(&state);
-        handles.push(tokio::spawn(async move {
+        let committer = tokio::spawn(async move {
             loop {
                 committer.dirty.notified().await;
                 // Extend the quiet period for as long as changes keep coming.
@@ -275,11 +310,11 @@ impl SyncRuntime {
                     Err(error) => tracing::warn!("sync: autocommit failed: {error}"),
                 }
             }
-        }));
+        });
 
         if let Some(interval) = self.interval {
             let scheduled = Arc::clone(self);
-            handles.push(tokio::spawn(async move {
+            others.push(tokio::spawn(async move {
                 loop {
                     tokio::time::sleep(interval).await;
                     match scheduled.run_full_sync(&state).await {
@@ -290,7 +325,46 @@ impl SyncRuntime {
             }));
         }
 
-        handles
+        SyncTasks {
+            committer: Some(committer),
+            others,
+        }
+    }
+}
+
+/// The cadence tasks [`SyncRuntime::spawn_background`] started, kept apart
+/// because shutdown has to stop them in one particular order.
+#[derive(Default)]
+pub struct SyncTasks {
+    /// The debounce loop — the only one that can be inside a `git commit`
+    /// when the server stops, so it is aborted last. `None` when the vault
+    /// has no sync runtime.
+    committer: Option<JoinHandle<()>>,
+    /// The change listener, plus the scheduled-sync loop when one exists.
+    others: Vec<JoinHandle<()>>,
+}
+
+impl SyncTasks {
+    /// Stop new work from starting: no more dirty marks, no more scheduled
+    /// syncs.
+    ///
+    /// The committer deliberately keeps running. Aborting it would drop its
+    /// `sync_lock` guard while the `git commit` it spawned runs on — freeing
+    /// the lock for a shutdown push that would then meet a live
+    /// `.git/index.lock`. Left alone, an autocommit under way holds the lock
+    /// until it is finished and the push simply queues behind it.
+    pub fn abort_cadence(&self) {
+        for task in &self.others {
+            task.abort();
+        }
+    }
+
+    /// Stop everything, once the shutdown push is done.
+    pub fn abort_all(&self) {
+        self.abort_cadence();
+        if let Some(committer) = &self.committer {
+            committer.abort();
+        }
     }
 }
 
@@ -556,9 +630,7 @@ pub(crate) mod tests {
             before,
             "nothing is committed before the quiet period elapses"
         );
-        for handle in handles {
-            handle.abort();
-        }
+        handles.abort_all();
     }
 
     #[tokio::test]
@@ -601,9 +673,60 @@ pub(crate) mod tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
-        for handle in handles {
-            handle.abort();
+        handles.abort_all();
+    }
+
+    /// Axum drops a handler future the moment its client disconnects, and the
+    /// CLI posts through an HTTP client with a request timeout. Neither may
+    /// abandon a half-open window: the gate must be released, the watcher
+    /// un-paused and the commit made regardless.
+    #[tokio::test]
+    async fn an_aborted_caller_still_finishes_the_sync_window() {
+        let (state, repos) = synced_state().await;
+        let runtime = Arc::clone(state.sync.as_ref().unwrap());
+        testing::write(
+            &repos.a,
+            "cancelled.md",
+            &page("0192b6c0-0000-7000-8000-0000000000f1", "Cancelled"),
+        );
+        let before = testing::git(&repos.a).log_count().unwrap();
+
+        // Hold the gate so the window is provably still queued when the
+        // caller goes away, rather than racing a sync that already finished.
+        let exclusion = state.mutation_coordinator.exclude_mutations().await;
+        let caller = tokio::spawn({
+            let state = Arc::clone(&state);
+            async move { runtime.run_full_sync(&state).await }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        caller.abort();
+        drop(exclusion);
+
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while testing::git(&repos.a).log_count().unwrap() == before {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the window did not finish after its caller was dropped"
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
+        let runtime = state.sync.as_ref().unwrap();
+        while state.watcher_paused.load(Ordering::SeqCst) || runtime.syncing() {
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the window left the watcher paused or `syncing` set"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        // The gate is free again, so an ordinary mutation can proceed.
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            state
+                .mutation_coordinator
+                .lock_paths(&[VaultPath::new("cancelled.md").unwrap()]),
+        )
+        .await
+        .expect("the abandoned window never released the mutation gate");
     }
 
     #[tokio::test]
