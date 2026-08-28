@@ -54,7 +54,10 @@ fn setup_archive_view_server() -> (TestServer, TempDir, Arc<AppState>) {
             cert_path: None,
             key_path: None,
         },
-        public_origins: Vec::new(),
+        public_origins: vec![
+            "https://clepsydra.example".to_string(),
+            "http://tunnel.example:8080".to_string(),
+        ],
     };
     let view_config = ArchiveViewConfig::from_server_settings(&server_settings).unwrap();
     let app = Router::new()
@@ -1116,6 +1119,76 @@ async fn archive_view_serves_html_with_configuration_bound_sandbox() {
             .map(|value| value.to_str().unwrap()),
         Some("attachment"),
         "the general CAS route must keep active content downloadable"
+    );
+}
+
+#[tokio::test]
+async fn archive_view_names_the_listed_origin_the_browser_addressed() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let hash = store_blob(&state, b"<html><body>hi</body></html>", "text/html");
+    let path = format!("/api/vault/archive/view/{hash}");
+    let csp_of = |response: &axum_test::TestResponse| {
+        response
+            .headers()
+            .get("content-security-policy")
+            .expect("view responses carry a CSP")
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let bind = "https://vault.example:7443";
+
+    let listed = server
+        .get(&path)
+        .add_header("host", "clepsydra.example")
+        .await;
+    listed.assert_status(StatusCode::OK);
+    let csp = csp_of(&listed);
+    assert_eq!(csp.matches("https://clepsydra.example").count(), 4, "{csp}");
+    assert!(!csp.contains("vault.example"), "{csp}");
+    assert!(
+        !csp.contains("tunnel.example"),
+        "other listed origins must not widen the policy: {csp}"
+    );
+
+    let default_port = server
+        .get(&path)
+        .add_header("host", "clepsydra.example:443")
+        .await;
+    assert_eq!(
+        csp_of(&default_port),
+        csp,
+        "explicit default port is the same origin"
+    );
+
+    let wrong_port = server.get(&path).add_header("host", "tunnel.example").await;
+    let csp = csp_of(&wrong_port);
+    assert_eq!(
+        csp.matches(bind).count(),
+        4,
+        "port mismatch falls back: {csp}"
+    );
+
+    let injected = server
+        .get(&path)
+        .add_header("host", "clepsydra.example; img-src https://evil.example")
+        .await;
+    let csp = csp_of(&injected);
+    assert!(
+        !csp.contains("evil.example"),
+        "request bytes reached the policy: {csp}"
+    );
+    assert_eq!(csp.matches(bind).count(), 4, "{csp}");
+
+    let head = server
+        .method(axum::http::Method::HEAD, &path)
+        .add_header("host", "clepsydra.example")
+        .await;
+    head.assert_status(StatusCode::OK);
+    assert_eq!(
+        csp_of(&head),
+        csp_of(&listed),
+        "HEAD selects the same policy as GET"
     );
 }
 

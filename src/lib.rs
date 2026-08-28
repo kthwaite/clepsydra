@@ -1062,6 +1062,10 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     let archive_view_config =
         api::archive::ArchiveViewConfig::from_server_settings(&settings.server)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    tracing::info!(
+        origins = %archive_view_config.allowed_origins().collect::<Vec<_>>().join(", "),
+        "archive snapshot view CSP origins (bind origin first)"
+    );
     run_startup_reconcile(&state).await;
     let _watcher = spawn_sync_watcher(&state)?;
     // `max_request_size_mb` budgets DECODED resource bytes, but the request

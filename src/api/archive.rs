@@ -8,7 +8,7 @@ use axum::Json;
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Extension, Path, Query, State};
-use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, Uri, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use bytes::Bytes;
@@ -521,6 +521,19 @@ fn validate_http_url(field: &str, raw: &str) -> Result<(), ApiError> {
     }
 }
 
+/// The host the browser addressed: the `Host` header, or the request-target
+/// authority for HTTP/2 requests, which carry `:authority` instead.
+fn request_host(headers: &HeaderMap, uri: &Uri) -> Option<String> {
+    headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .or_else(|| {
+            uri.authority()
+                .map(|authority| authority.as_str().to_owned())
+        })
+}
+
 fn sandbox_headers(config: &ArchiveViewConfig, host: Option<&str>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html"));
@@ -594,6 +607,7 @@ fn admitted_body(data: Vec<u8>, permit: tokio::sync::OwnedSemaphorePermit) -> Bo
 fn snapshot_response_with(
     snapshot: LoadedSnapshot,
     config: &ArchiveViewConfig,
+    host: Option<&str>,
     body_permit: Option<tokio::sync::OwnedSemaphorePermit>,
 ) -> Response {
     match snapshot {
@@ -609,7 +623,7 @@ fn snapshot_response_with(
                 Some(permit) => admitted_body(data, permit),
                 None => Body::from(data),
             };
-            let mut headers = sandbox_headers(config, None);
+            let mut headers = sandbox_headers(config, host);
             headers.insert(
                 ARCHIVE_UNCAPTURED_RESOURCE_COUNT_HEADER,
                 HeaderValue::from_str(&uncaptured_resource_count.to_string())
@@ -1081,7 +1095,10 @@ pub async fn view_snapshot(
     State(state): State<Arc<AppState>>,
     Extension(config): Extension<ArchiveViewConfig>,
     Path(hash): Path<String>,
+    uri: Uri,
+    headers: HeaderMap,
 ) -> Result<Response, ApiError> {
+    let host = request_host(&headers, &uri);
     let permit = acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await?;
     let cas = Arc::clone(&state.cas);
     let worker_hash = hash.clone();
@@ -1097,7 +1114,12 @@ pub async fn view_snapshot(
     .map_err(|error| ApiError::internal(format!("archive snapshot worker failed: {error}")))?
     .map_err(ApiError::from)?;
 
-    Ok(snapshot_response_with(snapshot, &config, Some(permit)))
+    Ok(snapshot_response_with(
+        snapshot,
+        &config,
+        host.as_deref(),
+        Some(permit),
+    ))
 }
 
 async fn run_head_inspection<T, F>(inspection: F) -> Result<T, ApiError>
@@ -1145,7 +1167,10 @@ pub async fn head_snapshot(
     State(state): State<Arc<AppState>>,
     Extension(config): Extension<ArchiveViewConfig>,
     Path(hash): Path<String>,
+    uri: Uri,
+    headers: HeaderMap,
 ) -> Response {
+    let host = request_host(&headers, &uri);
     let permit = match acquire_archive_view_permit(Arc::clone(&state.archive_view_semaphore)).await
     {
         Ok(permit) => permit,
@@ -1163,7 +1188,7 @@ pub async fn head_snapshot(
     })
     .await;
     without_body(match snapshot {
-        Ok(Ok(snapshot)) => snapshot_response_with(snapshot, &config, None),
+        Ok(Ok(snapshot)) => snapshot_response_with(snapshot, &config, host.as_deref(), None),
         Ok(Err(SnapshotLoadError::Retrieval(error))) | Err(error) => error.into_response(),
         Ok(Err(SnapshotLoadError::Transformation(error))) => transformation_error_response(error),
     })
