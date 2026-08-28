@@ -838,7 +838,7 @@ describe("BaseTableView", () => {
     // The NULL bucket renders as the labelled empty group.
     expect(screen.getByText("(empty)")).toBeTruthy();
     // Grouped output never gets a flat-view Totals footer.
-    expect(screen.queryByText("Totals")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Totals" })).toBeNull();
   });
 
   it("renders a Totals footer for flat output with configured aggregates", () => {
@@ -873,21 +873,17 @@ describe("BaseTableView", () => {
       },
     });
 
-    const footer = screen.getByText("Totals").closest("footer");
-    expect(footer).not.toBeNull();
-    expect(footer).toHaveAttribute("aria-label", "Totals");
+    const footer = screen.getByRole("group", { name: "Totals" });
+    expect(within(footer).getByText(/count\s*2/)).toBeInTheDocument();
     expect(
-      within(footer as HTMLElement).getByText(/count\s*2/),
-    ).toBeInTheDocument();
-    expect(
-      within(footer as HTMLElement).getByText(/percent_filled\(rating\)\s*50/),
+      within(footer).getByText(/percent_filled\(rating\)\s*50/),
     ).toBeInTheDocument();
   });
 
   it("renders no Totals footer when the active view has no aggregates", () => {
     renderView({});
 
-    expect(screen.queryByText("Totals")).toBeNull();
+    expect(screen.queryByRole("group", { name: "Totals" })).toBeNull();
     expect(document.querySelector("footer")).toBeNull();
   });
 

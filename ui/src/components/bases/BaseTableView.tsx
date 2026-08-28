@@ -1113,8 +1113,9 @@ export const BaseTableView = forwardRef<
             )}
           </ScrollViewport>
           {output?.shape === "flat" && (view?.aggregates?.length ?? 0) > 0 ? (
-            // biome-ignore lint/a11y/useAriaPropsSupportedByRole: nested under this section's <section>, footer's contextual role is "generic" per HTML-AAM (not "contentinfo"), so aria-label falls outside the rule's role-specific allowlist even though it still reads correctly as this landmark's name.
+            // biome-ignore lint/a11y/useSemanticElements: this is a footer-style totals summary, not a form — a <fieldset> would misrepresent it as a form-control group, so <footer role="group"> keeps footer semantics while role="group" gives it a legitimately nameable ARIA role.
             <footer
+              role="group"
               aria-label="Totals"
               className="mt-1 flex flex-wrap items-baseline gap-2 border-t border-rule pt-1"
             >
