@@ -67,7 +67,7 @@ import { useOptionalEncryptionActions } from "#/crypto/EncryptionProvider";
 import { diagnoseConversationMarkdown } from "#/editor/conversation/marker";
 import { ConversationPresentationProvider } from "#/editor/conversation/presentation";
 import { insertConversationTurn } from "#/editor/conversation/transforms";
-import { PageEditorHeader } from "#/editor/PageEditorHeader";
+import { PageEditorHeader, RawMarkdownButton } from "#/editor/PageEditorHeader";
 import { SaveIndicator } from "#/editor/SaveIndicator";
 import { SlateEditor } from "#/editor/SlateEditor";
 import type { CustomEditor } from "#/editor/types";
@@ -1031,6 +1031,19 @@ export function Folio({ tabId, path }: FolioProps) {
     </>
   );
 
+  // Kind-specific facts (a meeting's occurred/attendees) belong beside the
+  // title, not in the META rail: they are content, not sidebar metadata.
+  const HeaderExtras = presentation.headerExtras;
+  const headerExtras = HeaderExtras ? (
+    <HeaderExtras
+      path={path}
+      tabId={tabId}
+      isDraft={editor.isDraft}
+      tags={editableTags}
+      onTagsChange={editor.setTags}
+    />
+  ) : null;
+
   const document = (
     <>
       {folioReadOnly ? (
@@ -1042,6 +1055,11 @@ export function Folio({ tabId, path }: FolioProps) {
           encrypted={encrypted}
           archive={bodyProtected ? editor.archive : null}
           archiveTagEditor={archiveTagEditor}
+          onOpenRawMarkdown={
+            rawMarkdownAvailable && !rawMarkdownSession
+              ? openRawMarkdown
+              : undefined
+          }
         />
       ) : (
         <div className="mt-4">
@@ -1065,9 +1083,15 @@ export function Folio({ tabId, path }: FolioProps) {
             onRequestLock={
               rawMarkdownSession ? undefined : encryptionActions?.lock
             }
+            onOpenRawMarkdown={
+              rawMarkdownAvailable && !rawMarkdownSession
+                ? openRawMarkdown
+                : undefined
+            }
           />
         </div>
       )}
+      {headerExtras}
       {folioProperties}
       {isAiConversation ? (
         <>
@@ -1112,14 +1136,6 @@ export function Folio({ tabId, path }: FolioProps) {
           Ingredients, Steps, and Notes once and in that order as headings of
           one consistent level, with bullet ingredients and numbered steps.
           Components may be grouped under headings one level deeper.
-        </div>
-      ) : null}
-
-      {rawMarkdownAvailable && !rawMarkdownSession ? (
-        <div className="mt-3 flex justify-end">
-          <Button variant="secondary" size="sm" onPress={openRawMarkdown}>
-            Raw Markdown
-          </Button>
         </div>
       ) : null}
 
@@ -1754,6 +1770,7 @@ function ReadOnlyPageHeader({
   archive,
   archiveTagEditor,
   encrypted,
+  onOpenRawMarkdown,
 }: {
   path: string;
   title: string;
@@ -1762,6 +1779,7 @@ function ReadOnlyPageHeader({
   archive: NonNullable<PageMeta["archive"]> | null;
   archiveTagEditor?: ArchiveTagEditorProps;
   encrypted: boolean;
+  onOpenRawMarkdown?: () => void;
 }) {
   const displayTitle = title || path.split("/").pop() || path;
   return (
@@ -1774,7 +1792,16 @@ function ReadOnlyPageHeader({
           encrypted
         </span>
       ) : null}
-      <h1 className="w-full font-heading text-2xl font-bold">{displayTitle}</h1>
+      <div className="flex items-start gap-2">
+        <h1 className="min-w-0 w-full flex-1 font-heading text-2xl font-bold">
+          {displayTitle}
+        </h1>
+        {onOpenRawMarkdown ? (
+          <div className="flex shrink-0 items-center gap-1 pt-1.5 max-md:pt-0">
+            <RawMarkdownButton onPress={onOpenRawMarkdown} />
+          </div>
+        ) : null}
+      </div>
       {archive?.snapshot_hash ? (
         <Link
           to="/archive/$"

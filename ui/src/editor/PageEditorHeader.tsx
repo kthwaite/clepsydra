@@ -1,5 +1,8 @@
+import { FileCode } from "lucide-react";
 import { useState } from "react";
+import { Button, TooltipTrigger } from "react-aria-components";
 import { TagInput } from "#/components/ui/tag-input";
+import { VesselTooltip } from "#/components/ui/tooltip";
 
 interface PageEditorHeaderProps {
   path: string;
@@ -22,11 +25,32 @@ interface PageEditorHeaderProps {
   readOnlyTitle?: string;
   encrypted?: boolean;
   onRequestLock?: () => Promise<boolean>;
+  /** When set, renders a "Raw Markdown" icon button beside the title. */
+  onOpenRawMarkdown?: () => void;
 }
 
 /** Last path segment, e.g. "notes/ideas/my-note.md" → "my-note.md". */
 function filename(path: string): string {
   return path.split("/").pop() || path;
+}
+
+/**
+ * The Raw Markdown toggle: a quiet mono icon button with a Vessel tooltip.
+ * Shared by `PageEditorHeader` and Folio's `ReadOnlyPageHeader`.
+ */
+export function RawMarkdownButton({ onPress }: { onPress: () => void }) {
+  return (
+    <TooltipTrigger delay={300} closeDelay={0}>
+      <Button
+        aria-label="Raw Markdown"
+        onPress={onPress}
+        className="inline-flex h-7 w-7 cursor-pointer items-center justify-center border border-transparent bg-transparent text-ink-mute outline-none transition-colors data-[hovered]:text-accent data-[focus-visible]:text-accent data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-accent max-md:h-11 max-md:w-11"
+      >
+        <FileCode size={14} />
+      </Button>
+      <VesselTooltip>Raw Markdown</VesselTooltip>
+    </TooltipTrigger>
+  );
 }
 
 export function PageEditorHeader({
@@ -47,6 +71,7 @@ export function PageEditorHeader({
   readOnlyTitle,
   encrypted = false,
   onRequestLock,
+  onOpenRawMarkdown,
 }: PageEditorHeaderProps) {
   const [locking, setLocking] = useState(false);
   const [lockError, setLockError] = useState<string | null>(null);
@@ -93,28 +118,35 @@ export function PageEditorHeader({
           ⁂ {lockError}
         </p>
       ) : null}
-      {readOnlyTitle !== undefined ? (
-        <h1 className="w-full font-heading text-2xl font-bold">
-          {readOnlyTitle}
-        </h1>
-      ) : (
-        <textarea
-          rows={1}
-          aria-label="Page title"
-          value={title}
-          onChange={(event) =>
-            onTitleChange(event.currentTarget.value.replace(/[\r\n]/g, ""))
-          }
-          onBlur={flush}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.nativeEvent.isComposing) {
-              event.preventDefault();
+      <div className="flex items-start gap-2">
+        {readOnlyTitle !== undefined ? (
+          <h1 className="min-w-0 w-full flex-1 font-heading text-2xl font-bold">
+            {readOnlyTitle}
+          </h1>
+        ) : (
+          <textarea
+            rows={1}
+            aria-label="Page title"
+            value={title}
+            onChange={(event) =>
+              onTitleChange(event.currentTarget.value.replace(/[\r\n]/g, ""))
             }
-          }}
-          placeholder={filename(path)}
-          className="field-sizing-content block w-full max-w-full resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground max-md:min-h-11 md:field-sizing-fixed md:whitespace-nowrap md:break-normal md:overflow-x-auto"
-        />
-      )}
+            onBlur={flush}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                event.preventDefault();
+              }
+            }}
+            placeholder={filename(path)}
+            className="field-sizing-content block min-w-0 w-full max-w-full flex-1 resize-none overflow-hidden whitespace-pre-wrap break-words bg-transparent font-heading text-2xl font-bold outline-none placeholder:text-muted-foreground max-md:min-h-11 md:field-sizing-fixed md:whitespace-nowrap md:break-normal md:overflow-x-auto"
+          />
+        )}
+        {onOpenRawMarkdown ? (
+          <div className="flex shrink-0 items-center gap-1 pt-1.5 max-md:pt-0">
+            <RawMarkdownButton onPress={onOpenRawMarkdown} />
+          </div>
+        ) : null}
+      </div>
 
       <TagInput
         label="Tags"
