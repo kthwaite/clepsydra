@@ -50,6 +50,7 @@ file's directory without `~` expansion. See [Configuration](/docs/configuration)
 | `clep relabel` | optional `--dry-run` |
 | `clep migrate` | optional `--write`; dry run by default |
 | `clep cas` | nested `backfill` or `rebuild` command |
+| `clep codes` | nested `migrate` command |
 | `clep register-url` | optional `--obsidian`; macOS only |
 | `clep grep` | `<QUERY>`, `-n/--limit <N>` (default `20`), `--raw`, `--json` |
 | `clep tree` | optional `--json` |
@@ -425,6 +426,56 @@ failures also return `1`.
 ```bash
 clep cas rebuild
 clep cas rebuild --write
+```
+
+## `clep codes`
+
+```text
+clep codes <COMMAND>
+```
+
+This parent command requires one nested command. It hosts utilities for the
+Task/Cycle petname code scheme (`TSK-brave-finch-7q3zd` / `S-calm-heron-2xm9p`,
+ADR 0003).
+
+## `clep codes migrate`
+
+```text
+clep codes migrate [--write]
+```
+
+One-time migration from the legacy sequential code scheme (`TSK-0072`, `S-3`)
+to petname codes. Opens the configured vault and fully derived index directly
+— **stop `clep serve` first**, or its own in-memory index falls out of sync
+with the renames.
+
+Two passes. First, every TASK or CYCLE page whose filename stem is not
+already a valid petname code is renamed to a freshly minted one; inbound
+`[[wikilinks]]` are rewritten by the move planner, the same mechanism `clep
+relabel` uses. Second, every plain-text legacy token (`TSK-0072`, `S-3`) is
+rewritten vault-wide, including inside frontmatter values such as
+`cycle = "S-3"`, which the move planner does not touch — using the map of
+legacy code to newly minted code built by the first pass. A legacy token with
+no corresponding renamed page (for example a typo, or a code for a page that
+no longer exists) is left as-is and reported as a warning. A page with merge
+conflict markers, or an encrypted page, is skipped with a warning rather than
+rewritten. The default is a dry run — codes are minted and the full plan is
+reported, but nothing on disk changes; `--write` applies it.
+
+This is a one-time, **irreversible clean break**: after `--write` runs, no
+code in the legacy format is recognized anywhere in Clepsydra, and there is
+no alias mapping old codes to new ones. A legacy code recorded outside the
+vault (an external link, a chat log, a paper notebook) no longer resolves to
+anything. Commit or back up the vault first.
+
+The command prints each rename, each rewrite with its token count, and every
+warning, then a summary line. It returns `0` when there are no warnings and
+`1` when any warning is reported, even if other pages were renamed or
+rewritten. Config or vault-open failures also return `1`.
+
+```bash
+clep codes migrate            # dry run
+clep codes migrate --write    # rename and rewrite in place
 ```
 
 ## `clep register-url`

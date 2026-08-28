@@ -55,6 +55,7 @@ pub mod path;
 pub mod projection;
 pub mod property_value;
 pub mod query;
+pub mod recode;
 pub mod reconcile;
 pub mod reference_issues;
 pub mod reference_repair;
