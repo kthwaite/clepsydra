@@ -93,6 +93,7 @@ export function TaskingScreen({
   const cycleModal = useBoardStore((s) => s.cycleModal);
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const setOpFilter = useBoardStore((s) => s.setOpFilter);
+  const showCompleted = useBoardStore((s) => s.showCompleted);
 
   const {
     projects,
@@ -102,6 +103,7 @@ export function TaskingScreen({
     activeOp,
     visibleTasks,
     opFilteredCount,
+    hiddenCompletedCount,
     editTask,
   } = useMemo(() => {
     if (!data) {
@@ -113,12 +115,21 @@ export function TaskingScreen({
         activeOp: null,
         visibleTasks: [],
         opFilteredCount: 0,
+        hiddenCompletedCount: 0,
         editTask: null,
       };
     }
 
     const scopes = deriveProjectScopes(data.operations, data.tasks);
-    const opFiltered = filterTasks(data.tasks, opFilter);
+    const scoped = filterTasks(data.tasks, opFilter);
+    // List mode hides SEALED tasks unless the header toggle is on. The
+    // exclusion sits before the FilterBar so its N OF M strip counts only
+    // what the list can show. Kanban keeps its own closed-cycle rule
+    // (visibleInKanban); cycle and timeline modes are untouched.
+    const hideCompleted = mode === "backlog" && !showCompleted;
+    const opFiltered = hideCompleted
+      ? scoped.filter((t) => t.status !== "SEALED")
+      : scoped;
     const filtered = applyClientFilter(
       opFiltered,
       filterState,
@@ -138,11 +149,12 @@ export function TaskingScreen({
       activeOp: active?.op ?? null,
       visibleTasks: filtered,
       opFilteredCount: opFiltered.length,
+      hiddenCompletedCount: scoped.length - opFiltered.length,
       editTask: editTaskId
         ? (data.tasks.find((t) => t.id === editTaskId) ?? null)
         : null,
     };
-  }, [data, opFilter, filterState, editTaskId]);
+  }, [data, opFilter, filterState, editTaskId, mode, showCompleted]);
 
   // Self-heal a stale persisted opFilter: if the filter names a scope that no
   // longer exists (project renamed/deleted since last session), the board
@@ -289,6 +301,7 @@ export function TaskingScreen({
             activeOp={activeOp}
             filteredCount={visibleTasks.length}
             opFilteredCount={opFilteredCount}
+            hiddenCompletedCount={hiddenCompletedCount}
             filterFields={filterFields}
             filterState={filterState}
             onFilterChange={onFilterChange}

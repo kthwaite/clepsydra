@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::api::AppState;
 use crate::api::error::ApiError;
 use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
+use crate::vault::canonical::CanonicalName;
 use crate::vault::kind::Kind;
 use crate::vault::path::VaultPath;
 use crate::vault::query::body_excerpt;
@@ -56,37 +57,41 @@ pub(crate) async fn get_board(
                 })
                 .collect();
 
-            // --- Operations (PROJECT pages with board: true) -------------------
+            // --- Operations (PROJECT pages) ------------------------------------
             let mut op_stmt = conn.prepare(
-                "SELECT id, path, title, meta_json, project \
+                "SELECT id, path, title, canonical_name, meta_json, project \
                    FROM pages \
                   WHERE kind = ?1 \
                   ORDER BY path",
             )?;
 
-            let op_rows: Vec<(String, String, Option<String>, String, Option<String>)> = op_stmt
+            let op_rows: Vec<OperationRow> = op_stmt
                 .query_map(params![Kind::Project.as_str()], |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
                         row.get::<_, Option<String>>(2)?,
                         row.get::<_, String>(3)?,
-                        row.get::<_, Option<String>>(4)?,
+                        row.get::<_, String>(4)?,
+                        row.get::<_, Option<String>>(5)?,
                     ))
                 })?
                 .collect::<Result<_, _>>()?;
 
-            let mut operations: Vec<BoardOperation> = Vec::new();
-            for (id_str, path, title, meta_json, project) in op_rows {
-                // Parse meta_json to read the optional `board:` opt-out flag
+            // One operation per slug key (the `project` slug, or the page code
+            // for a slug-less page admitted by `board: true`). Rows arrive in
+            // path order, so a rank tie keeps the earlier path.
+            let mut best: HashMap<String, (u8, BoardOperation)> = HashMap::new();
+            for (id_str, path, title, canonical_name, meta_json, project) in op_rows {
                 let meta: serde_json::Value =
                     serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
                 // `board:` is opt-out, not opt-in: every PROJECT page is an
                 // operation unless its frontmatter says `board: false`. An
                 // absent key (the common case — onboarding never sets one)
-                // and `board: true` both list the page.
-                if meta.get("board") == Some(&serde_json::Value::Bool(false)) {
+                // and `board: true` both list the page, slug or not.
+                let board_flag = meta.get("board").and_then(serde_json::Value::as_bool);
+                if board_flag == Some(false) {
                     continue;
                 }
 
@@ -115,20 +120,36 @@ pub(crate) async fn get_board(
                 let note = extra_str(&meta, "note");
                 let dossier = extract_link_or_str(&meta, "link");
 
-                operations.push(BoardOperation {
-                    id,
-                    path,
-                    code,
-                    name,
-                    health,
-                    lead,
-                    target,
-                    note,
-                    dossier,
-                    project,
-                });
+                // Preference within a slug: `board: true`, then the page whose
+                // canonical name equals the slug, then path order.
+                let rank = operation_rank(board_flag, project.as_deref(), &canonical_name);
+                let key = project.clone().unwrap_or_else(|| code.clone());
+                if best.get(&key).is_some_and(|(held, _)| *held <= rank) {
+                    continue;
+                }
+
+                best.insert(
+                    key,
+                    (
+                        rank,
+                        BoardOperation {
+                            id,
+                            path,
+                            code,
+                            name,
+                            health,
+                            lead,
+                            target,
+                            note,
+                            dossier,
+                            project,
+                        },
+                    ),
+                );
             }
-            operations.sort_by(|a, b| a.code.cmp(&b.code));
+            let mut operations: Vec<BoardOperation> =
+                best.into_values().map(|(_, op)| op).collect();
+            operations.sort_by(|a, b| a.code.cmp(&b.code).then_with(|| a.path.cmp(&b.path)));
 
             // --- Cycles (CYCLE pages) ------------------------------------------
             let mut cy_stmt = conn.prepare(
@@ -201,6 +222,30 @@ pub(crate) async fn get_board(
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
     Ok(Json(result))
+}
+
+/// Row tuple for the operation query:
+/// `(id, path, title, canonical_name, meta_json, project)`.
+type OperationRow = (
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+    Option<String>,
+);
+
+/// Rank a PROJECT page among the pages sharing its slug key: lower wins.
+/// `board: true` (0) beats a canonical name equal to the slug (1), which
+/// beats everything else (2). Ties fall back to path order at the call site.
+fn operation_rank(board_flag: Option<bool>, project: Option<&str>, canonical_name: &str) -> u8 {
+    if board_flag == Some(true) {
+        0
+    } else if project.is_some_and(|slug| CanonicalName::new(slug).as_str() == canonical_name) {
+        1
+    } else {
+        2
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -539,7 +584,17 @@ fn count_checks(conn: &rusqlite::Connection, page_id: &str) -> Result<[u32; 2], 
 mod tests {
     use rusqlite::Connection;
 
-    use super::count_checks_by_page;
+    use super::{count_checks_by_page, operation_rank};
+
+    #[test]
+    fn operation_rank_prefers_board_flag_then_canonical_name() {
+        assert_eq!(operation_rank(Some(true), None, "anything"), 0);
+        assert_eq!(operation_rank(Some(true), Some("atlas"), "other"), 0);
+        assert_eq!(operation_rank(None, Some("atlas"), "atlas"), 1);
+        assert_eq!(operation_rank(None, Some("Atlas"), "atlas"), 1);
+        assert_eq!(operation_rank(None, Some("atlas"), "atlas hub"), 2);
+        assert_eq!(operation_rank(None, None, "atlas"), 2);
+    }
 
     #[test]
     fn checklist_counts_are_aggregated_for_multiple_pages() {
