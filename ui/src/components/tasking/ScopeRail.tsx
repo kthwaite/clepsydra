@@ -3,7 +3,7 @@ import type { BoardCycle, BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { useBoardStore } from "#/store/board";
 import { CycleStatePip, fmtCycleWindow, HealthDot } from "./board-constants";
-import type { ProjectScope } from "./board-projects";
+import { type ProjectScope, scopeNameIsRedundant } from "./board-projects";
 
 // ── UNFILED detection ────────────────────────────────────────────────────────
 
@@ -221,12 +221,14 @@ export function ScopeRail({ projects, cycles, tasks }: ScopeRailProps) {
               <span className="text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
                 {scope.code}
               </span>
-              <span
-                className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.04em] text-[var(--ink-mute)]"
-                title={scope.name}
-              >
-                {scope.name}
-              </span>
+              {!scopeNameIsRedundant(scope) && (
+                <span
+                  className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.04em] text-[var(--ink-mute)]"
+                  title={scope.name}
+                >
+                  {scope.name}
+                </span>
+              )}
               <span
                 className={cn(
                   "ml-auto min-w-[20px] flex-shrink-0 border border-[var(--rule)] px-[4px] text-center text-[var(--fs-xs)] tabular-nums tracking-[0.08em] text-[var(--ink-mute)]",

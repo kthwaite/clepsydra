@@ -100,12 +100,15 @@ pub(crate) async fn get_board(
                     Err(_) => continue,
                 };
 
-                // code = filename stem, uppercased
+                // code = the declared project slug, uppercased. The filename
+                // stem is only a fallback for slug-less pages: ADR-0002 names
+                // (`yyyymmdd.slug.shortid`) make a poor code, and the slug is
+                // what tasks and the Scope rail key on anyway.
                 let stem = path_stem(&path);
-                let code = stem.to_ascii_uppercase();
+                let code = project.as_deref().unwrap_or(stem).to_ascii_uppercase();
 
-                // name = title or stem
-                let name = title.unwrap_or_else(|| stem.to_ascii_uppercase());
+                // name = title or code
+                let name = title.unwrap_or_else(|| code.clone());
 
                 // Absent `health:` frontmatter normalizes to "GREEN" by design —
                 // the UI treats health as always-present decoration.
