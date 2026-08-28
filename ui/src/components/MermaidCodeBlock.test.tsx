@@ -1,6 +1,13 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MermaidCodeBlock } from "#/components/MermaidCodeBlock";
 
 const { renderMock } = vi.hoisted(() => ({ renderMock: vi.fn() }));
@@ -25,6 +32,23 @@ beforeEach(() => {
   renderMock.mockReset();
   renderMock.mockResolvedValue({ svg: "<svg data-testid='svg'></svg>" });
 });
+
+afterEach(() => {
+  // Unmount before restoring the theme: a live subscriber would answer the
+  // class change with a fresh render outside act.
+  cleanup();
+  document.documentElement.classList.remove("paper");
+});
+
+/** Renders the block, waits for the diagram, then opens the lightbox. */
+async function expandDiagram(user: ReturnType<typeof userEvent.setup>) {
+  render(<MermaidCodeBlock code={SOURCE} />);
+  await screen.findByTestId("mermaid-diagram");
+
+  await user.click(screen.getByRole("button", { name: "Expand diagram" }));
+
+  return screen.findByRole("dialog", { name: "Diagram" });
+}
 
 describe("MermaidCodeBlock", () => {
   it("renders the diagram and keeps the source out of sight", async () => {
@@ -65,6 +89,45 @@ describe("MermaidCodeBlock", () => {
       ),
     );
     expect(source()).not.toHaveClass("sr-only");
+  });
+
+  it("expands the rendered diagram into a lightbox", async () => {
+    const user = userEvent.setup();
+
+    const dialog = await expandDiagram(user);
+
+    expect(within(dialog).getByTestId("svg")).toBeInTheDocument();
+  });
+
+  it("offers no expand control while the source is showing", async () => {
+    const user = userEvent.setup();
+    render(<MermaidCodeBlock code={SOURCE} />);
+    await screen.findByTestId("mermaid-diagram");
+
+    await user.click(screen.getByRole("button", { name: "Show diagram" }));
+
+    expect(screen.queryByRole("button", { name: "Expand diagram" })).toBeNull();
+  });
+
+  it("offers no expand control when mermaid cannot parse the source", async () => {
+    renderMock.mockRejectedValue(new Error("Parse error on line 2"));
+    render(<MermaidCodeBlock code={SOURCE} />);
+
+    await screen.findByTestId("mermaid-error");
+
+    expect(screen.queryByRole("button", { name: "Expand diagram" })).toBeNull();
+  });
+
+  it("re-renders the diagram inside the open lightbox on a theme change", async () => {
+    const user = userEvent.setup();
+    const dialog = await expandDiagram(user);
+    renderMock.mockResolvedValue({ svg: "<svg data-testid='svg2'></svg>" });
+
+    await act(async () => {
+      document.documentElement.classList.add("paper");
+    });
+
+    expect(await within(dialog).findByTestId("svg2")).toBeInTheDocument();
   });
 
   it("copies the mermaid source", async () => {

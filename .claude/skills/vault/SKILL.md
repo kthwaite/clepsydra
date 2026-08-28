@@ -18,14 +18,15 @@ files directly, which bypasses locking, link rewriting, and the index.
   folders: NOTE→`notes/`, PROJECT→`projects/`, JOURNAL→`journals/`,
   AI_JOURNAL→`ai-journals/`, TODO→`todos/`, QUOTE→`quotes/`, BOOK→`books/`,
   CAPTURE→`captures/`, CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`,
-  RECIPE→`recipes/`, MEETING→`meetings/`, ONE_ON_ONE→`one-on-ones/`,
-  AI_CONVERSATION→`conversations/`.
+  RECIPE→`recipes/`, MEETING→`meetings/`, AI_CONVERSATION→`conversations/`.
+  There is no 1:1 kind: a 1:1 is a MEETING tagged `1:1`.
 - **Frontmatter** — `id` (UUID, never touch), `title`, `type`, `tags`,
   `aliases`, `project`, `created_at`/`updated_at`.
-- **Attendees** — MEETING and ONE_ON_ONE pages name people in `attendees`, a
-  list of wikilinks to person pages. A MEETING names any number; a ONE_ON_ONE
-  names one, and the server refuses a second.
-- **Occurred** — the same kinds record when they happened in `occurred_at`, an
+- **Attendees** — MEETING pages name people in `attendees`, a list of
+  wikilinks to person pages. A MEETING names any number; a 1:1 is a MEETING
+  tagged `1:1`. `vault_search` counts them: `attendees:1`, `attendees:>1`,
+  `attendees:0`; find 1:1s with `kind:meeting tag:1:1`.
+- **Occurred** — MEETING pages record when they happened in `occurred_at`, an
   unquoted TOML date-time (`2026-08-27T14:00:00Z`, or a bare date). Quoted, it
   is refused: a string never sorts or filters as a date.
 - **Wikilinks** — `[[Canonical Name]]` links pages by title-derived name or
@@ -113,29 +114,37 @@ page has backlinks or you're moving folders.
 Inbox (`INTAKE`) → Ready (`TRIAGE`) → In Progress (`FIELD`) → Review
 (`REVIEW`) → Done (`SEALED`). Priorities are P0 Critical, P1 High, P2 Medium,
 and P3 Low. Orient with `vault_board`; it lists Task TSK codes, Cycle S codes,
-and Projects through the legacy `operations` response field.
-Legacy `vault_board` response fields remain unchanged. The raw
+and Projects through the legacy `operations` response field. Codes are
+server-minted petnames — `TSK-<adjective>-<noun>-<tail>` for Tasks,
+`S-<adjective>-<noun>-<tail>` for Cycles (e.g. `TSK-brave-finch-7q3zd`) —
+never invent one. Input is matched case-insensitively, and any unique prefix
+(e.g. `TSK-brave-finch`) addresses the page; an ambiguous prefix is rejected
+with the candidates listed. Legacy `vault_board` response fields remain
+unchanged. The raw
 `columns[].label`/`columns[].sub` pairs are `INTAKE`/`unfiled`,
 `TRIAGE`/`staged`, `IN-FIELD`/`active`, `REVIEW`/`qa / seal`, and
 `SEALED`/`closed`. Derive display labels from `columns[].id` using the status
 mapping above. `tasks[].checks` is `[done, total]` Checklist Item counts.
 `tasks[].link` and `operations[].dossier` are Related Page values.
 
-Create Tasks with `vault_task_create`, never `vault_create_page` — the board
-reserves the next `TSK-NNNN` code and files the page under
+Create Tasks with `vault_task_create`, never `vault_create_page` — the server
+mints the `TSK-<adjective>-<noun>-<tail>` code and files the page under
 `tasks/<project>/`; include `ai-generated` in tags for LLM-authored Tasks.
 The `body` wire field is the Task Description. Checklist values become Todos.
-Move and edit with `vault_task_update`, addressing the Task by code, path, or
-id. Title/Project/status/priority/tags update when present
-(`clear_project: true` clears the Project). Cycle, assignee, estimate, due,
-blocker reason (`hold`), and Related Page (`link`) are tri-state — absent
-keeps, `null` or `""` clears, and a value sets. A non-empty `hold` means
-Blocked; Cycle `"BACKLOG"` moves the Task to Backlog.
+Move and edit with `vault_task_update`, addressing the Task by code (or any
+unique prefix of one), path, or id. Title/Project/status/priority/tags update
+when present (`clear_project: true` clears the Project). Cycle, assignee,
+estimate, due, blocker reason (`hold`), and Related Page (`link`) are
+tri-state — absent keeps, `null` or `""` clears, and a value sets. A
+non-empty `hold` means Blocked; Cycle `"BACKLOG"` moves the Task to Backlog.
 
-Create Cycles with `vault_cycle_create` (omit `code` to auto-generate the next
-`S-{n}`; `CLOSED` is rejected at creation). Close a finished Cycle with
-`vault_cycle_update` using state `CLOSED`. Pass `carry_to` to move unfinished
-Tasks: `"BACKLOG"` moves them to Backlog, while a Cycle code reassigns them.
+Create Cycles with `vault_cycle_create` (omit `code` to have the server mint
+an `S-<adjective>-<noun>-<tail>` code; an explicit `code` must match that
+same format or it is rejected, and conflicts if a Cycle already uses it;
+`CLOSED` is rejected at creation).
+Close a finished Cycle with `vault_cycle_update` using state `CLOSED`. Pass
+`carry_to` to move unfinished Tasks: `"BACKLOG"` moves them to Backlog, while
+a Cycle code or unique prefix reassigns them.
 
 **Delete.** `vault_delete_page` without `force` first. If it refuses with a
 backlink list, show the user what links there and confirm before re-running

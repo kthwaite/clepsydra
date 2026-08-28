@@ -51,13 +51,17 @@ pub enum TaskRef {
     Id(Uuid),
     /// A vault-relative page path (contains `/` or ends in `.md`).
     Path(String),
-    /// A board code such as `TSK-0001` or `S-13`, normalized to uppercase.
+    /// A board code such as `TSK-brave-finch-7q3zd` or `S-calm-heron-2xm9p`,
+    /// or a case-insensitive prefix of one — kept exactly as given. Codes are
+    /// never uppercased or otherwise normalized; resolution against the
+    /// board (exact match, then unique prefix) happens in [`find_board_id`].
     Code(String),
 }
 
 /// Classify a free-form task/cycle reference: trims, then parses as a UUID →
 /// [`TaskRef::Id`]; contains `/` or ends in `.md` → [`TaskRef::Path`] (kept
-/// as given); anything else → [`TaskRef::Code`], uppercased.
+/// as given); anything else → [`TaskRef::Code`] (kept as given, case
+/// preserved).
 pub fn classify_ref(input: &str) -> TaskRef {
     let input = input.trim();
     if let Ok(id) = Uuid::parse_str(input) {
@@ -66,7 +70,7 @@ pub fn classify_ref(input: &str) -> TaskRef {
     if input.contains('/') || input.ends_with(".md") {
         return TaskRef::Path(input.to_string());
     }
-    TaskRef::Code(input.to_uppercase())
+    TaskRef::Code(input.to_string())
 }
 
 /// Which board collection a code resolves against.
@@ -95,29 +99,62 @@ impl BoardKind {
 }
 
 /// Find the page UUID for `code` in a `GET /board` response, matching the
-/// `code` field of the kind's collection (`tasks` or `cycles`)
-/// case-insensitively. A miss names the unknown code and points at
-/// vault_board for the live code list.
+/// `code` field of the kind's collection (`tasks` or `cycles`). An exact
+/// case-insensitive match wins; otherwise a unique case-insensitive prefix
+/// match resolves. A miss names the unknown code and points at vault_board
+/// for the live code list; an ambiguous prefix lists every candidate.
 pub fn find_board_id(board: &Value, kind: BoardKind, code: &str) -> Result<String, String> {
-    board
+    let entries: Vec<(&str, &str)> = board
         .get(kind.collection())
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
-        .find(|entry| {
-            entry
-                .get("code")
-                .and_then(Value::as_str)
-                .is_some_and(|c| c.eq_ignore_ascii_case(code))
+        .filter_map(|entry| {
+            let entry_code = entry.get("code").and_then(Value::as_str)?;
+            let id = entry.get("id").and_then(Value::as_str)?;
+            Some((entry_code, id))
         })
-        .and_then(|entry| entry.get("id").and_then(Value::as_str))
-        .map(str::to_string)
-        .ok_or_else(|| {
-            format!(
-                "no {} with code '{code}' — list codes with vault_board",
-                kind.noun()
-            )
-        })
+        .collect();
+
+    let not_found = || {
+        format!(
+            "no {} with code '{code}' — list codes with vault_board",
+            kind.noun()
+        )
+    };
+
+    if let Some((_, id)) = entries
+        .iter()
+        .find(|(entry_code, _)| entry_code.eq_ignore_ascii_case(code))
+    {
+        return Ok((*id).to_string());
+    }
+
+    // An empty (or whitespace-only) needle must never resolve: `starts_with`
+    // trivially matches every entry, which would otherwise make blank input
+    // "ambiguous" or silently pick an arbitrary task/cycle.
+    let needle = code.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return Err(not_found());
+    }
+
+    let matches: Vec<(&str, &str)> = entries
+        .into_iter()
+        .filter(|(entry_code, _)| entry_code.to_ascii_lowercase().starts_with(&needle))
+        .collect();
+
+    match matches.as_slice() {
+        [] => Err(not_found()),
+        [(_, id)] => Ok((*id).to_string()),
+        _ => {
+            let codes: Vec<&str> = matches.iter().map(|(entry_code, _)| *entry_code).collect();
+            Err(format!(
+                "ambiguous {} prefix '{code}': candidates {}",
+                kind.noun(),
+                codes.join(", ")
+            ))
+        }
+    }
 }
 
 /// Extract the page UUID (`meta.id`) from a `GET /pages/{path}` response.
@@ -194,7 +231,7 @@ mod tests {
                 TaskRef::Path("tasks/xxii/TSK-0001.md".to_string()),
             ),
             ("TSK-0001", TaskRef::Code("TSK-0001".to_string())),
-            ("tsk-0001", TaskRef::Code("TSK-0001".to_string())),
+            ("tsk-0001", TaskRef::Code("tsk-0001".to_string())),
             ("S-13", TaskRef::Code("S-13".to_string())),
             ("notes/a.md", TaskRef::Path("notes/a.md".to_string())),
         ];
@@ -207,7 +244,7 @@ mod tests {
     fn classify_ref_trims_surrounding_whitespace() {
         assert_eq!(
             classify_ref("  tsk-0002  "),
-            TaskRef::Code("TSK-0002".to_string())
+            TaskRef::Code("tsk-0002".to_string())
         );
         assert_eq!(
             classify_ref(" notes/a.md "),
@@ -280,6 +317,71 @@ mod tests {
                 {"id": "tk-2", "code": "TSK-0002", "project": null},
             ],
         })
+    }
+
+    #[test]
+    fn classify_ref_keeps_case_and_treats_prefix_as_code() {
+        assert_eq!(
+            classify_ref("  TSK-brave-finch  "),
+            TaskRef::Code("TSK-brave-finch".into())
+        );
+        assert_eq!(
+            classify_ref("tsk-brave-finch-7q3zd"),
+            TaskRef::Code("tsk-brave-finch-7q3zd".into())
+        );
+    }
+
+    #[test]
+    fn find_board_id_resolves_exact_prefix_and_reports_ambiguity() {
+        let board = json!({"tasks": [
+            {"id": "id-1", "code": "TSK-brave-finch-7q3zd"},
+            {"id": "id-2", "code": "TSK-brave-otter-9k2ma"},
+            {"id": "id-3", "code": "TSK-calm-heron-2xm9p"},
+        ], "cycles": []});
+        assert_eq!(
+            find_board_id(&board, BoardKind::Task, "tsk-BRAVE-finch-7q3zd").unwrap(),
+            "id-1"
+        );
+        assert_eq!(
+            find_board_id(&board, BoardKind::Task, "TSK-calm").unwrap(),
+            "id-3"
+        );
+        let err = find_board_id(&board, BoardKind::Task, "TSK-brave").unwrap_err();
+        assert!(
+            err.contains("ambiguous")
+                && err.contains("TSK-brave-finch-7q3zd")
+                && err.contains("TSK-brave-otter-9k2ma"),
+            "{err}"
+        );
+        assert!(
+            find_board_id(&board, BoardKind::Task, "TSK-zzz")
+                .unwrap_err()
+                .contains("no task")
+        );
+    }
+
+    #[test]
+    fn find_board_id_empty_or_whitespace_code_never_matches() {
+        let board = json!({"tasks": [
+            {"id": "id-1", "code": "TSK-brave-finch-7q3zd"},
+            {"id": "id-2", "code": "TSK-brave-otter-9k2ma"},
+        ], "cycles": []});
+        for blank in ["", "   "] {
+            let err = find_board_id(&board, BoardKind::Task, blank).unwrap_err();
+            assert!(err.contains("no task"), "{err}");
+        }
+    }
+
+    #[test]
+    fn find_board_id_exact_match_wins_even_when_it_is_also_an_ambiguous_prefix() {
+        let board = json!({"tasks": [
+            {"id": "id-1", "code": "TSK-brave"},
+            {"id": "id-2", "code": "TSK-brave-finch-7q3zd"},
+        ], "cycles": []});
+        assert_eq!(
+            find_board_id(&board, BoardKind::Task, "TSK-brave").unwrap(),
+            "id-1"
+        );
     }
 
     #[test]

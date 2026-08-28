@@ -5,12 +5,10 @@ import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { TagInput } from "#/components/ui/tag-input";
-import { useBases } from "#/api/bases";
-import { BaseMemberIntake } from "#/components/bases/BaseMemberIntake";
-import { Select, SelectItem } from "#/components/ui/select";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
 import type { Kind } from "#/lib/kind";
+import { isOneOnOne, withOneOnOne } from "#/lib/meeting";
 import { useProjects } from "#/lib/useProjects";
 import { useUiStore } from "#/store/ui";
 
@@ -36,11 +34,8 @@ export function InscribeModal() {
   const openTab = useOpenTab();
   const projects = useProjects();
   const { data: tagIndex } = useTags();
-  const { data: baseList } = useBases();
   // Choosing a Base hands the form to the member draft: same composition and
   // same endpoint as the Base table's own Add member.
-  const [baseSlug, setBaseSlug] = useState<string | null>(null);
-  const bases = baseList?.bases ?? [];
 
   if (!isOpen) return null;
 
@@ -97,7 +92,6 @@ export function InscribeModal() {
   };
 
   const reset = () => {
-    setBaseSlug(null);
     setKind("NOTE");
     setProject(null);
     setTitle("");
@@ -130,46 +124,12 @@ export function InscribeModal() {
       >
         {/* terminal header */}
         <div className="flex items-baseline justify-between border-b border-ink bg-paper-2 px-3 py-1.5">
-          <span className="cl-mono text-[10px] uppercase tracking-[0.18em] text-ink">
+          <span className="cl-serif text-[10px] uppercase tracking-[0.18em] text-ink">
             ▣ Intake
-          </span>
-          <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-            FORM CLP-INTAKE-04 / REV.08
           </span>
         </div>
 
         <div className="px-4 py-3">
-          {bases.length > 0 ? (
-            <div className="mb-2.5">
-              <Field label="00 · Base · optional">
-                {/* A listbox, unlike the project combobox below, needs no
-                    Enter guard: RAC handles Enter within the open menu. */}
-                <div className="mt-1">
-                  <Select
-                    label="Base"
-                    value={baseSlug ?? ""}
-                    onChange={(key) =>
-                      setBaseSlug(key == null || key === "" ? null : String(key))
-                    }
-                  >
-                    <SelectItem id="">None — a plain page</SelectItem>
-                    {bases.map((base) => (
-                      <SelectItem key={base.slug} id={base.slug}>
-                        {base.name}
-                      </SelectItem>
-                    ))}
-                  </Select>
-                </div>
-              </Field>
-            </div>
-          ) : null}
-          {baseSlug ? (
-            <BaseMemberIntake
-              slug={baseSlug}
-              onCreated={(path, label) => finish(path, label)}
-            />
-          ) : (
-          <>
           <div className="mb-2.5 grid grid-cols-2 gap-3">
             <Field label="01 · Kind">
               <div className="mt-1">
@@ -198,7 +158,7 @@ export function InscribeModal() {
               // biome-ignore lint/a11y/noAutofocus: the intake modal intentionally starts focus at its primary title field
               autoFocus
               placeholder="new folio title"
-              className="cl-mono mt-1 w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+              className="cl-serif mt-1 w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
             />
           </Field>
           <Field label="04 · Tags">
@@ -213,9 +173,26 @@ export function InscribeModal() {
               valuePrefix="#"
               maxSuggestions={8}
             />
+            {/* TODO: we'll probably want more than one of these, with better semantics */}
+            {kind === "MEETING" && (
+              // A 1:1 is a MEETING tagged `1:1` (ADR 0006): the box edits the
+              // same tag list the chips above show.
+              <label className="cl-mono mt-1.5 flex cursor-pointer items-center gap-1.5 text-[10px] uppercase tracking-[0.14em] text-ink-mute">
+                <input
+                  type="checkbox"
+                  checked={isOneOnOne(tags)}
+                  onChange={(event) =>
+                    updateTags(
+                      withOneOnOne(tagsRef.current, event.target.checked),
+                    )
+                  }
+                />
+                1:1
+              </label>
+            )}
           </Field>
           <div className="cl-mono mb-2.5 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-            REF · <span className="normal-case">{destination}</span>
+            DESTINATION · <span className="normal-case">{destination}</span>
           </div>
           {error && (
             <div className="cl-mono mb-2 text-[11px] text-hot">⁂ {error}</div>
@@ -232,8 +209,6 @@ export function InscribeModal() {
               {create.isPending ? "committing…" : "▣ commit to archive"}
             </button>
           </div>
-          </>
-          )}
         </div>
       </form>
     </CodexModalShell>
@@ -249,7 +224,7 @@ function Field({
 }) {
   return (
     <div className="mb-2.5 block">
-      <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-ink-mute">
+      <span className="cl-serif text-[9px] uppercase tracking-[0.16em] text-ink-mute">
         {label}
       </span>
       {children}

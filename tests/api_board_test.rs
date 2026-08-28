@@ -47,7 +47,7 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
         .unwrap();
         std::fs::write(
             root.join("cycle-source.md"),
-            "---\nid: 01951234-0000-7000-8000-000000000091\ntitle: Cycle source\n---\n[[S-42]]\n",
+            "---\nid: 01951234-0000-7000-8000-000000000091\ntitle: Cycle source\n---\n[[S-swift-otter-8m3dr]]\n",
         )
         .unwrap();
     });
@@ -112,7 +112,7 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
     server
         .post("/api/vault/board/cycles")
         .json(&serde_json::json!({
-            "code": "S-42",
+            "code": "S-swift-otter-8m3dr",
             "label": "notified cycle",
             "start": "2042-05-18",
             "end": "2042-05-24"
@@ -123,11 +123,11 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
     else {
         panic!("expected IndexChanged")
     };
-    assert_eq!(upserted, vec!["cycles/S-42.md"]);
+    assert_eq!(upserted, vec!["cycles/S-swift-otter-8m3dr.md"]);
     assert!(removed.is_empty());
 
     let backlinks: Vec<serde_json::Value> = server
-        .get("/api/vault/index/backlinks/cycles/S-42.md")
+        .get("/api/vault/index/backlinks/cycles/S-swift-otter-8m3dr.md")
         .await
         .json();
     assert_eq!(backlinks.len(), 1);
@@ -138,7 +138,7 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|item| item["code"] == "S-42")
+        .find(|item| item["code"] == "S-swift-otter-8m3dr")
         .unwrap()["id"]
         .as_str()
         .unwrap();
@@ -151,10 +151,10 @@ async fn mutation_routes_apply_link_policy_and_emit_exact_notifications() {
     else {
         panic!("expected IndexChanged")
     };
-    assert_eq!(upserted, vec!["cycles/S-42.md"]);
+    assert_eq!(upserted, vec!["cycles/S-swift-otter-8m3dr.md"]);
     assert!(removed.is_empty());
     let backlinks: Vec<serde_json::Value> = server
-        .get("/api/vault/index/backlinks/cycles/S-42.md")
+        .get("/api/vault/index/backlinks/cycles/S-swift-otter-8m3dr.md")
         .await
         .json();
     assert_eq!(backlinks.len(), 1);
@@ -670,8 +670,13 @@ async fn create_task_allocates_code_and_files_under_operation() {
     res.assert_status(axum::http::StatusCode::CREATED);
 
     let body: serde_json::Value = res.json();
-    assert_eq!(body["code"], "TSK-0001", "code: {body}");
-    assert_eq!(body["path"], "tasks/op-sig3/TSK-0001.md", "path: {body}");
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(clepsydra::vault::code::is_valid_code(&code), "{code}");
+    assert_eq!(
+        body["path"],
+        format!("tasks/op-sig3/{code}.md"),
+        "path: {body}"
+    );
     assert_eq!(body["status"], "TRIAGE", "status: {body}");
     assert_eq!(body["priority"], "P1", "priority: {body}");
     assert_eq!(body["cycle"], "S-13", "cycle: {body}");
@@ -682,7 +687,7 @@ async fn create_task_allocates_code_and_files_under_operation() {
 
     // Verify file exists on disk with the expected frontmatter
     let vault_root = tmp.path().join("vault");
-    let file_path = vault_root.join("tasks/op-sig3/TSK-0001.md");
+    let file_path = vault_root.join(format!("tasks/op-sig3/{code}.md"));
     assert!(file_path.exists(), "task file should exist on disk");
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert!(
@@ -714,15 +719,16 @@ async fn create_task_without_project_files_at_tasks_root() {
     res.assert_status(axum::http::StatusCode::CREATED);
 
     let body: serde_json::Value = res.json();
-    assert_eq!(body["code"], "TSK-0001", "code: {body}");
-    assert_eq!(body["path"], "tasks/TSK-0001.md", "path: {body}");
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(clepsydra::vault::code::is_valid_code(&code), "{code}");
+    assert_eq!(body["path"], format!("tasks/{code}.md"), "path: {body}");
     assert!(body["project"].is_null(), "project should be null: {body}");
     assert_eq!(body["status"], "INTAKE", "status should default to INTAKE");
     assert_eq!(body["priority"], "P2", "priority should default to P2");
 
     let vault_root = tmp.path().join("vault");
     assert!(
-        vault_root.join("tasks/TSK-0001.md").exists(),
+        vault_root.join(format!("tasks/{code}.md")).exists(),
         "task file should be at tasks root"
     );
 }
@@ -745,7 +751,10 @@ async fn create_task_writes_the_brief_above_the_checklist() {
         .await;
     res.assert_status(axum::http::StatusCode::CREATED);
 
-    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    let dto: serde_json::Value = res.json();
+    let code = dto["code"].as_str().unwrap();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
     let (_, page_body) = content
         .split_once("+++\n")
         .and_then(|(_, rest)| rest.split_once("+++\n"))
@@ -756,7 +765,6 @@ async fn create_task_writes_the_brief_above_the_checklist() {
         "brief, blank line, then the checklist: {page_body:?}"
     );
 
-    let dto: serde_json::Value = res.json();
     assert_eq!(dto["checks"], serde_json::json!([0, 2]), "dto: {dto}");
     assert!(
         dto["body_excerpt"]
@@ -776,7 +784,12 @@ async fn create_task_writes_a_brief_without_a_checklist() {
         .await;
     res.assert_status(axum::http::StatusCode::CREATED);
 
-    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    let code = res.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
     assert!(
         content.ends_with("Just prose.\n"),
         "trimmed body: {content:?}"
@@ -798,7 +811,12 @@ async fn create_task_ignores_a_blank_brief() {
         .await;
     res.assert_status(axum::http::StatusCode::CREATED);
 
-    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    let code = res.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
     let (_, page_body) = content
         .split_once("+++\n")
         .and_then(|(_, rest)| rest.split_once("+++\n"))
@@ -811,13 +829,14 @@ async fn create_task_ignores_a_blank_brief() {
 }
 
 // ---------------------------------------------------------------------------
-// POST /board/tasks — second create increments code
+// POST /board/tasks — second create gets a distinct petname code
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn second_create_increments_code() {
+async fn second_create_gets_a_distinct_petname_code() {
     let (server, _tmp) = setup_server_with(|root| {
-        // Pre-seed an existing task at TSK-0481
+        // Pre-seed an existing task at TSK-0481 (legacy stem — never colliding
+        // with a freshly minted petname code, but must not break minting)
         std::fs::create_dir_all(root.join("tasks/op-sig3")).unwrap();
         std::fs::write(
             root.join("tasks/op-sig3/TSK-0481.md"),
@@ -828,17 +847,37 @@ async fn second_create_increments_code() {
         .unwrap();
     });
 
-    let res = server
+    let first = server
         .post("/api/vault/board/tasks")
         .json(&serde_json::json!({ "title": "next task" }))
         .await;
-    res.assert_status(axum::http::StatusCode::CREATED);
+    first.assert_status(axum::http::StatusCode::CREATED);
+    let first_code = first.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
-    let body: serde_json::Value = res.json();
-    assert_eq!(
-        body["code"], "TSK-0482",
-        "should allocate TSK-0482 after TSK-0481, got: {body}"
+    let second = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "yet another task" }))
+        .await;
+    second.assert_status(axum::http::StatusCode::CREATED);
+    let second_code = second.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    assert!(
+        clepsydra::vault::code::is_valid_code(&first_code),
+        "{first_code}"
     );
+    assert!(
+        clepsydra::vault::code::is_valid_code(&second_code),
+        "{second_code}"
+    );
+    assert_ne!(first_code, second_code, "codes must be distinct");
+    assert_ne!(first_code, "TSK-0481");
+    assert_ne!(second_code, "TSK-0481");
 }
 
 // ---------------------------------------------------------------------------
@@ -1028,7 +1067,9 @@ async fn create_task_persists_all_optional_fields() {
     );
 
     // Disk frontmatter carries all fields
-    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0001.md")).unwrap();
+    let code = body["code"].as_str().unwrap();
+    let content =
+        std::fs::read_to_string(tmp.path().join(format!("vault/tasks/{code}.md"))).unwrap();
     assert!(
         content.contains("assignee = \"kit\""),
         "frontmatter:\n{content}"
@@ -1403,7 +1444,11 @@ fn cycle_state_parses_valid_values_without_applying_operation_policy() {
 }
 
 #[tokio::test]
-async fn generated_cycle_path_violation_is_an_internal_error() {
+async fn path_unsafe_explicit_cycle_code_is_rejected_as_bad_request() {
+    // A path-traversal payload like "../outside" is now caught by the
+    // is_valid_code format check before it ever reaches path construction —
+    // the petname format admits no `/` or `.` characters, so this can no
+    // longer surface as a 500 from a malformed generated path.
     let (server, _tmp) = setup_server_with(|_| {});
     let response = server
         .post("/api/vault/board/cycles")
@@ -1414,12 +1459,12 @@ async fn generated_cycle_path_violation_is_an_internal_error() {
             "end": "2026-07-12"
         }))
         .await;
-    response.assert_status(axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+    response.assert_status(axum::http::StatusCode::BAD_REQUEST);
     let body: serde_json::Value = response.json();
     assert!(
         body["error"]
             .as_str()
-            .is_some_and(|error| error.starts_with("invalid path: ")),
+            .is_some_and(|error| error.starts_with("invalid cycle code")),
         "unexpected error payload: {body}"
     );
 }
@@ -1518,19 +1563,24 @@ async fn create_cycle_defaults_code_and_state() {
     res.assert_status(axum::http::StatusCode::CREATED);
 
     let body: serde_json::Value = res.json();
-    assert_eq!(body["code"], "S-14", "code: {body}");
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(
+        code.starts_with("S-") && clepsydra::vault::code::is_valid_code(&code),
+        "{code}"
+    );
+    assert_ne!(code, "S-13", "must not collide with the seeded cycle");
     assert_eq!(
         body["state"], "PLANNED",
         "state should default to PLANNED: {body}"
     );
-    assert_eq!(body["path"], "cycles/S-14.md", "path: {body}");
+    assert_eq!(body["path"], format!("cycles/{code}.md"), "path: {body}");
     assert_eq!(body["label"], "CYCLE 14", "label: {body}");
     assert_eq!(body["start"], "2026-04-20", "start: {body}");
     assert_eq!(body["end"], "2026-04-26", "end: {body}");
 
     // File on disk must have correct frontmatter
     let vault_root = tmp.path().join("vault");
-    let file_path = vault_root.join("cycles/S-14.md");
+    let file_path = vault_root.join(format!("cycles/{code}.md"));
     assert!(file_path.exists(), "cycle file should exist on disk");
     let content = std::fs::read_to_string(&file_path).unwrap();
     assert!(
@@ -1566,7 +1616,7 @@ async fn create_cycle_honors_explicit_code_and_state() {
     let res = server
         .post("/api/vault/board/cycles")
         .json(&serde_json::json!({
-            "code": "S-20",
+            "code": "S-brisk-otter-4h7qz",
             "label": "CYCLE 20",
             "start": "2026-06-01",
             "end": "2026-06-07",
@@ -1577,7 +1627,7 @@ async fn create_cycle_honors_explicit_code_and_state() {
     res.assert_status(axum::http::StatusCode::CREATED);
 
     let body: serde_json::Value = res.json();
-    assert_eq!(body["code"], "S-20", "code: {body}");
+    assert_eq!(body["code"], "S-brisk-otter-4h7qz", "code: {body}");
     assert_eq!(body["state"], "ACTIVE", "state: {body}");
     assert_eq!(body["goal"], "finish the thing", "goal: {body}");
 }
@@ -1591,7 +1641,7 @@ async fn create_cycle_rejects_duplicate_code() {
     let (server, _tmp) = setup_server_with(|root| {
         std::fs::create_dir_all(root.join("cycles")).unwrap();
         std::fs::write(
-            root.join("cycles/S-13.md"),
+            root.join("cycles/S-eager-lynx-6t9cy.md"),
             "---\nid: 01951234-0000-7000-8000-000000000002\n\
              title: CYCLE 13\ntype: CYCLE\nstate: ACTIVE\n---\n",
         )
@@ -1602,7 +1652,7 @@ async fn create_cycle_rejects_duplicate_code() {
     let res = server
         .post("/api/vault/board/cycles")
         .json(&serde_json::json!({
-            "code": "S-13",
+            "code": "S-eager-lynx-6t9cy",
             "label": "CYCLE 13 DUP",
             "start": "2026-04-13",
             "end": "2026-04-19"
@@ -1907,7 +1957,10 @@ async fn concurrent_create_requests_reserve_unique_task_and_cycle_codes() {
             .to_string(),
     ];
     task_codes.sort();
-    assert_eq!(task_codes, ["TSK-0001", "TSK-0002"]);
+    assert_ne!(task_codes[0], task_codes[1], "codes must be distinct");
+    for code in &task_codes {
+        assert!(clepsydra::vault::code::is_valid_code(code), "{code}");
+    }
 
     let mut cycle_codes = [
         cycle_a.json::<serde_json::Value>()["code"]
@@ -1920,7 +1973,192 @@ async fn concurrent_create_requests_reserve_unique_task_and_cycle_codes() {
             .to_string(),
     ];
     cycle_codes.sort();
-    assert_eq!(cycle_codes, ["S-1", "S-2"]);
+    assert_ne!(cycle_codes[0], cycle_codes[1], "codes must be distinct");
+    for code in &cycle_codes {
+        assert!(
+            code.starts_with("S-") && clepsydra::vault::code::is_valid_code(code),
+            "{code}"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — server mints a petname code, used verbatim as stem
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn created_task_gets_petname_code_used_verbatim_as_stem() {
+    // Task projects must be declared by a PROJECT page (develop's
+    // `ensure_project_exists`), so seed one for the slug used below.
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::write(
+            root.join("projects/op-sig3.md"),
+            "---\nid: 01951234-0000-7000-8000-0000000000a1\n\
+             title: SIGNAL-3 MIGRATION\ntype: PROJECT\nproject: op-sig3\n---\n",
+        )
+        .unwrap();
+    });
+    let resp = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "Alpha", "project": "op-sig3"}))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let body: serde_json::Value = resp.json();
+    let code = body["code"].as_str().unwrap().to_string();
+    assert!(clepsydra::vault::code::is_valid_code(&code), "{code}");
+    assert_eq!(
+        body["path"].as_str().unwrap(),
+        format!("tasks/op-sig3/{code}.md")
+    );
+    // lowercase body survives the round trip through the board listing
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let listed = board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["code"] == code);
+    assert!(listed.is_some(), "board lists the exact lowercase code");
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — server mints a petname code when none is given
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn created_cycle_without_code_gets_petname_code() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let resp = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "Cycle one",
+            "start": "2026-09-01",
+            "end": "2026-09-07"
+        }))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let code = resp.json::<serde_json::Value>()["code"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(
+        code.starts_with("S-") && clepsydra::vault::code::is_valid_code(&code),
+        "{code}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/cycles — an explicit code must match the petname format
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn explicit_cycle_code_must_be_valid_format() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let bad = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "x",
+            "code": "S-13",
+            "start": "2026-09-01",
+            "end": "2026-09-07"
+        }))
+        .await;
+    bad.assert_status_bad_request();
+
+    let good = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({
+            "label": "x",
+            "code": "S-calm-heron-2xm9p",
+            "start": "2026-09-08",
+            "end": "2026-09-14"
+        }))
+        .await;
+    good.assert_status(axum::http::StatusCode::CREATED);
+    assert_eq!(
+        good.json::<serde_json::Value>()["code"],
+        "S-calm-heron-2xm9p"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — unique-prefix cycle addressing (task 3)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn task_cycle_field_accepts_unique_prefix_and_stores_canonical() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let cyc = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({"label": "c", "code": "S-calm-heron-2xm9p", "start": "2026-09-01", "end": "2026-09-07"}))
+        .await;
+    cyc.assert_status(axum::http::StatusCode::CREATED);
+    let task = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "t", "cycle": "s-CALM-heron"}))
+        .await;
+    task.assert_status(axum::http::StatusCode::CREATED);
+    assert_eq!(
+        task.json::<serde_json::Value>()["cycle"],
+        "S-calm-heron-2xm9p"
+    );
+}
+
+#[tokio::test]
+async fn ambiguous_cycle_prefix_is_rejected_with_candidates() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    for code in ["S-calm-heron-2xm9p", "S-calm-otter-9k2ma"] {
+        server
+            .post("/api/vault/board/cycles")
+            .json(&serde_json::json!({"label": "c", "code": code, "start": "2026-09-01", "end": "2026-09-07"}))
+            .await
+            .assert_status(axum::http::StatusCode::CREATED);
+    }
+    let task = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "t", "cycle": "S-calm"}))
+        .await;
+    task.assert_status_bad_request();
+    let msg = task.text();
+    assert!(
+        msg.contains("S-calm-heron-2xm9p") && msg.contains("S-calm-otter-9k2ma"),
+        "{msg}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// GET /board — task ordering by creation time, not random code (task 4)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn board_lists_tasks_in_creation_order_not_code_order() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let mut created = Vec::new();
+    for title in ["first", "second", "third"] {
+        let r = server
+            .post("/api/vault/board/tasks")
+            .json(&serde_json::json!({"title": title}))
+            .await;
+        r.assert_status(axum::http::StatusCode::CREATED);
+        created.push(
+            r.json::<serde_json::Value>()["code"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let listed: Vec<String> = board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["code"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        listed, created,
+        "creation order, independent of the random codes"
+    );
 }
 
 // ---------------------------------------------------------------------------

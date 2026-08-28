@@ -167,26 +167,28 @@ afterEach(() => {
 // ══════════════════════════════════════════════════════════════════════════════
 
 describe("newCyclePrefill", () => {
-  it("code S-1 and label CYCLE 1 when no existing cycles", () => {
+  it("label CYCLE 1 when no existing cycles", () => {
     const pf = newCyclePrefill([], NOW);
-    expect(pf.code).toBe("S-1");
     expect(pf.label).toBe("CYCLE 1");
   });
 
-  it("increments from max numeric suffix (S-1 exists → S-2)", () => {
-    const pf = newCyclePrefill([{ code: "S-1", end: "2026-06-10" }], NOW);
-    expect(pf.code).toBe("S-2");
+  it("label increments by cycle count (one cycle exists → CYCLE 2)", () => {
+    const pf = newCyclePrefill(
+      [{ code: "S-brave-finch-7q3zd", end: "2026-06-10" }],
+      NOW,
+    );
+    expect(pf.label).toBe("CYCLE 2");
   });
 
-  it("handles codes with leading zeros (C-01 → S-2)", () => {
+  it("label = CYCLE (count + 1), independent of code format (petname codes carry no numbers)", () => {
     const pf = newCyclePrefill(
       [
         { code: "C-01", end: "2026-06-08" },
-        { code: "C-02", end: "2026-06-22" },
+        { code: "S-calm-heron-2xm9p", end: "2026-06-22" },
       ],
       NOW,
     );
-    expect(pf.code).toBe("S-3");
+    expect(pf.label).toBe("CYCLE 3");
   });
 
   it("start = day after latest cycle end (not now)", () => {
@@ -216,10 +218,9 @@ describe("newCyclePrefill", () => {
     expect(pf.start).toBe(isoAddDays(NOW, 1));
   });
 
-  it("single cycle: code increments by 1", () => {
+  it("single cycle: label is CYCLE 2 regardless of the existing code's number", () => {
     const pf = newCyclePrefill([{ code: "S-5", end: "2026-07-01" }], NOW);
-    expect(pf.code).toBe("S-6");
-    expect(pf.label).toBe("CYCLE 6");
+    expect(pf.label).toBe("CYCLE 2");
   });
 });
 
@@ -333,11 +334,15 @@ describe("NewCycleModal — render", () => {
     expect(label.value).toBe("CYCLE 3");
   });
 
-  it("prefills code with S-N", () => {
+  it("code input renders empty with a server-minted placeholder", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[CYCLE_ACTIVE, CYCLE_PLANNED]} now={NOW} />);
     const code = screen.getByTestId<HTMLInputElement>("new-cycle-code");
-    expect(code.value).toBe("S-3");
+    expect(code.value).toBe("");
+    expect(code).toHaveAttribute(
+      "placeholder",
+      "auto (assigned by the server)",
+    );
   });
 
   it("prefills start as day after latest cycle end", () => {
@@ -382,7 +387,7 @@ describe("NewCycleModal — render", () => {
 });
 
 describe("NewCycleModal — submit payload", () => {
-  it("commits POST with code, label, start, end, state", async () => {
+  it("commits POST with label, start, end, state; omits code when left empty (server mints it)", async () => {
     const stub = makeCreateStub();
     vi.stubGlobal("fetch", stub);
     useBoardStore.setState({ cycleModal: { kind: "new" } });
@@ -398,11 +403,35 @@ describe("NewCycleModal — submit payload", () => {
       const body = JSON.parse(
         (postCalls[0][1] as RequestInit).body as string,
       ) as Record<string, unknown>;
-      expect(body.code).toBe("S-3");
+      expect(body).not.toHaveProperty("code");
       expect(body.label).toBe("CYCLE 3");
       expect(body.start).toBe("2026-06-23");
       expect(body.end).toBe("2026-06-29");
       expect(body.state).toBe("PLANNED");
+    });
+  });
+
+  it("sends a typed code verbatim in the POST payload", async () => {
+    const stub = makeCreateStub();
+    vi.stubGlobal("fetch", stub);
+    useBoardStore.setState({ cycleModal: { kind: "new" } });
+    wrapQC(<NewCycleModal cycles={[CYCLE_ACTIVE, CYCLE_PLANNED]} now={NOW} />);
+
+    await userEvent.type(
+      screen.getByTestId("new-cycle-code"),
+      "S-brave-finch-7q3zd",
+    );
+    await userEvent.click(screen.getByTestId("new-cycle-commit"));
+
+    await waitFor(() => {
+      const postCalls = stub.mock.calls.filter(
+        ([, opts]) => (opts as RequestInit)?.method === "POST",
+      );
+      expect(postCalls.length).toBeGreaterThan(0);
+      const body = JSON.parse(
+        (postCalls[0][1] as RequestInit).body as string,
+      ) as Record<string, unknown>;
+      expect(body.code).toBe("S-brave-finch-7q3zd");
     });
   });
 
@@ -488,7 +517,7 @@ describe("NewCycleModal — success callbacks", () => {
   it("on success: closes modal, sets cycleSel to new code, sets mode cycle", async () => {
     const newCycle: BoardCycle = {
       ...CYCLE_ACTIVE,
-      code: "S-3",
+      code: "S-brave-finch-7q3zd",
       label: "CYCLE 3",
     };
     const stub = makeCreateStub(newCycle);
@@ -500,7 +529,7 @@ describe("NewCycleModal — success callbacks", () => {
 
     await waitFor(() => {
       expect(useBoardStore.getState().cycleModal).toBeNull();
-      expect(useBoardStore.getState().cycleSel).toBe("S-3");
+      expect(useBoardStore.getState().cycleSel).toBe("S-brave-finch-7q3zd");
       expect(useBoardStore.getState().mode).toBe("cycle");
     });
   });

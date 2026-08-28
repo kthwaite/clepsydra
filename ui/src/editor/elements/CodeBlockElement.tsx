@@ -9,6 +9,7 @@ import {
 } from "slate-react";
 import {
   MermaidDiagram,
+  MermaidExpandButton,
   MermaidViewToggle,
   useMermaidRender,
 } from "#/components/MermaidDiagram";
@@ -125,13 +126,22 @@ export function CodeBlockElement({ attributes, children, element }: Props) {
             className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
           />
           {lang === MERMAID_LANGUAGE && (
-            // Pressed when the diagram is what's on screen — while the caret is
-            // in the block that is never true, so the control always reads as
-            // "show the diagram now".
-            <MermaidViewToggle
-              isDiagram={wantsDiagram}
-              onChange={handleDiagramToggle}
-            />
+            <>
+              {/* Both controls stand down while the source is what's on
+                  screen: there is no picture to expand. */}
+              <MermaidExpandButton
+                svg={
+                  wantsDiagram && state.status === "ready" ? state.svg : null
+                }
+              />
+              {/* Pressed when the diagram is what's on screen — while the
+                  caret is in the block that is never true, so the control
+                  always reads as "show the diagram now". */}
+              <MermaidViewToggle
+                isDiagram={wantsDiagram}
+                onChange={handleDiagramToggle}
+              />
+            </>
           )}
           {readOnly ? (
             <span className="cl-mono uppercase tracking-[0.18em] text-accent">

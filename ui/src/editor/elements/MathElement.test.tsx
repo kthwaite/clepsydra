@@ -134,6 +134,16 @@ describe("MathElement", () => {
     ).toBeNull();
   });
 
+  it("opts the inline source input out of spellcheck", async () => {
+    const user = userEvent.setup();
+    renderMathEditor();
+
+    await user.click(screen.getByTestId("inline-math"));
+    const source = screen.getByRole("textbox", { name: "Edit inline math" });
+
+    expect(source).toHaveAttribute("spellcheck", "false");
+  });
+
   it("restores Slate focus and usable navigation after valid Escape", async () => {
     const user = userEvent.setup();
     const editor = renderMathEditor();
@@ -266,6 +276,16 @@ describe("MathElement", () => {
     const source = screen.getByRole("textbox", { name: "Edit display math" });
     expect(source.tagName).toBe("TEXTAREA");
     await waitFor(() => expect(source).toHaveFocus());
+  });
+
+  it("opts the display source textarea out of spellcheck", async () => {
+    const user = userEvent.setup();
+    renderMathEditor("display");
+
+    await user.click(screen.getByTestId("math-block"));
+    const source = screen.getByRole("textbox", { name: "Edit display math" });
+
+    expect(source).toHaveAttribute("spellcheck", "false");
   });
 
   it("keeps display textarea keys local while allowing Enter to insert a newline", async () => {

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use clepsydra::vault::Vault;
 use clepsydra::vault::config::DisambiguationStrategy;
 use clepsydra::vault::derivation::{Deriver, IndexedPage};
-use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex, reserve_code_number};
+use clepsydra::vault::index::{IndexError, UnresolvedReason, VaultIndex};
 use clepsydra::vault::init::init_vault;
 use clepsydra::vault::path::VaultPath;
 use clepsydra::vault::query::{QueryContext, QueryOutput, QuerySpec, evaluate};
@@ -1673,6 +1673,72 @@ fn fts_search_returns_typed_query_errors() {
 }
 
 #[test]
+fn structured_search_counts_attendees_and_composes_with_tags() {
+    // One `page_properties` row per attendee; a bare string is one row; a page
+    // without the property counts as 0. A 1:1 is a MEETING tagged `1:1`.
+    let (_tmp, vault) = setup_vault(&[
+        (
+            "meetings/none.md",
+            "+++\ntitle = \"Nobody Yet\"\ntype = \"MEETING\"\n+++\nAgenda.\n",
+        ),
+        (
+            "meetings/one.md",
+            "+++\ntitle = \"Ada Catch-up\"\ntype = \"MEETING\"\ntags = [\"1:1\"]\nattendees = [\"[[Ada Lovelace]]\"]\n+++\nAgenda.\n",
+        ),
+        (
+            "meetings/three.md",
+            "+++\ntitle = \"Kickoff\"\ntype = \"MEETING\"\nattendees = [\"[[Ada Lovelace]]\", \"[[Grace Hopper]]\", \"[[Alan Turing]]\"]\n+++\nAgenda.\n",
+        ),
+        (
+            "notes/bare.md",
+            "+++\ntitle = \"Bare String\"\nattendees = \"[[Ada Lovelace]]\"\n+++\nA note with an ordinary property.\n",
+        ),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+
+    let paths = |query: &str| -> Vec<String> {
+        let mut paths: Vec<String> = index
+            .search(query, 10)
+            .unwrap_or_else(|error| panic!("{query:?} should parse: {error}"))
+            .into_iter()
+            .map(|result| result.path)
+            .collect();
+        paths.sort();
+        paths
+    };
+
+    assert_eq!(paths("attendees:1"), ["meetings/one.md", "notes/bare.md"]);
+    assert_eq!(paths("attendees:=1"), ["meetings/one.md", "notes/bare.md"]);
+    assert_eq!(paths("attendees:>1"), ["meetings/three.md"]);
+    assert_eq!(paths("attendees:>=3"), ["meetings/three.md"]);
+    assert_eq!(paths("attendees:>=4"), Vec::<String>::new());
+    assert_eq!(
+        paths("attendees:<3"),
+        ["meetings/none.md", "meetings/one.md", "notes/bare.md"]
+    );
+    assert_eq!(
+        paths("attendees:<=1 kind:meeting"),
+        ["meetings/none.md", "meetings/one.md"]
+    );
+    assert_eq!(paths("attendees:0"), ["meetings/none.md"]);
+    assert_eq!(
+        paths("-attendees:0"),
+        ["meetings/one.md", "meetings/three.md", "notes/bare.md"]
+    );
+    assert_eq!(paths("kind:meeting tag:\"1:1\""), ["meetings/one.md"]);
+    assert_eq!(paths("kind:meeting tag:1:1"), ["meetings/one.md"]);
+    assert_eq!(paths("tag:1:1 attendees:1"), ["meetings/one.md"]);
+    assert_eq!(
+        paths("attendees:>1 | tag:1:1"),
+        ["meetings/one.md", "meetings/three.md"]
+    );
+    // A count composes with full text like any other field.
+    assert_eq!(paths("agenda attendees:>1"), ["meetings/three.md"]);
+}
+
+#[test]
 fn fts_search_removed_page_not_returned() {
     let (_tmp, vault) = setup_vault(&[(
         "ephemeral.md",
@@ -1806,33 +1872,6 @@ fn resolve_links_for_page_resolves_block_refs() {
             .any(|bl| bl.source_path == "referrer.md" && bl.kind == "block_ref"),
         "block_ref backlink should still exist after re-index + per-page resolve"
     );
-}
-
-#[test]
-fn code_reservation_initializes_from_observed_max_and_advances_monotonically() {
-    let tmp = TempDir::new().unwrap();
-    let db_path = tmp.path().join("cache.db");
-    let index = VaultIndex::open(&db_path).unwrap();
-    drop(index);
-
-    let mut conn = rusqlite::Connection::open(&db_path).unwrap();
-    assert_eq!(reserve_code_number(&mut conn, "TASK", 481).unwrap(), 482);
-    assert_eq!(reserve_code_number(&mut conn, "TASK", 481).unwrap(), 483);
-    assert_eq!(reserve_code_number(&mut conn, "TASK", 900).unwrap(), 484);
-}
-
-#[test]
-fn code_reservation_keeps_families_independent() {
-    let tmp = TempDir::new().unwrap();
-    let db_path = tmp.path().join("cache.db");
-    let index = VaultIndex::open(&db_path).unwrap();
-    drop(index);
-
-    let mut conn = rusqlite::Connection::open(&db_path).unwrap();
-    assert_eq!(reserve_code_number(&mut conn, "TASK", 7).unwrap(), 8);
-    assert_eq!(reserve_code_number(&mut conn, "CYCLE", 13).unwrap(), 14);
-    assert_eq!(reserve_code_number(&mut conn, "TASK", 7).unwrap(), 9);
-    assert_eq!(reserve_code_number(&mut conn, "CYCLE", 13).unwrap(), 15);
 }
 
 #[test]

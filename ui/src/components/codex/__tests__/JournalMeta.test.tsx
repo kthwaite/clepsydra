@@ -28,6 +28,9 @@ vi.mock("#/hooks/useOpenTab", () => ({
 
 import { AiJournalMeta, JournalMeta } from "../JournalMeta";
 
+// The rail props carry the page tags; the journal blocks ignore them.
+const noop = () => {};
+
 const entry = (d: string) => ({
   id: d,
   path: `journals/${d}.md`,
@@ -61,7 +64,13 @@ describe("JournalMeta", () => {
       data: [entry("2026-08-07"), entry("2026-08-04")],
     });
     render(
-      <JournalMeta path="journals/2026-08-07.md" tabId="t1" isDraft={false} />,
+      <JournalMeta
+        path="journals/2026-08-07.md"
+        tabId="t1"
+        isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
+      />,
     );
     fireEvent.click(screen.getByRole("button", { name: "previous entry" }));
     expect(updateTabPathMock).toHaveBeenCalledWith(
@@ -74,7 +83,13 @@ describe("JournalMeta", () => {
   it("disables prev at the window edge and next on today", () => {
     useJournalRecentMock.mockReturnValue({ data: [entry("2026-08-07")] });
     render(
-      <JournalMeta path="journals/2026-08-07.md" tabId="t1" isDraft={false} />,
+      <JournalMeta
+        path="journals/2026-08-07.md"
+        tabId="t1"
+        isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
+      />,
     );
     expect(
       screen.getByRole("button", { name: "previous entry" }),
@@ -87,7 +102,13 @@ describe("JournalMeta", () => {
       data: [entry("2026-08-07"), entry("2026-08-05")],
     });
     render(
-      <JournalMeta path="journals/2026-08-07.md" tabId="t1" isDraft={false} />,
+      <JournalMeta
+        path="journals/2026-08-07.md"
+        tabId="t1"
+        isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
+      />,
     );
     const skipped = screen.getByRole("button", { name: /6\/8/ });
     expect(skipped).toBeDisabled();
@@ -103,7 +124,13 @@ describe("JournalMeta", () => {
   it("shows unwritten state for a draft and day-of-year marginalia", () => {
     useJournalRecentMock.mockReturnValue({ data: [] });
     render(
-      <JournalMeta path="journals/2026-08-07.md" tabId="t1" isDraft={true} />,
+      <JournalMeta
+        path="journals/2026-08-07.md"
+        tabId="t1"
+        isDraft={true}
+        tags={[]}
+        onTagsChange={noop}
+      />,
     );
     // Scoped to the State row: today's cross-link row can also read
     // "unwritten" when the AI counterpart has no entry yet.
@@ -119,7 +146,13 @@ describe("JournalMeta", () => {
       data: [aiEntry("2026-08-07")],
     });
     render(
-      <JournalMeta path="journals/2026-08-07.md" tabId="t1" isDraft={false} />,
+      <JournalMeta
+        path="journals/2026-08-07.md"
+        tabId="t1"
+        isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
+      />,
     );
     expect(screen.getByText("AI journal")).toBeInTheDocument();
     const row = screen.getByRole("button", { name: /written/ });
@@ -136,7 +169,13 @@ describe("JournalMeta", () => {
     useJournalRecentMock.mockReturnValue({ data: [entry("2026-08-04")] });
     useAiJournalRecentMock.mockReturnValue({ data: [] });
     render(
-      <JournalMeta path="journals/2026-08-04.md" tabId="t1" isDraft={false} />,
+      <JournalMeta
+        path="journals/2026-08-04.md"
+        tabId="t1"
+        isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
+      />,
     );
     const row = screen.getByRole("button", { name: /unwritten/ });
     expect(row).toBeDisabled();
@@ -146,7 +185,13 @@ describe("JournalMeta", () => {
     useJournalRecentMock.mockReturnValue({ data: [] });
     useAiJournalRecentMock.mockReturnValue({ data: [] });
     render(
-      <JournalMeta path="journals/2026-08-07.md" tabId="t1" isDraft={true} />,
+      <JournalMeta
+        path="journals/2026-08-07.md"
+        tabId="t1"
+        isDraft={true}
+        tags={[]}
+        onTagsChange={noop}
+      />,
     );
     const row = screen.getByRole("button", { name: /unwritten/ });
     expect(row).not.toBeDisabled();
@@ -169,6 +214,8 @@ describe("AiJournalMeta", () => {
         path="ai-journals/2026-08-07.md"
         tabId="t1"
         isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "previous entry" }));
@@ -202,6 +249,8 @@ describe("AiJournalMeta", () => {
         path="ai-journals/20260807.2026-08-07.Ab12Cd34.md"
         tabId="t1"
         isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: "previous entry" }));
@@ -224,6 +273,8 @@ describe("AiJournalMeta", () => {
         path="ai-journals/2026-08-07.md"
         tabId="t1"
         isDraft={false}
+        tags={[]}
+        onTagsChange={noop}
       />,
     );
     expect(screen.getByText("Journal")).toBeInTheDocument();

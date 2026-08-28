@@ -4,13 +4,17 @@ import { MeetingMeta } from "#/components/codex/MeetingMeta";
 import { aiJournalDayLabel, journalDayLabel } from "#/lib/journal";
 import type { Kind } from "#/lib/kind";
 
-/** Props FOLIO hands every bespoke META-rail block. */
+/** Props FOLIO hands every bespoke block, in the META rail or the header. */
 export type KindMetaExtrasProps = {
   path: string;
   /** Workspace tab hosting this folio — lets a block repoint it (day nav). */
   tabId: string;
   /** True while the editor drafts a not-yet-created page (today's journal). */
   isDraft: boolean;
+  /** The page's editable tags — the same values the folio header edits. */
+  tags: string[];
+  /** Replace the editable tags; the editor saves the way the header does. */
+  onTagsChange: (next: string[]) => void;
 };
 
 /** What a per-kind renderer may customise around the shared FOLIO editor. */
@@ -21,6 +25,9 @@ export type KindPresentation = {
   metaExtras: ComponentType<KindMetaExtrasProps> | null;
   /** Label for FOLIO's wrapping Block around metaExtras (default "Details"). */
   metaExtrasLabel?: string;
+  /** Kind-specific facts rendered in the document column directly under the
+   *  title/tags header (MEETING: occurred + attendees), or null. */
+  headerExtras: ComponentType<KindMetaExtrasProps> | null;
   /** When set, FOLIO renders this string as a static title in place of the
    *  editable title input. */
   readOnlyTitle?: (path: string, title: string) => string;
@@ -29,39 +36,41 @@ export type KindPresentation = {
 const GENERIC: KindPresentation = {
   bodyPresentation: "editor",
   metaExtras: null,
+  headerExtras: null,
 };
 
-/** Bespoke registry. JOURNAL's metaExtras lands with the JournalMeta block. */
+/** Bespoke registry. A kind's extras land in the META rail when they are
+ *  navigation or sidebar metadata (JOURNAL's day nav), and in the header when
+ *  they are facts of the note itself (MEETING's occurred + attendees). */
 const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
   RECIPE: {
     bodyPresentation: "recipe",
     metaExtras: null,
+    headerExtras: null,
   },
   AI_CONVERSATION: {
     bodyPresentation: "ai-conversation",
     metaExtras: null,
+    headerExtras: null,
   },
   JOURNAL: {
     bodyPresentation: "editor",
     metaExtras: JournalMeta,
     metaExtrasLabel: "Journal",
+    headerExtras: null,
     readOnlyTitle: journalDayLabel,
   },
   AI_JOURNAL: {
     bodyPresentation: "editor",
     metaExtras: AiJournalMeta,
     metaExtrasLabel: "AI Journal",
+    headerExtras: null,
     readOnlyTitle: aiJournalDayLabel,
   },
   MEETING: {
     bodyPresentation: "editor",
-    metaExtras: MeetingMeta,
-    metaExtrasLabel: "Meeting",
-  },
-  ONE_ON_ONE: {
-    bodyPresentation: "editor",
-    metaExtras: MeetingMeta,
-    metaExtrasLabel: "Meeting",
+    metaExtras: null,
+    headerExtras: MeetingMeta,
   },
 };
 

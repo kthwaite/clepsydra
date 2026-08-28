@@ -1,4 +1,5 @@
-//! MEETING and ONE_ON_ONE pages and the `attendees` relation they share.
+//! MEETING pages, the `attendees` relation, and the retired ONE_ON_ONE kind
+//! (a 1:1 is a MEETING tagged `1:1` since 2026-08-28).
 
 mod support;
 
@@ -88,8 +89,10 @@ async fn a_meeting_is_created_with_any_number_of_attendees() {
 }
 
 #[tokio::test]
-async fn a_one_on_one_takes_one_attendee_and_refuses_a_second() {
-    let (server, _tmp) = setup_server();
+async fn a_legacy_one_on_one_kind_is_read_as_a_meeting() {
+    // ONE_ON_ONE folded into MEETING on 2026-08-28. The token still parses,
+    // any number of attendees is fine, and nothing is written back as it.
+    let (server, tmp) = setup_server();
 
     let (status, created) = create(
         &server,
@@ -97,47 +100,65 @@ async fn a_one_on_one_takes_one_attendee_and_refuses_a_second() {
         serde_json::json!({
             "title": "Ada — August",
             "kind": "ONE_ON_ONE",
-            "attendees": ["Ada Lovelace"],
-        }),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED);
-    assert_eq!(created["kind"], "ONE_ON_ONE");
-    assert!(
-        created["path"]
-            .as_str()
-            .unwrap()
-            .starts_with("one-on-ones/"),
-        "1:1 should file under its canonical folder: {created}"
-    );
-
-    let (status, error) = create(
-        &server,
-        "one-on-ones/crowd.md",
-        serde_json::json!({
-            "title": "Not A 1:1",
-            "kind": "ONE_ON_ONE",
+            "tags": ["1:1"],
             "attendees": ["Ada Lovelace", "Grace Hopper"],
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "MEETING");
+    assert_eq!(created["inferred"], false);
+    // Create-by-path keeps the requested path; the declaration is the point.
+    let path = created["path"].as_str().unwrap().to_string();
+    assert_eq!(created["meta"]["type"], "MEETING");
+    assert_eq!(
+        attendees_of(&server, &path).await,
+        serde_json::json!(["[[Ada Lovelace]]", "[[Grace Hopper]]"])
+    );
+    assert_eq!(
+        meta_key(&server, &path, "tags").await,
+        serde_json::json!(["1:1"])
+    );
+
+    let line = frontmatter_line(&tmp, &path, "type");
     assert!(
-        error["error"]
-            .as_str()
-            .unwrap()
-            .contains("names one attendee"),
-        "unhelpful error: {error}"
+        line.contains("MEETING") && !line.contains("ONE_ON_ONE"),
+        "the retired token must not be written back: {line:?}"
     );
 }
 
 #[tokio::test]
-async fn an_inferred_one_on_one_is_bound_by_the_same_rule() {
-    // No declared kind: the folder makes it a ONE_ON_ONE, and the attendee
-    // ceiling has to travel with the inference.
+async fn a_legacy_one_on_one_declared_on_disk_reads_back_as_a_meeting() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            std::fs::create_dir_all(root.join("one-on-ones")).unwrap();
+            std::fs::write(
+                root.join("one-on-ones/legacy.md"),
+                "+++\nid = \"019fd000-0000-7000-8000-00000000a001\"\ntitle = \"Legacy 1:1\"\ntype = \"ONE_ON_ONE\"\nattendees = [\"[[Ada Lovelace]]\"]\n+++\nNotes.\n",
+            )
+            .unwrap();
+        })
+        .build()
+        .into_server_and_temp();
+
+    let response = server.get("/api/vault/pages/one-on-ones/legacy.md").await;
+    response.assert_status_ok();
+    let page: serde_json::Value = response.json();
+    assert_eq!(page["kind"], "MEETING", "{page}");
+    assert_eq!(page["inferred"], false, "{page}");
+    assert_eq!(
+        page["meta"]["attendees"],
+        serde_json::json!(["[[Ada Lovelace]]"])
+    );
+}
+
+#[tokio::test]
+async fn a_page_under_a_legacy_one_on_one_folder_infers_meeting() {
+    // No declared kind: the retired folder infers MEETING, and a MEETING has
+    // no attendee ceiling.
     let (server, _tmp) = setup_server();
 
-    let (status, _) = create(
+    let (status, created) = create(
         &server,
         "one-on-ones/inferred.md",
         serde_json::json!({
@@ -146,16 +167,23 @@ async fn an_inferred_one_on_one_is_bound_by_the_same_rule() {
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["kind"], "MEETING");
+    assert_eq!(created["inferred"], true);
+    assert_eq!(
+        attendees_of(&server, created["path"].as_str().unwrap()).await,
+        serde_json::json!(["[[Ada Lovelace]]", "[[Grace Hopper]]"])
+    );
 }
 
 #[tokio::test]
 async fn meeting_pages_open_with_a_scaffold_body() {
     let (server, _tmp) = setup_server();
 
+    // The legacy token is a spelling of MEETING, so it gets the scaffold too.
     for (path, kind) in [
         ("meetings/scaffold.md", "MEETING"),
-        ("one-on-ones/scaffold.md", "ONE_ON_ONE"),
+        ("meetings/legacy.md", "ONE_ON_ONE"),
     ] {
         let (status, created) = create(
             &server,
@@ -164,6 +192,7 @@ async fn meeting_pages_open_with_a_scaffold_body() {
         )
         .await;
         assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(created["kind"], "MEETING");
         let body = created["body"].as_str().unwrap();
         assert!(body.contains("## Agenda"), "no scaffold for {kind}: {body}");
         assert!(body.contains("## Notes"), "no scaffold for {kind}: {body}");
@@ -185,6 +214,8 @@ async fn meeting_pages_open_with_a_scaffold_body() {
 
 #[tokio::test]
 async fn attendees_become_backlinks_on_the_person_page() {
+    // TSK-0105: the person page collects every meeting naming it through the
+    // `attendees` property, as a `property_ref` backlink.
     let (server, _tmp) = setup_server();
 
     server
@@ -199,7 +230,7 @@ async fn attendees_become_backlinks_on_the_person_page() {
         serde_json::json!({
             "title": "Kickoff",
             "kind": "MEETING",
-            "attendees": ["Ada Lovelace"],
+            "attendees": ["Ada Lovelace", "Grace Hopper"],
         }),
     )
     .await;
@@ -216,11 +247,14 @@ async fn attendees_become_backlinks_on_the_person_page() {
         .find(|entry| entry["source_path"] == meeting_path.as_str())
         .unwrap_or_else(|| panic!("meeting missing from Ada's backlinks: {backlinks}"));
     assert_eq!(entry["kind"], "property_ref");
+    assert_eq!(entry["target_raw"], "Ada Lovelace");
+    assert_eq!(entry["context"], "frontmatter field: attendees");
+    assert_eq!(entry["source_title"], "Kickoff");
 }
 
 #[tokio::test]
-async fn assigning_one_on_one_to_a_crowded_page_is_refused() {
-    let (server, _tmp) = setup_server();
+async fn assigning_the_legacy_one_on_one_kind_declares_meeting() {
+    let (server, tmp) = setup_server();
 
     let (status, meeting) = create(
         &server,
@@ -235,58 +269,75 @@ async fn assigning_one_on_one_to_a_crowded_page_is_refused() {
     assert_eq!(status, StatusCode::CREATED);
     let path = meeting["path"].as_str().unwrap().to_string();
 
-    let refused = server
+    // A roomful of people is no obstacle: the legacy token is just MEETING.
+    let assigned = server
         .post(&format!("/api/vault/pages-assign/{path}"))
         .json(&serde_json::json!({ "kind": "ONE_ON_ONE" }))
         .await;
-    refused.assert_status(StatusCode::BAD_REQUEST);
+    assigned.assert_status_ok();
+    let assigned: serde_json::Value = assigned.json();
+    let path = assigned["path"].as_str().map(str::to_owned).unwrap_or(path);
 
-    // The same page reassigned to MEETING is fine — only the 1:1 has a ceiling.
-    let allowed = server
-        .post(&format!("/api/vault/pages-assign/{path}"))
-        .json(&serde_json::json!({ "kind": "MEETING" }))
-        .await;
-    allowed.assert_status_ok();
+    let response = server.get(&format!("/api/vault/pages/{path}")).await;
+    response.assert_status_ok();
+    let page: serde_json::Value = response.json();
+    assert_eq!(page["kind"], "MEETING", "{page}");
+    let line = frontmatter_line(&tmp, &path, "type");
+    assert!(
+        line.contains("MEETING") && !line.contains("ONE_ON_ONE"),
+        "the retired token must not be written back: {line:?}"
+    );
 }
 
 #[tokio::test]
-async fn patching_attendees_is_held_to_the_kind_ceiling() {
+async fn patching_attendees_accepts_any_number_but_not_a_duplicate() {
     let (server, _tmp) = setup_server();
 
     let (status, created) = create(
         &server,
-        "one-on-ones/ada.md",
+        "meetings/ada.md",
         serde_json::json!({
             "title": "Ada — August",
-            "kind": "ONE_ON_ONE",
+            "kind": "MEETING",
+            "tags": ["1:1"],
             "attendees": ["Ada Lovelace"],
         }),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED);
     let id = created["meta"]["id"].as_str().unwrap().to_string();
+    let path = created["path"].as_str().unwrap().to_string();
     let revision = created["revision"].as_str().unwrap().to_string();
 
+    // The same person twice is still refused — shape validation survives the
+    // cardinality's removal.
     let refused = server
         .patch(&format!("/api/vault/pages/by-id/{id}/properties"))
         .json(&serde_json::json!({
-            "set": { "attendees": ["[[Ada Lovelace]]", "[[Grace Hopper]]"] },
+            "set": { "attendees": ["[[Ada Lovelace]]", "[[ada lovelace|Ada]]"] },
             "expected_revision": revision,
         }))
         .await;
     refused.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = refused.json();
+    assert!(
+        error["error"].as_str().unwrap().contains("more than once"),
+        "unhelpful error: {error}"
+    );
 
     // The refusal left the page alone, so the original revision still applies.
-    let swapped = server
+    let grown = server
         .patch(&format!("/api/vault/pages/by-id/{id}/properties"))
         .json(&serde_json::json!({
-            "set": { "attendees": ["[[Grace Hopper]]"] },
+            "set": { "attendees": ["[[Ada Lovelace]]", "[[Grace Hopper]]", "[[Alan Turing]]"] },
             "expected_revision": revision,
         }))
         .await;
-    swapped.assert_status_ok();
-    let patched: serde_json::Value = swapped.json();
-    assert_eq!(patched["properties"]["attendees"], "[[Grace Hopper]]");
+    grown.assert_status_ok();
+    assert_eq!(
+        attendees_of(&server, &path).await,
+        serde_json::json!(["[[Ada Lovelace]]", "[[Grace Hopper]]", "[[Alan Turing]]"])
+    );
 }
 
 #[tokio::test]

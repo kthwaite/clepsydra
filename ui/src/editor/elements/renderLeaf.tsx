@@ -4,7 +4,12 @@ import { TOKEN_COLOR } from "../decorate-code";
 export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
   if (leaf.code) {
     children = (
-      <code className="bg-muted px-1 py-0.5 font-mono text-sm">{children}</code>
+      <code
+        spellCheck={false}
+        className="bg-muted px-1 py-0.5 font-mono text-sm"
+      >
+        {children}
+      </code>
     );
   }
   if (leaf.bold) {

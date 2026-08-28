@@ -42,6 +42,20 @@ enum CasCommands {
 }
 
 #[derive(Debug, Subcommand)]
+enum CodesCommands {
+    #[command(
+        about = "One-time migration: recode legacy TASK/CYCLE pages and rewrite prose tokens",
+        long_about = "Rename every TASK/CYCLE page whose filename stem is not already a petname code (docs/adr/0003-hybrid-petname-task-codes.md) to a freshly minted one, rewriting inbound wikilinks through the move planner. Then rewrite every plain-text legacy token (`TSK-0072`, `S-3`) vault-wide, including inside frontmatter values such as `cycle = \"S-3\"`, which the move planner does not touch.\n\nStop `clep serve` first: this command opens the vault index directly, and a server running concurrently would hold a now-stale index and could reintroduce the renamed files' old paths.\n\nThis is a one-time, irreversible clean break: after it runs, no code in the legacy `TSK-0072` / `S-3` format is recognized anywhere in Clepsydra, and there is no alias mapping old codes to new ones. A legacy code recorded outside the vault (an external link, a chat log, a paper notebook) will no longer resolve to anything. Commit or back up the vault before running with --write.\n\nA page that fails to rename, or whose destination already exists, is warned about and left untouched for a later run rather than aborting the whole migration; its legacy code is correspondingly left unrewritten wherever it's mentioned in prose, also warned about, rather than rewritten to a code that was never created.",
+        after_help = "Examples:\n  clep codes migrate            # dry run\n  clep codes migrate --write    # rename and rewrite in place"
+    )]
+    Migrate {
+        /// Apply changes (default is a dry run).
+        #[arg(long)]
+        write: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum ConfigCommands {
     #[command(about = "Print the application config selected by normal lookup")]
     Show {
@@ -207,6 +221,14 @@ enum Commands {
     Cas {
         #[command(subcommand)]
         command: CasCommands,
+    },
+    #[command(
+        about = "Petname code utilities",
+        long_about = "Utilities for the Task/Cycle petname code scheme (docs/adr/0003-hybrid-petname-task-codes.md)."
+    )]
+    Codes {
+        #[command(subcommand)]
+        command: CodesCommands,
     },
     #[command(
         about = "Register the clepsydra:// URL scheme with macOS",
@@ -569,6 +591,40 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                         1
                     },
                 )
+            }
+        },
+        Commands::Codes { command } => match command {
+            CodesCommands::Migrate { write } => {
+                // Opens the vault and a fully-derived index directly (see
+                // long_about: stop `clep serve` first), the same way
+                // `Commands::Relabel` does, so inbound wikilinks get
+                // rewritten on rename.
+                let (vault, mut index) = open_vault_and_index()?;
+                println!(
+                    "Recoding legacy TASK/CYCLE pages to petname codes. This is a one-time, irreversible clean break — commit or back up the vault before running with --write."
+                );
+                let report = clepsydra::vault::recode::recode(&vault, &mut index, write)?;
+                for (old, new) in &report.renamed {
+                    println!("  {old} -> {new}");
+                }
+                for (path, count) in &report.rewritten {
+                    println!("  {path}: {count} token(s)");
+                }
+                for warning in &report.warnings {
+                    println!("  warning {warning}");
+                }
+                println!(
+                    "codes migrate: {} renamed, {} rewritten, {} warning(s){}",
+                    report.renamed.len(),
+                    report.rewritten.len(),
+                    report.warnings.len(),
+                    if report.dry_run {
+                        " (dry run — pass --write to apply)"
+                    } else {
+                        ""
+                    }
+                );
+                Ok(if report.warnings.is_empty() { 0 } else { 1 })
             }
         },
         Commands::Grep {
@@ -1227,5 +1283,32 @@ mod cli_tests {
     #[test]
     fn cas_rebuild_accepts_write() {
         assert!(cas_rebuild_write(&["clep", "cas", "rebuild", "--write"]));
+    }
+
+    fn codes_migrate_write(args: &[&str]) -> bool {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
+            Commands::Codes {
+                command: CodesCommands::Migrate { write },
+            } => write,
+            other => panic!("expected codes migrate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn codes_migrate_defaults_write_off() {
+        assert!(!codes_migrate_write(&["clep", "codes", "migrate"]));
+    }
+
+    #[test]
+    fn codes_migrate_accepts_write() {
+        assert!(codes_migrate_write(&[
+            "clep", "codes", "migrate", "--write"
+        ]));
+    }
+
+    #[test]
+    fn codes_requires_a_subcommand() {
+        assert!(Cli::try_parse_from(["clep", "codes"]).is_err());
     }
 }

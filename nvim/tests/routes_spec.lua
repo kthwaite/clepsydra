@@ -178,10 +178,10 @@ return {
 			with_stubs({
 				["POST /board/tasks"] = {
 					id = "u1",
-					code = "TSK-0055",
+					code = "TSK-swift-lynx-4h8bq",
 					title = "Fix it",
 					status = "INTAKE",
-					path = "tasks/TSK-0055.md",
+					path = "tasks/TSK-swift-lynx-4h8bq.md",
 				},
 			}, function(fake)
 				require("clepsydra.tasks").add("Fix it")
@@ -196,18 +196,18 @@ return {
 		fn = function()
 			with_stubs({
 				["GET /board"] = {
-					tasks = { { id = "u1", code = "TSK-0012", title = "T", status = "INTAKE", path = "tasks/TSK-0012.md" } },
+					tasks = { { id = "u1", code = "TSK-brave-finch-7q3zd", title = "T", status = "INTAKE", path = "tasks/TSK-brave-finch-7q3zd.md" } },
 				},
 				["PATCH /board/tasks/u1"] = {
 					id = "u1",
-					code = "TSK-0012",
+					code = "TSK-brave-finch-7q3zd",
 					title = "T",
 					status = "FIELD",
-					path = "tasks/TSK-0012.md",
+					path = "tasks/TSK-brave-finch-7q3zd.md",
 				},
 			}, function(fake)
 				local buf = vim.api.nvim_create_buf(false, true)
-				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-0012.md")
+				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-brave-finch-7q3zd.md")
 				vim.api.nvim_set_current_buf(buf)
 				local saved_select = vim.ui.select
 				vim.ui.select = function(_, _, on_choice)
@@ -305,11 +305,11 @@ return {
 		fn = function()
 			with_stubs({
 				["GET /board"] = {
-					tasks = { { id = "u9", code = "TSK-0021", title = "T", status = "INTAKE", path = "tasks/TSK-0021.md" } },
+					tasks = { { id = "u9", code = "TSK-calm-heron-2xm9p", title = "T", status = "INTAKE", path = "tasks/TSK-calm-heron-2xm9p.md" } },
 				},
 			}, function(fake)
 				local buf = vim.api.nvim_create_buf(false, true)
-				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-0021.md")
+				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-calm-heron-2xm9p.md")
 				vim.api.nvim_set_current_buf(buf)
 				local saved_select = vim.ui.select
 				vim.ui.select = function(_, _, on_choice)
@@ -335,7 +335,7 @@ return {
 				["GET /board"] = { tasks = {} },
 			}, function(fake)
 				local buf = vim.api.nvim_create_buf(false, true)
-				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-0099.md")
+				vim.api.nvim_buf_set_name(buf, "/vault/tasks/TSK-quiet-wren-9k2mx.md")
 				vim.api.nvim_set_current_buf(buf)
 				local messages = {}
 				vim.notify = function(msg, level)
@@ -345,7 +345,7 @@ return {
 				eq(1, #fake.calls)
 				eq("GET /board", fake.calls[1].method .. " " .. fake.calls[1].path)
 				eq(1, #messages)
-				eq("clepsydra: task not found on board: TSK-0099", messages[1].msg)
+				eq("clepsydra: task not found on board: TSK-quiet-wren-9k2mx", messages[1].msg)
 				eq(vim.log.levels.WARN, messages[1].level)
 			end)
 		end,

@@ -108,7 +108,9 @@ const {
   })),
 }));
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children }: { children: ReactNode }) => <a href="/archive">{children}</a>,
+  Link: ({ children }: { children: ReactNode }) => (
+    <a href="/archive">{children}</a>
+  ),
   useBlocker: (options: unknown) => {
     useBlockerMock(options);
     return blockerState.current;
@@ -165,10 +167,7 @@ vi.mock("#/components/page-tree/PageActionsMenu", () => ({
   PageActionsMenu: (props: {
     path: string;
     archiveOnly?: boolean;
-    onArchived: (archived: {
-      page_id: string;
-      original_path: string;
-    }) => void;
+    onArchived: (archived: { page_id: string; original_path: string }) => void;
   }) => {
     pageActionsMock(props);
     return (
@@ -1205,9 +1204,7 @@ describe("Folio kind assignment", () => {
     expect(kind).toBeDisabled();
     expect(kind).toHaveValue("JOURNAL");
     expect(screen.getByText("· fixed")).toBeInTheDocument();
-    expect(kind).toHaveAccessibleDescription(
-      "Journal kind cannot be changed.",
-    );
+    expect(kind).toHaveAccessibleDescription("Journal kind cannot be changed.");
   });
 
   it("displays an existing quotation kind without offering it for reassignment", async () => {
@@ -1233,7 +1230,6 @@ describe("Folio kind assignment", () => {
     expect(screen.getByRole("option", { name: "NOTE" })).toBeVisible();
   });
 });
-
 
 describe("Folio property placement", () => {
   it("places projected properties between the desktop header and body", () => {
@@ -1293,6 +1289,9 @@ describe("Folio property placement", () => {
     const body = screen.getByRole("textbox", { name: "Page body" });
     expect(
       within(header).getByRole("heading", { name: "Alpha", level: 1 }),
+    ).toBeVisible();
+    expect(
+      within(header).getByRole("button", { name: "Raw Markdown" }),
     ).toBeVisible();
     expect(properties).toBeVisible();
     expect(body).toBeVisible();
@@ -1514,9 +1513,7 @@ describe("Folio page archival wiring", () => {
 
     await waitFor(() => expect(useWorkspaceStore.getState().tabs).toEqual([]));
     expect(useWorkspaceStore.getState().activeTabId).toBeNull();
-    expect(
-      screen.getByRole("button", { name: /^Open console/ }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: /^Open console/ })).toBeVisible();
     expect(navigateMock).not.toHaveBeenCalled();
   });
 
@@ -1539,9 +1536,7 @@ describe("Folio page archival wiring", () => {
       }),
     );
 
-    await waitFor(() =>
-      expect(navigateMock).toHaveBeenCalledWith({ to: "/" }),
-    );
+    await waitFor(() => expect(navigateMock).toHaveBeenCalledWith({ to: "/" }));
     expect(useWorkspaceStore.getState().tabs).toEqual([]);
   });
 });

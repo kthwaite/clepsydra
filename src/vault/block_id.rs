@@ -143,6 +143,17 @@ pub fn generate_short_id() -> String {
     String::from_utf8(buf.to_vec()).expect("base62 is always valid UTF-8")
 }
 
+/// Lowercase Crockford base32 alphabet (no `i l o u`), used for the tail of
+/// Task/Cycle codes (docs/adr/0003). Kept here so the RNG stays private.
+pub(crate) const CROCKFORD32: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
+
+/// Fill `buf` with random lowercase Crockford base32 characters.
+pub(crate) fn fill_random_crockford32(buf: &mut [u8]) {
+    for slot in buf.iter_mut() {
+        *slot = CROCKFORD32[(next_random() % 32) as usize];
+    }
+}
+
 /// xorshift64 PRNG — fast, good enough for non-cryptographic random IDs.
 fn xorshift64(mut state: u64) -> u64 {
     state ^= state << 13;

@@ -105,6 +105,7 @@ function MathSourceEditor({
     onBlur: finish,
     onChange: handleChange,
     onKeyDown: handleKeyDown,
+    spellCheck: false,
     value: draft,
   };
 
