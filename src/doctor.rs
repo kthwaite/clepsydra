@@ -1125,8 +1125,7 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
         ));
     }
 
-    let raw = &archive.cas_path;
-    let path = expand_tilde(raw).unwrap_or_else(|| PathBuf::from(raw));
+    let path = vault.cas_root();
     report.push(info(SECTION, "path", path.display().to_string()));
 
     if !path.exists() {
@@ -2284,6 +2283,45 @@ mod tests {
                 .results
                 .iter()
                 .any(|r| { r.section == "cas" && r.name == "open" && r.status == Status::Warn })
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn cas_relative_path_resolves_against_vault_root() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        fs::write(
+            vault_root.join(".clepsydra/config.toml"),
+            "[vault]\nattachment_folder = \"_attachments\"\n\n[archive]\nenabled = true\ncas_path = \"cas-here\"\n",
+        )
+        .unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        // `Vault::open` canonicalizes the root, which resolves macOS's
+        // `/var` -> `/private/var` tmpdir symlink; match that here so the
+        // assertion doesn't depend on the raw (uncanonicalized) tmp path.
+        let expected = vault_root
+            .canonicalize()
+            .unwrap()
+            .join("cas-here")
+            .display()
+            .to_string();
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|r| r.section == "cas" && r.name == "path" && r.detail == expected),
+            "{:?}",
+            report
+                .results
+                .iter()
+                .filter(|r| r.section == "cas")
+                .collect::<Vec<_>>()
         );
     }
 

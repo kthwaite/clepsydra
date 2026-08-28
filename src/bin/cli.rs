@@ -506,9 +506,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 let vault_root =
                     clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
                 let vault = clepsydra::vault::Vault::open(&vault_root)?;
-                let cas_path_raw = &vault.config().archive.cas_path;
-                let cas_path = clepsydra::expand_tilde(cas_path_raw)
-                    .unwrap_or_else(|| PathBuf::from(cas_path_raw));
+                let cas_path = vault.cas_root();
                 let cas_db = cas_path.join("cas.db");
 
                 println!(
@@ -545,9 +543,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 let vault_root =
                     clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
                 let vault = clepsydra::vault::Vault::open(&vault_root)?;
-                let cas_path_raw = &vault.config().archive.cas_path;
-                let cas_path = clepsydra::expand_tilde(cas_path_raw)
-                    .unwrap_or_else(|| PathBuf::from(cas_path_raw));
+                let cas_path = vault.cas_root();
 
                 println!(
                     "Rebuilding {} from blob files under {} plus a vault-wide scan.",

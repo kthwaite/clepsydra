@@ -134,4 +134,9 @@ impl Vault {
     pub fn config(&self) -> &VaultConfig {
         &self.config
     }
+
+    /// Absolute CAS root for this vault (see `config::resolve_cas_path`).
+    pub fn cas_root(&self) -> PathBuf {
+        crate::vault::config::resolve_cas_path(&self.config.archive.cas_path, &self.root)
+    }
 }
