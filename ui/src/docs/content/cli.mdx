@@ -393,6 +393,13 @@ copied blob files plus the same frontmatter scan (the same work `clep cas
 rebuild` does) — `cas.db` is always rebuilt, never copied directly from the
 source.
 
+Content types for blobs whose pages still carry legacy string `blobs`
+entries (no `type`) are taken from the source store's own `cas.db`, when it
+is readable — frontmatter types always win over it — so running `clep cas
+backfill --write` after the migration can still type those pages from the
+migrated store without loss, instead of finding only the fallback
+`application/octet-stream` `rebuild_metadata` would otherwise have written.
+
 Stop `clep serve` first: the `cas.db` rebuild takes the destination store's
 exclusive lock, which a running server also holds open.
 

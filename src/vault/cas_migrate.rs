@@ -7,12 +7,20 @@
 //! `rebuild_metadata` (in write mode) also clears `rubbish_archive_releases`
 //! on the destination — harmless here since the destination is freshly
 //! created by this migration.
+//!
+//! Content types for legacy string blob entries (no `type` in frontmatter)
+//! are backfilled from the source's own `cas.db` before the rebuild, when
+//! that db is readable — otherwise `clep cas backfill` (which reads the
+//! *migrated* `cas.db`) would have nothing to type them from, since a fresh
+//! rebuild without this step falls back every untyped hash to
+//! `application/octet-stream`. Frontmatter types always win over the source
+//! db.
 
 use std::path::{Path, PathBuf};
 
 use crate::vault::Vault;
 use crate::vault::cas::{ContentStore, blob_relative_path, list_blob_hashes};
-use crate::vault::cas_scan::scan_archive_refs;
+use crate::vault::cas_scan::{ArchiveRefScan, scan_archive_refs};
 
 /// Where the store lived before 2026-08-28; the migration's default source.
 pub const LEGACY_DEFAULT_CAS_PATH: &str = "~/.clepsydra/cas";
@@ -32,6 +40,10 @@ pub struct MigrateReport {
     /// reading the source blob or writing the destination blob. The run
     /// still completes and reports everything else.
     pub failed: Vec<String>,
+    /// Referenced hashes typed from the source's own `cas.db` because their
+    /// frontmatter carried only a legacy, untyped string blob entry.
+    /// Frontmatter types always win; this only fills gaps.
+    pub types_from_source: u64,
     pub bytes_copied: u64,
     /// Source blobs no live page or rubbish item references.
     pub orphans_left: u64,
@@ -68,8 +80,9 @@ pub fn migrate(
         dry_run: !write,
         ..Default::default()
     };
-    let scan = scan_archive_refs(vault);
+    let mut scan = scan_archive_refs(vault);
     report.warnings.extend(scan.warnings.iter().cloned());
+    report.types_from_source = fill_types_from_source_db(&mut scan, &source, &mut report.warnings);
 
     for hash in scan.refs.keys() {
         let Some(rel) = blob_relative_path(hash) else {
@@ -152,6 +165,71 @@ fn copy_blob(to: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> 
     std::fs::create_dir_all(to.parent().expect("fan-out parent"))?;
     crate::vault::atomic_file::atomic_create(to, bytes)?;
     Ok(())
+}
+
+/// Fill in a content type, from the source's own `cas.db`, for every
+/// referenced hash the frontmatter scan left untyped (a legacy string blob
+/// entry with no `type`). Frontmatter types always win — only gaps are
+/// filled. Returns the number of hashes filled.
+///
+/// Not fatal: a source with no `cas.db`, or one that can't be opened or
+/// queried, contributes nothing here (one warning for the latter case) and
+/// `rebuild_metadata` falls back to `application/octet-stream` as before.
+fn fill_types_from_source_db(
+    scan: &mut ArchiveRefScan,
+    source: &Path,
+    warnings: &mut Vec<String>,
+) -> u64 {
+    let db_path = source.join("cas.db");
+    if !db_path.is_file() {
+        return 0;
+    }
+    let source_types = match read_source_blob_types(&db_path) {
+        Ok(types) => types,
+        Err(error) => {
+            warnings.push(format!(
+                "{}: could not read content types from source cas.db: {error}",
+                db_path.display()
+            ));
+            return 0;
+        }
+    };
+    let untyped_refs: Vec<String> = scan
+        .refs
+        .keys()
+        .filter(|hash| !scan.types.contains_key(*hash))
+        .cloned()
+        .collect();
+    let mut filled = 0u64;
+    for hash in untyped_refs {
+        if let Some(content_type) = source_types.get(&hash) {
+            scan.types.insert(hash, content_type.clone());
+            filled += 1;
+        }
+    }
+    filled
+}
+
+/// Read every `hash -> content_type` row from a `cas.db` at `db_path`,
+/// opened read-only so a concurrently running server holding the source
+/// store's exclusive lock is never contended.
+fn read_source_blob_types(
+    db_path: &Path,
+) -> Result<std::collections::BTreeMap<String, String>, Box<dyn std::error::Error>> {
+    let conn = rusqlite::Connection::open_with_flags(
+        db_path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI,
+    )?;
+    let mut statement = conn.prepare("SELECT hash, content_type FROM blobs")?;
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    let mut types = std::collections::BTreeMap::new();
+    for row in rows {
+        let (hash, content_type) = row?;
+        types.insert(hash, content_type);
+    }
+    Ok(types)
 }
 
 /// The legacy default store, if it exists and holds a `cas.db` (a hint target
@@ -359,5 +437,90 @@ mod tests {
             )
             .unwrap();
         assert_eq!(ref_count, 1);
+    }
+
+    #[test]
+    fn legacy_string_entries_get_content_type_from_source_cas_db() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let (snap, snap_b) = blob(b"<html>snap</html>");
+        let (img, img_b) = blob(b"\x89PNG img");
+        let (pdf, pdf_b) = blob(b"%PDF-1.4 doc");
+        fs::create_dir_all(root.join("notes")).unwrap();
+        // `img` is typed in frontmatter; `pdf` is only a legacy string
+        // entry (no `type`), so it depends on the source cas.db.
+        fs::write(root.join("notes/a.md"), format!(
+            "+++\nid = \"01900000-0000-7000-8000-00000000000a\"\ntitle = \"A\"\ncreated_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n\n[archive]\nsnapshot_hash = \"{snap}\"\nblobs = [{{ hash = \"{img}\", type = \"image/png\" }}, \"{pdf}\"]\n+++\nbody\n")).unwrap();
+        let source = tmp.path().join("old-cas");
+        write_blob(&source, &snap, &snap_b);
+        write_blob(&source, &img, &img_b);
+        write_blob(&source, &pdf, &pdf_b);
+
+        // Source cas.db types `img` with a CONFLICTING type (frontmatter
+        // must still win) and `pdf` with its real type (its only source of
+        // truth, since it has no frontmatter type).
+        let conn = rusqlite::Connection::open(source.join("cas.db")).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE blobs (
+                hash TEXT PRIMARY KEY,
+                size INTEGER,
+                content_type TEXT,
+                created_at TEXT,
+                ref_count INTEGER
+            );",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO blobs (hash, size, content_type, created_at, ref_count) \
+             VALUES (?1, 0, 'text/plain', '2026-01-01T00:00:00Z', 1)",
+            [&img],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO blobs (hash, size, content_type, created_at, ref_count) \
+             VALUES (?1, 0, 'application/pdf', '2026-01-01T00:00:00Z', 1)",
+            [&pdf],
+        )
+        .unwrap();
+        drop(conn);
+        let source_db_before = fs::read(source.join("cas.db")).unwrap();
+
+        let vault = Vault::open(&root).unwrap();
+        let report = migrate(&vault, &source, true).unwrap();
+
+        assert_eq!(
+            report.types_from_source, 1,
+            "only pdf lacked a frontmatter type"
+        );
+        assert_eq!(
+            fs::read(source.join("cas.db")).unwrap(),
+            source_db_before,
+            "source cas.db untouched"
+        );
+
+        let dest = vault.cas_root();
+        let dest_conn = rusqlite::Connection::open(dest.join("cas.db")).unwrap();
+        let img_ty: String = dest_conn
+            .query_row(
+                "SELECT content_type FROM blobs WHERE hash = ?1",
+                [&img],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(img_ty, "image/png", "frontmatter type wins over source db");
+        let pdf_ty: String = dest_conn
+            .query_row(
+                "SELECT content_type FROM blobs WHERE hash = ?1",
+                [&pdf],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            pdf_ty, "application/pdf",
+            "legacy string entry typed from source cas.db"
+        );
+        let rebuild = report.rebuild.expect("write rebuilds cas.db");
+        assert!(!rebuild.untyped_blobs.contains(&pdf));
     }
 }

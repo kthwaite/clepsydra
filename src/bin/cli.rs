@@ -643,13 +643,14 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                     );
                 }
                 println!(
-                    "cas migrate: {} blob(s) {verb} ({} bytes), {} already present, {} missing, {} corrupt, {} failed, {} orphan(s) left in source, {} warning(s){}",
+                    "cas migrate: {} blob(s) {verb} ({} bytes), {} already present, {} missing, {} corrupt, {} failed, {} typed from the source cas.db, {} orphan(s) left in source, {} warning(s){}",
                     report.copied.len(),
                     report.bytes_copied,
                     report.already_present.len(),
                     report.missing.len(),
                     report.corrupt.len(),
                     report.failed.len(),
+                    report.types_from_source,
                     report.orphans_left,
                     report.warnings.len(),
                     if report.dry_run {
