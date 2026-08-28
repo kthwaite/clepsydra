@@ -7,6 +7,8 @@
 //! ADR 0004.
 
 pub mod git;
+#[cfg(test)]
+pub(crate) mod testing;
 
 use std::path::Path;
 
