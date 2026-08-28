@@ -328,16 +328,24 @@ impl AllowedOrigin {
     /// matches an `http://` request policy and vice versa. Anything that is not
     /// a plain host-and-port is rejected before parsing.
     fn matches_host(&self, host: &str) -> bool {
-        let plain_host_bytes = host.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':' | b'[' | b']')
-        });
-        if host.is_empty() || !plain_host_bytes {
+        if !is_plain_host_and_port(host) {
             return false;
         }
         Url::parse(&format!("{}://{host}", self.url.scheme()))
             .map(|candidate| candidate.origin() == self.url.origin())
             .unwrap_or(false)
     }
+}
+
+/// Is `value` only the bytes a `host[:port]` may contain: ASCII
+/// alphanumerics, `.`, `-`, `:`, and IPv6 brackets? Everything a CSP source
+/// or a URL could misread (`;`, `'`, `,`, `/`, `@`, `%`, whitespace, `_`)
+/// is excluded.
+fn is_plain_host_and_port(value: &str) -> bool {
+    !value.is_empty()
+        && value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':' | b'[' | b']')
+        })
 }
 
 /// Validate one `server.public_origins` entry and normalise it to its ASCII
@@ -366,7 +374,15 @@ fn validate_public_origin(raw: &str) -> Result<String, &'static str> {
     if !matches!(url.path(), "" | "/") || url.query().is_some() || url.fragment().is_some() {
         return Err("must be a bare origin without path, query, or fragment");
     }
-    Ok(url.origin().ascii_serialization())
+    let source = url.origin().ascii_serialization();
+    let authority = source
+        .split_once("://")
+        .map(|(_, authority)| authority)
+        .unwrap_or_default();
+    if !is_plain_host_and_port(authority) {
+        return Err("must be a plain host[:port]");
+    }
+    Ok(source)
 }
 
 impl ArchiveViewConfig {
@@ -390,7 +406,8 @@ impl ArchiveViewConfig {
         for (index, raw) in settings.public_origins.iter().enumerate() {
             let source = validate_public_origin(raw)
                 .map_err(|reason| format!("server.public_origins[{index}] {reason}: {raw:?}"))?;
-            let origin = AllowedOrigin::new(source)?;
+            let origin = AllowedOrigin::new(source)
+                .map_err(|error| format!("server.public_origins[{index}]: {error}"))?;
             let already_listed = origin.url.origin() == bind.url.origin()
                 || public
                     .iter()
@@ -1791,6 +1808,9 @@ mod tests {
             ("https://clepsydra.localhost/api", "bare origin"),
             ("https://clepsydra.localhost?x=1", "bare origin"),
             ("https://clepsydra.localhost#top", "bare origin"),
+            ("https://a;img-src", "plain host"),
+            ("https://a'b", "plain host"),
+            ("https://a_b", "plain host"),
         ];
         for (raw, expected_reason) in rejected {
             let error =
@@ -1801,6 +1821,37 @@ mod tests {
                 "{raw}: {error}"
             );
         }
+    }
+
+    #[test]
+    fn public_origins_keep_ipv6_and_idna_hosts_in_ascii_form() {
+        let config = ArchiveViewConfig::from_server_settings(&settings_with_public_origins(&[
+            "https://[0:0:0:0:0:0:0:1]:8443",
+            "https://bücher.example",
+        ]))
+        .unwrap();
+        assert_eq!(
+            config.allowed_origins().collect::<Vec<_>>(),
+            vec![
+                "https://vault.example:7443",
+                "https://[::1]:8443",
+                "https://xn--bcher-kva.example",
+            ]
+        );
+        assert_eq!(
+            policy_origin_count(
+                config.policy_for_host(Some("[::1]:8443")),
+                "https://[::1]:8443"
+            ),
+            4
+        );
+        assert_eq!(
+            policy_origin_count(
+                config.policy_for_host(Some("xn--bcher-kva.example")),
+                "https://xn--bcher-kva.example"
+            ),
+            4
+        );
     }
 
     #[test]
@@ -1817,6 +1868,34 @@ mod tests {
         assert_eq!(
             config.allowed_origins().collect::<Vec<_>>(),
             vec!["http://localhost:16667", "https://a.example"]
+        );
+    }
+
+    #[test]
+    fn request_host_prefers_the_host_header_and_falls_back_to_the_authority() {
+        let uri = Uri::from_static("https://authority.example/api/vault/archive/view/x");
+
+        let empty = HeaderMap::new();
+        assert_eq!(
+            request_host(&empty, &uri).as_deref(),
+            Some("authority.example")
+        );
+
+        let mut with_host = HeaderMap::new();
+        with_host.insert(
+            header::HOST,
+            HeaderValue::from_static("listed.example:8443"),
+        );
+        assert_eq!(
+            request_host(&with_host, &uri).as_deref(),
+            Some("listed.example:8443")
+        );
+
+        let mut non_utf8 = HeaderMap::new();
+        non_utf8.insert(header::HOST, HeaderValue::from_bytes(b"h\xffst").unwrap());
+        assert_eq!(
+            request_host(&non_utf8, &Uri::from_static("/relative")).as_deref(),
+            None
         );
     }
 

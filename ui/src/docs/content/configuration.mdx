@@ -181,11 +181,18 @@ served at `/api/docs` and `/api/openapi.json`; see the
 ### Archive viewer origins (`server.public_origins`)
 
 Archived snapshots render inside a sandboxed frame. The frame's
-Content-Security-Policy names exactly one origin that images, fonts, and media
-may load from: the origin the browser used to reach Clepsydra. That origin is
-chosen from the bind origin (`server.host`, `server.port`, TLS) plus this list by
-matching the request's `Host` header. The header only selects a configured
-entry; its bytes never reach the policy.
+Content-Security-Policy names exactly one origin that images, fonts, media,
+and stylesheets may load from: the origin the browser used to reach
+Clepsydra. That origin is chosen from the bind origin (`server.host`,
+`server.port`, TLS) plus this list by matching the request's `Host` header.
+The header only selects a configured entry; its bytes never reach the
+policy.
+
+Origins compare by scheme, host, and port. `localhost` and `127.0.0.1` are
+different origins, so a browser that opens `http://127.0.0.1:<port>` needs its
+own entry even when `server.host` is `localhost`. The request `Host` header
+carries no scheme, so list one scheme per `host[:port]`; when two entries
+differ only by scheme, the first listed one wins.
 
 Behind a reverse proxy or tunnel, list every name browsers use:
 
