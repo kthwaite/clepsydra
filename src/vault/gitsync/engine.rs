@@ -23,6 +23,9 @@ use crate::vault::Vault;
 /// How many page titles a generated commit message names.
 const TITLE_LIMIT: usize = 3;
 
+/// Headline of the commit that finishes a merge an earlier run abandoned.
+const LEFTOVER_MERGE_HEADLINE: &str = "sync: resolve in-progress merge";
+
 /// A git-backed vault, ready to sync.
 #[derive(Debug, Clone)]
 pub struct SyncEngine {
@@ -194,10 +197,16 @@ impl SyncEngine {
     }
 
     /// Commit everything in the working tree, or `None` when it is clean.
+    ///
+    /// A merge an earlier run left in progress is finished first: `git add
+    /// -A` over unmerged paths would collapse the conflict markers sitting
+    /// in the working tree into an ordinary commit and push them to every
+    /// device.
     pub fn commit_local(&self) -> Result<Option<CommitSummary>, SyncError> {
+        let leftover = self.commit_leftover_merge()?;
         let entries = self.git.status()?;
         if entries.is_empty() {
-            return Ok(None);
+            return Ok(leftover);
         }
         self.git.add_all()?;
         let message = commit_message(&self.root, &entries);
@@ -206,6 +215,33 @@ impl SyncEngine {
             sha,
             files: entries.len(),
             message,
+        }))
+    }
+
+    /// Finish a merge an earlier run left in progress — a process killed
+    /// between the merge and its resolution, a merge run by hand, or an
+    /// abort that itself failed. `None` when none is in progress.
+    fn commit_leftover_merge(&self) -> Result<Option<CommitSummary>, SyncError> {
+        let in_progress = self.git.merge_head()?.is_some();
+        let unmerged = self.git.unmerged()?;
+        if !in_progress && unmerged.is_empty() {
+            return Ok(None);
+        }
+        let files = self.git.status()?.len();
+        let (sha, copies, warnings) =
+            self.resolve_and_commit("MERGE_HEAD", LEFTOVER_MERGE_HEADLINE, !unmerged.is_empty())?;
+        for warning in warnings {
+            tracing::warn!("sync: {warning}");
+        }
+        tracing::info!(
+            "sync: finished a merge left in progress ({} unmerged path(s), {} conflict copy/ies)",
+            unmerged.len(),
+            copies.len()
+        );
+        Ok(Some(CommitSummary {
+            sha,
+            files,
+            message: merge_message(LEFTOVER_MERGE_HEADLINE, &copies),
         }))
     }
 
@@ -250,15 +286,25 @@ impl SyncEngine {
                     ))
                 }
             }
-            (0, Some(_)) => self.resolve_and_commit(&reference, false),
-            (1, Some(_)) => self.resolve_and_commit(&reference, true),
+            (status @ (0 | 1), Some(_)) => {
+                let headline = format!("sync: merge {reference}");
+                let (commit, conflict_copies, warnings) =
+                    self.resolve_and_commit(&reference, &headline, status == 1)?;
+                Ok((
+                    MergeSummary::Merged {
+                        commit,
+                        conflict_copies,
+                    },
+                    warnings,
+                ))
+            }
             (status, _) => {
                 // Unrelated histories, an unwritable tree, a broken index:
                 // leave nothing half-merged behind.
-                let _ = self.git.abort_merge();
+                let note = self.abort_merge_note().unwrap_or_default();
                 Err(SyncError::MergeFailed {
                     reference,
-                    detail: format!("exit {status}: {}", out.stderr.trim()),
+                    detail: format!("exit {status}: {}{note}", out.stderr.trim()),
                 })
             }
         }
@@ -266,23 +312,44 @@ impl SyncEngine {
 
     /// Resolve (when git stopped on conflicts) and commit the merge,
     /// aborting it if either step fails — a sync never leaves a merge in
-    /// progress or a conflicted tree behind (D4).
+    /// progress or a conflicted tree behind (D4). Returns the commit, the
+    /// Conflict Copies it recorded, and any warnings.
+    #[allow(clippy::type_complexity)]
     fn resolve_and_commit(
         &self,
         reference: &str,
+        headline: &str,
         conflicted: bool,
-    ) -> Result<(MergeSummary, Vec<String>), SyncError> {
+    ) -> Result<(String, Vec<ConflictCopy>, Vec<String>), SyncError> {
         let resolved = if conflicted {
             self.resolve_unmerged()
         } else {
             Ok((Vec::new(), Vec::new()))
         };
-        let committed = resolved
-            .and_then(|(copies, warnings)| Ok((self.finish_merge(reference, copies)?, warnings)));
-        if committed.is_err() {
-            let _ = self.git.abort_merge();
+        let committed = resolved.and_then(|(copies, warnings)| {
+            Ok((self.finish_merge(headline, &copies)?, copies, warnings))
+        });
+        match committed {
+            Ok(done) => Ok(done),
+            // The abort is what keeps the tree usable; if it fails too, say
+            // so rather than reporting only the original problem.
+            Err(e) => Err(match self.abort_merge_note() {
+                None => e,
+                Some(note) => SyncError::MergeFailed {
+                    reference: reference.to_string(),
+                    detail: format!("{e}{note}"),
+                },
+            }),
         }
-        committed
+    }
+
+    /// `git merge --abort`, reporting the note to append to an error when
+    /// the abort itself failed and the tree is still conflicted.
+    fn abort_merge_note(&self) -> Option<String> {
+        match self.git.abort_merge() {
+            Ok(()) => None,
+            Err(e) => Some(format!("; additionally `git merge --abort` failed: {e}")),
+        }
     }
 
     /// Resolve every unmerged path (D6): ours stays in the tree, theirs
@@ -331,30 +398,12 @@ impl SyncEngine {
 
     /// Commit the merge git left staged, naming the Conflict Copies it
     /// produced.
-    fn finish_merge(
-        &self,
-        reference: &str,
-        copies: Vec<ConflictCopy>,
-    ) -> Result<MergeSummary, SyncError> {
-        let mut message = format!("sync: merge {reference}");
-        if !copies.is_empty() {
-            message.push_str(&format!(
-                "\n\n{} conflict cop{}:\n",
-                copies.len(),
-                if copies.len() == 1 { "y" } else { "ies" }
-            ));
-            for copy in &copies {
-                message.push_str(&format!("- {} -> {}\n", copy.original, copy.copy));
-            }
-        }
+    fn finish_merge(&self, headline: &str, copies: &[ConflictCopy]) -> Result<String, SyncError> {
         let commit = self
             .git
-            .commit(&super::with_device_trailer(&message), &self.author)?;
+            .commit(&merge_message(headline, copies), &self.author)?;
         self.tighten_crypto_permissions();
-        Ok(MergeSummary::Merged {
-            commit,
-            conflict_copies: copies,
-        })
+        Ok(commit)
     }
 
     /// Push the branch, reporting a rejection rather than forcing it.
@@ -403,6 +452,20 @@ impl SyncEngine {
     /// Commit, pull, push: the whole sync (D7), recording the result (D8).
     pub fn full_sync(&self) -> Result<SyncReport, SyncError> {
         let started_at = Utc::now();
+        match self.full_sync_inner(started_at) {
+            Ok(report) => Ok(self.record(report)),
+            Err(e) => {
+                // A failed sync must not leave the last success on show.
+                let line = format!("error: {}", first_line(&e.to_string()));
+                if let Err(save) = self.save_state(&line, Utc::now()) {
+                    tracing::warn!("sync: could not record sync state: {save}");
+                }
+                Err(e)
+            }
+        }
+    }
+
+    fn full_sync_inner(&self, started_at: DateTime<Utc>) -> Result<SyncReport, SyncError> {
         let committed = self.commit_local()?;
         let (mut merge, mut warnings) = self.pull_inner()?;
         let push = match merge {
@@ -411,23 +474,19 @@ impl SyncEngine {
                 let (status, retried) = self.push_with_retry_inner()?;
                 if let Some((retry_merge, retry_warnings)) = retried {
                     warnings.extend(retry_warnings);
-                    // The retry's merge is the interesting one only when the
-                    // first pull had nothing to report.
-                    if matches!(merge, MergeSummary::UpToDate) {
-                        merge = retry_merge;
-                    }
+                    merge = fold_merges(merge, retry_merge);
                 }
                 status
             }
         };
-        Ok(self.record(SyncReport {
+        Ok(SyncReport {
             committed,
             merge,
             push,
             warnings,
             started_at,
             finished_at: Utc::now(),
-        }))
+        })
     }
 
     /// The shutdown path: commit what is outstanding and push it, without
@@ -480,16 +539,23 @@ impl SyncEngine {
     /// Record the report as this device's state (D8). A state file that
     /// cannot be written is a warning, never a failed sync.
     fn record(&self, mut report: SyncReport) -> SyncReport {
-        let state = SyncState {
-            last_sync_at: Some(report.finished_at),
-            last_result: Some(report.one_line()),
-        };
-        if let Err(e) = state::save(&self.root, &state) {
+        if let Err(e) = self.save_state(&report.one_line(), report.finished_at) {
             report
                 .warnings
                 .push(format!("could not record sync state: {e}"));
         }
         report
+    }
+
+    /// Write one line of outcome and its timestamp to `.git/clep-sync.toml`.
+    fn save_state(&self, result: &str, at: DateTime<Utc>) -> Result<(), SyncError> {
+        state::save(
+            &self.root,
+            &SyncState {
+                last_sync_at: Some(at),
+                last_result: Some(result.to_string()),
+            },
+        )
     }
 
     /// A checkout recreates `.clepsydra/crypto` with the umask, so tighten
@@ -531,6 +597,53 @@ pub fn commit_message(root: &Path, entries: &[StatusEntry]) -> String {
         summary
     };
     super::with_device_trailer(&summary)
+}
+
+/// The message for a merge commit: the headline, the Conflict Copies the
+/// merge produced, and the `Device:` trailer (D9).
+fn merge_message(headline: &str, copies: &[ConflictCopy]) -> String {
+    let mut message = headline.to_string();
+    if !copies.is_empty() {
+        message.push_str(&format!(
+            "\n\n{} conflict cop{}:\n",
+            copies.len(),
+            if copies.len() == 1 { "y" } else { "ies" }
+        ));
+        for copy in copies {
+            message.push_str(&format!("- {} -> {}\n", copy.original, copy.copy));
+        }
+    }
+    super::with_device_trailer(&message)
+}
+
+/// Fold the merge a push retry performed into the one before it (D7).
+///
+/// The retry is the merge the tree ends on, but the Conflict Copies of the
+/// first merge are just as real: both sets are reported, or the push would
+/// carry copies no report ever mentions.
+fn fold_merges(first: MergeSummary, retry: MergeSummary) -> MergeSummary {
+    match retry {
+        MergeSummary::Merged {
+            commit,
+            conflict_copies,
+        } => {
+            let mut copies = match first {
+                MergeSummary::Merged {
+                    conflict_copies, ..
+                } => conflict_copies,
+                _ => Vec::new(),
+            };
+            copies.extend(conflict_copies);
+            MergeSummary::Merged {
+                commit,
+                conflict_copies: copies,
+            }
+        }
+        MergeSummary::FastForward { head } if matches!(first, MergeSummary::UpToDate) => {
+            MergeSummary::FastForward { head }
+        }
+        _ => first,
+    }
 }
 
 /// A page's frontmatter title, falling back to its filename stem — a deleted
@@ -612,6 +725,59 @@ mod tests {
             engine(&repos.a).commit_local().unwrap().is_none(),
             "clean tree commits nothing"
         );
+    }
+
+    #[test]
+    fn commit_local_finishes_a_merge_left_in_progress() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "notes/p.md", &page("12", "Plan", "base"));
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+        testing::write(&repos.a, "notes/p.md", &page("12", "Plan", "A's edit"));
+        engine(&repos.a).full_sync().unwrap();
+
+        // B commits its own edit, then a merge is started and abandoned
+        // mid-conflict: a process killed here, or a merge run by hand.
+        testing::write(&repos.b, "notes/p.md", &page("12", "Plan", "B's edit"));
+        let gb = testing::git(&repos.b);
+        gb.add_all().unwrap();
+        gb.commit("b", &testing::author()).unwrap();
+        gb.fetch("origin", "main").unwrap();
+        assert_eq!(gb.merge_no_commit("origin/main").unwrap().status, 1);
+        assert!(gb.merge_head().unwrap().is_some());
+        assert!(
+            testing::read(&repos.b, "notes/p.md").contains("<<<<<<<"),
+            "the abandoned merge left conflict markers in the tree"
+        );
+
+        let summary = engine(&repos.b).commit_local().unwrap().unwrap();
+
+        assert!(gb.merge_head().unwrap().is_none(), "merge finished");
+        assert!(gb.status().unwrap().is_empty(), "tree is clean");
+        let parents = gb
+            .run(&["rev-list", "--parents", "-n", "1", "HEAD"])
+            .unwrap();
+        assert_eq!(
+            parents.split_whitespace().count(),
+            3,
+            "HEAD is a merge commit: {parents}"
+        );
+        assert!(
+            summary
+                .message
+                .starts_with("sync: resolve in-progress merge"),
+            "{}",
+            summary.message
+        );
+        let copies = find_conflict_copies(&repos.b);
+        assert_eq!(copies.len(), 1, "{copies:?}");
+        assert!(copies[0].starts_with("notes/p.conflict."));
+        let committed = gb.run(&["show", "HEAD:notes/p.md"]).unwrap();
+        assert!(
+            !committed.contains("<<<<<<<"),
+            "no conflict markers were committed: {committed}"
+        );
+        assert_eq!(committed.trim(), page("12", "Plan", "B's edit").trim());
     }
 
     #[test]
@@ -699,7 +865,12 @@ mod tests {
         assert!(copy.contains("A's edit"));
         assert!(copy.contains("conflict_of = \"notes/p.md\""));
         assert!(copy.contains("title = \"Plan (conflict "));
-        assert!(!copy.contains("0000000000005"), "copy has a fresh id");
+        let copy_meta = crate::vault::page::parse_frontmatter(&copy).unwrap().0;
+        assert_ne!(
+            copy_meta.id.to_string(),
+            "0192b6c0-0000-7000-8000-000000000005",
+            "copy has a fresh id"
+        );
         assert!(matches!(rb.push, PushStatus::Pushed));
         assert!(
             testing::git(&repos.b).status().unwrap().is_empty(),
@@ -767,6 +938,147 @@ mod tests {
         let report = eb.push_with_retry().unwrap();
         assert!(matches!(report, PushStatus::Pushed));
         assert!(repos.b.join("a2.md").is_file());
+    }
+
+    /// A `pre-push` hook in `root` that pushes `other` to the shared remote
+    /// before the push it precedes — the one deterministic way to land a
+    /// remote change between a sync's fetch and its push. It removes itself
+    /// so only the first push loses the race.
+    #[cfg(unix)]
+    fn race_push_from(root: &Path, other: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let hook = root.join(".git/hooks/pre-push");
+        fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        fs::write(
+            &hook,
+            format!(
+                "#!/bin/sh\n\
+                 rm -f -- \"$0\"\n\
+                 cat > /dev/null\n\
+                 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR\n\
+                 git -C '{}' push -q origin main\n\
+                 exit 0\n",
+                other.display()
+            ),
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// The push retry's merge is the one the tree ends on, but the merge
+    /// before it produced Conflict Copies too — the report must carry both.
+    #[cfg(unix)]
+    #[test]
+    fn retry_merge_and_its_conflict_copies_reach_the_report() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "notes/p.md", &page("13", "P", "base"));
+        testing::write(&repos.a, "notes/q.md", &page("14", "Q", "base"));
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+
+        // Already on the remote when B syncs: conflicts with B's q edit.
+        testing::write(&repos.a, "notes/q.md", &page("14", "Q", "A's q"));
+        engine(&repos.a).full_sync().unwrap();
+        // Committed but held back; the hook pushes it mid-sync.
+        testing::write(&repos.a, "notes/p.md", &page("13", "P", "A's p"));
+        engine(&repos.a).commit_local().unwrap().unwrap();
+
+        testing::write(&repos.b, "notes/q.md", &page("14", "Q", "B's q"));
+        testing::write(&repos.b, "notes/p.md", &page("13", "P", "B's p"));
+        race_push_from(&repos.b, &repos.a);
+
+        let report = engine(&repos.b).full_sync().unwrap();
+
+        assert!(
+            matches!(report.merge, MergeSummary::Merged { .. }),
+            "{:?}",
+            report.merge
+        );
+        assert!(
+            matches!(report.push, PushStatus::Pushed),
+            "{:?}",
+            report.push
+        );
+        let mut originals: Vec<&str> = report
+            .conflict_copies()
+            .iter()
+            .map(|copy| copy.original.as_str())
+            .collect();
+        originals.sort_unstable();
+        assert_eq!(
+            originals,
+            vec!["notes/p.md", "notes/q.md"],
+            "both merges' copies are reported"
+        );
+        assert!(
+            report.one_line().contains("2 conflict copies"),
+            "{}",
+            report.one_line()
+        );
+        assert_eq!(find_conflict_copies(&repos.b).len(), 2);
+        assert!(testing::git(&repos.b).status().unwrap().is_empty());
+        assert_eq!(
+            testing::read(&repos.b, "notes/p.md"),
+            page("13", "P", "B's p"),
+            "ours stays on both merges"
+        );
+    }
+
+    #[test]
+    fn fold_merges_keeps_every_conflict_copy() {
+        let copy = |original: &str| ConflictCopy {
+            original: original.to_string(),
+            copy: format!("{original}.conflict.abc1234"),
+        };
+        let merged = |sha: &str, originals: &[&str]| MergeSummary::Merged {
+            commit: sha.to_string(),
+            conflict_copies: originals.iter().map(|o| copy(o)).collect(),
+        };
+        let copies = |summary: &MergeSummary| match summary {
+            MergeSummary::Merged {
+                conflict_copies, ..
+            } => conflict_copies.len(),
+            _ => 0,
+        };
+
+        // Both merges' copies survive, under the retry's commit.
+        let folded = fold_merges(merged("aaa", &["a.md"]), merged("bbb", &["b.md"]));
+        assert_eq!(copies(&folded), 2);
+        let MergeSummary::Merged { commit, .. } = &folded else {
+            panic!("{folded:?}")
+        };
+        assert_eq!(commit, "bbb");
+        // A retry that merged after a fast-forward still reports its copies.
+        assert_eq!(
+            copies(&fold_merges(
+                MergeSummary::FastForward { head: "aaa".into() },
+                merged("bbb", &["b.md"])
+            )),
+            1
+        );
+        // Only an uneventful first pull is replaced by a fast-forward.
+        assert!(matches!(
+            fold_merges(
+                MergeSummary::UpToDate,
+                MergeSummary::FastForward { head: "bbb".into() }
+            ),
+            MergeSummary::FastForward { .. }
+        ));
+        assert!(matches!(
+            fold_merges(
+                MergeSummary::FastForward { head: "aaa".into() },
+                MergeSummary::UpToDate
+            ),
+            MergeSummary::FastForward { head } if head == "aaa"
+        ));
+        assert_eq!(
+            copies(&fold_merges(
+                merged("aaa", &["a.md"]),
+                MergeSummary::UpToDate
+            )),
+            1
+        );
     }
 
     #[test]

@@ -10,6 +10,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use super::SyncError;
+use crate::vault::atomic_file::{atomic_create, atomic_replace};
 
 /// What the last sync on this device did.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -43,14 +44,28 @@ pub fn load(root: &Path) -> SyncState {
     }
 }
 
-/// Record the state, replacing whatever was there. A plain write: the file
-/// is small, per-device and rewritten on every sync, and a torn write reads
-/// back as [`SyncState::default`].
+/// Record the state, replacing whatever was there. Published atomically, so
+/// a `clep sync status` running beside a sync reads one whole version of the
+/// file or the other, never a half-written one.
 pub fn save(root: &Path, state: &SyncState) -> Result<(), SyncError> {
     let path = state_path(root);
     let text = toml::to_string(state)
         .map_err(|e| SyncError::Config(format!("serializing {}: {e}", path.display())))?;
-    std::fs::write(&path, text).map_err(|e| SyncError::io(&path, e))
+    let bytes = text.as_bytes();
+    if path.exists() {
+        atomic_replace(&path, bytes)
+    } else {
+        atomic_create(&path, bytes)
+    }
+    .or_else(|e| {
+        // Another sync published it between the check and the create.
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            atomic_replace(&path, bytes)
+        } else {
+            Err(e)
+        }
+    })
+    .map_err(|e| SyncError::io(&path, e.into_inner()))
 }
 
 #[cfg(test)]
@@ -78,6 +93,19 @@ mod tests {
         let loaded = load(tmp.path());
         assert_eq!(loaded.last_sync_at.unwrap().timestamp(), now.timestamp());
         assert_eq!(loaded.last_result.as_deref(), Some("ok"));
+        // A second save replaces the published file in place.
+        save(
+            tmp.path(),
+            &SyncState {
+                last_sync_at: Some(now),
+                last_result: Some("error: fetch failed".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            load(tmp.path()).last_result.as_deref(),
+            Some("error: fetch failed")
+        );
         fs::write(tmp.path().join(".git/clep-sync.toml"), "not = [toml").unwrap();
         assert!(load(tmp.path()).last_result.is_none());
     }
