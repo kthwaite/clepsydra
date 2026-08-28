@@ -67,9 +67,6 @@ export function Lightbox({
     const stage = stageRef.current;
     if (!isOpen || !stage) return;
 
-    // Every opening starts fitted: the fresh stage node carries d3's identity
-    // transform, so React's copy of it has to match.
-    setTransform(zoomIdentity);
     const behavior = zoom<HTMLDivElement, unknown>()
       .scaleExtent([0.25, 8])
       .on("zoom", (event) => setTransform(event.transform));
@@ -79,6 +76,9 @@ export function Lightbox({
     return () => {
       select(stage).on(".zoom", null);
       behaviorRef.current = null;
+      // Drop the view on the way out, not on the way back in: resetting when
+      // the stage reopens would paint the old transform for one frame first.
+      setTransform(zoomIdentity);
     };
   }, [isOpen]);
 
@@ -99,7 +99,7 @@ export function Lightbox({
       isOpen={isOpen}
       isDismissable
       onOpenChange={onOpenChange}
-      className="fixed inset-0 z-50 bg-black/85"
+      className="fixed inset-0 z-50 bg-paper/95"
     >
       <Modal className="h-dvh w-screen">
         <RACDialog
@@ -108,7 +108,10 @@ export function Lightbox({
         >
           {/* The lightbox can be rendered from inside Slate's `Editable`, and
               React portals still bubble synthetic events up the React tree.
-              It owns no text fields, so nothing above it should see its keys. */}
+              It owns no text fields, so nothing above it should see its keys —
+              except Tab. React Aria contains focus from a listener on
+              `document`, and React's stopPropagation() stops the native event
+              too, so shielding Tab would let focus walk out of the dialog. */}
           <div
             role="document"
             className="contents"
@@ -117,7 +120,7 @@ export function Lightbox({
                 onOpenChange(false);
                 event.preventDefault();
               }
-              event.stopPropagation();
+              if (event.key !== "Tab") event.stopPropagation();
             }}
           >
             <div
