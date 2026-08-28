@@ -253,6 +253,7 @@ describe("base definition model", () => {
   it("offers operators that match field type and cardinality", () => {
     expect(operatorsFor("system-multi")).toEqual([
       "contains",
+      "not_contains",
       "in",
       "is_empty",
       "not_empty",
@@ -261,6 +262,9 @@ describe("base definition model", () => {
       "eq",
       "ne",
       "contains",
+      "not_contains",
+      "starts_with",
+      "ends_with",
       "in",
       "is_empty",
       "not_empty",
@@ -284,6 +288,7 @@ describe("base definition model", () => {
       "eq",
       "ne",
       "contains",
+      "not_contains",
       "in",
       "is_empty",
       "not_empty",
@@ -292,6 +297,7 @@ describe("base definition model", () => {
       "eq",
       "ne",
       "contains",
+      "not_contains",
       "in",
       "is_empty",
       "not_empty",
@@ -367,8 +373,98 @@ describe("title templates", () => {
   });
 
   it("omits an absent template from the wire form", () => {
-    const draft = fromWire({ name: "Books", properties: [], views: [] } as never);
+    const draft = fromWire({
+      name: "Books",
+      properties: [],
+      views: [],
+    } as never);
     expect(draft.titleTemplate).toBeUndefined();
     expect(toWire(draft)).not.toHaveProperty("title_template");
+  });
+});
+
+describe("operatorsFor", () => {
+  it("offers relative-date operators for date-like fields", () => {
+    for (const type of ["date", "datetime"] as const) {
+      expect(operatorsFor(type)).toEqual([
+        "eq",
+        "ne",
+        "lt",
+        "lte",
+        "gt",
+        "gte",
+        "is_today",
+        "is_this_week",
+        "is_past_week",
+        "is_next_week",
+        "is_this_month",
+        "is_empty",
+        "not_empty",
+      ]);
+    }
+  });
+  it("offers affix and negated contains on substring fields", () => {
+    for (const type of ["text", "url", "system-scalar"] as const) {
+      expect(operatorsFor(type)).toEqual([
+        "eq",
+        "ne",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+        "in",
+        "is_empty",
+        "not_empty",
+      ]);
+    }
+  });
+  it("offers not_contains but no affix on membership fields", () => {
+    expect(operatorsFor("select")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "not_contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("multi_select")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "not_contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("system-multi")).toEqual([
+      "contains",
+      "not_contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("number")).toEqual([
+      "eq",
+      "ne",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+    ]);
+    expect(operatorsFor("relation")).toEqual([
+      "eq",
+      "ne",
+      "links_to",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("bool")).toEqual([
+      "eq",
+      "ne",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
   });
 });

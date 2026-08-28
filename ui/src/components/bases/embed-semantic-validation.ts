@@ -67,9 +67,50 @@ const MULTI_SYSTEM_OPERATORS: ReadonlySet<FilterOp> = new Set([
   "eq",
   "ne",
   "contains",
+  "not_contains",
   "in",
   "is_empty",
   "not_empty",
+]);
+
+const VALUELESS_OPERATORS: ReadonlySet<FilterOp> = new Set([
+  "is_empty",
+  "not_empty",
+  "is_today",
+  "is_this_week",
+  "is_past_week",
+  "is_next_week",
+  "is_this_month",
+]);
+
+/** Mirrors `SysField::supports_relative_date` in `src/vault/query.rs`. */
+const RELATIVE_DATE_OPERATORS: ReadonlySet<FilterOp> = new Set([
+  "is_today",
+  "is_this_week",
+  "is_past_week",
+  "is_next_week",
+  "is_this_month",
+]);
+const RELATIVE_DATE_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
+  "created_at",
+  "updated_at",
+  "journal_date",
+]);
+
+/** Mirrors `SysField::supports_affix` / `PropertyType::supports_affix` in
+ * `src/vault/query.rs` and `src/vault/base.rs`. */
+const AFFIX_OPERATORS: ReadonlySet<FilterOp> = new Set([
+  "starts_with",
+  "ends_with",
+]);
+const AFFIX_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
+  "id",
+  "path",
+  "title",
+  "kind",
+  "project",
+  "created_at",
+  "updated_at",
 ]);
 
 function isSystemField(value: string): value is SystemField {
@@ -134,15 +175,27 @@ function isOrdered(type: PropertyType): boolean {
 }
 
 function supportsOperator(field: ResolvedField, op: FilterOp): boolean {
+  if (RELATIVE_DATE_OPERATORS.has(op)) {
+    return field.source === "system"
+      ? RELATIVE_DATE_SYSTEM_FIELDS.has(field.name)
+      : field.type === "date" || field.type === "datetime";
+  }
+  if (AFFIX_OPERATORS.has(op)) {
+    if (field.multiValuedSystem) return false;
+    return field.source === "system"
+      ? AFFIX_SYSTEM_FIELDS.has(field.name)
+      : field.type === "text" || field.type === "url";
+  }
+  const containsLike = op === "contains" || op === "not_contains";
   if (field.multiValuedSystem) return MULTI_SYSTEM_OPERATORS.has(op);
   if (field.source === "system") {
     if (op === "links_to") return false;
-    if (op === "contains") return supportsContains(field.type);
+    if (containsLike) return supportsContains(field.type);
     if (ORDERING_OPERATORS.has(op)) return field.type !== "bool";
     return true;
   }
   if (op === "links_to") return field.type === "relation";
-  if (op === "contains") return supportsContains(field.type);
+  if (containsLike) return supportsContains(field.type);
   if (ORDERING_OPERATORS.has(op)) return isOrdered(field.type);
   return true;
 }
@@ -182,7 +235,7 @@ function validateComparison(
     ];
   }
 
-  if (filter.op === "is_empty" || filter.op === "not_empty") {
+  if (VALUELESS_OPERATORS.has(filter.op)) {
     return filter.value == null
       ? []
       : [

@@ -161,28 +161,64 @@ export function createMinimalDraft(
   };
 }
 
+const RELATIVE_DATE_OPERATORS: readonly FilterOp[] = [
+  "is_today",
+  "is_this_week",
+  "is_past_week",
+  "is_next_week",
+  "is_this_month",
+];
+
 export function operatorsFor(
   type: PropertyType | "system-multi" | "system-scalar",
 ): FilterOp[] {
   switch (type) {
     case "system-multi":
-      return ["contains", "in", "is_empty", "not_empty"];
+      return ["contains", "not_contains", "in", "is_empty", "not_empty"];
     case "multi_select":
-      return ["eq", "ne", "contains", "in", "is_empty", "not_empty"];
+    case "select":
+      return [
+        "eq",
+        "ne",
+        "contains",
+        "not_contains",
+        "in",
+        "is_empty",
+        "not_empty",
+      ];
     case "number":
+      return ["eq", "ne", "lt", "lte", "gt", "gte"];
     case "date":
     case "datetime":
-      return ["eq", "ne", "lt", "lte", "gt", "gte"];
+      return [
+        "eq",
+        "ne",
+        "lt",
+        "lte",
+        "gt",
+        "gte",
+        ...RELATIVE_DATE_OPERATORS,
+        "is_empty",
+        "not_empty",
+      ];
     case "relation":
       return ["eq", "ne", "links_to", "is_empty", "not_empty"];
     case "bool":
       return ["eq", "ne", "in", "is_empty", "not_empty"];
-    case "select":
-      return ["eq", "ne", "contains", "in", "is_empty", "not_empty"];
     case "text":
     case "url":
     case "system-scalar":
-      return ["eq", "ne", "contains", "in", "is_empty", "not_empty"];
+      return [
+        "eq",
+        "ne",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+        "in",
+        "is_empty",
+        "not_empty",
+      ];
   }
 }
 

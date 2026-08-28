@@ -15,6 +15,7 @@ function detail(): BaseDetailResponse {
       },
       { key: "topics", definition: { type: "multi_select" } },
       { key: "related", definition: { type: "relation" } },
+      { key: "logged_at", definition: { type: "datetime" } },
     ],
     views: [
       {
@@ -187,4 +188,51 @@ describe("validateBaseEmbedSemantics", () => {
       ]);
     },
   );
+
+  it("rejects a relative-date operator on a non-date field", () => {
+    const diagnostics = validate({
+      filter: { field: "shelf", op: "is_today" },
+    });
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        path: "filter.op",
+        message: expect.stringMatching(/is_today/),
+      }),
+    ]);
+  });
+
+  it("rejects starts_with on a multi-valued system field", () => {
+    const diagnostics = validate({
+      filter: { field: "tags", op: "starts_with", value: "a" },
+    });
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        path: "filter.op",
+        message: expect.stringMatching(/starts_with/),
+      }),
+    ]);
+  });
+
+  it("accepts not_contains on a multi-valued system field", () => {
+    expect(
+      validate({ filter: { field: "tags", op: "not_contains", value: "a" } }),
+    ).toEqual([]);
+  });
+
+  it("accepts is_this_month on created_at and on a declared datetime property", () => {
+    expect(
+      validate({ filter: { field: "created_at", op: "is_this_month" } }),
+    ).toEqual([]);
+    expect(
+      validate({ filter: { field: "logged_at", op: "is_this_month" } }),
+    ).toEqual([]);
+  });
+
+  it("accepts is_today on journal_date", () => {
+    expect(
+      validate({ filter: { field: "journal_date", op: "is_today" } }),
+    ).toEqual([]);
+  });
 });
