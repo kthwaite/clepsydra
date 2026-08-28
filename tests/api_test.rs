@@ -1743,7 +1743,7 @@ async fn list_attachments_empty() {
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn move_page_rewrites_backlinks() {
+async fn move_page_keeps_title_links_and_rewrites_stem_links() {
     let (server, tmp) = setup_server();
     let vault_root = tmp.path().join("vault");
 
@@ -1754,10 +1754,12 @@ async fn move_page_rewrites_backlinks() {
         .await
         .assert_status(StatusCode::CREATED);
 
-    // Create source page that links to target
+    // Create source page that links to target by title and by filename stem
     server
         .post("/api/vault/pages/source.md")
-        .json(&serde_json::json!({"title": "Source", "body": "See [[Target]] here."}))
+        .json(
+            &serde_json::json!({"title": "Source", "body": "See [[Target]] and [[target]] here."}),
+        )
         .await
         .assert_status(StatusCode::CREATED);
 
@@ -1782,16 +1784,31 @@ async fn move_page_rewrites_backlinks() {
         "renamed.md should exist after move"
     );
 
-    // Verify backlink was rewritten in source.md
+    // The title link still resolves through the page's title-derived canonical
+    // name, so it must be left alone; only the stem link follows the file.
     let content = fs::read_to_string(vault_root.join("source.md")).unwrap();
     assert!(
-        !content.contains("[[Target]]"),
-        "old link should be rewritten, but found: {content}"
+        content.contains("[[Target]]"),
+        "title link must survive the move, but found: {content}"
     );
-    // The new link should reference "renamed" (the new stem)
     assert!(
-        content.contains("[[renamed]]"),
-        "expected [[renamed]] in rewritten content, but found: {content}"
+        content.contains("[[renamed]]") && !content.contains("[[target]]"),
+        "stem link should follow the file, but found: {content}"
+    );
+
+    // And the moved page still lists source.md among its backlinks.
+    let res = server.get("/api/vault/index/backlinks/renamed.md").await;
+    res.assert_status_ok();
+    let backlinks: serde_json::Value = res.json();
+    let sources: Vec<&str> = backlinks
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|b| b["source_path"].as_str())
+        .collect();
+    assert!(
+        sources.contains(&"source.md"),
+        "source.md should still backlink renamed.md: {backlinks}"
     );
 }
 
@@ -1808,7 +1825,9 @@ async fn page_move_commits_primary_and_backlink_rewrite_before_one_notification(
     fixture
         .server
         .post("/api/vault/pages/source.md")
-        .json(&serde_json::json!({"title": "Source", "body": "See [[Target]] here."}))
+        // Stem-form link: it follows the renamed file, so the move carries a
+        // backlink rewrite. A title-form [[Target]] would be left alone.
+        .json(&serde_json::json!({"title": "Source", "body": "See [[target]] here."}))
         .await
         .assert_status(StatusCode::CREATED);
     fixture
@@ -1828,7 +1847,7 @@ async fn page_move_commits_primary_and_backlink_rewrite_before_one_notification(
     assert!(!vault_root.join("target.md").exists());
     assert!(vault_root.join("renamed.md").exists());
     let backlink = fs::read_to_string(vault_root.join("source.md")).unwrap();
-    assert!(!backlink.contains("[[Target]]"));
+    assert!(!backlink.contains("[[target]]"));
     assert!(backlink.contains("[[renamed]]"));
     match notifications.try_recv().expect("move notification") {
         SyncNotification::IndexChanged { upserted, removed } => {
@@ -2216,10 +2235,15 @@ async fn move_folder_rewrites_all_contained_pages() {
         .await
         .assert_status(StatusCode::CREATED);
 
-    // Create external page that links to the page inside the folder
+    // Create external page that links to the page inside the folder, by
+    // title (resolves through the page's title, survives the move) and by
+    // relative path (must follow the file).
     server
         .post("/api/vault/pages/index.md")
-        .json(&serde_json::json!({"title": "Index", "body": "See [[Design Notes]] for details."}))
+        .json(&serde_json::json!({
+            "title": "Index",
+            "body": "See [[Design Notes]] and [the file](notes/design.md) for details."
+        }))
         .await
         .assert_status(StatusCode::CREATED);
 
@@ -2251,11 +2275,15 @@ async fn move_folder_rewrites_all_contained_pages() {
         "page should exist in new folder"
     );
 
-    // Verify backlink in index.md was rewritten
+    // The path link follows the folder; the title link is left as written.
     let content = fs::read_to_string(vault_root.join("index.md")).unwrap();
     assert!(
-        !content.contains("[[Design Notes]]"),
-        "old link should be rewritten, but found: {content}"
+        content.contains("(docs/design.md)") && !content.contains("(notes/design.md)"),
+        "relative link should follow the folder, but found: {content}"
+    );
+    assert!(
+        content.contains("[[Design Notes]]"),
+        "title link must survive the folder move, but found: {content}"
     );
 }
 
