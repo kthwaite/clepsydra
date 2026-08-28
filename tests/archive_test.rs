@@ -88,9 +88,16 @@ fn archive_hook_reports_cas_decrement_failure() {
         "snapshot_hash".to_string(),
         toml::Value::String("invalid".to_string()),
     );
+    // Table-shaped blob entry ({hash, type}), the current capture format.
+    let mut blob_entry = toml::Table::new();
+    blob_entry.insert("hash".to_string(), toml::Value::String(valid_hash));
+    blob_entry.insert(
+        "type".to_string(),
+        toml::Value::String("application/octet-stream".to_string()),
+    );
     archive.insert(
         "blobs".to_string(),
-        toml::Value::Array(vec![toml::Value::String(valid_hash)]),
+        toml::Value::Array(vec![toml::Value::Table(blob_entry)]),
     );
     let mut meta = PageMeta::new();
     meta.extra
@@ -135,6 +142,9 @@ fn archive_hook_deduplicates_captured_archive_metadata_hashes() {
         "snapshot_hash".to_string(),
         toml::Value::String(hash.clone()),
     );
+    // Legacy plain-string blob entries, kept deliberately (not migrated to the
+    // {hash, type} table shape) as regression coverage for the reader's
+    // legacy-shape path, which must keep working indefinitely.
     archive.insert(
         "blobs".to_string(),
         toml::Value::Array(vec![

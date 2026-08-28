@@ -84,6 +84,14 @@ pub struct EncryptionMetaResponse {
     pub key_id: String,
 }
 
+/// One captured archive resource: CAS hash plus its declared content type.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ArchiveBlobResponse {
+    pub hash: String,
+    #[serde(rename = "type")]
+    pub content_type: String,
+}
+
 /// OpenAPI schema for the flattened `[archive]` frontmatter table.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ArchiveMetaResponse {
@@ -109,7 +117,7 @@ pub struct ArchiveMetaResponse {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub excerpt: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub blobs: Option<Vec<String>>,
+    pub blobs: Option<Vec<ArchiveBlobResponse>>,
 }
 
 /// OpenAPI schema for page metadata exposed in `PageDetail`.

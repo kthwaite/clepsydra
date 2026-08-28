@@ -90,6 +90,14 @@ fn migrate_with_publication(
             }
         };
 
+        if super::conflict::has_conflict_markers(&content) {
+            report.warnings.push(format!(
+                "{}: contains merge conflict markers; skipped",
+                vault_path.as_str()
+            ));
+            continue;
+        }
+
         let (meta, body, _rewrote, warning) = legacy_yaml::parse_or_repair_frontmatter(&content);
         if let Some(w) = warning {
             report
@@ -193,6 +201,34 @@ mod tests {
         let content =
             std::fs::read_to_string(vault.resolve(&VaultPath::new("broken.md").unwrap())).unwrap();
         assert_eq!(content, broken, "unparseable page must not be touched");
+    }
+
+    #[test]
+    fn conflicted_legacy_page_is_skipped_others_still_convert() {
+        let conflicted = "---\nid: 01900000-0000-7000-8000-000000000005\ntitle: Conflicted\ncreated_at: 2026-01-01T00:00:00Z\nupdated_at: 2026-01-01T00:00:00Z\n---\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch\n";
+        let (_tmp, vault) = make_vault(&[("conflicted.md", conflicted), ("legacy.md", LEGACY)]);
+
+        let report = migrate(&vault, true);
+
+        assert_eq!(report.converted, vec!["legacy.md"]);
+        assert_eq!(report.warnings.len(), 1);
+        assert!(
+            report.warnings[0].contains("conflicted.md")
+                && report.warnings[0].contains("merge conflict markers"),
+            "unexpected warning: {:?}",
+            report.warnings
+        );
+
+        // Conflicted page is byte-identical: never converted.
+        let content =
+            std::fs::read_to_string(vault.resolve(&VaultPath::new("conflicted.md").unwrap()))
+                .unwrap();
+        assert_eq!(content, conflicted, "conflicted page must not be touched");
+
+        // The clean legacy page in the same sweep still converts.
+        let legacy_content =
+            std::fs::read_to_string(vault.resolve(&VaultPath::new("legacy.md").unwrap())).unwrap();
+        assert!(legacy_content.starts_with("+++\n"));
     }
 
     #[test]

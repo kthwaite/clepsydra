@@ -755,9 +755,9 @@ struct ArchiveHashes {
     /// body, so it must be computed post-rewrite or that justification fails.
     content_hash: String,
     snapshot_hash: String,
-    /// Every deconstructed resource, excluding the snapshot itself. The delete
-    /// hook decrements each of these.
-    resource_hashes: Vec<String>,
+    /// Every deconstructed resource, excluding the snapshot itself, as
+    /// (hash, content type) pairs. The delete hook decrements each hash.
+    resources: Vec<(String, String)>,
 }
 
 /// Build the PageMeta (with nested `archive` TOML table) for an ingest request.
@@ -784,7 +784,7 @@ fn build_archive_meta(req: &ArchiveRequest, hashes: &ArchiveHashes) -> PageMeta 
     archive_map.insert("snapshot_hash".into(), ts(&hashes.snapshot_hash));
     archive_map.insert(
         "resource_count".into(),
-        toml::Value::Integer(hashes.resource_hashes.len() as i64),
+        toml::Value::Integer(hashes.resources.len() as i64),
     );
     if let Some(ref description) = req.description {
         archive_map.insert("description".into(), ts(description));
@@ -801,11 +801,16 @@ fn build_archive_meta(req: &ArchiveRequest, hashes: &ArchiveHashes) -> PageMeta 
         }
     }
 
-    if !hashes.resource_hashes.is_empty() {
+    if !hashes.resources.is_empty() {
         let blobs: Vec<toml::Value> = hashes
-            .resource_hashes
+            .resources
             .iter()
-            .map(|h| toml::Value::String(h.clone()))
+            .map(|(hash, content_type)| {
+                let mut entry = toml::Table::new();
+                entry.insert("hash".into(), toml::Value::String(hash.clone()));
+                entry.insert("type".into(), toml::Value::String(content_type.clone()));
+                toml::Value::Table(entry)
+            })
             .collect();
         archive_map.insert("blobs".into(), toml::Value::Array(blobs));
     }
@@ -1369,10 +1374,10 @@ pub async fn ingest_archive(
     let snapshot_bytes = deconstructed.html.into_bytes();
     let snapshot_hash = ContentStore::hash_bytes(&snapshot_bytes);
 
-    let resource_hashes: Vec<String> = deconstructed
+    let resources: Vec<(String, String)> = deconstructed
         .resources
         .iter()
-        .map(|r| r.hash.clone())
+        .map(|r| (r.hash.clone(), r.content_type.clone()))
         .collect();
 
     let mut to_store: Vec<(String, Vec<u8>, String)> = deconstructed
@@ -1401,7 +1406,7 @@ pub async fn ingest_archive(
             source_hash,
             content_hash,
             snapshot_hash,
-            resource_hashes,
+            resources,
         },
     );
     let page_id = meta.id.to_string();
@@ -1889,7 +1894,7 @@ mod tests {
             source_hash: "sha256:src".to_string(),
             content_hash: "sha256:content".to_string(),
             snapshot_hash: "sha256:snap".to_string(),
-            resource_hashes: vec!["sha256:img".to_string()],
+            resources: vec![("sha256:img".to_string(), "image/png".to_string())],
         }
     }
 
@@ -1920,17 +1925,22 @@ mod tests {
     fn build_archive_meta_lists_only_resource_blobs() {
         let meta = build_archive_meta(&request_fixture(), &hashes_fixture());
 
-        let archive = match meta.extra.get("archive") {
-            Some(toml::Value::Table(m)) => m,
-            other => panic!("expected archive mapping, got {other:?}"),
-        };
-        let blobs: Vec<&str> = archive["blobs"]
-            .as_array()
-            .expect("blobs array present")
-            .iter()
-            .filter_map(|v| v.as_str())
-            .collect();
-        assert_eq!(blobs, vec!["sha256:img"]);
+        let archive = meta
+            .extra
+            .get("archive")
+            .and_then(|v| v.as_table())
+            .unwrap();
+        let blobs = archive.get("blobs").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(blobs.len(), 1);
+        let entry = blobs[0].as_table().unwrap();
+        assert_eq!(
+            entry.get("hash").and_then(|v| v.as_str()),
+            Some("sha256:img")
+        );
+        assert_eq!(
+            entry.get("type").and_then(|v| v.as_str()),
+            Some("image/png")
+        );
         assert_eq!(archive["resource_count"].as_integer(), Some(1));
         assert_eq!(archive["snapshot_hash"].as_str(), Some("sha256:snap"));
         assert_eq!(archive["source_hash"].as_str(), Some("sha256:src"));

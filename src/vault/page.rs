@@ -429,7 +429,24 @@ pub fn parse_frontmatter(content: &str) -> Result<(PageMeta, String), Frontmatte
 /// should persist `write_page_content(meta, body)` back to disk. When `warning`
 /// is `Some`, the frontmatter was unparseable and the file was left unmodified
 /// (indexed with default metadata only).
+///
+/// Content containing git merge conflict markers is never marked for rewrite
+/// (docs/adr/0004).
 pub fn parse_or_repair_frontmatter(content: &str) -> (PageMeta, String, bool, Option<String>) {
+    if crate::vault::conflict::has_conflict_markers(content) {
+        let (meta, body, _rewrote, inner) = parse_or_repair_frontmatter_inner(content);
+        const NOTE: &str =
+            "contains merge conflict markers; indexing read-only (file not modified)";
+        let warning = match inner {
+            Some(w) => format!("{NOTE}; {w}"),
+            None => NOTE.to_string(),
+        };
+        return (meta, body, false, Some(warning));
+    }
+    parse_or_repair_frontmatter_inner(content)
+}
+
+fn parse_or_repair_frontmatter_inner(content: &str) -> (PageMeta, String, bool, Option<String>) {
     if content.starts_with("+++") {
         match split_fenced(content, "+++") {
             Ok((toml_str, body)) => match toml_str.parse::<toml::Table>() {
