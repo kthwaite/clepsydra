@@ -225,7 +225,7 @@ describe("BaseTable standalone regression", () => {
       {},
     );
 
-    await user.click(screen.getByRole("columnheader", { name: "rating" }));
+    await user.click(screen.getByRole("columnheader", { name: /^rating/ }));
     await waitFor(() =>
       expect(mocks.useBaseView).toHaveBeenLastCalledWith(
         "reading",
