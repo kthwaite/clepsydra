@@ -311,7 +311,7 @@ describe("base definition model", () => {
     ]);
   });
 
-  it("matches grouping and aggregate capabilities", () => {
+  it("matches grouping capabilities", () => {
     for (const type of [
       "text",
       "bool",
@@ -326,14 +326,6 @@ describe("base definition model", () => {
       expect(canGroup(type)).toBe(false);
     }
     expect(canGroup(undefined)).toBe(true);
-
-    const numericFunctions = ["count", "sum", "avg", "min", "max"];
-    expect(aggregateFunctions("number")).toEqual(numericFunctions);
-    expect(aggregateFunctions("date")).toEqual(numericFunctions);
-    expect(aggregateFunctions("datetime")).toEqual(numericFunctions);
-    expect(aggregateFunctions("word_count")).toEqual(numericFunctions);
-    expect(aggregateFunctions("select")).toEqual(["count"]);
-    expect(aggregateFunctions(undefined)).toEqual(["count"]);
   });
 
   it("moves an item immutably while preserving tuple order", () => {
@@ -466,5 +458,35 @@ describe("operatorsFor", () => {
       "is_empty",
       "not_empty",
     ]);
+  });
+});
+
+describe("aggregateFunctions", () => {
+  it("offers every function on numeric and temporal fields", () => {
+    for (const type of ["number", "date", "datetime", "word_count"] as const) {
+      expect(aggregateFunctions(type)).toEqual([
+        "count",
+        "count_filled",
+        "count_empty",
+        "percent_filled",
+        "count_unique",
+        "sum",
+        "avg",
+        "min",
+        "max",
+        "median",
+        "range",
+      ]);
+    }
+  });
+  it("offers only the count family elsewhere", () => {
+    expect(aggregateFunctions("select")).toEqual([
+      "count",
+      "count_filled",
+      "count_empty",
+      "percent_filled",
+      "count_unique",
+    ]);
+    expect(aggregateFunctions(undefined)).toEqual(["count"]);
   });
 });

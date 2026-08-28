@@ -8,6 +8,8 @@ import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
+import { BaseFilterEditor } from "./BaseFilterEditor";
+import { DisplayLabelsEditor } from "./DisplayLabelsEditor";
 import {
   type AggregateFunction,
   aggregateFunctions,
@@ -17,15 +19,13 @@ import {
   moveItem,
 } from "./definition-model";
 import { diagnosticRows } from "./diagnostic-rows";
+import { OrderedSortEditor } from "./OrderedSortEditor";
 import {
   MoveButtons,
   ReorderHandle,
   useIdentifiedRows,
   useReorderable,
 } from "./ordered-list";
-import { DisplayLabelsEditor } from "./DisplayLabelsEditor";
-import { BaseFilterEditor } from "./BaseFilterEditor";
-import { OrderedSortEditor } from "./OrderedSortEditor";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 
 interface FieldCapability {
@@ -63,10 +63,16 @@ const headingClass =
   "font-mono text-xs font-semibold uppercase tracking-widest text-foreground";
 const AGGREGATE_FUNCTION_OPTIONS = [
   "count",
+  "count_filled",
+  "count_empty",
+  "percent_filled",
+  "count_unique",
   "sum",
   "avg",
   "min",
   "max",
+  "median",
+  "range",
 ] as const satisfies readonly AggregateFunction[];
 
 interface ViewDefinitionEditorProps {
@@ -108,8 +114,8 @@ function VisibleColumnRow({
   onRemove,
   onHandleRef,
 }: VisibleColumnRowProps) {
-  const { rowRef, setHandle, onHandleKeyDown } = useReorderable<HTMLTableRowElement>(
-    {
+  const { rowRef, setHandle, onHandleKeyDown } =
+    useReorderable<HTMLTableRowElement>({
       kind: "base-view-column",
       idKey: "columnId",
       id: row.id,
@@ -118,14 +124,10 @@ function VisibleColumnRow({
       onMove,
       onReorder,
       onHandleRef,
-    },
-  );
+    });
 
   return (
-    <tr
-      ref={rowRef}
-      className="border-b border-border align-top"
-    >
+    <tr ref={rowRef} className="border-b border-border align-top">
       <td className="w-10 px-1 py-2 align-top sm:px-2">
         <ReorderHandle
           label={`${row.column} column`}
@@ -314,18 +316,13 @@ export function ViewDefinitionEditor({
     );
     onChange({
       ...view,
-      aggregates: view.aggregates.filter(
-        (_, position) => position !== index,
-      ),
+      aggregates: view.aggregates.filter((_, position) => position !== index),
     });
   }
 
   function appendAggregate() {
     const aggregate: Aggregate = { fn: "count" };
-    setAggregateRows((current) => [
-      ...current,
-      createAggregateRow(aggregate),
-    ]);
+    setAggregateRows((current) => [...current, createAggregateRow(aggregate)]);
     onChange({
       ...view,
       aggregates: [...view.aggregates, aggregate],
@@ -479,9 +476,7 @@ export function ViewDefinitionEditor({
           <Select
             label="Column to add"
             value={columnToAdd}
-            onChange={(key) =>
-              setColumnToAdd(key == null ? "" : String(key))
-            }
+            onChange={(key) => setColumnToAdd(key == null ? "" : String(key))}
           >
             <SelectItem id="">Choose a field</SelectItem>
             {unselectedColumns.map(({ key }) => (
@@ -598,10 +593,7 @@ export function ViewDefinitionEditor({
                 <Select
                   label={`Aggregate function ${index + 1}`}
                   triggerRef={(element) => {
-                    registerFocus(
-                      `${viewPath}.aggregates[${index}]`,
-                      element,
-                    );
+                    registerFocus(`${viewPath}.aggregates[${index}]`, element);
                     registerFocus(
                       `${viewPath}.aggregates[${index}].fn`,
                       element,

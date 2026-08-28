@@ -145,7 +145,7 @@ describe("Base member API", () => {
     const evaluationResponse: BaseViewEvaluateResponse = {
       revision: "rev-1",
       member_creation: capability,
-      output: { shape: "flat", rows: [], total: 0 },
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     };
 
     expect(request.embed_filter).toEqual(evaluationRequest.filter);
@@ -311,7 +311,7 @@ describe("Base member API", () => {
           blockers: [],
           fields: [],
         },
-        output: { shape: "flat", rows: [], total: 0 },
+        output: { shape: "flat", rows: [], total: 0, aggregates: [] },
       },
     } as never);
     const queryClient = freshQueryClient();

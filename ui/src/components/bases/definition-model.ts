@@ -47,7 +47,7 @@ export interface BaseDraft {
   views: DraftView[];
 }
 
-export type AggregateFunction = "count" | "sum" | "avg" | "min" | "max";
+export type AggregateFunction = Aggregate["fn"];
 
 function cloneFilter(filter: BaseFilter | null | undefined) {
   return filter == null ? undefined : structuredClone(filter);
@@ -242,18 +242,35 @@ export function canGroup(type: PropertyType | undefined) {
   return !(type === "number" || type === "multi_select" || type === "relation");
 }
 
+const COUNT_FAMILY: readonly AggregateFunction[] = [
+  "count",
+  "count_filled",
+  "count_empty",
+  "percent_filled",
+  "count_unique",
+];
+const FOLD_FAMILY: readonly AggregateFunction[] = [
+  "sum",
+  "avg",
+  "min",
+  "max",
+  "median",
+  "range",
+];
+
 export function aggregateFunctions(
   type: PropertyType | "word_count" | undefined,
 ): AggregateFunction[] {
+  if (type === undefined) return ["count"];
   if (
     type === "number" ||
     type === "date" ||
     type === "datetime" ||
     type === "word_count"
   ) {
-    return ["count", "sum", "avg", "min", "max"];
+    return [...COUNT_FAMILY, ...FOLD_FAMILY];
   }
-  return ["count"];
+  return [...COUNT_FAMILY];
 }
 
 export function moveItem<T>(

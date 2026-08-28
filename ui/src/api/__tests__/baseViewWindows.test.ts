@@ -27,12 +27,12 @@ function row(id: number) {
   };
 }
 
-function flatPage(ids: number[], total: number) {
+function flatPage(ids: number[], total: number, aggregates: unknown[] = []) {
   return {
     data: {
       revision: "rev-1",
       member_creation: capability,
-      output: { shape: "flat", rows: ids.map(row), total },
+      output: { shape: "flat", rows: ids.map(row), total, aggregates },
     },
   };
 }
@@ -97,6 +97,22 @@ describe("useBaseViewWindows", () => {
       "row-4",
     ]);
     expect(result.current.hasMore).toBe(false);
+  });
+
+  it("carries the newest window's aggregates through the merge", async () => {
+    const post = vi.spyOn(fetchClient, "POST");
+    post.mockResolvedValueOnce(flatPage([1, 2], 4) as never);
+    post.mockResolvedValueOnce(flatPage([3, 4], 4, [7]) as never);
+    const { result } = renderHook(() => useBaseViewWindows(config), {
+      wrapper: wrapper(freshClient()),
+    });
+
+    await waitFor(() => expect(result.current.loaded).toBe(2));
+    act(() => result.current.loadMore());
+    await waitFor(() => expect(result.current.loaded).toBe(4));
+
+    const output = result.current.data?.output;
+    expect(output?.shape === "flat" && output.aggregates).toEqual([7]);
   });
 
   it("drops a row a concurrent insert pushed into two windows", async () => {
