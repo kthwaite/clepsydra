@@ -103,19 +103,21 @@ Embedded data path: the controller composes the **effective filter** = `all([fen
 | `bool` | `true` / `false` | `eq true` / `eq false` | `<col> is checked` / `<col> is unchecked` |
 | `select`, `text`, `url`, `number`, system scalar (`kind`, `project`) | scalar | `eq value` | `<col> is <value>` (text/url quoted) |
 | `multi_select`, `tags`, `aliases` | array | one item per element, `contains e` | `<col> has <e>` |
-| `relation` | array of wikilinks | one item per element, `links_to e` | `<col> links to <e>` |
+| `relation` | array of wikilinks | one item per element, `links_to <target>` where `<target>` is the wikilink's target with `[[`/`]]` and any `\|alias` stripped (shared helper with `RelationCell`) — the server's `links_to` canonicalises bare targets only | `<col> links to <target>` |
 | `date`, `journal_date` | string | `eq <first 10 chars>` | `<col> is <date>` |
 | `datetime`, `created_at`, `updated_at` | string | no equality item (presets only) | — |
 | `word_count`, `id`, `title`, `path`, `body`, undeclared columns | — | none (row items only) | — |
 
-`datePresets` = the five relative operators with labels Today, This week, Past week, Next week, This month, offered as a **Filter by date ▸** submenu for `date`, `datetime`, `created_at`, `updated_at`, `journal_date`.
+`DATE_PRESETS` = the five relative operators. The **cell** menu offers them as a **Filter by date ▸** submenu whose items read Today, This week, Past week, Next week, This month (for `date`, `datetime`, `created_at`, `updated_at`, `journal_date`); the resulting quick filter's label — and therefore its chip — is the full form `<col> is this week`.
 
-`headerFilterPresets(column, type, definition)` for the header **Filter ▸** submenu:
+`headerFilterPresets(column, type, definition)` for the header **Filter ▸** submenu, in this order (every item's text is its chip text, `<col> <operator label>`):
 
-- every column that accepts `is_empty`: "Is empty", "Is not empty";
-- `bool`: "Is checked", "Is unchecked";
-- date-like: the five relative presets;
-- `select` / `multi_select` with declared `options`: one "is <option>" / "has <option>" item per option, capped at 12 (the 13th onward are omitted; the submenu's last item reads "… and N more — use a cell").
+- `bool`: "<col> is checked", "<col> is unchecked";
+- date-like: the five relative presets, "<col> is today" … "<col> is this month";
+- `select` / `multi_select` with declared `options`: one "<col> is <option>" / "<col> has <option>" item per option, capped at 12; when options exceed the cap the submenu ends with a disabled item "… and N more — use a cell" (`headerOptionOverflow`);
+- every column with a quick-filter type, `number` included: "<col> is empty", "<col> is not empty".
+
+Number columns therefore get the emptiness pair (the server accepts `is_empty`/`not_empty` on numbers); an empty number cell derives `<col> is empty`, a zero derives `<col> is 0`.
 
 Labels reuse `OPERATOR_LABELS` wording; the strip chip text equals the menu item text.
 
@@ -136,21 +138,25 @@ Save to view is hidden in `readOnly` mode and when `definition` has no matching 
 
 ### Primitive
 
-`ContextMenuTrigger` / `MenuTrigger` / `Menu` / `MenuItem` / `MenuSeparator` / `SubmenuTrigger` from `#/components/ui/menu`. Right-click and the keyboard context-menu key (Shift+F10, ⌃Enter on macOS, the Menu key) come free from `ContextMenuTrigger`; the `⋯` buttons use `MenuTrigger`.
+`MenuTrigger` / `Menu` / `MenuItem` / `MenuSeparator` / `SubmenuTrigger` from `#/components/ui/menu`. Every menu in the table hangs off exactly one `⋯` `Button` inside a `MenuTrigger trigger="contextMenu"` — one per column header and one per row (in the row's first visible cell). React Aria's `Pressable`-based `ContextMenuTrigger` is **not** used inside the grid: `Pressable` gives its child a `tabindex`, and React Aria's grid cells focus their first focusable descendant, so a wrapper would steal in-cell focus from the title/editor buttons.
+
+Gestures reach the button by forwarding (`ui/src/components/bases/context-menu-forward.ts`): a non-focusable wrapper `<div>` around each cell's / header's content handles `onContextMenu` (and, for cells, the keyboard context-menu keys: `ContextMenu`, Shift+F10, ⌃Enter on macOS) by re-dispatching a `contextmenu` `MouseEvent` on the row's / header's `⋯` button at the pointer coordinates (or at the origin element's bottom-left for keyboard). React Aria's own `useContextMenu` handler then opens the menu at that point. Forwarded events carry a module-private tag so the button can tell them from a gesture aimed at the button itself. The `⋯` button's press forwards a `contextmenu` at its own rect, and it declares `aria-haspopup="menu"` / `aria-expanded` explicitly (React Aria strips them for context triggers). Menus are named by their trigger button (React Aria's `aria-labelledby`), so they carry no `aria-label` of their own.
 
 ### Header
 
-Each `<Column>` body becomes:
+Each `<Column>` body renders a non-focusable forwarding wrapper around the label and sort glyph, followed by the `⋯` button as a sibling:
 
 ```
-<ContextMenuTrigger>
-  <div class="flex items-center gap-1" data-column={column}>
-    <span>{label}{▲▼}</span>
-    <MenuTrigger><Button variant="ghost" size="sm" aria-label={`${label} column menu`}>⋯</Button><Menu …>{items}</Menu></MenuTrigger>
-  </div>
-  <Menu aria-label={`${label} column menu`}>{items}</Menu>
-</ContextMenuTrigger>
+<div class="flex flex-1 items-center gap-1" onContextMenu={forward → header ⋯}>
+  <span>{label}{▲▼}</span>
+</div>
+<MenuTrigger trigger="contextMenu">
+  <Button variant="ghost" size="sm" aria-label={`${label} column menu`} aria-haspopup="menu" aria-expanded={isOpen} onPress={forward at own rect}>⋯</Button>
+  <Menu>{items}</Menu>
+</MenuTrigger>
 ```
+
+The `⋯` button is the header's only focusable child, so keyboard focus entering a header lands on it (Enter opens the menu; sorting by keyboard goes through the menu). Its label joins the column header's accessible name ("author author column menu") — accepted, since `aria-hidden` would hide it from keyboard users and React Aria's `Column` drops `aria-label`.
 
 Items (`BaseHeaderMenu.tsx`, `headerMenuItems(column)`):
 
@@ -168,20 +174,26 @@ Effective grouping = `group` override if set, else `view.group_by`.
 
 ### Cell + row
 
-Every body cell's content is wrapped:
+Every body cell's content is wrapped in a non-focusable forwarding trigger; the row has one menu, on the `⋯` button in its first visible cell:
 
 ```
-<ContextMenuTrigger>
-  <div class="min-w-0" data-row-id={row.id} data-column={column}>{content}</div>
-  <Menu aria-label={`${title} — ${label}`} onAction={…}>
-    {cellItems}          // quick filter(s), Filter by date ▸, Copy value — only for property/system columns
-    <MenuSeparator/>
-    {rowItems}
-  </Menu>
-</ContextMenuTrigger>
+<Cell>
+  <div data-row-id={row.id} data-column={column} onContextMenu={forward → row ⋯} onKeyDown={context keys → forward}>{content}</div>
+  {first visible column ? <RowActionsButton …/> : null}   // sibling, not a child, of the wrapper
+</Cell>
 ```
 
-The first rendered column also carries the ghost `⋯` button (`MenuTrigger`, `aria-label={`Row actions for ${title}`}`, `opacity-0 group-data-[hovered]:opacity-100 focus-visible:opacity-100` where the `Row` has class `group`) whose menu holds only the row items. The `⋯` button sits after the title/first-cell content.
+`BaseTableView` keeps one `contextTarget: { rowId, column, origin } | null`. A cell gesture records its column and origin element before forwarding; a press or direct context gesture on the `⋯` button records `{ column: undefined, origin: null }`; the target is cleared when the menu closes. The row `Menu` (rendered only while open) is:
+
+```
+{cellItems}          // quick filter(s), Filter by date ▸, Copy value — only when contextTarget.column has a quick-filter type
+<MenuSeparator/>     // only when cell items precede row items
+{rowItems}
+```
+
+On close, React Aria returns focus to the `⋯` button; the table then hands it back to `origin` when that control is still in the document and nothing else (the archive dialog) has claimed focus.
+
+The `⋯` button (`aria-label={`Row actions for ${title}`}`) is a ghost: `opacity-0 pointer-events-none`, revealed on row hover (`Row` has class `group`), `focus-within`, `focus-visible`, and while open. It renders only when at least one row action beyond Open is wired (`onOpenPageInNewTab`, `onCopyWikilink`, `onDuplicateRow`, `onArchiveRow`); a read-only preview with none of them shows no button, and cell right-clicks then fall through to the browser menu. Its label joins the row header cell's accessible name ("<title> Row actions for <title>"), the same trade-off as the header.
 
 Row items (`BaseRowMenu.tsx`, `rowMenuItems(row)`):
 
@@ -193,7 +205,7 @@ Row items (`BaseRowMenu.tsx`, `rowMenuItems(row)`):
 | `duplicate` | Duplicate | ✗ | `onDuplicateRow(row)` |
 | `archive` | Archive… (`variant="destructive"`) | ✗ | opens the confirm dialog |
 
-Cell items appear only when the cell's column is a declared property or a quick-filterable system column; the title cell and the `body` cell get row items only, plus Copy value for `body`? — no: `body` gets none (excerpt is derived).
+Cell items appear only when the cell's column is a declared property or a quick-filterable system column (`quickFilterType` ≠ undefined); the title, path, id, body and word-count cells get row items only. Copy value stays available in `readOnly` (it is non-mutating, like Copy wikilink).
 
 ### Copy value
 
@@ -256,4 +268,7 @@ Rendered by `ViewOverridesStrip.tsx` between the toolbar and the member draft wh
 8. `readOnly`: no header menu, no cell filters, no Duplicate/Archive, no Save.
 9. Embedded quick filters travel with the evaluate request and `embed_filter`; standalone member creation ignores them.
 11. Duplicate reports through a notice and does not move focus.
+12. Context menus are forwarded to one `⋯` `MenuTrigger trigger="contextMenu"` per row / per header (no `Pressable` wrappers inside the grid); keyboard focus in a header lands on `⋯`, so keyboard sorting goes through the menu.
+13. Relation quick filters use the unwrapped wikilink target; number columns get the emptiness presets.
+14. `ui/vitest.config.ts` `testTimeout` is raised to 15 s: the per-row menu trigger adds ~30% to `BaseTable.test.tsx`'s wall time and the 5 s default was already marginal for jsdom + React Aria suites.
 10. Copy wikilink uses the title (`[[Title]]`), falling back to the path stem.
