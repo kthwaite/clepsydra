@@ -21,7 +21,7 @@ import {
   sortKindsByLabel,
 } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
-import { useProjects } from "#/lib/useProjects";
+import { useProjects, useProjectValues } from "#/lib/useProjects";
 import { useGazetteerStore } from "#/store/gazetteer";
 import {
   appendUniqueTag,
@@ -104,7 +104,9 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const isMobile = useMobileLayout();
   const openTab = useOpenTab();
   const bulk = useAssignBulk();
+  // Assign offers declared projects; the filter keeps orphan slugs findable.
   const projects = useProjects();
+  const projectValues = useProjectValues();
   const filterFields = useMemo<FilterField[]>(
     () => [
       {
@@ -120,7 +122,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
         id: "project",
         kind: "single",
         label: "PROJECT",
-        options: projects.map((p) => ({ value: p })),
+        options: projectValues.map((p) => ({ value: p })),
       },
       {
         id: "tags",
@@ -129,7 +131,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
         options: tags.map((t) => ({ value: t.tag })),
       },
     ],
-    [projects, tags],
+    [projectValues, tags],
   );
 
   const items = content?.items ?? [];

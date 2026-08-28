@@ -35,7 +35,9 @@ files directly, which bypasses locking, link rewriting, and the index.
   (docs/adr/0002). Never construct these by hand; `vault_create_page`
   derives them.
 - **Projects** — a declared `project` files the page under
-  `<kind-folder>/<project>/` (docs/adr/0001).
+  `<kind-folder>/<project>/` (docs/adr/0001). The slug must be one some
+  PROJECT page declares; a PROJECT page may declare its own slug (that is
+  what creates a project). The server refuses anything else with 400.
 
 ## Choosing the right tool
 
@@ -106,9 +108,11 @@ An edit does not add `ai-generated` merely because an LLM performed it.
 
 **Organise.** Filing means declaring metadata: `vault_assign` with `kind`
 and/or `project` (bulk-capable via `paths`) — the vault relocates files
-itself and rewrites links. Use `vault_move_page` only for destinations
-assignment can't express, and run `vault_preview_mutation` first when the
-page has backlinks or you're moving folders.
+itself and rewrites links. A `project` must already be declared by a PROJECT
+page; to start a project, assign `kind: PROJECT` and the new slug to its hub
+page first, then file other pages under it. Use `vault_move_page` only for
+destinations assignment can't express, and run `vault_preview_mutation`
+first when the page has backlinks or you're moving folders.
 
 **Task Board.** Use display labels in prose and persisted values in MCP calls:
 Inbox (`INTAKE`) → Ready (`TRIAGE`) → In Progress (`FIELD`) → Review

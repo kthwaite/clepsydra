@@ -81,7 +81,7 @@ for an explicit destination that assignment cannot express.
 | `vault_tree` | read | Folder tree, or one folder's contents |
 | `vault_links` | read | Backlinks, outlinks, or similar pages |
 | `vault_tags` | read | Tag vocabulary with usage counts |
-| `vault_create_page` | write | New page in one atomic mutation; derives the canonical `yyyymmdd.slug.shortid.md` path, declares kind/project |
+| `vault_create_page` | write | New page in one atomic mutation; derives the canonical `yyyymmdd.slug.shortid.md` path, declares kind/project (a project must be one some PROJECT page declares, unless the page is itself a PROJECT) |
 | `vault_update_page` | write | Whole-field replacement of title/tags/aliases/body, guarded by the current revision |
 | `vault_edit_page` | write | Exact-match string edit of the body, guarded by the current revision |
 | `vault_append_page` | write | Append to the page or to a heading's section (revision-guarded, one retry) |
@@ -93,7 +93,7 @@ for an explicit destination that assignment cannot express.
 | `vault_task_update` | write | Patch a Task addressed by TSK code (or any unique prefix of one), path, or id; tri-state clearing for Cycle, assignee, estimate, due, blocker reason (`hold`), and related page (`link`) |
 | `vault_cycle_create` | write | New Cycle (a CYCLE page under `cycles/`); code auto-generates as `S-<adjective>-<noun>-<tail>`, or an explicit code in that same format (rejected otherwise; conflicts if it already exists) |
 | `vault_cycle_update` | write | Patch a Cycle addressed by S code (or any unique prefix of one), path, or id; closing with `carry_to` moves unfinished Tasks |
-| `vault_assign` | organize | Declare kind/project (single or bulk); the vault relocates files |
+| `vault_assign` | organize | Declare kind/project (single or bulk); the vault relocates files. A project must be one some PROJECT page declares; a PROJECT page may declare a new slug, and a bulk call that names an undeclared slug on any other page moves nothing |
 | `vault_move_page` | organize | Explicit rename/relocate with link rewriting |
 | `vault_folder` | organize | Create / delete (`recursive` opt-in) / move folders |
 | `vault_archive_page` | organize | Archive an active page to the Rubbish Bin without rewriting inbound links |

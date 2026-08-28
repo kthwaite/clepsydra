@@ -239,7 +239,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                   </span>
                 </span>
 
-                {/* OP */}
+                {/* PROJECT */}
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap tracking-[0.06em] text-[var(--ink-3)]">
                   {t.project ?? "—"}
                 </span>
@@ -261,7 +261,7 @@ export function BacklogView({ tasks, colLabel }: BacklogViewProps) {
                   </InlineEditPopover>
                 </span>
 
-                {/* OPR */}
+                {/* ASSIGNEE */}
                 <span className="overflow-hidden text-ellipsis whitespace-nowrap text-[var(--ink-2)]">
                   {t.assignee ?? "—"}
                 </span>

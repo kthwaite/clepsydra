@@ -266,6 +266,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
+        check_projects(v, &mut report);
         check_conflicts(v, &mut report);
         check_meetings(v, &mut report);
         check_bases(v, &mut report);
@@ -283,6 +284,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
             "legacy census",
             "skipped — vault unavailable",
         ));
+        report.push(skip("projects", "census", "skipped — vault unavailable"));
         report.push(skip("meetings", "census", "skipped — vault unavailable"));
         report.push(skip("bases", "registry", "skipped — vault unavailable"));
     }
@@ -1808,25 +1810,10 @@ fn check_conflicts(vault: &Vault, report: &mut Report) {
 // Check 8b: meeting frontmatter
 // ---------------------------------------------------------------------------
 
-/// Census of MEETING pages whose `attendees` or `occurred_at` the API would
-/// refuse to write. Files are hand-editable, so nothing stops a page reaching
-/// this state; the doctor is where it surfaces. Pages that are merely
-/// unfinished — a meeting with no time — are reported separately, as
-/// information rather than breakage. (A 1:1 is a MEETING tagged `1:1`; it may
-/// name any number of people, so nothing here counts attendees.)
-fn check_meetings(vault: &Vault, report: &mut Report) {
-    use crate::vault::attendance;
-    use crate::vault::kind::resolve;
-    use crate::vault::meeting;
+/// Visit every readable, non-excluded markdown page under the vault root.
+fn for_each_page(vault: &Vault, mut visit: impl FnMut(&crate::vault::page::Page)) {
     use crate::vault::page::Page;
     use crate::vault::path::VaultPath;
-
-    const SECTION: &str = "meetings";
-    const LISTED: usize = 10;
-
-    let mut meetings = 0usize;
-    let mut invalid: Vec<String> = Vec::new();
-    let mut undated: Vec<String> = Vec::new();
 
     for entry in walkdir::WalkDir::new(vault.root())
         .into_iter()
@@ -1847,16 +1834,92 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
         if vault.is_excluded(&vault_path) {
             continue;
         }
-        let Ok(page) = Page::from_file(entry.path(), vault_path.clone()) else {
+        let Ok(page) = Page::from_file(entry.path(), vault_path) else {
             continue;
         };
-        let (kind, _) = resolve(vault_path.as_str(), page.meta.kind);
+        visit(&page);
+    }
+}
+
+/// Orphan project slugs: `project` values pages carry that no PROJECT page
+/// declares. The API refuses to write one, but files are hand-editable, so
+/// the doctor is where they surface — as information, since nothing breaks.
+fn check_projects(vault: &Vault, report: &mut Report) {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::vault::kind::{Kind, resolve};
+
+    const SECTION: &str = "projects";
+    const LISTED: usize = 10;
+
+    let mut declared: BTreeSet<String> = BTreeSet::new();
+    let mut carried: BTreeMap<String, usize> = BTreeMap::new();
+    for_each_page(vault, |page| {
+        let Some(slug) = page.meta.project.as_deref() else {
+            return;
+        };
+        let (kind, _) = resolve(page.path.as_str(), page.meta.kind);
+        if kind == Kind::Project {
+            declared.insert(slug.to_string());
+        } else {
+            *carried.entry(slug.to_string()).or_default() += 1;
+        }
+    });
+
+    let orphans = carried
+        .iter()
+        .filter(|(slug, _)| !declared.contains(*slug))
+        .map(|(slug, pages)| format!("{slug} ({pages} page(s))"))
+        .collect::<Vec<_>>();
+
+    if orphans.is_empty() {
+        report.push(ok(
+            SECTION,
+            "census",
+            "every project slug is declared by a PROJECT page",
+        ));
+        return;
+    }
+    report.push(
+        info(
+            SECTION,
+            "orphans",
+            listing(
+                &orphans,
+                format!("{} orphan project slug(s):", orphans.len()),
+                LISTED,
+            ),
+        )
+        .with_hint("create a PROJECT page declaring the slug, or clear the pages' `project`"),
+    );
+}
+
+/// Census of MEETING pages whose `attendees` or `occurred_at` the API would
+/// refuse to write. Files are hand-editable, so nothing stops a page reaching
+/// this state; the doctor is where it surfaces. Pages that are merely
+/// unfinished — a meeting with no time — are reported separately, as
+/// information rather than breakage. (A 1:1 is a MEETING tagged `1:1`; it may
+/// name any number of people, so nothing here counts attendees.)
+fn check_meetings(vault: &Vault, report: &mut Report) {
+    use crate::vault::attendance;
+    use crate::vault::kind::resolve;
+    use crate::vault::meeting;
+
+    const SECTION: &str = "meetings";
+    const LISTED: usize = 10;
+
+    let mut meetings = 0usize;
+    let mut invalid: Vec<String> = Vec::new();
+    let mut undated: Vec<String> = Vec::new();
+
+    for_each_page(vault, |page| {
+        let path = page.path.as_str();
+        let (kind, _) = resolve(path, page.meta.kind);
         if !attendance::has_attendees(kind) && !meeting::records_occurrence(kind) {
-            continue;
+            return;
         }
         meetings += 1;
 
-        let path = vault_path.as_str();
         if let Err(error) = attendance::validate(kind, &page.meta) {
             invalid.push(format!("{path}: {error}"));
         }
@@ -1865,7 +1928,7 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
         } else if meeting::is_undated(kind, &page.meta) {
             undated.push(path.to_string());
         }
-    }
+    });
 
     if meetings == 0 {
         report.push(info(SECTION, "census", "no meeting pages"));
@@ -2723,6 +2786,113 @@ mod tests {
                 .iter()
                 .any(|record| record.section == "meetings" && record.name == "unnamed 1:1s"),
             "no meeting is reported as unnamed: {:#?}",
+            report.results
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn project_check_passes_when_every_slug_is_declared() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(
+            &vault_root,
+            "projects/atlas/atlas.md",
+            "title = \"Atlas\"\ntype = \"PROJECT\"\nproject = \"atlas\"\n",
+        );
+        write_page(
+            &vault_root,
+            "notes/atlas/filed.md",
+            "title = \"Filed\"\nproject = \"atlas\"\n",
+        );
+        write_page(&vault_root, "notes/plain.md", "title = \"Plain\"\n");
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_record(
+            &report,
+            "projects",
+            "census",
+            Status::Ok,
+            "every project slug is declared by a PROJECT page",
+        );
+        assert!(
+            !report
+                .results
+                .iter()
+                .any(|record| record.section == "projects" && record.name == "orphans"),
+            "a declared slug is not an orphan: {:#?}",
+            report.results
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn project_check_lists_orphan_slugs_as_information() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(
+            &vault_root,
+            "projects/atlas/atlas.md",
+            "title = \"Atlas\"\ntype = \"PROJECT\"\nproject = \"atlas\"\n",
+        );
+        write_page(
+            &vault_root,
+            "notes/atlas/filed.md",
+            "title = \"Filed\"\nproject = \"atlas\"\n",
+        );
+        // Hand-edited: two notes and a task name slugs no PROJECT page declares.
+        write_page(
+            &vault_root,
+            "notes/ghost/one.md",
+            "title = \"One\"\nproject = \"ghost\"\n",
+        );
+        write_page(
+            &vault_root,
+            "notes/ghost/two.md",
+            "title = \"Two\"\nproject = \"ghost\"\n",
+        );
+        write_page(
+            &vault_root,
+            "tasks/phantom/TSK-0001.md",
+            "title = \"Phantom task\"\ntype = \"TASK\"\nproject = \"phantom\"\n",
+        );
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        let orphans = report
+            .results
+            .iter()
+            .find(|record| record.section == "projects" && record.name == "orphans")
+            .expect("projects.orphans should be reported");
+        assert_eq!(orphans.status, Status::Info, "{orphans:#?}");
+        assert!(
+            orphans.detail.starts_with("2 orphan project slug(s):"),
+            "{orphans:#?}"
+        );
+        assert!(orphans.detail.contains("ghost (2 page(s))"), "{orphans:#?}");
+        assert!(
+            orphans.detail.contains("phantom (1 page(s))"),
+            "{orphans:#?}"
+        );
+        assert!(!orphans.detail.contains("atlas"), "{orphans:#?}");
+        assert!(
+            orphans
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("PROJECT page")),
+            "{orphans:#?}"
+        );
+        assert!(
+            !report
+                .results
+                .iter()
+                .any(|record| record.section == "projects" && record.name == "census"),
+            "orphans replace the all-clear: {:#?}",
             report.results
         );
     }

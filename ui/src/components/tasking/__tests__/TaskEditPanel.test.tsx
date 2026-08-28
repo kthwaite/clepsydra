@@ -3,7 +3,7 @@
  *
  * Covers:
  *   - Render: task fields present
- *   - Immediate patches: disposition radio, priority radio, operation select,
+ *   - Immediate patches: disposition radio, priority radio, project select,
  *     cycle select (BACKLOG → null), tags
  *   - Debounced patches: title, assignee, hold reason (vi.useFakeTimers)
  *   - Hold toggle on/off payloads
@@ -492,7 +492,7 @@ describe("TaskEditPanel — immediate patches", () => {
     });
   });
 
-  it("operation UNFILED select fires PATCH {project: ''}", async () => {
+  it("project UNFILED select fires PATCH {project: ''}", async () => {
     const stub = makeStub();
     wrap({ task: FULL_TASK, fetchStub: stub, seedBoard: true });
 

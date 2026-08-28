@@ -182,3 +182,18 @@ impl ApiFixtureBuilder {
         }
     }
 }
+
+/// Declare a project: create a PROJECT page at `projects/<slug>/<slug>.md`
+/// whose `project` is `slug`. Every non-PROJECT page that names `slug` needs
+/// this first — the server refuses a `project` no PROJECT page declares.
+pub async fn seed_project(server: &TestServer, slug: &str) {
+    server
+        .post(&format!("/api/vault/pages/projects/{slug}/{slug}.md"))
+        .json(&serde_json::json!({
+            "title": slug,
+            "kind": "PROJECT",
+            "project": slug,
+        }))
+        .await
+        .assert_status(axum::http::StatusCode::CREATED);
+}

@@ -229,7 +229,7 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* OPERATION + CYCLE */}
+        {/* PROJECT + CYCLE */}
         <div className="grid grid-cols-2 gap-[12px]">
           <EdField label="Project">
             <Select
@@ -238,7 +238,7 @@ export function NewTaskModal({
               onChange={(key) =>
                 setProject(key === null ? "" : String(key))
               }
-              data-testid="new-task-operation"
+              data-testid="new-task-project"
             >
               <SelectItem id="">No project</SelectItem>
               {assignableScopes.map((scope) => (
@@ -294,7 +294,7 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* OPERATOR / EST */}
+        {/* ASSIGNEE / EST */}
         <div className="grid grid-cols-2 gap-[12px]">
           <EdField label="Assignee">
             <input

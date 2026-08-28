@@ -23,6 +23,7 @@ pub mod location;
 pub mod openapi;
 pub mod pages;
 pub mod pagination;
+pub mod projects;
 pub mod properties;
 pub mod query;
 pub mod rubbish;

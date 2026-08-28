@@ -46,7 +46,7 @@ vi.mock("#/api/board", () => ({
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => api.openTab }));
 vi.mock("#/lib/useProjects", () => ({
-  useProjects: () => ["Atlas", "Zephyr"],
+  useProjectValues: () => ["Atlas", "Zephyr"],
 }));
 
 import {

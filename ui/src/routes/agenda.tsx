@@ -28,7 +28,7 @@ import {
   shouldReplaceFilterHistory,
 } from "#/lib/filters/url";
 import { localDateKey, parseLocalDate } from "#/lib/time";
-import { useProjects } from "#/lib/useProjects";
+import { useProjectValues } from "#/lib/useProjects";
 
 const AGENDA_ROUTE_PATH = "/agenda" as const;
 
@@ -177,7 +177,7 @@ export function AgendaScreen({
   filterState: FilterState;
   onFilterChange: (next: FilterState) => void;
 }) {
-  const projects = useProjects();
+  const projects = useProjectValues();
 
   const filterFields: FilterField[] = useMemo(
     () => [
