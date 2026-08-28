@@ -539,7 +539,6 @@ mod tests {
                 "CYCLE",
                 "RECIPE",
                 "MEETING",
-                "ONE_ON_ONE",
                 "ARCHIVE",
                 "AI_CONVERSATION",
                 "AI_JOURNAL",

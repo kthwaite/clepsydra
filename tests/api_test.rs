@@ -6175,6 +6175,8 @@ async fn search_query_errors_have_a_stable_contract() {
 
     for (query, span, kind) in [
         ("kind%3Aunknown", (5, 12), "unknown_kind"),
+        ("attendees%3Amany", (10, 14), "invalid_field_value"),
+        ("attendees%3A-1", (10, 12), "invalid_field_value"),
         ("%28", (0, 1), "unmatched_parenthesis"),
         ("tasting+%7C", (8, 9), "dangling_or"),
     ] {

@@ -18,14 +18,15 @@ files directly, which bypasses locking, link rewriting, and the index.
   folders: NOTE→`notes/`, PROJECT→`projects/`, JOURNAL→`journals/`,
   AI_JOURNAL→`ai-journals/`, TODO→`todos/`, QUOTE→`quotes/`, BOOK→`books/`,
   CAPTURE→`captures/`, CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`,
-  RECIPE→`recipes/`, MEETING→`meetings/`, ONE_ON_ONE→`one-on-ones/`,
-  AI_CONVERSATION→`conversations/`.
+  RECIPE→`recipes/`, MEETING→`meetings/`, AI_CONVERSATION→`conversations/`.
+  There is no 1:1 kind: a 1:1 is a MEETING tagged `1:1`.
 - **Frontmatter** — `id` (UUID, never touch), `title`, `type`, `tags`,
   `aliases`, `project`, `created_at`/`updated_at`.
-- **Attendees** — MEETING and ONE_ON_ONE pages name people in `attendees`, a
-  list of wikilinks to person pages. A MEETING names any number; a ONE_ON_ONE
-  names one, and the server refuses a second.
-- **Occurred** — the same kinds record when they happened in `occurred_at`, an
+- **Attendees** — MEETING pages name people in `attendees`, a list of
+  wikilinks to person pages. A MEETING names any number; a 1:1 is a MEETING
+  tagged `1:1`. `vault_search` counts them: `attendees:1`, `attendees:>1`,
+  `attendees:0`; find 1:1s with `kind:meeting tag:1:1`.
+- **Occurred** — MEETING pages record when they happened in `occurred_at`, an
   unquoted TOML date-time (`2026-08-27T14:00:00Z`, or a bare date). Quoted, it
   is refused: a string never sorts or filters as a date.
 - **Wikilinks** — `[[Canonical Name]]` links pages by title-derived name or

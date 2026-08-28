@@ -2213,18 +2213,18 @@ export interface components {
         CreatePageRequest: {
             aliases?: string[] | null;
             /**
-             * @description Person pages this MEETING or ONE_ON_ONE names, written to the page's
-             *     `attendees:` frontmatter as part of the same create mutation. Bare
-             *     names are wrapped as wikilinks; `[[Already Linked]]` is kept as
-             *     written. A ONE_ON_ONE accepts at most one.
+             * @description Person pages this MEETING names, written to the page's `attendees:`
+             *     frontmatter as part of the same create mutation. Bare names are
+             *     wrapped as wikilinks; `[[Already Linked]]` is kept as written. Any
+             *     number is accepted; a 1:1 is a MEETING tagged `1:1`.
              */
             attendees?: string[] | null;
             body?: string | null;
             kind?: null | components["schemas"]["Kind"];
             /**
-             * @description When this MEETING or ONE_ON_ONE took place: `2026-08-27T14:00:00Z`, the
-             *     same without an offset, or a bare `2026-08-27` when only the day is
-             *     known. Written as a native TOML date-time.
+             * @description When this MEETING took place: `2026-08-27T14:00:00Z`, the same without
+             *     an offset, or a bare `2026-08-27` when only the day is known. Written
+             *     as a native TOML date-time.
              */
             occurred_at?: string | null;
             /**
@@ -2527,7 +2527,7 @@ export interface components {
          *     vocabulary instead of hardcoding it.
          * @enum {string}
          */
-        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "MEETING" | "ONE_ON_ONE" | "ARCHIVE" | "AI_CONVERSATION" | "AI_JOURNAL";
+        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "MEETING" | "ARCHIVE" | "AI_CONVERSATION" | "AI_JOURNAL";
         LocationResponse: {
             /** @description Optional human-readable label (e.g. `"London"`). */
             label?: string | null;
@@ -2640,16 +2640,16 @@ export interface components {
             aliases?: string[] | null;
             archive?: null | components["schemas"]["ArchiveMetaResponse"];
             /**
-             * @description Person pages a MEETING or ONE_ON_ONE names, as wikilink strings.
-             *     Clepsydra always writes an array; a hand-written single wikilink
+             * @description Person pages a MEETING names, as wikilink strings. Clepsydra always
+             *     writes an array; a hand-written single wikilink
              *     (`attendees = "[[Ada Lovelace]]"`) is read as a one-element list.
              */
             attendees?: string[] | null;
             created_at?: string | null;
             id: string;
             /**
-             * @description When a MEETING or ONE_ON_ONE took place, as an ISO date-time. Stored as
-             *     a native TOML date-time, so it sorts and filters like one.
+             * @description When a MEETING took place, as an ISO date-time. Stored as a native
+             *     TOML date-time, so it sorts and filters like one.
              */
             occurred_at?: string | null;
             tags?: string[] | null;

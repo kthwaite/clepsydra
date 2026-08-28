@@ -617,9 +617,9 @@ pub async fn patch_properties(
         }
     };
 
-    // Attendees are a schema-blind property like any other, so the cardinality
-    // a MEETING / ONE_ON_ONE carries is checked here, against the page as it
-    // would be after the splice — that covers `set` and `clear` in one place,
+    // Attendees are a schema-blind property like any other, so the shape a
+    // MEETING's list has to keep is checked here, against the page as it would
+    // be after the splice — that covers `set` and `clear` in one place,
     // whatever the base registry does or does not declare.
     let touches = |key: &str| {
         request.set.contains_key(key) || request.clear.iter().any(|cleared| cleared == key)
