@@ -271,4 +271,4 @@ Rendered by `ViewOverridesStrip.tsx` between the toolbar and the member draft wh
 12. Context menus are forwarded to one `⋯` `MenuTrigger trigger="contextMenu"` per row / per header (no `Pressable` wrappers inside the grid); keyboard focus in a header lands on `⋯`, so keyboard sorting goes through the menu.
 13. Relation quick filters use the unwrapped wikilink target; number columns get the emptiness presets.
 14. `ui/vitest.config.ts` `testTimeout` is raised to 15 s: the per-row menu trigger adds ~30% to `BaseTable.test.tsx`'s wall time and the 5 s default was already marginal for jsdom + React Aria suites.
-10. Copy wikilink uses the title (`[[Title]]`), falling back to the path stem.
+15. Copy wikilink uses the title (`[[Title]]`), falling back to the path stem.
