@@ -4,18 +4,29 @@ use pulldown_cmark::Options;
 
 /// Parser options for vault and user-supplied markdown.
 ///
-/// `Options::all()` minus `ENABLE_DEFINITION_LIST`: pulldown-cmark 0.12.2
-/// panics in its first pass on blockquote + definition-list input
-/// (minimal repro: `"\n>.\n>:"`). The editor schema has no definition-list
-/// element; the one consumer (search excerpts) only used the events to
-/// strip `:` markers, a cosmetic behavior traded for panic safety. Every
-/// `Parser::new_ext` over vault content must use these options (or
-/// `Options::empty()` where extensions are deliberately off, as in link
-/// extraction and the rewriter).
+/// An explicit allowlist rather than `Options::all()`, so upstream releases
+/// cannot silently switch extensions on. Deliberately excluded:
+/// - `ENABLE_WIKILINKS`: Clepsydra parses its own `[[…]]` grammar from Text
+///   events; pulldown's wikilinks would swallow them.
+/// - `ENABLE_SUBSCRIPT` / `ENABLE_SUPERSCRIPT`: single-`~` subscript
+///   collides with the vault's single-tilde strikethrough convention.
+///
+/// Definition lists are enabled: the pulldown-cmark 0.12 first-pass panics
+/// on blockquote + `:` input (minimal repros `"\n>.\n>:"` and `">p\n>:\n\n"`)
+/// are fixed in 0.13.4; the canary tests below keep us honest.
 pub fn markdown_options() -> Options {
-    let mut opts = Options::all();
-    opts.remove(Options::ENABLE_DEFINITION_LIST);
-    opts
+    Options::ENABLE_TABLES
+        | Options::ENABLE_FOOTNOTES
+        | Options::ENABLE_STRIKETHROUGH
+        | Options::ENABLE_TASKLISTS
+        | Options::ENABLE_SMART_PUNCTUATION
+        | Options::ENABLE_HEADING_ATTRIBUTES
+        | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS
+        | Options::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS
+        | Options::ENABLE_OLD_FOOTNOTES
+        | Options::ENABLE_MATH
+        | Options::ENABLE_GFM
+        | Options::ENABLE_DEFINITION_LIST
 }
 
 #[cfg(test)]
@@ -23,27 +34,35 @@ mod tests {
     use super::*;
     use pulldown_cmark::Parser;
 
-    /// The exact input that panics pulldown-cmark 0.12.2's first pass when
-    /// definition lists are enabled. Must not gain a trailing newline.
-    const PANIC_REPRO: &str = "\n>.\n>:";
+    /// Blockquote + definition-marker inputs that crashed pulldown-cmark
+    /// 0.12.2 (offset-iterator range inversion; first-pass spine underflow).
+    /// Canaries: they must stay panic-free with definition lists enabled.
+    const PANIC_REPRO_OFFSET: &str = "\n>.\n>:";
+    const PANIC_REPRO_FIRSTPASS: &str = ">p\n>:\n\n";
 
     #[test]
-    fn options_exclude_definition_lists() {
+    fn options_are_the_curated_allowlist() {
         let opts = markdown_options();
-        assert!(!opts.contains(Options::ENABLE_DEFINITION_LIST));
-        // The rest of Options::all() stays on.
+        assert!(opts.contains(Options::ENABLE_DEFINITION_LIST));
         assert!(opts.contains(Options::ENABLE_TABLES));
         assert!(opts.contains(Options::ENABLE_FOOTNOTES));
+        assert!(opts.contains(Options::ENABLE_GFM));
+        assert!(!opts.contains(Options::ENABLE_WIKILINKS));
+        assert!(!opts.contains(Options::ENABLE_SUBSCRIPT));
+        assert!(!opts.contains(Options::ENABLE_SUPERSCRIPT));
     }
 
     #[test]
-    fn blockquote_definition_marker_parses_without_panic() {
-        // A bare `Parser::new_ext(...).count()` does not reproduce the
-        // panic; only the offset-tracking iteration path does (the one
-        // `parse_blocks` and others actually use), so exercise that path.
-        let events = Parser::new_ext(PANIC_REPRO, markdown_options())
+    fn blockquote_definition_marker_offset_iter_is_panic_free() {
+        let events = Parser::new_ext(PANIC_REPRO_OFFSET, markdown_options())
             .into_offset_iter()
             .count();
+        assert!(events > 0);
+    }
+
+    #[test]
+    fn blockquote_definition_marker_firstpass_is_panic_free() {
+        let events = Parser::new_ext(PANIC_REPRO_FIRSTPASS, markdown_options()).count();
         assert!(events > 0);
     }
 }

@@ -1117,9 +1117,6 @@ pub(crate) fn body_excerpt(markdown: &str) -> String {
                 pending_space |= !excerpt.is_empty();
                 false
             }
-            // DefinitionList/DefinitionListTitle/DefinitionListDefinition are
-            // inert while markdown_options() masks definition lists; kept
-            // for a future re-enable after the upstream parser fix.
             Event::End(
                 TagEnd::Paragraph
                 | TagEnd::Heading(_)
@@ -2527,12 +2524,9 @@ moment  = { type = "datetime" }
             body_excerpt("| first | second |\n| --- | --- |\n| third | fourth |\n"),
             "first second third fourth"
         );
-        // Definition lists are masked out of parsing (see
-        // vault::markdown::markdown_options), so `:` markers now pass
-        // through excerpts as literal text instead of being stripped.
         assert_eq!(
             body_excerpt("Term\n: Definition\n\nOther\n: Meaning\n"),
-            "Term : Definition Other : Meaning"
+            "Term Definition Other Meaning"
         );
     }
 

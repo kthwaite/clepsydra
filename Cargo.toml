@@ -29,7 +29,7 @@ notify-debouncer-mini = "0.5"
 owo-colors = "4.3.0"
 parking_lot = "0.12"
 percent-encoding = "2"
-pulldown-cmark = "0.12"
+pulldown-cmark = "0.13"
 regex = "1"
 quick-xml = "0.37"
 reqwest = { version = "0.12", features = ["json"] }
