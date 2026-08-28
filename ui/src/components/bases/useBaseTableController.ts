@@ -254,7 +254,7 @@ export function useBaseTableController(
   const evaluationQuery = useBaseViewWindows(embeddedConfig);
   const commit = usePropertyCommit();
   const { mutateAsync: createMemberAsync } = useCreateBaseMember();
-  const updateBase = useUpdateBase();
+  const { mutateAsync: updateBaseAsync } = useUpdateBase();
   const projects = useProjects();
   const detailRefetch = detail.refetch;
   const evaluationRefetch = evaluationQuery.refetch;
@@ -413,7 +413,7 @@ export function useBaseTableController(
       baseColumns,
     );
     try {
-      await updateBase.mutateAsync({
+      await updateBaseAsync({
         params: { path: { slug } },
         body: {
           expected_revision: current.revision,
@@ -449,7 +449,7 @@ export function useBaseTableController(
     overridesClear,
     slug,
     sort,
-    updateBase,
+    updateBaseAsync,
   ]);
   const reloadDefinition = useCallback(async () => {
     await detailRefetch();
