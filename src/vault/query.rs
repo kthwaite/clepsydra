@@ -330,9 +330,12 @@ pub fn project_page_field_value(
     }
 }
 
-/// Match the journal-date path forms materialized by the page index.
+/// Match the journal-date path forms materialized by the page index
+/// (`journals/` and `ai-journals/`).
 fn page_journal_date(path: &str) -> Option<&str> {
-    let filename = path.strip_prefix("journals/")?;
+    let filename = path
+        .strip_prefix("journals/")
+        .or_else(|| path.strip_prefix("ai-journals/"))?;
     let stem = filename.strip_suffix(".md").unwrap_or(filename);
     let candidate = if stem.len() == 10 {
         stem
@@ -1494,6 +1497,37 @@ mod tests {
                 "{field:?}"
             );
         }
+    }
+
+    #[test]
+    fn page_field_projection_derives_journal_date_for_ai_journal_paths() {
+        let legacy = projection_page("ai-journals/2026-08-27.md", String::new());
+        assert_eq!(
+            project_page_field_value(
+                &legacy,
+                &ProjectionFieldIdentity::System(SysField::JournalDate)
+            ),
+            (true, Some(serde_json::json!("2026-08-27")))
+        );
+
+        let canonical =
+            projection_page("ai-journals/20260827.2026-08-27.Ab12Cd34.md", String::new());
+        assert_eq!(
+            project_page_field_value(
+                &canonical,
+                &ProjectionFieldIdentity::System(SysField::JournalDate)
+            ),
+            (true, Some(serde_json::json!("2026-08-27")))
+        );
+
+        let nested = projection_page("other/ai-journals/2026-08-27.md", String::new());
+        assert_eq!(
+            project_page_field_value(
+                &nested,
+                &ProjectionFieldIdentity::System(SysField::JournalDate)
+            ),
+            (false, None)
+        );
     }
 
     #[test]
