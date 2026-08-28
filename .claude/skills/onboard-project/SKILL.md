@@ -43,7 +43,9 @@ project state; this repo keeps only code-adjacent/contractual docs.
 - **Durable output:** decisions and status notes go to vault pages under
   project `<slug>`, wikilinked to the hub; update the hub's Status/Threads
   sections when they change.
-- **Session end:** log what changed and what's next with `vault_journal_capture`.
+- **Session end:** log what changed and what's next with
+  `vault_ai_journal_capture` (pass `author`). `vault_journal_capture` is the
+  user's own journal — only on their explicit request.
 ```
 
 Name the repo's contractual artifacts (spec, design corpus, plan dirs) in the
@@ -57,7 +59,7 @@ tags). Body shape, in order:
 
 - Intro: what the project is, repo path, what stays in-repo and why.
 - The sentence: "Claude sessions in the repo read this page at session start
-  and journal-capture at session end."
+  and log to the AI journal at session end."
 - `## Status` — dated bullets, including "Clepsydra adopted as the
   PM/documentation layer on <date> (dogfooding)."
 - `## Threads` — open work and next steps.
@@ -72,7 +74,7 @@ demote the tracker files to short pointer stubs referencing the vault (their
 history stays in git). No tracker files → open work goes in hub Threads, no
 tasks are created.
 
-**5. Close out:** one `vault_journal_capture` bullet wikilinking [[<Name>]].
+**5. Close out:** one `vault_ai_journal_capture` bullet wikilinking [[<Name>]].
 Leave all repo changes uncommitted unless asked to commit.
 
 ## Don'ts
