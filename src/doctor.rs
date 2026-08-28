@@ -1431,59 +1431,16 @@ fn subtract_released_rubbish_refs(
 }
 
 /// Re-derive a blob's fan-out path (`<cas>/<hex[..2]>/<hex>`) from a
-/// `"sha256:<hex>"` hash. `ContentStore::blob_path` is private, so doctor
-/// reimplements the same two-level layout locally. Returns `None` for a hash
-/// that doesn't match the expected shape.
+/// `"sha256:<hex>"` hash. Delegates to `cas::blob_relative_path`. Returns
+/// `None` for a hash that doesn't match the expected shape.
 fn cas_blob_path(cas_root: &Path, hash: &str) -> Option<PathBuf> {
-    let hex = hash.strip_prefix("sha256:")?;
-    if hex.len() != 64
-        || !hex
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return None;
-    }
-    Some(cas_root.join(&hex[..2]).join(hex))
+    crate::vault::cas::blob_relative_path(hash).map(|rel| cas_root.join(rel))
 }
 
 /// Walk the CAS root's two-level fan-out directories and list every blob file
-/// found, as `"sha256:<hex>"` hashes. Mirrors `ContentStore::scan_blob_files`'s
-/// layout (private, so reimplemented here) but doctor only needs hashes, not
-/// sizes.
+/// found, as `"sha256:<hex>"` hashes. Delegates to `cas::list_blob_hashes`.
 fn list_cas_blob_files(cas_root: &Path) -> Vec<String> {
-    fn is_lowercase_hex(name: &str, len: usize) -> bool {
-        name.len() == len
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    }
-
-    let Ok(entries) = std::fs::read_dir(cas_root) else {
-        return Vec::new();
-    };
-    let mut prefixes: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
-        .filter(|name| is_lowercase_hex(name, 2))
-        .collect();
-    prefixes.sort();
-
-    let mut hashes = Vec::new();
-    for prefix in prefixes.drain(..) {
-        let Ok(files) = std::fs::read_dir(cas_root.join(&prefix)) else {
-            continue;
-        };
-        let mut names: Vec<String> = files
-            .filter_map(Result::ok)
-            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
-            .filter(|name| is_lowercase_hex(name, 64) && name.starts_with(&prefix))
-            .collect();
-        names.sort();
-        hashes.extend(names.into_iter().map(|name| format!("sha256:{name}")));
-    }
-    hashes
+    crate::vault::cas::list_blob_hashes(cas_root)
 }
 
 // ---------------------------------------------------------------------------
