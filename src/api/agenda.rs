@@ -592,7 +592,7 @@ pub async fn get_agenda(
                     let Some(due) = agenda_meta_string(&metadata, "due") else {
                         continue;
                     };
-                    let code = agenda_path_stem(&path).to_ascii_uppercase();
+                    let code = agenda_path_stem(&path).to_string();
                     tasks.push(AgendaTask {
                         kind: AgendaTaskKind::Task,
                         id,

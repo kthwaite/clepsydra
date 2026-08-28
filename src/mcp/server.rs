@@ -3453,13 +3453,22 @@ mod tests {
 
     /// Serve a seeded vault and create one cycle + one task in it through the
     /// board tools, returning the server for follow-up assertions.
+    /// The stable, explicit code for the cycle `serve_board_vault` seeds —
+    /// pinned rather than minted so tests can address it by a known literal.
+    const SEEDED_CYCLE_CODE: &str = "S-orbit-crane-3f8mq";
+
     async fn serve_board_vault() -> (VaultMcpServer, tempfile::TempDir) {
         let (server, tmp) = serve_seeded_vault().await;
         server
             .client
             .post_json(
                 "/api/vault/board/cycles",
-                &json!({"label": "Sprint One", "start": "2026-08-10", "end": "2026-08-24"}),
+                &json!({
+                    "label": "Sprint One",
+                    "start": "2026-08-10",
+                    "end": "2026-08-24",
+                    "code": SEEDED_CYCLE_CODE
+                }),
             )
             .await
             .expect("cycle create should succeed");
@@ -3513,8 +3522,9 @@ mod tests {
                 }))
                 .await,
         );
-        assert_eq!(value["code"], "TSK-0001");
-        assert_eq!(value["path"], "tasks/xxii/TSK-0001.md");
+        let code = value["code"].as_str().unwrap().to_string();
+        assert!(crate::vault::code::is_valid_code(&code), "{code}: {value}");
+        assert_eq!(value["path"], format!("tasks/xxii/{code}.md"));
         assert_eq!(value["status"], "INTAKE");
         assert_eq!(value["priority"], "P2");
         assert_eq!(value["checks"], json!([0, 1]), "checklist becomes - [ ]");
@@ -3600,24 +3610,27 @@ mod tests {
     #[tokio::test]
     async fn task_update_by_code_sets_and_clears_tri_state_fields() {
         let (server, _tmp) = serve_board_vault().await;
-        server
-            .vault_task_create(Parameters(TaskCreateParams {
-                cycle: Some("S-1".to_string()),
-                assignee: Some("kit".to_string()),
-                ..task_create_params("Move me")
-            }))
-            .await
-            .unwrap();
+        let created = parse(
+            server
+                .vault_task_create(Parameters(TaskCreateParams {
+                    cycle: Some(SEEDED_CYCLE_CODE.to_string()),
+                    assignee: Some("kit".to_string()),
+                    ..task_create_params("Move me")
+                }))
+                .await,
+        );
+        let code = created["code"].as_str().unwrap().to_string();
 
-        // Address by lowercase code; move the column, clear the cycle via
-        // null, clear the assignee via the empty-string fallback.
+        // Address by lowercase code (case-insensitive lookup); move the
+        // column, clear the cycle via null, clear the assignee via the
+        // empty-string fallback.
         let value = parse(
             server
                 .vault_task_update(Parameters(TaskUpdateParams {
                     status: Some("TRIAGE".to_string()),
                     cycle: Some(None),
                     assignee: Some(Some(String::new())),
-                    ..task_update_params("tsk-0001")
+                    ..task_update_params(&code.to_lowercase())
                 }))
                 .await,
         );
@@ -3629,16 +3642,18 @@ mod tests {
     #[tokio::test]
     async fn task_update_resolves_paths_and_rejects_unknown_codes() {
         let (server, _tmp) = serve_board_vault().await;
-        server
-            .vault_task_create(Parameters(task_create_params("By path")))
-            .await
-            .unwrap();
+        let created = parse(
+            server
+                .vault_task_create(Parameters(task_create_params("By path")))
+                .await,
+        );
+        let path = created["path"].as_str().unwrap().to_string();
 
         let value = parse(
             server
                 .vault_task_update(Parameters(TaskUpdateParams {
                     priority: Some("P0".to_string()),
-                    ..task_update_params("tasks/TSK-0001.md")
+                    ..task_update_params(&path)
                 }))
                 .await,
         );
@@ -3702,14 +3717,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cycle_create_auto_generates_sequential_codes() {
+    async fn cycle_create_mints_distinct_petname_codes() {
         let (server, _tmp) = serve_seeded_vault().await;
         let first = parse(
             server
                 .vault_cycle_create(Parameters(cycle_create_params("Sprint One")))
                 .await,
         );
-        assert_eq!(first["code"], "S-1");
+        let first_code = first["code"].as_str().unwrap().to_string();
+        assert!(
+            first_code.starts_with("S-") && crate::vault::code::is_valid_code(&first_code),
+            "{first_code}"
+        );
         assert_eq!(first["state"], "PLANNED");
         assert_eq!(first["label"], "Sprint One");
 
@@ -3721,7 +3740,12 @@ mod tests {
                 }))
                 .await,
         );
-        assert_eq!(second["code"], "S-2");
+        let second_code = second["code"].as_str().unwrap().to_string();
+        assert!(
+            second_code.starts_with("S-") && crate::vault::code::is_valid_code(&second_code),
+            "{second_code}"
+        );
+        assert_ne!(first_code, second_code, "codes must be distinct");
         assert_eq!(second["state"], "ACTIVE");
     }
 
@@ -3739,20 +3763,20 @@ mod tests {
 
         server
             .vault_cycle_create(Parameters(CycleCreateParams {
-                code: Some("S-7".to_string()),
+                code: Some("S-quiet-fox-5n2wt".to_string()),
                 ..cycle_create_params("Explicit")
             }))
             .await
             .unwrap();
         let err = server
             .vault_cycle_create(Parameters(CycleCreateParams {
-                code: Some("S-7".to_string()),
+                code: Some("S-quiet-fox-5n2wt".to_string()),
                 ..cycle_create_params("Duplicate")
             }))
             .await
             .expect_err("duplicate explicit code should conflict");
         assert!(err.contains("409"), "{err}");
-        assert!(err.contains("S-7"), "{err}");
+        assert!(err.contains("S-quiet-fox-5n2wt"), "{err}");
     }
 
     #[tokio::test]
@@ -3763,11 +3787,11 @@ mod tests {
                 .vault_cycle_update(Parameters(CycleUpdateParams {
                     state: Some("ACTIVE".to_string()),
                     goal: Some("Ship the board tools".to_string()),
-                    ..cycle_update_params("s-1")
+                    ..cycle_update_params(&SEEDED_CYCLE_CODE.to_lowercase())
                 }))
                 .await,
         );
-        assert_eq!(value["code"], "S-1");
+        assert_eq!(value["code"], SEEDED_CYCLE_CODE);
         assert_eq!(value["state"], "ACTIVE");
         assert_eq!(value["goal"], "Ship the board tools");
     }
@@ -3775,13 +3799,15 @@ mod tests {
     #[tokio::test]
     async fn cycle_seal_with_carry_to_rehomes_unsealed_tasks() {
         let (server, _tmp) = serve_board_vault().await;
-        server
-            .vault_cycle_create(Parameters(cycle_create_params("Sprint Two")))
-            .await
-            .unwrap();
+        let second_cycle = parse(
+            server
+                .vault_cycle_create(Parameters(cycle_create_params("Sprint Two")))
+                .await,
+        );
+        let second_code = second_cycle["code"].as_str().unwrap().to_string();
         server
             .vault_task_create(Parameters(TaskCreateParams {
-                cycle: Some("S-1".to_string()),
+                cycle: Some(SEEDED_CYCLE_CODE.to_string()),
                 ..task_create_params("Unfinished work")
             }))
             .await
@@ -3791,8 +3817,8 @@ mod tests {
             server
                 .vault_cycle_update(Parameters(CycleUpdateParams {
                     state: Some("CLOSED".to_string()),
-                    carry_to: Some("S-2".to_string()),
-                    ..cycle_update_params("S-1")
+                    carry_to: Some(second_code.clone()),
+                    ..cycle_update_params(SEEDED_CYCLE_CODE)
                 }))
                 .await,
         );
@@ -3804,7 +3830,7 @@ mod tests {
                 .await,
         );
         assert_eq!(
-            board["tasks"][0]["cycle"], "S-2",
+            board["tasks"][0]["cycle"], second_code,
             "unsealed task should carry over: {board}"
         );
     }
@@ -3815,7 +3841,7 @@ mod tests {
         let err = server
             .vault_cycle_update(Parameters(CycleUpdateParams {
                 carry_to: Some("BACKLOG".to_string()),
-                ..cycle_update_params("S-1")
+                ..cycle_update_params(SEEDED_CYCLE_CODE)
             }))
             .await
             .expect_err("carry_to without CLOSED should be rejected");

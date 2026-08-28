@@ -12,6 +12,7 @@ pub(crate) mod cycles;
 pub(crate) mod read;
 pub(crate) mod tasks;
 
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use axum::Router;
@@ -24,7 +25,7 @@ use uuid::Uuid;
 use super::AppState;
 use super::error::ApiError;
 use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
-use crate::vault::index::reserve_code_number;
+use crate::vault::code::{self, CodeFamily};
 use crate::vault::kind::Kind;
 
 // ---------------------------------------------------------------------------
@@ -177,8 +178,9 @@ impl std::str::FromStr for CycleState {
 /// POST /board/cycles request body.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateCycleRequest {
-    /// Optional explicit code (e.g. "S-20"). If absent, auto-generated as
-    /// "S-{max+1}" from existing CYCLE page stems.
+    /// Optional explicit code (e.g. "S-calm-heron-2xm9p"); must match the
+    /// petname format (docs/adr/0003) and not collide with an existing
+    /// CYCLE page stem. If absent, a fresh code is minted.
     pub code: Option<String>,
     /// Human-readable label — stored as the page title.
     pub label: String,
@@ -314,20 +316,29 @@ fn validate_priority(priority: &str) -> Result<(), ApiError> {
 }
 
 // ---------------------------------------------------------------------------
-// Cycle-code scan + code allocation (shared by tasks + cycles handlers)
+// Code stems + code allocation (shared by tasks + cycles handlers)
 // ---------------------------------------------------------------------------
 
-/// Collect the filename stems of all CYCLE pages. Stems are the cycle codes
-/// (case-sensitive, e.g. "S-13"). Single source of truth for every
-/// cycle-existence check.
-fn cycle_stems(conn: &rusqlite::Connection) -> Result<Vec<String>, rusqlite::Error> {
+/// Filename stems of every page of `kind` — these ARE the codes.
+pub(crate) fn code_stems(
+    conn: &rusqlite::Connection,
+    kind: Kind,
+) -> Result<BTreeSet<String>, rusqlite::Error> {
     let mut stmt = conn.prepare("SELECT path FROM pages WHERE kind = ?1")?;
     let stems = stmt
-        .query_map(params![Kind::Cycle.as_str()], |row| row.get::<_, String>(0))?
+        .query_map(params![kind.as_str()], |row| row.get::<_, String>(0))?
         .filter_map(|r| r.ok())
         .map(|p| path_stem(&p).to_string())
         .collect();
     Ok(stems)
+}
+
+/// Collect the filename stems of all CYCLE pages. Stems are the cycle codes
+/// (case-sensitive, e.g. "S-13"). Thin wrapper over [`code_stems`] kept so
+/// existing callers (task cycle-membership checks, seal carryover) don't need
+/// to touch the `BTreeSet`/`Vec` distinction.
+fn cycle_stems(conn: &rusqlite::Connection) -> Result<Vec<String>, rusqlite::Error> {
+    Ok(code_stems(conn, Kind::Cycle)?.into_iter().collect())
 }
 
 /// Fetch all cycle codes through the index handle.
@@ -353,45 +364,31 @@ async fn ensure_cycle_exists(state: &AppState, cycle_code: &str) -> Result<(), A
     Ok(())
 }
 
-/// Highest numeric suffix among the stems of `kind` pages whose uppercased
-/// stem starts with `prefix` (e.g. kind "TASK" + prefix "TSK-" → 481 for
-/// `tasks/TSK-0481.md`). Returns 0 when no stem matches.
-fn max_code_number(
-    conn: &rusqlite::Connection,
-    kind: &str,
-    prefix: &str,
-) -> Result<u32, rusqlite::Error> {
-    let mut stmt = conn.prepare("SELECT path FROM pages WHERE kind = ?1")?;
-    let max = stmt
-        .query_map(params![kind], |row| row.get::<_, String>(0))?
-        .filter_map(|r| r.ok())
-        .filter_map(|p| {
-            path_stem(&p)
-                .to_ascii_uppercase()
-                .strip_prefix(prefix)
-                .and_then(|n| n.parse::<u32>().ok())
-        })
-        .max()
-        .unwrap_or(0);
-    Ok(max)
-}
-
-/// Reserve the next sequential code number for a page kind through the
-/// single index thread.
-async fn reserve_next_code_number(
+/// Mint a code no existing page of the family's kind uses. With 43 bits of
+/// entropy a collision is astronomically unlikely; the loop exists so the
+/// guarantee is structural, not probabilistic.
+pub(crate) async fn mint_unique_code(
     state: &AppState,
-    kind: &'static str,
-    prefix: &'static str,
-) -> Result<u32, ApiError> {
-    state
+    family: CodeFamily,
+) -> Result<String, ApiError> {
+    const ATTEMPTS: usize = 8;
+    let kind = family.kind();
+    let stems = state
         .index
-        .with_index(move |index, _vault| {
-            let observed_max = max_code_number(index.connection(), kind, prefix)?;
-            reserve_code_number(index.connection_mut(), kind, observed_max)
-        })
+        .with_index(move |index, _vault| code_stems(index.connection(), kind))
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?
-        .map_err(|e| ApiError::internal(e.to_string()))
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    for _ in 0..ATTEMPTS {
+        let candidate = code::mint(family);
+        if !stems.contains(&candidate) {
+            return Ok(candidate);
+        }
+    }
+    Err(ApiError::internal(format!(
+        "could not mint a unique {} code after {ATTEMPTS} attempts",
+        family.prefix()
+    )))
 }
 
 // ---------------------------------------------------------------------------

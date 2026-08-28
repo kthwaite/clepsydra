@@ -95,12 +95,12 @@ pub(crate) async fn get_board(
                     Err(_) => continue,
                 };
 
-                // code = filename stem, uppercased
+                // code = filename stem, verbatim
                 let stem = path_stem(&path);
-                let code = stem.to_ascii_uppercase();
+                let code = stem.to_string();
 
                 // name = title or stem
-                let name = title.unwrap_or_else(|| stem.to_ascii_uppercase());
+                let name = title.unwrap_or_else(|| stem.to_string());
 
                 // Absent `health:` frontmatter normalizes to "GREEN" by design —
                 // the UI treats health as always-present decoration.
@@ -160,7 +160,7 @@ pub(crate) async fn get_board(
                     serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
                 let stem = path_stem(&path);
-                let code = stem.to_ascii_uppercase();
+                let code = stem.to_string();
                 let label = title.unwrap_or_else(|| code.clone());
 
                 let state_str = extra_str(&meta, "state").unwrap_or_else(|| "PLANNED".to_string());
@@ -329,14 +329,14 @@ pub(super) async fn build_board_task_dto(
 }
 
 /// Build a `BoardCycle` DTO from the index for a given vault path. The code
-/// is derived from the path stem (uppercased) — the same canonical derivation
-/// the GET /board aggregation uses.
+/// is the path stem verbatim — the same canonical derivation the GET /board
+/// aggregation uses.
 pub(super) async fn build_board_cycle_dto(
     state: &AppState,
     vault_path: &VaultPath,
 ) -> Result<BoardCycle, ApiError> {
     let vp_str = vault_path.as_str().to_string();
-    let code_str = path_stem(&vp_str).to_ascii_uppercase();
+    let code_str = path_stem(&vp_str).to_string();
     state
         .index
         .with_index(move |index, _vault| {
@@ -427,7 +427,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
             serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
         let stem = path_stem(&path);
-        let code = stem.to_ascii_uppercase();
+        let code = stem.to_string();
         let task_title = title.unwrap_or_else(|| code.clone());
 
         let status = extra_str(&meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string());

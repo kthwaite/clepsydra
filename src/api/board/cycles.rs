@@ -14,6 +14,7 @@ use rusqlite::params;
 use crate::api::AppState;
 use crate::api::error::ApiError;
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
+use crate::vault::code::{self, CodeFamily};
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::CreatePageCommand;
 use crate::vault::page::{PageMeta, parse_frontmatter, write_page_content};
@@ -24,7 +25,7 @@ use crate::vault::task_history::heal_task_update;
 use super::read::build_board_cycle_dto;
 use super::{
     BoardCycle, CreateCycleRequest, CycleState, PatchCycleRequest, ensure_cycle_exists, extra_str,
-    fetch_cycle_codes, path_stem, reserve_next_code_number,
+    fetch_cycle_codes, mint_unique_code, path_stem,
 };
 
 // ---------------------------------------------------------------------------
@@ -65,9 +66,15 @@ pub(crate) async fn create_cycle(
         ));
     }
 
-    // 2. Determine code: explicit (must not collide) or auto-generated
+    // 2. Determine code: explicit (must be valid format, must not collide)
+    // or minted fresh.
     let code: String = match body.code {
         Some(explicit) => {
+            if !code::is_valid_code(&explicit) {
+                return Err(ApiError::bad_request(format!(
+                    "invalid cycle code '{explicit}': expected S-<adjective>-<noun>-<tail> (see docs/adr/0003)"
+                )));
+            }
             let codes = fetch_cycle_codes(&state).await?;
             if codes.iter().any(|c| c == &explicit) {
                 return Err(ApiError::conflict(format!(
@@ -76,11 +83,7 @@ pub(crate) async fn create_cycle(
             }
             explicit
         }
-        None => {
-            // Auto-generate from a transactional CYCLE-family reservation.
-            let next_num = reserve_next_code_number(&state, "CYCLE", "S-").await?;
-            format!("S-{next_num}")
-        }
+        None => mint_unique_code(&state, CodeFamily::Cycle).await?,
     };
 
     // 3. Build vault path: cycles/<CODE>.md
