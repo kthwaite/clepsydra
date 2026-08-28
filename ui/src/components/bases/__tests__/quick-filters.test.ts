@@ -4,6 +4,7 @@ import {
   datePresetFilter,
   HEADER_OPTION_CAP,
   headerFilterPresets,
+  headerOptionOverflow,
   isDateLike,
   quickFiltersForCell,
   quickFilterType,
@@ -37,6 +38,14 @@ describe("quickFiltersForCell", () => {
     ]);
     expect(quickFiltersForCell("tags", "system-multi", [], "Tags")).toEqual([
       { field: "tags", op: "is_empty", label: "Tags is empty" },
+    ]);
+    // The server accepts is_empty on a number property, so a blank one offers
+    // it too — while a zero stays a value, since `0` is not empty.
+    expect(quickFiltersForCell("rating", "number", null, "Rating")).toEqual([
+      { field: "rating", op: "is_empty", label: "Rating is empty" },
+    ]);
+    expect(quickFiltersForCell("rating", "number", 0, "Rating")).toEqual([
+      { field: "rating", op: "eq", value: 0, label: "Rating is 0" },
     ]);
   });
 
@@ -80,16 +89,31 @@ describe("quickFiltersForCell", () => {
       { field: "themes", op: "contains", value: "a", label: "Themes has a" },
       { field: "themes", op: "contains", value: "b", label: "Themes has b" },
     ]);
+    // `links_to` matches the bare target; the brackets never reach the server.
     expect(
-      quickFiltersForCell("series", "relation", ["[[Earthsea]]"], "Series"),
+      quickFiltersForCell(
+        "series",
+        "relation",
+        ["[[Earthsea]]", "[[Solar Cycle|the cycle]]"],
+        "Series",
+      ),
     ).toEqual([
       {
         field: "series",
         op: "links_to",
-        value: "[[Earthsea]]",
-        label: "Series links to [[Earthsea]]",
+        value: "Earthsea",
+        label: "Series links to Earthsea",
+      },
+      {
+        field: "series",
+        op: "links_to",
+        value: "Solar Cycle",
+        label: "Series links to Solar Cycle",
       },
     ]);
+    expect(quickFiltersForCell("series", "relation", [42], "Series")).toEqual(
+      [],
+    );
   });
 
   it("uses the date face for dates and nothing for datetimes", () => {
@@ -140,15 +164,20 @@ describe("date presets", () => {
 });
 
 describe("headerFilterPresets", () => {
-  it("offers emptiness for filterable columns and nothing for numbers", () => {
+  it("offers emptiness for every filterable column, numbers included", () => {
     expect(
       headerFilterPresets("author", "text", undefined, "Author").map(
         (f) => f.label,
       ),
     ).toEqual(["Author is empty", "Author is not empty"]);
     expect(
-      headerFilterPresets("rating", "number", undefined, "Rating"),
-    ).toEqual([]);
+      headerFilterPresets("rating", "number", undefined, "Rating").map(
+        (f) => f.label,
+      ),
+    ).toEqual(["Rating is empty", "Rating is not empty"]);
+    expect(headerFilterPresets("title", undefined, undefined, "Title")).toEqual(
+      [],
+    );
   });
 
   it("adds checked/unchecked, date presets and select options", () => {
@@ -210,5 +239,14 @@ describe("headerFilterPresets", () => {
     expect(presets.filter((f) => f.op === "eq")).toHaveLength(
       HEADER_OPTION_CAP,
     );
+    expect(headerOptionOverflow({ type: "select", options })).toBe(3);
+  });
+
+  it("reports no overflow when the options fit, or there are none", () => {
+    expect(headerOptionOverflow({ type: "select", options: ["a", "b"] })).toBe(
+      0,
+    );
+    expect(headerOptionOverflow({ type: "text" })).toBe(0);
+    expect(headerOptionOverflow(undefined)).toBe(0);
   });
 });

@@ -773,6 +773,10 @@ pub async fn evaluate_view(
     )
     .map_err(invalid_view_query)?;
     let group_by = group_override(params.group_by.as_deref());
+    // Grouped output has no single row sequence to offset into, so GET refuses
+    // the pairing the evaluate endpoint already refuses.
+    validate_embed_window(&view, group_by.as_ref(), params.offset.unwrap_or(0))
+        .map_err(invalid_view_query)?;
 
     let spec = query_spec(
         &base,

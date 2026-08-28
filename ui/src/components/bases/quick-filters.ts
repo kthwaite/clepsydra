@@ -2,6 +2,7 @@ import type { FilterOp, PropertyDefinition, PropertyType } from "#/api/bases";
 import type { CellValue } from "./cells/types";
 import { OPERATOR_LABELS } from "./operator-labels";
 import type { QuickFilter } from "./view-overrides";
+import { wikilinkTarget } from "./wikilink-target";
 
 export type QuickFilterType = PropertyType | "system-scalar" | "system-multi";
 
@@ -76,7 +77,6 @@ export function quickFiltersForCell(
   value: CellValue | undefined,
   label: string,
 ): QuickFilter[] {
-  if (type === "number" && isEmptyValue(value)) return [];
   if (isEmptyValue(value)) return [emptiness(field, label, "is_empty")];
   switch (type) {
     case "bool":
@@ -98,8 +98,14 @@ export function quickFiltersForCell(
         ? value.map((element) => membership(field, label, "contains", element))
         : [];
     case "relation":
+      // The stored value is a wikilink; `links_to` matches the bare target.
       return Array.isArray(value)
-        ? value.map((element) => membership(field, label, "links_to", element))
+        ? value.flatMap((element) => {
+            const target = wikilinkTarget(element);
+            return target === ""
+              ? []
+              : [membership(field, label, "links_to", target)];
+          })
         : [];
     case "date": {
       if (typeof value !== "string") return [];
@@ -129,6 +135,13 @@ export function datePresetFilter(
 
 export const HEADER_OPTION_CAP = 12;
 
+/** How many of a column's options the header submenu leaves out. */
+export function headerOptionOverflow(
+  definition: PropertyDefinition | undefined,
+): number {
+  return Math.max(0, (definition?.options?.length ?? 0) - HEADER_OPTION_CAP);
+}
+
 /** The header menu's Filter ▸ presets (spec "headerFilterPresets"). */
 export function headerFilterPresets(
   field: string,
@@ -136,7 +149,7 @@ export function headerFilterPresets(
   definition: PropertyDefinition | undefined,
   label: string,
 ): QuickFilter[] {
-  if (type === undefined || type === "number") return [];
+  if (type === undefined) return [];
   const presets: QuickFilter[] = [];
   if (type === "bool") {
     presets.push(checked(field, label, true), checked(field, label, false));

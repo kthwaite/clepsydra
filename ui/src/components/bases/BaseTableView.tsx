@@ -53,7 +53,11 @@ import type {
   BaseMemberDraftValue,
 } from "./member-draft";
 import { useIdentifiedRows } from "./ordered-list";
-import { headerFilterPresets, quickFilterType } from "./quick-filters";
+import {
+  headerFilterPresets,
+  headerOptionOverflow,
+  quickFilterType,
+} from "./quick-filters";
 import type { OverridesSaveState } from "./useViewOverrides";
 import { ViewOverridesStrip } from "./ViewOverridesStrip";
 import {
@@ -780,6 +784,14 @@ export const BaseTableView = forwardRef<
       return output.groups.flatMap((group) => group.rows);
     return [];
   }, [output]);
+  // Opening the page is what the title button already does, so a menu holding
+  // only that is a button with nothing behind it: the read-only definition
+  // preview wires no row actions at all.
+  const hasRowActions =
+    onOpenPageInNewTab !== undefined ||
+    onCopyWikilink !== undefined ||
+    onDuplicateRow !== undefined ||
+    onArchiveRow !== undefined;
   const rowActions = useMemo<RowMenuActions>(
     () => ({
       onOpenPage,
@@ -887,6 +899,9 @@ export const BaseTableView = forwardRef<
                       quickFilterType(column, properties.get(column)),
                       properties.get(column),
                       label,
+                    )}
+                    optionOverflow={headerOptionOverflow(
+                      properties.get(column),
                     )}
                     onSortChange={onSortChange}
                     onAddQuickFilter={onAddQuickFilter ?? noop}
@@ -1048,7 +1063,7 @@ export const BaseTableView = forwardRef<
                       </span>
                     )}
                   </CellContextTrigger>
-                  {column === visibleColumns[0] ? (
+                  {column === visibleColumns[0] && hasRowActions ? (
                     <RowActionsButton
                       row={row}
                       readOnly={readOnly}

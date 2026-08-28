@@ -257,6 +257,31 @@ describe("column header menu", () => {
     });
   });
 
+  it("says how many options the Filter submenu left out", async () => {
+    const user = userEvent.setup();
+    const options = Array.from({ length: 15 }, (_, index) => `option-${index}`);
+    renderView({
+      ...overrideSpies(),
+      overrides: EMPTY_OVERRIDES,
+      definition: {
+        ...definition,
+        properties: (definition.properties ?? []).map((property) =>
+          property.key === "status"
+            ? { key: "status", definition: { type: "select", options } }
+            : property,
+        ),
+      },
+    });
+    await user.click(
+      screen.getByRole("button", { name: "status column menu" }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "Filter" }));
+    const overflow = await screen.findByRole("menuitem", {
+      name: "… and 3 more — use a cell",
+    });
+    expect(overflow).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("never hides the title column and shows Ungroup for the grouped column", async () => {
     const user = userEvent.setup();
     const spies = overrideSpies();
@@ -468,6 +493,23 @@ describe("cell and row menu", () => {
     expect(
       within(menu).queryByRole("menuitem", { name: "Archive…" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("omits the row menu when no row action is wired", async () => {
+    const user = userEvent.setup();
+    // The definition preview renders read-only with no row callbacks; a menu
+    // holding only Open would duplicate the title button and do nothing here.
+    renderView({ readOnly: true });
+    expect(
+      screen.queryByRole("button", { name: /Row actions for/ }),
+    ).not.toBeInTheDocument();
+
+    // Without a button to forward to, the cell leaves the gesture alone.
+    await user.pointer({
+      target: screen.getByText("reading"),
+      keys: "[MouseRight]",
+    });
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("opens the cell menu from the keyboard", async () => {

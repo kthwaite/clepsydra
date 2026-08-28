@@ -29,6 +29,8 @@ export interface BaseHeaderMenuProps {
   groupedByThis: boolean;
   hideable: boolean;
   presets: QuickFilter[];
+  /** Options the presets left out, from `headerOptionOverflow`. */
+  optionOverflow: number;
   onSortChange(sort: SortKey[] | undefined): void;
   onAddQuickFilter(filter: QuickFilter): void;
   onSetGroup(group: GroupOverride | undefined): void;
@@ -51,6 +53,7 @@ function HeaderMenu({
   groupedByThis,
   hideable,
   presets,
+  optionOverflow,
   onSortChange,
   onAddQuickFilter,
   onSetGroup,
@@ -105,6 +108,13 @@ function HeaderMenu({
                 {preset.label}
               </MenuItem>
             ))}
+            {/* The cap is a menu-length limit, not a filter limit: say so
+                rather than truncating the options in silence. */}
+            {optionOverflow > 0 ? (
+              <MenuItem id="overflow" isDisabled>
+                {`… and ${optionOverflow} more — use a cell`}
+              </MenuItem>
+            ) : null}
           </Menu>
         </SubmenuTrigger>
       ) : null}
@@ -135,7 +145,8 @@ function HeaderMenu({
  * name ("author author column menu"), which is accepted: `aria-hidden` would
  * take the menu away from keyboard users, `Column` drops an `aria-label` of
  * its own (React Aria filters it out), and React Aria collections will not let
- * the button live outside the `<Column>`.
+ * the button live outside the `<Column>`. The row menu's button does the same
+ * to its row header cell, which reads "Zulu Row actions for Zulu".
  */
 export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
   const { children, ...rest } = props;
@@ -170,7 +181,7 @@ export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
           // popup, and this button does both, so it says so itself.
           aria-haspopup="menu"
           aria-expanded={isOpen}
-          className="px-1 py-0 opacity-60 hover:opacity-100"
+          className="px-1 py-0 opacity-60 hover:opacity-100 aria-expanded:opacity-100"
           onPress={() => {
             const trigger = triggerRef.current;
             if (trigger) summon(pointUnder(trigger));

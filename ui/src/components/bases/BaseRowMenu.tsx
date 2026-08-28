@@ -259,7 +259,10 @@ export function RowActionsButton({
         aria-haspopup="menu"
         aria-expanded={isOpen}
         data-row-menu=""
-        className="ml-auto shrink-0 px-1 py-0 opacity-0 focus-visible:opacity-100 group-data-[hovered]:opacity-100 group-focus-within:opacity-100"
+        // Invisible until the row is engaged, and untouchable while invisible:
+        // an `opacity-0` button is still a hit target, so a stray click at the
+        // first cell's right edge would open a menu from nowhere.
+        className="ml-auto shrink-0 px-1 py-0 opacity-0 pointer-events-none aria-expanded:pointer-events-auto aria-expanded:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 group-data-[hovered]:pointer-events-auto group-data-[hovered]:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100"
         onPress={() => {
           const trigger = triggerRef.current;
           if (!trigger) return;

@@ -1155,6 +1155,16 @@ async fn view_evaluation_honors_a_group_override() {
         body["detail"]["diagnostics"][0]["message"],
         "field `rating` cannot group"
     );
+
+    // Grouped output has no single row sequence to offset into; GET refuses the
+    // pairing rather than dropping the offset, as the evaluate endpoint does.
+    let res = server
+        .get("/api/vault/bases/reading/views/continues?group_by=author&offset=10")
+        .await;
+    res.assert_status_bad_request();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["code"], "invalid_embed_query");
+    assert_eq!(body["detail"]["diagnostics"][0]["field"], "offset");
 }
 
 #[tokio::test]
