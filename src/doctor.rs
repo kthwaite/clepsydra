@@ -1233,7 +1233,12 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
 /// path so tests need no HOME override.
 fn legacy_store_hint(store: &Path, legacy: Option<&Path>) -> Option<CheckResult> {
     let legacy = legacy?;
-    if store.join("cas.db").is_file() || !legacy.join("cas.db").is_file() {
+    // Key on blob FILES, not `cas.db`: once `clep serve` runs on the
+    // phase-3 binary, `ContentStore::open` creates an empty `cas.db` on
+    // first touch, which would otherwise silence this hint during exactly
+    // the installed-and-restarted-before-migrating window it exists to
+    // catch.
+    if !crate::vault::cas::list_blob_hashes(store).is_empty() || !legacy.join("cas.db").is_file() {
         return None;
     }
     // Canonicalize both sides when they exist so a symlinked home doesn't
@@ -1251,7 +1256,7 @@ fn legacy_store_hint(store: &Path, legacy: Option<&Path>) -> Option<CheckResult>
             "cas",
             "legacy",
             format!(
-                "this vault's store {} has no cas.db yet, but a legacy store exists at {}",
+                "this vault's store {} holds no blobs yet, but a legacy store exists at {}",
                 store.display(),
                 legacy.display()
             ),
@@ -1969,12 +1974,32 @@ mod tests {
                 .contains("clep cas migrate")
         );
         assert!(legacy_store_hint(&store, None).is_none());
-        fs::create_dir_all(&store).unwrap();
-        fs::write(store.join("cas.db"), b"x").unwrap();
+
+        // An initialised store — one that actually holds a blob file at a
+        // valid fan-out path — silences the hint.
+        let blob_hash = crate::vault::cas::ContentStore::hash_bytes(b"x");
+        let blob_rel = crate::vault::cas::blob_relative_path(&blob_hash).unwrap();
+        let blob_path = store.join(&blob_rel);
+        fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
+        fs::write(&blob_path, b"x").unwrap();
         assert!(
             legacy_store_hint(&store, Some(&legacy)).is_none(),
             "initialised store: no hint"
         );
+
+        // `ContentStore::open` (e.g. on first `clep serve` startup against
+        // the phase-3 default) creates an empty `cas.db` before any blob is
+        // ever written. A store in that state must still warn — this is
+        // exactly the installed-and-restarted-before-migrating window the
+        // hint exists to catch.
+        let empty_db_store = tmp.path().join("vault2/.clepsydra/cas");
+        fs::create_dir_all(&empty_db_store).unwrap();
+        fs::write(empty_db_store.join("cas.db"), b"").unwrap();
+        assert!(
+            legacy_store_hint(&empty_db_store, Some(&legacy)).is_some(),
+            "empty cas.db but no blobs yet: hint still fires"
+        );
+
         assert!(
             legacy_store_hint(&legacy, Some(&legacy)).is_none(),
             "store IS the legacy path: no hint"

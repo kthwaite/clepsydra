@@ -49,7 +49,9 @@ pub struct MigrateReport {
     pub orphans_left: u64,
     /// Set only when `write` was true.
     pub rebuild: Option<crate::vault::cas::RebuildReport>,
-    /// Scan warnings plus one line per missing or corrupt blob.
+    /// Scan warnings plus one line per missing, corrupt, or failed-I/O
+    /// blob, one per malformed hash, and one if the source's `cas.db`
+    /// couldn't be read for content types.
     pub warnings: Vec<String>,
     pub dry_run: bool,
 }

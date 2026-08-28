@@ -202,8 +202,11 @@ same transaction as the vault-content walk, so a write racing the backup can
 still land on one side of the split. Likewise, external Zotero PDF asset paths
 are outside this backup.
 
-There is no shipped restore command, archive-import or reference-replay
-operation, or CAS refcount rebuild. Recovery means stopping writers, safely
+There is no shipped restore command or archive-import/reference-replay
+operation; for CAS refcount recovery after a restore, run `clep cas rebuild`
+(or `clep cas migrate` first if the backup predates the vault-relative CAS
+default, ADR 0005) and verify with `clep doctor --full`. Recovery means
+stopping writers, safely
 extracting the tar to the intended vault location, restoring a matching complete
 CAS directory, including `cas.db`, and restoring any external assets. Start
 Clepsydra so the derived page index can rebuild, but do not expect that rebuild

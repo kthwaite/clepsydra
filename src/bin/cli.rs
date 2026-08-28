@@ -41,7 +41,7 @@ enum CasCommands {
     },
     #[command(
         about = "Copy this vault's referenced blobs from an old CAS into the vault's store and rebuild cas.db",
-        long_about = "Moves the content-addressed store into the vault (ADR 0005). Copies only the blobs referenced by this vault's live pages and rubbish items from --from (default: the pre-2026-08-28 store at ~/.clepsydra/cas) into [archive].cas_path (default .clepsydra/cas inside the vault), verifies each blob's sha256, then rebuilds the destination cas.db from blob files plus a vault-wide frontmatter scan. The source store is never modified; blobs no page references stay behind. Stop `clep serve` first: the rebuild takes the store's lock. Dry run by default; --write applies."
+        long_about = "Moves the content-addressed store into the vault (ADR 0005). Copies only the blobs referenced by this vault's live pages and rubbish items from --from (default: the pre-2026-08-28 store at ~/.clepsydra/cas) into [archive].cas_path (default .clepsydra/cas inside the vault), verifies each blob's sha256, then rebuilds the destination cas.db from blob files plus a vault-wide frontmatter scan. The source store is never modified; blobs no page references stay behind. Stop `clep serve` first: the rebuild replaces every cas.db row from a point-in-time scan, so a capture landing while it runs is miscounted (ref_count 0 or untyped until the next `clep cas rebuild`); a server still on the old binary would also keep writing new blobs into the source store after the scan. Dry run by default; --write applies."
     )]
     Migrate {
         /// Source CAS root to copy from (default: ~/.clepsydra/cas).
