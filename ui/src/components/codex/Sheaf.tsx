@@ -168,8 +168,7 @@ export function Sheaf({
       )}
     >
       <span className="flex flex-shrink-0 items-center gap-1.5 whitespace-nowrap border-r border-rule-soft px-3 py-1 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-        § SHEAF
-        <span className="text-ink-2">{pageTabs.length}</span>
+        <span className="text-ink-2">{pageTabs.length} tabs</span>
       </span>
 
       {segments.map((seg) =>
