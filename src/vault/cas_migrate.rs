@@ -28,6 +28,10 @@ pub struct MigrateReport {
     pub missing: Vec<String>,
     /// Source files whose sha256 didn't match their name; not copied.
     pub corrupt: Vec<String>,
+    /// Referenced hashes that could not be copied due to an I/O error
+    /// reading the source blob or writing the destination blob. The run
+    /// still completes and reports everything else.
+    pub failed: Vec<String>,
     pub bytes_copied: u64,
     /// Source blobs no live page or rubbish item references.
     pub orphans_left: u64,
@@ -80,14 +84,27 @@ pub fn migrate(
             continue;
         }
         let from = source.join(&rel);
-        if !from.is_file() {
+        // `exists()`, not `is_file()`: a path that exists but isn't a
+        // regular file (e.g. a directory sitting where a blob should be)
+        // is a per-blob I/O failure below, not "absent from the source".
+        if !from.exists() {
             report.missing.push(hash.clone());
             report
                 .warnings
                 .push(format!("{hash}: not found in {}", source.display()));
             continue;
         }
-        let bytes = std::fs::read(&from)?;
+        let bytes = match std::fs::read(&from) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                report.failed.push(hash.clone());
+                report.warnings.push(format!(
+                    "{hash}: failed to read {}: {error}",
+                    from.display()
+                ));
+                continue;
+            }
+        };
         if ContentStore::hash_bytes(&bytes) != *hash {
             report.corrupt.push(hash.clone());
             report.warnings.push(format!(
@@ -97,12 +114,18 @@ pub fn migrate(
             continue;
         }
         if write {
-            std::fs::create_dir_all(to.parent().expect("fan-out parent"))?;
             // `to` is guaranteed absent here (the `to.is_file()` check above
-            // already `continue`d otherwise), so `atomic_create` — not
-            // `atomic_replace`, which requires an existing destination to
-            // read permissions from — is the correct publish primitive.
-            crate::vault::atomic_file::atomic_create(&to, &bytes)?;
+            // already `continue`d otherwise). A per-blob write failure (disk
+            // full, permissions, a concurrent run racing `atomic_create`'s
+            // `AlreadyExists`) must not abort the whole migration — warn and
+            // move on, mirroring `missing`/`corrupt`/the read failure above.
+            if let Err(error) = copy_blob(&to, &bytes) {
+                report.failed.push(hash.clone());
+                report
+                    .warnings
+                    .push(format!("{hash}: failed to write {}: {error}", to.display()));
+                continue;
+            }
         }
         report.bytes_copied += bytes.len() as u64;
         report.copied.push(hash.clone());
@@ -118,6 +141,17 @@ pub fn migrate(
         report.rebuild = Some(store.rebuild_metadata(&scan, true)?);
     }
     Ok(report)
+}
+
+/// Publish one blob's bytes at `to` (a path inside the destination's
+/// fan-out), creating its parent directory first. `atomic_create` — not
+/// `atomic_replace`, which requires an existing destination to read
+/// permissions from — is the correct primitive: callers only reach here for
+/// a `to` that doesn't exist yet.
+fn copy_blob(to: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(to.parent().expect("fan-out parent"))?;
+    crate::vault::atomic_file::atomic_create(to, bytes)?;
+    Ok(())
 }
 
 /// The legacy default store, if it exists and holds a `cas.db` (a hint target
@@ -261,5 +295,69 @@ mod tests {
         let (_tmp, vault, source, _) = fixture();
         assert!(migrate(&vault, &vault.cas_root(), false).is_err());
         assert!(migrate(&vault, &source.join("nope"), false).is_err());
+    }
+
+    #[test]
+    fn unreadable_source_blob_is_skipped_with_warning_others_still_copied() {
+        let (_tmp, vault, source, [snap, img, _orphan, _gone]) = fixture();
+        // Replace the img blob file with a directory of the same name, so
+        // `from.exists()` is true but `fs::read` fails — an I/O failure
+        // distinct from "missing" or "corrupt".
+        let img_path = source.join(blob_relative_path(&img).unwrap());
+        fs::remove_file(&img_path).unwrap();
+        fs::create_dir_all(&img_path).unwrap();
+
+        let report = migrate(&vault, &source, true).unwrap();
+
+        assert_eq!(report.failed, vec![img.clone()]);
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains(&img) && w.contains(&img_path.display().to_string())),
+            "warning must name the hash and the path: {:?}",
+            report.warnings
+        );
+        // The other referenced blob is unaffected.
+        assert!(
+            vault
+                .cas_root()
+                .join(blob_relative_path(&snap).unwrap())
+                .exists()
+        );
+        assert!(report.rebuild.is_some(), "run still completes and rebuilds");
+    }
+
+    #[test]
+    fn rubbish_item_reference_is_migrated() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let (rub_hash, rub_bytes) = blob(b"<html>rubbish snap</html>");
+        let item = root.join(".clepsydra/rubbish/0190aaaa-0000-7000-8000-000000000001");
+        fs::create_dir_all(&item).unwrap();
+        fs::write(item.join("page.md"), format!(
+            "+++\nid = \"01900000-0000-7000-8000-00000000000c\"\ntitle = \"C\"\ncreated_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n\n[archive]\nsnapshot_hash = \"{rub_hash}\"\n+++\nbody\n"
+        )).unwrap();
+        fs::write(item.join("manifest.json"), "{}").unwrap();
+        let source = tmp.path().join("old-cas");
+        write_blob(&source, &rub_hash, &rub_bytes);
+        fs::write(source.join("cas.db"), b"not copied").unwrap();
+        let vault = Vault::open(&root).unwrap();
+
+        let report = migrate(&vault, &source, true).unwrap();
+
+        assert_eq!(report.copied, vec![rub_hash.clone()]);
+        let dest = vault.cas_root();
+        assert!(dest.join(blob_relative_path(&rub_hash).unwrap()).exists());
+        let conn = rusqlite::Connection::open(dest.join("cas.db")).unwrap();
+        let ref_count: i64 = conn
+            .query_row(
+                "SELECT ref_count FROM blobs WHERE hash = ?1",
+                [&rub_hash],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(ref_count, 1);
     }
 }
