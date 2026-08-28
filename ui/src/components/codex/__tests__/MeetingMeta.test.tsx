@@ -26,6 +26,17 @@ beforeEach(() => {
 });
 
 describe("MeetingMeta", () => {
+  it("labels itself as a landmark the document header can carry", () => {
+    usePageMock.mockReturnValue(page("MEETING", ["[[Ada]]"]));
+    render(
+      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
+    );
+
+    expect(
+      screen.getByRole("region", { name: "Meeting details" }),
+    ).toBeInTheDocument();
+  });
+
   it("lists the people a meeting names", () => {
     usePageMock.mockReturnValue(page("MEETING", ["[[Ada]]", "[[Grace]]"]));
     render(

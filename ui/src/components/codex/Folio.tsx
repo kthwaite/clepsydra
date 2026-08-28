@@ -1031,6 +1031,13 @@ export function Folio({ tabId, path }: FolioProps) {
     </>
   );
 
+  // Kind-specific facts (a meeting's occurred/attendees) belong beside the
+  // title, not in the META rail: they are content, not sidebar metadata.
+  const HeaderExtras = presentation.headerExtras;
+  const headerExtras = HeaderExtras ? (
+    <HeaderExtras path={path} tabId={tabId} isDraft={editor.isDraft} />
+  ) : null;
+
   const document = (
     <>
       {folioReadOnly ? (
@@ -1068,6 +1075,7 @@ export function Folio({ tabId, path }: FolioProps) {
           />
         </div>
       )}
+      {headerExtras}
       {folioProperties}
       {isAiConversation ? (
         <>

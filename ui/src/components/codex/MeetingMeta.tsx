@@ -17,8 +17,10 @@ import { localIso, OCCURRED_AT_KEY, readOccurredAt } from "#/lib/meeting";
  *  declared property, without requiring the vault to declare a Base for it. */
 const OCCURRED_AT_DEFINITION = { type: "datetime" } as const;
 
-/** MEETING / ONE_ON_ONE META-rail block: when the meeting happened and which
- *  person pages it names.
+/** MEETING / ONE_ON_ONE header band: when the meeting happened and which
+ *  person pages it names. These are facts of the note rather than sidebar
+ *  metadata, so FOLIO renders this under the title/tags header (registered as
+ *  the kind's `headerExtras`) rather than in the META rail.
  *
  *  Both are ordinary frontmatter properties, so this writes through the same
  *  property-patch path the Base rail uses — including the `datetime` type hint
@@ -70,9 +72,13 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <div className="cl-mono mb-1 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+    <section
+      aria-label="Meeting details"
+      data-testid="meeting-header"
+      className="mb-3 flex flex-wrap items-start gap-x-8 gap-y-2 border-b border-rule pb-3"
+    >
+      <div className="flex min-w-[12rem] flex-col gap-1">
+        <div className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
           Occurred
         </div>
         <div className="flex items-center gap-1">
@@ -98,24 +104,25 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
         </div>
       </div>
 
-      <div>
-        {attendees.length === 0 ? (
-          <div className="cl-mono text-[11px] text-ink-mute">
-            {kind === "ONE_ON_ONE" ? "nobody named yet" : "no attendees"}
-          </div>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {attendees.map((attendee) => (
-              <li
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+          {kind === "ONE_ON_ONE" ? "With" : "Attendees"}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {attendees.length === 0 ? (
+            <span className="cl-mono text-[11px] text-ink-mute">
+              {kind === "ONE_ON_ONE" ? "nobody named yet" : "no attendees"}
+            </span>
+          ) : (
+            attendees.map((attendee) => (
+              <span
                 key={attendee}
-                className="flex items-center justify-between gap-2"
+                className="cl-mono inline-flex items-center gap-1 border border-rule px-1.5 py-0.5 text-[11px] text-ink"
               >
-                <span className="cl-mono truncate text-[12px] text-ink">
-                  {attendee}
-                </span>
+                <span className="truncate">{attendee}</span>
                 <button
                   type="button"
-                  className="cl-btn px-1.5 py-0.5"
+                  className="cl-btn px-1 py-0"
                   disabled={saving || isDraft}
                   aria-label={`remove ${attendee}`}
                   onClick={() =>
@@ -124,43 +131,43 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
                 >
                   ×
                 </button>
-              </li>
-            ))}
-          </ul>
-        )}
+              </span>
+            ))
+          )}
 
-        {canAdd && (
-          <div className="mt-2 flex gap-1">
-            <input
-              className="cl-mono w-full border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
-              value={name}
-              placeholder="person"
-              aria-label="add attendee"
-              onChange={(event) => setName(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void add();
-                }
-              }}
-            />
-            <button
-              type="button"
-              className="cl-btn"
-              disabled={saving || name.trim().length === 0}
-              onClick={() => void add()}
-            >
-              Add
-            </button>
-          </div>
-        )}
+          {canAdd && (
+            <>
+              <input
+                className="cl-mono w-40 border border-rule bg-transparent p-1 text-[12px] text-ink outline-none placeholder:text-ink-mute focus:border-accent"
+                value={name}
+                placeholder="person"
+                aria-label="add attendee"
+                onChange={(event) => setName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void add();
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="cl-btn"
+                disabled={saving || name.trim().length === 0}
+                onClick={() => void add()}
+              >
+                Add
+              </button>
+            </>
+          )}
 
-        {kind === "ONE_ON_ONE" && attendees.length >= 1 && (
-          <div className="cl-mono mt-2 text-[9px] uppercase tracking-[0.14em] text-ink-mute">
-            a 1:1 names one person
-          </div>
-        )}
+          {kind === "ONE_ON_ONE" && attendees.length >= 1 && (
+            <span className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+              a 1:1 names one person
+            </span>
+          )}
+        </div>
       </div>
-    </div>
+    </section>
   );
 }
