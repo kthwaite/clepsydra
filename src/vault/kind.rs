@@ -33,6 +33,8 @@ pub enum Kind {
     Archive,
     #[schema(rename = "AI_CONVERSATION")]
     AiConversation,
+    #[schema(rename = "AI_JOURNAL")]
+    AiJournal,
 }
 
 impl Kind {
@@ -58,6 +60,7 @@ impl Kind {
             // a mismatch would relocate every existing archived page.
             Kind::Archive => "archive",
             Kind::AiConversation => "conversations",
+            Kind::AiJournal => "ai-journals",
         }
     }
 
@@ -80,6 +83,7 @@ impl Kind {
             Kind::OneOnOne => "one_on_one",
             Kind::Archive => "archive",
             Kind::AiConversation => "ai_conversation",
+            Kind::AiJournal => "ai_journal",
         }
     }
 
@@ -102,6 +106,7 @@ impl Kind {
             Kind::OneOnOne => "ONE_ON_ONE",
             Kind::Archive => "ARCHIVE",
             Kind::AiConversation => "AI_CONVERSATION",
+            Kind::AiJournal => "AI_JOURNAL",
         }
     }
 
@@ -128,6 +133,7 @@ impl Kind {
             }
             "ARCHIVE" => Some(Kind::Archive),
             "AI_CONVERSATION" => Some(Kind::AiConversation),
+            "AI_JOURNAL" => Some(Kind::AiJournal),
             _ => None,
         }
     }
@@ -153,6 +159,7 @@ impl Kind {
             | "1on1s" | "1on1" | "121s" | "121" => Some(Kind::OneOnOne),
             "archive" | "archives" | "archived" => Some(Kind::Archive),
             "conversations" | "conversation" | "chats" => Some(Kind::AiConversation),
+            "ai-journals" | "ai-journal" => Some(Kind::AiJournal),
             _ => None,
         }
     }
@@ -327,6 +334,7 @@ mod tests {
             Kind::Meeting,
             Kind::OneOnOne,
             Kind::AiConversation,
+            Kind::AiJournal,
         ];
         for k in all {
             assert_eq!(
@@ -369,6 +377,7 @@ mod tests {
             (Kind::Meeting, "meeting"),
             (Kind::OneOnOne, "one_on_one"),
             (Kind::AiConversation, "ai_conversation"),
+            (Kind::AiJournal, "ai_journal"),
         ];
 
         for (kind, tag) in expected {
@@ -502,5 +511,29 @@ mod tests {
         );
         let decoded: Kind = serde_json::from_str("\"ONE_ON_ONE\"").unwrap();
         assert_eq!(decoded, Kind::OneOnOne);
+    }
+
+    #[test]
+    fn ai_journal_kind_round_trips() {
+        assert_eq!(Kind::AiJournal.as_str(), "AI_JOURNAL");
+        assert_eq!(Kind::from_token("AI_JOURNAL"), Some(Kind::AiJournal));
+        assert_eq!(Kind::from_token("ai_journal"), Some(Kind::AiJournal));
+        assert_eq!(Kind::AiJournal.canonical_folder(), "ai-journals");
+        assert_eq!(Kind::AiJournal.computed_tag(), "ai_journal");
+        for folder in ["ai-journals", "ai-journal"] {
+            assert_eq!(
+                resolve(&format!("{folder}/x.md"), None),
+                (Kind::AiJournal, true),
+                "folder {folder:?} should infer AI_JOURNAL"
+            );
+        }
+        // The plain journal folders must NOT infer the AI kind.
+        assert_eq!(resolve("journals/x.md", None), (Kind::Journal, true));
+        assert_eq!(
+            serde_json::to_string(&Kind::AiJournal).unwrap(),
+            "\"AI_JOURNAL\""
+        );
+        let decoded: Kind = serde_json::from_str("\"AI_JOURNAL\"").unwrap();
+        assert_eq!(decoded, Kind::AiJournal);
     }
 }

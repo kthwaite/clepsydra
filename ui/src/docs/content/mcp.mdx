@@ -60,7 +60,7 @@ TLS verifies the server and protects transport; it does not add an agent login.
 | --- | --- | --- |
 | Discover and read | `vault_search`, `vault_get_page`, `vault_list_pages`, `vault_tree`, `vault_links`, `vault_tags` | Locate a page before acting; inspect content, structure, graph, and vocabulary. Oversized `vault_get_page` bodies are truncated and flagged. |
 | Create and edit | `vault_create_page`, `vault_update_page`, `vault_edit_page`, `vault_append_page` | Create in one projected mutation; replace whole fields; exact-match a body span; or append to the page/a heading section. |
-| Capture | `vault_journal_capture`, `vault_capture_conversation` | Add a fleeting journal entry or capture complete visible conversation turns. |
+| Capture | `vault_journal_capture`, `vault_ai_journal_capture`, `vault_capture_conversation` | Add a fleeting entry to the user's journal or the AI journal, or capture complete visible conversation turns. |
 | Task Board | `vault_board`, `vault_task_create`, `vault_task_update`, `vault_cycle_create`, `vault_cycle_update` | Inspect the board, create or update Tasks, and create or atomically close and carry over Cycles. |
 | Organize | `vault_assign`, `vault_move_page`, `vault_folder` | Declare kind/project, explicitly move a page, or create/move/delete folders. |
 | Page lifecycle | `vault_archive_page`, `vault_list_rubbish`, `vault_get_rubbish_item`, `vault_restore_page`, `vault_purge_page`, `vault_empty_rubbish` | Archive without rewriting links; inspect retained items; restore to the original path; or permanently purge one/all retained items. |
@@ -85,7 +85,8 @@ for an explicit destination that assignment cannot express.
 | `vault_update_page` | write | Whole-field replacement of title/tags/aliases/body, guarded by the current revision |
 | `vault_edit_page` | write | Exact-match string edit of the body, guarded by the current revision |
 | `vault_append_page` | write | Append to the page or to a heading's section (revision-guarded, one retry) |
-| `vault_journal_capture` | write | Quick-capture into today's journal |
+| `vault_journal_capture` | write | Quick-capture into today's journal — the user's own journal, only on the user's explicit request |
+| `vault_ai_journal_capture` | write | Append an agent-initiated note to today's AI journal, with an optional `author` label |
 | `vault_capture_conversation` | write | Create or safely append a visible user/assistant chat as an `AI_CONVERSATION` Folio |
 | `vault_board` | read | Task Board columns with WIP limits, Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field; optional `project` filter |
 | `vault_task_create` | write | New Task; reserves the next `TSK-NNNN` code and files the page under `tasks/<project>/` |
@@ -113,6 +114,7 @@ extend it instead of duplicating it.
 | Author standalone page | required | `vault_create_page` |
 | Edit/append existing page | unchanged | `vault_edit_page` / `vault_append_page` |
 | Journal capture | not added for authorship alone | `vault_journal_capture` |
+| AI journal capture | not added for authorship alone | `vault_ai_journal_capture` |
 | Conversation capture | not added for authorship alone | `vault_capture_conversation` |
 
 Standalone pages must declare their real Kind and project in
@@ -166,6 +168,29 @@ Cycles cannot be created Closed: `vault_cycle_create` accepts Planned
 unfinished Tasks: `"BACKLOG"` moves them to Backlog, while a Cycle code such
 as `"S-14"` reassigns them. `carry_to` is valid only with `state: "CLOSED"`;
 without it, Tasks remain in the closed Cycle.
+
+### Capture into a journal
+
+Two capture tools write to two separate daily streams. `vault_journal_capture`
+appends to the user's own journal (`journals/`) and is for the user's own
+writing only — call it when the user explicitly asks for a journal capture,
+never on the agent's own initiative. `vault_ai_journal_capture` appends to the
+AI journal (`ai-journals/`) and is the default destination for agent-initiated
+notes, work logs, session summaries, and asides; it never writes to the user's
+own journal. Neither call adds the `ai-generated` tag: a capture is not
+standalone authorship.
+
+Both tools take `content` and create today's page on first write if it does
+not exist yet. `vault_ai_journal_capture` also takes an optional `author`, a
+single line of 1-64 characters (for example `claude-code`), rendered as an
+entry prefix: `- HH:MM — [author] content`. Without `author`, the entry omits
+the bracket. For both tools, plain prose becomes a timed list entry; an
+existing list item, Todo, heading, blockquote, or code fence passes through
+verbatim and unattributed, exactly as human captures do.
+
+The AI journal is excluded from Agenda and from the human journal's
+`carried_forward` Todos in both directions: an AI journal capture never
+surfaces as agenda work, and reading it back returns no carried-forward list.
 
 ### Capture a conversation
 

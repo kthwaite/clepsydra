@@ -23,6 +23,7 @@ export const KIND_FOLDER: Record<Kind, string> = {
   ONE_ON_ONE: "one-on-ones",
   ARCHIVE: "archive",
   AI_CONVERSATION: "conversations",
+  AI_JOURNAL: "ai-journals",
 };
 
 const SLUG_MAX = 40;

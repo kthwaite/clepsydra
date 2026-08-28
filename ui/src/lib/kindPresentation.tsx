@@ -1,7 +1,7 @@
 import type { ComponentType } from "react";
-import { JournalMeta } from "#/components/codex/JournalMeta";
+import { AiJournalMeta, JournalMeta } from "#/components/codex/JournalMeta";
 import { MeetingMeta } from "#/components/codex/MeetingMeta";
-import { journalDayLabel } from "#/lib/journal";
+import { aiJournalDayLabel, journalDayLabel } from "#/lib/journal";
 import type { Kind } from "#/lib/kind";
 
 /** Props FOLIO hands every bespoke META-rail block. */
@@ -46,6 +46,12 @@ const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
     metaExtras: JournalMeta,
     metaExtrasLabel: "Journal",
     readOnlyTitle: journalDayLabel,
+  },
+  AI_JOURNAL: {
+    bodyPresentation: "editor",
+    metaExtras: AiJournalMeta,
+    metaExtrasLabel: "AI Journal",
+    readOnlyTitle: aiJournalDayLabel,
   },
   MEETING: {
     bodyPresentation: "editor",

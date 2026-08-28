@@ -90,22 +90,46 @@ remain unchanged.
 
 ### Open and capture into journals
 
+Clepsydra keeps two daily journal streams: your own journal (`journals/`, kind
+`JOURNAL`) and the AI journal (`ai-journals/`, kind `AI_JOURNAL`) for
+agent-initiated notes and work logs. Each stream holds one page per day, keyed
+by the same server clock.
+
 Run **Today's journal** from the command palette or choose **Open today’s
-journal** in the Atrium. If today's page does not exist, Clepsydra opens the
-canonical draft path and creates the page on first write. The server's journal
-clock decides the canonical date; the browser constructs the initial draft path
-from its local date, so keep client and server clocks aligned.
+journal** in the Atrium for your own journal. Run **Today's AI journal** from
+the command palette or choose **AI journal** in the Atrium for the AI stream.
+If today's page does not exist, Clepsydra opens the canonical draft path and
+creates the page on first write. The server's journal clock decides the
+canonical date; the browser constructs the initial draft path from its local
+date, so keep client and server clocks aligned.
 
 The journal rail provides **previous entry**, **Today**, **next entry**, and a
-14-day recent calendar. Previous and next skip unwritten dates. Only today can
-be opened as an unwritten draft from that rail; other journal API lookups accept
-an exact `YYYY-MM-DD`, not natural-language dates.
+14-day recent calendar for the open stream. Previous and next skip unwritten
+dates. Only today can be opened as an unwritten draft from that rail; other
+journal API lookups accept an exact `YYYY-MM-DD`, not natural-language dates.
+Each rail also carries a cross-link row to the sibling stream's page for the
+same date — labeled **AI journal** on your journal's rail and **Journal** on
+the AI journal's rail — reading **written · open** when that page exists and
+**unwritten** otherwise.
 
 Run **Capture aside** to append to today's journal. Plain prose becomes a timed
 list entry; an existing list item, Todo, heading, blockquote, or code fence
 keeps its Markdown shape. `GET /journal/today` also returns open Todos from the
 previous seven journal dates as `carried_forward`; it does not copy them into
 today's file.
+
+Agent captures into the AI journal follow the same block-shape rule and may
+carry an optional short author label after the timestamp, rendered as
+`- HH:MM — [author] content`; without an author the entry omits the bracket. An
+existing list item, Todo, heading, blockquote, or code fence still passes
+through verbatim and unattributed. The AI journal's `today` response carries no
+`carried_forward`: Agenda and carried-forward draw only from your own journal,
+so AI journal entries and their Todos never appear in Agenda's **Today** bucket
+or in a `carried_forward` list.
+
+Neither journal kind can be changed to another kind once assigned, and pages in
+either stream cannot join a Project — a journal page's date, not a Project,
+organizes it.
 
 ### Plan on the Task Board
 

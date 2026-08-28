@@ -7,6 +7,7 @@ import { useLocation } from "#/api/location";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
+import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { kindColorVar, resolveKind } from "#/lib/kind";
@@ -55,6 +56,7 @@ export function Atrium() {
   const openTab = useOpenTab();
   const navigate = useNavigate();
   const openTodayJournal = useOpenTodayJournal();
+  const openTodayAiJournal = useOpenTodayAiJournal();
   const openHistory = useWorkspaceStore((s) => s.openHistory);
   const [recentTab, setRecentTab] = useState<"edited" | "created" | "opened">(
     "edited",
@@ -136,7 +138,7 @@ export function Atrium() {
             </div>
             <div className="text-[16px]">→</div>
           </button>
-          <div className="grid grid-cols-2 gap-1.5">
+          <div className="grid grid-cols-3 gap-1.5">
             <button
               type="button"
               onClick={openInscribe}
@@ -156,6 +158,13 @@ export function Atrium() {
               <div className="mt-1 hidden text-[9px] tracking-[0.18em] text-ink-mute md:block">
                 ⌘ K
               </div>
+            </button>
+            <button
+              type="button"
+              onClick={openTodayAiJournal}
+              className="cl-mono border border-rule bg-paper px-2.5 py-2 text-left text-[9px] uppercase tracking-[0.22em] text-ink-2 hover:border-ink-mute hover:text-ink"
+            >
+              AI journal
             </button>
           </div>
         </div>

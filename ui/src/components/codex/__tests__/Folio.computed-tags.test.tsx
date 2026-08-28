@@ -50,6 +50,10 @@ vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, isLoading: false }),
   useJournalRecent: () => ({ data: [] }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: () => ({ data: null, isLoading: false }),
+  useAiJournalRecent: () => ({ data: [] }),
+}));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/components/codex/useCollapsibleRail", () => ({
   useCollapsibleRail: () => ({

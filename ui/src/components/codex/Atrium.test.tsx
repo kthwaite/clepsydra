@@ -16,6 +16,7 @@ const atriumMocks = vi.hoisted(() => ({
   openLocation: vi.fn(),
   openTab: vi.fn(),
   openTodayJournal: vi.fn(),
+  openTodayAiJournal: vi.fn(),
   featureFlags: { academic: true, feeds: true },
   feedHook: vi.fn(),
   readingContinues: false,
@@ -63,6 +64,10 @@ vi.mock("#/hooks/useOpenTab", () => ({
 
 vi.mock("#/hooks/useOpenTodayJournal", () => ({
   useOpenTodayJournal: () => atriumMocks.openTodayJournal,
+}));
+
+vi.mock("#/hooks/useOpenTodayAiJournal", () => ({
+  useOpenTodayAiJournal: () => atriumMocks.openTodayAiJournal,
 }));
 
 vi.mock("#/store/ui", () => ({
@@ -284,14 +289,19 @@ describe("Atrium composition", () => {
     const search = within(daystart).getByRole("button", {
       name: /^Search/i,
     });
+    const aiJournal = within(daystart).getByRole("button", {
+      name: /^AI journal/i,
+    });
 
     await user.click(journal);
     await user.click(capture);
     await user.click(search);
+    await user.click(aiJournal);
 
     expect(atriumMocks.openTodayJournal).toHaveBeenCalledOnce();
     expect(atriumMocks.openInscribe).toHaveBeenCalledOnce();
     expect(atriumMocks.openSearch).toHaveBeenCalledOnce();
+    expect(atriumMocks.openTodayAiJournal).toHaveBeenCalledOnce();
   });
 
   it("does not restore removed cards", () => {

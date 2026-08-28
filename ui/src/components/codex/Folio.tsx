@@ -24,6 +24,7 @@ import {
   Transforms,
 } from "slate";
 import { ReactEditor } from "slate-react";
+import { useAiJournalToday } from "#/api/aiJournal";
 import {
   useBacklinks,
   useOutlinks,
@@ -81,7 +82,7 @@ import {
 } from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
-import { todayJournalPath } from "#/lib/journal";
+import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
 import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
@@ -256,6 +257,9 @@ export function Folio({ tabId, path }: FolioProps) {
   const isTodayDraftPath = path === todayJournalPath();
   const { data: journalToday, isLoading: isJournalTodayLoading } =
     useJournalToday(isTodayDraftPath);
+  const isTodayAiDraftPath = path === todayAiJournalPath();
+  const { data: aiJournalToday, isLoading: isAiJournalTodayLoading } =
+    useAiJournalToday(isTodayAiDraftPath);
   const editor = usePageEditor(path, useJournalEditorOptions(path));
   const { data: backlinks } = useBacklinks(path);
   const { data: outlinks } = useOutlinks(path);
@@ -337,6 +341,19 @@ export function Folio({ tabId, path }: FolioProps) {
       );
     }
   }, [isTodayDraftPath, journalToday, path, tabId, updateTabPath]);
+  useEffect(() => {
+    if (
+      isTodayAiDraftPath &&
+      aiJournalToday?.path &&
+      aiJournalToday.path !== path
+    ) {
+      updateTabPath(
+        tabId,
+        aiJournalToday.path,
+        aiJournalToday.meta.title ?? undefined,
+      );
+    }
+  }, [isTodayAiDraftPath, aiJournalToday, path, tabId, updateTabPath]);
 
   const assign = useAssignPage();
   const projects = useProjects();
@@ -527,6 +544,7 @@ export function Folio({ tabId, path }: FolioProps) {
     () => resolveKind({ path, kind: editor.kind, body: editor.bodyMarkdown }),
     [path, editor.kind, editor.bodyMarkdown],
   );
+  const isJournalKind = kind === "JOURNAL" || kind === "AI_JOURNAL";
   const presentation = presentationFor(kind);
   const isAiConversation = presentation.bodyPresentation === "ai-conversation";
   const conversationReadOnly = isAiConversation && conversationMode === "read";
@@ -577,7 +595,8 @@ export function Folio({ tabId, path }: FolioProps) {
     !editor.isLoading &&
     !(editor.error && !editor.isDraft) &&
     (!encrypted || encryptionState.status === "plain") &&
-    !(isTodayDraftPath && (isJournalTodayLoading || journalToday));
+    !(isTodayDraftPath && (isJournalTodayLoading || journalToday)) &&
+    !(isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday));
   const rawMarkdownDirty =
     rawMarkdownSession !== null &&
     rawMarkdownSession.value !== rawMarkdownSession.snapshot;
@@ -946,8 +965,8 @@ export function Folio({ tabId, path }: FolioProps) {
 
   if (
     !rawMarkdownSession &&
-    isTodayDraftPath &&
-    (isJournalTodayLoading || journalToday)
+    ((isTodayDraftPath && (isJournalTodayLoading || journalToday)) ||
+      (isTodayAiDraftPath && (isAiJournalTodayLoading || aiJournalToday)))
   ) {
     return <div className="cl-marg p-6">… fetching today’s journal …</div>;
   }
@@ -1199,7 +1218,9 @@ export function Folio({ tabId, path }: FolioProps) {
                 immutableReason={
                   kind === "JOURNAL"
                     ? "Journal kind cannot be changed."
-                    : undefined
+                    : kind === "AI_JOURNAL"
+                      ? "AI journal kind cannot be changed."
+                      : undefined
                 }
                 onAssign={(k) =>
                   assign.mutate(
@@ -1214,8 +1235,16 @@ export function Folio({ tabId, path }: FolioProps) {
         <KV
           k="Project"
           v={
-            folioReadOnly ? (
-              <span>{project ?? "—"}</span>
+            folioReadOnly || isJournalKind ? (
+              <span
+                title={
+                  isJournalKind
+                    ? "Journal pages cannot join a project."
+                    : undefined
+                }
+              >
+                {project ?? "—"}
+              </span>
             ) : (
               <ProjectCombo
                 key={project ?? ""}

@@ -84,6 +84,10 @@ vi.mock("#/api/journal", () => ({
   useJournalEditorOptions: () => undefined,
   useJournalRecent: () => ({ data: [] }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: () => ({ data: null, isLoading: false }),
+  useAiJournalRecent: () => ({ data: [] }),
+}));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/crypto/EncryptionProvider", () => ({
   useOptionalEncryptionActions: () => ({ lock: vi.fn() }),

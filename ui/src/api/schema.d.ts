@@ -180,6 +180,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/ai-journal/range": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /ai-journal/range?from=YYYY-MM-DD&to=YYYY-MM-DD — list AI journals in range. */
+        get: operations["ai_journal_get_range"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/ai-journal/recent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /ai-journal/recent?days=7 — list recent AI journal pages. */
+        get: operations["ai_journal_get_recent"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/ai-journal/today": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /ai-journal/today — read today's AI journal page (404 when absent). */
+        get: operations["ai_journal_get_today"];
+        put?: never;
+        /** POST /ai-journal/today — create today's AI journal if missing (get-or-create). */
+        post: operations["ai_journal_ensure_today"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/ai-journal/today/capture": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** POST /ai-journal/today/capture — append content to today's AI journal. */
+        post: operations["ai_journal_capture_today"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/ai-journal/{date}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /ai-journal/:date — get an AI journal page by date. */
+        get: operations["ai_journal_get_by_date"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/archive": {
         parameters: {
             query?: never;
@@ -1606,6 +1692,14 @@ export interface components {
         };
         /** @enum {string} */
         AggregateFn: "count" | "sum" | "avg" | "min" | "max";
+        AiCaptureRequest: {
+            /**
+             * @description Short label naming the writing agent (e.g. `claude-code`), rendered
+             *     as an entry prefix. Single line, 1-64 characters.
+             */
+            author?: string | null;
+            content: string;
+        };
         AmbiguousName: {
             canonical_name: string;
             page_ids: string[];
@@ -2428,7 +2522,7 @@ export interface components {
          *     vocabulary instead of hardcoding it.
          * @enum {string}
          */
-        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "MEETING" | "ONE_ON_ONE" | "ARCHIVE" | "AI_CONVERSATION";
+        Kind: "NOTE" | "PROJECT" | "JOURNAL" | "TODO" | "QUOTE" | "BOOK" | "CAPTURE" | "CODE" | "PERSON" | "TASK" | "CYCLE" | "RECIPE" | "MEETING" | "ONE_ON_ONE" | "ARCHIVE" | "AI_CONVERSATION" | "AI_JOURNAL";
         LocationResponse: {
             /** @description Optional human-readable label (e.g. `"London"`). */
             label?: string | null;
@@ -3795,6 +3889,255 @@ export interface operations {
                 };
             };
             /** @description Cycle not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    ai_journal_get_range: {
+        parameters: {
+            query: {
+                from: string;
+                to: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI journals in date range */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalSummary"][];
+                };
+            };
+            /** @description Invalid date range */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    ai_journal_get_recent: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recent AI journals */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JournalSummary"][];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    ai_journal_get_today: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Today's AI journal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description AI journal not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    ai_journal_ensure_today: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Existing AI journal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Created AI journal */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    ai_journal_capture_today: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiCaptureRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated AI journal */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Invalid author */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Protected AI journal */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    ai_journal_get_by_date: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Journal date in YYYY-MM-DD format */
+                date: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description AI journal page */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PageDetailResponse"];
+                };
+            };
+            /** @description Invalid date */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description AI journal not found */
             404: {
                 headers: {
                     [name: string]: unknown;

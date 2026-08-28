@@ -14,6 +14,12 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/journal/range", "get"),
     ("/api/vault/journal/recent", "get"),
     ("/api/vault/journal/{date}", "get"),
+    ("/api/vault/ai-journal/today", "get"),
+    ("/api/vault/ai-journal/today", "post"),
+    ("/api/vault/ai-journal/today/capture", "post"),
+    ("/api/vault/ai-journal/range", "get"),
+    ("/api/vault/ai-journal/recent", "get"),
+    ("/api/vault/ai-journal/{date}", "get"),
     ("/api/vault/conversations/capture", "post"),
     ("/api/vault/tasks", "get"),
     ("/api/vault/tasks/history", "get"),
@@ -66,8 +72,8 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 115,
-        "OpenAPI should document all 115 registered /api/vault operations"
+        operation_count, 121,
+        "OpenAPI should document all 121 registered /api/vault operations"
     );
 }
 
@@ -315,6 +321,15 @@ fn openapi_kind_enum_contains_meeting_kinds() {
     assert!(kinds.contains(&serde_json::json!("MEETING")));
     // The variant is `OneOnOne`; only the schema rename makes it wire-correct.
     assert!(kinds.contains(&serde_json::json!("ONE_ON_ONE")));
+}
+
+#[test]
+fn openapi_kind_enum_contains_ai_journal() {
+    let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
+    let kinds = document["components"]["schemas"]["Kind"]["enum"]
+        .as_array()
+        .expect("Kind should be a string enum");
+    assert!(kinds.contains(&serde_json::json!("AI_JOURNAL")));
 }
 
 #[test]

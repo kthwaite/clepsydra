@@ -148,6 +148,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "guide", slug: "tasks-agenda-journals-and-board" },
   },
   {
+    id: "journal.ai.today",
+    label: "Open today's AI journal",
+    surface: "command",
+    disposition: { kind: "guide", slug: "tasks-agenda-journals-and-board" },
+  },
+  {
     id: "journal.capture",
     label: "Capture aside",
     surface: "command",

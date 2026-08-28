@@ -24,6 +24,7 @@ import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
 import { formatChord, SHORTCUTS } from "#/lib/shortcuts";
@@ -70,6 +71,7 @@ function CommandPaletteContent() {
   const activateTab = useActivateTabWithFolioHistory();
   const leaveWorkspace = useLeaveFolioWorkspace();
   const openTodayJournal = useOpenTodayJournal();
+  const openTodayAiJournal = useOpenTodayAiJournal();
   const { toggle: toggleTheme, diegetic, setDiegetic } = useTheme();
 
   const [q, setQ] = useState("");
@@ -122,6 +124,9 @@ function CommandPaletteContent() {
               return;
             case "open-today-journal":
               openTodayJournal();
+              return;
+            case "open-today-ai-journal":
+              openTodayAiJournal();
               return;
             case "open-capture-aside":
               openCaptureAside();
@@ -212,6 +217,7 @@ function CommandPaletteContent() {
       activateTab,
       leaveWorkspace,
       openTodayJournal,
+      openTodayAiJournal,
       toggleTheme,
       openInscribe,
       openCaptureAside,

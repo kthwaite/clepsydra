@@ -125,6 +125,7 @@ describe("sortKindsByLabel", () => {
     expect(sortKindsByLabel(ASSIGNABLE_KINDS)).toEqual([
       "ONE_ON_ONE", // "1:1" — digits sort before letters
       "AI_CONVERSATION",
+      "AI_JOURNAL",
       "ARCHIVE",
       "BOOK",
       "CAPTURE",

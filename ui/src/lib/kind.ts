@@ -34,6 +34,7 @@ export const KINDS = [
   "ONE_ON_ONE",
   "ARCHIVE",
   "AI_CONVERSATION",
+  "AI_JOURNAL",
 ] as const satisfies readonly Kind[];
 
 type MissingFromKinds = Exclude<Kind, (typeof KINDS)[number]>;
@@ -77,6 +78,9 @@ export const KIND_META: Record<Kind, KindMeta> = {
   // pip keeps them legible without competing with authored material.
   ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)" },
   AI_CONVERSATION: { label: "AI CONVERSATION", color: "var(--cool)" },
+  // The assistants' own daily stream; deep accent separates it from the
+  // human JOURNAL's cool pip at a glance.
+  AI_JOURNAL: { label: "AI JOURNAL", color: "var(--accent-deep)" },
 };
 
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
@@ -90,6 +94,8 @@ export const sortKindsByLabel = <K extends Kind>(kinds: readonly K[]): K[] =>
 // Top-level folder → kind. Keys are lowercased folder names; several synonyms
 // map to the same kind.
 const FOLDER_KIND: Record<string, Kind> = {
+  "ai-journals": "AI_JOURNAL",
+  "ai-journal": "AI_JOURNAL",
   journals: "JOURNAL",
   journal: "JOURNAL",
   daily: "JOURNAL",

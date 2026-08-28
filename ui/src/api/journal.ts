@@ -1,8 +1,9 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useEnsureAiJournalToday } from "#/api/aiJournal";
 import type { components } from "#/api/schema";
 import type { PageEditorOptions } from "#/editor/usePageEditor";
-import { todayJournalPath } from "#/lib/journal";
+import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
 import { fetchClient } from "./client";
 import { invalidatePageContent, queryKeys } from "./keys";
 
@@ -61,18 +62,27 @@ export function useEnsureJournalToday() {
   });
 }
 
-/** FOLIO's journal wiring: today's journal binds before the file exists and
- *  is created on first write; every other path edits normally. */
+/** FOLIO's journal wiring: today's journal (human or AI) binds before the
+ *  file exists and is created on first write; every other path edits
+ *  normally. */
 export function useJournalEditorOptions(
   path: string,
 ): PageEditorOptions | undefined {
   const ensureToday = useEnsureJournalToday();
-  const mutateAsync = ensureToday.mutateAsync;
-  const isToday = path === todayJournalPath();
-  return useMemo(
-    () => (isToday ? { ensure: () => mutateAsync() } : undefined),
-    [isToday, mutateAsync],
-  );
+  const ensureAiToday = useEnsureAiJournalToday();
+  const humanMutate = ensureToday.mutateAsync;
+  const aiMutate = ensureAiToday.mutateAsync;
+  const stream =
+    path === todayJournalPath()
+      ? "human"
+      : path === todayAiJournalPath()
+        ? "ai"
+        : null;
+  return useMemo(() => {
+    if (stream === "human") return { ensure: () => humanMutate() };
+    if (stream === "ai") return { ensure: () => aiMutate() };
+    return undefined;
+  }, [stream, humanMutate, aiMutate]);
 }
 
 export function useJournalRecent(days = 7) {

@@ -566,3 +566,95 @@ async fn today_journal_carried_forward_empty_when_no_recent_tasks() {
         "should be empty when no recent journal tasks"
     );
 }
+
+// ---------------------------------------------------------------------------
+// AI-journal / human-journal kind discrimination
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn human_journal_queries_never_see_ai_journal_pages() {
+    let today = today_str();
+    let today_clone = today.clone();
+
+    let (server, _tmp) = setup_server_with_files(move |vault_root| {
+        let ai_journals_dir = vault_root.join("ai-journals");
+        std::fs::create_dir_all(&ai_journals_dir).unwrap();
+        let content = format!(
+            "---\nid: 00000000-0000-0000-0000-bbbbbbbbbbbb\ntitle: \"{today_clone}\"\n---\n\
+             - ai note\n"
+        );
+        std::fs::write(ai_journals_dir.join(format!("{today_clone}.md")), &content).unwrap();
+    });
+
+    // The AI journal page must not satisfy the HUMAN journal queries.
+    server
+        .get("/api/vault/journal/today")
+        .await
+        .assert_status(StatusCode::NOT_FOUND);
+
+    let recent: serde_json::Value = server.get("/api/vault/journal/recent?days=7").await.json();
+    assert!(
+        recent.as_array().unwrap().is_empty(),
+        "recent must exclude ai-journal pages"
+    );
+
+    let range: serde_json::Value = server
+        .get(&format!("/api/vault/journal/range?from={today}&to={today}"))
+        .await
+        .json();
+    assert!(
+        range.as_array().unwrap().is_empty(),
+        "range must exclude ai-journal pages"
+    );
+
+    // The pre-existing AI page for today must NOT satisfy ensure — POST must
+    // still create a fresh HUMAN journal page.
+    let created = server.post("/api/vault/journal/today").await;
+    created.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = created.json();
+    let path = body["path"].as_str().unwrap();
+    assert!(
+        path.starts_with("journals/"),
+        "ensure must create a HUMAN journal page, got: {path}"
+    );
+}
+
+#[tokio::test]
+async fn carried_forward_excludes_ai_journal_todos() {
+    let yesterday = {
+        let today = fixed_now().date_naive();
+        (today - chrono::Duration::days(1))
+            .format("%Y-%m-%d")
+            .to_string()
+    };
+    let yesterday_clone = yesterday.clone();
+
+    let (server, _tmp) = setup_server_with_files(move |vault_root| {
+        let ai_journals_dir = vault_root.join("ai-journals");
+        std::fs::create_dir_all(&ai_journals_dir).unwrap();
+        let content = format!(
+            "---\nid: 00000000-0000-0000-0000-cccccccccccc\ntitle: \"{yesterday_clone}\"\n---\n\
+             - [ ] agent todo\n"
+        );
+        std::fs::write(
+            ai_journals_dir.join(format!("{yesterday_clone}.md")),
+            &content,
+        )
+        .unwrap();
+    });
+
+    // Seed today's HUMAN journal so GET /journal/today succeeds.
+    server.post("/api/vault/journal/today").await;
+
+    let res = server.get("/api/vault/journal/today").await;
+    res.assert_status_ok();
+
+    let body: serde_json::Value = res.json();
+    let carried = body["carried_forward"]
+        .as_array()
+        .expect("carried_forward should be an array");
+    assert!(
+        carried.is_empty(),
+        "carried_forward must exclude ai-journal todos, got: {carried:?}"
+    );
+}

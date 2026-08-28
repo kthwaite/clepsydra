@@ -185,6 +185,9 @@ vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, isLoading: false }),
   useJournalEditorOptions: () => undefined,
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: () => ({ data: null, isLoading: false }),
+}));
 vi.mock("#/crypto/EncryptionProvider", () => ({
   useOptionalEncryptionActions: () => ({ lock: vi.fn() }),
   useOptionalEncryptionStatus: () => null,
