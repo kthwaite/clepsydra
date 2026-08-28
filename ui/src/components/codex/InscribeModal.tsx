@@ -1,12 +1,9 @@
 import { type FormEvent, useRef, useState } from "react";
-import { useBases } from "#/api/bases";
 import { useTags } from "#/api/index";
 import { useCreatePage } from "#/api/pages";
-import { BaseMemberIntake } from "#/components/bases/BaseMemberIntake";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import { KindSelect } from "#/components/codex/KindSelect";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
-import { Select, SelectItem } from "#/components/ui/select";
 import { TagInput } from "#/components/ui/tag-input";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { generateShortId, intakePath } from "#/lib/intake";
@@ -37,11 +34,8 @@ export function InscribeModal() {
   const openTab = useOpenTab();
   const projects = useProjects();
   const { data: tagIndex } = useTags();
-  const { data: baseList } = useBases();
   // Choosing a Base hands the form to the member draft: same composition and
   // same endpoint as the Base table's own Add member.
-  const [baseSlug, setBaseSlug] = useState<string | null>(null);
-  const bases = baseList?.bases ?? [];
 
   if (!isOpen) return null;
 
@@ -98,7 +92,6 @@ export function InscribeModal() {
   };
 
   const reset = () => {
-    setBaseSlug(null);
     setKind("NOTE");
     setProject(null);
     setTitle("");
