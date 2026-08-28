@@ -215,13 +215,19 @@ async fn board_aggregates_operations_cycles_tasks() {
     assert_eq!(columns[0]["id"], "INTAKE");
     assert_eq!(columns[0]["label"], "INTAKE");
     assert_eq!(columns[0]["sub"], "unfiled");
-    assert_eq!(columns[0]["wip"], 0);
     assert_eq!(columns[2]["id"], "FIELD");
     assert_eq!(columns[2]["label"], "IN-FIELD");
     assert_eq!(columns[2]["sub"], "active");
-    assert_eq!(columns[2]["wip"], 4);
     assert_eq!(columns[4]["id"], "SEALED");
     assert_eq!(columns[4]["sub"], "closed");
+    // WIP limits were removed (TSK-0116): no column carries a `wip` key.
+    for col in columns {
+        assert!(
+            col.get("wip").is_none(),
+            "column {} still exposes a `wip` field: {col:?}",
+            col["id"]
+        );
+    }
 
     // --- operations ---
     let ops = body["operations"].as_array().unwrap();

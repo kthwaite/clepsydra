@@ -33,12 +33,12 @@ use crate::vault::kind::Kind;
 // ---------------------------------------------------------------------------
 
 /// The five board columns in order.
-const COLUMNS: &[(&str, &str, &str, u32)] = &[
-    (DEFAULT_STATUS, DEFAULT_STATUS, "unfiled", 0),
-    ("TRIAGE", "TRIAGE", "staged", 6),
-    ("FIELD", "IN-FIELD", "active", 4),
-    ("REVIEW", "REVIEW", "qa / seal", 4),
-    ("SEALED", "SEALED", "closed", 0),
+const COLUMNS: &[(&str, &str, &str)] = &[
+    (DEFAULT_STATUS, DEFAULT_STATUS, "unfiled"),
+    ("TRIAGE", "TRIAGE", "staged"),
+    ("FIELD", "IN-FIELD", "active"),
+    ("REVIEW", "REVIEW", "qa / seal"),
+    ("SEALED", "SEALED", "closed"),
 ];
 
 /// Valid priority tokens.
@@ -77,7 +77,6 @@ pub struct BoardColumn {
     pub id: String,
     pub label: String,
     pub sub: String,
-    pub wip: u32,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -293,9 +292,9 @@ pub fn router() -> Router<Arc<AppState>> {
 
 /// Validate a status string against the known columns.
 fn validate_status(status: &str) -> Result<(), ApiError> {
-    let valid = COLUMNS.iter().any(|&(id, _, _, _)| id == status);
+    let valid = COLUMNS.iter().any(|&(id, _, _)| id == status);
     if !valid {
-        let valid_ids: Vec<&str> = COLUMNS.iter().map(|&(id, _, _, _)| id).collect();
+        let valid_ids: Vec<&str> = COLUMNS.iter().map(|&(id, _, _)| id).collect();
         return Err(ApiError::bad_request(format!(
             "unknown status: '{status}'; valid values: {}",
             valid_ids.join(", ")
