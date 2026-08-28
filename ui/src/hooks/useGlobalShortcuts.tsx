@@ -3,12 +3,12 @@ import { useEffect, useMemo } from "react";
 import { routeViewFromMatches } from "#/components/codex/useCodexView";
 import { goToView } from "#/components/codex/viewRegistry";
 import { useTheme } from "#/components/ThemeProvider";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   type ActivateTabWithFolioHistory,
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import {
   type Chord,

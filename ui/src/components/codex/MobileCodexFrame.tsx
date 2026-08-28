@@ -1,6 +1,5 @@
 import { useNavigate } from "@tanstack/react-router";
 import { createPortal } from "react-dom";
-import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { useCodexView } from "#/components/codex/useCodexView";
 import {
@@ -9,12 +8,13 @@ import {
   MOBILE_NAV,
   VIEW_REGISTRY,
 } from "#/components/codex/viewRegistry";
+import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { useTheme } from "#/components/ThemeProvider";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { useUiStore } from "#/store/ui";
 

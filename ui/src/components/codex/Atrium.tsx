@@ -5,17 +5,18 @@ import { useContentIndex } from "#/api/index";
 import { useJournalToday } from "#/api/journal";
 import { useLocation } from "#/api/location";
 import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
+import { KindIcon } from "#/components/KindIcon";
 import { useClock } from "#/hooks/useClock";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";
-import { kindColorVar, resolveKind } from "#/lib/kind";
+import { resolveKind } from "#/lib/kind";
 import { formatRelativeTime, pad2 } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
-import { AgendaTile } from "./AgendaTile";
 import { ActivityHeatmap } from "./ActivityHeatmap";
+import { AgendaTile } from "./AgendaTile";
 import {
   buildHeatmap,
   formatBclDate,
@@ -242,9 +243,10 @@ export function Atrium() {
                       {pad2(i + 1)}
                     </span>
                     <span className="cl-mono col-start-2 row-start-1 flex min-w-0 items-center gap-1.5 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] text-ink-mute md:col-start-auto md:row-start-auto">
-                      <span
-                        className="inline-block h-[6px] w-[6px] flex-shrink-0"
-                        style={{ background: kindColorVar(kind) }}
+                      <KindIcon
+                        kind={kind}
+                        size={11}
+                        className="flex-shrink-0"
                       />
                       {shortFolio(n.path)}
                     </span>
@@ -320,8 +322,6 @@ export function Atrium() {
           onOpenPage={(path, title) => openTab("page", path, title)}
         />
       </Card>
-
-
 
       {/* READING CONTINUES — the bases pilot; hidden without a reading base */}
       <ReadingContinuesPanel />

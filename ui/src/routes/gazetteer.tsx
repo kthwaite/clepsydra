@@ -5,7 +5,7 @@ import {
 } from "@tanstack/react-router";
 import { Gazetteer, type GazetteerFilters } from "#/components/codex/Gazetteer";
 import type { GazetteerSort } from "#/components/codex/gazetteer-filter";
-import { facetsEqual, type FilterState } from "#/lib/filters/model";
+import { type FilterState, facetsEqual } from "#/lib/filters/model";
 
 export type GazetteerSearch = Record<string, unknown> & {
   q?: string;

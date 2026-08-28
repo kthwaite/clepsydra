@@ -36,7 +36,9 @@ function isTagField(field: string): field is TagConditionField {
 function readMembership(
   filter: BaseFilter,
   allowEmpty = false,
-): { field: TagConditionField; op: "contains" | "eq"; value: string } | undefined {
+):
+  | { field: TagConditionField; op: "contains" | "eq"; value: string }
+  | undefined {
   if (!("field" in filter)) return undefined;
   if (!isTagField(filter.field)) return undefined;
   if (!MEMBERSHIP_OPS.has(filter.op)) return undefined;
@@ -55,7 +57,8 @@ function readIn(
 ): { field: TagConditionField; values: string[] } | undefined {
   if (!("field" in filter)) return undefined;
   if (!isTagField(filter.field) || filter.op !== "in") return undefined;
-  if (!Array.isArray(filter.value) || filter.value.length === 0) return undefined;
+  if (!Array.isArray(filter.value) || filter.value.length === 0)
+    return undefined;
   if (!filter.value.every((item) => typeof item === "string" && item !== "")) {
     return undefined;
   }
@@ -65,14 +68,18 @@ function readIn(
 /** An `all`/`any` group whose children are all memberships of one field. */
 function readGroup(
   filter: BaseFilter,
-): { field: TagConditionField; quantifier: TagQuantifier; values: string[] } | undefined {
-  const children = "all" in filter ? filter.all : "any" in filter ? filter.any : undefined;
+):
+  | { field: TagConditionField; quantifier: TagQuantifier; values: string[] }
+  | undefined {
+  const children =
+    "all" in filter ? filter.all : "any" in filter ? filter.any : undefined;
   if (!children || children.length === 0) return undefined;
   // Arity matters: map would pass the index as `allowEmpty`.
   const memberships = children.map((child) => readMembership(child));
   const [first] = memberships;
   if (!first) return undefined;
-  if (!memberships.every((entry) => entry?.field === first.field)) return undefined;
+  if (!memberships.every((entry) => entry?.field === first.field))
+    return undefined;
   return {
     field: first.field,
     quantifier: "all" in filter ? "all_of" : "any_of",
@@ -123,7 +130,8 @@ export function readTagCondition(filter: BaseFilter): TagCondition | undefined {
     // "none of a, b" is not(any of a, b). Negating an all-of group means "not
     // both", a predicate this row cannot express, so leave it to the general
     // editor.
-    const negatable = inner.quantifier === "any_of" || inner.values.length === 1;
+    const negatable =
+      inner.quantifier === "any_of" || inner.values.length === 1;
     if (!negatable) return undefined;
     return { ...inner, quantifier: "none_of" };
   }
@@ -161,11 +169,15 @@ function writePositive(condition: TagCondition): BaseFilter {
   if (values.length === 1) return membershipNode(field, "contains", values[0]);
   // Other encodings survive only while they still express the quantifier.
   if (encoding?.kind === "group" && encoding.connective === connective) {
-    const children = values.map((value) => membershipNode(field, "contains", value));
+    const children = values.map((value) =>
+      membershipNode(field, "contains", value),
+    );
     return connective === "all" ? { all: children } : { any: children };
   }
   if (connective === "all") {
-    return { all: values.map((value) => membershipNode(field, "contains", value)) };
+    return {
+      all: values.map((value) => membershipNode(field, "contains", value)),
+    };
   }
   return { field, op: "in", value: values };
 }

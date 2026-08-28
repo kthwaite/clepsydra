@@ -71,26 +71,16 @@ describe("Task Board display vocabulary", () => {
   it("renders approved priority labels while preserving raw radio values", async () => {
     const onChange = vi.fn();
     render(
-      <PriorityRow
-        value="P2"
-        onChange={onChange}
-        testIdPrefix="vocabulary"
-      />,
+      <PriorityRow value="P2" onChange={onChange} testIdPrefix="vocabulary" />,
     );
 
-    for (const label of [
-      "P0 Critical",
-      "P1 High",
-      "P2 Medium",
-      "P3 Low",
-    ]) {
+    for (const label of ["P0 Critical", "P1 High", "P2 Medium", "P3 Low"]) {
       expect(screen.getByRole("radio", { name: label })).toBeInTheDocument();
     }
 
     await userEvent.click(screen.getByRole("radio", { name: "P0 Critical" }));
     expect(onChange).toHaveBeenCalledWith("P0");
   });
-
 
   it("uses neutral copy for an undated Cycle window", () => {
     expect(fmtCycleWindow(null, null)).toBe("No dates");

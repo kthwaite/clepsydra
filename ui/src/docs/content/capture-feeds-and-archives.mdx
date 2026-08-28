@@ -30,7 +30,9 @@ and scheduler without deleting `feeds.md`, other Markdown data, or
 - Follow the [Browser Extension](/docs/browser-extension) guide to build and
   connect the capture client. Archiving must be enabled.
 - Review `[archive]` settings, especially `cas_path`, path prefix, and request
-  limits. The default CAS is `~/.clepsydra/cas`, outside the vault.
+  limits. The default CAS is `.clepsydra/cas`, inside the vault (ADR 0005); a
+  vault created before 2026-08-28 keeps its blobs in the old external store
+  until `clep cas migrate` moves them.
 - Keep enough storage for vault pages, `.clepsydra/feeds.db`, and CAS blobs.
 
 ## Workflow
@@ -189,16 +191,22 @@ and substitutes a consistent snapshot of `.clepsydra/feeds.db` for its live
 SQLite/WAL files. The archive therefore includes ordinary Folios, `feeds.md`,
 plain attachments stored inside the vault, and the feed reader database.
 
-The backup does **not** automatically include the default CAS because
-`~/.clepsydra/cas` is outside the vault. If `archive.cas_path` points outside the
-vault, back up the complete CAS directory, including `cas.db` and the blob tree,
-separately and keep that copy consistent with the vault's archive Folios.
-Likewise, external Zotero PDF asset paths are outside this backup. If a custom
-CAS path is inside the vault, it is walked as ordinary vault content, but that
-walk is not a transactional snapshot across archive Folios and CAS.
+The backup always includes the CAS. `clep backup` opens the configured
+`archive.cas_path` — inside the vault at the default `.clepsydra/cas`, or an
+external directory for a custom path — and writes a consistent snapshot of
+`cas.db` and the blob tree into the tar at `.clepsydra/cas`, regardless of
+where the live CAS actually lives; no separate CAS backup is needed. When the
+CAS is inside the vault, the ordinary file walk skips it to avoid archiving it
+twice — the CAS snapshot is authoritative. That snapshot is not taken in the
+same transaction as the vault-content walk, so a write racing the backup can
+still land on one side of the split. Likewise, external Zotero PDF asset paths
+are outside this backup.
 
-There is no shipped restore command, archive-import or reference-replay
-operation, or CAS refcount rebuild. Recovery means stopping writers, safely
+There is no shipped restore command or archive-import/reference-replay
+operation; for CAS refcount recovery after a restore, run `clep cas rebuild`
+(or `clep cas migrate` first if the backup predates the vault-relative CAS
+default, ADR 0005) and verify with `clep doctor --full`. Recovery means
+stopping writers, safely
 extracting the tar to the intended vault location, restoring a matching complete
 CAS directory, including `cas.db`, and restoring any external assets. Start
 Clepsydra so the derived page index can rebuild, but do not expect that rebuild

@@ -60,6 +60,7 @@ import { RecipeFolioBody } from "#/components/codex/recipe/RecipeFolioBody";
 import { useCollapsibleRail } from "#/components/codex/useCollapsibleRail";
 import { useReadingColumn } from "#/components/codex/useReadingColumn";
 import { useScrollSpy } from "#/components/codex/useScrollSpy";
+import { KindIcon } from "#/components/KindIcon";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TagInput } from "#/components/ui/tag-input";
@@ -83,7 +84,7 @@ import {
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
 import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
-import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import { kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
 import { formatAbsoluteDate, formatRelativeTime } from "#/lib/time";
@@ -1010,7 +1011,7 @@ export function Folio({ tabId, path }: FolioProps) {
         </span>
         <div className="flex items-center gap-3">
           <span className="cl-mono inline-flex items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-            <Pip kind={kind} />
+            <KindIcon kind={kind} size={11} className="flex-shrink-0" />
             {kindLabel(kind)}
           </span>
           {folioReadOnly && !archiveTagEditor && editor.revisionConflict ? (
@@ -1951,16 +1952,6 @@ function ProtectedBodyNotice({ onUnlock }: { onUnlock: () => void }) {
   );
 }
 
-function Pip({ kind }: { kind: Parameters<typeof kindColorVar>[0] }) {
-  return (
-    <span
-      className="inline-block h-[6px] w-[6px] flex-shrink-0"
-      style={{ background: kindColorVar(kind) }}
-      aria-hidden
-    />
-  );
-}
-
 function RailHeader({
   label,
   onCollapse,
@@ -2104,7 +2095,10 @@ function LinkList({
     <div className="flex flex-col gap-1.5">
       {items.map((it) => (
         <div key={it.path} className="grid grid-cols-[16px_1fr] gap-1.5">
-          <Pip kind={resolveKindAndColor(it.path)} />
+          <KindIcon
+            kind={resolveKindAndColor(it.path)}
+            className="flex-shrink-0"
+          />
           <div className="min-w-0">
             <CLink path={it.path} className="block text-[12px] text-ink">
               {it.title}
@@ -2211,7 +2205,7 @@ function OpenRow({
         title={t.path ?? t.label}
         className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left hover:text-ink"
       >
-        <Pip kind={kind} />
+        <KindIcon kind={kind} className="flex-shrink-0" />
         <span className="overflow-hidden text-ellipsis whitespace-nowrap">
           {t.label || t.path || "(untitled)"}
         </span>

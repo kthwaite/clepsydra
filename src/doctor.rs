@@ -266,6 +266,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
+        check_projects(v, &mut report);
         check_conflicts(v, &mut report);
         check_meetings(v, &mut report);
         check_bases(v, &mut report);
@@ -283,6 +284,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
             "legacy census",
             "skipped — vault unavailable",
         ));
+        report.push(skip("projects", "census", "skipped — vault unavailable"));
         report.push(skip("meetings", "census", "skipped — vault unavailable"));
         report.push(skip("bases", "registry", "skipped — vault unavailable"));
     }
@@ -1125,9 +1127,15 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
         ));
     }
 
-    let raw = &archive.cas_path;
-    let path = expand_tilde(raw).unwrap_or_else(|| PathBuf::from(raw));
+    let path = vault.cas_root();
     report.push(info(SECTION, "path", path.display().to_string()));
+
+    if let Some(hint) = legacy_store_hint(
+        &path,
+        crate::vault::cas_migrate::legacy_store_with_blobs().as_deref(),
+    ) {
+        report.push(hint);
+    }
 
     if !path.exists() {
         report.push(
@@ -1220,6 +1228,45 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
             format!("cannot open {} read-only: {e}", db_path.display()),
         )),
     }
+}
+
+/// WARN when this vault's store has no `cas.db` yet but a legacy store does —
+/// the user has not run `clep cas migrate`. Pure: takes the candidate legacy
+/// path so tests need no HOME override.
+fn legacy_store_hint(store: &Path, legacy: Option<&Path>) -> Option<CheckResult> {
+    let legacy = legacy?;
+    // Key on blob FILES, not `cas.db`: once `clep serve` runs on the
+    // phase-3 binary, `ContentStore::open` creates an empty `cas.db` on
+    // first touch, which would otherwise silence this hint during exactly
+    // the installed-and-restarted-before-migrating window it exists to
+    // catch.
+    if !crate::vault::cas::list_blob_hashes(store).is_empty() || !legacy.join("cas.db").is_file() {
+        return None;
+    }
+    // Canonicalize both sides when they exist so a symlinked home doesn't
+    // defeat the same-store check; `store` commonly doesn't exist yet here
+    // (the point of the hint), so fall back to a plain path comparison.
+    let same_store = match (std::fs::canonicalize(store), std::fs::canonicalize(legacy)) {
+        (Ok(s), Ok(l)) => s == l,
+        _ => store == legacy,
+    };
+    if same_store {
+        return None;
+    }
+    Some(
+        warn(
+            "cas",
+            "legacy",
+            format!(
+                "this vault's store {} holds no blobs yet, but a legacy store exists at {}",
+                store.display(),
+                legacy.display()
+            ),
+        )
+        .with_hint(
+            "run `clep cas migrate` (dry run), then `clep cas migrate --write` with `clep serve` stopped",
+        ),
+    )
 }
 
 /// `--full` CAS verify: recount expected refs from a vault-wide scan, subtract
@@ -1432,59 +1479,16 @@ fn subtract_released_rubbish_refs(
 }
 
 /// Re-derive a blob's fan-out path (`<cas>/<hex[..2]>/<hex>`) from a
-/// `"sha256:<hex>"` hash. `ContentStore::blob_path` is private, so doctor
-/// reimplements the same two-level layout locally. Returns `None` for a hash
-/// that doesn't match the expected shape.
+/// `"sha256:<hex>"` hash. Delegates to `cas::blob_relative_path`. Returns
+/// `None` for a hash that doesn't match the expected shape.
 fn cas_blob_path(cas_root: &Path, hash: &str) -> Option<PathBuf> {
-    let hex = hash.strip_prefix("sha256:")?;
-    if hex.len() != 64
-        || !hex
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
-        return None;
-    }
-    Some(cas_root.join(&hex[..2]).join(hex))
+    crate::vault::cas::blob_relative_path(hash).map(|rel| cas_root.join(rel))
 }
 
 /// Walk the CAS root's two-level fan-out directories and list every blob file
-/// found, as `"sha256:<hex>"` hashes. Mirrors `ContentStore::scan_blob_files`'s
-/// layout (private, so reimplemented here) but doctor only needs hashes, not
-/// sizes.
+/// found, as `"sha256:<hex>"` hashes. Delegates to `cas::list_blob_hashes`.
 fn list_cas_blob_files(cas_root: &Path) -> Vec<String> {
-    fn is_lowercase_hex(name: &str, len: usize) -> bool {
-        name.len() == len
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    }
-
-    let Ok(entries) = std::fs::read_dir(cas_root) else {
-        return Vec::new();
-    };
-    let mut prefixes: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
-        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
-        .filter(|name| is_lowercase_hex(name, 2))
-        .collect();
-    prefixes.sort();
-
-    let mut hashes = Vec::new();
-    for prefix in prefixes.drain(..) {
-        let Ok(files) = std::fs::read_dir(cas_root.join(&prefix)) else {
-            continue;
-        };
-        let mut names: Vec<String> = files
-            .filter_map(Result::ok)
-            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
-            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
-            .filter(|name| is_lowercase_hex(name, 64) && name.starts_with(&prefix))
-            .collect();
-        names.sort();
-        hashes.extend(names.into_iter().map(|name| format!("sha256:{name}")));
-    }
-    hashes
+    crate::vault::cas::list_blob_hashes(cas_root)
 }
 
 // ---------------------------------------------------------------------------
@@ -1808,25 +1812,10 @@ fn check_conflicts(vault: &Vault, report: &mut Report) {
 // Check 8b: meeting frontmatter
 // ---------------------------------------------------------------------------
 
-/// Census of MEETING pages whose `attendees` or `occurred_at` the API would
-/// refuse to write. Files are hand-editable, so nothing stops a page reaching
-/// this state; the doctor is where it surfaces. Pages that are merely
-/// unfinished — a meeting with no time — are reported separately, as
-/// information rather than breakage. (A 1:1 is a MEETING tagged `1:1`; it may
-/// name any number of people, so nothing here counts attendees.)
-fn check_meetings(vault: &Vault, report: &mut Report) {
-    use crate::vault::attendance;
-    use crate::vault::kind::resolve;
-    use crate::vault::meeting;
+/// Visit every readable, non-excluded markdown page under the vault root.
+fn for_each_page(vault: &Vault, mut visit: impl FnMut(&crate::vault::page::Page)) {
     use crate::vault::page::Page;
     use crate::vault::path::VaultPath;
-
-    const SECTION: &str = "meetings";
-    const LISTED: usize = 10;
-
-    let mut meetings = 0usize;
-    let mut invalid: Vec<String> = Vec::new();
-    let mut undated: Vec<String> = Vec::new();
 
     for entry in walkdir::WalkDir::new(vault.root())
         .into_iter()
@@ -1847,16 +1836,92 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
         if vault.is_excluded(&vault_path) {
             continue;
         }
-        let Ok(page) = Page::from_file(entry.path(), vault_path.clone()) else {
+        let Ok(page) = Page::from_file(entry.path(), vault_path) else {
             continue;
         };
-        let (kind, _) = resolve(vault_path.as_str(), page.meta.kind);
+        visit(&page);
+    }
+}
+
+/// Orphan project slugs: `project` values pages carry that no PROJECT page
+/// declares. The API refuses to write one, but files are hand-editable, so
+/// the doctor is where they surface — as information, since nothing breaks.
+fn check_projects(vault: &Vault, report: &mut Report) {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    use crate::vault::kind::{Kind, resolve};
+
+    const SECTION: &str = "projects";
+    const LISTED: usize = 10;
+
+    let mut declared: BTreeSet<String> = BTreeSet::new();
+    let mut carried: BTreeMap<String, usize> = BTreeMap::new();
+    for_each_page(vault, |page| {
+        let Some(slug) = page.meta.project.as_deref() else {
+            return;
+        };
+        let (kind, _) = resolve(page.path.as_str(), page.meta.kind);
+        if kind == Kind::Project {
+            declared.insert(slug.to_string());
+        } else {
+            *carried.entry(slug.to_string()).or_default() += 1;
+        }
+    });
+
+    let orphans = carried
+        .iter()
+        .filter(|(slug, _)| !declared.contains(*slug))
+        .map(|(slug, pages)| format!("{slug} ({pages} page(s))"))
+        .collect::<Vec<_>>();
+
+    if orphans.is_empty() {
+        report.push(ok(
+            SECTION,
+            "census",
+            "every project slug is declared by a PROJECT page",
+        ));
+        return;
+    }
+    report.push(
+        info(
+            SECTION,
+            "orphans",
+            listing(
+                &orphans,
+                format!("{} orphan project slug(s):", orphans.len()),
+                LISTED,
+            ),
+        )
+        .with_hint("create a PROJECT page declaring the slug, or clear the pages' `project`"),
+    );
+}
+
+/// Census of MEETING pages whose `attendees` or `occurred_at` the API would
+/// refuse to write. Files are hand-editable, so nothing stops a page reaching
+/// this state; the doctor is where it surfaces. Pages that are merely
+/// unfinished — a meeting with no time — are reported separately, as
+/// information rather than breakage. (A 1:1 is a MEETING tagged `1:1`; it may
+/// name any number of people, so nothing here counts attendees.)
+fn check_meetings(vault: &Vault, report: &mut Report) {
+    use crate::vault::attendance;
+    use crate::vault::kind::resolve;
+    use crate::vault::meeting;
+
+    const SECTION: &str = "meetings";
+    const LISTED: usize = 10;
+
+    let mut meetings = 0usize;
+    let mut invalid: Vec<String> = Vec::new();
+    let mut undated: Vec<String> = Vec::new();
+
+    for_each_page(vault, |page| {
+        let path = page.path.as_str();
+        let (kind, _) = resolve(path, page.meta.kind);
         if !attendance::has_attendees(kind) && !meeting::records_occurrence(kind) {
-            continue;
+            return;
         }
         meetings += 1;
 
-        let path = vault_path.as_str();
         if let Err(error) = attendance::validate(kind, &page.meta) {
             invalid.push(format!("{path}: {error}"));
         }
@@ -1865,7 +1930,7 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
         } else if meeting::is_undated(kind, &page.meta) {
             undated.push(path.to_string());
         }
-    }
+    });
 
     if meetings == 0 {
         report.push(info(SECTION, "census", "no meeting pages"));
@@ -1952,6 +2017,57 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn legacy_store_hint_only_when_store_uninitialised_and_legacy_present() {
+        let tmp = TempDir::new().unwrap();
+        let store = tmp.path().join("vault/.clepsydra/cas");
+        let legacy = tmp.path().join("legacy");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("cas.db"), b"x").unwrap();
+        let hint = legacy_store_hint(&store, Some(&legacy)).expect("hint");
+        assert_eq!(
+            (hint.section, hint.name, hint.status),
+            ("cas", "legacy", Status::Warn)
+        );
+        assert!(
+            hint.hint
+                .as_deref()
+                .unwrap_or("")
+                .contains("clep cas migrate")
+        );
+        assert!(legacy_store_hint(&store, None).is_none());
+
+        // An initialised store — one that actually holds a blob file at a
+        // valid fan-out path — silences the hint.
+        let blob_hash = crate::vault::cas::ContentStore::hash_bytes(b"x");
+        let blob_rel = crate::vault::cas::blob_relative_path(&blob_hash).unwrap();
+        let blob_path = store.join(&blob_rel);
+        fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
+        fs::write(&blob_path, b"x").unwrap();
+        assert!(
+            legacy_store_hint(&store, Some(&legacy)).is_none(),
+            "initialised store: no hint"
+        );
+
+        // `ContentStore::open` (e.g. on first `clep serve` startup against
+        // the phase-3 default) creates an empty `cas.db` before any blob is
+        // ever written. A store in that state must still warn — this is
+        // exactly the installed-and-restarted-before-migrating window the
+        // hint exists to catch.
+        let empty_db_store = tmp.path().join("vault2/.clepsydra/cas");
+        fs::create_dir_all(&empty_db_store).unwrap();
+        fs::write(empty_db_store.join("cas.db"), b"").unwrap();
+        assert!(
+            legacy_store_hint(&empty_db_store, Some(&legacy)).is_some(),
+            "empty cas.db but no blobs yet: hint still fires"
+        );
+
+        assert!(
+            legacy_store_hint(&legacy, Some(&legacy)).is_none(),
+            "store IS the legacy path: no hint"
+        );
+    }
 
     /// RAII guard that records the prior value of an env var on construction
     /// and restores it on drop. Required because tokio's default test runtime
@@ -2284,6 +2400,45 @@ mod tests {
                 .results
                 .iter()
                 .any(|r| { r.section == "cas" && r.name == "open" && r.status == Status::Warn })
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn cas_relative_path_resolves_against_vault_root() {
+        let tmp = TempDir::new().unwrap();
+        let cwd = tmp.path();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        fs::write(
+            vault_root.join(".clepsydra/config.toml"),
+            "[vault]\nattachment_folder = \"_attachments\"\n\n[archive]\nenabled = true\ncas_path = \"cas-here\"\n",
+        )
+        .unwrap();
+        write_top_level_config(cwd, &vault_root);
+
+        let report = run_with_cwd(cwd, DoctorOpts::default()).await;
+
+        // `Vault::open` canonicalizes the root, which resolves macOS's
+        // `/var` -> `/private/var` tmpdir symlink; match that here so the
+        // assertion doesn't depend on the raw (uncanonicalized) tmp path.
+        let expected = vault_root
+            .canonicalize()
+            .unwrap()
+            .join("cas-here")
+            .display()
+            .to_string();
+        assert!(
+            report
+                .results
+                .iter()
+                .any(|r| r.section == "cas" && r.name == "path" && r.detail == expected),
+            "{:?}",
+            report
+                .results
+                .iter()
+                .filter(|r| r.section == "cas")
+                .collect::<Vec<_>>()
         );
     }
 
@@ -2723,6 +2878,113 @@ mod tests {
                 .iter()
                 .any(|record| record.section == "meetings" && record.name == "unnamed 1:1s"),
             "no meeting is reported as unnamed: {:#?}",
+            report.results
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn project_check_passes_when_every_slug_is_declared() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(
+            &vault_root,
+            "projects/atlas/atlas.md",
+            "title = \"Atlas\"\ntype = \"PROJECT\"\nproject = \"atlas\"\n",
+        );
+        write_page(
+            &vault_root,
+            "notes/atlas/filed.md",
+            "title = \"Filed\"\nproject = \"atlas\"\n",
+        );
+        write_page(&vault_root, "notes/plain.md", "title = \"Plain\"\n");
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        assert_record(
+            &report,
+            "projects",
+            "census",
+            Status::Ok,
+            "every project slug is declared by a PROJECT page",
+        );
+        assert!(
+            !report
+                .results
+                .iter()
+                .any(|record| record.section == "projects" && record.name == "orphans"),
+            "a declared slug is not an orphan: {:#?}",
+            report.results
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn project_check_lists_orphan_slugs_as_information() {
+        let tmp = TempDir::new().unwrap();
+        let vault_root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&vault_root).unwrap();
+        write_page(
+            &vault_root,
+            "projects/atlas/atlas.md",
+            "title = \"Atlas\"\ntype = \"PROJECT\"\nproject = \"atlas\"\n",
+        );
+        write_page(
+            &vault_root,
+            "notes/atlas/filed.md",
+            "title = \"Filed\"\nproject = \"atlas\"\n",
+        );
+        // Hand-edited: two notes and a task name slugs no PROJECT page declares.
+        write_page(
+            &vault_root,
+            "notes/ghost/one.md",
+            "title = \"One\"\nproject = \"ghost\"\n",
+        );
+        write_page(
+            &vault_root,
+            "notes/ghost/two.md",
+            "title = \"Two\"\nproject = \"ghost\"\n",
+        );
+        write_page(
+            &vault_root,
+            "tasks/phantom/TSK-0001.md",
+            "title = \"Phantom task\"\ntype = \"TASK\"\nproject = \"phantom\"\n",
+        );
+        write_top_level_config(tmp.path(), &vault_root);
+
+        let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
+
+        let orphans = report
+            .results
+            .iter()
+            .find(|record| record.section == "projects" && record.name == "orphans")
+            .expect("projects.orphans should be reported");
+        assert_eq!(orphans.status, Status::Info, "{orphans:#?}");
+        assert!(
+            orphans.detail.starts_with("2 orphan project slug(s):"),
+            "{orphans:#?}"
+        );
+        assert!(orphans.detail.contains("ghost (2 page(s))"), "{orphans:#?}");
+        assert!(
+            orphans.detail.contains("phantom (1 page(s))"),
+            "{orphans:#?}"
+        );
+        assert!(!orphans.detail.contains("atlas"), "{orphans:#?}");
+        assert!(
+            orphans
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("PROJECT page")),
+            "{orphans:#?}"
+        );
+        assert!(
+            !report
+                .results
+                .iter()
+                .any(|record| record.section == "projects" && record.name == "census"),
+            "orphans replace the all-clear: {:#?}",
             report.results
         );
     }

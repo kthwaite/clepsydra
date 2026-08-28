@@ -16,10 +16,10 @@ import {
 import {
   Children,
   cloneElement,
-  type FocusEvent as ReactFocusEvent,
   type HTMLAttributes,
   type MutableRefObject,
   type ReactElement,
+  type FocusEvent as ReactFocusEvent,
   type ReactNode,
   type Ref,
   useCallback,

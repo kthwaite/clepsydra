@@ -6,9 +6,10 @@ import { useBacklinks } from "#/api/index";
 import { usePage } from "#/api/pages";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { PreviewBody } from "#/components/codex/PreviewBody";
+import { KindIcon } from "#/components/KindIcon";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
-import { kindColorVar, resolveKind } from "#/lib/kind";
+import { resolveKind } from "#/lib/kind";
 import {
   cancelHoverClose,
   PREVIEW_WIDTH,
@@ -117,10 +118,7 @@ function PreviewWindow({ win }: { win: PW }) {
         onPointerDown={onTitlePointerDown}
         className="flex cursor-grab items-center gap-1.5 border-b border-ink bg-paper-2 px-2 py-1 active:cursor-grabbing"
       >
-        <span
-          className="inline-block h-[6px] w-[6px] flex-shrink-0"
-          style={{ background: kindColorVar(kind) }}
-        />
+        <KindIcon kind={kind} size={11} className="flex-shrink-0" />
         <span className="cl-mono flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[9px] uppercase tracking-[0.12em] text-ink-mute">
           ⟦ {shortFolio(win.path)} ⟧
         </span>

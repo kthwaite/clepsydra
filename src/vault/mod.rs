@@ -17,6 +17,7 @@ pub mod block_id;
 pub mod board_vocab;
 pub mod canonical;
 pub mod cas;
+pub mod cas_migrate;
 pub mod cas_scan;
 pub mod checkpoint;
 pub mod code;
@@ -133,5 +134,10 @@ impl Vault {
     /// The loaded vault configuration.
     pub fn config(&self) -> &VaultConfig {
         &self.config
+    }
+
+    /// Absolute CAS root for this vault (see `config::resolve_cas_path`).
+    pub fn cas_root(&self) -> PathBuf {
+        crate::vault::config::resolve_cas_path(&self.config.archive.cas_path, &self.root)
     }
 }

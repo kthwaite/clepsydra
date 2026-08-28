@@ -283,6 +283,43 @@ describe("InscribeModal", () => {
     expect(vars.params.path.path).toMatch(/^meetings\//);
   });
 
+  it("never sends a project no PROJECT page declares", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+    await user.type(
+      screen.getByRole("combobox", { name: "Project" }),
+      "ghost{Enter}",
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("no such project");
+    expect(screen.getByRole("combobox", { name: "Project" })).toHaveValue(
+      "ghost",
+    );
+    // The intercepted Enter must not have submitted the form.
+    expect(createMutate).not.toHaveBeenCalled();
+
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Orphan");
+    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+
+    expect(createMutate).toHaveBeenCalledTimes(1);
+    const [vars] = createMutate.mock.calls[0];
+    expect(vars.body).not.toHaveProperty("project");
+    expect(vars.params.path.path).toMatch(/^notes\/\d{8}\.orphan\./);
+  });
+
+  it("sends a project picked from the declared list", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+    await user.type(screen.getByRole("combobox", { name: "Project" }), "al");
+    await user.click(await screen.findByRole("option", { name: "aleph" }));
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Filed");
+    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+
+    const [vars] = createMutate.mock.calls[0];
+    expect(vars.body.project).toBe("aleph");
+    expect(vars.params.path.path).toMatch(/^notes\/aleph\/\d{8}\.filed\./);
+  });
+
   it("sends committed tag chips with the create request", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);

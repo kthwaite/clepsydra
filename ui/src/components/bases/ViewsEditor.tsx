@@ -8,14 +8,14 @@ import type {
 } from "./BaseDefinitionWorkspace";
 import type { DraftProperty, DraftView } from "./definition-model";
 import { moveItem } from "./definition-model";
+import { asciiCaseFold } from "./local-validation";
 import {
   MoveButtons,
   ReorderAnnouncement,
   ReorderHandle,
-  useReorderable,
   useReorderAnnouncement,
+  useReorderable,
 } from "./ordered-list";
-import { asciiCaseFold } from "./local-validation";
 import { ViewDefinitionEditor } from "./ViewDefinitionEditor";
 
 interface ViewsEditorProps {

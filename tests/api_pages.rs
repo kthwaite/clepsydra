@@ -77,6 +77,8 @@ async fn page_query_stops_at_the_sql_page_boundary_but_keeps_the_full_total() {
 #[tokio::test]
 async fn filtered_page_total_is_stable_across_ordered_page_boundaries() {
     let fixture = ApiFixture::builder().build();
+    support::seed_project(&fixture.server, "atlas").await;
+    support::seed_project(&fixture.server, "other").await;
     for (path, tags, project) in [
         ("alpha.md", &["focus"][..], Some("atlas")),
         ("bravo.md", &["other"][..], Some("atlas")),
@@ -437,6 +439,7 @@ async fn journal_pages_accept_clear_project() {
 #[tokio::test]
 async fn bulk_assign_rejects_project_on_journal_pages() {
     let fixture = ApiFixture::builder().build();
+    support::seed_project(&fixture.server, "clepsydra").await;
     create_page(&fixture.server, "notes/note.md", &[], None).await;
     create_page(&fixture.server, "journals/2026-08-27.md", &[], None).await;
 

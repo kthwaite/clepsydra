@@ -9,8 +9,8 @@ import {
   decodeBaseMemberDiagnostics,
 } from "#/api/bases";
 import { formatApiError, isApiError } from "#/api/error";
-import type { BaseMemberDraftValue } from "./member-draft";
 import { asciiCaseFold } from "./local-validation";
+import type { BaseMemberDraftValue } from "./member-draft";
 
 export type MemberCreationSource =
   | {

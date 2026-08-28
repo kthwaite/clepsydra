@@ -107,9 +107,7 @@ describe("Stats", () => {
     const user = userEvent.setup();
     render(<Stats />);
 
-    const subjects = closestSection(
-      screen.getByText("Subjects, by frequency"),
-    );
+    const subjects = closestSection(screen.getByText("Subjects, by frequency"));
     const garden = within(subjects).getByRole("button", {
       name: /#garden.*9/i,
     });
@@ -118,7 +116,8 @@ describe("Stats", () => {
     });
 
     expect(
-      garden.compareDocumentPosition(reading) & Node.DOCUMENT_POSITION_FOLLOWING,
+      garden.compareDocumentPosition(reading) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
 
     await user.click(reading);

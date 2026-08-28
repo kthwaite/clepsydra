@@ -13,6 +13,7 @@ import type {
   ConfiguredBaseEmbedElement,
   InvalidBaseEmbedElement,
 } from "#/editor/schema/types";
+
 function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
@@ -22,11 +23,12 @@ async function chooseSelectOption(
   label: string,
   option: string,
 ) {
-  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  const trigger = screen.getByRole("button", {
+    name: selectTriggerName(label),
+  });
   await user.click(trigger);
   await user.click(await screen.findByRole("option", { name: option }));
 }
-
 
 const apiState = vi.hoisted(() => ({
   bases: {} as {
@@ -215,7 +217,9 @@ describe("BaseEmbedInspector structured mode", () => {
     expect(
       screen.getByRole("dialog", { name: "Configure Base embed" }),
     ).toHaveAccessibleDescription(/saved Base view and local query overrides/i);
-    const base = screen.getByRole("button", { name: selectTriggerName("Base") });
+    const base = screen.getByRole("button", {
+      name: selectTriggerName("Base"),
+    });
     expect(base).toHaveFocus();
     expect(base).toHaveAccessibleDescription(/saved Base/i);
     expect(
@@ -244,11 +248,13 @@ describe("BaseEmbedInspector structured mode", () => {
 
     await chooseSelectOption(user, "Base", "Tasks");
 
-    expect(screen.getByRole("button", { name: selectTriggerName("Saved view") })).toHaveTextContent(
-      "Open",
-    );
+    expect(
+      screen.getByRole("button", { name: selectTriggerName("Saved view") }),
+    ).toHaveTextContent("Open");
     expect(screen.getByText("All pages")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: selectTriggerName("Sort field 1") })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: selectTriggerName("Sort field 1") }),
+    ).toBeNull();
     expect(screen.getByRole("spinbutton", { name: "Limit" })).toHaveValue(37);
   });
 
@@ -265,10 +271,14 @@ describe("BaseEmbedInspector structured mode", () => {
     await chooseSelectOption(user, "Saved view", "Unread");
 
     expect(
-      screen.getByRole("button", { name: selectTriggerName("Field for condition 1") }),
+      screen.getByRole("button", {
+        name: selectTriggerName("Field for condition 1"),
+      }),
     ).toHaveTextContent("rating");
     expect(screen.getByRole("spinbutton", { name: "Limit" })).toHaveValue(37);
-    expect(screen.queryByRole("button", { name: selectTriggerName("Sort field 1") })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: selectTriggerName("Sort field 1") }),
+    ).toBeNull();
   });
 
   it.each([
@@ -425,7 +435,9 @@ describe("BaseEmbedInspector structured mode", () => {
     const user = userEvent.setup();
     const original = configured();
     const callbacks = renderInspector(original);
-    const base = screen.getByRole("button", { name: selectTriggerName("Base") });
+    const base = screen.getByRole("button", {
+      name: selectTriggerName("Base"),
+    });
 
     await chooseSelectOption(user, "Base", "Tasks");
     callbacks.rerenderInspector(original);
@@ -435,9 +447,9 @@ describe("BaseEmbedInspector structured mode", () => {
     callbacks.rerenderInspector(original, false);
     callbacks.rerenderInspector(original, true);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: selectTriggerName("Base") })).toHaveTextContent(
-        "Reading Log",
-      ),
+      expect(
+        screen.getByRole("button", { name: selectTriggerName("Base") }),
+      ).toHaveTextContent("Reading Log"),
     );
   });
 
@@ -454,16 +466,18 @@ describe("BaseEmbedInspector structured mode", () => {
     );
 
     callbacks.rerenderInspector(configured({ base: "tasks", view: "Open" }));
-    expect(await screen.findByRole("button", { name: selectTriggerName("Base") })).toHaveTextContent(
-      "Tasks",
-    );
+    expect(
+      await screen.findByRole("button", { name: selectTriggerName("Base") }),
+    ).toHaveTextContent("Tasks");
   });
 
   it("keeps missing Base and view references visible and recoverable", async () => {
     const user = userEvent.setup();
     renderInspector(configured({ base: "gone", view: "Renamed" }));
 
-    const base = screen.getByRole("button", { name: selectTriggerName("Base") });
+    const base = screen.getByRole("button", {
+      name: selectTriggerName("Base"),
+    });
     expect(base).toHaveTextContent("gone (missing)");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     expect(screen.getByText(/Base.*gone.*not found/i)).toBeInTheDocument();
@@ -472,10 +486,12 @@ describe("BaseEmbedInspector structured mode", () => {
       await screen.findByRole("option", { name: "gone (missing)" }),
     ).toBeInTheDocument();
 
-    await user.click(await screen.findByRole("option", { name: "Reading Log" }));
-    expect(screen.getByRole("button", { name: selectTriggerName("Saved view") })).toHaveTextContent(
-      "All",
+    await user.click(
+      await screen.findByRole("option", { name: "Reading Log" }),
     );
+    expect(
+      screen.getByRole("button", { name: selectTriggerName("Saved view") }),
+    ).toHaveTextContent("All");
     expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
   });
 
@@ -483,7 +499,9 @@ describe("BaseEmbedInspector structured mode", () => {
     const user = userEvent.setup();
     renderInspector(configured({ view: "Renamed" }));
 
-    const view = screen.getByRole("button", { name: selectTriggerName("Saved view") });
+    const view = screen.getByRole("button", {
+      name: selectTriggerName("Saved view"),
+    });
     expect(view).toHaveTextContent("Renamed (missing)");
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
     await user.click(view);
@@ -586,9 +604,9 @@ describe("BaseEmbedInspector structured mode", () => {
     await chooseSelectOption(user, "Base", "Tasks");
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: selectTriggerName("Saved view") })).toHaveTextContent(
-        "Open",
-      );
+      expect(
+        screen.getByRole("button", { name: selectTriggerName("Saved view") }),
+      ).toHaveTextContent("Open");
       expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
     });
   });
@@ -611,10 +629,7 @@ describe("BaseEmbedInspector structured mode", () => {
       "data-invalid",
       "true",
     );
-    expect(sortField.closest(".group")).toHaveAttribute(
-      "data-invalid",
-      "true",
-    );
+    expect(sortField.closest(".group")).toHaveAttribute("data-invalid", "true");
     expect(screen.getAllByText(/unknown field.*foreign/i)).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
@@ -802,38 +817,42 @@ describe("pure Base embed validation bounds", () => {
     ["field bytes", valid({ sort: [{ field: "é".repeat(128) }] })],
     ["string bytes", valid({ filter: comparison("title", "é".repeat(2048)) })],
     ["body bytes", valid({ base: "x".repeat(65_536 - 23) })],
-  ])("keeps Save enabled for %s at N", (_name, value) => {
-    if (_name === "field bytes") {
-      const field = "é".repeat(128);
-      const properties = apiState.details.reading.data?.properties;
-      if (properties) {
-        properties.push({ key: field, definition: { type: "text" } });
+  ])(
+    "keeps Save enabled for %s at N",
+    (_name, value) => {
+      if (_name === "field bytes") {
+        const field = "é".repeat(128);
+        const properties = apiState.details.reading.data?.properties;
+        if (properties) {
+          properties.push({ key: field, definition: { type: "text" } });
+        }
       }
-    }
-    const slug = String(value.base);
-    if (!apiState.details[slug]) {
-      apiState.bases.data?.bases.push({
-        slug,
-        name: "Boundary Base",
-        diagnostic_count: 0,
-        match_count: 0,
-        views: ["All"],
-      });
-      apiState.details[slug] = {
-        data: detail(slug, "Boundary Base", ["All"]),
-        isPending: false,
-        isFetching: false,
-        error: null,
-      };
-    }
-    renderInspector(
-      configured({
-        ...(value as Partial<ConfiguredBaseEmbedElement>),
-        ...(_name === "body bytes" ? { limit: undefined } : {}),
-      }),
-    );
-    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
-  }, 15_000);
+      const slug = String(value.base);
+      if (!apiState.details[slug]) {
+        apiState.bases.data?.bases.push({
+          slug,
+          name: "Boundary Base",
+          diagnostic_count: 0,
+          match_count: 0,
+          views: ["All"],
+        });
+        apiState.details[slug] = {
+          data: detail(slug, "Boundary Base", ["All"]),
+          isPending: false,
+          isFetching: false,
+          error: null,
+        };
+      }
+      renderInspector(
+        configured({
+          ...(value as Partial<ConfiguredBaseEmbedElement>),
+          ...(_name === "body bytes" ? { limit: undefined } : {}),
+        }),
+      );
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    },
+    15_000,
+  );
 
   it.each([
     ["depth", valid({ filter: nestedNot(9) }), /Filter depth 9 exceeds/i],
@@ -900,7 +919,9 @@ describe("pure Base embed validation bounds", () => {
                 _name === "group children"
               ? screen.getByRole("region", { name: "Embed filter" })
               : _name === "field bytes"
-                ? screen.getByRole("button", { name: selectTriggerName("Sort field 1") })
+                ? screen.getByRole("button", {
+                    name: selectTriggerName("Sort field 1"),
+                  })
                 : screen.getByRole("textbox", {
                     name: "Value for condition 1",
                   });

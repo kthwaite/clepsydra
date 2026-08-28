@@ -162,7 +162,7 @@ vi.mock("#/api/pages", () => ({
   useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 vi.mock("#/api/client", () => ({ fetchClient: { GET: vi.fn() } }));
-vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
+vi.mock("#/lib/useProjects", () => ({ useProjects: () => ["clepsydra"] }));
 
 import { BaseTable } from "#/components/bases/BaseTable";
 

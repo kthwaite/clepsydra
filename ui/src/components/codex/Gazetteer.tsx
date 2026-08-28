@@ -8,6 +8,7 @@ import { KindSelect } from "#/components/codex/KindSelect";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { FilterBar } from "#/components/filters/FilterBar";
+import { KindIcon } from "#/components/KindIcon";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
@@ -15,13 +16,12 @@ import type { FilterField, FilterState } from "#/lib/filters/model";
 import {
   KINDS,
   type Kind,
-  kindColorVar,
   kindLabel,
   resolveKind,
   sortKindsByLabel,
 } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
-import { useProjects } from "#/lib/useProjects";
+import { useProjects, useProjectValues } from "#/lib/useProjects";
 import { useGazetteerStore } from "#/store/gazetteer";
 import {
   appendUniqueTag,
@@ -104,7 +104,9 @@ export function Gazetteer({ initialTag, filters }: Props) {
   const isMobile = useMobileLayout();
   const openTab = useOpenTab();
   const bulk = useAssignBulk();
+  // Assign offers declared projects; the filter keeps orphan slugs findable.
   const projects = useProjects();
+  const projectValues = useProjectValues();
   const filterFields = useMemo<FilterField[]>(
     () => [
       {
@@ -120,7 +122,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
         id: "project",
         kind: "single",
         label: "PROJECT",
-        options: projects.map((p) => ({ value: p })),
+        options: projectValues.map((p) => ({ value: p })),
       },
       {
         id: "tags",
@@ -129,7 +131,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
         options: tags.map((t) => ({ value: t.tag })),
       },
     ],
-    [projects, tags],
+    [projectValues, tags],
   );
 
   const items = content?.items ?? [];
@@ -386,9 +388,10 @@ export function Gazetteer({ initialTag, filters }: Props) {
                   </td>
                   <td className="cl-mono px-3 py-1.5">
                     <span className="flex items-center gap-1.5">
-                      <span
-                        className="inline-block h-[6px] w-[6px] flex-shrink-0"
-                        style={{ background: kindColorVar(kind) }}
+                      <KindIcon
+                        kind={kind}
+                        size={11}
+                        className="flex-shrink-0"
                         title={kindLabel(kind)}
                       />
                       <span className="text-[10px] text-ink-2">

@@ -21,6 +21,7 @@ import {
   PropertiesEditor,
   type PropertiesEditorProps,
 } from "#/components/bases/PropertiesEditor";
+
 const PROPERTY_TYPE_LABELS: Record<PropertyType, string> = {
   text: "Text",
   number: "Number",
@@ -42,11 +43,12 @@ async function chooseSelectOption(
   label: string,
   option: string,
 ) {
-  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  const trigger = screen.getByRole("button", {
+    name: selectTriggerName(label),
+  });
   await user.click(trigger);
   await user.click(await screen.findByRole("option", { name: option }));
 }
-
 
 const { updateMock } = vi.hoisted(() => ({ updateMock: vi.fn() }));
 
@@ -78,32 +80,26 @@ function register<T>(registrations: T[], registration: T) {
   };
 }
 
-vi.mock(
-  "@atlaskit/pragmatic-drag-and-drop/element/adapter",
-  () => ({
-    draggable: (registration: DraggableRegistration) =>
-      register(dnd.draggables, registration),
-    dropTargetForElements: (registration: DropTargetRegistration) =>
-      register(dnd.dropTargets, registration),
-  }),
-);
+vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
+  draggable: (registration: DraggableRegistration) =>
+    register(dnd.draggables, registration),
+  dropTargetForElements: (registration: DropTargetRegistration) =>
+    register(dnd.dropTargets, registration),
+}));
 
-vi.mock(
-  "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge",
-  () => ({
-    attachClosestEdge: (
-      data: Parameters<AttachClosestEdge>[0],
-      { allowedEdges }: Parameters<AttachClosestEdge>[1],
-    ) => ({
-      ...data,
-      [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
-        ? dnd.closestEdge
-        : null,
-    }),
-    extractClosestEdge: (data: Record<string | symbol, unknown>) =>
-      (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+vi.mock("@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge", () => ({
+  attachClosestEdge: (
+    data: Parameters<AttachClosestEdge>[0],
+    { allowedEdges }: Parameters<AttachClosestEdge>[1],
+  ) => ({
+    ...data,
+    [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
+      ? dnd.closestEdge
+      : null,
   }),
-);
+  extractClosestEdge: (data: Record<string | symbol, unknown>) =>
+    (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   useBlocker: () => ({ status: "idle" }),
@@ -430,9 +426,11 @@ describe("PropertiesEditor", () => {
     await user.click(
       within(table).getByRole("button", { name: "Edit status" }),
     );
-    expect(screen.getByRole("button", { name: selectTriggerName("Type for status") })).toHaveTextContent(
-      "Select",
-    );
+    expect(
+      screen.getByRole("button", {
+        name: selectTriggerName("Type for status"),
+      }),
+    ).toHaveTextContent("Select");
     expect(screen.getByLabelText("New option for status")).toBeInTheDocument();
   });
 
@@ -530,9 +528,9 @@ describe("PropertiesEditor", () => {
 
     cancelDrag(source);
 
-    expect(dispatchExternalDrop(unrelatedPropertySource, target, "bottom")).toBe(
-      true,
-    );
+    expect(
+      dispatchExternalDrop(unrelatedPropertySource, target, "bottom"),
+    ).toBe(true);
     expect(canDrop(columnSource, target)).toBe(false);
     expect(rendered.onChange).not.toHaveBeenCalled();
     expect(dnd.draggables).toHaveLength(3);

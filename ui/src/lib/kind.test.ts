@@ -5,6 +5,7 @@ import {
   KIND_META,
   KINDS,
   kindColorVar,
+  kindIcon,
   kindLabel,
   parseFrontmatterKind,
   resolveKind,
@@ -188,5 +189,17 @@ describe("KIND_META", () => {
       expect(kindColorVar(k)).toMatch(/^var\(--/);
       expect(kindLabel(k)).toBe(KIND_META[k].label);
     }
+  });
+
+  it("has an icon for every kind", () => {
+    for (const k of KINDS) {
+      expect(kindIcon(k)).toBe(KIND_META[k].icon);
+      expect(kindIcon(k).displayName).toBeTruthy();
+    }
+  });
+
+  it("gives each kind a distinct icon", () => {
+    const icons = KINDS.map(kindIcon);
+    expect(new Set(icons).size).toBe(KINDS.length);
   });
 });

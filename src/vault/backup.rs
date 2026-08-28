@@ -18,7 +18,6 @@ use crate::feeds::store::{
     lock_feed_generation_shared, open_feed_lock_file, snapshot_database_file,
 };
 
-use crate::expand_tilde;
 use crate::vault::cas::ContentStore;
 use crate::vault::config::VaultConfig;
 
@@ -127,9 +126,8 @@ pub fn create_backup(
         path: config_path.clone(),
         message: source.to_string(),
     })?;
-    let configured_cas_path = vault_config.archive.cas_path;
     let unresolved_cas_path =
-        expand_tilde(&configured_cas_path).unwrap_or_else(|| PathBuf::from(&configured_cas_path));
+        crate::vault::config::resolve_cas_path(&vault_config.archive.cas_path, &vault_root);
     let cas_store = ContentStore::open_existing(&unresolved_cas_path)
         .map_err(|source| cas_error("open", &unresolved_cas_path, source))?;
     let cas_root = cas_store.root().to_path_buf();
@@ -194,7 +192,7 @@ pub fn create_backup(
         format_version: BACKUP_FORMAT_VERSION,
         created_at: timestamp.to_rfc3339_opts(SecondsFormat::Secs, true),
         cas: BackupManifestCas {
-            configured_path: &configured_cas_path,
+            configured_path: &vault_config.archive.cas_path,
             resolved_source_path,
             archived_path: CAS_ARCHIVE_ROOT,
         },

@@ -7,12 +7,12 @@ import {
 import { Select, SelectItem } from "#/components/ui/select";
 import { useProjects } from "#/lib/useProjects";
 import { BaseMemberDraft } from "./BaseMemberDraft";
+import { resolveMemberCreationSession } from "./member-creation";
 import {
   type BaseMemberDraftField,
   type BaseMemberDraftValue,
   composeMemberDraftFields,
 } from "./member-draft";
-import { resolveMemberCreationSession } from "./member-creation";
 
 interface BaseMemberIntakeProps {
   slug: string;

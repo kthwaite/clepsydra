@@ -100,9 +100,7 @@ function AgendaTileContent({ className }: AgendaTileProps) {
           {tasks.map((task) => {
             const due = task.properties.due;
             const priority = task.properties.priority;
-            const overdue = due
-              ? due < localDateKey(new Date())
-              : false;
+            const overdue = due ? due < localDateKey(new Date()) : false;
 
             return (
               <li

@@ -1,5 +1,5 @@
-import type { PagePreviewProjection } from "#/api/bases";
 import { Fragment, lazy, Suspense } from "react";
+import type { PagePreviewProjection } from "#/api/bases";
 import {
   countWords,
   previewMarkdownSource,

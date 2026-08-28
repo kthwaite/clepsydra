@@ -38,12 +38,7 @@ import {
 } from "./BoardModalFrame";
 import { type ColLabelFn, cycleStateLabel } from "./board-constants";
 import { type ProjectScope, scopeLabel } from "./board-projects";
-import {
-  DispositionRow,
-  EdField,
-  INPUT_CLS,
-  PriorityRow,
-} from "./fields";
+import { DispositionRow, EdField, INPUT_CLS, PriorityRow } from "./fields";
 
 // ── NewTaskModal ──────────────────────────────────────────────────────────────
 
@@ -229,16 +224,14 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* OPERATION + CYCLE */}
+        {/* PROJECT + CYCLE */}
         <div className="grid grid-cols-2 gap-[12px]">
           <EdField label="Project">
             <Select
               aria-label="Project"
               value={project}
-              onChange={(key) =>
-                setProject(key === null ? "" : String(key))
-              }
-              data-testid="new-task-operation"
+              onChange={(key) => setProject(key === null ? "" : String(key))}
+              data-testid="new-task-project"
             >
               <SelectItem id="">No project</SelectItem>
               {assignableScopes.map((scope) => (
@@ -294,7 +287,7 @@ export function NewTaskModal({
           />
         </EdField>
 
-        {/* OPERATOR / EST */}
+        {/* ASSIGNEE / EST */}
         <div className="grid grid-cols-2 gap-[12px]">
           <EdField label="Assignee">
             <input

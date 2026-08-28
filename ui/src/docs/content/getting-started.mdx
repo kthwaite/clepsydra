@@ -309,23 +309,38 @@ current surface.
 
 ## Pips and status colours
 
-Small square “pips” carry status throughout the Vessel chrome. They draw
+Small square “pips” carry status throughout the Vessel chrome, and page
+kinds carry an icon in the same palette. They draw
 from four signal tokens — **orange** (accent), **cyan** (cool), **amber**
 (warn), **red** (hot) — plus the grey ink ramp for neutral states.
 
-### Kind pips
+### Kind markers
 
-Every page kind has a fixed pip colour, shown in Gazetteer, Constellation,
-Sheaf tabs, link previews, and the Folio rails:
+Every page kind has a fixed icon and colour, shown in Gazetteer, Sheaf tabs,
+link previews, the Atrium lists, and the Folio rails. The glyph names the
+kind; the colour groups related kinds:
 
-| Colour | Kinds |
-| --- | --- |
-| Orange (accent) | PROJECT |
-| Deep orange | BOOK, RECIPE |
-| Cyan (cool) | JOURNAL, PERSON, CAPTURE, MEETING, AI CONVERSATION |
-| Amber (warn) | TODO, QUOTE |
-| Red (hot) | TASK |
-| Ink / greys | CODE (brightest), CYCLE (dimmer), NOTE and ARCHIVE (most muted, shared shade) |
+| Kind | Icon | Colour |
+| --- | --- | --- |
+| PROJECT | compass | Orange (accent) |
+| BOOK | open book | Deep orange |
+| RECIPE | cooking pot | Deep orange |
+| AI JOURNAL | robot | Deep orange |
+| JOURNAL | calendar | Cyan (cool) |
+| PERSON | person | Cyan (cool) |
+| MEETING | people | Cyan (cool) |
+| CAPTURE | inbox | Cyan (cool) |
+| AI CONVERSATION | speech bubbles | Cyan (cool) |
+| TODO | checklist | Amber (warn) |
+| QUOTE | quote marks | Amber (warn) |
+| TASK | checked box | Red (hot) |
+| CODE | angle brackets | Ink (brightest) |
+| CYCLE | repeat arrows | Ink (dimmer) |
+| NOTE | document | Muted ink |
+| ARCHIVE | archive box | Muted ink |
+
+Constellation keeps its own shape vocabulary (square, triangle, circle) —
+node shapes, not icons.
 
 ### Task Board pips
 

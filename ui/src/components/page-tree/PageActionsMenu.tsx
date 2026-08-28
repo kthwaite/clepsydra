@@ -4,11 +4,7 @@ import {
   type MutationPreviewRequest,
   usePreviewMutation,
 } from "#/api/index";
-import {
-  type ArchivedPage,
-  useArchivePage,
-  useMovePage,
-} from "#/api/pages";
+import { type ArchivedPage, useArchivePage, useMovePage } from "#/api/pages";
 import { MutationPreviewDialog } from "#/components/page-tree/MutationPreviewDialog";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
@@ -166,7 +162,9 @@ function MovePageAction({
               onPress={() => void requestMovePreview()}
               isDisabled={previewMutation.isPending || movePage.isPending}
             >
-              {previewMutation.isPending ? "Preparing preview…" : "Preview move"}
+              {previewMutation.isPending
+                ? "Preparing preview…"
+                : "Preview move"}
             </Button>
           </>
         }

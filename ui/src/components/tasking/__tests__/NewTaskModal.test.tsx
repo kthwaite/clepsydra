@@ -125,7 +125,9 @@ describe("NewTaskModal — render", () => {
 
   it("uses the approved task dialog and project context language", () => {
     wrap();
-    expect(screen.getByRole("dialog", { name: "New task" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "New task" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("New task")).toBeInTheDocument();
     expect(screen.getByText(/No project · Create task/)).toBeInTheDocument();
   });
@@ -144,11 +146,10 @@ describe("NewTaskModal — render", () => {
     );
     expect(
       screen.getByRole("textbox", { name: "Description" }),
-    ).toHaveAttribute(
-      "placeholder",
-      "What the task is and why it matters…",
-    );
-    expect(screen.getByRole("radiogroup", { name: "Status" })).toBeInTheDocument();
+    ).toHaveAttribute("placeholder", "What the task is and why it matters…");
+    expect(
+      screen.getByRole("radiogroup", { name: "Status" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("radiogroup", { name: "Priority" }),
     ).toBeInTheDocument();
@@ -411,10 +412,7 @@ describe("NewTaskModal — submit payload", () => {
     await user.paste("[[alpha-dossier]]");
 
     // Brief: prose that becomes the page body above the checklist
-    await user.type(
-      screen.getByTestId("new-task-brief"),
-      "Why this matters.",
-    );
+    await user.type(screen.getByTestId("new-task-brief"), "Why this matters.");
 
     // Checklist: two lines
     await user.type(
@@ -590,9 +588,7 @@ describe("NewTaskModal — action feedback", () => {
     await userEvent.type(screen.getByLabelText("Title"), "Pending task");
     await userEvent.click(screen.getByRole("button", { name: "Create task" }));
     await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Creating…" }),
-      ).toBeDisabled(),
+      expect(screen.getByRole("button", { name: "Creating…" })).toBeDisabled(),
     );
   });
 

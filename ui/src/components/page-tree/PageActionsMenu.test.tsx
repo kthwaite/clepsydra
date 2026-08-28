@@ -39,10 +39,12 @@ const archivedPage: ArchivedPage = {
   title: "Alpha",
 };
 
-function renderMenu(overrides: {
-  beforeMutation?: () => Promise<void>;
-  onArchived?: (archived: typeof archivedPage) => void;
-} = {}) {
+function renderMenu(
+  overrides: {
+    beforeMutation?: () => Promise<void>;
+    onArchived?: (archived: typeof archivedPage) => void;
+  } = {},
+) {
   const onArchived = overrides.onArchived ?? vi.fn();
   render(
     <PageActionsMenu
@@ -74,9 +76,7 @@ describe("PageActionsMenu page archival", () => {
     const user = userEvent.setup();
     renderMenu();
 
-    expect(
-      screen.getByRole("button", { name: "Archive Page" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Archive Page" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /delete page/i }),
     ).not.toBeInTheDocument();
@@ -92,9 +92,7 @@ describe("PageActionsMenu page archival", () => {
         /inbound links remain byte-identical and become unresolved/i,
       ),
     ).toBeVisible();
-    expect(
-      within(dialog).getByText(/restore.*Rubbish Bin/i),
-    ).toBeVisible();
+    expect(within(dialog).getByText(/restore.*Rubbish Bin/i)).toBeVisible();
     expect(
       within(dialog).queryByRole("button", { name: /preview/i }),
     ).not.toBeInTheDocument();
@@ -112,9 +110,7 @@ describe("PageActionsMenu page archival", () => {
       />,
     );
 
-    expect(
-      screen.getByRole("button", { name: "Archive Page" }),
-    ).toBeVisible();
+    expect(screen.getByRole("button", { name: "Archive Page" })).toBeVisible();
     expect(
       screen.queryByRole("button", { name: /move or rename page/i }),
     ).not.toBeInTheDocument();
@@ -133,9 +129,7 @@ describe("PageActionsMenu page archival", () => {
     const { onArchived } = renderMenu({ beforeMutation });
 
     await user.click(screen.getByRole("button", { name: "Archive Page" }));
-    await user.click(
-      screen.getByRole("button", { name: "Confirm archive" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
     await waitFor(() => expect(onArchived).toHaveBeenCalledWith(archivedPage));
     expect(mocks.archivePage).toHaveBeenCalledWith({
@@ -152,9 +146,7 @@ describe("PageActionsMenu page archival", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Archive Page" }));
-    await user.click(
-      screen.getByRole("button", { name: "Confirm archive" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
     expect(await screen.findByText("Save failed")).toBeVisible();
     expect(mocks.archivePage).not.toHaveBeenCalled();
@@ -182,9 +174,7 @@ describe("PageActionsMenu page archival", () => {
     renderMenu({ onArchived });
 
     await user.click(screen.getByRole("button", { name: "Archive Page" }));
-    await user.click(
-      screen.getByRole("button", { name: "Confirm archive" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Confirm archive" }));
 
     expect(await screen.findByText("Archive conflict")).toBeVisible();
     expect(onArchived).not.toHaveBeenCalled();

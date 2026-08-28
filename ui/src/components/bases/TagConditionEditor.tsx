@@ -5,8 +5,8 @@ import { Button } from "#/components/ui/button";
 import { Select, SelectItem } from "#/components/ui/select";
 import { TagInput } from "#/components/ui/tag-input";
 import type { DraftProperty } from "./definition-model";
-import type { FilterDiagnosticScope } from "./filter-diagnostics";
 import { FilterComparisonEditor } from "./FilterComparisonEditor";
+import type { FilterDiagnosticScope } from "./filter-diagnostics";
 import {
   readTagCondition,
   TAG_CONDITION_FIELDS,
@@ -63,7 +63,11 @@ export function TagConditionEditor({
         />
         {condition ? (
           <div>
-            <Button size="sm" variant="ghost" onPress={() => setAdvanced(false)}>
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => setAdvanced(false)}
+            >
               Edit condition {position} as a tag condition
             </Button>
           </div>

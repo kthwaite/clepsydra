@@ -135,7 +135,10 @@ vi.mock("#/components/codex/ReadingProgressContext", () => ({
 }));
 vi.mock("#/components/codex/Sheaf", () => ({
   Sheaf: ({ activeTabVisible }: { activeTabVisible?: boolean }) => (
-    <div data-testid="sheaf" data-active-tab-visible={String(activeTabVisible)} />
+    <div
+      data-testid="sheaf"
+      data-active-tab-visible={String(activeTabVisible)}
+    />
   ),
 }));
 vi.mock("#/components/ThemeProvider", () => ({

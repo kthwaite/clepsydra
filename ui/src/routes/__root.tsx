@@ -1,10 +1,10 @@
 import { createRootRoute, HeadContent, Outlet } from "@tanstack/react-router";
 import { lazy, type ReactNode, Suspense, useEffect, useRef } from "react";
-import { FeatureFlagsProvider } from "#/components/FeatureFlagsProvider";
-import { NotFoundPage } from "#/components/FeatureGate";
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { LinkPreviewLayer } from "#/components/codex/LinkPreviewLayer";
 import { ReadingProgressProvider } from "#/components/codex/ReadingProgressContext";
+import { FeatureFlagsProvider } from "#/components/FeatureFlagsProvider";
+import { NotFoundPage } from "#/components/FeatureGate";
 import { RouteError } from "#/components/RouteError";
 import { Toaster } from "#/components/ui/Toaster";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";

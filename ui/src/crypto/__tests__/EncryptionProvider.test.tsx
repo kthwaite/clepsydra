@@ -286,7 +286,10 @@ describe("EncryptionProvider", () => {
 
   it("clears workspace and Folio visit state after explicit successful lock", async () => {
     clearFolioHistoryState();
-    const wrapped = await wrapIdentity(fixtureIdentity, "correct-password-value");
+    const wrapped = await wrapIdentity(
+      fixtureIdentity,
+      "correct-password-value",
+    );
     configHook.value = {
       ...configHook.value,
       data: {

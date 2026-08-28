@@ -266,38 +266,35 @@ export function useBaseEmbedEditingController(
     [],
   );
 
-  return useMemo(
-    () => {
-      // The revision makes the controller identity reflect session changes,
-      // while the callbacks themselves continue to read the live refs.
-      void sessionVersion;
-      return {
-        begin,
-        commit,
-        cancel,
-        isActive,
-        registerEntryFocus,
-        focusEntry,
-        restoreFocus,
-        exit,
-        remove,
-        disposeNode,
-      };
-    },
-    [
+  return useMemo(() => {
+    // The revision makes the controller identity reflect session changes,
+    // while the callbacks themselves continue to read the live refs.
+    void sessionVersion;
+    return {
       begin,
-      cancel,
       commit,
-      disposeNode,
-      exit,
-      focusEntry,
+      cancel,
       isActive,
       registerEntryFocus,
-      remove,
+      focusEntry,
       restoreFocus,
-      sessionVersion,
-    ],
-  );
+      exit,
+      remove,
+      disposeNode,
+    };
+  }, [
+    begin,
+    cancel,
+    commit,
+    disposeNode,
+    exit,
+    focusEntry,
+    isActive,
+    registerEntryFocus,
+    remove,
+    restoreFocus,
+    sessionVersion,
+  ]);
 }
 
 const BaseEmbedEditingContext =

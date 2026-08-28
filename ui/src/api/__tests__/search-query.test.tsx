@@ -130,7 +130,9 @@ describe("useSearch query error policy", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Invalid search query.",
     );
-    expect(screen.queryByText("Application route failed.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Application route failed."),
+    ).not.toBeInTheDocument();
     expect(transport.fetch).toHaveBeenCalledOnce();
   });
 
@@ -149,7 +151,9 @@ describe("useSearch query error policy", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Search unavailable.",
     );
-    expect(screen.queryByText("Application route failed.")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Application route failed."),
+    ).not.toBeInTheDocument();
     expect(transport.fetch).toHaveBeenCalledTimes(4);
   });
 });

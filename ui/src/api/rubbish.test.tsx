@@ -18,6 +18,7 @@ vi.mock("#/api/client", () => ({
   fetchClient: { POST: transport.post, DELETE: transport.delete },
 }));
 
+import { queryKeys } from "#/api/keys";
 import {
   useEmptyRubbish,
   usePurgeRubbishItem,
@@ -25,7 +26,6 @@ import {
   useRubbishItem,
   useRubbishList,
 } from "#/api/rubbish";
-import { queryKeys } from "#/api/keys";
 
 function harness() {
   const client = new QueryClient({
@@ -75,7 +75,11 @@ describe("rubbish API hooks", () => {
   });
 
   it("restore invalidates rubbish and every normal page-derived structure", async () => {
-    const restored = { item_id: "item-1", page_id: "page-1", path: "notes/a.md" };
+    const restored = {
+      item_id: "item-1",
+      page_id: "page-1",
+      path: "notes/a.md",
+    };
     transport.post.mockResolvedValue({ data: restored, error: undefined });
     const { client, wrapper } = harness();
     const listKey = queryKeys.rubbish.all;
@@ -115,7 +119,11 @@ describe("rubbish API hooks", () => {
 
   it("purge and Empty Bin invalidate only rubbish data and never derive page paths from item IDs", async () => {
     transport.delete.mockResolvedValue({
-      data: { item_id: "item-1", page_id: "page-1", original_path: "notes/a.md" },
+      data: {
+        item_id: "item-1",
+        page_id: "page-1",
+        original_path: "notes/a.md",
+      },
       error: undefined,
     });
     const { client, wrapper } = harness();
@@ -153,10 +161,7 @@ describe("rubbish API hooks", () => {
       "/api/vault/rubbish/{item_id}",
       { params: { path: { item_id: "item-1" } } },
     );
-    expect(transport.delete).toHaveBeenNthCalledWith(
-      2,
-      "/api/vault/rubbish",
-    );
+    expect(transport.delete).toHaveBeenNthCalledWith(2, "/api/vault/rubbish");
   });
 
   it("invalidates rubbish once for each rejected purge settlement", async () => {

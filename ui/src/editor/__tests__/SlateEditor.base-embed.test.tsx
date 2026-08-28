@@ -13,7 +13,7 @@ import {
   type Descendant,
   Editor,
   Node,
-  Path,
+  type Path,
   Element as SlateElement,
   Transforms,
 } from "slate";

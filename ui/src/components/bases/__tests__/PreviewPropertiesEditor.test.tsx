@@ -94,7 +94,9 @@ describe("PreviewPropertiesEditor", () => {
       within(select).getAllByRole("option", { name: /body.*read-only/i }),
     ).toHaveLength(1);
     expect(
-      within(select).getByRole("option", { name: /system title.*already added/i }),
+      within(select).getByRole("option", {
+        name: /system title.*already added/i,
+      }),
     ).toBeDisabled();
     expect(
       within(select).getByRole("option", { name: /body.*already added/i }),
@@ -122,9 +124,7 @@ describe("PreviewPropertiesEditor", () => {
       { id: "preview-qualified-body", field: "prop.body", label: "Excerpt" },
     ]);
 
-    const field = screen.getByLabelText(
-      "Field for preview property sys.title",
-    );
+    const field = screen.getByLabelText("Field for preview property sys.title");
     expect(
       within(field).getByRole("option", { name: /body.*already added/i }),
     ).toBeDisabled();
@@ -157,7 +157,9 @@ describe("PreviewPropertiesEditor", () => {
       screen.getByLabelText("Preview property to add"),
       "status",
     );
-    await user.click(screen.getByRole("button", { name: "Add preview property" }));
+    await user.click(
+      screen.getByRole("button", { name: "Add preview property" }),
+    );
     const label = screen.getByLabelText("Label for status");
     expect(label).toHaveFocus();
     expect(label).toBeEnabled();
@@ -185,7 +187,6 @@ describe("PreviewPropertiesEditor", () => {
     });
     expect(enabledMoveBack).toHaveFocus();
     expect(enabledMoveBack).toBeEnabled();
-
 
     await user.click(
       screen.getByRole("button", { name: "Remove preview property body" }),

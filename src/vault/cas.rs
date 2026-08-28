@@ -692,6 +692,52 @@ fn open_or_create_regular_cas_file(display_path: &Path, create: bool) -> io::Res
         .open(display_path)
 }
 
+/// `"sha256:<64 hex>"` → `<hex[..2]>/<hex>`, the store's two-level fan-out,
+/// relative to a CAS root. `None` for a malformed hash.
+pub(crate) fn blob_relative_path(hash: &str) -> Option<PathBuf> {
+    let hex = ContentStore::validate_hash(hash).ok()?;
+    Some(Path::new(&hex[..2]).join(hex))
+}
+
+/// Every blob file under `root`'s two-level fan-out, as `"sha256:<hex>"`
+/// hashes (sorted). `root` need not exist; a missing or unreadable directory
+/// yields an empty list.
+pub(crate) fn list_blob_hashes(root: &Path) -> Vec<String> {
+    fn is_lowercase_hex(name: &str, len: usize) -> bool {
+        name.len() == len
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
+
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut prefixes: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .filter(|name| is_lowercase_hex(name, 2))
+        .collect();
+    prefixes.sort();
+
+    let mut hashes = Vec::new();
+    for prefix in prefixes.drain(..) {
+        let Ok(files) = fs::read_dir(root.join(&prefix)) else {
+            continue;
+        };
+        let mut names: Vec<String> = files
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+            .filter(|name| is_lowercase_hex(name, 64) && name.starts_with(&prefix))
+            .collect();
+        names.sort();
+        hashes.extend(names.into_iter().map(|name| format!("sha256:{name}")));
+    }
+    hashes
+}
+
 impl ContentStore {
     /// Open or create a content store at the given root directory.
     pub fn open(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
@@ -877,9 +923,12 @@ impl ContentStore {
 
     /// Resolve a validated hash to its filesystem path (two-level fan-out).
     fn blob_path(&self, hash: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
-        let hex = Self::validate_hash(hash)?;
-        let prefix = &hex[..2];
-        Ok(self.root.join(prefix).join(hex))
+        // Validate first so a malformed hash still gets `validate_hash`'s
+        // error text, not `blob_relative_path`'s generic `None`.
+        Self::validate_hash(hash)?;
+        Ok(self
+            .root
+            .join(blob_relative_path(hash).expect("just validated")))
     }
 
     fn verified_backup_blob(
@@ -1713,6 +1762,18 @@ mod tests {
         store.release_rubbish_archive_refs(item_id, hashes)?;
         remove_item()?;
         Ok(())
+    }
+
+    #[test]
+    fn blob_relative_path_fans_out_by_two_hex_chars() {
+        let hash = ContentStore::hash_bytes(b"abc");
+        let hex = hash.strip_prefix("sha256:").unwrap();
+        assert_eq!(
+            blob_relative_path(&hash).unwrap(),
+            Path::new(&hex[..2]).join(hex)
+        );
+        assert!(blob_relative_path("md5:00").is_none());
+        assert!(blob_relative_path("sha256:zz").is_none());
     }
 
     #[test]

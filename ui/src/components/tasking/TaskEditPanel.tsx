@@ -15,7 +15,7 @@
  * and restores focus to the previously-focused element on close.
  *
  * All edits are sent as optimistic PATCHes:
- *   - Immediate: disposition (status), priority, operation select, cycle select,
+ *   - Immediate: disposition (status), priority, project select, cycle select,
  *     hold toggle.
  *   - Debounced 300ms: title, assignee, estimate, start, due, hold reason,
  *     link, tags.
@@ -545,7 +545,7 @@ export function TaskEditPanel({
               />
             </EdField>
 
-            {/* OPERATION + CYCLE */}
+            {/* PROJECT + CYCLE */}
             <div className="grid grid-cols-2 gap-[12px]">
               <EdField label="Project">
                 <Select
@@ -558,7 +558,7 @@ export function TaskEditPanel({
                     })
                   }
                   isDisabled={archiving}
-                  data-testid="edit-panel-operation"
+                  data-testid="edit-panel-project"
                 >
                   <SelectItem id="">No project</SelectItem>
                   {assignableScopes.map((scope) => (
@@ -600,7 +600,7 @@ export function TaskEditPanel({
               </EdField>
             </div>
 
-            {/* OPERATOR / EST */}
+            {/* ASSIGNEE / EST */}
             <div className="grid grid-cols-2 gap-[12px]">
               <EdField label="Assignee">
                 <input

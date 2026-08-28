@@ -180,18 +180,15 @@ describe("list item checkbox", () => {
 
     for (const control of controls) {
       expect(control).toHaveClass("max-md:min-h-11", "max-md:min-w-11");
-      expect(control).not.toHaveClass(
-        "before:absolute",
-        "before:-inset-3.5",
-      );
+      expect(control).not.toHaveClass("before:absolute", "before:-inset-3.5");
     }
     for (const listItem of listItems) {
       expect(listItem).toHaveClass("max-md:items-start");
       const content = listItem?.querySelector("[data-task-content]");
       expect(content).toHaveClass("min-w-0", "flex-1");
-      expect(
-        content?.querySelector("[data-task-content-row]"),
-      ).toHaveClass("max-md:min-h-11");
+      expect(content?.querySelector("[data-task-content-row]")).toHaveClass(
+        "max-md:min-h-11",
+      );
     }
 
     expect(listItems[0]).toContainElement(listItems[1]);

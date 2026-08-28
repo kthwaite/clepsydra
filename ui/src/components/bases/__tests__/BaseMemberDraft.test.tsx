@@ -138,10 +138,14 @@ describe("BaseMemberDraft", () => {
     );
 
     expect(
-      screen.getByText(/required for base membership\. the base fixes this to BOOK/i),
+      screen.getByText(
+        /required for base membership\. the base fixes this to BOOK/i,
+      ),
     ).toBeVisible();
     expect(
-      screen.getByText(/required for base membership\. the base allows queued or reading/i),
+      screen.getByText(
+        /required for base membership\. the base allows queued or reading/i,
+      ),
     ).toBeVisible();
   });
 
@@ -173,7 +177,9 @@ describe("BaseMemberDraft", () => {
       screen.getByRole("button", { name: /—.*New member — Status/ }),
     );
     expect(
-      (await screen.findAllByRole("option")).map((option) => option.textContent),
+      (await screen.findAllByRole("option")).map(
+        (option) => option.textContent,
+      ),
       // The leading em dash is the select's own clear option.
     ).toEqual(["—", "queued", "reading"]);
   });
@@ -762,15 +768,15 @@ describe("BaseMemberDraft", () => {
       screen.getByRole("textbox", { name: "New member — Title" }),
       "No Project",
     );
-    const project = screen.getByRole("combobox", {
-      name: "New member — Project",
-    });
-    await user.type(project, "clepsydra{Enter}");
+    // Queried afresh: Enter on a typed slug remounts the strict project field.
+    const project = () =>
+      screen.getByRole("combobox", { name: "New member — Project" });
+    await user.type(project(), "clepsydra{Enter}");
     await user.click(
       screen.getByRole("button", { name: "Clear New member — Project" }),
     );
-    expect(project).toHaveValue("");
-    await user.click(project);
+    expect(project()).toHaveValue("");
+    await user.click(project());
     await user.tab();
     await user.click(screen.getByRole("button", { name: "Save new member" }));
 

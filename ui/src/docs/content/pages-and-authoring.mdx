@@ -48,6 +48,13 @@ Kind writes the `type` frontmatter field; the unrelated frontmatter key `kind`
 is an ordinary property. Assigning a Project writes `project`. Either assignment
 can move the same file so the folder follows its declared metadata.
 
+A page's Project must be a slug some `PROJECT` page declares. A `PROJECT` page
+may declare its own slug — that is what creates a project — whether its kind
+is declared or inferred from the `projects/` folder. The server refuses any
+other Project with a 400 on create (Base member drafts included) and on single
+or bulk assignment; the bulk form moves nothing when one page fails. Hand-edited files are not blocked;
+`clep doctor` lists orphan slugs.
+
 | Kind | Canonical folder |
 | --- | --- |
 | `NOTE` | `notes` |
@@ -179,6 +186,9 @@ committed, that item is deletion-only and cannot be restored.
 
 - Intake refuses a blank title. Invalid paths, unknown Kinds, invalid Project
   slugs, and existing destinations are rejected.
+- A Project no `PROJECT` page declares is rejected with `unknown project` on
+  create and on assignment, unless the page is itself a `PROJECT`. A rejected
+  bulk assignment moves nothing.
 - A page-create collision returns a conflict and does not overwrite the
   existing file. A Kind/Project declaration can fail after intake creation;
   the new page remains at its created path.

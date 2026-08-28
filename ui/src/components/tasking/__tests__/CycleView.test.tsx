@@ -334,7 +334,9 @@ describe("CycleView — header", () => {
   it("renders canonical Backlog copy without retired scheduling language", () => {
     renderCycleView(BACKLOG_PSEUDO, []);
     expect(screen.getByText("No Cycle")).toBeInTheDocument();
-    expect(screen.getByText("Tasks not assigned to a Cycle.")).toBeInTheDocument();
+    expect(
+      screen.getByText("Tasks not assigned to a Cycle."),
+    ).toBeInTheDocument();
     expect(screen.queryByText(/unscheduled/i)).not.toBeInTheDocument();
   });
 
@@ -355,7 +357,13 @@ describe("CycleView — header", () => {
 describe("CycleView — metrics and burndown", () => {
   it("renders approved cycle summary labels", () => {
     renderCycleView(ACTIVE_CYCLE, C01_TASKS); // 3 tasks
-    for (const label of ["Tasks", "Done", "In progress", "Blocked", "Progress"]) {
+    for (const label of [
+      "Tasks",
+      "Done",
+      "In progress",
+      "Blocked",
+      "Progress",
+    ]) {
       expect(screen.getByText(label)).toBeInTheDocument();
     }
     expect(screen.getByText("03")).toBeInTheDocument();
@@ -696,8 +704,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     renderScreen();
     await screen.findByRole("heading", { name: "Task Board" });
 
-    const cycleEmptyState = screen
-      .getByText("No tasks in Cycle 02")
+    const cycleEmptyState = screen.getByText("No tasks in Cycle 02")
       .parentElement!;
     await userEvent.click(
       within(cycleEmptyState).getByRole("button", { name: /New task/i }),
@@ -720,8 +727,7 @@ describe("TaskingScreen integration — cycle mode", () => {
     renderScreen();
     await screen.findByRole("heading", { name: "Task Board" });
 
-    const cycleEmptyState = screen
-      .getByText("No tasks in Cycle 02")
+    const cycleEmptyState = screen.getByText("No tasks in Cycle 02")
       .parentElement!;
     await userEvent.click(
       within(cycleEmptyState).getByRole("button", { name: /New task/i }),

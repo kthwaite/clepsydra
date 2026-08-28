@@ -1,9 +1,5 @@
 import type { HistoryState, RouterHistory } from "@tanstack/history";
-import {
-  useNavigate,
-  useRouter,
-  useRouterState,
-} from "@tanstack/react-router";
+import { useNavigate, useRouter, useRouterState } from "@tanstack/react-router";
 import { useCallback, useLayoutEffect } from "react";
 import { routeViewFromMatches } from "#/components/codex/useCodexView";
 import {
@@ -78,7 +74,6 @@ function runFolioHistoryTraversalGuards(
   proceed(approved);
 }
 
-
 export function registerFolioHistoryTraversalGuard(
   guard: FolioHistoryTraversalGuard,
 ): () => void {
@@ -98,13 +93,9 @@ function captureTrackedHistoryDestination(): void {
   );
 }
 
-function activeDestinationState(
-  folioOriginTabId: string | null,
-): HistoryState {
+function activeDestinationState(folioOriginTabId: string | null): HistoryState {
   const workspace = useWorkspaceStore.getState();
-  const active = workspace.tabs.find(
-    (tab) => tab.id === workspace.activeTabId,
-  );
+  const active = workspace.tabs.find((tab) => tab.id === workspace.activeTabId);
   if (active?.type === "page" && active.path) {
     return {
       folioTabId: active.id,
@@ -123,9 +114,7 @@ function activeDestinationState(
 
 /** Replace an archived Folio's current browser-history tuple with the single
  * survivor selected by the atomic workspace cleanup, or a launcher tuple. */
-export function replaceFolioHistoryAfterArchive(
-  history: RouterHistory,
-): void {
+export function replaceFolioHistoryAfterArchive(history: RouterHistory): void {
   const nextState = activeDestinationState(null);
   capturedDepartureLocationId = null;
   trackedHistoryDestination = readFolioHistoryDestination(nextState);
@@ -137,10 +126,7 @@ export function replaceFolioHistoryAfterArchive(
   );
 }
 
-
-function applyHistoryDestination(
-  destination: FolioHistoryDestination,
-): void {
+function applyHistoryDestination(destination: FolioHistoryDestination): void {
   const workspace = useWorkspaceStore.getState();
   const tab = workspace.tabs.find(
     (candidate) =>
@@ -158,8 +144,6 @@ function applyHistoryDestination(
   });
 }
 
-
-
 export function useFolioHistoryController(): void {
   const router = useRouter();
 
@@ -169,8 +153,7 @@ export function useFolioHistoryController(): void {
       history.location.state,
     );
     trackedHistoryDestination = initialDestination;
-    trackedHistoryOriginTabId =
-      history.location.state.folioOriginTabId ?? null;
+    trackedHistoryOriginTabId = history.location.state.folioOriginTabId ?? null;
     const back = history.back;
     const forward = history.forward;
     trackedHistoryEntryIdentity = historyEntryIdentity(history.location.state);
@@ -296,9 +279,7 @@ export function useOpenTabWithFolioHistory(): OpenTabWithFolioHistory {
 
       runWorkspaceTransition(() => {
         const current = useWorkspaceStore.getState();
-        const folioOriginTabId = onWorkspaceRoute
-          ? current.activeTabId
-          : null;
+        const folioOriginTabId = onWorkspaceRoute ? current.activeTabId : null;
         captureTrackedHistoryDestination();
         current.openTab(type, path, label, target);
         const destinationState = activeDestinationState(folioOriginTabId);

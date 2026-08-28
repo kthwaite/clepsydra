@@ -70,9 +70,7 @@ export function useIdentifiedRows<Value>(
         }
 
         const positional = current[index];
-        const positionalIndex = positional
-          ? available.indexOf(positional)
-          : -1;
+        const positionalIndex = positional ? available.indexOf(positional) : -1;
         if (positional && positionalIndex >= 0) {
           available.splice(positionalIndex, 1);
           return { ...positional, value };

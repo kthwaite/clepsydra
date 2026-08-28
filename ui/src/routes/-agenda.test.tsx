@@ -2,11 +2,7 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  AgendaResponse,
-  AgendaTask,
-  AgendaTodo,
-} from "#/api/tasks";
+import type { AgendaResponse, AgendaTask, AgendaTodo } from "#/api/tasks";
 import { EMPTY_FILTER_STATE, type FilterState } from "#/lib/filters/model";
 
 const router = vi.hoisted(() => ({
@@ -46,7 +42,7 @@ vi.mock("#/api/board", () => ({
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => api.openTab }));
 vi.mock("#/lib/useProjects", () => ({
-  useProjects: () => ["Atlas", "Zephyr"],
+  useProjectValues: () => ["Atlas", "Zephyr"],
 }));
 
 import {
@@ -279,7 +275,9 @@ describe("AgendaScreen", () => {
     const overdueSection = overdue.closest("section");
     const dueTodaySection = dueToday.closest("section");
     if (!overdueSection || !dueTodaySection) {
-      throw new Error("Agenda section heading is missing its section container");
+      throw new Error(
+        "Agenda section heading is missing its section container",
+      );
     }
     expect(within(overdueSection).getByText("Renew insurance")).toBeVisible();
     expect(within(dueTodaySection).getByText("Ship Agenda")).toBeVisible();
@@ -363,7 +361,9 @@ describe("AgendaScreen", () => {
       />,
     );
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Couldn’t load Agenda.");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Couldn’t load Agenda.",
+    );
     expect(screen.queryByText("Nothing due today.")).toBeNull();
   });
 
@@ -409,32 +409,36 @@ describe("AgendaScreen", () => {
   ])(
     "applies the %s facet to its documented source domain",
     (field, value, expected, excluded) => {
-    const items = [
-      todo("Open Todo", 1, { status: "todo" }),
-      todo("Doing Todo", 2, { status: "doing" }),
-      todo("High Todo", 3, { properties: { priority: "a" } }),
-      task("Matching Task type", 4),
-      task("Field Task", 5, { status: "FIELD" }),
-      task("P1 Task", 6, { priority: "P1" }),
-      task("Atlas Task", 7, { project: "Atlas" }),
-      task("Blocked Task", 8, { hold: "Waiting" }),
-    ];
+      const items = [
+        todo("Open Todo", 1, { status: "todo" }),
+        todo("Doing Todo", 2, { status: "doing" }),
+        todo("High Todo", 3, { properties: { priority: "a" } }),
+        task("Matching Task type", 4),
+        task("Field Task", 5, { status: "FIELD" }),
+        task("P1 Task", 6, { priority: "P1" }),
+        task("Atlas Task", 7, { project: "Atlas" }),
+        task("Blocked Task", 8, { hold: "Waiting" }),
+      ];
 
-    render(
-      <ControlledAgendaScreen
-        initial={{ text: "", facets: { [field]: [value] } }}
-        data={response({ today: items })}
-      />,
-    );
+      render(
+        <ControlledAgendaScreen
+          initial={{ text: "", facets: { [field]: [value] } }}
+          data={response({ today: items })}
+        />,
+      );
 
-    expect(screen.getByText(expected)).toBeVisible();
-    expect(screen.queryByText(excluded)).toBeNull();
-    if (field.startsWith("task") || field === "project" || field === "blocked") {
-      expect(screen.queryByText("Open Todo")).toBeNull();
-    }
-    if (field.startsWith("todo")) {
-      expect(screen.queryByText("Matching Task type")).toBeNull();
-    }
+      expect(screen.getByText(expected)).toBeVisible();
+      expect(screen.queryByText(excluded)).toBeNull();
+      if (
+        field.startsWith("task") ||
+        field === "project" ||
+        field === "blocked"
+      ) {
+        expect(screen.queryByText("Open Todo")).toBeNull();
+      }
+      if (field.startsWith("todo")) {
+        expect(screen.queryByText("Matching Task type")).toBeNull();
+      }
     },
   );
 
@@ -467,7 +471,9 @@ describe("AgendaScreen", () => {
     const user = userEvent.setup();
     render(
       <ControlledAgendaScreen
-        data={response({ today: [task("No Project Task", 1, { project: null })] })}
+        data={response({
+          today: [task("No Project Task", 1, { project: null })],
+        })}
       />,
     );
 

@@ -1,10 +1,10 @@
 import type { ReactElement, ReactNode } from "react";
 import {
-  CheckboxGroup as RACCheckboxGroup,
-  type CheckboxGroupProps as RACCheckboxGroupProps,
   composeRenderProps,
   FieldError,
   Label,
+  CheckboxGroup as RACCheckboxGroup,
+  type CheckboxGroupProps as RACCheckboxGroupProps,
   type ValidationResult,
 } from "react-aria-components";
 import { Description } from "#/components/ui/form";

@@ -107,6 +107,7 @@ The compact active equivalent is shown below.
 host = "localhost"
 port = 3000
 dev_mode = false
+# public_origins = ["https://clepsydra.localhost"]
 
 [server.tls]
 enabled = false
@@ -136,6 +137,7 @@ fetch_concurrency = 4
 | `server` | `host` | string | `localhost` | Bind host |
 | `server` | `port` | integer | `3000` | Bind port |
 | `server` | `dev_mode` | bool | `false` | `false`: serve embedded frontend. `true`: API/docs only |
+| `server` | `public_origins` | string[] | `[]` | Reverse-proxy or tunnel origins the archive viewer may name; config file only |
 | `server.tls` | `enabled` | bool | `false` | Enable HTTPS |
 | `server.tls` | `cert_path` | string | unset | Used only when **both** cert and key are set |
 | `server.tls` | `key_path` | string | unset | Used only when **both** cert and key are set |
@@ -175,6 +177,36 @@ appropriate interface address or `localhost` from the same machine. Bracket an
 IPv6 literal (`https://[::1]:3000`). Swagger UI and the generated contract are
 served at `/api/docs` and `/api/openapi.json`; see the
 [API Reference](/docs/api-reference).
+
+### Archive viewer origins (`server.public_origins`)
+
+Archived snapshots render inside a sandboxed frame. The frame's
+Content-Security-Policy names exactly one origin that images, fonts, media,
+and stylesheets may load from: the origin the browser used to reach
+Clepsydra. That origin is chosen from the bind origin (`server.host`,
+`server.port`, TLS) plus this list by matching the request's `Host` header.
+The header only selects a configured entry; its bytes never reach the
+policy.
+
+Origins compare by scheme, host, and port. `localhost` and `127.0.0.1` are
+different origins, so a browser that opens `http://127.0.0.1:<port>` needs its
+own entry even when `server.host` is `localhost`. The request `Host` header
+carries no scheme, so list one scheme per `host[:port]`; when two entries
+differ only by scheme, the first listed one wins.
+
+Behind a reverse proxy or tunnel, list every name browsers use:
+
+```toml
+[server]
+public_origins = ["https://clepsydra.localhost", "https://vault.tail1234.ts.net"]
+```
+
+Entries must be bare `scheme://host[:port]` origins — no wildcards, paths,
+queries, or credentials; startup fails otherwise. A name missing from the list
+falls back to the bind origin, and the snapshot renders without its images and
+fonts (fail closed, nothing leaks). `clep serve` logs the effective origins at
+startup. This key is read from the config file only; it has no
+environment-variable form.
 
 ### TLS behavior (`server.tls`)
 
@@ -327,7 +359,7 @@ The exact root `feeds.md` is always excluded independently of this list.
 | Key | Type | Default |
 |---|---:|---|
 | `enabled` | bool | `true` |
-| `cas_path` | string | `~/.clepsydra/cas` |
+| `cas_path` | string | `.clepsydra/cas` |
 | `default_path_prefix` | string | `archive` |
 | `max_blob_size_mb` | integer | `100` |
 | `max_request_size_mb` | integer | `250` |
@@ -335,7 +367,9 @@ The exact root `feeds.md` is always excluded independently of this list.
 
 Notes:
 
-- `cas_path` supports `~/...` (expanded to your home directory).
+- `cas_path` is resolved against the vault root when relative (the default
+  keeps the store inside the vault at `.clepsydra/cas`); `~/...` expands to
+  your home directory; absolute paths are used as-is.
 - Archive request size limits are enforced at ingest time. `max_blob_size_mb`
   bounds one deconstructed resource; `max_request_size_mb` bounds the whole
   capture (the deconstructed snapshot plus every resource it references).
@@ -438,7 +472,7 @@ annotations_folder = "library/annotations"
 
 [archive]
 enabled = true
-cas_path = "~/.clepsydra/cas"
+cas_path = ".clepsydra/cas"
 default_path_prefix = "archive"
 max_blob_size_mb = 100
 max_request_size_mb = 250

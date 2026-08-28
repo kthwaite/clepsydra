@@ -52,34 +52,28 @@ function register<T>(registrations: T[], registration: T) {
   };
 }
 
-vi.mock(
-  "@atlaskit/pragmatic-drag-and-drop/element/adapter",
-  () => ({
-    draggable: (registration: DraggableRegistration) =>
-      register(dnd.draggables, registration),
-    dropTargetForElements: (registration: DropTargetRegistration) =>
-      register(dnd.dropTargets, registration),
-    monitorForElements: (registration: MonitorRegistration) =>
-      register(dnd.monitors, registration),
-  }),
-);
+vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
+  draggable: (registration: DraggableRegistration) =>
+    register(dnd.draggables, registration),
+  dropTargetForElements: (registration: DropTargetRegistration) =>
+    register(dnd.dropTargets, registration),
+  monitorForElements: (registration: MonitorRegistration) =>
+    register(dnd.monitors, registration),
+}));
 
-vi.mock(
-  "@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge",
-  () => ({
-    attachClosestEdge: (
-      data: Parameters<AttachClosestEdge>[0],
-      { allowedEdges }: Parameters<AttachClosestEdge>[1],
-    ) => ({
-      ...data,
-      [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
-        ? dnd.closestEdge
-        : null,
-    }),
-    extractClosestEdge: (data: Record<string | symbol, unknown>) =>
-      (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+vi.mock("@atlaskit/pragmatic-drag-and-drop-hitbox/closest-edge", () => ({
+  attachClosestEdge: (
+    data: Parameters<AttachClosestEdge>[0],
+    { allowedEdges }: Parameters<AttachClosestEdge>[1],
+  ) => ({
+    ...data,
+    [dnd.closestEdgeKey]: allowedEdges.includes(dnd.closestEdge)
+      ? dnd.closestEdge
+      : null,
   }),
-);
+  extractClosestEdge: (data: Record<string | symbol, unknown>) =>
+    (data[dnd.closestEdgeKey] as ClosestEdge | null | undefined) ?? null,
+}));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => () => {},
@@ -395,9 +389,7 @@ describe("Sheaf quire rendering", () => {
     // surface and the close control — not on the inner label button,
     // which stops short of the ✕.
     expect(wrapper).toContainElement(close);
-    expect(wrapper.style.boxShadow).toContain(
-      "inset 0 -2px 0 0 var(--accent)",
-    );
+    expect(wrapper.style.boxShadow).toContain("inset 0 -2px 0 0 var(--accent)");
     expect(tabButton.getAttribute("style")).toBeNull();
     expect(close.getAttribute("style")).toBeNull();
   });
@@ -556,9 +548,7 @@ describe("Sheaf tab drag-and-drop wiring", () => {
       seed(false);
       render(<Sheaf activeTabId="t3" />);
 
-      const source = sourceFor(
-        screen.getByRole("button", { name: "Alpha" }),
-      );
+      const source = sourceFor(screen.getByRole("button", { name: "Alpha" }));
       const target = dropTargetFor(
         screen.getByRole("button", { name: "Gamma" }),
       );
@@ -566,7 +556,9 @@ describe("Sheaf tab drag-and-drop wiring", () => {
 
       const state = useWorkspaceStore.getState();
       expect(state.tabs.map((tab) => tab.id)).toEqual(expectedIds);
-      expect(state.tabs.find((tab) => tab.id === "t1")?.quireId).toBeUndefined();
+      expect(
+        state.tabs.find((tab) => tab.id === "t1")?.quireId,
+      ).toBeUndefined();
     },
   );
 
@@ -575,9 +567,7 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     render(<Sheaf activeTabId="t3" />);
 
     const source = sourceFor(screen.getByRole("button", { name: "Gamma" }));
-    const target = dropTargetFor(
-      screen.getByRole("button", { name: "Beta" }),
-    );
+    const target = dropTargetFor(screen.getByRole("button", { name: "Beta" }));
     dispatchDrop({ source, target, edge: "left" });
 
     const state = useWorkspaceStore.getState();
@@ -779,18 +769,14 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     dispatchDragStart(source);
 
     dispatchTargetEnter(source, target, "left");
-    expect(wrapper.style.boxShadow).toContain(
-      "inset 2px 0 0 0 var(--accent)",
-    );
+    expect(wrapper.style.boxShadow).toContain("inset 2px 0 0 0 var(--accent)");
     expect(close.getAttribute("style")).toBeNull();
 
     dispatchTargetDrag(source, target, "right");
     expect(wrapper.style.boxShadow).not.toContain(
       "inset 2px 0 0 0 var(--accent)",
     );
-    expect(wrapper.style.boxShadow).toContain(
-      "inset -2px 0 0 0 var(--accent)",
-    );
+    expect(wrapper.style.boxShadow).toContain("inset -2px 0 0 0 var(--accent)");
 
     dispatchTargetLeave(source, target);
     expect(wrapper.getAttribute("style")).toBe(idleWrapperStyle);
@@ -812,7 +798,9 @@ describe("Sheaf tab drag-and-drop wiring", () => {
     dispatchTargetEnter(source, target);
     expect(quire.getAttribute("style")).not.toBe(idleStyle);
     expect(quire.getAttribute("style")).toContain("var(--accent)");
-    expect(quire.style.boxShadow).not.toContain("inset 2px 0 0 0 var(--accent)");
+    expect(quire.style.boxShadow).not.toContain(
+      "inset 2px 0 0 0 var(--accent)",
+    );
     expect(quire.style.boxShadow).not.toContain(
       "inset -2px 0 0 0 var(--accent)",
     );

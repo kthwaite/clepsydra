@@ -14,9 +14,10 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { SheafContextMenu } from "#/components/codex/SheafContextMenu";
 import { TabPreviewCard } from "#/components/codex/TabPreviewCard";
 import { shouldPreviewTab } from "#/components/codex/tab-preview";
+import { KindIcon } from "#/components/KindIcon";
 import { useActivateTabWithFolioHistory } from "#/hooks/useFolioHistoryNavigation";
 import { cn } from "#/lib/cn";
-import { kindColorVar, resolveKindFromPath } from "#/lib/kind";
+import { resolveKindFromPath } from "#/lib/kind";
 import { type Quire, quireColorVar, sheafSegments } from "#/store/quires";
 import { useUiStore } from "#/store/ui";
 import { type TabDescriptor, useWorkspaceStore } from "#/store/workspace";
@@ -434,11 +435,7 @@ function FolioTab({
             dragged && "opacity-50",
           )}
         >
-          <span
-            className="inline-block h-[6px] w-[6px] flex-shrink-0"
-            style={{ background: kindColorVar(kind) }}
-            aria-hidden
-          />
+          <KindIcon kind={kind} className="flex-shrink-0" />
           <span className="max-w-[160px] overflow-hidden text-ellipsis text-[12px] select-none">
             {t.label || t.path || "(untitled)"}
           </span>

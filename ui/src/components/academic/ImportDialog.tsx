@@ -10,8 +10,8 @@ import {
 import { Button } from "#/components/ui/button";
 import { Checkbox } from "#/components/ui/checkbox";
 import { Dialog } from "#/components/ui/dialog";
-import { TextField } from "#/components/ui/text-field";
 import { Select, SelectItem } from "#/components/ui/select";
+import { TextField } from "#/components/ui/text-field";
 import { useOpenTab } from "#/hooks/useOpenTab";
 
 type ImportMode = "bibtex" | "doi" | "isbn" | "zotero";

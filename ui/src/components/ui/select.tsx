@@ -1,5 +1,6 @@
 import { ChevronDown } from "lucide-react";
 import { composeRenderProps } from "react-aria-components/composeRenderProps";
+import type { ListBoxSectionProps } from "react-aria-components/ListBox";
 import {
   Select as AriaSelect,
   type SelectProps as AriaSelectProps,
@@ -10,7 +11,6 @@ import {
   SelectValue,
   type ValidationResult,
 } from "react-aria-components/Select";
-import type { ListBoxSectionProps } from "react-aria-components/ListBox";
 import {
   DropdownItem,
   DropdownListBox,
@@ -81,10 +81,7 @@ export function Select<T, M extends "single" | "multiple" = "single">({
   );
 }
 
-export function SelectListBox<T>({
-  className,
-  ...props
-}: ListBoxProps<T>) {
+export function SelectListBox<T>({ className, ...props }: ListBoxProps<T>) {
   return (
     <DropdownListBox
       {...props}
@@ -116,16 +113,11 @@ export function SelectItem({ className, ...props }: ListBoxItemProps) {
       {...props}
       className={composeRenderProps(
         className,
-        (
-          className,
-          { isDisabled, isFocused, isHovered, isSelected },
-        ) =>
+        (className, { isDisabled, isFocused, isHovered, isSelected }) =>
           cn(
             "flex cursor-default items-center gap-2 p-2 text-sm outline-none transition-colors",
-            (isHovered || isFocused) &&
-              "bg-accent text-accent-foreground",
-            isSelected &&
-              "bg-accent font-medium text-accent-foreground",
+            (isHovered || isFocused) && "bg-accent text-accent-foreground",
+            isSelected && "bg-accent font-medium text-accent-foreground",
             isDisabled && "pointer-events-none opacity-50",
             className,
           ),

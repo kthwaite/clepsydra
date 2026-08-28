@@ -2,7 +2,6 @@ import { useIsMutating } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { createPortal } from "react-dom";
 import { useStats } from "#/api/index";
-import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import type { CodexFrameChromeProps } from "#/components/codex/CodexFrame";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { useReadingProgress } from "#/components/codex/ReadingProgressContext";
@@ -14,13 +13,14 @@ import {
   goToView,
   VIEW_REGISTRY,
 } from "#/components/codex/viewRegistry";
+import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { useTheme } from "#/components/ThemeProvider";
 import { useClock } from "#/hooks/useClock";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { useUptime } from "#/hooks/useUptime";
 import { useVaultEvents } from "#/hooks/useVaultEvents";
 import { cn } from "#/lib/cn";

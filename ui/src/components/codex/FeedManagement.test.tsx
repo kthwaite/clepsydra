@@ -301,7 +301,9 @@ describe("FeedManagement", () => {
       ),
     ).toEqual(["Engineering", "Research", "Design"]);
     await user.keyboard("{Escape}");
-    await user.click(within(subscribe).getByRole("button", { name: /cancel/i }));
+    await user.click(
+      within(subscribe).getByRole("button", { name: /cancel/i }),
+    );
     await waitFor(() => expect(noSubscribeDialog()).toBe(true));
 
     await user.click(screen.getByRole("button", { name: /edit one example/i }));
@@ -597,9 +599,9 @@ describe("FeedManagement", () => {
     managementMocks.subscribeState.isPending = true;
     view.rerender(<FeedManagement />);
     const pending = within(await subscribeDialog());
-    expect(pending.getByRole("textbox", { name: /feed or site url/i })).toHaveValue(
-      "https://pending.example/feed",
-    );
+    expect(
+      pending.getByRole("textbox", { name: /feed or site url/i }),
+    ).toHaveValue("https://pending.example/feed");
     expect(pending.getByRole("combobox", { name: /^group$/i })).toHaveValue(
       "Engineering",
     );
@@ -621,9 +623,9 @@ describe("FeedManagement", () => {
     expect(failed.getByRole("alert")).toHaveTextContent(
       "feeds.md changed; reload and retry",
     );
-    expect(failed.getByRole("textbox", { name: /feed or site url/i })).toHaveValue(
-      "https://pending.example/feed",
-    );
+    expect(
+      failed.getByRole("textbox", { name: /feed or site url/i }),
+    ).toHaveValue("https://pending.example/feed");
     expect(failed.getByRole("combobox", { name: /^group$/i })).toHaveValue(
       "Engineering",
     );
@@ -669,7 +671,9 @@ describe("FeedManagement", () => {
     expect(
       reopened.getByRole("textbox", { name: /feed or site url/i }),
     ).toHaveValue("");
-    expect(reopened.getByRole("combobox", { name: /^group$/i })).toHaveValue("");
+    expect(reopened.getByRole("combobox", { name: /^group$/i })).toHaveValue(
+      "",
+    );
   });
 
   it("keeps the full edit draft and local alert through a conflict", async () => {

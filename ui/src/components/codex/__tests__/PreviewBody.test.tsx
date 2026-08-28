@@ -153,7 +153,9 @@ describe("PreviewBody", () => {
     const { rerender } = render(
       <PreviewBody path="notes/passive.md" page={page} previewPending />,
     );
-    expect(screen.queryByText("Properties unavailable")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Properties unavailable"),
+    ).not.toBeInTheDocument();
     expect(document.querySelector("dl")).toBeNull();
 
     rerender(
@@ -165,9 +167,7 @@ describe("PreviewBody", () => {
     );
     expect(document.querySelector("dl")).toBeNull();
 
-    rerender(
-      <PreviewBody path="notes/passive.md" page={page} previewError />,
-    );
+    rerender(<PreviewBody path="notes/passive.md" page={page} previewError />);
     expect(screen.getByText("Properties unavailable")).toBeInTheDocument();
   });
 
@@ -181,10 +181,14 @@ describe("PreviewBody", () => {
       />,
     );
 
-    expect(screen.getByText("Protected note · open to unlock")).toBeInTheDocument();
+    expect(
+      screen.getByText("Protected note · open to unlock"),
+    ).toBeInTheDocument();
     expect(screen.queryByText("secret")).not.toBeInTheDocument();
     expect(screen.queryByText("classified")).not.toBeInTheDocument();
     expect(screen.queryByText("+2 more")).not.toBeInTheDocument();
-    expect(screen.queryByText("Properties unavailable")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("Properties unavailable"),
+    ).not.toBeInTheDocument();
   });
 });

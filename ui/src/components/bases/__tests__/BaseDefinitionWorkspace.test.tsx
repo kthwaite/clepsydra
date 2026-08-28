@@ -3,6 +3,7 @@ import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BaseDetailResponse, BaseMutationResponse } from "#/api/bases";
 import { BaseDefinitionWorkspace } from "#/components/bases/BaseDefinitionWorkspace";
+
 function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
@@ -12,11 +13,12 @@ async function chooseSelectOption(
   label: string,
   option: string,
 ) {
-  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  const trigger = screen.getByRole("button", {
+    name: selectTriggerName(label),
+  });
   await user.click(trigger);
   await user.click(await screen.findByRole("option", { name: option }));
 }
-
 
 const { previewMock, updateMock, useBlockerMock } = vi.hoisted(() => ({
   previewMock: vi.fn(),
@@ -163,7 +165,13 @@ describe("BaseDefinitionWorkspace", () => {
       within(screen.getByRole("navigation", { name: "Definition sections" }))
         .getAllByRole("button")
         .map((button) => button.textContent),
-    ).toEqual(["General", "Filter", "Properties", "Preview properties", "Views"]);
+    ).toEqual([
+      "General",
+      "Filter",
+      "Properties",
+      "Preview properties",
+      "Views",
+    ]);
   });
 
   it("keeps presentation edits local until Save and sends both additions", async () => {
@@ -276,7 +284,6 @@ describe("BaseDefinitionWorkspace", () => {
     );
     expect(screen.getByLabelText("Display label for body")).toHaveFocus();
   });
-
 
   it("retains deterministic preview row identity across a successful save response", async () => {
     const initialPreviewId =

@@ -3,7 +3,7 @@
  *
  * Covers:
  *   - Render: task fields present
- *   - Immediate patches: disposition radio, priority radio, operation select,
+ *   - Immediate patches: disposition radio, priority radio, project select,
  *     cycle select (BACKLOG → null), tags
  *   - Debounced patches: title, assignee, hold reason (vi.useFakeTimers)
  *   - Hold toggle on/off payloads
@@ -34,8 +34,8 @@ import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
   NO_SLUG_OP,
-  SEALED_IN_CLOSED_CYCLE_TASK,
   PROJECT_SCOPES,
+  SEALED_IN_CLOSED_CYCLE_TASK,
 } from "./fixtures";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
@@ -202,18 +202,20 @@ describe("TaskEditPanel — render", () => {
 
   it("uses approved accessible names and task field labels", () => {
     wrap();
-    expect(screen.getByRole("dialog", { name: "Edit task" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("dialog", { name: "Edit task" }),
+    ).toBeInTheDocument();
     expect(screen.getByRole("textbox", { name: "Title" })).toBeInTheDocument();
-    expect(screen.getByRole("radiogroup", { name: "Status" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radiogroup", { name: "Status" }),
+    ).toBeInTheDocument();
     expect(
       screen.getByRole("radiogroup", { name: "Priority" }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /Project$/ }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Cycle$/ }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cycle$/ })).toBeInTheDocument();
     for (const name of [
       "Assignee",
       "Estimate",
@@ -492,7 +494,7 @@ describe("TaskEditPanel — immediate patches", () => {
     });
   });
 
-  it("operation UNFILED select fires PATCH {project: ''}", async () => {
+  it("project UNFILED select fires PATCH {project: ''}", async () => {
     const stub = makeStub();
     wrap({ task: FULL_TASK, fetchStub: stub, seedBoard: true });
 
@@ -729,7 +731,9 @@ describe("TaskEditPanel — hold toggle", () => {
       vi.advanceTimersByTime(350);
     });
 
-    const patchCall = stub.mock.calls.find(([, opts]) => opts?.method === "PATCH");
+    const patchCall = stub.mock.calls.find(
+      ([, opts]) => opts?.method === "PATCH",
+    );
     expect(JSON.parse(patchCall?.[1]?.body as string)).toEqual({
       hold: "Waiting on vendor",
     });
@@ -822,9 +826,7 @@ describe("TaskEditPanel — archive two-step", () => {
       stub.mock.calls.filter(([, opts]) => opts?.method === "DELETE"),
     ).toHaveLength(0);
     expect(useBoardStore.getState().editTaskId).toBe(FULL_TASK.id);
-    expect(
-      screen.getByRole("button", { name: "Archiving…" }),
-    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Archiving…" })).toBeDisabled();
     expect(screen.getByText("Moving to Rubbish Bin…")).toBeInTheDocument();
 
     resolvePatch(

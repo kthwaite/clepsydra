@@ -19,10 +19,7 @@ const graphWithAiJournal = {
     ...graph.nodes,
     { id: "f", path: "ai-journals/2026-08-27.md", title: "AI Journal" },
   ],
-  edges: [
-    ...graph.edges,
-    { source: "a", target: "f", kind: "wikilink" },
-  ],
+  edges: [...graph.edges, { source: "a", target: "f", kind: "wikilink" }],
 };
 
 describe("applyFilters", () => {

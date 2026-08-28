@@ -3774,3 +3774,107 @@ async fn openapi_documents_the_new_aggregate_functions_and_flat_aggregates_field
             .any(|field| field == "aggregates")
     );
 }
+
+// ---------------------------------------------------------------------------
+// Base member `project` must name a slug some PROJECT page declares
+// ---------------------------------------------------------------------------
+
+/// A base with no filter of its own and an unfiltered view, so any kind of
+/// member can be drafted through it.
+fn seed_filed_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::write(
+        root.join("bases/filed.base.toml"),
+        r#"name = "Filed"
+
+[[views]]
+name = "All"
+columns = ["title"]
+"#,
+    )
+    .unwrap();
+}
+
+async fn create_filed_member(
+    fixture: &ApiFixture,
+    title: &str,
+    fields: serde_json::Value,
+) -> axum_test::TestResponse {
+    let revision = current_base_revision(fixture, "filed").await;
+    fixture
+        .server
+        .post("/api/vault/bases/filed/members")
+        .json(&serde_json::json!({
+            "base_revision": revision,
+            "view": "All",
+            "title": title,
+            "fields": fields
+        }))
+        .await
+}
+
+#[tokio::test]
+async fn member_rejects_a_project_no_project_page_declares() {
+    let fixture = member_fixture(seed_filed_base);
+    let before = page_paths(fixture.state.vault.root());
+
+    let response = create_filed_member(
+        &fixture,
+        "Orphan",
+        serde_json::json!({ "project": "ghost" }),
+    )
+    .await;
+
+    response.assert_status(StatusCode::BAD_REQUEST);
+    let error: serde_json::Value = response.json();
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains("unknown project: ghost")),
+        "{error}"
+    );
+    assert_eq!(page_paths(fixture.state.vault.root()), before);
+}
+
+#[tokio::test]
+async fn member_accepts_a_project_a_project_page_declares() {
+    let fixture = member_fixture(seed_filed_base);
+    support::seed_project(&fixture.server, "atlas").await;
+
+    let response =
+        create_filed_member(&fixture, "Filed", serde_json::json!({ "project": "atlas" })).await;
+
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    let path = body["path"].as_str().unwrap();
+    assert!(path.starts_with("notes/atlas/"), "{body}");
+    let vault_path = clepsydra::vault::path::VaultPath::new(path).unwrap();
+    let page = clepsydra::vault::page::Page::from_file(
+        &fixture.state.vault.resolve(&vault_path),
+        vault_path,
+    )
+    .unwrap();
+    assert_eq!(page.meta.project.as_deref(), Some("atlas"));
+}
+
+#[tokio::test]
+async fn project_kind_member_may_declare_a_new_slug() {
+    let fixture = member_fixture(seed_filed_base);
+
+    let response = create_filed_member(
+        &fixture,
+        "Hub",
+        serde_json::json!({ "kind": "PROJECT", "project": "minted" }),
+    )
+    .await;
+
+    response.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = response.json();
+    assert!(
+        body["path"]
+            .as_str()
+            .unwrap()
+            .starts_with("projects/minted/"),
+        "{body}"
+    );
+}

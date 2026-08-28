@@ -1,16 +1,12 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { createRef, useState } from "react";
 import type { ComponentType, PropsWithChildren } from "react";
+import { createRef, useState } from "react";
 import type { Key } from "react-aria-components/Select";
 import { describe, expect, it, vi } from "vitest";
 import { Header } from "#/components/ui/list-box";
 import * as SelectModule from "#/components/ui/select";
-import {
-  Select,
-  SelectItem,
-  SelectListBox,
-} from "#/components/ui/select";
+import { Select, SelectItem, SelectListBox } from "#/components/ui/select";
 
 describe("Select", () => {
   it("opens and reports a selected key", async () => {

@@ -8,11 +8,7 @@ import { createElement, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fetchClient } from "#/api/client";
 import { queryKeys } from "#/api/keys";
-import {
-  useAssignBulk,
-  useAssignPage,
-  useUpdatePage,
-} from "#/api/pages";
+import { useAssignBulk, useAssignPage, useUpdatePage } from "#/api/pages";
 
 function harness() {
   const client = new QueryClient({

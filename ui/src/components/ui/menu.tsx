@@ -1,15 +1,14 @@
 import { Check, ChevronRight } from "lucide-react";
 import {
   Children,
-  isValidElement,
   type ComponentProps,
+  isValidElement,
   type ReactElement,
   type ReactNode,
 } from "react";
 import { Pressable } from "react-aria-components";
 import { composeRenderProps } from "react-aria-components/composeRenderProps";
 import {
-  Keyboard,
   Menu as AriaMenu,
   MenuItem as AriaMenuItem,
   type MenuItemProps as AriaMenuItemProps,
@@ -19,9 +18,10 @@ import {
   MenuTrigger as AriaMenuTrigger,
   type MenuTriggerProps as AriaMenuTriggerProps,
   Separator as AriaSeparator,
-  type SeparatorProps,
   SubmenuTrigger as AriaSubmenuTrigger,
   type SubmenuTriggerProps as AriaSubmenuTriggerProps,
+  Keyboard,
+  type SeparatorProps,
   Text,
 } from "react-aria-components/Menu";
 import { Popover } from "#/components/ui/popover";
@@ -117,8 +117,7 @@ export function MenuItem({
   ...props
 }: MenuItemProps) {
   const textValue =
-    providedTextValue ??
-    (typeof children === "string" ? children : undefined);
+    providedTextValue ?? (typeof children === "string" ? children : undefined);
 
   return (
     <AriaMenuItem
@@ -193,9 +192,7 @@ export function MenuItem({
   );
 }
 
-export function MenuSection<T extends object>(
-  props: AriaMenuSectionProps<T>,
-) {
+export function MenuSection<T extends object>(props: AriaMenuSectionProps<T>) {
   return <AriaMenuSection {...props} />;
 }
 

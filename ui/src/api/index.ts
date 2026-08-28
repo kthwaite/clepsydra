@@ -7,8 +7,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import type { components, operations } from "#/api/schema";
-import { isInvalidSearchQuery } from "./error";
 import { $api, fetchClient } from "./client";
+import { isInvalidSearchQuery } from "./error";
 import { invalidateByPath, invalidatePageStructure, queryKeys } from "./keys";
 
 export type AmbiguousName = components["schemas"]["AmbiguousName"];

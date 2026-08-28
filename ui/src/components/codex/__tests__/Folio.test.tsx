@@ -7,7 +7,7 @@ import {
   within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { useEffect, useLayoutEffect, useMemo, type ReactNode } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useMemo } from "react";
 import {
   createEditor,
   type Descendant,

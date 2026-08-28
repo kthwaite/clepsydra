@@ -137,11 +137,7 @@ it("retains open navigation and transient hover cancellation", () => {
   render(<LinkPreviewLayer />);
 
   fireEvent.click(screen.getByRole("button", { name: "open" }));
-  expect(openTabMock).toHaveBeenCalledWith(
-    "page",
-    "notes/target.md",
-    "Target",
-  );
+  expect(openTabMock).toHaveBeenCalledWith("page", "notes/target.md", "Target");
 
   const card = document.querySelector<HTMLElement>(".fixed.cursor-default");
   expect(card).not.toBeNull();

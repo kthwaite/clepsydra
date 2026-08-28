@@ -72,10 +72,7 @@ describe("WikilinkCombobox", () => {
 
     expect(
       screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual([
-      "Design Notesnotes/design-notes.md",
-      "Create “design”",
-    ]);
+    ).toEqual(["Design Notesnotes/design-notes.md", "Create “design”"]);
   });
 
   it.each([
@@ -137,13 +134,16 @@ describe("WikilinkCombobox", () => {
   });
 
   it("keeps the first eight matching pages in order before Create", () => {
-    const manyPages = Array.from({ length: 9 }, (_, index): PageSummary => ({
-      ...pages[0],
-      id: `p${index}`,
-      title: `Topic ${index}`,
-      canonical_name: `topic-${index}`,
-      path: `notes/topic-${index}.md`,
-    }));
+    const manyPages = Array.from(
+      { length: 9 },
+      (_, index): PageSummary => ({
+        ...pages[0],
+        id: `p${index}`,
+        title: `Topic ${index}`,
+        canonical_name: `topic-${index}`,
+        path: `notes/topic-${index}.md`,
+      }),
+    );
 
     renderCombobox({ pages: manyPages, query: "topic" });
 
@@ -163,13 +163,16 @@ describe("WikilinkCombobox", () => {
   });
 
   it("suppresses Create when the exact page is beyond the eight-row cap", () => {
-    const manyPages = Array.from({ length: 9 }, (_, index): PageSummary => ({
-      ...pages[0],
-      id: `p${index}`,
-      title: index === 8 ? "Topic" : `Topic ${index}`,
-      canonical_name: `topic-${index}`,
-      path: `notes/topic-${index}.md`,
-    }));
+    const manyPages = Array.from(
+      { length: 9 },
+      (_, index): PageSummary => ({
+        ...pages[0],
+        id: `p${index}`,
+        title: index === 8 ? "Topic" : `Topic ${index}`,
+        canonical_name: `topic-${index}`,
+        path: `notes/topic-${index}.md`,
+      }),
+    );
 
     renderCombobox({ pages: manyPages, query: "topic" });
 

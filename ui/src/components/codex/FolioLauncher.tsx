@@ -1,8 +1,9 @@
 import { folioDisplayName, shortFolio } from "#/components/codex/folio-utils";
+import { KindIcon } from "#/components/KindIcon";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
-import { kindColorVar, resolveKind } from "#/lib/kind";
+import { resolveKind } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { useUiStore } from "#/store/ui";
 import { useWorkspaceStore } from "#/store/workspace";
@@ -87,14 +88,9 @@ export function FolioLauncher() {
                     onClick={() => openTab("page", entry.path, name)}
                     className="group flex items-center gap-2 border-b border-rule-soft py-1.5 text-left"
                   >
-                    <span
-                      className="inline-block h-[6px] w-[6px] flex-shrink-0"
-                      style={{
-                        background: kindColorVar(
-                          resolveKind({ path: entry.path }),
-                        ),
-                      }}
-                      aria-hidden
+                    <KindIcon
+                      kind={resolveKind({ path: entry.path })}
+                      className="flex-shrink-0"
                     />
                     <span className="min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[12px] text-ink-mute group-hover:text-ink">
                       {name}

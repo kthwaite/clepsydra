@@ -4,6 +4,7 @@ import {
   clearFolioHistoryForTab,
   clearFolioHistoryState,
   clearFolioRestoration,
+  consumeFolioHistoryRestorationRequest,
   type FolioRestoration,
   readFolioHistoryDestination,
   readFolioHistoryLocation,
@@ -13,7 +14,6 @@ import {
   requestFolioHistoryRestoration,
   saveFolioRestoration,
   subscribeFolioHistoryRestorationRequests,
-  consumeFolioHistoryRestorationRequest,
 } from "#/store/folioRestoration";
 
 const testTabIds = [
@@ -38,14 +38,10 @@ function restoration(
 }
 
 function capture(tabId: string, scrollTop: number): () => void {
-  return registerFolioHistoryCapture(
-    tabId,
-    `notes/${tabId}.md`,
-    () => ({
-      ...restoration(tabId),
-      scrollTop,
-    }),
-  );
+  return registerFolioHistoryCapture(tabId, `notes/${tabId}.md`, () => ({
+    ...restoration(tabId),
+    scrollTop,
+  }));
 }
 
 beforeEach(() => {
@@ -179,27 +175,15 @@ describe("Folio history restoration registry", () => {
     });
 
     expect(
-      captureFolioHistoryLocation(
-        "wrong-tab",
-        "beta",
-        "notes/alpha.md",
-      ),
+      captureFolioHistoryLocation("wrong-tab", "beta", "notes/alpha.md"),
     ).toBe(false);
     expect(
-      captureFolioHistoryLocation(
-        "wrong-path",
-        "alpha",
-        "notes/other.md",
-      ),
+      captureFolioHistoryLocation("wrong-path", "alpha", "notes/other.md"),
     ).toBe(false);
     expect(calls).toBe(0);
 
     expect(
-      captureFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      captureFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md"),
     ).toBe(true);
     source.scrollTop = 999;
     source.anchor!.path[0] = 4;
@@ -214,11 +198,8 @@ describe("Folio history restoration registry", () => {
 
     first!.focus!.path[0] = 8;
     expect(
-      readFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      )?.focus?.path,
+      readFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md")
+        ?.focus?.path,
     ).toEqual([0, 0]);
   });
 
@@ -249,27 +230,16 @@ describe("Folio history restoration registry", () => {
   it("replaces an existing location ID with the latest capture", () => {
     capture("alpha", 100);
     expect(
-      captureFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      captureFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md"),
     ).toBe(true);
 
     capture("alpha", 200);
     expect(
-      captureFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      captureFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md"),
     ).toBe(true);
     expect(
-      readFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      )?.scrollTop,
+      readFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md")
+        ?.scrollTop,
     ).toBe(200);
   });
 
@@ -291,45 +261,22 @@ describe("Folio history restoration registry", () => {
       ).toBe(true);
     }
     scrollTop = 100;
-    captureFolioHistoryLocation(
-      "history-0",
-      "alpha",
-      "notes/alpha.md",
-    );
+    captureFolioHistoryLocation("history-0", "alpha", "notes/alpha.md");
     scrollTop = 64;
-    captureFolioHistoryLocation(
-      "history-64",
-      "alpha",
-      "notes/alpha.md",
-    );
+    captureFolioHistoryLocation("history-64", "alpha", "notes/alpha.md");
 
     expect(
-      readFolioHistoryLocation(
-        "history-1",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      readFolioHistoryLocation("history-1", "alpha", "notes/alpha.md"),
     ).toBeNull();
     expect(
-      readFolioHistoryLocation(
-        "history-0",
-        "alpha",
-        "notes/alpha.md",
-      )?.scrollTop,
+      readFolioHistoryLocation("history-0", "alpha", "notes/alpha.md")
+        ?.scrollTop,
     ).toBe(100);
     expect(
-      readFolioHistoryLocation(
-        "history-2",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      readFolioHistoryLocation("history-2", "alpha", "notes/alpha.md"),
     ).not.toBeNull();
     expect(
-      readFolioHistoryLocation(
-        "history-64",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      readFolioHistoryLocation("history-64", "alpha", "notes/alpha.md"),
     ).not.toBeNull();
   });
 
@@ -339,18 +286,11 @@ describe("Folio history restoration registry", () => {
 
     unregisterFirst();
     expect(
-      captureFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      captureFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md"),
     ).toBe(true);
     expect(
-      readFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      )?.scrollTop,
+      readFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md")
+        ?.scrollTop,
     ).toBe(200);
 
     unregisterSecond();
@@ -365,17 +305,9 @@ describe("Folio history restoration registry", () => {
 
   it("supersedes an older pending restoration request", () => {
     capture("alpha", 100);
-    captureFolioHistoryLocation(
-      "history-first",
-      "alpha",
-      "notes/alpha.md",
-    );
+    captureFolioHistoryLocation("history-first", "alpha", "notes/alpha.md");
     capture("beta", 200);
-    captureFolioHistoryLocation(
-      "history-second",
-      "beta",
-      "notes/beta.md",
-    );
+    captureFolioHistoryLocation("history-second", "beta", "notes/beta.md");
 
     requestFolioHistoryRestoration({
       tabId: "alpha",
@@ -391,19 +323,19 @@ describe("Folio history restoration registry", () => {
     expect(
       readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
     ).toBeNull();
-    expect(
-      readFolioHistoryRestorationRequest("beta", "notes/beta.md"),
-    ).toEqual({
-      request: {
-        tabId: "beta",
-        path: "notes/beta.md",
-        locationId: "history-second",
+    expect(readFolioHistoryRestorationRequest("beta", "notes/beta.md")).toEqual(
+      {
+        request: {
+          tabId: "beta",
+          path: "notes/beta.md",
+          locationId: "history-second",
+        },
+        restoration: {
+          ...restoration("beta"),
+          scrollTop: 200,
+        },
       },
-      restoration: {
-        ...restoration("beta"),
-        scrollTop: 200,
-      },
-    });
+    );
   });
 
   it("exposes a matching pending request when its snapshot is absent", () => {
@@ -487,17 +419,9 @@ describe("Folio history restoration registry", () => {
 
   it("clears records, capture, and pending restoration for one tab only", () => {
     capture("alpha", 100);
-    captureFolioHistoryLocation(
-      "history-alpha",
-      "alpha",
-      "notes/alpha.md",
-    );
+    captureFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md");
     capture("beta", 200);
-    captureFolioHistoryLocation(
-      "history-beta",
-      "beta",
-      "notes/beta.md",
-    );
+    captureFolioHistoryLocation("history-beta", "beta", "notes/beta.md");
     capture("alpha", 300);
     requestFolioHistoryRestoration({
       tabId: "alpha",
@@ -508,18 +432,10 @@ describe("Folio history restoration registry", () => {
     clearFolioHistoryForTab("alpha");
 
     expect(
-      readFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      readFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md"),
     ).toBeNull();
     expect(
-      readFolioHistoryLocation(
-        "history-beta",
-        "beta",
-        "notes/beta.md",
-      ),
+      readFolioHistoryLocation("history-beta", "beta", "notes/beta.md"),
     ).not.toBeNull();
     expect(
       readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),
@@ -544,16 +460,8 @@ describe("Folio history restoration registry", () => {
       folioLocationId: "history-alpha",
     });
     capture("alpha", 100);
-    captureFolioHistoryLocation(
-      "history-alpha",
-      "alpha",
-      "notes/alpha.md",
-    );
-    readFolioHistoryLocation(
-      "history-alpha",
-      "alpha",
-      "notes/alpha.md",
-    );
+    captureFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md");
+    readFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md");
     requestFolioHistoryRestoration({
       tabId: "alpha",
       path: "notes/alpha.md",
@@ -565,11 +473,7 @@ describe("Folio history restoration registry", () => {
     clearFolioHistoryState();
 
     expect(
-      readFolioHistoryLocation(
-        "history-alpha",
-        "alpha",
-        "notes/alpha.md",
-      ),
+      readFolioHistoryLocation("history-alpha", "alpha", "notes/alpha.md"),
     ).toBeNull();
     expect(
       readFolioHistoryRestorationRequest("alpha", "notes/alpha.md"),

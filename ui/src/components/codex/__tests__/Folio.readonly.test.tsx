@@ -193,10 +193,7 @@ describe("Folio read-only bodies", () => {
       name: "Archive tags",
     });
     await user.click(
-      within(editable).getByRole(
-        "button",
-        { name: "Remove saved" },
-      ),
+      within(editable).getByRole("button", { name: "Remove saved" }),
     );
     expect(state.setTags).toHaveBeenLastCalledWith(["reading"]);
 
