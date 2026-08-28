@@ -442,7 +442,11 @@ async fn ai_journal_todos_never_reach_the_agenda() {
         .map(|item| item["content"].as_str().unwrap())
         .collect::<Vec<_>>();
     assert_eq!(today_content.len(), 1);
-    assert!(today_content.iter().any(|value| value.contains("human item")));
+    assert!(
+        today_content
+            .iter()
+            .any(|value| value.contains("human item"))
+    );
 
     let all_items = body["overdue"]
         .as_array()
@@ -458,9 +462,11 @@ async fn ai_journal_todos_never_reach_the_agenda() {
         )
         .chain(body["undated"].as_array().unwrap())
         .collect::<Vec<_>>();
-    assert!(!all_items
-        .iter()
-        .any(|item| item["content"].as_str().unwrap().contains("agent")));
+    assert!(
+        !all_items
+            .iter()
+            .any(|item| item["content"].as_str().unwrap().contains("agent"))
+    );
 }
 
 #[tokio::test]
