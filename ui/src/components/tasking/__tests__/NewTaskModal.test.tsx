@@ -14,11 +14,13 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoardStore } from "#/store/board";
 import { COL_LABEL, type ColLabelFn } from "../board-constants";
+import { deriveProjectScopes } from "../board-projects";
 import { NewTaskModal } from "../NewTaskModal";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
   NO_SLUG_OP,
+  PROJECT_SCOPES,
 } from "./fixtures";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
@@ -45,7 +47,7 @@ function wrap(
     <QueryClientProvider client={qc}>
       <NewTaskModal
         colLabel={NEUTRAL_COL_LABEL}
-        operations={operations}
+        projects={PROJECT_SCOPES}
         cycles={cycles}
       />
     </QueryClientProvider>,
@@ -113,7 +115,7 @@ describe("NewTaskModal — render", () => {
       <QueryClientProvider client={qc}>
         <NewTaskModal
           colLabel={NEUTRAL_COL_LABEL}
-          operations={operations}
+          projects={PROJECT_SCOPES}
           cycles={cycles}
         />
       </QueryClientProvider>,
@@ -287,7 +289,7 @@ describe("NewTaskModal — render", () => {
       <QueryClientProvider client={qc}>
         <NewTaskModal
           colLabel={NEUTRAL_COL_LABEL}
-          operations={BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations}
+          projects={PROJECT_SCOPES}
           cycles={BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles}
         />
       </QueryClientProvider>,
@@ -317,6 +319,30 @@ describe("NewTaskModal — render", () => {
     expect(startInput).toHaveAttribute("type", "date");
   });
 
+  it("offers a task slug with no PROJECT page, labelled by code alone", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    useBoardStore.setState({ taskModal: { project: "ghost" } });
+    const ghostTask = { ...BOARD_FIXTURE.tasks[0], project: "ghost" };
+    render(
+      <QueryClientProvider client={qc}>
+        <NewTaskModal
+          colLabel={NEUTRAL_COL_LABEL}
+          projects={deriveProjectScopes(operations, [ghostTask])}
+          cycles={cycles}
+        />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText(/GHOST · Create task/)).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: /Project$/ }));
+    expect(screen.getByRole("option", { name: "GHOST" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("option", { name: "OPS-1 — Operation Alpha" }),
+    ).toBeInTheDocument();
+  });
+
   it("omits slug-less operations from the OPERATION dropdown", async () => {
     const qc = new QueryClient({
       defaultOptions: { queries: { retry: false } },
@@ -326,7 +352,7 @@ describe("NewTaskModal — render", () => {
       <QueryClientProvider client={qc}>
         <NewTaskModal
           colLabel={NEUTRAL_COL_LABEL}
-          operations={[...operations, NO_SLUG_OP]}
+          projects={deriveProjectScopes([...operations, NO_SLUG_OP], [])}
           cycles={cycles}
         />
       </QueryClientProvider>,

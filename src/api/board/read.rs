@@ -78,13 +78,15 @@ pub(crate) async fn get_board(
 
             let mut operations: Vec<BoardOperation> = Vec::new();
             for (id_str, path, title, meta_json, project) in op_rows {
-                // Parse meta_json to check board: true
+                // Parse meta_json to read the optional `board:` opt-out flag
                 let meta: serde_json::Value =
                     serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
-                // Filter: board: true must be present in extra
-                let board_flag = meta.get("board");
-                if board_flag != Some(&serde_json::Value::Bool(true)) {
+                // `board:` is opt-out, not opt-in: every PROJECT page is an
+                // operation unless its frontmatter says `board: false`. An
+                // absent key (the common case — onboarding never sets one)
+                // and `board: true` both list the page.
+                if meta.get("board") == Some(&serde_json::Value::Bool(false)) {
                     continue;
                 }
 

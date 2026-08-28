@@ -27,7 +27,7 @@
  */
 
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
-import type { BoardCycle, BoardOperation } from "#/api/board";
+import type { BoardCycle } from "#/api/board";
 import { useCreateTask } from "#/api/board";
 import { Select, SelectItem } from "#/components/ui/select";
 import { useBoardStore } from "#/store/board";
@@ -36,7 +36,8 @@ import {
   BoardModalFrame,
   ModalEscChip,
 } from "./BoardModalFrame";
-import { type ColLabelFn, cycleStateLabel, opKey } from "./board-constants";
+import { type ColLabelFn, cycleStateLabel } from "./board-constants";
+import { type ProjectScope, scopeLabel } from "./board-projects";
 import {
   DispositionRow,
   EdField,
@@ -47,14 +48,15 @@ import {
 // ── NewTaskModal ──────────────────────────────────────────────────────────────
 
 interface NewTaskModalProps {
-  operations: BoardOperation[];
+  /** Project scopes (operations ∪ task slugs) — see deriveProjectScopes. */
+  projects: ProjectScope[];
   cycles: BoardCycle[];
   /** Resolves a column id to its server-supplied display label. */
   colLabel: ColLabelFn;
 }
 
 export function NewTaskModal({
-  operations,
+  projects,
   cycles,
   colLabel,
 }: NewTaskModalProps) {
@@ -104,18 +106,18 @@ export function NewTaskModal({
 
   if (!isOpen) return null;
 
-  // A board:true PROJECT page with no project: frontmatter has no valid
-  // filter/assignment key (filterTasks compares t.project === opFilter, and
-  // a slug-less op's key can never match a task's project) — exclude it so
-  // a task can't be misfiled to it.
-  const assignableOps = operations.filter((op) => Boolean(op.project));
+  // A PROJECT page with no project: frontmatter has no valid assignment key
+  // (a task's project is a slug, and a slug-less op has none) — exclude it
+  // so a task can't be misfiled to it. Synthesized scopes (slug with no
+  // page) are assignable: the slug is the project.
+  const assignableScopes = projects.filter((p) => p.slug !== null);
 
   // Closed cycles are not assignable to new tasks.
   const selectableCycles = cycles.filter((c) => c.state !== "CLOSED");
 
   // Derived display for the sub-header
   const opLabel = project
-    ? (operations.find((op) => opKey(op) === project)?.code ?? project)
+    ? (projects.find((p) => p.key === project)?.code ?? project)
     : "No project";
   const dirty =
     title !== "" ||
@@ -239,13 +241,13 @@ export function NewTaskModal({
               data-testid="new-task-operation"
             >
               <SelectItem id="">No project</SelectItem>
-              {assignableOps.map((op) => (
+              {assignableScopes.map((scope) => (
                 <SelectItem
-                  key={op.id}
-                  id={opKey(op)}
-                  textValue={`${op.code} — ${op.name}`}
+                  key={scope.key}
+                  id={scope.key}
+                  textValue={scopeLabel(scope)}
                 >
-                  {op.code} — {op.name}
+                  {scopeLabel(scope)}
                 </SelectItem>
               ))}
             </Select>

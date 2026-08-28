@@ -7,17 +7,18 @@
  *
  * Deviations from prototype:
  *   - windowOf is derived from cycle dates (decision 14), not hardcoded.
- *   - UNFILED grouping: tasks whose project is null or doesn't match any
- *     operation are collected into a synthetic "UNFILED" group at the end.
+ *   - UNFILED grouping: tasks with a null project are collected into a
+ *     synthetic "UNFILED" group at the end. A slug with no PROJECT page is a
+ *     synthesized ProjectScope, so its tasks group under their own header.
  *   - Empty state: when no dated cycles exist or no task has a due date, a
  *     centered "— NOTHING SCHEDULED —" notice is shown instead of a broken axis.
- *   - operations prop: ALL → all operations, single op (opFilter set) → that
- *     op's operation only (threaded from TaskingScreen).
+ *   - projects prop: ALL → all project scopes, single scope (opFilter set) →
+ *     that scope only (threaded from TaskingScreen).
  *   - parseDay ISO-only (see timeline-math.ts for deviation docs).
  */
 
 import { useMemo } from "react";
-import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
+import type { BoardCycle, BoardTask } from "#/api/board";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import {
@@ -26,6 +27,7 @@ import {
   HealthDot,
   priColor,
 } from "./board-constants";
+import type { ProjectScope } from "./board-projects";
 import { parseDay, pct, taskRange, windowOf } from "./timeline-math";
 
 // ── types ─────────────────────────────────────────────────────────────────────
@@ -37,7 +39,7 @@ interface ScheduledTask {
 }
 
 interface TLGroup {
-  op: BoardOperation | null; // null = UNFILED pseudo-group
+  scope: ProjectScope | null; // null = UNFILED pseudo-group
   items: ScheduledTask[];
 }
 
@@ -77,12 +79,12 @@ export interface TimelineViewProps {
   /** Op-filtered tasks from TaskingScreen (already filtered by opFilter). */
   tasks: BoardTask[];
   /**
-   * Operations to group by:
-   *   opFilter=ALL → all operations
-   *   opFilter=<key> → caller passes only the single active operation
+   * Project scopes to group by (operations ∪ task slugs):
+   *   opFilter=ALL → all scopes
+   *   opFilter=<key> → caller passes only the single active scope
    * TaskingScreen threads this correctly; tests may pass any subset.
    */
-  operations: BoardOperation[];
+  projects: ProjectScope[];
   cycles: BoardCycle[];
   /** Override for edit handler; defaults to store setEditTaskId. */
   onEditTask?: (id: string) => void;
@@ -92,7 +94,7 @@ export interface TimelineViewProps {
 
 export function TimelineView({
   tasks,
-  operations,
+  projects,
   cycles,
   onEditTask,
   colLabel,
@@ -112,13 +114,9 @@ export function TimelineView({
     [cycles],
   );
 
-  // Build groups: one per operation that has ≥1 scheduled task in `tasks`,
-  // plus an UNFILED pseudo-group for tasks with no matching operation.
+  // Build groups: one per project scope that has ≥1 scheduled task in
+  // `tasks`, plus an UNFILED pseudo-group for tasks with no project.
   const { groups, unscheduled } = useMemo(() => {
-    const knownProjects = new Set(
-      operations.map((op) => op.project).filter(Boolean),
-    );
-
     // Partition tasks into scheduled vs unscheduled
     const scheduled: (BoardTask & { _s: number; _e: number })[] = [];
     let unscheduledCount = 0;
@@ -132,30 +130,32 @@ export function TimelineView({
       }
     }
 
-    // Group by operation
-    const opGroups: TLGroup[] = operations
-      .map((op) => ({
-        op,
+    // Group by slug. A slug-less op has no slug for a task to carry, so it
+    // yields no group (and never absorbs null-project tasks via null===null).
+    const scopeGroups: TLGroup[] = projects
+      .filter((scope) => scope.slug !== null)
+      .map((scope) => ({
+        scope,
         items: scheduled
-          .filter((t) => t.project === op.project)
+          .filter((t) => t.project === scope.slug)
           .sort((a, b) => a._s - b._s)
           .map((t) => ({ task: t, s: t._s, e: t._e })),
       }))
       .filter((g) => g.items.length > 0);
 
-    // UNFILED: tasks with null/empty project or project not in any op
+    // UNFILED: tasks with null/empty project
     const unfiledItems = scheduled
-      .filter((t) => !t.project || !knownProjects.has(t.project))
+      .filter((t) => !t.project)
       .sort((a, b) => a._s - b._s)
       .map((t) => ({ task: t, s: t._s, e: t._e }));
 
     const grps: TLGroup[] =
       unfiledItems.length > 0
-        ? [...opGroups, { op: null, items: unfiledItems }]
-        : opGroups;
+        ? [...scopeGroups, { scope: null, items: unfiledItems }]
+        : scopeGroups;
 
     return { groups: grps, unscheduled: unscheduledCount };
-  }, [tasks, operations]);
+  }, [tasks, projects]);
 
   // ── Empty state ────────────────────────────────────────────────────────────
 
@@ -227,7 +227,7 @@ export function TimelineView({
       {/* ── Body ─────────────────────────────────────────────────────── */}
       <div className="flex-1">
         {groups.map((g) => {
-          const groupKey = g.op ? (g.op.project ?? g.op.code) : "UNFILED";
+          const groupKey = g.scope ? g.scope.key : "UNFILED";
 
           return (
             <div
@@ -237,12 +237,12 @@ export function TimelineView({
             >
               {/* Group header */}
               <div className="flex items-center gap-[8px] border-b border-[var(--ink-3)] bg-[var(--bg)] px-[var(--pad)] py-[6px]">
-                <HealthDot health={g.op ? g.op.health : "NONE"} />
+                <HealthDot health={g.scope?.health ?? "NONE"} />
                 <span className="cl-mono text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
-                  {g.op ? g.op.code : "No project"}
+                  {g.scope ? g.scope.code : "No project"}
                 </span>
                 <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.06em] text-[var(--ink-3)]">
-                  {g.op ? g.op.name : "Tasks with no project"}
+                  {g.scope ? g.scope.name : "Tasks with no project"}
                 </span>
               </div>
 

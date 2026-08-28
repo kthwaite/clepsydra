@@ -20,7 +20,7 @@ import {
   stubBoardFetch,
 } from "./fixtures";
 
-const { operations, tasks } = BOARD_FIXTURE;
+const { tasks } = BOARD_FIXTURE;
 
 /** Minimal 3-task fixture for filter-strip composition tests. */
 const FILTER_FIXTURE: BoardResponse = {
@@ -131,43 +131,45 @@ afterEach(() => {
 
 describe("filterTasks", () => {
   it("ALL returns all tasks", () => {
-    expect(filterTasks(tasks, operations, "ALL")).toHaveLength(tasks.length);
+    expect(filterTasks(tasks, "ALL")).toHaveLength(tasks.length);
   });
 
-  it("specific op project filters to matching tasks only", () => {
-    const result = filterTasks(tasks, operations, "alpha");
+  it("specific project slug filters to matching tasks only", () => {
+    const result = filterTasks(tasks, "alpha");
     expect(result.every((t) => t.project === "alpha")).toBe(true);
     expect(result).toHaveLength(3); // t1, t2, t5
   });
 
-  it("specific op project with no match returns empty", () => {
-    const result = filterTasks(tasks, operations, "ghost");
+  it("specific project slug with no match returns empty", () => {
+    const result = filterTasks(tasks, "ghost");
     expect(result).toHaveLength(0);
   });
 
+  it("a slug with no backing operation still filters to its tasks", () => {
+    const ghost = { ...tasks[0], id: "tg", project: "ghost" };
+    const result = filterTasks([ghost, ...tasks], "ghost");
+    expect(result).toEqual([ghost]);
+  });
+
   it("UNFILED returns tasks with null project", () => {
-    const result = filterTasks(tasks, operations, "UNFILED");
+    const result = filterTasks(tasks, "UNFILED");
     expect(result.every((t) => !t.project)).toBe(true);
     expect(result).toHaveLength(1); // t4
   });
 
-  it("UNFILED returns tasks with project not matching any operation", () => {
+  it("UNFILED does NOT return tasks whose slug has no operation", () => {
     const orphan = { ...tasks[0], project: "orphan-project" };
-    const result = filterTasks(
-      [orphan, ...tasks.slice(1)],
-      operations,
-      "UNFILED",
-    );
-    // orphan + t4 (null project)
-    expect(result.some((t) => t.project === "orphan-project")).toBe(true);
-    expect(result.some((t) => !t.project)).toBe(true);
+    const result = filterTasks([orphan, ...tasks.slice(1)], "UNFILED");
+    // only t4 (null project) — a real slug is a project, page or not
+    expect(result.some((t) => t.project === "orphan-project")).toBe(false);
+    expect(result).toHaveLength(1);
   });
 
   it("UNFILED with no unfiled tasks returns empty array", () => {
     const cleanTasks = tasks.filter(
       (t) => t.project === "alpha" || t.project === "beta",
     );
-    const result = filterTasks(cleanTasks, operations, "UNFILED");
+    const result = filterTasks(cleanTasks, "UNFILED");
     expect(result).toHaveLength(0);
   });
 });
@@ -837,5 +839,66 @@ describe("TaskingScreen — stale opFilter self-heal", () => {
     await waitFor(() =>
       expect(useBoardStore.getState().opFilter).toBe("alpha"),
     );
+  });
+});
+
+// ── task slugs with no PROJECT page (operations empty) ───────────────────────
+
+describe("TaskingScreen — task slugs with no operation", () => {
+  const NO_OPS_BOARD: BoardResponse = { ...BOARD_FIXTURE, operations: [] };
+
+  it("derives rail rows from task slugs; No project counts null-project tasks only", async () => {
+    stubBoardFetch(NO_OPS_BOARD);
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    expect(screen.getByText("2 projects · 2 cycles")).toBeInTheDocument();
+    const alphaRow = screen.getByText("ALPHA").closest("button")!;
+    expect(within(alphaRow).getByText("3")).toBeInTheDocument(); // t1, t2, t5
+    const betaRow = screen.getByText("BETA").closest("button")!;
+    expect(within(betaRow).getByText("1")).toBeInTheDocument(); // t3
+    const noProjectRow = screen.getByText("No project").closest("button")!;
+    expect(within(noProjectRow).getByText("1")).toBeInTheDocument(); // t4
+  });
+
+  it("clicking a synthesized row scopes the board to that slug", async () => {
+    stubBoardFetch(NO_OPS_BOARD);
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    await userEvent.click(screen.getByText("ALPHA").closest("button")!);
+    expect(useBoardStore.getState().opFilter).toBe("alpha");
+
+    // Open = non-SEALED alpha tasks (t1, t2)
+    const openLabel = screen.getByText("Open");
+    const openStat = openLabel.parentElement!.querySelector("span:last-child");
+    expect(openStat?.textContent).toBe("02");
+    expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
+    expect(screen.queryByText("Task Unfiled")).not.toBeInTheDocument();
+    // No page behind the slug → no op-meta strip
+    expect(screen.queryByText("LEAD")).not.toBeInTheDocument();
+  });
+
+  it("self-heal keeps a persisted opFilter that a task slug backs", async () => {
+    useBoardStore.setState({ opFilter: "alpha" });
+    stubBoardFetch(NO_OPS_BOARD);
+    renderScreen();
+    await screen.findByText("Task Board");
+    await screen.findByText("Task Alpha 1");
+
+    expect(useBoardStore.getState().opFilter).toBe("alpha");
+  });
+
+  it("kanban + presets the synthesized slug as project", async () => {
+    useBoardStore.setState({ opFilter: "beta" });
+    stubBoardFetch(NO_OPS_BOARD);
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    await userEvent.click(screen.getByTestId("kb-add-FIELD"));
+    expect(useBoardStore.getState().taskModal).toEqual({
+      status: "FIELD",
+      project: "beta",
+    });
   });
 });

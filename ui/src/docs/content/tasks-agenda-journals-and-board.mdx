@@ -150,6 +150,9 @@ The Task Board has four views:
 - **Timeline** lays out scheduled Tasks across Projects and Cycles.
 
 The Scope rail groups Tasks by Project and Cycle, with Backlog for Tasks not assigned to a Cycle.
+Every Project page appears in the rail; set `board: false` in a Project
+page's frontmatter to hide it. A Project that Tasks declare but no Project
+page backs still gets a row.
 Switching views does not change Task pages. Dragging a card or editing its
 panel updates the corresponding Task page metadata.
 

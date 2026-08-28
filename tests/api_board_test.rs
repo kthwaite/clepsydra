@@ -360,25 +360,18 @@ async fn checklist_counts_preserve_checkbox_semantics_across_tasks() {
 }
 
 // ---------------------------------------------------------------------------
-// PROJECT without board: true is excluded
+// PROJECT with board: false is excluded
 // ---------------------------------------------------------------------------
 
 #[tokio::test]
-async fn project_without_board_flag_excluded() {
+async fn project_with_board_false_excluded() {
     let (server, _tmp) = setup_server_with(|root| {
         std::fs::create_dir_all(root.join("projects")).unwrap();
-        // board: false — must not appear
+        // board: false — explicit opt-out, must not appear
         std::fs::write(
             root.join("projects/hidden.md"),
             "---\nid: 01951234-0000-7000-8000-000000000010\n\
-             title: Hidden Op\ntype: PROJECT\nboard: false\n---\n",
-        )
-        .unwrap();
-        // no board key at all — must not appear
-        std::fs::write(
-            root.join("projects/no-board.md"),
-            "---\nid: 01951234-0000-7000-8000-000000000011\n\
-             title: No Board Op\ntype: PROJECT\n---\n",
+             title: Hidden Op\ntype: PROJECT\nproject: hidden\nboard: false\n---\n",
         )
         .unwrap();
     });
@@ -389,8 +382,39 @@ async fn project_without_board_flag_excluded() {
     let ops = body["operations"].as_array().unwrap();
     assert!(
         ops.is_empty(),
-        "expected no operations when board: true absent, got: {ops:?}"
+        "expected no operations when board: false, got: {ops:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// PROJECT without a board key is included (opt-out, not opt-in)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_without_board_key_included() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        // no board key at all — must appear
+        std::fs::write(
+            root.join("projects/no-board.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000011\n\
+             title: No Board Op\ntype: PROJECT\nproject: no-board\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        1,
+        "expected one operation when board key absent, got: {ops:?}"
+    );
+    assert_eq!(ops[0]["code"], "NO-BOARD");
+    assert_eq!(ops[0]["project"], "no-board");
+    assert_eq!(ops[0]["health"], "GREEN");
 }
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,7 @@
 import { vi } from "vitest";
 import type { BoardResponse } from "#/api/board";
 import type { ColLabelFn } from "../board-constants";
+import { deriveProjectScopes } from "../board-projects";
 
 /** Minimal BoardResponse fixture reused across tasking view tests. */
 export const BOARD_FIXTURE: BoardResponse = {
@@ -133,6 +134,15 @@ export const BOARD_FIXTURE: BoardResponse = {
     },
   ],
 };
+
+/**
+ * Project scopes derived from BOARD_FIXTURE — what TaskingScreen passes to
+ * the rail, timeline, header, and project selects.
+ */
+export const PROJECT_SCOPES = deriveProjectScopes(
+  BOARD_FIXTURE.operations,
+  BOARD_FIXTURE.tasks,
+);
 
 /**
  * A board:true PROJECT page with no project: frontmatter — its canonical
