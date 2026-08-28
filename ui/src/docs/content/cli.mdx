@@ -462,6 +462,12 @@ conflict markers, or an encrypted page, is skipped with a warning rather than
 rewritten. The default is a dry run — codes are minted and the full plan is
 reported, but nothing on disk changes; `--write` applies it.
 
+A page that fails to rename, or whose destination already exists, does not
+abort the run: it is warned about and left untouched for a later run to
+retry, and its legacy code is correspondingly left unrewritten (and warned
+about) wherever it's mentioned in prose elsewhere, rather than being
+rewritten to a code that was never actually created.
+
 This is a one-time, **irreversible clean break**: after `--write` runs, no
 code in the legacy format is recognized anywhere in Clepsydra, and there is
 no alias mapping old codes to new ones. A legacy code recorded outside the

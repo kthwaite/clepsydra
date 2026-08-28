@@ -54,10 +54,29 @@ pub struct RecodeReport {
 /// already on the code scheme are left alone. A page with merge-conflict
 /// markers, or one that is encrypted, is skipped with a warning rather than
 /// rewritten.
+///
+/// A single page's rename failing (or being skipped because its destination
+/// already exists) does not abort the run: it is warned about, left as-is
+/// for a later run to retry, and its legacy-token mapping entry is revoked
+/// so step 2 doesn't rewrite prose elsewhere to a code that was never
+/// actually created for it.
 pub fn recode(
     vault: &Vault,
     index: &mut VaultIndex,
     write: bool,
+) -> Result<RecodeReport, IndexError> {
+    recode_with_minter(vault, index, write, code::mint)
+}
+
+/// [`recode`], parameterized over code minting. Production code always
+/// passes `code::mint`; tests inject a deterministic minter to force the
+/// collision (`Ok(None)`) and hard-failure (`Err`) rename paths, which
+/// `code::mint`'s randomness can't reach on demand.
+fn recode_with_minter(
+    vault: &Vault,
+    index: &mut VaultIndex,
+    write: bool,
+    mut mint: impl FnMut(CodeFamily) -> String,
 ) -> Result<RecodeReport, IndexError> {
     let mut report = RecodeReport {
         dry_run: !write,
@@ -82,7 +101,9 @@ pub fn recode(
     }
 
     let mut mapping: BTreeMap<String, String> = BTreeMap::new(); // legacy stem -> new code
-    let mut planned: Vec<(String, String)> = Vec::new(); // (old path, new path)
+    // (old path, new path, legacy stem whose mapping entry must be revoked
+    // if this planned rename doesn't actually happen).
+    let mut planned: Vec<(String, String, Option<String>)> = Vec::new();
     for (path, kind) in rows {
         let vp = VaultPath::new(&path).map_err(|e| IndexError::Other(e.to_string()))?;
         let stem = vp.stem();
@@ -93,7 +114,7 @@ pub fn recode(
             Kind::from_token(&kind).expect("pages.kind column always holds a valid Kind token");
         let family = CodeFamily::from_kind(kind).expect("query filtered to TASK/CYCLE");
         let new_code = loop {
-            let candidate = code::mint(family);
+            let candidate = mint(family);
             if taken.insert(candidate.clone()) {
                 break candidate;
             }
@@ -102,20 +123,42 @@ pub fn recode(
             Some(parent) => format!("{parent}/{new_code}.md"),
             None => format!("{new_code}.md"),
         };
-        if is_legacy_stem(stem) {
+        let legacy_stem = if is_legacy_stem(stem) {
             mapping.insert(stem.to_string(), new_code.clone());
-        }
-        planned.push((path, new_path));
+            Some(stem.to_string())
+        } else {
+            None
+        };
+        planned.push((path, new_path, legacy_stem));
     }
 
-    // 2. Execute renames (wikilinks rewritten by the move planner).
-    for (old, new) in &planned {
+    // 2. Execute renames (wikilinks rewritten by the move planner). A page
+    //    that fails to rename, or is skipped because its destination
+    //    already exists, is warned about rather than aborting the run —
+    //    step 3 still sweeps every other page, and this page's legacy stem
+    //    (if any) is struck from `mapping` so its prose mentions elsewhere
+    //    are left alone (and warned as unmapped) instead of being rewritten
+    //    to a code that doesn't exist on disk.
+    for (old, new, legacy_stem) in &planned {
         if write {
-            match move_page_to(vault, index, old, new, &[])? {
-                Some(_) => report.renamed.push((old.clone(), new.clone())),
-                None => report.warnings.push(format!(
-                    "{old}: destination {new} already exists; not renamed"
-                )),
+            match move_page_to(vault, index, old, new, &[]) {
+                Ok(Some(_)) => report.renamed.push((old.clone(), new.clone())),
+                Ok(None) => {
+                    if let Some(stem) = legacy_stem {
+                        mapping.remove(stem);
+                    }
+                    report.warnings.push(format!(
+                        "{old}: destination {new} already exists; not renamed"
+                    ));
+                }
+                Err(error) => {
+                    if let Some(stem) = legacy_stem {
+                        mapping.remove(stem);
+                    }
+                    report
+                        .warnings
+                        .push(format!("{old}: rename to {new} failed: {error}"));
+                }
             }
         } else {
             report.renamed.push((old.clone(), new.clone()));
@@ -237,6 +280,31 @@ mod tests {
         std::fs::read_to_string(vault.root().join(rel)).unwrap()
     }
 
+    const TASK_LEGACY: &str = "+++\nid = \"01900000-0000-7000-8000-00000000000e\"\ntitle = \"E\"\ntype = \"TASK\"\ncreated_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n+++\nbody\n";
+    const NOTE_REF: &str = "+++\nid = \"01900000-0000-7000-8000-00000000000f\"\ntitle = \"Ref\"\ncreated_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n+++\nSee TSK-0001 for details.\n";
+
+    /// A single legacy TASK page plus a NOTE that mentions its code in
+    /// prose — the minimal shape needed to force and observe a single
+    /// planned rename not actually happening (finding 1/2 regression tests).
+    fn single_task_fixture() -> (tempfile::TempDir, Vault, VaultIndex) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        for (rel, content) in [
+            ("tasks/proj/TSK-0001.md", TASK_LEGACY),
+            ("notes/ref.md", NOTE_REF),
+        ] {
+            let abs = root.join(rel);
+            std::fs::create_dir_all(abs.parent().unwrap()).unwrap();
+            std::fs::write(abs, content).unwrap();
+        }
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open(&tmp.path().join("cache.db")).unwrap();
+        index.build(&vault).unwrap();
+        index.resolve_links().unwrap();
+        (tmp, vault, index)
+    }
+
     #[test]
     fn dry_run_plans_everything_and_touches_nothing() {
         let (_tmp, vault, mut index) = fixture();
@@ -318,6 +386,97 @@ mod tests {
         let report = recode(&vault, &mut index, true).unwrap();
         assert_eq!(std::fs::read_to_string(&clash).unwrap(), before);
         assert!(report.warnings.iter().any(|w| w.contains("notes/clash.md")));
+    }
+
+    /// Finding 2: a planned rename skipped because its destination already
+    /// exists (`move_page_to` returns `Ok(None)`) must revoke that page's
+    /// legacy-token mapping entry, not just skip adding it to `renamed`.
+    /// Otherwise step 3 would rewrite prose elsewhere to a code that was
+    /// never actually created on disk.
+    #[test]
+    fn skipped_rename_destination_exists_revokes_mapping_entry() {
+        let (_tmp, vault, mut index) = single_task_fixture();
+        // Pre-create the destination our forced minter will pick, so
+        // `move_page_to`'s collision guard skips the rename with `Ok(None)`.
+        std::fs::write(
+            vault.root().join("tasks/proj/TSK-brave-finch-7q3zd.md"),
+            "placeholder",
+        )
+        .unwrap();
+
+        let report = recode_with_minter(&vault, &mut index, true, |_| {
+            "TSK-brave-finch-7q3zd".to_string()
+        })
+        .unwrap();
+
+        assert!(
+            report.renamed.is_empty(),
+            "skipped rename must not be reported as renamed: {report:?}"
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("tasks/proj/TSK-0001.md") && w.contains("already exists")),
+            "{:?}",
+            report.warnings
+        );
+        assert!(vault.root().join("tasks/proj/TSK-0001.md").exists());
+        // The prose reference to the never-renamed legacy code is left
+        // alone, not silently rewritten to a code that was never created.
+        let note = read(&vault, "notes/ref.md");
+        assert!(note.contains("TSK-0001"), "{note}");
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("notes/ref.md") && w.contains("TSK-0001")),
+            "unmapped legacy token should be warned about: {:?}",
+            report.warnings
+        );
+    }
+
+    /// Finding 1: a rename that hard-fails (`move_page_to` returns `Err`)
+    /// must not abort the whole run — it should be warned about, and step 3
+    /// must still sweep every other page. The `..` in the forced code makes
+    /// `VaultPath::new` reject the destination inside `move_page_to`,
+    /// producing a deterministic `Err` (as opposed to the `Ok(None)`
+    /// collision-skip path covered above) with zero side effects, since
+    /// that rejection is the very first fallible step `move_page_to` takes.
+    #[test]
+    fn rename_failure_is_warned_and_does_not_abort_the_run() {
+        let (_tmp, vault, mut index) = single_task_fixture();
+
+        let report =
+            recode_with_minter(&vault, &mut index, true, |_| "boom/../nope".to_string()).unwrap();
+
+        assert!(
+            report.renamed.is_empty(),
+            "failed rename must not be reported as renamed: {report:?}"
+        );
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("tasks/proj/TSK-0001.md") && w.contains("failed")),
+            "{:?}",
+            report.warnings
+        );
+        // The source page is untouched, and the run continues rather than
+        // aborting: notes/ref.md is still swept, and its reference to the
+        // never-renamed legacy code is left alone (warned as unmapped)
+        // rather than rewritten to a code that doesn't exist on disk.
+        assert!(vault.root().join("tasks/proj/TSK-0001.md").exists());
+        let note = read(&vault, "notes/ref.md");
+        assert!(note.contains("TSK-0001"), "{note}");
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("notes/ref.md") && w.contains("TSK-0001")),
+            "unmapped legacy token should be warned about: {:?}",
+            report.warnings
+        );
     }
 
     #[test]
