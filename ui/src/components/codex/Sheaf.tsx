@@ -179,8 +179,7 @@ export function Sheaf({
             active={seg.tab.id === activeTabId}
             dragged={seg.tab.id === draggedTabId}
             dropEdge={
-              dropFeedback?.kind === "tab" &&
-              dropFeedback.tabId === seg.tab.id
+              dropFeedback?.kind === "tab" && dropFeedback.tabId === seg.tab.id
                 ? dropFeedback.edge
                 : null
             }
@@ -212,8 +211,7 @@ export function Sheaf({
                   active={t.id === activeTabId}
                   dragged={t.id === draggedTabId}
                   dropEdge={
-                    dropFeedback?.kind === "tab" &&
-                    dropFeedback.tabId === t.id
+                    dropFeedback?.kind === "tab" && dropFeedback.tabId === t.id
                       ? dropFeedback.edge
                       : null
                   }
@@ -276,8 +274,7 @@ function QuireHeader({
       element,
       getData: () => ({ kind: "sheaf-quire", quireId: quire.id }),
       canDrop: ({ source }) => getSheafTabId(source.data) !== null,
-      onDragEnter: () =>
-        setDropFeedback({ kind: "quire", quireId: quire.id }),
+      onDragEnter: () => setDropFeedback({ kind: "quire", quireId: quire.id }),
       onDragLeave: () => setDropFeedback(null),
       onDrop: ({ source }) => {
         setDropFeedback(null);
