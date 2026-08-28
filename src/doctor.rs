@@ -1128,6 +1128,13 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
     let path = vault.cas_root();
     report.push(info(SECTION, "path", path.display().to_string()));
 
+    if let Some(hint) = legacy_store_hint(
+        &path,
+        crate::vault::cas_migrate::legacy_store_with_blobs().as_deref(),
+    ) {
+        report.push(hint);
+    }
+
     if !path.exists() {
         report.push(
             warn(
@@ -1219,6 +1226,40 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
             format!("cannot open {} read-only: {e}", db_path.display()),
         )),
     }
+}
+
+/// WARN when this vault's store has no `cas.db` yet but a legacy store does —
+/// the user has not run `clep cas migrate`. Pure: takes the candidate legacy
+/// path so tests need no HOME override.
+fn legacy_store_hint(store: &Path, legacy: Option<&Path>) -> Option<CheckResult> {
+    let legacy = legacy?;
+    if store.join("cas.db").is_file() || !legacy.join("cas.db").is_file() {
+        return None;
+    }
+    // Canonicalize both sides when they exist so a symlinked home doesn't
+    // defeat the same-store check; `store` commonly doesn't exist yet here
+    // (the point of the hint), so fall back to a plain path comparison.
+    let same_store = match (std::fs::canonicalize(store), std::fs::canonicalize(legacy)) {
+        (Ok(s), Ok(l)) => s == l,
+        _ => store == legacy,
+    };
+    if same_store {
+        return None;
+    }
+    Some(
+        warn(
+            "cas",
+            "legacy",
+            format!(
+                "this vault's store {} has no cas.db yet, but a legacy store exists at {}",
+                store.display(),
+                legacy.display()
+            ),
+        )
+        .with_hint(
+            "run `clep cas migrate` (dry run), then `clep cas migrate --write` with `clep serve` stopped",
+        ),
+    )
 }
 
 /// `--full` CAS verify: recount expected refs from a vault-wide scan, subtract
@@ -1908,6 +1949,37 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::TempDir;
+
+    #[test]
+    fn legacy_store_hint_only_when_store_uninitialised_and_legacy_present() {
+        let tmp = TempDir::new().unwrap();
+        let store = tmp.path().join("vault/.clepsydra/cas");
+        let legacy = tmp.path().join("legacy");
+        fs::create_dir_all(&legacy).unwrap();
+        fs::write(legacy.join("cas.db"), b"x").unwrap();
+        let hint = legacy_store_hint(&store, Some(&legacy)).expect("hint");
+        assert_eq!(
+            (hint.section, hint.name, hint.status),
+            ("cas", "legacy", Status::Warn)
+        );
+        assert!(
+            hint.hint
+                .as_deref()
+                .unwrap_or("")
+                .contains("clep cas migrate")
+        );
+        assert!(legacy_store_hint(&store, None).is_none());
+        fs::create_dir_all(&store).unwrap();
+        fs::write(store.join("cas.db"), b"x").unwrap();
+        assert!(
+            legacy_store_hint(&store, Some(&legacy)).is_none(),
+            "initialised store: no hint"
+        );
+        assert!(
+            legacy_store_hint(&legacy, Some(&legacy)).is_none(),
+            "store IS the legacy path: no hint"
+        );
+    }
 
     /// RAII guard that records the prior value of an env var on construction
     /// and restores it on drop. Required because tokio's default test runtime

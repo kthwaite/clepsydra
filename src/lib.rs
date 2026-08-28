@@ -700,6 +700,15 @@ pub async fn build_app_state_with_settings(
         })?;
     }
     let cas = vault::cas::ContentStore::open(&vault.cas_root())?;
+    if cas.stats().map(|s| s.blob_count == 0).unwrap_or(false)
+        && let Some(legacy) = vault::cas_migrate::legacy_store_with_blobs()
+    {
+        tracing::warn!(
+            "CAS at {} is empty but a legacy store exists at {}; archived pages will 404 until `clep cas migrate --write` runs",
+            vault.cas_root().display(),
+            legacy.display()
+        );
+    }
     let feed_runtime = if features.feeds {
         Some(crate::feeds::runtime::FeedRuntime::open(
             vault.root(),
