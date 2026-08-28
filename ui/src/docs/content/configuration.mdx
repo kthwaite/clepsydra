@@ -107,6 +107,7 @@ The compact active equivalent is shown below.
 host = "localhost"
 port = 3000
 dev_mode = false
+# public_origins = ["https://clepsydra.localhost"]
 
 [server.tls]
 enabled = false
@@ -136,6 +137,7 @@ fetch_concurrency = 4
 | `server` | `host` | string | `localhost` | Bind host |
 | `server` | `port` | integer | `3000` | Bind port |
 | `server` | `dev_mode` | bool | `false` | `false`: serve embedded frontend. `true`: API/docs only |
+| `server` | `public_origins` | string[] | `[]` | Reverse-proxy or tunnel origins the archive viewer may name; config file only |
 | `server.tls` | `enabled` | bool | `false` | Enable HTTPS |
 | `server.tls` | `cert_path` | string | unset | Used only when **both** cert and key are set |
 | `server.tls` | `key_path` | string | unset | Used only when **both** cert and key are set |
@@ -175,6 +177,29 @@ appropriate interface address or `localhost` from the same machine. Bracket an
 IPv6 literal (`https://[::1]:3000`). Swagger UI and the generated contract are
 served at `/api/docs` and `/api/openapi.json`; see the
 [API Reference](/docs/api-reference).
+
+### Archive viewer origins (`server.public_origins`)
+
+Archived snapshots render inside a sandboxed frame. The frame's
+Content-Security-Policy names exactly one origin that images, fonts, and media
+may load from: the origin the browser used to reach Clepsydra. That origin is
+chosen from the bind origin (`server.host`, `server.port`, TLS) plus this list by
+matching the request's `Host` header. The header only selects a configured
+entry; its bytes never reach the policy.
+
+Behind a reverse proxy or tunnel, list every name browsers use:
+
+```toml
+[server]
+public_origins = ["https://clepsydra.localhost", "https://vault.tail1234.ts.net"]
+```
+
+Entries must be bare `scheme://host[:port]` origins — no wildcards, paths,
+queries, or credentials; startup fails otherwise. A name missing from the list
+falls back to the bind origin, and the snapshot renders without its images and
+fonts (fail closed, nothing leaks). `clep serve` logs the effective origins at
+startup. This key is read from the config file only; it has no
+environment-variable form.
 
 ### TLS behavior (`server.tls`)
 
