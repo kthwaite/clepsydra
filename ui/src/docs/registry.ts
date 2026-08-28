@@ -19,6 +19,7 @@ import mcpSource from "#/docs/content/mcp.mdx?raw";
 import neovimSource from "#/docs/content/neovim.mdx?raw";
 import pagesAndAuthoringSource from "#/docs/content/pages-and-authoring.mdx?raw";
 import recipesSource from "#/docs/content/recipes.mdx?raw";
+import syncSource from "#/docs/content/sync.mdx?raw";
 import tasksAgendaJournalsAndBoardSource from "#/docs/content/tasks-agenda-journals-and-board.mdx?raw";
 import troubleshootingSource from "#/docs/content/troubleshooting.mdx?raw";
 
@@ -47,6 +48,7 @@ const EncryptionAndProtectedPagesGuide = lazy(
 const ConfigurationGuide = lazy(
   () => import("#/docs/content/configuration.mdx"),
 );
+const SyncGuide = lazy(() => import("#/docs/content/sync.mdx"));
 const TroubleshootingGuide = lazy(
   () => import("#/docs/content/troubleshooting.mdx"),
 );
@@ -142,6 +144,13 @@ const configurationMeta = {
     "paper mode",
     "diegetic chrome",
   ],
+} satisfies DocMeta;
+const syncMeta = {
+  slug: "sync",
+  title: "Sync between devices",
+  description:
+    "Keep one vault on several devices with git, git-lfs, and Conflict Copies.",
+  keywords: ["sync", "git", "lfs", "conflict copy", "devices"],
 } satisfies DocMeta;
 const troubleshootingMeta = {
   slug: "troubleshooting",
@@ -353,6 +362,7 @@ const configuration = page(
   ConfigurationGuide,
   configurationSource,
 );
+const sync = page("operations-reference", syncMeta, SyncGuide, syncSource);
 const troubleshooting = page(
   "operations-reference",
   troubleshootingMeta,
@@ -469,7 +479,7 @@ export const DOC_GROUPS = [
   {
     id: "operations-reference",
     label: "Operations and reference",
-    pages: [configuration, troubleshooting, cli, apiReference],
+    pages: [configuration, sync, troubleshooting, cli, apiReference],
   },
 ] as const satisfies readonly DocGroup[];
 

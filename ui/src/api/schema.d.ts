@@ -1560,6 +1560,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["run_sync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/vault/sync/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["sync_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/tasks": {
         parameters: {
             query?: never;
@@ -2132,6 +2164,13 @@ export interface components {
         };
         CaptureRequest: {
             content: string;
+        };
+        /** @description One "theirs" side written beside the page it conflicted with (ADR 0004). */
+        ConflictCopyDto: {
+            /** @description Vault-relative path of the copy holding the incoming content. */
+            copy: string;
+            /** @description Vault-relative path of the page that kept its local content. */
+            original: string;
         };
         /** @description Conflict detail returned for `Manual` conflict policy. */
         ConflictDetail: {
@@ -3081,6 +3120,53 @@ export interface components {
         } | {
             /** @enum {string} */
             type: "feed_changed";
+        };
+        /** @description The result of one sync. */
+        SyncReportDto: {
+            /** @description Sha of the commit this sync made, or `null` when the tree was clean. */
+            committed?: string | null;
+            conflict_copies: components["schemas"]["ConflictCopyDto"][];
+            /** Format: int64 */
+            duration_ms: number;
+            files_committed: number;
+            /** @description `no_remote` | `fetch_failed` | `up_to_date` | `fast_forward` | `merged`. */
+            merge: string;
+            /**
+             * @description The new head for `fast_forward`/`merged`, the failure for
+             *     `fetch_failed`, `null` otherwise.
+             */
+            merge_detail?: string | null;
+            /** @description `not_attempted` | `nothing_to_push` | `pushed` | `rejected` | `failed`. */
+            push: string;
+            push_detail?: string | null;
+            warnings: string[];
+        };
+        /** @description What `clep sync status` and the UI read. */
+        SyncStatusDto: {
+            /**
+             * @description Commits ahead of / behind `origin/<branch>`; `null` when there is no
+             *     remote-tracking branch yet.
+             */
+            ahead?: number | null;
+            behind?: number | null;
+            branch: string;
+            conflict_copies: number;
+            dirty_files: number;
+            head?: string | null;
+            /**
+             * @description `false` when the vault is not a `clep sync init`-ed repository; every
+             *     other field is then a placeholder.
+             */
+            initialised: boolean;
+            /** Format: date-time */
+            last_sync_at?: string | null;
+            last_sync_result?: string | null;
+            /** @description A vault change is waiting out its autocommit quiet period. */
+            pending_autocommit: boolean;
+            remote?: string | null;
+            /** @description A sync is running right now. */
+            syncing: boolean;
+            unmerged_files: number;
         };
         TagCount: {
             /**
@@ -8578,6 +8664,73 @@ export interface operations {
                 };
             };
             /** @description Rubbish item could not be restored */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    run_sync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sync report */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncReportDto"];
+                };
+            };
+            /** @description Sync is not initialised for this vault */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    sync_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sync status; `initialised` is false when the vault is not a sync repository */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncStatusDto"];
+                };
+            };
+            /** @description Internal server error */
             500: {
                 headers: {
                     [name: string]: unknown;

@@ -113,10 +113,23 @@ pub(crate) fn api_error_message(status: u16, body: &str) -> String {
     message
 }
 
+/// The request timeout every client starts with. Long enough for any ordinary
+/// vault call; [`ApiClient::with_timeout`] raises it for the few operations
+/// (a whole `clep sync`) that can legitimately run for minutes.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How the transport was configured, retained so [`ApiClient::with_timeout`]
+/// can rebuild it under the same policy instead of quietly relaxing it.
+struct Transport {
+    extra_root_cert_pem: Option<Vec<u8>>,
+    local_only: bool,
+}
+
 /// HTTP client bound to one server base URL (e.g. `http://localhost:16667`).
 pub struct ApiClient {
     http: reqwest::Client,
     base: String,
+    transport: Transport,
 }
 
 impl ApiClient {
@@ -127,7 +140,7 @@ impl ApiClient {
         base: String,
         extra_root_cert_pem: Option<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        Self::build(base, extra_root_cert_pem, false)
+        Self::build(base, extra_root_cert_pem, false, DEFAULT_TIMEOUT)
     }
 
     /// Build a client that cannot use ambient proxies or follow redirects.
@@ -138,26 +151,46 @@ impl ApiClient {
         base: String,
         extra_root_cert_pem: Option<Vec<u8>>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        Self::build(base, extra_root_cert_pem, true)
+        Self::build(base, extra_root_cert_pem, true, DEFAULT_TIMEOUT)
+    }
+
+    /// The same client with a different request timeout — same base URL, same
+    /// certificate, same proxy and redirect policy. For the rare call whose
+    /// honest duration exceeds [`DEFAULT_TIMEOUT`]: a `clep sync` against a
+    /// large vault and a slow remote is minutes of legitimate work, and timing
+    /// it out client-side would report a failure for a sync that in fact
+    /// succeeded.
+    pub fn with_timeout(self, timeout: Duration) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::build(
+            self.base,
+            self.transport.extra_root_cert_pem,
+            self.transport.local_only,
+            timeout,
+        )
     }
 
     fn build(
         base: String,
         extra_root_cert_pem: Option<Vec<u8>>,
         local_only: bool,
+        timeout: Duration,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut builder = reqwest::Client::builder().timeout(Duration::from_secs(30));
+        let mut builder = reqwest::Client::builder().timeout(timeout);
         if local_only {
             builder = builder
                 .no_proxy()
                 .redirect(reqwest::redirect::Policy::none());
         }
-        if let Some(pem) = extra_root_cert_pem {
-            builder = builder.add_root_certificate(reqwest::Certificate::from_pem(&pem)?);
+        if let Some(pem) = &extra_root_cert_pem {
+            builder = builder.add_root_certificate(reqwest::Certificate::from_pem(pem)?);
         }
         Ok(Self {
             http: builder.build()?,
             base,
+            transport: Transport {
+                extra_root_cert_pem,
+                local_only,
+            },
         })
     }
 
@@ -257,6 +290,19 @@ impl ApiClient {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn with_timeout_keeps_the_base_url_and_local_only_policy() {
+        let client = ApiClient::new_local("http://127.0.0.1:16667".to_string(), None).unwrap();
+        assert!(client.transport.local_only);
+
+        let slow = client.with_timeout(Duration::from_secs(900)).unwrap();
+        assert_eq!(slow.base(), "http://127.0.0.1:16667");
+        assert!(
+            slow.transport.local_only,
+            "raising the timeout must not relax the local-only transport policy"
+        );
+    }
 
     #[test]
     fn encode_vault_path_preserves_slashes_and_encodes_spaces() {

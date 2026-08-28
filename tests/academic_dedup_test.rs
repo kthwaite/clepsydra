@@ -60,6 +60,8 @@ fn setup_server() -> (TestServer, TempDir) {
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
         mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
+        sync: None,
+        watcher_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         feed_runtime: Some(
             clepsydra::feeds::runtime::FeedRuntime::open(
                 &root,

@@ -27,6 +27,8 @@ pub struct VaultConfig {
     pub academic: AcademicSection,
     #[serde(default)]
     pub archive: ArchiveSection,
+    #[serde(default)]
+    pub sync: SyncSection,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -220,6 +222,44 @@ fn default_gc_min_age_days() -> u32 {
     30
 }
 
+/// `[sync]` — git-backed vault synchronisation (spec §4).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct SyncSection {
+    /// Seconds of quiet after the last mutation before the server commits.
+    #[serde(default = "default_autocommit_debounce_secs")]
+    pub autocommit_debounce_secs: u64,
+    /// Seconds between scheduled full syncs; `0` disables the schedule.
+    #[serde(default)]
+    pub interval_secs: u64,
+    /// The single synced branch.
+    #[serde(default = "default_sync_branch")]
+    pub branch: String,
+    #[serde(default)]
+    pub author_name: Option<String>,
+    #[serde(default)]
+    pub author_email: Option<String>,
+}
+
+impl Default for SyncSection {
+    fn default() -> Self {
+        Self {
+            autocommit_debounce_secs: default_autocommit_debounce_secs(),
+            interval_secs: 0,
+            branch: default_sync_branch(),
+            author_name: None,
+            author_email: None,
+        }
+    }
+}
+
+fn default_autocommit_debounce_secs() -> u64 {
+    300
+}
+
+fn default_sync_branch() -> String {
+    "main".to_string()
+}
+
 impl VaultConfig {
     /// Load vault configuration from `.clepsydra/config.toml` under the given
     /// vault root. Returns defaults if the file does not exist.
@@ -361,5 +401,31 @@ database_path = "/custom/path/zotero.sqlite"
             "only the reserved root manifest is unconditional"
         );
         assert!(vault.is_excluded(&crate::vault::path::VaultPath::new("private/page.md").unwrap()));
+    }
+
+    #[test]
+    fn sync_config_defaults() {
+        let config = VaultConfig::default();
+        assert_eq!(config.sync.autocommit_debounce_secs, 300);
+        assert_eq!(config.sync.interval_secs, 0);
+        assert_eq!(config.sync.branch, "main");
+        assert!(config.sync.author_name.is_none());
+        assert!(config.sync.author_email.is_none());
+    }
+
+    #[test]
+    fn sync_config_parses_partial_section() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        fs::write(
+            tmp.path().join(".clepsydra/config.toml"),
+            "[sync]\nbranch = \"trunk\"\nauthor_name = \"Kit\"\nauthor_email = \"kit@example.com\"\n",
+        )
+        .unwrap();
+        let config = VaultConfig::load(tmp.path()).unwrap();
+        assert_eq!(config.sync.branch, "trunk");
+        assert_eq!(config.sync.autocommit_debounce_secs, 300);
+        assert_eq!(config.sync.author_name.as_deref(), Some("Kit"));
+        assert_eq!(config.sync.author_email.as_deref(), Some("kit@example.com"));
     }
 }

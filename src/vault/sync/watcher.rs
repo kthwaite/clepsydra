@@ -1,4 +1,6 @@
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use notify_debouncer_mini::notify::RecommendedWatcher;
@@ -136,12 +138,33 @@ impl VaultWatcher {
         debounce: Duration,
         tx: mpsc::UnboundedSender<ChangeEvent>,
     ) -> Result<Self, notify::Error> {
+        Self::start_with_pause(root, debounce, tx, Arc::new(AtomicBool::new(false)))
+    }
+
+    /// As [`VaultWatcher::start`], with a shared pause flag: every event
+    /// observed while `paused` is set is dropped rather than forwarded.
+    ///
+    /// The server holds this flag across a git sync window (D10). A merge
+    /// rewrites the working tree wholesale, and the one full index rebuild
+    /// that follows already covers every path it touched; without the pause
+    /// the watcher would re-index each of those files a second time — while
+    /// the mutation gate is held shut, so the reconcile pass behind it would
+    /// stall until the window closed.
+    pub fn start_with_pause(
+        root: PathBuf,
+        debounce: Duration,
+        tx: mpsc::UnboundedSender<ChangeEvent>,
+        paused: Arc<AtomicBool>,
+    ) -> Result<Self, notify::Error> {
         tracing::info!("Starting vault watcher on {:?}", root);
         let root_clone = root.clone();
         let root_canonical = std::fs::canonicalize(&root).unwrap_or(root.clone());
         let mut debouncer = new_debouncer_opt::<_, AccessFilteredWatcher>(
             notify_debouncer_mini::Config::default().with_timeout(debounce),
             move |result: Result<Vec<DebouncedEvent>, notify::Error>| {
+                if paused.load(Ordering::SeqCst) {
+                    return;
+                }
                 let events = match result {
                     Ok(events) => events,
                     Err(e) => {
@@ -377,5 +400,38 @@ mod tests {
         let noncanonical_root = PathBuf::from("/tmp/noncanonical-placeholder");
         let mapped = map_debounced_event(&noncanonical_root, &canonical_root, &event);
         assert!(matches!(mapped, Some(ChangeEvent::Upsert(vp)) if vp.as_str() == "notes.md"));
+    }
+
+    #[tokio::test]
+    async fn paused_watcher_drops_events_and_resumes() {
+        let tmp = TempDir::new().unwrap();
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let paused = Arc::new(AtomicBool::new(true));
+        let _watcher = VaultWatcher::start_with_pause(
+            tmp.path().to_path_buf(),
+            Duration::from_millis(100),
+            tx,
+            Arc::clone(&paused),
+        )
+        .unwrap();
+
+        std::fs::write(tmp.path().join("a.md"), "x").unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(1_500), rx.recv())
+                .await
+                .is_err(),
+            "a paused watcher must deliver nothing"
+        );
+
+        paused.store(false, Ordering::SeqCst);
+        std::fs::write(tmp.path().join("b.md"), "y").unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("no event within 5s after resuming")
+            .expect("watcher channel closed");
+        assert!(
+            matches!(event, ChangeEvent::Upsert(ref p) if p.as_str() == "b.md"),
+            "the event observed while paused must be dropped, not replayed: {event:?}"
+        );
     }
 }

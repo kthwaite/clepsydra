@@ -75,3 +75,11 @@ _Avoid_: TSK number, sequential code, ticket number
 **Conflict Copy**:
 A sibling page holding the version of a page that lost an automatic merge after the same page was edited on two devices. It remains until the user reconciles or discards it.
 _Avoid_: conflicted file, merge artifact
+
+**Sync**:
+The git-backed exchange of a vault's files between one user's devices: commit, fetch, merge, push, run by `clep sync` or the server.
+_Avoid_: backup, replication
+
+**Device**:
+One machine holding a copy of the vault; named by its hostname in every sync commit's `Device:` trailer.
+_Avoid_: client, node

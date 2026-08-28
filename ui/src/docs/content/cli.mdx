@@ -51,6 +51,9 @@ file's directory without `~` expansion. See [Configuration](/docs/configuration)
 | `clep migrate` | optional `--write`; dry run by default |
 | `clep cas` | nested `migrate`, `backfill`, or `rebuild` command |
 | `clep codes` | nested `migrate` command |
+| `clep sync` | no options; nested `init` or `status` |
+| `clep sync init` | optional `--remote URL`, `--author-name`, `--author-email` |
+| `clep sync status` | no options |
 | `clep register-url` | optional `--obsidian`; macOS only |
 | `clep grep` | `<QUERY>`, `-n/--limit <N>` (default `20`), `--raw`, `--json` |
 | `clep tree` | optional `--json` |
@@ -551,6 +554,134 @@ rewritten. Config or vault-open failures also return `1`.
 ```bash
 clep codes migrate            # dry run
 clep codes migrate --write    # rename and rewrite in place
+```
+
+## `clep sync`
+
+```text
+clep sync [COMMAND]
+```
+
+With no nested command, runs one whole sync
+(`docs/superpowers/specs/2026-08-27-clep-sync-design.md`): commit local
+changes, fetch, merge `origin`, resolve every conflicting file by keeping
+yours and writing theirs beside it as a Conflict Copy, commit the merge, and
+push — see [Sync between devices](/docs/sync) for the full picture. The
+working tree is never left conflicted. `init` and `status` are the nested
+commands.
+
+**Server or standalone.** Only one process may write the vault at a time, so
+`clep sync` first asks whether a server is listening on the configured
+address. If one answers, the sync runs *there* — inside the server's quiesce
+window, followed by its index rebuild — and this command prints the report it
+gets back. If nothing answers, the sync runs here, directly against the
+configured vault. The output is identical either way. A sync over a large
+vault and a slow remote is minutes of honest work, so the server-side call is
+given a 15-minute budget rather than the ordinary 30-second one.
+
+Output — one aligned row per phase, with each Conflict Copy named under the
+merge row and each warning on its own line:
+
+```text
+committed: 3 files (abc1234)      | committed: nothing to commit
+merge:     merged (0123abc), 1 conflict copy:
+           - notes/p.md → notes/p.conflict.ab12cd3.md
+           | up to date | fast-forward (def5678) | no remote
+           | fetch failed: <detail>
+push:      pushed | nothing to push | not attempted
+           | rejected: <detail> | failed: <detail>
+warnings:  <one line each, when any>
+```
+
+Exit code `1` when the fetch failed or the push was rejected or failed;
+otherwise `0`. Conflict Copies are a success, not a failure — they are how a
+conflict is meant to end (`docs/adr/0004-conflict-copies-over-merge-markers.md`).
+
+```bash
+clep sync
+```
+
+## `clep sync init`
+
+```text
+clep sync init [--remote <url>] [--author-name <name>] [--author-email <email>]
+```
+
+Turns the configured vault into a synced git repository, or adopts one
+already there. Idempotent — safe to re-run.
+
+What it does, in order: creates the repository at the vault root, or adopts
+one already there on the configured `[sync] branch` (default `main`);
+requires `git-lfs` (`git lfs version`, then `git lfs install --local`);
+writes the managed `.gitignore`/`.gitattributes` blocks (git-ignoring
+`.clepsydra/cache.db*` and friends; marking `*.md merge=clep` and the
+`.clepsydra/cas/` / `_attachments/` LFS filters) without disturbing any
+existing content in those files; seeds `[sync] author_name`/`author_email`
+from `--author-name`/`--author-email`, else the config already on disk, else
+git's global `user.name`/`user.email`, else an interactive prompt on a TTY;
+migrates a legacy `~/.clepsydra/cas` store into the vault when the vault's
+own CAS store is still empty (ADR 0005:
+`docs/adr/0005-cas-in-vault-frontmatter-metadata.md`); adds `--remote` as
+`origin`; and makes the initial commit (`Device: <hostname>` trailer, author
+from `[sync]`).
+
+Refuses when: the vault root sits inside another git repository (move the
+vault, or remove the outer repository); the checked-out branch differs from
+`[sync] branch`; `origin` already points somewhere else; `git-lfs` is not
+installed, or (with `--remote`) the remote does not answer the git-lfs batch
+API; no author can be resolved from any of the sources above; or a `clep
+serve` is running on the configured address — stop it first, since this
+command must be the vault's only writer while it runs.
+
+The command prints one line per outcome (repository created or adopted,
+branch, managed lines added, author, remote, lfs status, CAS migration
+result, initial commit) followed by any warnings. It returns `0` with no
+warnings and `1` otherwise — including per-blob CAS migration warnings
+(missing, corrupt, or failed blobs), which do not abort the run.
+
+```bash
+clep sync init
+clep sync init --remote git@github.com:me/vault.git
+clep sync init --author-name "Kit Thwaite" --author-email kit@example.com
+```
+
+## `clep sync status`
+
+```text
+clep sync status
+```
+
+Reports the vault's sync state and changes nothing. Like `clep sync`, it asks
+a running server first — so its live autocommit state is included — and reads
+the repository directly when nothing answers.
+
+```text
+branch:          main (head abc1234)
+remote:          git@github.com:me/vault.git   | none
+ahead/behind:    1 / 0                          | unknown (no upstream)
+worktree:        clean | 3 uncommitted files | 1 unmerged file (!)
+conflict copies: 0
+last sync:       2026-08-28T18:20:11Z — committed 2 files; merged; pushed
+                 | never
+autocommit:      idle | pending | pending (sync running)
+```
+
+The `autocommit:` row appears only when a server answered — it is the one
+fact this command cannot read off the repository. It says `pending` while a
+change is waiting out its quiet period and `idle` otherwise, with
+` (sync running)` appended while a sync is actually in progress.
+
+`ahead/behind` reads `unknown (no upstream)` until the branch has been pushed
+once. `last sync` comes from this device's own record (`.git/clep-sync.toml`),
+so it describes this machine, not the remote. `conflict copies` counts the
+`*.conflict.<id>.md` files still sitting in the tree — each one is a merge
+waiting for you to fold it back in and delete it.
+
+Exit code `1` when the working tree holds unmerged paths, or when sync is not
+initialised for this vault; otherwise `0`.
+
+```bash
+clep sync status
 ```
 
 ## `clep register-url`
