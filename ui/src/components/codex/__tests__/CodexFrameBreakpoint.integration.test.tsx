@@ -133,6 +133,10 @@ vi.mock("#/api/journal", () => ({
   useJournalEditorOptions: () => undefined,
   useJournalRecent: () => ({ data: [] }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: () => ({ data: null, isLoading: false }),
+  useAiJournalRecent: () => ({ data: [] }),
+}));
 vi.mock("#/components/codex/ReadingProgressContext", () => ({
   useReadingProgress: () => ({ progress: 0 }),
   useSetReadingProgress: () => vi.fn(),

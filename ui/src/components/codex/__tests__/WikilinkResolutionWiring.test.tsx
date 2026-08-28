@@ -59,6 +59,10 @@ vi.mock("#/api/journal", () => ({
   useJournalRecent: () => ({ data: [] }),
   useEnsureJournalToday: () => ({ mutateAsync: vi.fn() }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: () => ({ data: null, isLoading: false }),
+  useAiJournalRecent: () => ({ data: [] }),
+}));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => [],
 }));

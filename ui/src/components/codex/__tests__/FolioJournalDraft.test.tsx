@@ -6,26 +6,58 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "./FolioProperties.mock";
 
 const {
+  collapsibleRailState,
   mobileLayoutState,
   setReadingProgressMock,
   usePageEditorMock,
   useJournalTodayMock,
+  useAiJournalTodayMock,
+  useJournalEditorOptionsMock,
 } = vi.hoisted(() => ({
+  collapsibleRailState: { collapsed: true },
   mobileLayoutState: { matches: false },
   setReadingProgressMock: vi.fn(),
   usePageEditorMock: vi.fn(),
   useJournalTodayMock: vi.fn(),
+  useAiJournalTodayMock: vi.fn(),
+  useJournalEditorOptionsMock: vi.fn(),
 }));
 vi.mock("#/editor/usePageEditor", () => ({
   usePageEditor: usePageEditorMock,
 }));
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => mobileLayoutState.matches,
+}));
+// Expanding the META rail (for the Project-control test) mounts
+// OpenFilesAccordion, which reaches into router history state via
+// useRouterState. Stub the module so that path doesn't need a RouterProvider.
+vi.mock("@tanstack/react-router", () => ({
+  Link: ({ children }: { children: ReactNode }) => (
+    <a href="/archive">{children}</a>
+  ),
+  useBlocker: () => ({ status: "idle" as const }),
+  useLocation: () => ({ pathname: "/workspace" }),
+  useNavigate: () => vi.fn(),
+  useRouter: () => ({
+    history: {
+      back: vi.fn(),
+      replace: vi.fn(),
+      canGoBack: () => false,
+      location: { href: "/workspace", state: {} },
+    },
+  }),
+  useRouterState: ({
+    select,
+  }: {
+    select: (s: {
+      matches: Array<{ staticData?: { codexView?: string } }>;
+    }) => unknown;
+  }) => select({ matches: [{ staticData: { codexView: "workspace" } }] }),
 }));
 vi.mock("#/editor/SaveIndicator", () => ({ SaveIndicator: () => null }));
 vi.mock("#/editor/SlateEditor", () => ({
@@ -82,16 +114,29 @@ vi.mock("#/crypto/EncryptionProvider", () => ({
   }),
 }));
 vi.mock("#/api/journal", () => ({
-  useJournalEditorOptions: () => undefined,
+  useJournalEditorOptions: useJournalEditorOptionsMock,
   useJournalToday: useJournalTodayMock,
   useJournalRecent: () => ({ data: [] }),
   useEnsureJournalToday: () => ({ mutateAsync: vi.fn() }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: useAiJournalTodayMock,
+  useEnsureAiJournalToday: () => ({ mutateAsync: vi.fn() }),
+  useAiJournalRecent: () => ({ data: [] }),
+}));
+// The META-rail's JournalMeta/AiJournalMeta blocks reach into router
+// navigation and journal-recent queries irrelevant to this file's draft-dance
+// assertions; stub them out so expanding the rail doesn't require mocking
+// @tanstack/react-router too.
+vi.mock("#/components/codex/JournalMeta", () => ({
+  JournalMeta: () => null,
+  AiJournalMeta: () => null,
+}));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 vi.mock("#/components/codex/useCollapsibleRail", () => ({
   useCollapsibleRail: () => ({
-    collapsed: true,
-    width: 0,
+    collapsed: collapsibleRailState.collapsed,
+    width: 240,
     toggle: vi.fn(),
     onResizeStart: vi.fn(),
   }),
@@ -104,7 +149,7 @@ vi.mock("#/components/codex/ReadingProgressContext", () => ({
   useSetReadingProgress: () => setReadingProgressMock,
 }));
 
-import { todayJournalPath } from "#/lib/journal";
+import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
 import { useWorkspaceStore } from "#/store/workspace";
 import { Folio } from "../Folio";
 
@@ -142,8 +187,13 @@ describe("Folio journal draft", () => {
     vi.clearAllMocks();
     usePageEditorMock.mockReset();
     useJournalTodayMock.mockReset();
+    useAiJournalTodayMock.mockReset();
+    useJournalEditorOptionsMock.mockReset();
     mobileLayoutState.matches = false;
+    collapsibleRailState.collapsed = true;
     useJournalTodayMock.mockReturnValue({ data: null, isLoading: false });
+    useAiJournalTodayMock.mockReturnValue({ data: null, isLoading: false });
+    useJournalEditorOptionsMock.mockReturnValue(undefined);
     useWorkspaceStore.setState({ tabs: [], activeTabId: null });
   });
 
@@ -169,6 +219,78 @@ describe("Folio journal draft", () => {
     render(<Folio tabId="t1" path={todayJournalPath()} />);
 
     expect(useWorkspaceStore.getState().tabs[0].path).toBe(canonicalPath);
+  });
+
+  it("repoints a stale AI draft tab when today's AI journal already exists", () => {
+    const canonicalPath = "ai-journals/20260827.2026-08-27.Ab12Cd34.md";
+    useAiJournalTodayMock.mockReturnValue({
+      data: { path: canonicalPath, meta: { title: "2026-08-27" } },
+      isLoading: false,
+    });
+    usePageEditorMock.mockReturnValue(draftEditor());
+    useWorkspaceStore.setState({
+      tabs: [
+        {
+          id: "t1",
+          type: "page",
+          path: todayAiJournalPath(),
+          label: "2026-08-27",
+        },
+      ],
+      activeTabId: "t1",
+    });
+
+    render(<Folio tabId="t1" path={todayAiJournalPath()} />);
+
+    expect(useWorkspaceStore.getState().tabs[0].path).toBe(canonicalPath);
+  });
+
+  it("passes ensure() for the AI draft path that calls the AI ensure mutation", () => {
+    const ensureAiJournal = vi.fn();
+    useJournalEditorOptionsMock.mockImplementation((p: string) =>
+      p === todayAiJournalPath()
+        ? { ensure: () => ensureAiJournal() }
+        : undefined,
+    );
+    usePageEditorMock.mockReturnValue(draftEditor());
+
+    render(<Folio tabId="t1" path={todayAiJournalPath()} />);
+
+    const lastCall = usePageEditorMock.mock.calls.at(-1);
+    expect(lastCall?.[0]).toBe(todayAiJournalPath());
+    const options = lastCall?.[1] as { ensure?: () => void } | undefined;
+    expect(options?.ensure).toBeTypeOf("function");
+    options?.ensure?.();
+    expect(ensureAiJournal).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the Project control static for JOURNAL and AI_JOURNAL kinds", () => {
+    collapsibleRailState.collapsed = false;
+    usePageEditorMock.mockReturnValue({
+      ...draftEditor(),
+      kind: "JOURNAL",
+    });
+    const journalView = render(
+      <Folio tabId="t1" path="journals/2026-08-07.md" />,
+    );
+    expect(screen.queryByRole("combobox", { name: "Project" })).toBeNull();
+    expect(
+      screen.getByTitle("Journal pages cannot join a project."),
+    ).toBeInTheDocument();
+    journalView.unmount();
+
+    usePageEditorMock.mockReturnValue({
+      ...draftEditor(),
+      kind: "AI_JOURNAL",
+    });
+    render(<Folio tabId="t1" path="ai-journals/2026-08-07.md" />);
+    expect(screen.queryByRole("combobox", { name: "Project" })).toBeNull();
+    expect(
+      screen.getByTitle("Journal pages cannot join a project."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("AI journal kind cannot be changed."),
+    ).toBeInTheDocument();
   });
 
   it("renders the editor surface, not FolioNotFound, for a draft", () => {
