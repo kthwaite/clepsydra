@@ -1286,21 +1286,46 @@ fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &m
         }
     };
 
-    let mut known_hashes: BTreeSet<String> = BTreeSet::new();
+    // Rows only tell half the story: a hash the vault expects references
+    // (`expected`) but that never got a `blobs` row at all — never stored,
+    // or a DB desync — would be invisible to a rows-only comparison. Compare
+    // over the union of both sides so a referenced-but-untracked hash still
+    // surfaces (as a refcounts mismatch, and as `missing` if its file is
+    // also absent) instead of silently passing every check.
+    let stored: BTreeMap<String, i64> = rows.iter().cloned().collect();
+    let all_hashes: BTreeSet<String> = expected
+        .keys()
+        .cloned()
+        .chain(stored.keys().cloned())
+        .collect();
+
     let mut mismatches = Vec::new();
     let mut missing = Vec::new();
-    for (hash, ref_count) in &rows {
-        known_hashes.insert(hash.clone());
+    let mut checked_for_missing = 0usize;
+    for hash in &all_hashes {
+        let stored_count = stored.get(hash).copied().unwrap_or(0);
         let expected_count = expected.get(hash).copied().unwrap_or(0);
-        if *ref_count != expected_count {
+        if stored_count != expected_count {
+            let no_row = if stored.contains_key(hash) {
+                ""
+            } else {
+                " (no row)"
+            };
             mismatches.push(format!(
-                "{hash}: stored ref_count {ref_count}, expected {expected_count}"
+                "{hash}: stored ref_count {stored_count}{no_row}, expected {expected_count}"
             ));
         }
-        match cas_blob_path(cas_path, hash) {
-            Some(blob_path) if !blob_path.exists() => missing.push(hash.clone()),
-            Some(_) => {}
-            None => missing.push(format!("{hash} (malformed hash)")),
+        // Only a hash something currently cares about (a live/rubbish
+        // reference, or a DB row still claiming one) needs its file present.
+        // A hash with both at 0 is already fully released; a missing file
+        // for it is unremarkable, not a fault.
+        if expected_count > 0 || stored_count > 0 {
+            checked_for_missing += 1;
+            match cas_blob_path(cas_path, hash) {
+                Some(blob_path) if !blob_path.exists() => missing.push(hash.clone()),
+                Some(_) => {}
+                None => missing.push(format!("{hash} (malformed hash)")),
+            }
         }
     }
 
@@ -1308,7 +1333,10 @@ fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &m
         report.push(ok(
             SECTION,
             "refcounts",
-            format!("{} blob(s) match expected reference counts", rows.len()),
+            format!(
+                "{} blob(s) match expected reference counts",
+                all_hashes.len()
+            ),
         ));
     } else {
         report.push(
@@ -1329,7 +1357,7 @@ fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &m
         report.push(ok(
             SECTION,
             "missing",
-            format!("all {} blob file(s) present on disk", rows.len()),
+            format!("all {checked_for_missing} referenced blob file(s) present on disk"),
         ));
     } else {
         report.push(warn(
@@ -1338,7 +1366,7 @@ fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &m
             listing(
                 &missing,
                 format!(
-                    "{} blob(s) referenced in cas.db with no file on disk:",
+                    "{} blob(s) referenced (by cas.db or the vault) with no file on disk:",
                     missing.len()
                 ),
                 LISTED,
@@ -1346,11 +1374,13 @@ fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &m
         ));
     }
 
+    // GC-eligible: nothing currently expects this file, regardless of
+    // whether it still has a `blobs` row (a row with ref_count 0 is exactly
+    // as unreferenced as a file with no row at all — see `rebuild_metadata`'s
+    // `unreferenced_blobs`).
     let orphans: Vec<String> = list_cas_blob_files(cas_path)
         .into_iter()
-        .filter(|hash| {
-            !known_hashes.contains(hash) || expected.get(hash).copied().unwrap_or(0) <= 0
-        })
+        .filter(|hash| expected.get(hash).copied().unwrap_or(0) <= 0)
         .collect();
     if orphans.is_empty() {
         report.push(ok(SECTION, "orphans", "no orphaned blob files on disk"));
@@ -1361,7 +1391,7 @@ fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &m
             listing(
                 &orphans,
                 format!(
-                    "{} blob file(s) on disk with no DB row or expected reference:",
+                    "{} blob file(s) on disk with no expected reference:",
                     orphans.len()
                 ),
                 LISTED,
@@ -2859,6 +2889,92 @@ mod tests {
             .unwrap();
         assert!(matches!(r.status, Status::Warn));
         assert!(r.detail.contains(hex));
+    }
+
+    #[test]
+    fn full_cas_verify_reports_orphan_with_zero_expected_refs() {
+        // A blob is `store()`d (so it has a `blobs` row, ref_count 1) but no
+        // page ever references it — the scan expects 0 refs, so it's
+        // GC-eligible even though the row exists.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let cas_dir = tmp.path().join("cas");
+        let store = crate::vault::cas::ContentStore::open(&cas_dir).unwrap();
+        let stored = store.store(b"<html>", "text/html").unwrap();
+        drop(store);
+        std::fs::write(
+            root.join(".clepsydra/config.toml"),
+            format!("[archive]\ncas_path = \"{}\"\n", cas_dir.display()),
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "orphans")
+            .unwrap();
+        assert!(matches!(r.status, Status::Info));
+        assert!(r.detail.contains(&stored.hash));
+    }
+
+    #[test]
+    fn full_cas_verify_reports_orphan_untracked_file() {
+        // A raw file planted straight into the fan-out, bypassing
+        // `ContentStore` entirely — no `blobs` row, no page reference.
+        let (_tmp, root, cas_dir, _hash) = cas_fixture();
+        let fake_hex = "c".repeat(64);
+        let fan_out_dir = cas_dir.join(&fake_hex[..2]);
+        std::fs::create_dir_all(&fan_out_dir).unwrap();
+        std::fs::write(fan_out_dir.join(&fake_hex), b"untracked").unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "orphans")
+            .unwrap();
+        assert!(matches!(r.status, Status::Info));
+        assert!(r.detail.contains(&fake_hex));
+    }
+
+    #[test]
+    fn full_cas_verify_reports_referenced_hash_with_no_row_and_no_file() {
+        // A page references a hash that was never stored: no `blobs` row,
+        // no fan-out file. The union of expected refs and DB rows must
+        // surface this — a DB-rows-only comparison would never see it.
+        let (_tmp, root, _cas_dir, _hash) = cas_fixture();
+        let phantom = format!("sha256:{}", "d".repeat(64));
+        std::fs::write(
+            root.join("archive/x/b.md"),
+            format!(
+                "+++\nid = \"01900000-0000-7000-8000-00000000000a\"\ntitle = \"B\"\n\
+                 created_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n\
+                 [archive]\nurl = \"https://y\"\ndomain = \"y\"\ncaptured_at = \"2026-01-01T00:00:00Z\"\n\
+                 snapshot_hash = \"{phantom}\"\n+++\nbody\n"
+            ),
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let refcounts = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "refcounts")
+            .unwrap();
+        assert!(matches!(refcounts.status, Status::Warn));
+        assert!(refcounts.detail.contains(&phantom));
+        let missing = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "missing")
+            .unwrap();
+        assert!(matches!(missing.status, Status::Warn));
+        assert!(missing.detail.contains(&phantom));
     }
 }
 
