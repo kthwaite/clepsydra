@@ -17,6 +17,13 @@ return {
 		end,
 	},
 	{
+		name = "extract_code rejects an uppercase body and an incomplete prefix",
+		fn = function()
+			eq(nil, tasks.extract_code("TSK-BRAVE-FINCH-7Q3ZD", ""))
+			eq(nil, tasks.extract_code("TSK-brave-finch", ""))
+		end,
+	},
+	{
 		name = "extract_code falls back to the buffer file name",
 		fn = function()
 			eq("TSK-calm-heron-2xm9p", tasks.extract_code("word", "/v/tasks/x/TSK-calm-heron-2xm9p.md"))

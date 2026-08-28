@@ -487,8 +487,9 @@ pub struct CycleCreateParams {
     pub start: String,
     /// End date (YYYY-MM-DD).
     pub end: String,
-    /// Explicit cycle code (e.g. "S-brave-finch-7q3zd"); conflicts if it
-    /// already exists. Absent = the server mints one
+    /// Explicit cycle code (e.g. "S-brave-finch-7q3zd"); must match the
+    /// format S-<adjective>-<noun>-<tail> (rejected otherwise) and conflicts
+    /// if it already exists. Absent = the server mints one
     /// (S-<adjective>-<noun>-<tail>).
     pub code: Option<String>,
     /// Cycle goal.
@@ -1398,7 +1399,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_cycle_create",
-        description = "Create a Cycle for the Task Board (a CYCLE page under cycles/). Omit `code` to have the server mint an S-<adjective>-<noun>-<tail> code; an explicit code conflicts if it exists. State defaults to Planned (`PLANNED`); Active (`ACTIVE`) is also allowed. Closed (`CLOSED`) is rejected at creation — close a finished Cycle with vault_cycle_update.",
+        description = "Create a Cycle for the Task Board (a CYCLE page under cycles/). Omit `code` to have the server mint an S-<adjective>-<noun>-<tail> code; an explicit code must match that same format (rejected otherwise) and conflicts if it already exists. State defaults to Planned (`PLANNED`); Active (`ACTIVE`) is also allowed. Closed (`CLOSED`) is rejected at creation — close a finished Cycle with vault_cycle_update.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
