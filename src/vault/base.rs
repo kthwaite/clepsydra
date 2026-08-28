@@ -297,6 +297,54 @@ pub enum AggregateFn {
     Avg,
     Min,
     Max,
+    /// Rows where the field is absent.
+    CountEmpty,
+    /// Rows where the field is present.
+    CountFilled,
+    /// `100 * count_filled / count`, rounded to one decimal.
+    PercentFilled,
+    /// Distinct present values (first array element only).
+    CountUnique,
+    /// Middle value of the present values (mean of the two middles for numbers).
+    Median,
+    /// `max - min`; days for dates.
+    Range,
+}
+
+impl AggregateFn {
+    /// Every function but `count` folds a field.
+    pub fn requires_field(self) -> bool {
+        !matches!(self, AggregateFn::Count)
+    }
+
+    /// Numeric/temporal folds: need `number`, `date`, `datetime`, or `word_count`.
+    pub fn is_fold(self) -> bool {
+        matches!(
+            self,
+            AggregateFn::Sum
+                | AggregateFn::Avg
+                | AggregateFn::Min
+                | AggregateFn::Max
+                | AggregateFn::Median
+                | AggregateFn::Range
+        )
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AggregateFn::Count => "count",
+            AggregateFn::Sum => "sum",
+            AggregateFn::Avg => "avg",
+            AggregateFn::Min => "min",
+            AggregateFn::Max => "max",
+            AggregateFn::CountEmpty => "count_empty",
+            AggregateFn::CountFilled => "count_filled",
+            AggregateFn::PercentFilled => "percent_filled",
+            AggregateFn::CountUnique => "count_unique",
+            AggregateFn::Median => "median",
+            AggregateFn::Range => "range",
+        }
+    }
 }
 
 /// One field shown in a Base's default preview, in configured order.
@@ -1491,17 +1539,64 @@ fn validate(base: &BaseDefinition, diagnostics: &mut Vec<BaseDiagnostic>) {
                     ),
                 );
             }
-            if !matches!(aggregate.function, AggregateFn::Count) && aggregate.field.is_none() {
+            if aggregate.function.requires_field() && aggregate.field.is_none() {
                 push(
                     BaseDiagnosticSeverity::Warning,
                     Some(format!(
                         "views[{view_index}].aggregates[{aggregate_index}].field"
                     )),
                     format!(
-                        "view `{}`: aggregate `{:?}` requires a field",
-                        view.name, aggregate.function
+                        "view `{}`: aggregate `{}` requires a field",
+                        view.name,
+                        aggregate.function.as_str()
                     ),
                 );
+            }
+            if let Some(field) = aggregate.field.as_deref()
+                && let Ok(resolved) = crate::vault::query::resolve_field(
+                    field,
+                    &crate::vault::query::QueryContext::for_base(base),
+                )
+            {
+                let path = Some(format!(
+                    "views[{view_index}].aggregates[{aggregate_index}].field"
+                ));
+                if matches!(
+                    resolved,
+                    crate::vault::query::ResolvedField::Sys(
+                        crate::vault::query::SysField::Tags
+                            | crate::vault::query::SysField::Aliases
+                    )
+                ) {
+                    push(
+                        BaseDiagnosticSeverity::Warning,
+                        path,
+                        format!(
+                            "view `{}`: aggregate `{}` cannot fold the multi-valued system field `{field}`",
+                            view.name,
+                            aggregate.function.as_str()
+                        ),
+                    );
+                } else if aggregate.function.is_fold() {
+                    let ty = match resolved {
+                        crate::vault::query::ResolvedField::Prop { ty, .. } => ty,
+                        crate::vault::query::ResolvedField::Sys(sys) => sys.property_type(),
+                    };
+                    if !matches!(
+                        ty,
+                        PropertyType::Number | PropertyType::Date | PropertyType::Datetime
+                    ) {
+                        push(
+                            BaseDiagnosticSeverity::Warning,
+                            path,
+                            format!(
+                                "view `{}`: aggregate `{}` needs a number, date, or datetime field, not `{field}` ({ty:?})",
+                                view.name,
+                                aggregate.function.as_str()
+                            ),
+                        );
+                    }
+                }
             }
         }
     }
@@ -1888,6 +1983,84 @@ name = "All"
                 })
                 .collect(),
         }
+    }
+
+    #[test]
+    fn aggregate_fold_on_non_numeric_property_warns() {
+        let mut file = base_file_with_views(["All"]);
+        file.properties = vec![(
+            "status".to_string(),
+            PropertyDefinition {
+                property_type: PropertyType::Select,
+                options: vec!["queued".to_string(), "reading".to_string()],
+                many: None,
+            },
+        )];
+        file.views[0].aggregates = vec![Aggregate {
+            function: AggregateFn::Median,
+            field: Some("status".to_string()),
+        }];
+
+        let result = validate_definition("reading", file);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Warning
+                    && diagnostic.path.as_deref() == Some("views[0].aggregates[0].field")
+                    && diagnostic
+                        .message
+                        .contains("needs a number, date, or datetime field")
+            }),
+            "{:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn aggregate_on_multi_valued_system_field_warns() {
+        let mut file = base_file_with_views(["All"]);
+        file.views[0].aggregates = vec![Aggregate {
+            function: AggregateFn::CountUnique,
+            field: Some("tags".to_string()),
+        }];
+
+        let result = validate_definition("reading", file);
+        assert!(
+            result.diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == BaseDiagnosticSeverity::Warning
+                    && diagnostic.path.as_deref() == Some("views[0].aggregates[0].field")
+                    && diagnostic
+                        .message
+                        .contains("cannot fold the multi-valued system field")
+            }),
+            "{:?}",
+            result.diagnostics
+        );
+    }
+
+    #[test]
+    fn aggregate_count_filled_on_select_property_has_no_diagnostic() {
+        let mut file = base_file_with_views(["All"]);
+        file.properties = vec![(
+            "status".to_string(),
+            PropertyDefinition {
+                property_type: PropertyType::Select,
+                options: vec!["queued".to_string(), "reading".to_string()],
+                many: None,
+            },
+        )];
+        file.views[0].aggregates = vec![Aggregate {
+            function: AggregateFn::CountFilled,
+            field: Some("status".to_string()),
+        }];
+
+        let result = validate_definition("reading", file);
+        assert!(
+            result.diagnostics.iter().all(
+                |diagnostic| diagnostic.path.as_deref() != Some("views[0].aggregates[0].field")
+            ),
+            "{:?}",
+            result.diagnostics
+        );
     }
 
     #[test]

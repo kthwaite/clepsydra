@@ -891,6 +891,7 @@ mod tests {
                         columns: serde_json::Map::new(),
                     }],
                     total: 1,
+                    aggregates: Vec::new(),
                 })
             },
         )

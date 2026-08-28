@@ -3421,3 +3421,170 @@ async fn filtered_member_relation_candidate_matches_indexed_links_for_canonical_
     assert_eq!(page_paths(fixture.state.vault.root()), before_paths);
     assert_eq!(indexed_page_count(&fixture).await, before_rows);
 }
+
+// -- Flat-view aggregates: count/median/range functions --------------------
+
+const TOTALS_BASE: &str = r#"
+name = "Totals"
+
+[filter]
+all = [ { field = "kind", op = "eq", value = "BOOK" } ]
+
+[properties]
+rating  = { type = "number" }
+status  = { type = "select", options = ["queued", "reading", "finished"] }
+
+[[views]]
+name = "All"
+columns = ["title", "rating"]
+aggregates = [
+  { fn = "count" },
+  { fn = "count_filled", field = "rating" },
+  { fn = "percent_filled", field = "rating" },
+  { fn = "median", field = "rating" },
+  { fn = "range", field = "rating" },
+]
+"#;
+
+/// Six BOOK pages with ratings `5, 3, 4, (absent), 2, 3`.
+fn seed_totals_base(root: &Path) {
+    fs::create_dir_all(root.join("bases")).unwrap();
+    fs::create_dir_all(root.join("books")).unwrap();
+    fs::write(root.join("bases/totals.base.toml"), TOTALS_BASE).unwrap();
+
+    let page = |id: &str, title: &str, extras: &str| {
+        format!("+++\nid = \"{id}\"\ntitle = \"{title}\"\ntype = \"BOOK\"\n{extras}+++\nbody\n")
+    };
+    let books = [
+        ("a", "Book A", "rating = 5\nstatus = \"reading\"\n"),
+        ("b", "Book B", "rating = 3\nstatus = \"reading\"\n"),
+        ("c", "Book C", "rating = 4\nstatus = \"queued\"\n"),
+        ("d", "Book D", ""),
+        ("e", "Book E", "rating = 2\nstatus = \"finished\"\n"),
+        ("f", "Book F", "rating = 3\nstatus = \"reading\"\n"),
+    ];
+    for (letter, title, extras) in books {
+        fs::write(
+            root.join(format!("books/{letter}.md")),
+            page(
+                &format!("0190f8a0-0000-7000-8000-0000000000a{letter}"),
+                title,
+                extras,
+            ),
+        )
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn flat_view_aggregates_are_unaffected_by_the_row_window() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_totals_base)
+        .build()
+        .into_server_and_temp();
+
+    let response = server
+        .get("/api/vault/bases/totals/views/All?limit=2")
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert_eq!(body["shape"], "flat");
+    assert_eq!(body["rows"].as_array().unwrap().len(), 2);
+    assert_eq!(body["total"], 6);
+    assert_eq!(
+        body["aggregates"],
+        serde_json::json!([6, 5, 83.3, 3.0, 3.0]),
+        "the window (limit=2) must not change the aggregates"
+    );
+}
+
+#[tokio::test]
+async fn preview_reports_a_warning_for_a_median_over_a_select_field() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_totals_base)
+        .build()
+        .into_server_and_temp();
+
+    let definition = serde_json::json!({
+        "name": "Totals Preview",
+        "filter": { "all": [{ "field": "kind", "op": "eq", "value": "BOOK" }] },
+        "properties": [
+            { "key": "rating", "definition": { "type": "number" } },
+            {
+                "key": "status",
+                "definition": {
+                    "type": "select",
+                    "options": ["queued", "reading", "finished"]
+                }
+            }
+        ],
+        "views": [{
+            "name": "All",
+            "aggregates": [{ "fn": "median", "field": "status" }]
+        }]
+    });
+
+    let response = server
+        .post("/api/vault/bases/preview")
+        .json(&serde_json::json!({
+            "definition": definition,
+            "view": "All"
+        }))
+        .await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+
+    assert!(
+        body["diagnostics"].as_array().unwrap().iter().any(|d| {
+            d["severity"] == "warning"
+                && d["path"] == "views[0].aggregates[0].field"
+                && d["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains("needs a number, date, or datetime field")
+        }),
+        "{body:#}"
+    );
+}
+
+#[tokio::test]
+async fn openapi_documents_the_new_aggregate_functions_and_flat_aggregates_field() {
+    let document = serde_json::to_value(ApiDoc::openapi()).unwrap();
+
+    assert_eq!(
+        document["components"]["schemas"]["AggregateFn"]["enum"],
+        serde_json::json!([
+            "count",
+            "sum",
+            "avg",
+            "min",
+            "max",
+            "count_empty",
+            "count_filled",
+            "percent_filled",
+            "count_unique",
+            "median",
+            "range",
+        ])
+    );
+
+    let query_output = &document["components"]["schemas"]["QueryOutput"]["oneOf"];
+    let flat = query_output
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|variant| variant["properties"]["shape"]["enum"] == serde_json::json!(["flat"]))
+        .expect("flat variant present");
+    assert!(
+        flat["properties"]["aggregates"].is_object(),
+        "flat variant should carry an `aggregates` field: {flat:#}"
+    );
+    assert!(
+        flat["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|field| field == "aggregates")
+    );
+}

@@ -915,8 +915,17 @@ pub struct GroupResult {
 #[derive(Debug, serde::Serialize, utoipa::ToSchema)]
 #[serde(tag = "shape", rename_all = "snake_case")]
 pub enum QueryOutput {
-    Flat { rows: Vec<QueryRow>, total: i64 },
-    Grouped { groups: Vec<GroupResult> },
+    Flat {
+        rows: Vec<QueryRow>,
+        total: i64,
+        /// One value per requested aggregate, in request order, computed
+        /// over the whole predicate (unaffected by `limit`/`offset`).
+        #[schema(value_type = Vec<serde_json::Value>)]
+        aggregates: Vec<serde_json::Value>,
+    },
+    Grouped {
+        groups: Vec<GroupResult>,
+    },
 }
 
 struct PreparedQuery {
@@ -1029,21 +1038,56 @@ fn evaluate_flat(
     ctx: &QueryContext,
 ) -> Result<QueryOutput, QueryError> {
     let prepared = prepare(spec, ctx)?;
+    let plan = plan_aggregates(spec, ctx)?;
 
-    let total: i64 = {
-        let sql = format!(
-            "SELECT COUNT(*) FROM pages p WHERE {}",
-            prepared.where_clause
-        );
-        conn.query_row(
-            &sql,
-            rusqlite::params_from_iter(prepared.where_params.iter()),
-            |r| r.get(0),
-        )?
-    };
+    // Header query: total row count plus every non-median aggregate, all
+    // computed over the whole predicate (`limit`/`offset` apply only to the
+    // row fetch below).
+    let header_sql = format!(
+        "SELECT COUNT(*){} FROM pages p{} WHERE {}",
+        plan.exprs
+            .iter()
+            .flatten()
+            .map(|e| format!(", {e}"))
+            .collect::<String>(),
+        plan.joins,
+        prepared.where_clause,
+    );
+    let mut header_params: Vec<SqlValue> = Vec::new();
+    header_params.extend(plan.params.iter().cloned());
+    header_params.extend(prepared.where_params.iter().cloned());
+
+    let (total, mut aggregates): (i64, Vec<serde_json::Value>) = conn.query_row(
+        &header_sql,
+        rusqlite::params_from_iter(header_params.iter()),
+        |row| {
+            let total: i64 = row.get(0)?;
+            let mut aggregates = Vec::with_capacity(plan.exprs.len());
+            let mut col = 1;
+            for expr in &plan.exprs {
+                if expr.is_some() {
+                    let v: rusqlite::types::Value = row.get(col)?;
+                    aggregates.push(sql_value_to_json(v));
+                    col += 1;
+                } else {
+                    // Median placeholder, filled in below.
+                    aggregates.push(serde_json::Value::Null);
+                }
+            }
+            Ok((total, aggregates))
+        },
+    )?;
+
+    for median in &plan.medians {
+        aggregates[median.index] = median_value(conn, &prepared, median, None)?;
+    }
 
     let rows = fetch_rows(conn, spec, ctx, &prepared, None, spec.limit, spec.offset)?;
-    Ok(QueryOutput::Flat { rows, total })
+    Ok(QueryOutput::Flat {
+        rows,
+        total,
+        aggregates,
+    })
 }
 
 fn evaluate_grouped(
@@ -1074,44 +1118,7 @@ fn evaluate_grouped(
     };
 
     let prepared = prepare(spec, ctx)?;
-
-    // Aggregate select list.
-    let mut agg_exprs = Vec::new();
-    let mut agg_joins = String::new();
-    let mut agg_params: Vec<SqlValue> = Vec::new();
-    for (i, agg) in spec.aggregates.iter().enumerate() {
-        if let Some(field) = agg.field.as_deref() {
-            resolve_field(field, ctx)?;
-        }
-        match (agg.function, &agg.field) {
-            (AggregateFn::Count, _) => agg_exprs.push("COUNT(*)".to_string()),
-            (function, Some(field)) => {
-                let (key, column) = match resolve_field(field, ctx)? {
-                    ResolvedField::Prop { key, ty } => match ty {
-                        PropertyType::Number => (key, "value_num"),
-                        PropertyType::Date | PropertyType::Datetime => (key, "value_date"),
-                        _ => return Err(QueryError::InvalidAggregate(function)),
-                    },
-                    ResolvedField::Sys(SysField::WordCount) => {
-                        let f = sql_aggregate(function);
-                        agg_exprs.push(format!("{f}(p.word_count)"));
-                        continue;
-                    }
-                    ResolvedField::Sys(_) => {
-                        return Err(QueryError::InvalidAggregate(function));
-                    }
-                };
-                let alias = format!("agg{i}");
-                agg_joins.push_str(&format!(
-                    " LEFT JOIN page_properties {alias} ON {alias}.page_id = p.id AND {alias}.key = ? AND {alias}.ord = 0"
-                ));
-                agg_params.push(SqlValue::Text(key));
-                let f = sql_aggregate(function);
-                agg_exprs.push(format!("{f}({alias}.{column})"));
-            }
-            (function, None) => return Err(QueryError::InvalidAggregate(function)),
-        }
-    }
+    let plan = plan_aggregates(spec, ctx)?;
 
     // The grouped header query: key, total, aggregates.
     let (group_expr, group_join, group_join_param) = match &group_column {
@@ -1125,24 +1132,25 @@ fn evaluate_grouped(
     };
 
     let header_sql = format!(
-        "SELECT {group_expr} AS gkey, COUNT(*) AS total{} FROM pages p{group_join}{agg_joins} WHERE {} GROUP BY gkey ORDER BY gkey IS NULL, gkey ASC",
-        agg_exprs
+        "SELECT {group_expr} AS gkey, COUNT(*) AS total{} FROM pages p{group_join}{} WHERE {} GROUP BY gkey ORDER BY gkey IS NULL, gkey ASC",
+        plan.exprs
             .iter()
+            .flatten()
             .map(|e| format!(", {e}"))
             .collect::<String>(),
+        plan.joins,
         prepared.where_clause,
     );
     let mut header_params: Vec<SqlValue> = Vec::new();
     if let Some(p) = &group_join_param {
         header_params.push(p.clone());
     }
-    header_params.extend(agg_params.iter().cloned());
+    header_params.extend(plan.params.iter().cloned());
     header_params.extend(prepared.where_params.iter().cloned());
 
     #[allow(clippy::type_complexity)]
     let headers: Vec<(Option<SqlValue>, i64, Vec<serde_json::Value>)> = {
         let mut stmt = conn.prepare(&header_sql)?;
-        let n_aggs = spec.aggregates.len();
         let rows = stmt.query_map(rusqlite::params_from_iter(header_params.iter()), |row| {
             let key: Option<SqlValue> =
                 row.get::<_, rusqlite::types::Value>(0).map(|v| match v {
@@ -1150,10 +1158,17 @@ fn evaluate_grouped(
                     other => Some(other),
                 })?;
             let total: i64 = row.get(1)?;
-            let mut aggs = Vec::with_capacity(n_aggs);
-            for i in 0..n_aggs {
-                let v: rusqlite::types::Value = row.get(2 + i)?;
-                aggs.push(sql_value_to_json(v));
+            let mut aggs = Vec::with_capacity(plan.exprs.len());
+            let mut col = 2;
+            for expr in &plan.exprs {
+                if expr.is_some() {
+                    let v: rusqlite::types::Value = row.get(col)?;
+                    aggs.push(sql_value_to_json(v));
+                    col += 1;
+                } else {
+                    // Median placeholder, filled in below.
+                    aggs.push(serde_json::Value::Null);
+                }
             }
             Ok((key, total, aggs))
         })?;
@@ -1166,7 +1181,11 @@ fn evaluate_grouped(
         GroupRowLimit::Limit(limit) => Some(limit),
     };
     let mut groups = Vec::with_capacity(headers.len());
-    for (key, total, aggregates) in headers {
+    for (key, total, mut aggregates) in headers {
+        for median in &plan.medians {
+            aggregates[median.index] =
+                median_value(conn, &prepared, median, Some((&group_column, key.as_ref())))?;
+        }
         let rows = fetch_rows(
             conn,
             spec,
@@ -1194,6 +1213,9 @@ enum GroupColumn {
     Property { key: String, column: &'static str },
 }
 
+/// `SUM`/`AVG`/`MIN`/`MAX`/`COUNT`: the aggregates that fold straight to one
+/// SQL function call. `median` and `range` build their own SQL shape in
+/// `plan_aggregates`, and never reach this function.
 fn sql_aggregate(f: AggregateFn) -> &'static str {
     match f {
         AggregateFn::Count => "COUNT",
@@ -1201,6 +1223,220 @@ fn sql_aggregate(f: AggregateFn) -> &'static str {
         AggregateFn::Avg => "AVG",
         AggregateFn::Min => "MIN",
         AggregateFn::Max => "MAX",
+        AggregateFn::CountEmpty
+        | AggregateFn::CountFilled
+        | AggregateFn::PercentFilled
+        | AggregateFn::CountUnique
+        | AggregateFn::Median
+        | AggregateFn::Range => {
+            unreachable!("{f:?} builds its own SQL shape in plan_aggregates, not via sql_aggregate")
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate planning: shared SQL shape for flat and grouped evaluation
+// ---------------------------------------------------------------------------
+
+/// One aggregate's SQL shape, shared by flat and grouped evaluation.
+struct AggregatePlan {
+    /// Select expressions appended after `COUNT(*)`; `None` for a median,
+    /// which is computed from an ordered fetch (see `median_value`).
+    exprs: Vec<Option<String>>,
+    /// `LEFT JOIN page_properties agg{i} … AND ord = 0` per property target.
+    joins: String,
+    params: Vec<SqlValue>,
+    medians: Vec<MedianPlan>,
+}
+
+struct MedianPlan {
+    /// Position in the aggregates list.
+    index: usize,
+    /// Column expression, e.g. `agg2.value_num` or `p.word_count`.
+    column: String,
+    /// The join that introduces `column` (empty for system columns), with its params.
+    join: String,
+    join_params: Vec<SqlValue>,
+    numeric: bool,
+}
+
+enum AggregateTarget {
+    Property { key: String, ty: PropertyType },
+    System(&'static str, PropertyType),
+}
+
+fn plan_aggregates(spec: &QuerySpec, ctx: &QueryContext) -> Result<AggregatePlan, QueryError> {
+    let mut plan = AggregatePlan {
+        exprs: Vec::new(),
+        joins: String::new(),
+        params: Vec::new(),
+        medians: Vec::new(),
+    };
+    for (i, agg) in spec.aggregates.iter().enumerate() {
+        let function = agg.function;
+        if !function.requires_field() {
+            plan.exprs.push(Some("COUNT(*)".to_string()));
+            continue;
+        }
+        let Some(field) = agg.field.as_deref() else {
+            return Err(QueryError::InvalidAggregate(function));
+        };
+        let target = match resolve_field(field, ctx)? {
+            ResolvedField::Prop { key, ty } => AggregateTarget::Property { key, ty },
+            ResolvedField::Sys(SysField::Tags | SysField::Aliases) => {
+                return Err(QueryError::InvalidAggregate(function));
+            }
+            ResolvedField::Sys(sys) => AggregateTarget::System(
+                sys.column().expect("scalar system field"),
+                sys.property_type(),
+            ),
+        };
+        let (column, ty, join, join_params) = match target {
+            AggregateTarget::Property { key, ty } => {
+                let alias = format!("agg{i}");
+                let join = format!(
+                    " LEFT JOIN page_properties {alias} ON {alias}.page_id = p.id AND {alias}.key = ? AND {alias}.ord = 0"
+                );
+                (
+                    format!("{alias}.{}", typed_column(ty)),
+                    ty,
+                    join,
+                    vec![SqlValue::Text(key)],
+                )
+            }
+            AggregateTarget::System(column, ty) => {
+                (column.to_string(), ty, String::new(), Vec::new())
+            }
+        };
+        if function.is_fold()
+            && !matches!(
+                ty,
+                PropertyType::Number | PropertyType::Date | PropertyType::Datetime
+            )
+        {
+            return Err(QueryError::InvalidAggregate(function));
+        }
+        plan.joins.push_str(&join);
+        plan.params.extend(join_params.iter().cloned());
+        let numeric = ty == PropertyType::Number;
+        plan.exprs.push(match function {
+            AggregateFn::Count => unreachable!("handled above"),
+            AggregateFn::CountFilled => Some(format!("COUNT({column})")),
+            AggregateFn::CountEmpty => Some(format!("COUNT(*) - COUNT({column})")),
+            AggregateFn::PercentFilled => Some(format!(
+                "CASE WHEN COUNT(*) = 0 THEN 0 ELSE ROUND(100.0 * COUNT({column}) / COUNT(*), 1) END"
+            )),
+            AggregateFn::CountUnique => Some(format!("COUNT(DISTINCT {column})")),
+            AggregateFn::Sum | AggregateFn::Avg | AggregateFn::Min | AggregateFn::Max => {
+                Some(format!("{}({column})", sql_aggregate(function)))
+            }
+            AggregateFn::Range if numeric => Some(format!("MAX({column}) - MIN({column})")),
+            AggregateFn::Range => Some(format!(
+                "julianday(MAX({column})) - julianday(MIN({column}))"
+            )),
+            AggregateFn::Median => {
+                plan.medians.push(MedianPlan {
+                    index: i,
+                    column: column.clone(),
+                    join,
+                    join_params,
+                    numeric,
+                });
+                None
+            }
+        });
+    }
+    Ok(plan)
+}
+
+/// The group restriction shared by `fetch_rows` and `median_value`: a
+/// `LEFT JOIN` (for property groups) plus an `AND` predicate pinning one
+/// group's key. The join and predicate params are kept separate because
+/// other clauses' params (the base `WHERE`) are bound between them in the
+/// full query text.
+fn group_predicate(
+    group: Option<(&GroupColumn, Option<&SqlValue>)>,
+) -> (String, Vec<SqlValue>, String, Vec<SqlValue>) {
+    match group {
+        None => (String::new(), Vec::new(), String::new(), Vec::new()),
+        Some((GroupColumn::System(col), key)) => match key {
+            Some(v) => (
+                String::new(),
+                Vec::new(),
+                format!(" AND {col} = ?"),
+                vec![(*v).clone()],
+            ),
+            None => (
+                String::new(),
+                Vec::new(),
+                format!(" AND {col} IS NULL"),
+                Vec::new(),
+            ),
+        },
+        Some((GroupColumn::Property { key, column }, value)) => {
+            let join =
+                " LEFT JOIN page_properties grp ON grp.page_id = p.id AND grp.key = ? AND grp.ord = 0"
+                    .to_string();
+            let join_params = vec![SqlValue::Text(key.clone())];
+            let (clause, clause_params) = match value {
+                Some(v) => (format!(" AND grp.{column} = ?"), vec![(*v).clone()]),
+                None => (format!(" AND grp.{column} IS NULL"), Vec::new()),
+            };
+            (join, join_params, clause, clause_params)
+        }
+    }
+}
+
+/// Fetch the present values of a median's column (optionally restricted to
+/// one group), and reduce them: empty → `Null`; numeric → the mean of the
+/// one or two middle values as a JSON number; otherwise the lower-middle
+/// value's text as a JSON string.
+fn median_value(
+    conn: &Connection,
+    prepared: &PreparedQuery,
+    median: &MedianPlan,
+    group: Option<(&GroupColumn, Option<&SqlValue>)>,
+) -> Result<serde_json::Value, QueryError> {
+    let (group_join, group_join_params, group_clause, group_params) = group_predicate(group);
+    let column = &median.column;
+    let sql = format!(
+        "SELECT {column} FROM pages p{}{group_join} WHERE {}{group_clause} AND {column} IS NOT NULL ORDER BY {column}",
+        median.join, prepared.where_clause,
+    );
+    let mut params: Vec<SqlValue> = Vec::new();
+    params.extend(median.join_params.iter().cloned());
+    params.extend(group_join_params);
+    params.extend(prepared.where_params.iter().cloned());
+    params.extend(group_params);
+
+    let values: Vec<rusqlite::types::Value> = {
+        let mut stmt = conn.prepare(&sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params.iter()), |row| row.get(0))?;
+        rows.collect::<Result<_, _>>()?
+    };
+
+    let n = values.len();
+    if n == 0 {
+        return Ok(serde_json::Value::Null);
+    }
+    if median.numeric {
+        let as_f64 = |v: &rusqlite::types::Value| match v {
+            rusqlite::types::Value::Integer(i) => *i as f64,
+            rusqlite::types::Value::Real(f) => *f,
+            _ => 0.0,
+        };
+        let mid = n / 2;
+        let value = if n % 2 == 1 {
+            as_f64(&values[mid])
+        } else {
+            (as_f64(&values[mid - 1]) + as_f64(&values[mid])) / 2.0
+        };
+        Ok(serde_json::Number::from_f64(value)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null))
+    } else {
+        let lower_mid = if n % 2 == 1 { n / 2 } else { n / 2 - 1 };
+        Ok(sql_value_to_json(values[lower_mid].clone()))
     }
 }
 
@@ -1370,43 +1606,17 @@ fn fetch_rows(
         }
     }
 
-    // Group restriction.
-    let (group_clause, group_join, group_param) = match group {
-        None => (String::new(), "", None),
-        Some((column, key)) => match column {
-            GroupColumn::System(col) => match key {
-                Some(v) => (format!(" AND {col} = ?"), "", Some((*v).clone())),
-                None => (format!(" AND {col} IS NULL"), "", None),
-            },
-            GroupColumn::Property { column, .. } => match key {
-                Some(v) => (
-                    format!(" AND grp.{column} = ?"),
-                    " LEFT JOIN page_properties grp ON grp.page_id = p.id AND grp.key = ? AND grp.ord = 0",
-                    Some((*v).clone()),
-                ),
-                None => (
-                    format!(" AND grp.{column} IS NULL"),
-                    " LEFT JOIN page_properties grp ON grp.page_id = p.id AND grp.key = ? AND grp.ord = 0",
-                    None,
-                ),
-            },
-        },
-    };
+    // Group restriction, shared with `median_value`.
+    let (group_join, group_join_params, group_clause, group_params) = group_predicate(group);
 
     let mut params: Vec<SqlValue> = Vec::new();
     params.extend(column_params);
     // grp join param (the property key) precedes sort-join params because the
     // join clause is emitted before them.
-    if !group_join.is_empty()
-        && let Some((GroupColumn::Property { key, .. }, _)) = group
-    {
-        params.push(SqlValue::Text(key.clone()));
-    }
+    params.extend(group_join_params);
     params.extend(prepared.join_params.iter().cloned());
     params.extend(prepared.where_params.iter().cloned());
-    if let Some(p) = group_param {
-        params.push(p);
-    }
+    params.extend(group_params);
     params.extend(prepared.order_params.iter().cloned());
 
     let mut sql = format!(
@@ -2810,7 +3020,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             ..Default::default()
         };
 
-        let QueryOutput::Flat { rows, total } =
+        let QueryOutput::Flat { rows, total, .. } =
             evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
         else {
             panic!("expected flat output");
@@ -2830,7 +3040,7 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
             ..Default::default()
         };
         let out = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap();
-        let QueryOutput::Flat { rows, total } = out else {
+        let QueryOutput::Flat { rows, total, .. } = out else {
             panic!("expected flat");
         };
         assert_eq!(total, 4, "total ignores pagination");
@@ -3231,5 +3441,314 @@ status  = { type = "select", options = ["queued", "reading", "finished"] }
                 Err(QueryError::ProjectionOnlyBody)
             ));
         }
+    }
+
+    // -- Flat-view aggregates and count/median/range functions ------------
+
+    const AGGREGATE_BASE: &str = r#"
+name = "Totals"
+
+[filter]
+all = [ { field = "kind", op = "eq", value = "BOOK" } ]
+
+[properties]
+rating  = { type = "number" }
+status  = { type = "select", options = ["queued", "reading", "finished"] }
+started = { type = "date" }
+"#;
+
+    fn agg(function: AggregateFn, field: Option<&str>) -> Aggregate {
+        Aggregate {
+            function,
+            field: field.map(str::to_string),
+        }
+    }
+
+    /// Six BOOK pages: ratings `5, 3, 4, (absent), 2, 3`; statuses
+    /// `reading, reading, queued, (absent), finished, reading`; `started`
+    /// dates `08-01, 08-11, (absent), (absent), 08-21, 08-31`.
+    fn aggregate_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("books")).unwrap();
+        std::fs::write(tmp.path().join("bases/totals.base.toml"), AGGREGATE_BASE).unwrap();
+        let write = |name: &str, content: String| {
+            std::fs::write(tmp.path().join(name), content).unwrap();
+        };
+        write(
+            "books/a.md",
+            page(
+                "0190f8a0-0000-7000-8000-0000000000a1",
+                "BOOK",
+                "Book A",
+                "rating = 5\nstatus = \"reading\"\nstarted = 2026-08-01\n",
+            ),
+        );
+        write(
+            "books/b.md",
+            page(
+                "0190f8a0-0000-7000-8000-0000000000a2",
+                "BOOK",
+                "Book B",
+                "rating = 3\nstatus = \"reading\"\nstarted = 2026-08-11\n",
+            ),
+        );
+        write(
+            "books/c.md",
+            page(
+                "0190f8a0-0000-7000-8000-0000000000a3",
+                "BOOK",
+                "Book C",
+                "rating = 4\nstatus = \"queued\"\n",
+            ),
+        );
+        write(
+            "books/d.md",
+            page("0190f8a0-0000-7000-8000-0000000000a4", "BOOK", "Book D", ""),
+        );
+        write(
+            "books/e.md",
+            page(
+                "0190f8a0-0000-7000-8000-0000000000a5",
+                "BOOK",
+                "Book E",
+                "rating = 2\nstatus = \"finished\"\nstarted = 2026-08-21\n",
+            ),
+        );
+        write(
+            "books/f.md",
+            page(
+                "0190f8a0-0000-7000-8000-0000000000a6",
+                "BOOK",
+                "Book F",
+                "rating = 3\nstatus = \"reading\"\nstarted = 2026-08-31\n",
+            ),
+        );
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("totals").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    /// Four BOOK pages with ratings `1, 2, 3, 4` (even count, for the
+    /// mean-of-two-middles median case).
+    fn median_even_fixture() -> (tempfile::TempDir, VaultIndex, BaseDefinition) {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("books")).unwrap();
+        std::fs::write(tmp.path().join("bases/totals.base.toml"), AGGREGATE_BASE).unwrap();
+        let write = |name: &str, content: String| {
+            std::fs::write(tmp.path().join(name), content).unwrap();
+        };
+        for (i, rating) in [1, 2, 3, 4].into_iter().enumerate() {
+            write(
+                &format!("books/r{i}.md"),
+                page(
+                    &format!("0190f8a0-0000-7000-8000-0000000000b{i}"),
+                    "BOOK",
+                    &format!("Book {i}"),
+                    &format!("rating = {rating}\n"),
+                ),
+            );
+        }
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        index.build(&vault).unwrap();
+
+        let registry = crate::vault::base::BaseRegistry::load(tmp.path());
+        let base = registry.get("totals").unwrap().clone();
+        (tmp, index, base)
+    }
+
+    #[test]
+    fn flat_view_returns_aggregates_over_the_whole_predicate() {
+        let (_tmp, index, base) = aggregate_fixture();
+        let spec = QuerySpec {
+            filter: None,
+            sort: vec![],
+            group_by: None,
+            aggregates: vec![
+                agg(AggregateFn::Count, None),
+                agg(AggregateFn::CountFilled, Some("rating")),
+                agg(AggregateFn::CountEmpty, Some("rating")),
+                agg(AggregateFn::PercentFilled, Some("rating")),
+                agg(AggregateFn::CountUnique, Some("status")),
+                agg(AggregateFn::Median, Some("rating")),
+                agg(AggregateFn::Range, Some("rating")),
+                agg(AggregateFn::Median, Some("started")),
+                agg(AggregateFn::Range, Some("started")),
+                agg(AggregateFn::Sum, Some("rating")),
+            ],
+            columns: vec![],
+            limit: Some(2),
+            offset: 1,
+            group_row_limit: GroupRowLimit::Default,
+        };
+        let QueryOutput::Flat {
+            rows,
+            total,
+            aggregates,
+        } = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("flat")
+        };
+        assert_eq!(rows.len(), 2, "window applies to rows");
+        assert_eq!(total, 6);
+        assert_eq!(
+            aggregates,
+            vec![
+                serde_json::json!(6),
+                serde_json::json!(5),
+                serde_json::json!(1),
+                serde_json::json!(83.3),
+                serde_json::json!(3),
+                serde_json::json!(3.0),
+                serde_json::json!(3.0),
+                serde_json::json!("2026-08-11"),
+                serde_json::json!(30.0),
+                serde_json::json!(17.0),
+            ]
+        );
+    }
+
+    #[test]
+    fn median_of_even_count_is_the_mean_of_the_middle_two() {
+        let (_tmp, index, base) = median_even_fixture();
+        let spec = QuerySpec {
+            aggregates: vec![agg(AggregateFn::Median, Some("rating"))],
+            ..Default::default()
+        };
+        let QueryOutput::Flat { aggregates, .. } =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("flat")
+        };
+        assert_eq!(aggregates, vec![serde_json::json!(2.5)]);
+    }
+
+    #[test]
+    fn aggregates_over_an_empty_result_are_zero_or_null() {
+        let (_tmp, index, base) = aggregate_fixture();
+        let filter: Filter = serde_json::from_value(serde_json::json!({
+            "field": "rating", "op": "gt", "value": 100
+        }))
+        .unwrap();
+        let spec = QuerySpec {
+            filter: Some(filter),
+            aggregates: vec![
+                agg(AggregateFn::Count, None),
+                agg(AggregateFn::CountFilled, Some("rating")),
+                agg(AggregateFn::PercentFilled, Some("rating")),
+                agg(AggregateFn::Median, Some("rating")),
+                agg(AggregateFn::Range, Some("rating")),
+                agg(AggregateFn::Sum, Some("rating")),
+            ],
+            ..Default::default()
+        };
+        let QueryOutput::Flat {
+            rows,
+            total,
+            aggregates,
+        } = evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("flat")
+        };
+        assert!(rows.is_empty());
+        assert_eq!(total, 0);
+        assert_eq!(
+            aggregates,
+            vec![
+                serde_json::json!(0),
+                serde_json::json!(0),
+                serde_json::json!(0),
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+                serde_json::Value::Null,
+            ]
+        );
+    }
+
+    #[test]
+    fn grouped_views_support_the_new_functions() {
+        let (_tmp, index, base) = aggregate_fixture();
+        let spec = QuerySpec {
+            group_by: Some("status".into()),
+            aggregates: vec![
+                agg(AggregateFn::CountFilled, Some("rating")),
+                agg(AggregateFn::Median, Some("rating")),
+            ],
+            ..Default::default()
+        };
+        let QueryOutput::Grouped { groups } =
+            evaluate(index.connection(), &spec, &QueryContext::for_base(&base)).unwrap()
+        else {
+            panic!("grouped")
+        };
+        let find = |key: &str| {
+            groups
+                .iter()
+                .find(|g| g.key == serde_json::json!(key))
+                .unwrap()
+        };
+
+        assert_eq!(
+            find("reading").aggregates,
+            vec![serde_json::json!(3), serde_json::json!(3.0)]
+        );
+        assert_eq!(
+            find("queued").aggregates,
+            vec![serde_json::json!(1), serde_json::json!(4.0)]
+        );
+        assert_eq!(
+            find("finished").aggregates,
+            vec![serde_json::json!(1), serde_json::json!(2.0)]
+        );
+
+        let null_group = groups
+            .iter()
+            .find(|g| g.key == serde_json::Value::Null)
+            .unwrap();
+        assert_eq!(
+            null_group.aggregates,
+            vec![serde_json::json!(0), serde_json::Value::Null]
+        );
+    }
+
+    #[test]
+    fn aggregates_reject_multi_valued_system_fields_and_folds_on_text() {
+        let (_tmp, index, base) = aggregate_fixture();
+        let ctx = QueryContext::for_base(&base);
+
+        let tags_spec = QuerySpec {
+            aggregates: vec![agg(AggregateFn::CountUnique, Some("tags"))],
+            ..Default::default()
+        };
+        assert!(matches!(
+            evaluate(index.connection(), &tags_spec, &ctx),
+            Err(QueryError::InvalidAggregate(AggregateFn::CountUnique))
+        ));
+
+        let status_median_spec = QuerySpec {
+            aggregates: vec![agg(AggregateFn::Median, Some("status"))],
+            ..Default::default()
+        };
+        assert!(matches!(
+            evaluate(index.connection(), &status_median_spec, &ctx),
+            Err(QueryError::InvalidAggregate(AggregateFn::Median))
+        ));
+
+        let no_field_spec = QuerySpec {
+            aggregates: vec![agg(AggregateFn::CountFilled, None)],
+            ..Default::default()
+        };
+        assert!(matches!(
+            evaluate(index.connection(), &no_field_spec, &ctx),
+            Err(QueryError::InvalidAggregate(AggregateFn::CountFilled))
+        ));
     }
 }
