@@ -37,9 +37,11 @@ import { ArchiveRowDialog } from "./ArchiveRowDialog";
 import { BaseHeaderMenu } from "./BaseHeaderMenu";
 import { BaseMemberDraft } from "./BaseMemberDraft";
 import {
-  CellContextMenu,
+  CellContextTrigger,
   RowActionsButton,
+  type RowContextTarget,
   type RowMenuActions,
+  type RowMenuCell,
 } from "./BaseRowMenu";
 import { type CellValue, formatCellValue } from "./cells/types";
 import { canGroup, canSort } from "./definition-model";
@@ -753,6 +755,21 @@ export const BaseTableView = forwardRef<
     [],
   );
 
+  const [contextTarget, setContextTarget] = useState<RowContextTarget | null>(
+    null,
+  );
+  /** The cell section the row's menu shows, when a cell summoned it. */
+  const contextCell = (row: QueryRow): RowMenuCell | undefined => {
+    const column = contextTarget?.column;
+    if (contextTarget?.rowId !== String(row.id) || column === undefined)
+      return undefined;
+    return {
+      column,
+      label: displayLabelForColumn(column),
+      type: quickFilterType(column, properties.get(column)),
+      value: (row.columns as Record<string, CellValue>)[column],
+    };
+  };
   const [archiveTarget, setArchiveTarget] = useState<QueryRow | null>(null);
   const [archiveFocus, setArchiveFocus] = useState<
     ArchiveFocusRequest | undefined
@@ -888,10 +905,14 @@ export const BaseTableView = forwardRef<
         key={`${cacheIdentity}:${memberDraftOpen ? "draft" : "active"}`}
         dependencies={[
           activeCell,
+          contextTarget,
           evaluationIdentity,
           focusCreatedId,
           memberDraftOpen,
+          onAddQuickFilter,
+          onCopyValue,
           readOnly,
+          rowActions,
         ]}
         items={rows}
       >
@@ -902,21 +923,13 @@ export const BaseTableView = forwardRef<
           >
             {visibleColumns.map((column) => (
               <Cell key={column} className="px-1 py-0.5 align-top">
-                {/* The row menu button is a sibling of the cell's context
-                    trigger: nested inside it, React Aria would name its popup
-                    after the whole cell instead of the row. */}
+                {/* One menu serves the row; each cell forwards its context
+                    events to the `⋯` button that owns it. */}
                 <div className="flex min-w-0 items-center">
-                  <CellContextMenu
+                  <CellContextTrigger
                     row={row}
                     column={column}
-                    label={displayLabelForColumn(column)}
-                    type={quickFilterType(column, properties.get(column))}
-                    definition={properties.get(column)}
-                    value={(row.columns as Record<string, CellValue>)[column]}
-                    readOnly={readOnly}
-                    actions={rowActions}
-                    onAddQuickFilter={onAddQuickFilter}
-                    onCopyValue={onCopyValue}
+                    onContextTarget={setContextTarget}
                   >
                     {column === "title" ? (
                       readOnly || memberDraftOpen ? (
@@ -1034,12 +1047,21 @@ export const BaseTableView = forwardRef<
                         )}
                       </span>
                     )}
-                  </CellContextMenu>
+                  </CellContextTrigger>
                   {column === visibleColumns[0] ? (
                     <RowActionsButton
                       row={row}
                       readOnly={readOnly}
                       actions={rowActions}
+                      cell={contextCell(row)}
+                      restoreFocus={
+                        contextTarget?.rowId === String(row.id)
+                          ? contextTarget.origin
+                          : null
+                      }
+                      onContextTarget={setContextTarget}
+                      onAddQuickFilter={onAddQuickFilter}
+                      onCopyValue={onCopyValue}
                     />
                   ) : null}
                 </div>

@@ -1,14 +1,20 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useRef } from "react";
 import type { SortKey } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import {
-  ContextMenuTrigger,
   Menu,
   MenuItem,
   MenuSeparator,
   MenuTrigger,
   SubmenuTrigger,
 } from "#/components/ui/menu";
+import {
+  type ContextMenuPoint,
+  forwardContextMenu,
+  isContextMenuKey,
+  pointOfContextMenu,
+  pointUnder,
+} from "./context-menu-forward";
 import {
   type GroupOverride,
   type QuickFilter,
@@ -31,7 +37,7 @@ export interface BaseHeaderMenuProps {
   children: ReactNode;
 }
 
-/** Why a column refuses to hide; `undefined` when it does not refuse. */
+/** Why a column refuses to hide, for the disabled item's description. */
 function hideBlocker(column: string): string {
   return column === "title"
     ? "The title column stays visible"
@@ -61,8 +67,9 @@ function HeaderMenu({
     if (preset) onAddQuickFilter(preset);
   };
   return (
+    // No `aria-label`: React Aria names a menu after its trigger, and an
+    // `aria-label` here loses to the `aria-labelledby` it always sets.
     <Menu
-      aria-label={`${label} column menu`}
       onAction={(key) => {
         const id = String(key);
         if (id === "sort-asc") onSortChange([{ field: column, dir: "asc" }]);
@@ -122,29 +129,53 @@ function HeaderMenu({
 }
 
 /**
- * Column header content with a `⋯` menu button and a right-click menu. The
- * two triggers stay siblings: a `MenuTrigger` nested inside the
- * `ContextMenuTrigger` inherits that trigger's `aria-labelledby`, which would
- * name the popup after the whole header instead of the button.
+ * Column header content with a `⋯` menu button that owns the header's only
+ * menu; right-clicking the header content forwards to it.
+ *
+ * The button's `aria-label` becomes part of the column header's accessible
+ * name ("author author column menu"), which is accepted: `aria-hidden` would
+ * take the menu away from keyboard users, `Column` drops an `aria-label` of
+ * its own (React Aria filters it out), and React Aria collections will not let
+ * the button live outside the `<Column>`.
  */
 export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
   const { children, label } = props;
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const summon = (point: ContextMenuPoint) =>
+    forwardContextMenu(triggerRef.current, point);
   return (
     <div className="flex items-center gap-1" data-column={props.column}>
-      <ContextMenuTrigger>
-        {/* React Aria makes the context target pressable; the column header
-            around it is the sort control, so this must not take a tab stop. */}
-        <div tabIndex={-1} className="flex min-w-0 items-center">
-          {children}
-        </div>
-        <HeaderMenu {...props} />
-      </ContextMenuTrigger>
-      <MenuTrigger>
+      {/* Not focusable: React Aria focuses a column header's first focusable
+          child, which must stay the `⋯` button. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: these handlers only forward the platform's context-menu gesture to the `⋯` button, which is the real, focusable control; a role here would both misdescribe the header and claim the focus React Aria owes that button. */}
+      <div
+        className="flex min-w-0 flex-1 items-center"
+        onContextMenu={(event) => {
+          event.preventDefault();
+          summon(pointOfContextMenu(event));
+        }}
+        onKeyDown={(event) => {
+          if (!isContextMenuKey(event)) return;
+          event.preventDefault();
+          summon(pointUnder(event.target as Element));
+        }}
+      >
+        {children}
+      </div>
+      <MenuTrigger trigger="contextMenu">
         <Button
+          ref={triggerRef}
           variant="ghost"
           size="sm"
           aria-label={`${label} column menu`}
+          // A context-menu trigger neither presses open nor advertises a
+          // popup, so the button supplies both itself.
+          aria-haspopup="menu"
           className="px-1 py-0 opacity-60 hover:opacity-100"
+          onPress={() => {
+            const trigger = triggerRef.current;
+            if (trigger) summon(pointUnder(trigger));
+          }}
         >
           ⋯
         </Button>

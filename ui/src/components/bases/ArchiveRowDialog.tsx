@@ -17,6 +17,10 @@ export function ArchiveRowDialog({
 }: ArchiveRowDialogProps) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The page named in the dialog outlives `row`, so the exit transition does
+  // not play against a blank description.
+  const [named, setNamed] = useState<QueryRow | null>(row);
+  if (row !== null && row !== named) setNamed(row);
   const close = () => {
     if (pending) return;
     setError(null);
@@ -45,7 +49,7 @@ export function ArchiveRowDialog({
         if (!open) close();
       }}
       title="Archive page"
-      description={row ? (row.title ?? row.path) : ""}
+      description={named ? (named.title ?? named.path) : ""}
       isDismissable={!pending}
       footer={
         <>

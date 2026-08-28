@@ -77,12 +77,55 @@ const row = {
   },
 };
 
+const secondRow = {
+  id: "02",
+  path: "wizard.md",
+  title: "A Wizard of Earthsea",
+  kind: "BOOK",
+  columns: {
+    author: "Ursula Le Guin",
+    rating: 5,
+    status: "queued",
+    due: "2026-09-01",
+  },
+};
+
 const flat: QueryOutput = {
   shape: "flat",
   rows: [row],
   total: 1,
   aggregates: [],
 };
+
+const bothRows: QueryOutput = {
+  shape: "flat",
+  rows: [row, secondRow],
+  total: 2,
+  aggregates: [],
+};
+
+const onlySecondRow: QueryOutput = {
+  shape: "flat",
+  rows: [secondRow],
+  total: 1,
+  aggregates: [],
+};
+
+const noRows: QueryOutput = {
+  shape: "flat",
+  rows: [],
+  total: 0,
+  aggregates: [],
+};
+
+/** What the active element is, for focus assertions that name a control. */
+function activeControl(): { tag: string; name: string } {
+  const active = document.activeElement as HTMLElement | null;
+  return {
+    tag: active?.tagName ?? "none",
+    name: active?.getAttribute("aria-label") ?? active?.textContent ?? "",
+  };
+}
 
 const enabledCapability: BaseMemberCapability = {
   view: "Continues",
@@ -175,6 +218,8 @@ describe("column header menu", () => {
     expect(view.onSortChange).toHaveBeenCalledWith([
       { field: "author", dir: "desc" },
     ]);
+    // The button's press must not also reach the column header's sort press.
+    expect(view.onSortChange).toHaveBeenCalledTimes(1);
 
     await user.click(
       screen.getByRole("button", { name: "author column menu" }),
@@ -237,8 +282,11 @@ describe("column header menu", () => {
       target: screen.getByText("author"),
       keys: "[MouseRight]",
     });
+    const menu = await screen.findByRole("menu", {
+      name: "author column menu",
+    });
     expect(
-      await screen.findByRole("menuitem", { name: "Sort ascending" }),
+      within(menu).getByRole("menuitem", { name: "Sort ascending" }),
     ).toBeVisible();
   });
 
@@ -258,12 +306,15 @@ describe("cell and row menu", () => {
   it("right-click on a cell offers the value filter, copy, and row actions", async () => {
     const user = userEvent.setup();
     const spies = overrideSpies();
-    const view = renderView({ ...spies, overrides: EMPTY_OVERRIDES });
+    renderView({ ...spies, overrides: EMPTY_OVERRIDES });
     await user.pointer({
       target: screen.getByRole("button", { name: "reading" }),
       keys: "[MouseRight]",
     });
-    const menu = await screen.findByRole("menu");
+    // The row's `⋯` button owns the menu, so it names it.
+    const menu = await screen.findByRole("menu", {
+      name: "Row actions for The Book of the New Sun",
+    });
     await user.click(
       within(menu).getByRole("menuitem", { name: "status is reading" }),
     );
@@ -291,7 +342,6 @@ describe("cell and row menu", () => {
       await screen.findByRole("menuitem", { name: "Open in new tab" }),
     );
     expect(spies.onOpenPageInNewTab).toHaveBeenCalledWith("book.md");
-    void view;
   });
 
   it("offers the date submenu on date cells", async () => {
@@ -404,6 +454,164 @@ describe("cell and row menu", () => {
     } finally {
       platformSpy.mockRestore();
     }
+  });
+
+  it("returns focus to the control the keyboard opened it from", async () => {
+    const platformSpy = vi
+      .spyOn(window.navigator, "platform", "get")
+      .mockReturnValue("MacIntel");
+    try {
+      const user = userEvent.setup();
+      renderView({ ...overrideSpies(), overrides: EMPTY_OVERRIDES });
+      const title = screen.getByRole("button", {
+        name: "The Book of the New Sun",
+      });
+      // Entering the grid through a click is what gives the button focus; a
+      // bare focus() is redirected by React Aria's selection manager.
+      await user.click(title);
+      await user.keyboard("{Control>}{Enter}{/Control}");
+      expect(
+        await screen.findByRole("menu", {
+          name: "Row actions for The Book of the New Sun",
+        }),
+      ).toBeVisible();
+
+      await user.keyboard("{Escape}");
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      await waitFor(() => expect(title).toHaveFocus());
+    } finally {
+      platformSpy.mockRestore();
+    }
+  });
+
+  it("leaves in-cell focus on the row's own controls", async () => {
+    const user = userEvent.setup();
+    renderView({ ...overrideSpies(), overrides: EMPTY_OVERRIDES });
+    await user.click(
+      screen.getByRole("button", { name: "The Book of the New Sun" }),
+    );
+
+    const stops: { tag: string; name: string }[] = [];
+    for (let step = 0; step < 3; step += 1) {
+      await user.keyboard("{ArrowRight}");
+      stops.push(activeControl());
+    }
+    // Every stop is a control of the row, never the cell's context wrapper.
+    expect(stops.map((stop) => stop.tag)).toEqual([
+      "BUTTON",
+      "BUTTON",
+      "BUTTON",
+    ]);
+    expect(stops.map((stop) => stop.name)).toEqual([
+      "Row actions for The Book of the New Sun",
+      "Gene Wolfe",
+      "reading",
+    ]);
+
+    for (let step = 0; step < 3; step += 1) await user.keyboard("{ArrowLeft}");
+    expect(document.activeElement).toHaveAttribute("data-row-title", "01");
+  });
+
+  it("keeps filters out of a read-only menu but not Copy value", async () => {
+    const user = userEvent.setup();
+    renderView({
+      ...overrideSpies(),
+      readOnly: true,
+      overrides: { ...EMPTY_OVERRIDES, hiddenColumns: ["author"] },
+    });
+    await user.pointer({
+      target: screen.getByText("reading"),
+      keys: "[MouseRight]",
+    });
+    const menu = await screen.findByRole("menu", {
+      name: "Row actions for The Book of the New Sun",
+    });
+    expect(
+      within(menu).queryByRole("menuitem", { name: "status is reading" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(menu).getByRole("menuitem", { name: "Copy value" }),
+    ).toBeVisible();
+
+    // The open menu hides the rest of the page from assistive technology.
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    const strip = screen.getByRole("group", { name: "View overrides" });
+    expect(
+      within(strip).queryByRole("button", { name: "Save to view" }),
+    ).not.toBeInTheDocument();
+    expect(within(strip).getByRole("button", { name: "Clear" })).toBeVisible();
+  });
+});
+
+describe("archive row", () => {
+  async function archiveFirstRow(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(
+      screen.getByRole("button", {
+        name: "Row actions for The Book of the New Sun",
+      }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "Archive…" }));
+    const dialog = await screen.findByRole("dialog", { name: "Archive page" });
+    await user.click(
+      within(dialog).getByRole("button", { name: "Confirm archive" }),
+    );
+    return dialog;
+  }
+
+  it("moves focus to the following row once it is archived", async () => {
+    const user = userEvent.setup();
+    const spies = overrideSpies();
+    const view = renderView({
+      ...spies,
+      overrides: EMPTY_OVERRIDES,
+      output: bothRows,
+    });
+    await archiveFirstRow(user);
+    await waitFor(() =>
+      expect(spies.onArchiveRow).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "01" }),
+      ),
+    );
+
+    view.rerender({ output: onlySecondRow });
+    await waitFor(() =>
+      expect(document.activeElement).toHaveAttribute("data-row-title", "02"),
+    );
+  });
+
+  it("falls back to the view's entry control when no row is left", async () => {
+    const user = userEvent.setup();
+    const spies = overrideSpies();
+    const view = renderView({ ...spies, overrides: EMPTY_OVERRIDES });
+    await archiveFirstRow(user);
+    await waitFor(() => expect(spies.onArchiveRow).toHaveBeenCalled());
+
+    view.rerender({ output: noRows });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Continues" })).toHaveFocus(),
+    );
+  });
+
+  it("keeps the dialog open and reports a failed archive", async () => {
+    const user = userEvent.setup();
+    const spies = overrideSpies();
+    renderView({
+      ...spies,
+      overrides: EMPTY_OVERRIDES,
+      onArchiveRow: vi.fn().mockRejectedValue(new Error("boom")),
+    });
+    const dialog = await archiveFirstRow(user);
+
+    await waitFor(() =>
+      expect(within(dialog).getByRole("alert")).toHaveTextContent("boom"),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Archive page" }),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByRole("button", { name: "Confirm archive" }),
+    ).toBeEnabled();
   });
 });
 
