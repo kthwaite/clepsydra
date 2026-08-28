@@ -14,6 +14,7 @@ use crate::api::AppState;
 use crate::api::error::ApiError;
 use crate::api::events::SyncNotification;
 use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
+use crate::vault::code::CodeFamily;
 use crate::vault::kind::Kind;
 use crate::vault::mutation_coordinator::{
     CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
@@ -24,7 +25,7 @@ use crate::vault::path::VaultPath;
 use super::read::build_board_task_dto;
 use super::{
     BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, ensure_project_exists,
-    path_stem, reserve_next_code_number, validate_priority, validate_status,
+    mint_unique_code, path_stem, validate_priority, validate_status,
 };
 
 // ---------------------------------------------------------------------------
@@ -61,10 +62,12 @@ pub(crate) async fn create_task(
         Some(c) => Some(c.to_string()),
     };
 
-    // 2. Validate cycle exists (if specified)
-    if let Some(ref cycle_code) = cycle_opt {
-        ensure_cycle_exists(&state, cycle_code).await?;
-    }
+    // 2. Validate cycle exists (if specified); resolve to its canonical code
+    // (exact match or unique prefix) so what gets stored is always the stem.
+    let cycle_opt: Option<String> = match cycle_opt {
+        Some(cycle_code) => Some(ensure_cycle_exists(&state, &cycle_code).await?),
+        None => None,
+    };
 
     // 2b. Validate the project exists (if specified): the slug must be
     // declared by a PROJECT page, so a typo cannot file the task under a
@@ -73,9 +76,8 @@ pub(crate) async fn create_task(
         ensure_project_exists(&state, project).await?;
     }
 
-    // 3. Reserve the next TASK code through the index transaction.
-    let next_num = reserve_next_code_number(&state, "TASK", "TSK-").await?;
-    let code = format!("TSK-{next_num:04}");
+    // 3. Mint a fresh TASK code (re-rolls on collision).
+    let code = mint_unique_code(&state, CodeFamily::Task).await?;
 
     // 4. Determine vault path
     let vault_path_str = match &body.project {
@@ -202,8 +204,8 @@ pub(crate) async fn patch_task(
     let cycle_field: Option<Option<String>> = match &body.cycle {
         Some(Some(c)) if c == "BACKLOG" => Some(None),
         Some(Some(c)) => {
-            ensure_cycle_exists(&state, c).await?;
-            Some(Some(c.clone()))
+            let canonical = ensure_cycle_exists(&state, c).await?;
+            Some(Some(canonical))
         }
         other => other.clone(),
     };
@@ -324,7 +326,7 @@ pub(crate) async fn patch_task(
         .map_err(crate::api::mutation_error)?;
 
     let final_path = result.path.as_str();
-    let code = path_stem(final_path).to_ascii_uppercase();
+    let code = path_stem(final_path).to_string();
     let task_dto = build_board_task_dto(&state, &result.path, &code).await?;
     Ok(Json(task_dto))
 }

@@ -5,17 +5,19 @@ local M = {}
 --- Board stage vocabulary, in column order (src/api/board/mod.rs COLUMNS).
 M.STAGES = { "INTAKE", "TRIAGE", "FIELD", "REVIEW", "SEALED" }
 
---- Extract a TSK code from the word under the cursor, falling back to the
+--- Extract a task code from the word under the cursor, falling back to the
 --- buffer's file name (task pages are named after their code). Pure.
+--- Codes are `TSK-<adjective>-<noun>-<tail>` (docs/adr/0003): the prefix is
+--- case-insensitive on input, the body stays lowercase.
 ---@param cword string
 ---@param bufname string
----@return string|nil code normalized uppercase, e.g. "TSK-0012"
+---@return string|nil code e.g. "TSK-brave-finch-7q3zd"
 function M.extract_code(cword, bufname)
-	local code = cword:upper():match("TSK%-%d+")
-	if code then
-		return code
+	local function find(s)
+		local body = s:match("[Tt][Ss][Kk]%-([%l%d]+%-[%l%d]+%-[%l%d]+)")
+		return body and ("TSK-" .. body) or nil
 	end
-	return vim.fs.basename(bufname):upper():match("TSK%-%d+")
+	return find(cword) or find(vim.fs.basename(bufname))
 end
 
 --- Find a board task by code. Pure.

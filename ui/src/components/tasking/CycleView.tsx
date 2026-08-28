@@ -425,7 +425,7 @@ export function CycleView({
                     </span>
 
                     {/* Code */}
-                    <span className="flex-shrink-0 text-[var(--fs-s)] [font-variant-numeric:tabular-nums] text-[var(--ink)]">
+                    <span className="min-w-0 truncate text-[var(--fs-s)] [font-variant-numeric:tabular-nums] text-[var(--ink)]">
                       {t.code}
                     </span>
 

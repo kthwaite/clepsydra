@@ -98,7 +98,7 @@ export function TaskCard({
 
       {/* Top row: id · priority badge · op code */}
       <div className="mb-[6px] flex items-center gap-[8px]">
-        <span className="cl-mono font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-2)]">
+        <span className="cl-mono truncate max-w-full font-variant-numeric text-[var(--fs-xs)] tracking-[0.06em] text-[var(--ink-2)]">
           {t.code}
         </span>
         <InlineEditPopover

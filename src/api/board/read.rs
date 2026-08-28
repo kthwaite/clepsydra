@@ -184,7 +184,7 @@ pub(crate) async fn get_board(
                     serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
                 let stem = path_stem(&path);
-                let code = stem.to_ascii_uppercase();
+                let code = stem.to_string();
                 let label = title.unwrap_or_else(|| code.clone());
 
                 let state_str = extra_str(&meta, "state").unwrap_or_else(|| "PLANNED".to_string());
@@ -268,7 +268,7 @@ type TaskDtoRow = (
 );
 
 /// Row tuple for the task-list query:
-/// `(id, path, title, meta_json, project, updated_at, tags_raw, body)`.
+/// `(id, path, title, meta_json, project, updated_at, tags_raw, body, created_at)`.
 type TaskListRow = (
     String,
     String,
@@ -277,6 +277,7 @@ type TaskListRow = (
     Option<String>,
     Option<String>,
     String,
+    Option<String>,
     Option<String>,
 );
 
@@ -377,14 +378,14 @@ pub(super) async fn build_board_task_dto(
 }
 
 /// Build a `BoardCycle` DTO from the index for a given vault path. The code
-/// is derived from the path stem (uppercased) — the same canonical derivation
-/// the GET /board aggregation uses.
+/// is the path stem verbatim — the same canonical derivation the GET /board
+/// aggregation uses.
 pub(super) async fn build_board_cycle_dto(
     state: &AppState,
     vault_path: &VaultPath,
 ) -> Result<BoardCycle, ApiError> {
     let vp_str = vault_path.as_str().to_string();
-    let code_str = path_stem(&vp_str).to_ascii_uppercase();
+    let code_str = path_stem(&vp_str).to_string();
     state
         .index
         .with_index(move |index, _vault| {
@@ -440,7 +441,8 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         "SELECT p.id, p.path, p.title, p.meta_json, p.project, p.updated_at, \
                 COALESCE((SELECT group_concat(t.tag, char(31)) \
                             FROM tags t WHERE t.page_id = p.id), ''), \
-                CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END \
+                CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END, \
+                p.created_at \
            FROM pages p \
            LEFT JOIN page_bodies body_index ON body_index.page_id = p.id \
           WHERE p.kind = ?1 \
@@ -458,14 +460,17 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
 
     let checks_by_page = count_checks_by_page(conn)?;
 
-    let mut tasks: Vec<BoardTask> = Vec::new();
-    for (id_str, path, title, meta_json, project, updated_at, tags_raw, body) in task_rows {
+    let mut tasks: Vec<(BoardTask, Option<String>)> = Vec::new();
+    for (id_str, path, title, meta_json, project, updated_at, tags_raw, body, created_at) in
+        task_rows
+    {
         let id = match Uuid::parse_str(&id_str) {
             Ok(u) => u,
             Err(_) => continue,
@@ -475,7 +480,7 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
             serde_json::from_str(&meta_json).unwrap_or(serde_json::Value::Null);
 
         let stem = path_stem(&path);
-        let code = stem.to_ascii_uppercase();
+        let code = stem.to_string();
         let task_title = title.unwrap_or_else(|| code.clone());
 
         let status = extra_str(&meta, "status").unwrap_or_else(|| DEFAULT_STATUS.to_string());
@@ -501,29 +506,37 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         let checks = checks_by_page.get(&id_str).copied().unwrap_or([0, 0]);
         let updated_at_str = updated_at.unwrap_or_default();
 
-        tasks.push(BoardTask {
-            id,
-            path,
-            code,
-            title: task_title,
-            body_excerpt: body.as_deref().map(body_excerpt),
-            project,
-            status,
-            priority,
-            cycle,
-            assignee,
-            estimate,
-            due,
-            start: task_start,
-            hold,
-            tags,
-            checks,
-            link,
-            updated_at: updated_at_str,
-        });
+        tasks.push((
+            BoardTask {
+                id,
+                path,
+                code,
+                title: task_title,
+                body_excerpt: body.as_deref().map(body_excerpt),
+                project,
+                status,
+                priority,
+                cycle,
+                assignee,
+                estimate,
+                due,
+                start: task_start,
+                hold,
+                tags,
+                checks,
+                link,
+                updated_at: updated_at_str,
+            },
+            created_at,
+        ));
     }
-    tasks.sort_by(|a, b| a.code.cmp(&b.code));
-    Ok(tasks)
+    // Creation order (RFC3339 UTC strings sort chronologically), code as the
+    // tie-breaker. A missing `created_at` sorts first; page parsing back-fills
+    // it, so that branch is effectively unreachable.
+    tasks.sort_by(|(a, a_created), (b, b_created)| {
+        a_created.cmp(b_created).then_with(|| a.code.cmp(&b.code))
+    });
+    Ok(tasks.into_iter().map(|(task, _)| task).collect())
 }
 
 /// Extract `link` field: if value looks like a wikilink (`[[target]]` or

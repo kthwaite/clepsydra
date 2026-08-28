@@ -188,8 +188,12 @@ vault_archive_page; their normal links remain unresolved while binned, and resto
 original-path-only. The vault relocates pages filed by kind/project itself; \
 vault_preview_mutation dry-runs moves. Orient on the Task Board with vault_board; it lists Task \
 TSK codes, Cycle S codes, Projects through the legacy operations response field, and the persisted \
-status values agents must send. Create Tasks with vault_task_create rather than vault_create_page \
-so they receive TSK codes; the `ai-generated` tag policy applies to LLM-authored tasks. Move Tasks \
+status values agents must send. Task and Cycle codes are server-minted petnames — \
+`TSK-<adjective>-<noun>-<tail>` for Tasks, `S-<adjective>-<noun>-<tail>` for Cycles (e.g. \
+`TSK-brave-finch-7q3zd`); agents never choose them. Input is matched case-insensitively, and any \
+unique prefix (e.g. `TSK-brave-finch`) addresses the page; an ambiguous prefix is rejected with the \
+candidates listed. Create Tasks with vault_task_create rather than vault_create_page \
+so they receive a code; the `ai-generated` tag policy applies to LLM-authored tasks. Move Tasks \
 through Inbox (`INTAKE`) → Ready (`TRIAGE`) → In Progress (`FIELD`) → Review (`REVIEW`) → Done \
 (`SEALED`) with vault_task_update, addressing them by code, path, or id. Close Cycles with \
 vault_cycle_update, passing carry_to to move their unfinished Tasks. Page paths are vault-relative; \
@@ -408,7 +412,8 @@ pub struct TaskCreateParams {
     /// Priority: P0 Critical, P1 High, P2 Medium, or P3 Low. Defaults to P2.
     pub priority: Option<String>,
     /// Cycle code the Task belongs to; must match an existing Cycle (e.g.
-    /// "S-13"). "BACKLOG" means Backlog, same as omitting the field.
+    /// "S-brave-finch-7q3zd", or any unique prefix of it). "BACKLOG" means
+    /// Backlog, same as omitting the field.
     pub cycle: Option<String>,
     /// Assignee name.
     pub assignee: Option<String>,
@@ -429,7 +434,8 @@ pub struct TaskCreateParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct TaskUpdateParams {
-    /// Task reference: TSK code (e.g. "TSK-0012"), vault path, or page UUID.
+    /// Task reference: TSK code (e.g. "TSK-brave-finch-7q3zd"), any unique
+    /// prefix of one (e.g. "TSK-brave-finch"), vault path, or page UUID.
     pub task: String,
     /// New title. Absent = keep.
     pub title: Option<String>,
@@ -483,8 +489,10 @@ pub struct CycleCreateParams {
     pub start: String,
     /// End date (YYYY-MM-DD).
     pub end: String,
-    /// Explicit cycle code (e.g. "S-20"); conflicts if it already exists.
-    /// Absent = auto-generated as S-{max+1}.
+    /// Explicit cycle code (e.g. "S-brave-finch-7q3zd"); must match the
+    /// format S-<adjective>-<noun>-<tail> (rejected otherwise) and conflicts
+    /// if it already exists. Absent = the server mints one
+    /// (S-<adjective>-<noun>-<tail>).
     pub code: Option<String>,
     /// Cycle goal.
     pub goal: Option<String>,
@@ -495,7 +503,8 @@ pub struct CycleCreateParams {
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct CycleUpdateParams {
-    /// Cycle reference: S code (e.g. "S-13"), vault path, or page UUID.
+    /// Cycle reference: S code (e.g. "S-brave-finch-7q3zd"), any unique
+    /// prefix of one (e.g. "S-brave-finch"), vault path, or page UUID.
     pub cycle: String,
     /// Lifecycle state: Planned (PLANNED), Active (ACTIVE), or Closed (CLOSED).
     /// Absent = keep.
@@ -508,7 +517,8 @@ pub struct CycleUpdateParams {
     pub end: Option<String>,
     /// Carryover target for the Cycle's unfinished Tasks when closing; only
     /// valid with state CLOSED. "BACKLOG" moves them to Backlog, a Cycle code
-    /// (e.g. "S-14") reassigns them. Absent = leave Tasks in the closed Cycle.
+    /// or unique prefix (e.g. "S-calm-heron-2xm9p") reassigns them. Absent =
+    /// leave Tasks in the closed Cycle.
     pub carry_to: Option<String>,
 }
 
@@ -1265,7 +1275,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_board",
-        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED), with WIP limits. Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete.",
+        description = "Orient on the Task Board: Inbox (INTAKE) → Ready (TRIAGE) → In Progress (FIELD) → Review (REVIEW) → Done (SEALED), with WIP limits. Returns Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field. Codes are server-minted petnames (`TSK-<adjective>-<noun>-<tail>` / `S-<adjective>-<noun>-<tail>`); any unique prefix of one addresses the page elsewhere. Legacy `columns[].label`/`columns[].sub` pairs are INTAKE/unfiled, TRIAGE/staged, IN-FIELD/active, REVIEW/qa / seal, and SEALED/closed; derive display labels from the column status ID instead. `tasks[].checks` is [done, total] Checklist Item counts. `tasks[].link` and `operations[].dossier` are Related Page values. Look up Task and Cycle codes here before updates. Optional `project` filters Tasks and operations to that exact Project; columns and Cycles remain complete.",
         annotations(
             read_only_hint = true,
             destructive_hint = false,
@@ -1289,7 +1299,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a Task on the Task Board — preferred over vault_create_page because it reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
+        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1328,7 +1338,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_update",
-        description = "Update a Task on the Task Board, addressed by TSK code, vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
+        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1391,7 +1401,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_cycle_create",
-        description = "Create a Cycle for the Task Board (a CYCLE page under cycles/). Omit `code` to generate the next S-{n}; an explicit code conflicts if it exists. State defaults to Planned (`PLANNED`); Active (`ACTIVE`) is also allowed. Closed (`CLOSED`) is rejected at creation — close a finished Cycle with vault_cycle_update.",
+        description = "Create a Cycle for the Task Board (a CYCLE page under cycles/). Omit `code` to have the server mint an S-<adjective>-<noun>-<tail> code; an explicit code must match that same format (rejected otherwise) and conflicts if it already exists. State defaults to Planned (`PLANNED`); Active (`ACTIVE`) is also allowed. Closed (`CLOSED`) is rejected at creation — close a finished Cycle with vault_cycle_update.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1424,7 +1434,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_cycle_update",
-        description = "Update a Cycle on the Task Board, addressed by S code, vault path, or page UUID. Fields update when present: state Planned (`PLANNED`), Active (`ACTIVE`), or Closed (`CLOSED`), plus goal, start, and end. To close with carryover, set state `CLOSED` and pass `carry_to` to move unfinished Tasks: `BACKLOG` moves them to Backlog, while a Cycle code reassigns them. `carry_to` is valid only with `CLOSED`; without it, Tasks remain in the closed Cycle.",
+        description = "Update a Cycle on the Task Board, addressed by S code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Fields update when present: state Planned (`PLANNED`), Active (`ACTIVE`), or Closed (`CLOSED`), plus goal, start, and end. To close with carryover, set state `CLOSED` and pass `carry_to` to move unfinished Tasks: `BACKLOG` moves them to Backlog, while a Cycle code reassigns them. `carry_to` is valid only with `CLOSED`; without it, Tasks remain in the closed Cycle.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1636,7 +1646,11 @@ mod tests {
             ),
             (
                 "task creation routes through the board",
-                "create tasks with vault_task_create rather than vault_create_page so they receive tsk codes",
+                "create tasks with vault_task_create rather than vault_create_page so they receive a code",
+            ),
+            (
+                "code format and prefix addressing",
+                "any unique prefix (e.g. `tsk-brave-finch`) addresses the page",
             ),
             (
                 "task provenance",
@@ -3460,6 +3474,10 @@ mod tests {
         assert!(!cycle_update.contains("unsealed"));
     }
 
+    /// The stable, explicit code for the cycle `serve_board_vault` seeds —
+    /// pinned rather than minted so tests can address it by a known literal.
+    const SEEDED_CYCLE_CODE: &str = "S-orbit-crane-3f8mq";
+
     /// Serve a seeded vault with two Projects (`xxii`, `other`) and one
     /// cycle created through the board tools, returning the server for
     /// follow-up assertions. Task `project` values must name a Project.
@@ -3483,7 +3501,12 @@ mod tests {
             .client
             .post_json(
                 "/api/vault/board/cycles",
-                &json!({"label": "Sprint One", "start": "2026-08-10", "end": "2026-08-24"}),
+                &json!({
+                    "label": "Sprint One",
+                    "start": "2026-08-10",
+                    "end": "2026-08-24",
+                    "code": SEEDED_CYCLE_CODE
+                }),
             )
             .await
             .expect("cycle create should succeed");
@@ -3550,8 +3573,9 @@ mod tests {
                 }))
                 .await,
         );
-        assert_eq!(value["code"], "TSK-0001");
-        assert_eq!(value["path"], "tasks/xxii/TSK-0001.md");
+        let code = value["code"].as_str().unwrap().to_string();
+        assert!(crate::vault::code::is_valid_code(&code), "{code}: {value}");
+        assert_eq!(value["path"], format!("tasks/xxii/{code}.md"));
         assert_eq!(value["status"], "INTAKE");
         assert_eq!(value["priority"], "P2");
         assert_eq!(value["checks"], json!([0, 1]), "checklist becomes - [ ]");
@@ -3637,24 +3661,27 @@ mod tests {
     #[tokio::test]
     async fn task_update_by_code_sets_and_clears_tri_state_fields() {
         let (server, _tmp) = serve_board_vault().await;
-        server
-            .vault_task_create(Parameters(TaskCreateParams {
-                cycle: Some("S-1".to_string()),
-                assignee: Some("kit".to_string()),
-                ..task_create_params("Move me")
-            }))
-            .await
-            .unwrap();
+        let created = parse(
+            server
+                .vault_task_create(Parameters(TaskCreateParams {
+                    cycle: Some(SEEDED_CYCLE_CODE.to_string()),
+                    assignee: Some("kit".to_string()),
+                    ..task_create_params("Move me")
+                }))
+                .await,
+        );
+        let code = created["code"].as_str().unwrap().to_string();
 
-        // Address by lowercase code; move the column, clear the cycle via
-        // null, clear the assignee via the empty-string fallback.
+        // Address by lowercase code (case-insensitive lookup); move the
+        // column, clear the cycle via null, clear the assignee via the
+        // empty-string fallback.
         let value = parse(
             server
                 .vault_task_update(Parameters(TaskUpdateParams {
                     status: Some("TRIAGE".to_string()),
                     cycle: Some(None),
                     assignee: Some(Some(String::new())),
-                    ..task_update_params("tsk-0001")
+                    ..task_update_params(&code.to_lowercase())
                 }))
                 .await,
         );
@@ -3666,16 +3693,18 @@ mod tests {
     #[tokio::test]
     async fn task_update_resolves_paths_and_rejects_unknown_codes() {
         let (server, _tmp) = serve_board_vault().await;
-        server
-            .vault_task_create(Parameters(task_create_params("By path")))
-            .await
-            .unwrap();
+        let created = parse(
+            server
+                .vault_task_create(Parameters(task_create_params("By path")))
+                .await,
+        );
+        let path = created["path"].as_str().unwrap().to_string();
 
         let value = parse(
             server
                 .vault_task_update(Parameters(TaskUpdateParams {
                     priority: Some("P0".to_string()),
-                    ..task_update_params("tasks/TSK-0001.md")
+                    ..task_update_params(&path)
                 }))
                 .await,
         );
@@ -3739,14 +3768,18 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cycle_create_auto_generates_sequential_codes() {
+    async fn cycle_create_mints_distinct_petname_codes() {
         let (server, _tmp) = serve_seeded_vault().await;
         let first = parse(
             server
                 .vault_cycle_create(Parameters(cycle_create_params("Sprint One")))
                 .await,
         );
-        assert_eq!(first["code"], "S-1");
+        let first_code = first["code"].as_str().unwrap().to_string();
+        assert!(
+            first_code.starts_with("S-") && crate::vault::code::is_valid_code(&first_code),
+            "{first_code}"
+        );
         assert_eq!(first["state"], "PLANNED");
         assert_eq!(first["label"], "Sprint One");
 
@@ -3758,7 +3791,12 @@ mod tests {
                 }))
                 .await,
         );
-        assert_eq!(second["code"], "S-2");
+        let second_code = second["code"].as_str().unwrap().to_string();
+        assert!(
+            second_code.starts_with("S-") && crate::vault::code::is_valid_code(&second_code),
+            "{second_code}"
+        );
+        assert_ne!(first_code, second_code, "codes must be distinct");
         assert_eq!(second["state"], "ACTIVE");
     }
 
@@ -3776,20 +3814,20 @@ mod tests {
 
         server
             .vault_cycle_create(Parameters(CycleCreateParams {
-                code: Some("S-7".to_string()),
+                code: Some("S-quiet-fox-5n2wt".to_string()),
                 ..cycle_create_params("Explicit")
             }))
             .await
             .unwrap();
         let err = server
             .vault_cycle_create(Parameters(CycleCreateParams {
-                code: Some("S-7".to_string()),
+                code: Some("S-quiet-fox-5n2wt".to_string()),
                 ..cycle_create_params("Duplicate")
             }))
             .await
             .expect_err("duplicate explicit code should conflict");
         assert!(err.contains("409"), "{err}");
-        assert!(err.contains("S-7"), "{err}");
+        assert!(err.contains("S-quiet-fox-5n2wt"), "{err}");
     }
 
     #[tokio::test]
@@ -3800,11 +3838,11 @@ mod tests {
                 .vault_cycle_update(Parameters(CycleUpdateParams {
                     state: Some("ACTIVE".to_string()),
                     goal: Some("Ship the board tools".to_string()),
-                    ..cycle_update_params("s-1")
+                    ..cycle_update_params(&SEEDED_CYCLE_CODE.to_lowercase())
                 }))
                 .await,
         );
-        assert_eq!(value["code"], "S-1");
+        assert_eq!(value["code"], SEEDED_CYCLE_CODE);
         assert_eq!(value["state"], "ACTIVE");
         assert_eq!(value["goal"], "Ship the board tools");
     }
@@ -3812,13 +3850,15 @@ mod tests {
     #[tokio::test]
     async fn cycle_seal_with_carry_to_rehomes_unsealed_tasks() {
         let (server, _tmp) = serve_board_vault().await;
-        server
-            .vault_cycle_create(Parameters(cycle_create_params("Sprint Two")))
-            .await
-            .unwrap();
+        let second_cycle = parse(
+            server
+                .vault_cycle_create(Parameters(cycle_create_params("Sprint Two")))
+                .await,
+        );
+        let second_code = second_cycle["code"].as_str().unwrap().to_string();
         server
             .vault_task_create(Parameters(TaskCreateParams {
-                cycle: Some("S-1".to_string()),
+                cycle: Some(SEEDED_CYCLE_CODE.to_string()),
                 ..task_create_params("Unfinished work")
             }))
             .await
@@ -3828,8 +3868,8 @@ mod tests {
             server
                 .vault_cycle_update(Parameters(CycleUpdateParams {
                     state: Some("CLOSED".to_string()),
-                    carry_to: Some("S-2".to_string()),
-                    ..cycle_update_params("S-1")
+                    carry_to: Some(second_code.clone()),
+                    ..cycle_update_params(SEEDED_CYCLE_CODE)
                 }))
                 .await,
         );
@@ -3841,7 +3881,7 @@ mod tests {
                 .await,
         );
         assert_eq!(
-            board["tasks"][0]["cycle"], "S-2",
+            board["tasks"][0]["cycle"], second_code,
             "unsealed task should carry over: {board}"
         );
     }
@@ -3852,7 +3892,7 @@ mod tests {
         let err = server
             .vault_cycle_update(Parameters(CycleUpdateParams {
                 carry_to: Some("BACKLOG".to_string()),
-                ..cycle_update_params("S-1")
+                ..cycle_update_params(SEEDED_CYCLE_CODE)
             }))
             .await
             .expect_err("carry_to without CLOSED should be rejected");

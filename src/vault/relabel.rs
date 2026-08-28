@@ -46,16 +46,23 @@ pub fn relabel(
 ) -> Result<RelabelReport, IndexError> {
     // Snapshot the page paths up front so we don't hold a borrow of the index
     // (or iterate a table we are concurrently mutating) during the moves.
-    let rows: Vec<String> = {
+    let rows: Vec<(String, String)> = {
         let mut stmt = index
             .connection()
-            .prepare("SELECT path FROM pages ORDER BY path")?;
-        stmt.query_map([], |r| r.get::<_, String>(0))?
+            .prepare("SELECT path, kind FROM pages ORDER BY path")?;
+        stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
             .collect::<Result<_, _>>()?
     };
 
     let mut report = RelabelReport::default();
-    for path in rows {
+    for (path, kind) in rows {
+        // TASK/CYCLE pages carry petname codes, not canonical-scheme
+        // filenames; `clep codes migrate` (src/vault/recode.rs) owns their
+        // renames, so relabel must never touch them.
+        if kind == "TASK" || kind == "CYCLE" {
+            report.skipped += 1;
+            continue;
+        }
         let vp = VaultPath::new(&path).map_err(|e| IndexError::Other(e.to_string()))?;
         if is_canonical_page_filename(vp.filename()) {
             report.skipped += 1;
@@ -136,6 +143,22 @@ mod tests {
             .map(|e| e.file_name().to_string_lossy().into_owned())
             .filter(|n| n.ends_with(".md"))
             .collect()
+    }
+
+    /// TASK/CYCLE pages carry petname codes, not canonical-scheme filenames;
+    /// `clep codes migrate` (src/vault/recode.rs) owns their renames, so
+    /// relabel must leave them alone even when the stem isn't canonical.
+    #[test]
+    fn task_pages_are_skipped_not_renamed() {
+        let (_tmp, vault, mut index) = fixture_with_pages(&[(
+            "tasks/TSK-0481.md",
+            "---\nid: 0190f8a0-0000-7000-8000-000000000021\ntype: task\ncreated_at: 2026-05-31T12:00:00Z\nupdated_at: 2026-05-31T12:00:00Z\n---\nbody",
+        )]);
+
+        let report = relabel(&vault, &mut index, false).unwrap();
+        assert_eq!(report.renamed, 0);
+        assert_eq!(report.skipped, 1);
+        assert!(vault.root().join("tasks/TSK-0481.md").exists());
     }
 
     #[test]
