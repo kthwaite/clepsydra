@@ -22,7 +22,10 @@ function wrap(kind: FilterWrapKind, value: BaseFilter): BaseFilter {
   return { not: value };
 }
 
-function applyAction(filter: BaseFilter, action: FilterTreeAction): FilterUpdate {
+function applyAction(
+  filter: BaseFilter,
+  action: FilterTreeAction,
+): FilterUpdate {
   if (action.type === "replace") return { value: action.value };
   if (action.type === "remove") return { value: undefined };
   if (action.type === "wrap") {
@@ -79,11 +82,7 @@ function updateFilterAtOffset(
     return { value: filter };
   }
 
-  const child = updateFilterAtOffset(
-    children[childIndex],
-    action,
-    offset + 2,
-  );
+  const child = updateFilterAtOffset(children[childIndex], action, offset + 2);
   if (child.move !== undefined) {
     const destination = childIndex + child.move;
     if (destination < 0 || destination >= children.length) {

@@ -285,9 +285,7 @@ it("renders GFM tables as semantic HTML", () => {
   );
 
   const table = screen.getAllByRole("table")[1];
-  expect(table.closest("section")).toHaveAccessibleName(
-    "Scrollable table",
-  );
+  expect(table.closest("section")).toHaveAccessibleName("Scrollable table");
   expect(
     within(table).getByRole("columnheader", { name: "Key" }),
   ).toBeInTheDocument();
@@ -562,9 +560,7 @@ it("documents extension permissions and complete capture scope", () => {
   expect(source).toMatch(
     /computes its own hashes for the snapshot and\s+every resource it deconstructs from it/,
   );
-  expect(source).toContain(
-    "does not hash, split, or upload resources itself.",
-  );
+  expect(source).toContain("does not hash, split, or upload resources itself.");
   expect(source).toMatch(/configured\s+Clepsydra server/);
 });
 

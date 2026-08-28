@@ -44,7 +44,9 @@ function resolvePresentationField(
   return {
     identity,
     ...(isProperty && !propertyKeys.has(property)
-      ? { warning: `Property “${property}” is not declared and is unavailable.` }
+      ? {
+          warning: `Property “${property}” is not declared and is unavailable.`,
+        }
       : {}),
   };
 }
@@ -93,7 +95,9 @@ export function validateBaseDraftStructure(
       property.definition.type,
     ]),
   );
-  const propertyKeys = new Set(draft.properties.map((property) => property.key));
+  const propertyKeys = new Set(
+    draft.properties.map((property) => property.key),
+  );
   const previewIdentities = new Set<string>();
   for (const [previewIndex, preview] of draft.preview.entries()) {
     if (preview.label !== undefined && preview.label.trim().length === 0) {

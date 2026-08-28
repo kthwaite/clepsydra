@@ -5,6 +5,8 @@ import type {
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
 import type { DraftProperty } from "./definition-model";
+import { FilterComparisonEditor } from "./FilterComparisonEditor";
+import { FilterNodeMenu, FilterSeedMenu } from "./filter-actions";
 import { createFilterDiagnosticScope } from "./filter-diagnostics";
 import {
   type FilterPath,
@@ -12,11 +14,9 @@ import {
   type FilterWrapKind,
   updateFilterTree,
 } from "./filter-tree";
-import { FilterNodeMenu, FilterSeedMenu } from "./filter-actions";
-import { FilterComparisonEditor } from "./FilterComparisonEditor";
 import { useIdentifiedRows } from "./ordered-list";
-import { readTagCondition } from "./tag-condition";
 import { TagConditionEditor } from "./TagConditionEditor";
+import { readTagCondition } from "./tag-condition";
 
 interface BaseFilterEditorProps {
   value: BaseFilter | undefined;
@@ -89,9 +89,7 @@ function FilterNodeEditor({
         value={value}
         position={position}
         properties={properties}
-        onChange={(next) =>
-          dispatch({ type: "replace", path, value: next })
-        }
+        onChange={(next) => dispatch({ type: "replace", path, value: next })}
         diagnosticScope={diagnosticScope}
       />
     );

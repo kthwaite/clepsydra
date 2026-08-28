@@ -4,9 +4,7 @@ import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 
 export function NotFoundPage() {
   return (
-    <div className="cl-cap p-8 text-[var(--ink-mute)]">
-      404 · folio missing
-    </div>
+    <div className="cl-cap p-8 text-[var(--ink-mute)]">404 · folio missing</div>
   );
 }
 

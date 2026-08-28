@@ -1,6 +1,6 @@
+import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
 import type { Key } from "react-aria-components/Select";
-import type { Meta, StoryObj } from "@storybook/react";
 import { Select, SelectItem } from "#/components/ui/select";
 
 const meta: Meta<typeof Select> = {

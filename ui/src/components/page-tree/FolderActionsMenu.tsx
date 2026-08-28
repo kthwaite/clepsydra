@@ -380,8 +380,8 @@ export function FolderActionsMenu({
         <div className="space-y-4">
           <p className="text-sm text-destructive">
             Folder deletion is permanent: its pages do not enter the Rubbish
-            Bin. The backend cannot preview folder deletion, so verify the
-            exact folder name before continuing.
+            Bin. The backend cannot preview folder deletion, so verify the exact
+            folder name before continuing.
           </p>
           <TextField
             label={`Type ${deleteSource} to confirm`}

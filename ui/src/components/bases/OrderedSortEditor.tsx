@@ -14,8 +14,8 @@ import {
   ReorderAnnouncement,
   ReorderHandle,
   useIdentifiedRows,
-  useReorderable,
   useReorderAnnouncement,
+  useReorderable,
 } from "./ordered-list";
 import { SYSTEM_PROPERTY_FIELDS } from "./PropertiesEditor";
 
@@ -46,7 +46,6 @@ export function sortableFieldKeys(
   ];
   return fields.filter(({ type }) => canSort(type)).map(({ key }) => key);
 }
-
 
 interface OrderedSortEditorProps {
   value: SortKey[];
@@ -217,12 +216,7 @@ export function OrderedSortEditor({
           );
         })}
       </ol>
-      <Button
-        className="mt-3"
-        size="sm"
-        variant="secondary"
-        onPress={append}
-      >
+      <Button className="mt-3" size="sm" variant="secondary" onPress={append}>
         Add sort
       </Button>
       {announceMove ? null : <ReorderAnnouncement message={own.announcement} />}
@@ -247,16 +241,15 @@ function SortRow({
   onReorder(sourceId: string, targetId: string, edge: string): void;
   children: ReactNode;
 }) {
-  const { rowRef, setHandle, onHandleKeyDown } =
-    useReorderable<HTMLLIElement>({
-      kind: "base-sort",
-      idKey: "sortId",
-      id,
-      index,
-      count,
-      onMove,
-      onReorder,
-    });
+  const { rowRef, setHandle, onHandleKeyDown } = useReorderable<HTMLLIElement>({
+    kind: "base-sort",
+    idKey: "sortId",
+    id,
+    index,
+    count,
+    onMove,
+    onReorder,
+  });
 
   return (
     <li

@@ -20,10 +20,10 @@ import {
 } from "#/hooks/useFolioHistoryNavigation";
 import {
   clearFolioHistoryState,
+  type FolioRestoration,
   readFolioHistoryDestination,
   readFolioHistoryRestorationRequest,
   registerFolioHistoryCapture,
-  type FolioRestoration,
 } from "#/store/folioRestoration";
 import {
   registerWorkspaceTransitionGuard,
@@ -194,10 +194,12 @@ describe("Folio history initialization", () => {
     const { actions, history } = renderHarness();
 
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).toMatchObject({
-        folioTabId: "alpha",
-        folioPath: "notes/alpha.md",
-      }),
+      expect(readFolioHistoryDestination(history.location.state)).toMatchObject(
+        {
+          folioTabId: "alpha",
+          folioPath: "notes/alpha.md",
+        },
+      ),
     );
 
     expect(history.length).toBe(1);
@@ -209,11 +211,7 @@ describe("Folio history initialization", () => {
 
   it("applies a complete initial tuple without replacing it", async () => {
     seedWorkspace("beta");
-    const initial = pageState(
-      "alpha",
-      "notes/alpha.md",
-      "location-alpha",
-    );
+    const initial = pageState("alpha", "notes/alpha.md", "location-alpha");
     const { actions, history } = renderHarness({ states: [initial] });
 
     await waitFor(() =>
@@ -239,7 +237,9 @@ describe("programmatic Folio navigation", () => {
     const { actions, history } = renderHarness();
     await waitForController();
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).not.toBeNull(),
+      expect(
+        readFolioHistoryDestination(history.location.state),
+      ).not.toBeNull(),
     );
     actions.splice(0);
     const order: string[] = [];
@@ -253,9 +253,11 @@ describe("programmatic Folio navigation", () => {
     });
 
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).toMatchObject({
-        folioPath: "notes/beta.md",
-      }),
+      expect(readFolioHistoryDestination(history.location.state)).toMatchObject(
+        {
+          folioPath: "notes/beta.md",
+        },
+      ),
     );
     const destination = readFolioHistoryDestination(history.location.state);
     expect(order).toEqual(["capture:alpha"]);
@@ -276,7 +278,9 @@ describe("programmatic Folio navigation", () => {
   it("does nothing when opening the already-active page without a block target", async () => {
     const { actions, history } = renderHarness();
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).not.toBeNull(),
+      expect(
+        readFolioHistoryDestination(history.location.state),
+      ).not.toBeNull(),
     );
     actions.splice(0);
     let guardCalls = 0;
@@ -307,7 +311,9 @@ describe("programmatic Folio navigation", () => {
   it("waits for guarded approval before capture, mutation, and navigation", async () => {
     const { history } = renderHarness();
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).not.toBeNull(),
+      expect(
+        readFolioHistoryDestination(history.location.state),
+      ).not.toBeNull(),
     );
     let captureCalls = 0;
     registerCapture("alpha", "notes/alpha.md", () => {
@@ -334,9 +340,11 @@ describe("programmatic Folio navigation", () => {
     act(() => proceed?.());
 
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).toMatchObject({
-        folioPath: "notes/beta.md",
-      }),
+      expect(readFolioHistoryDestination(history.location.state)).toMatchObject(
+        {
+          folioPath: "notes/beta.md",
+        },
+      ),
     );
     expect(captureCalls).toBe(1);
     expect(useWorkspaceStore.getState().activeTabId).not.toBe("alpha");
@@ -346,7 +354,9 @@ describe("programmatic Folio navigation", () => {
   it("pushes a fresh tuple when activating an existing page tab", async () => {
     const { actions, history } = renderHarness();
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).not.toBeNull(),
+      expect(
+        readFolioHistoryDestination(history.location.state),
+      ).not.toBeNull(),
     );
     const outgoing = readFolioHistoryDestination(history.location.state);
     actions.splice(0);
@@ -355,10 +365,12 @@ describe("programmatic Folio navigation", () => {
     act(() => currentControls().activate("beta"));
 
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).toMatchObject({
-        folioTabId: "beta",
-        folioPath: "notes/beta.md",
-      }),
+      expect(readFolioHistoryDestination(history.location.state)).toMatchObject(
+        {
+          folioTabId: "beta",
+          folioPath: "notes/beta.md",
+        },
+      ),
     );
     const destination = readFolioHistoryDestination(history.location.state);
     expect(destination?.folioLocationId).not.toBe(outgoing?.folioLocationId);
@@ -369,7 +381,9 @@ describe("programmatic Folio navigation", () => {
   it("clears every Folio destination field for graph entries", async () => {
     const { history } = renderHarness();
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).not.toBeNull(),
+      expect(
+        readFolioHistoryDestination(history.location.state),
+      ).not.toBeNull(),
     );
     registerCapture("alpha", "notes/alpha.md");
 
@@ -389,7 +403,9 @@ describe("programmatic Folio navigation", () => {
   it("captures before invoking a guarded programmatic departure", async () => {
     const { history } = renderHarness();
     await waitFor(() =>
-      expect(readFolioHistoryDestination(history.location.state)).not.toBeNull(),
+      expect(
+        readFolioHistoryDestination(history.location.state),
+      ).not.toBeNull(),
     );
     const order: string[] = [];
     registerCapture("alpha", "notes/alpha.md", () => {
@@ -537,19 +553,11 @@ describe("native history tuple application", () => {
   it.each([
     {
       case: "missing tab ID",
-      destination: pageState(
-        "missing",
-        "notes/alpha.md",
-        "location-missing",
-      ),
+      destination: pageState("missing", "notes/alpha.md", "location-missing"),
     },
     {
       case: "mismatched tab path",
-      destination: pageState(
-        "alpha",
-        "notes/renamed.md",
-        "location-renamed",
-      ),
+      destination: pageState("alpha", "notes/renamed.md", "location-renamed"),
     },
   ])("retains the current tab for a stale $case", async ({ destination }) => {
     seedWorkspace("beta");
@@ -578,10 +586,7 @@ describe("native history tuple application", () => {
   it("ignores graph entries after capturing the outgoing page", async () => {
     seedWorkspace("beta");
     const { history } = renderHarness({
-      states: [
-        graphState,
-        pageState("beta", "notes/beta.md", "location-beta"),
-      ],
+      states: [graphState, pageState("beta", "notes/beta.md", "location-beta")],
     });
     await waitForController();
     let captureCalls = 0;
@@ -628,5 +633,3 @@ describe("native history tuple application", () => {
     expect(useWorkspaceStore.getState().activeTabId).toBe("alpha");
   });
 });
-
-

@@ -4,9 +4,9 @@ import type { PropertyDefinition, PropertyType } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import { IconButton } from "#/components/ui/icon-button";
 import { Select, SelectItem } from "#/components/ui/select";
-import { MoveButtons, ReorderHandle, useReorderable } from "./ordered-list";
 import type { DraftProperty } from "./definition-model";
 import { moveItem } from "./definition-model";
+import { MoveButtons, ReorderHandle, useReorderable } from "./ordered-list";
 
 export const PROPERTY_TYPES: readonly PropertyType[] = [
   "text",
@@ -278,8 +278,8 @@ export function PropertyDefinitionEditor({
   const [renameKey, setRenameKey] = useState("");
   const [editing, setEditing] = useState(false);
 
-  const { rowRef, setHandle, onHandleKeyDown } = useReorderable<HTMLTableRowElement>(
-    {
+  const { rowRef, setHandle, onHandleKeyDown } =
+    useReorderable<HTMLTableRowElement>({
       kind: "base-property",
       idKey: "propertyId",
       id: property.id,
@@ -288,8 +288,7 @@ export function PropertyDefinitionEditor({
       onMove,
       onReorder,
       onHandleRef,
-    },
-  );
+    });
 
   function updateDefinition(definition: PropertyDefinition) {
     onChange({ ...property, definition });

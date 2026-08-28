@@ -10,13 +10,13 @@ import { formatApiError, isApiConflict } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { Dialog } from "#/components/ui/dialog";
 import { TextField } from "#/components/ui/text-field";
+import { BaseFilterEditor } from "./BaseFilterEditor";
 import {
   createMinimalDraft,
   isValidBaseSlug,
   slugifyBaseName,
   toWire,
 } from "./definition-model";
-import { BaseFilterEditor } from "./BaseFilterEditor";
 
 interface CreateBaseDialogProps {
   isOpen: boolean;

@@ -1,5 +1,5 @@
 import { Check, Minus } from "lucide-react";
-import { useEffect, useRef, type ReactElement, type ReactNode } from "react";
+import { type ReactElement, type ReactNode, useEffect, useRef } from "react";
 import { mergeRefs, useObjectRef } from "react-aria";
 import {
   CheckboxButton,

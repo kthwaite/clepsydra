@@ -130,9 +130,10 @@ describe("cell editors", () => {
     expect(trigger).toHaveFocus();
 
     await user.click(trigger);
-    expect(
-      screen.getByRole("option", { name: "archived" }),
-    ).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("option", { name: "archived" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
     await user.click(screen.getByRole("option", { name: "—" }));
 
     expect(onCommit).toHaveBeenCalledWith(null, undefined);

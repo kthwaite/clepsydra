@@ -306,9 +306,7 @@ describe("NewCycleModal — render", () => {
     for (const field of ["Name", "ID", "Start date", "End date", "Goal"]) {
       expect(screen.getByLabelText(field, { exact: true })).toBeInTheDocument();
     }
-    expect(
-      screen.getByRole("group", { name: "Status" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Status" })).toBeInTheDocument();
     expect(
       screen.getByPlaceholderText("What this cycle should achieve"),
     ).toBeInTheDocument();
@@ -443,9 +441,7 @@ describe("NewCycleModal — submit payload", () => {
     useBoardStore.setState({ cycleModal: { kind: "new" } });
     wrapQC(<NewCycleModal cycles={[]} now={NOW} />);
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Create cycle" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Create cycle" }));
 
     expect(
       await screen.findByRole("button", { name: "Creating…" }),
@@ -732,9 +728,7 @@ describe("OpenCycleModal — submit payload", () => {
     });
     wrapQC(<OpenCycleModal cycle={CYCLE_PLANNED} cycles={[]} tasks={[]} />);
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Start cycle" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Start cycle" }));
 
     expect(
       await screen.findByRole("button", { name: "Starting…" }),
@@ -887,9 +881,7 @@ describe("SealCycleModal — render", () => {
       `Move to ${CYCLE_PLANNED.code}`,
       "Keep in this cycle",
     ]) {
-      expect(
-        screen.getByRole("button", { name: choice }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: choice })).toBeInTheDocument();
     }
   });
 
@@ -971,9 +963,7 @@ describe("SealCycleModal — submit payloads", () => {
     });
     wrapQC(<SealCycleModal cycle={CYCLE_ACTIVE} cycles={[]} tasks={TASKS} />);
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Close cycle" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Close cycle" }));
 
     expect(
       await screen.findByRole("button", { name: "Closing…" }),

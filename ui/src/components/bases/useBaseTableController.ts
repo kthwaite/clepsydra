@@ -25,12 +25,12 @@ import {
   predicateIdentity,
   queryIdentity,
 } from "./embed-query";
+import { asciiCaseFold } from "./local-validation";
 import {
   type MemberCreationOutcome,
   type MemberCreationSource,
   resolveMemberCreationSession,
 } from "./member-creation";
-import { asciiCaseFold } from "./local-validation";
 import {
   type BaseMemberDraftField,
   type BaseMemberDraftValue,
@@ -161,7 +161,6 @@ function placementNotice(
     ? { scope: "query", queryIdentity: placement.queryIdentity, message }
     : genericNotice(message);
 }
-
 
 /** Shared orchestration for standalone and embedded Base tables. */
 export function useBaseTableController(

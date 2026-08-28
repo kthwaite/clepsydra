@@ -63,7 +63,9 @@ describe("filter tree transactions", () => {
       value: "NOTE",
     } satisfies BaseFilter;
 
-    expect(updateFilterTree(root, { type: "remove", path: [] })).toBeUndefined();
+    expect(
+      updateFilterTree(root, { type: "remove", path: [] }),
+    ).toBeUndefined();
   });
 
   it("appends a child to all without mutating the source", () => {

@@ -23,14 +23,14 @@ describe("readTagCondition", () => {
   });
 
   it("reads a bare eq comparison, which the engine treats as membership", () => {
-    expect(readTagCondition({ field: "aliases", op: "eq", value: "ale" })).toEqual(
-      {
-        field: "aliases",
-        quantifier: "all_of",
-        values: ["ale"],
-        encoding: { kind: "single", op: "eq" },
-      },
-    );
+    expect(
+      readTagCondition({ field: "aliases", op: "eq", value: "ale" }),
+    ).toEqual({
+      field: "aliases",
+      quantifier: "all_of",
+      values: ["ale"],
+      encoding: { kind: "single", op: "eq" },
+    });
   });
 
   it("reads an all group of same-field memberships as all-of", () => {
@@ -89,7 +89,9 @@ describe("readTagCondition", () => {
   });
 
   it("reads an empty membership comparison as a condition with no values yet", () => {
-    expect(readTagCondition({ field: "tags", op: "contains", value: "" })).toEqual({
+    expect(
+      readTagCondition({ field: "tags", op: "contains", value: "" }),
+    ).toEqual({
       field: "tags",
       quantifier: "all_of",
       values: [],
@@ -103,7 +105,10 @@ describe("readTagCondition", () => {
       "a group with an empty child value",
       { all: [contains("beer"), contains("")] } as BaseFilter,
     ],
-    ["an unsupported operator", { field: "tags", op: "is_empty" } as BaseFilter],
+    [
+      "an unsupported operator",
+      { field: "tags", op: "is_empty" } as BaseFilter,
+    ],
     [
       "a group mixing fields",
       { all: [contains("beer"), contains("x", "kind")] } as BaseFilter,
@@ -208,7 +213,9 @@ describe("writeTagCondition", () => {
   });
 
   it("drops a stale encoding when the quantifier changes", () => {
-    const read = readTagCondition({ all: [contains("beer"), contains("wine")] });
+    const read = readTagCondition({
+      all: [contains("beer"), contains("wine")],
+    });
     if (!read) throw new Error("expected a tag condition");
     expect(writeTagCondition({ ...read, quantifier: "any_of" })).toEqual({
       field: "tags",
@@ -228,7 +235,8 @@ describe("writeTagCondition", () => {
     ];
     for (const filter of filters) {
       const read = readTagCondition(filter);
-      if (!read) throw new Error(`expected a tag condition: ${JSON.stringify(filter)}`);
+      if (!read)
+        throw new Error(`expected a tag condition: ${JSON.stringify(filter)}`);
       expect(writeTagCondition(read)).toEqual(filter);
     }
   });

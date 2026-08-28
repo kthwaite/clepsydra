@@ -27,12 +27,12 @@ vi.mock("#/components/academic/AcademicLibrary", () => ({
   },
 }));
 
-
 import {
   ACADEMIC_FILTER_URL,
   academicFilterNavigation,
   Route,
 } from "#/routes/academic";
+
 const AcademicRoute = Route.options.component as () => ReactNode;
 
 beforeEach(() => {
@@ -40,7 +40,6 @@ beforeEach(() => {
   routeMocks.featureFlags.academic = true;
   routeMocks.featureFlags.feeds = true;
 });
-
 
 describe("Academic route filters", () => {
   it("exposes work_type/status/year/tag field ids matching the URL codec", () => {

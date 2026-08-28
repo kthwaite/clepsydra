@@ -1,7 +1,4 @@
-import {
-  QueryClient,
-  QueryClientProvider,
-} from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -63,9 +60,7 @@ describe("FeatureFlagsProvider query errors", () => {
       </QueryClientProvider>,
     );
 
-    expect(
-      await screen.findByText("academic:off feeds:off"),
-    ).toBeVisible();
+    expect(await screen.findByText("academic:off feeds:off")).toBeVisible();
     expect(
       screen.queryByText("Capability boundary crashed."),
     ).not.toBeInTheDocument();

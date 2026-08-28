@@ -5,11 +5,11 @@ import type {
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
 import type { DraftProperty, DraftView } from "./definition-model";
-import {
-  presentationFieldChoices,
-  type PresentationFieldChoice,
-} from "./PreviewPropertiesEditor";
 import { presentationFieldIdentity } from "./local-validation";
+import {
+  type PresentationFieldChoice,
+  presentationFieldChoices,
+} from "./PreviewPropertiesEditor";
 
 interface DisplayLabelsEditorProps {
   labels: DraftView["labels"];
@@ -116,12 +116,8 @@ export function DisplayLabelsEditor({
           const identitiesUsedByOtherRows = new Set(
             Object.keys(labels)
               .filter((existingField) => existingField !== field)
-              .map((existingField) =>
-                presentationFieldIdentity(existingField),
-              )
-              .filter(
-                (identity): identity is string => identity !== undefined,
-              ),
+              .map((existingField) => presentationFieldIdentity(existingField))
+              .filter((identity): identity is string => identity !== undefined),
           );
           return (
             <li
@@ -154,9 +150,7 @@ export function DisplayLabelsEditor({
                     onChange({ ...remaining, [nextField]: movedLabel });
                   }}
                 >
-                  {choices.some(
-                    (choice) => choice.field === field,
-                  ) ? null : (
+                  {choices.some((choice) => choice.field === field) ? null : (
                     <option value={field}>{field}</option>
                   )}
                   {choices.map((choice) => {

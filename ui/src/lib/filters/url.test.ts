@@ -103,9 +103,7 @@ describe("filterStateToSearch", () => {
 
 describe("canonicalizeFilterSearch", () => {
   it("preserves unrelated and alias params while emitting canonical keys", () => {
-    expect(
-      canonicalizeFilterSearch({ tag: "legacy", page: 2 }, opts),
-    ).toEqual({
+    expect(canonicalizeFilterSearch({ tag: "legacy", page: 2 }, opts)).toEqual({
       tag: "legacy",
       page: 2,
       q: undefined,

@@ -1,6 +1,11 @@
 import type { BaseFilter } from "#/api/bases";
 import { Button } from "#/components/ui/button";
-import { Menu, MenuItem, MenuSeparator, MenuTrigger } from "#/components/ui/menu";
+import {
+  Menu,
+  MenuItem,
+  MenuSeparator,
+  MenuTrigger,
+} from "#/components/ui/menu";
 
 /** A blank condition on a scalar system field: what "add a condition" means
  * before the author has chosen anything. */
@@ -16,12 +21,20 @@ export function emptyTagCondition(): BaseFilter {
 
 type SeedId = "condition" | "tag" | "all" | "any" | "not";
 
-const SEEDS: ReadonlyArray<{ id: SeedId; noun: string; seed: () => BaseFilter }> = [
+const SEEDS: ReadonlyArray<{
+  id: SeedId;
+  noun: string;
+  seed: () => BaseFilter;
+}> = [
   { id: "condition", noun: "condition", seed: emptyComparison },
   { id: "tag", noun: "tag condition", seed: emptyTagCondition },
   { id: "all", noun: "Match all group", seed: () => ({ all: [] }) },
   { id: "any", noun: "Match any group", seed: () => ({ any: [] }) },
-  { id: "not", noun: "Not condition", seed: () => ({ not: emptyComparison() }) },
+  {
+    id: "not",
+    noun: "Not condition",
+    seed: () => ({ not: emptyComparison() }),
+  },
 ];
 
 function seedLabel(noun: string, replace: boolean) {

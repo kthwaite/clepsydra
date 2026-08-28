@@ -130,9 +130,7 @@ describe("EditorSuggestionPopover", () => {
     );
 
     fireEvent.keyDown(document, { key: "ArrowDown", bubbles: true });
-    view.rerender(
-      <EditorSuggestionPopover {...commonProps} items={items} />,
-    );
+    view.rerender(<EditorSuggestionPopover {...commonProps} items={items} />);
     fireEvent.keyDown(document, { key: "ArrowDown", bubbles: true });
 
     expect(screen.getAllByRole("option")[1]).toHaveAttribute(

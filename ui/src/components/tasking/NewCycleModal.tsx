@@ -229,10 +229,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
         </div>
 
         {/* INITIAL STATE */}
-        <fieldset
-          aria-label="Status"
-          className="m-0 min-w-0 border-0 p-0"
-        >
+        <fieldset aria-label="Status" className="m-0 min-w-0 border-0 p-0">
           <legend className="mb-[5px] flex w-full items-baseline justify-between gap-[8px]">
             <span className="cl-mono text-[9px] uppercase tracking-[0.16em] text-[var(--ink-mute)]">
               Status

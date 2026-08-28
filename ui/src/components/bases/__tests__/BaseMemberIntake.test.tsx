@@ -1,7 +1,4 @@
-import type {
-  UseMutationResult,
-  UseQueryResult,
-} from "@tanstack/react-query";
+import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -34,8 +31,7 @@ interface BaseHookState {
 }
 
 const mocks = vi.hoisted(() => ({
-  createMember:
-    vi.fn<UseCreateBaseMemberResult["mutateAsync"]>(),
+  createMember: vi.fn<UseCreateBaseMemberResult["mutateAsync"]>(),
   mutateMember: vi.fn<UseCreateBaseMemberResult["mutate"]>(),
   refetchBase: vi.fn<UseBaseResult["refetch"]>(),
   resetMutation: vi.fn<UseCreateBaseMemberResult["reset"]>(),
@@ -50,9 +46,7 @@ const mocks = vi.hoisted(() => ({
   mutation: { isPending: false },
 }));
 
-function useBaseResult(
-  state: BaseHookState = mocks.detail,
-): UseBaseResult {
+function useBaseResult(state: BaseHookState = mocks.detail): UseBaseResult {
   const common = {
     dataUpdatedAt: state.data === undefined ? 0 : 1,
     errorUpdatedAt: state.error === null ? 0 : 1,
@@ -471,8 +465,9 @@ describe("BaseMemberIntake", () => {
     expect(
       screen.getByRole("button", { name: "Save new member" }),
     ).toBeDisabled();
-    expect(screen.getByText("Member creation is unavailable for this view."))
-      .toBeVisible();
+    expect(
+      screen.getByText("Member creation is unavailable for this view."),
+    ).toBeVisible();
 
     await chooseView(user, "Shelf");
     expect(
@@ -744,9 +739,7 @@ describe("BaseMemberIntake", () => {
     await save(user);
     expect(await screen.findByText("Candidate rejected.")).toBeVisible();
 
-    await user.click(
-      screen.getByRole("button", { name: "Cancel new member" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Cancel new member" }));
 
     expect(screen.queryByText("Candidate rejected.")).toBeNull();
     expect(screen.queryByText(ratingDiagnostic.message)).toBeNull();

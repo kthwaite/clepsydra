@@ -19,8 +19,9 @@ import type {
   ConfiguredBaseEmbedElement,
 } from "#/editor/schema/types";
 import type { BaseDiagnostic } from "./BaseDefinitionWorkspace";
-import { diagnosticRows } from "./diagnostic-rows";
+import { BaseFilterEditor } from "./BaseFilterEditor";
 import type { DraftProperty } from "./definition-model";
+import { diagnosticRows } from "./diagnostic-rows";
 import {
   type BaseEmbedDisplay,
   EMBED_WIDTH_MAX,
@@ -28,7 +29,6 @@ import {
 } from "./embed-presentation";
 import { validateBaseEmbedSemantics } from "./embed-semantic-validation";
 import { asciiCaseFold } from "./local-validation";
-import { BaseFilterEditor } from "./BaseFilterEditor";
 import { OrderedSortEditor } from "./OrderedSortEditor";
 
 interface StructuredDraft {
