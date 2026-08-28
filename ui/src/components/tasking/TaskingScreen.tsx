@@ -14,8 +14,8 @@ import { useBoardStore } from "#/store/board";
 import { BacklogView } from "./BacklogView";
 import { BoardHeader } from "./BoardHeader";
 import {
-  COL_ORDER,
   COL_LABEL,
+  COL_ORDER,
   COL_SUBLABEL,
   type ColLabelFn,
   PRI_LABEL,
