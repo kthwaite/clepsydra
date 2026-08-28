@@ -20,10 +20,10 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BasePreviewResponse, PropertyDefinition } from "#/api/bases";
 import { BasePreview } from "#/components/bases/BasePreview";
-import {
-  type BaseDraft,
-  type DraftProperty,
-  type DraftView,
+import type {
+  BaseDraft,
+  DraftProperty,
+  DraftView,
 } from "#/components/bases/definition-model";
 import { ViewsEditor } from "#/components/bases/ViewsEditor";
 
@@ -1210,7 +1210,7 @@ describe("BasePreview", () => {
     vi.useFakeTimers();
     previewMock.mockResolvedValue({
       diagnostics: [],
-      output: { shape: "flat", rows: [], total: 0 },
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     } satisfies BasePreviewResponse);
     const initial = draft();
     const rendered = render(
@@ -1298,6 +1298,7 @@ describe("BasePreview", () => {
           },
         ],
         total: 1,
+        aggregates: [],
       },
     });
     const initial = draft();
@@ -1328,6 +1329,7 @@ describe("BasePreview", () => {
             },
           ],
           total: 1,
+          aggregates: [],
         },
       });
       await oldPromise;
@@ -1340,7 +1342,7 @@ describe("BasePreview", () => {
     vi.useFakeTimers();
     previewMock.mockResolvedValue({
       diagnostics: [],
-      output: { shape: "flat", rows: [], total: 0 },
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     });
     render(<BasePreview draft={draft()} selectedViewId="view-all" />);
     await act(async () => vi.advanceTimersByTimeAsync(250));
@@ -1366,7 +1368,7 @@ describe("BasePreview", () => {
     await act(async () =>
       resolve({
         diagnostics: [],
-        output: { shape: "flat", rows: [], total: 0 },
+        output: { shape: "flat", rows: [], total: 0, aggregates: [] },
       }),
     );
     expect(screen.getByText(/no pages match/i)).toBeInTheDocument();
@@ -1385,6 +1387,7 @@ describe("BasePreview", () => {
           },
         ],
         total: 125,
+        aggregates: [],
       },
     });
     rendered.rerender(

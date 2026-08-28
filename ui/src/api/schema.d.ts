@@ -1691,7 +1691,7 @@ export interface components {
             fn: components["schemas"]["AggregateFn"];
         };
         /** @enum {string} */
-        AggregateFn: "count" | "sum" | "avg" | "min" | "max";
+        AggregateFn: "count" | "sum" | "avg" | "min" | "max" | "count_empty" | "count_filled" | "percent_filled" | "count_unique" | "median" | "range";
         AiCaptureRequest: {
             /**
              * @description Short label naming the writing agent (e.g. `claude-code`), rendered
@@ -2577,7 +2577,7 @@ export interface components {
          * @description Comparison operators for filter predicates.
          * @enum {string}
          */
-        Op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "contains" | "in" | "links_to" | "is_empty" | "not_empty";
+        Op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "contains" | "not_contains" | "starts_with" | "ends_with" | "in" | "links_to" | "is_empty" | "not_empty" | "is_today" | "is_this_week" | "is_past_week" | "is_next_week" | "is_this_month";
         OutlinkEntry: {
             kind: string;
             source_field?: string | null;
@@ -2854,6 +2854,11 @@ export interface components {
             expected_revision: string;
         };
         QueryOutput: {
+            /**
+             * @description One value per requested aggregate, in request order, computed
+             *     over the whole predicate (unaffected by `limit`/`offset`).
+             */
+            aggregates: unknown[];
             rows: components["schemas"]["QueryRow"][];
             /** @enum {string} */
             shape: "flat";

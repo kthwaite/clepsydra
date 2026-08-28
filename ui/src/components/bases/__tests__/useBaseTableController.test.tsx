@@ -134,7 +134,7 @@ const createdRow = {
 };
 
 function output(rows = [createdRow]): QueryOutput {
-  return { shape: "flat", rows, total: rows.length };
+  return { shape: "flat", rows, total: rows.length, aggregates: [] };
 }
 
 function evaluation(
@@ -339,20 +339,23 @@ describe("useBaseTableController embedded mode", () => {
         error: { error: "evaluation failed" },
       },
     },
-  ])("renders unavailable Add actions while the evaluation is $label", ({ state }) => {
-    Object.assign(mocks.evaluationState, state);
+  ])(
+    "renders unavailable Add actions while the evaluation is $label",
+    ({ state }) => {
+      Object.assign(mocks.evaluationState, state);
 
-    render(<ControllerTable value={options()} />);
+      render(<ControllerTable value={options()} />);
 
-    const addActions = screen.getAllByRole("button", { name: /Add member/ });
-    expect(addActions.length).toBeGreaterThan(0);
-    for (const add of addActions) {
-      expect(add).toBeDisabled();
-      expect(add).toHaveAccessibleDescription(
-        "Member creation is unavailable for this view.",
-      );
-    }
-  });
+      const addActions = screen.getAllByRole("button", { name: /Add member/ });
+      expect(addActions.length).toBeGreaterThan(0);
+      for (const add of addActions) {
+        expect(add).toBeDisabled();
+        expect(add).toHaveAccessibleDescription(
+          "Member creation is unavailable for this view.",
+        );
+      }
+    },
+  );
 
   it.each([
     {

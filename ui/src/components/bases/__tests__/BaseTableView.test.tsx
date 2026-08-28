@@ -4,6 +4,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createRef, type ReactNode } from "react";
@@ -72,7 +73,12 @@ const row = {
   columns: { author: "Gene Wolfe", rating: 4.5, status: "reading" },
 };
 
-const flat: QueryOutput = { shape: "flat", rows: [row], total: 1 };
+const flat: QueryOutput = {
+  shape: "flat",
+  rows: [row],
+  total: 1,
+  aggregates: [],
+};
 
 const enabledCapability: BaseMemberCapability = {
   view: "Continues",
@@ -213,7 +219,7 @@ describe("BaseTableView compact scroller", () => {
     const { rerender } = renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 140 },
+      output: { shape: "flat", rows, total: 140, aggregates: [] },
       rowWindow: window(),
     });
     expect(scroller()).toBeInTheDocument();
@@ -227,7 +233,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 140 },
+      output: { shape: "flat", rows, total: 140, aggregates: [] },
       rowWindow,
     });
 
@@ -254,7 +260,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 140 },
+      output: { shape: "flat", rows, total: 140, aggregates: [] },
       rowWindow,
     });
 
@@ -270,7 +276,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 140 },
+      output: { shape: "flat", rows, total: 140, aggregates: [] },
       rowWindow: window(),
     });
 
@@ -283,7 +289,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 140 },
+      output: { shape: "flat", rows, total: 140, aggregates: [] },
       rowWindow: window({ hasMore: false, cappedBy: "author" }),
     });
 
@@ -298,7 +304,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 4000 },
+      output: { shape: "flat", rows, total: 4000, aggregates: [] },
       rowWindow: window({
         loaded: 1000,
         total: 4000,
@@ -318,7 +324,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 3 },
+      output: { shape: "flat", rows, total: 3, aggregates: [] },
       rowWindow: window({ total: 3, hasMore: false }),
     });
 
@@ -329,7 +335,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows, total: 140 },
+      output: { shape: "flat", rows, total: 140, aggregates: [] },
       rowWindow: window({ isLoadingMore: true }),
     });
 
@@ -342,7 +348,7 @@ describe("BaseTableView compact scroller", () => {
     renderView({
       chrome: "compact",
       configureSlug: undefined,
-      output: { shape: "flat", rows: [], total: 0 },
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
       rowWindow: window({ total: 0, loaded: 0, hasMore: false }),
     });
 
@@ -430,6 +436,7 @@ describe("BaseTableView", () => {
       output: {
         shape: "flat",
         total: 1,
+        aggregates: [],
         rows: [
           {
             ...row,
@@ -602,7 +609,7 @@ describe("BaseTableView", () => {
     const props = renderView({ focusCreatedId: row.id, onCreatedRowFocused });
 
     props.rerender({
-      output: { shape: "flat", rows: [], total: 0 },
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     });
     await flushFocusTimer();
     vi.useRealTimers();
@@ -830,6 +837,54 @@ describe("BaseTableView", () => {
     expect(screen.getByText(/avg\(rating\)\s*4.75/)).toBeTruthy();
     // The NULL bucket renders as the labelled empty group.
     expect(screen.getByText("(empty)")).toBeTruthy();
+    // Grouped output never gets a flat-view Totals footer.
+    expect(screen.queryByRole("group", { name: "Totals" })).toBeNull();
+  });
+
+  it("renders a Totals footer for flat output with configured aggregates", () => {
+    const totalsDefinition: BaseDetailResponse = {
+      ...definition,
+      views: [
+        {
+          name: "Continues",
+          layout: "table",
+          columns: ["title", "author"],
+          aggregates: [
+            { fn: "count" },
+            { fn: "percent_filled", field: "rating" },
+          ],
+        },
+        definition.views![1],
+      ],
+    };
+    const secondRow = {
+      ...row,
+      id: "02",
+      path: "second.md",
+      title: "A Wizard of Earthsea",
+    };
+    renderView({
+      definition: totalsDefinition,
+      output: {
+        shape: "flat",
+        rows: [row, secondRow],
+        total: 2,
+        aggregates: [2, 50],
+      },
+    });
+
+    const footer = screen.getByRole("group", { name: "Totals" });
+    expect(within(footer).getByText(/count\s*2/)).toBeInTheDocument();
+    expect(
+      within(footer).getByText(/percent_filled\(rating\)\s*50/),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no Totals footer when the active view has no aggregates", () => {
+    renderView({});
+
+    expect(screen.queryByRole("group", { name: "Totals" })).toBeNull();
+    expect(document.querySelector("footer")).toBeNull();
   });
 
   it("title cell navigates to the page", async () => {
@@ -857,6 +912,7 @@ describe("BaseTableView", () => {
       output: {
         shape: "flat",
         total: 1,
+        aggregates: [],
         rows: [
           {
             ...row,
@@ -896,6 +952,7 @@ describe("BaseTableView", () => {
       output: {
         shape: "flat",
         total: 1,
+        aggregates: [],
         rows: [
           {
             ...row,
@@ -993,6 +1050,7 @@ describe("BaseTableView", () => {
       output: {
         shape: "flat",
         total: 2,
+        aggregates: [],
         rows: [
           {
             ...row,
@@ -1070,6 +1128,7 @@ describe("BaseTableView", () => {
       output: {
         shape: "flat",
         total: 1,
+        aggregates: [],
         rows: [
           {
             ...row,
@@ -1286,7 +1345,7 @@ describe("BaseTableView", () => {
 
   it("announces flat output excluded by the current cap", () => {
     renderView({
-      output: { shape: "flat", rows: [row], total: 3 },
+      output: { shape: "flat", rows: [row], total: 3, aggregates: [] },
     });
 
     expect(
@@ -1452,7 +1511,7 @@ describe("BaseTableView", () => {
     rerender(
       <BaseTableView
         {...props}
-        output={{ shape: "flat", rows: [], total: 0 }}
+        output={{ shape: "flat", rows: [], total: 0, aggregates: [] }}
       />,
     );
     expect(screen.queryByLabelText(/^Edit /)).not.toBeInTheDocument();
@@ -1482,7 +1541,12 @@ describe("BaseTableView", () => {
     };
     const props = renderView({
       definition: tabDefinition,
-      output: { shape: "flat", rows: [row, secondRow], total: 2 },
+      output: {
+        shape: "flat",
+        rows: [row, secondRow],
+        total: 2,
+        aggregates: [],
+      },
     });
 
     await user.click(screen.getByRole("button", { name: "4.5" }));
@@ -1522,7 +1586,7 @@ describe("BaseTableView", () => {
     });
     props.rerender({
       definition: terminalDefinition,
-      output: { shape: "flat", rows: [], total: 0 },
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     });
     await waitFor(() =>
       expect(
@@ -1583,7 +1647,7 @@ describe("BaseTableView", () => {
     });
     props.rerender({
       definition: terminalDefinition,
-      output: { shape: "flat", rows: [], total: 0 },
+      output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     });
     props.rerender({ definition: terminalDefinition, output: flat });
     await waitFor(() =>

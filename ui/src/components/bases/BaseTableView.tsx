@@ -39,11 +39,11 @@ import { canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import type { EmbedScrollCap } from "./embed-query";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
-import { useIdentifiedRows } from "./ordered-list";
 import type {
   BaseMemberDraftField,
   BaseMemberDraftValue,
 } from "./member-draft";
+import { useIdentifiedRows } from "./ordered-list";
 
 const EMPTY_AGGREGATES: readonly Aggregate[] = [];
 
@@ -183,6 +183,39 @@ function aggregateLabel(
   const agg = view?.aggregates?.[index];
   if (!agg) return "";
   return agg.field ? `${agg.fn}(${agg.field})` : agg.fn;
+}
+
+/** One chip per aggregate value: `${label} ${formattedValue}`, keyed by the
+ * view's aggregate identity so it survives reorders. Shared by group headers
+ * and the flat-output Totals footer. */
+function AggregateChips({
+  values,
+  definition,
+  viewName,
+  rows,
+}: {
+  values: readonly unknown[];
+  definition: BaseDetailResponse;
+  viewName: string;
+  /** `displayAggregateRows` — stable per-index identity for the key. */
+  rows: readonly { id: string }[];
+}) {
+  return (
+    <>
+      {values.map((value, index) => {
+        const label = aggregateLabel(definition, viewName, index);
+        const aggregateRow = rows[index];
+        return (
+          <span
+            key={aggregateRow?.id ?? label}
+            className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
+          >
+            {label} {formatCellValue(value as CellValue)}
+          </span>
+        );
+      })}
+    </>
+  );
 }
 
 /** How near the end of the loaded rows counts as approaching it. */
@@ -1034,61 +1067,70 @@ export const BaseTableView = forwardRef<
         </p>
       ) : null}
       {shouldRenderGrid ? (
-        <ScrollViewport enabled={compact} onApproachEnd={approachEnd}>
-          {groups ? (
-            <div className="flex flex-col gap-4">
-              {groups.map((group) => {
-                const key =
-                  group.key == null
-                    ? "(empty)"
-                    : formatCellValue(group.key as CellValue);
-                const groupIdentity = `${evaluationIdentity}:group:${JSON.stringify(group.key)}`;
-                return (
-                  <section key={groupIdentity}>
-                    <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
-                      <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
-                        {key}
-                      </span>
-                      <span className="cl-mono text-[10px] text-ink-mute">
-                        {group.rows.length < group.total
-                          ? `${group.rows.length} of ${group.total} rows`
-                          : `${group.total} row${group.total === 1 ? "" : "s"}`}
-                      </span>
-                      {group.aggregates.map((value, aggregateIndex) => {
-                        const label = aggregateLabel(
-                          definition,
-                          activeView,
-                          aggregateIndex,
-                        );
-                        const aggregateRow =
-                          displayAggregateRows[aggregateIndex];
-                        return (
-                          <span
-                            key={aggregateRow?.id ?? label}
-                            className="cl-mono border border-rule px-1.5 py-[1px] text-[10px] text-ink-2"
-                          >
-                            {label} {formatCellValue(value as CellValue)}
-                          </span>
-                        );
-                      })}
-                    </header>
-                    {grid(
-                      group.rows,
-                      `${definition.name} — ${key}`,
-                      groupIdentity,
-                    )}
-                  </section>
-                );
-              })}
-            </div>
-          ) : (
-            grid(
-              output?.shape === "flat" ? output.rows : [],
-              `${definition.name} — ${activeView}`,
-              `${evaluationIdentity}:flat`,
-            )
-          )}
-        </ScrollViewport>
+        <>
+          <ScrollViewport enabled={compact} onApproachEnd={approachEnd}>
+            {groups ? (
+              <div className="flex flex-col gap-4">
+                {groups.map((group) => {
+                  const key =
+                    group.key == null
+                      ? "(empty)"
+                      : formatCellValue(group.key as CellValue);
+                  const groupIdentity = `${evaluationIdentity}:group:${JSON.stringify(group.key)}`;
+                  return (
+                    <section key={groupIdentity}>
+                      <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
+                        <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
+                          {key}
+                        </span>
+                        <span className="cl-mono text-[10px] text-ink-mute">
+                          {group.rows.length < group.total
+                            ? `${group.rows.length} of ${group.total} rows`
+                            : `${group.total} row${group.total === 1 ? "" : "s"}`}
+                        </span>
+                        <AggregateChips
+                          values={group.aggregates}
+                          definition={definition}
+                          viewName={activeView}
+                          rows={displayAggregateRows}
+                        />
+                      </header>
+                      {grid(
+                        group.rows,
+                        `${definition.name} — ${key}`,
+                        groupIdentity,
+                      )}
+                    </section>
+                  );
+                })}
+              </div>
+            ) : (
+              grid(
+                output?.shape === "flat" ? output.rows : [],
+                `${definition.name} — ${activeView}`,
+                `${evaluationIdentity}:flat`,
+              )
+            )}
+          </ScrollViewport>
+          {output?.shape === "flat" && (view?.aggregates?.length ?? 0) > 0 ? (
+            // biome-ignore lint/a11y/useSemanticElements: this is a footer-style totals summary, not a form — a <fieldset> would misrepresent it as a form-control group, so <footer role="group"> keeps footer semantics while role="group" gives it a legitimately nameable ARIA role.
+            <footer
+              role="group"
+              aria-label="Totals"
+              className="mt-1 flex flex-wrap items-baseline gap-2 border-t border-rule pt-1"
+            >
+              <span className="cl-mono text-[10px] uppercase tracking-[0.1em] text-ink-mute">
+                Totals
+              </span>
+              <AggregateChips
+                values={output.aggregates}
+                definition={definition}
+                viewName={activeView}
+                rows={displayAggregateRows}
+              />
+            </footer>
+          ) : null}
+        </>
       ) : null}
       {shouldRenderGrid && !readOnly && !memberDraftOpen && onAddMember ? (
         <Button

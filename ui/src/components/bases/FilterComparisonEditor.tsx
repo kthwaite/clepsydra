@@ -2,11 +2,7 @@ import { type Ref, useEffect, useId, useState } from "react";
 import type { Key } from "react-aria-components";
 import type { BaseFilter, FilterOp, PropertyType } from "#/api/bases";
 import { Header } from "#/components/ui/list-box";
-import {
-  Select,
-  SelectItem,
-  SelectSection,
-} from "#/components/ui/select";
+import { Select, SelectItem, SelectSection } from "#/components/ui/select";
 import { type DraftProperty, operatorsFor } from "./definition-model";
 import type { FilterDiagnosticScope } from "./filter-diagnostics";
 
@@ -35,6 +31,33 @@ export const CANONICAL_FILTER_FIELDS = SYSTEM_FIELDS.map(({ key }) => key);
 const VALUELESS_OPERATORS: Partial<Record<FilterOp, true>> = {
   is_empty: true,
   not_empty: true,
+  is_today: true,
+  is_this_week: true,
+  is_past_week: true,
+  is_next_week: true,
+  is_this_month: true,
+};
+
+const OPERATOR_LABELS: Record<FilterOp, string> = {
+  eq: "is",
+  ne: "is not",
+  lt: "<",
+  lte: "≤",
+  gt: ">",
+  gte: "≥",
+  contains: "contains",
+  not_contains: "does not contain",
+  starts_with: "starts with",
+  ends_with: "ends with",
+  in: "is any of",
+  links_to: "links to",
+  is_empty: "is empty",
+  not_empty: "is not empty",
+  is_today: "is today",
+  is_this_week: "is this week",
+  is_past_week: "is in the past week",
+  is_next_week: "is in the next week",
+  is_this_month: "is this month",
 };
 
 function comparison(field: string, op: FilterOp, value: unknown): BaseFilter {
@@ -55,7 +78,6 @@ const BOOLEAN_CHOICES: readonly SelectChoice[] = [
   { id: "true", label: "True" },
   { id: "false", label: "False" },
 ];
-
 
 interface ConditionalValueSelectProps {
   ariaLabel: string;
@@ -267,9 +289,7 @@ export function FilterComparisonEditor({
         <Select
           label="Field"
           aria-label={`Field for condition ${position}`}
-          triggerRef={(element) =>
-            diagnosticScope.register("field", element)
-          }
+          triggerRef={(element) => diagnosticScope.register("field", element)}
           value={filterValue.field}
           isInvalid={fieldInvalid}
           aria-describedby={
@@ -362,7 +382,7 @@ export function FilterComparisonEditor({
           {operatorOptions.map((operator) => (
             <SelectItem key={operator} id={operator}>
               {operators.includes(operator)
-                ? operator.replace("_", " ")
+                ? OPERATOR_LABELS[operator]
                 : `${operator} (unsupported)`}
             </SelectItem>
           ))}
@@ -415,7 +435,9 @@ export function FilterComparisonEditor({
                   comparison(
                     filterValue.field,
                     activeOperator,
-                    selectedValues.map((selectedValue) => selectedValue === "true"),
+                    selectedValues.map(
+                      (selectedValue) => selectedValue === "true",
+                    ),
                   ),
                 )
               }
@@ -444,20 +466,12 @@ export function FilterComparisonEditor({
               }
               onSingleChange={(selectedValue) =>
                 onChange(
-                  comparison(
-                    filterValue.field,
-                    activeOperator,
-                    selectedValue,
-                  ),
+                  comparison(filterValue.field, activeOperator, selectedValue),
                 )
               }
               onMultipleChange={(selectedValues) =>
                 onChange(
-                  comparison(
-                    filterValue.field,
-                    activeOperator,
-                    selectedValues,
-                  ),
+                  comparison(filterValue.field, activeOperator, selectedValues),
                 )
               }
             />
@@ -465,9 +479,7 @@ export function FilterComparisonEditor({
             <label className="flex min-w-0 flex-col">
               <span className={labelClass}>Value</span>
               <input
-                ref={(element) =>
-                  diagnosticScope.register("value", element)
-                }
+                ref={(element) => diagnosticScope.register("value", element)}
                 aria-label={`Value for condition ${position}`}
                 aria-invalid={valueInvalid || undefined}
                 aria-describedby={

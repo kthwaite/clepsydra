@@ -108,11 +108,16 @@ pub async fn run_query(
     Json(request): Json<QueryRequest>,
 ) -> Result<Json<QueryOutput>, ApiError> {
     let (spec, types) = request.into_query_parts();
+    let today = state.clock.now().date_naive();
 
     let mut output = state
         .index
         .with_index(move |index, _vault| {
-            let ctx = QueryContext { base: None, types };
+            let ctx = QueryContext {
+                base: None,
+                types,
+                today,
+            };
             evaluate(index.connection(), &spec, &ctx)
         })
         .await

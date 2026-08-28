@@ -68,7 +68,9 @@ describe("TagConditionEditor", () => {
       screen.getByRole("button", { name: /operator for condition 1/i }),
     ).toHaveTextContent(/has all of/i);
     // Tag chips carry the vault's `#` prefix, as in the Inscribe modal.
-    const values = screen.getByRole("grid", { name: /values for condition 1/i });
+    const values = screen.getByRole("grid", {
+      name: /values for condition 1/i,
+    });
     expect(within(values).getByText("#beer")).toBeVisible();
     expect(within(values).getByText("#brewing")).toBeVisible();
   });
@@ -118,7 +120,9 @@ describe("TagConditionEditor", () => {
       "bre",
     );
 
-    expect(await screen.findByRole("option", { name: /brewing/ })).toBeVisible();
+    expect(
+      await screen.findByRole("option", { name: /brewing/ }),
+    ).toBeVisible();
   });
 
   it("switches the condition between tags and aliases", async () => {
@@ -170,12 +174,14 @@ describe("TagConditionEditor", () => {
     });
 
     await user.click(
-      screen.getByRole("button", { name: /edit condition 1 as an advanced condition/i }),
+      screen.getByRole("button", {
+        name: /edit condition 1 as an advanced condition/i,
+      }),
     );
 
     expect(
       screen.getByRole("button", { name: /operator for condition 1/i }),
-    ).toHaveTextContent(/in/i);
+    ).toHaveTextContent(/is any of/i);
     expect(onChange).not.toHaveBeenCalled();
   });
 

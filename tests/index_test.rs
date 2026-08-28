@@ -1496,7 +1496,7 @@ fn computed_tags_are_searchable_and_project_as_effective_tags() {
         ..Default::default()
     };
 
-    let QueryOutput::Flat { rows, total } =
+    let QueryOutput::Flat { rows, total, .. } =
         evaluate(index.connection(), &spec, &QueryContext::default()).unwrap()
     else {
         panic!("tag search should return flat query rows");

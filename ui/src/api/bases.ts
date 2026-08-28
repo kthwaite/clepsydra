@@ -291,7 +291,12 @@ function mergeWindows(
   }
   return {
     ...newest,
-    output: { shape: "flat", rows, total: newest.output.total },
+    output: {
+      shape: "flat",
+      rows,
+      total: newest.output.total,
+      aggregates: newest.output.aggregates,
+    },
   };
 }
 

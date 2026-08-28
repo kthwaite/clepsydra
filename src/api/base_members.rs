@@ -241,8 +241,13 @@ async fn create_base_member_with_ids(
             ))
         })?;
     validate_create_embed_filter(&stored.definition, request.embed_filter.as_ref())?;
-    let capability =
-        composed_member_capability(&stored.definition, &view, request.embed_filter.as_ref());
+    let today = state.clock.now().date_naive();
+    let capability = composed_member_capability(
+        &stored.definition,
+        &view,
+        request.embed_filter.as_ref(),
+        today,
+    );
     if !capability.enabled {
         return Err(validation_error(capability.blockers));
     }
@@ -351,6 +356,7 @@ async fn create_base_member_with_ids(
                 journal_date: None,
             },
             &link_targets,
+            today,
         )
         .map_err(validation_error)?;
 
