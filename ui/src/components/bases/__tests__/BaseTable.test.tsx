@@ -146,6 +146,10 @@ vi.mock("#/api/bases", async (importOriginal) => {
       mutateAsync: mocks.createMember,
       isPending: false,
     }),
+    useUpdateBase: () => ({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    }),
     usePropertyCommit: () => mocks.commit,
   };
 });

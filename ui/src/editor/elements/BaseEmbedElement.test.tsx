@@ -13,6 +13,7 @@ import type {
   BaseTableControllerModel,
   BaseTableControllerOptions,
 } from "#/components/bases/useBaseTableController";
+import { EMPTY_OVERRIDES } from "#/components/bases/view-overrides";
 import {
   BaseEmbedEditingProvider,
   useBaseEmbedEditingController,
@@ -195,6 +196,16 @@ function controllerModel(
     onMemberEdit: vi.fn(),
     focusCreatedId: undefined,
     onCreatedRowFocused: vi.fn(),
+    overrides: EMPTY_OVERRIDES,
+    onAddQuickFilter: vi.fn(),
+    onRemoveQuickFilter: vi.fn(),
+    onSetGroup: vi.fn(),
+    onHideColumn: vi.fn(),
+    onShowHiddenColumns: vi.fn(),
+    onClearOverrides: vi.fn(),
+    onSaveOverrides: vi.fn(),
+    onReloadDefinition: vi.fn(),
+    overridesSave: { phase: "idle" },
     rowWindow: {
       total: 0,
       loaded: 0,
