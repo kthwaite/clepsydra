@@ -1348,7 +1348,7 @@ export function Folio({ tabId, path }: FolioProps) {
             <button
               type="button"
               aria-expanded={attachmentsOpen}
-              className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+              className="cl-serif flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
               onClick={() => setAttachmentsOpen((open) => !open)}
             >
               <span>Manage attachments</span>
@@ -1390,7 +1390,7 @@ export function Folio({ tabId, path }: FolioProps) {
             <button
               type="button"
               aria-expanded={organizationOpen}
-              className="cl-mono flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
+              className="cl-serif flex w-full cursor-pointer items-center justify-between text-[10px] uppercase tracking-[0.1em] text-ink-mute hover:text-accent"
               onClick={() => setOrganizationOpen((open) => !open)}
             >
               <span>Manage paths</span>
@@ -1788,7 +1788,7 @@ function ReadOnlyPageHeader({
       className="mt-4 pb-4 max-md:flex max-md:flex-col max-md:gap-3"
     >
       {encrypted ? (
-        <span className="cl-mono mb-2 block text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+        <span className="cl-serif mb-2 block text-[9px] uppercase tracking-[0.14em] text-ink-mute">
           encrypted
         </span>
       ) : null}
@@ -1806,7 +1806,7 @@ function ReadOnlyPageHeader({
         <Link
           to="/archive/$"
           params={{ _splat: path }}
-          className="cl-mono mt-2 inline-block text-[10px] uppercase tracking-[0.14em] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
+          className="cl-serif mt-2 inline-block text-[10px] uppercase tracking-[0.14em] text-accent underline decoration-accent-deep underline-offset-4 hover:text-ink focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-accent"
         >
           View archived snapshot
         </Link>
@@ -1939,7 +1939,7 @@ function ProtectedBodyNotice({ onUnlock }: { onUnlock: () => void }) {
         onPress={async () => {
           setBusy(true);
           try {
-            await onUnlock();
+            onUnlock();
           } finally {
             setBusy(false);
           }
@@ -1972,7 +1972,7 @@ function RailHeader({
 }) {
   return (
     <div className="sticky top-0 z-10 flex items-center justify-between border-b border-rule bg-paper px-3 py-1">
-      <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+      <span className="cl-serif text-[9px] uppercase tracking-[0.18em] text-ink-mute">
         {label}
       </span>
       <button
@@ -2043,7 +2043,7 @@ function Block({
 }) {
   return (
     <div className="border-b border-rule-soft px-3 py-3">
-      <div className="cl-mono mb-1.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
+      <div className="cl-serif mb-1.5 text-[9px] uppercase tracking-[0.18em] text-ink-mute">
         {label}
       </div>
       {children}
@@ -2053,7 +2053,7 @@ function Block({
 
 function KV({ k, v }: { k: string; v: React.ReactNode }) {
   return (
-    <div className="cl-mono grid grid-cols-[64px_1fr] items-center gap-2 py-[1px] text-[11px]">
+    <div className="cl-serif grid grid-cols-[64px_1fr] items-center gap-2 py-[1px] text-[11px]">
       <span className="text-[9px] uppercase tracking-[0.12em] text-ink-mute">
         {k}
       </span>
