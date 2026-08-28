@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { Kind } from "#/lib/kind";
 import {
   ASSIGNABLE_KINDS,
   KIND_META,
@@ -10,7 +11,6 @@ import {
   resolveKindFromPath,
   sortKindsByLabel,
 } from "#/lib/kind";
-import type { Kind } from "#/lib/kind";
 
 describe("resolveKindFromPath", () => {
   it("maps known top-level folders to kinds (case-insensitive)", () => {
@@ -36,14 +36,21 @@ describe("resolveKindFromPath", () => {
     expect(resolveKindFromPath("meetings/20260827.standup.ab12cd34.md")).toBe(
       "MEETING",
     );
+    // Legacy 1:1 folders infer MEETING: a 1:1 is a MEETING tagged `1:1`
+    // (mirrors Kind::from_folder in src/vault/kind.rs).
     for (const folder of [
       "one-on-ones",
       "one-on-one",
+      "one-to-ones",
+      "one-to-one",
       "1-1s",
+      "1-1",
+      "1on1s",
       "1on1",
       "121s",
+      "121",
     ]) {
-      expect(resolveKindFromPath(`${folder}/x.md`)).toBe("ONE_ON_ONE");
+      expect(resolveKindFromPath(`${folder}/x.md`)).toBe("MEETING");
     }
   });
 
@@ -123,7 +130,6 @@ describe("assignable kinds", () => {
 describe("sortKindsByLabel", () => {
   it("orders kinds alphabetically by display label, not token", () => {
     expect(sortKindsByLabel(ASSIGNABLE_KINDS)).toEqual([
-      "ONE_ON_ONE", // "1:1" — digits sort before letters
       "AI_CONVERSATION",
       "AI_JOURNAL",
       "ARCHIVE",
@@ -159,14 +165,14 @@ describe("KIND_META", () => {
     expect(KINDS).toContain("RECIPE");
   });
 
-  it("includes meetings and 1:1s in the runtime kind list", () => {
+  it("includes meetings in the runtime kind list", () => {
     expect(KINDS).toContain("MEETING");
-    expect(KINDS).toContain("ONE_ON_ONE");
+    expect(kindLabel("MEETING")).toBe("MEETING");
   });
 
-  it("labels a one-on-one the way it is spoken", () => {
-    expect(kindLabel("ONE_ON_ONE")).toBe("1:1");
-    expect(kindLabel("MEETING")).toBe("MEETING");
+  it("has no 1:1 kind — a 1:1 is a MEETING tagged 1:1", () => {
+    expect(KINDS as readonly string[]).not.toContain("ONE_ON_ONE");
+    expect(Object.keys(KIND_META)).not.toContain("ONE_ON_ONE");
   });
 
   it("uses the exact AI conversation label", () => {

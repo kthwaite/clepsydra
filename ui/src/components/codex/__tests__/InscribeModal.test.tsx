@@ -51,10 +51,7 @@ vi.mock("#/components/bases/BaseMemberIntake", () => ({
         <button
           type="button"
           onClick={() =>
-            props.onCreated(
-              "books/the-dispossessed.md",
-              "The Dispossessed",
-            )
+            props.onCreated("books/the-dispossessed.md", "The Dispossessed")
           }
         >
           Complete member intake
@@ -75,9 +72,7 @@ describe("InscribeModal", () => {
 
   it("offers kind + project controls instead of a designation textbox", () => {
     render(<InscribeModal />);
-    expect(
-      screen.getByRole("combobox", { name: "Kind" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Kind" })).toBeInTheDocument();
     expect(
       screen.getByRole("combobox", { name: "Project" }),
     ).toBeInTheDocument();
@@ -93,7 +88,9 @@ describe("InscribeModal", () => {
     expect(screen.getByRole("textbox", { name: "Title" })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: /Base$/ }));
-    await user.click(await screen.findByRole("option", { name: "Reading Log" }));
+    await user.click(
+      await screen.findByRole("option", { name: "Reading Log" }),
+    );
 
     expect(screen.getByTestId("member-intake")).toHaveTextContent("reading");
     // The page-shaped fields step aside; the member draft owns the form.
@@ -107,7 +104,9 @@ describe("InscribeModal", () => {
     const user = userEvent.setup();
     const view = render(<InscribeModal />);
     await user.click(screen.getByRole("button", { name: /Base$/ }));
-    await user.click(await screen.findByRole("option", { name: "Reading Log" }));
+    await user.click(
+      await screen.findByRole("option", { name: "Reading Log" }),
+    );
 
     await user.click(
       screen.getByRole("button", { name: "Complete member intake" }),
@@ -232,6 +231,56 @@ describe("InscribeModal", () => {
     await user.click(screen.getByRole("button", { name: /commit to archive/ }));
     expect(createMutate).not.toHaveBeenCalled();
     expect(screen.getByText(/title is required/)).toBeInTheDocument();
+  });
+
+  it("offers a 1:1 checkbox only for meetings", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+    expect(screen.queryByRole("checkbox", { name: "1:1" })).toBeNull();
+
+    await user.click(screen.getByRole("combobox", { name: "Kind" }));
+    await user.click(screen.getByRole("option", { name: "MEETING" }));
+    expect(screen.getByRole("checkbox", { name: "1:1" })).not.toBeChecked();
+
+    // The kind field filters on its text; clear it to reach NOTE again.
+    await user.clear(screen.getByRole("combobox", { name: "Kind" }));
+    await user.type(screen.getByRole("combobox", { name: "Kind" }), "no");
+    await user.click(await screen.findByRole("option", { name: "NOTE" }));
+    expect(screen.queryByRole("checkbox", { name: "1:1" })).toBeNull();
+  });
+
+  it("checking 1:1 adds the tag; unchecking removes it", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+    await user.click(screen.getByRole("combobox", { name: "Kind" }));
+    await user.click(screen.getByRole("option", { name: "MEETING" }));
+
+    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
+    expect(screen.getByRole("checkbox", { name: "1:1" })).toBeChecked();
+    expect(screen.getByText("#1:1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
+    expect(screen.getByRole("checkbox", { name: "1:1" })).not.toBeChecked();
+    expect(screen.queryByText("#1:1")).toBeNull();
+  });
+
+  it("ships the 1:1 tag with the meeting's create request, once", async () => {
+    const user = userEvent.setup();
+    render(<InscribeModal />);
+    await user.click(screen.getByRole("combobox", { name: "Kind" }));
+    await user.click(screen.getByRole("option", { name: "MEETING" }));
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Ada");
+    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
+    // Ticking twice more toggles off and on; the tag must not duplicate.
+    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
+    await user.click(screen.getByRole("checkbox", { name: "1:1" }));
+
+    await user.click(screen.getByRole("button", { name: /commit to archive/ }));
+
+    const [vars] = createMutate.mock.calls[0];
+    expect(vars.body.kind).toBe("MEETING");
+    expect(vars.body.tags).toEqual(["1:1"]);
+    expect(vars.params.path.path).toMatch(/^meetings\//);
   });
 
   it("sends committed tag chips with the create request", async () => {

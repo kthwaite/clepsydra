@@ -1,15 +1,48 @@
 import { describe, expect, it } from "vitest";
 import { KINDS } from "#/lib/kind";
-import { localIso, readOccurredAt, recordsOccurrence } from "#/lib/meeting";
+import {
+  isOneOnOne,
+  localIso,
+  ONE_ON_ONE_TAG,
+  readOccurredAt,
+  recordsOccurrence,
+  withOneOnOne,
+} from "#/lib/meeting";
 
 describe("recordsOccurrence", () => {
-  it("covers meetings and 1:1s and nothing else", () => {
+  it("covers meetings and nothing else", () => {
     expect(recordsOccurrence("MEETING")).toBe(true);
-    expect(recordsOccurrence("ONE_ON_ONE")).toBe(true);
     for (const kind of KINDS) {
-      if (kind === "MEETING" || kind === "ONE_ON_ONE") continue;
+      if (kind === "MEETING") continue;
       expect(recordsOccurrence(kind)).toBe(false);
     }
+  });
+});
+
+describe("the 1:1 tag", () => {
+  it("is spelled exactly 1:1", () => {
+    expect(ONE_ON_ONE_TAG).toBe("1:1");
+  });
+
+  it("reads the tag off a tag list", () => {
+    expect(isOneOnOne(["1:1"])).toBe(true);
+    expect(isOneOnOne(["weekly", "1:1"])).toBe(true);
+    expect(isOneOnOne(["weekly"])).toBe(false);
+    expect(isOneOnOne([])).toBe(false);
+  });
+
+  it("appends the tag once and removes every copy", () => {
+    expect(withOneOnOne(["weekly"], true)).toEqual(["weekly", "1:1"]);
+    expect(withOneOnOne(["weekly", "1:1"], true)).toEqual(["weekly", "1:1"]);
+    expect(withOneOnOne(["1:1", "weekly", "1:1"], false)).toEqual(["weekly"]);
+    expect(withOneOnOne([], false)).toEqual([]);
+  });
+
+  it("returns a new array and leaves the input intact", () => {
+    const input = ["weekly"];
+    const next = withOneOnOne(input, true);
+    expect(next).not.toBe(input);
+    expect(input).toEqual(["weekly"]);
   });
 });
 

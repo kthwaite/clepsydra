@@ -1313,7 +1313,13 @@ export function Folio({ tabId, path }: FolioProps) {
         const Extras = presentation.metaExtras;
         return Extras ? (
           <Block label={presentation.metaExtrasLabel ?? "Details"}>
-            <Extras path={path} tabId={tabId} isDraft={editor.isDraft} />
+            <Extras
+              path={path}
+              tabId={tabId}
+              isDraft={editor.isDraft}
+              tags={editableTags}
+              onTagsChange={editor.setTags}
+            />
           </Block>
         ) : null;
       })()}

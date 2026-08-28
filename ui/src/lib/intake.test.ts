@@ -78,13 +78,14 @@ describe("intakePath", () => {
     expect(KIND_FOLDER.RECIPE).toBe("recipes");
   });
 
-  it("projects meetings and 1:1s into their own folders", () => {
+  it("projects meetings into the meetings folder", () => {
     expect(KIND_FOLDER.MEETING).toBe("meetings");
-    expect(KIND_FOLDER.ONE_ON_ONE).toBe("one-on-ones");
+    // A 1:1 is a MEETING tagged `1:1`; there is no folder of its own.
+    expect(Object.keys(KIND_FOLDER)).not.toContain("ONE_ON_ONE");
   });
 
   it("has a folder for every kind", () => {
-    // Hyphens are allowed because `one-on-ones` has one; mirrors
+    // Hyphens are allowed because `ai-journals` has one; mirrors
     // `Kind::canonical_folder` in src/vault/kind.rs.
     for (const k of KINDS) {
       expect(KIND_FOLDER[k]).toMatch(/^[a-z][a-z-]*[a-z]$/);
