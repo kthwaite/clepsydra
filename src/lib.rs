@@ -886,6 +886,15 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
     Ok(watcher)
 }
 
+/// Resolve config + vault root the same way the server does and open the
+/// vault — no index. For CLI commands that only need the filesystem.
+pub fn open_vault() -> Result<Vault, Box<dyn std::error::Error>> {
+    let cwd = std::env::current_dir()?;
+    let (settings, config_path) = Settings::load(&cwd)?;
+    let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+    Vault::open(&vault_root).map_err(|e| explain_startup_error(e, &vault_root))
+}
+
 /// Resolve config + vault root the same way the server does, then open the vault
 /// and build a fully-derived [`VaultIndex`] (full deriver chain, links resolved).
 ///
@@ -894,11 +903,7 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
 /// mirroring the vault/index portion of [`build_app_state`] without spawning the
 /// index handle, watcher, or HTTP server.
 pub fn open_vault_and_index() -> Result<(Vault, VaultIndex), Box<dyn std::error::Error>> {
-    let cwd = std::env::current_dir()?;
-    let (settings, config_path) = Settings::load(&cwd)?;
-    let vault_root = resolve_vault_root(&settings.vault.root, &config_path, &cwd);
-
-    let vault = Vault::open(&vault_root).map_err(|e| explain_startup_error(e, &vault_root))?;
+    let vault = open_vault()?;
 
     let db_path = vault.root().join(INDEX_DB_RELATIVE);
     let mut index = VaultIndex::open(&db_path)?;

@@ -348,6 +348,25 @@ Notes:
   `max_request_size_mb * 4 / 3` MB. This keeps the 400 from the resource-size
   check firing before a bare 413 would.
 
+### `[sync]` settings
+
+| Key | Type | Default |
+|---|---:|---|
+| `autocommit_debounce_secs` | integer | `300` |
+| `interval_secs` | integer | `0` |
+| `branch` | string | `main` |
+| `author_name` | string | _(seeded by `clep sync init`)_ |
+| `author_email` | string | _(seeded by `clep sync init`)_ |
+
+Notes:
+
+- `clep sync init` writes this section; the file syncs with the vault, so
+  every device shares one author identity. Each commit also carries a
+  `Device: <hostname>` trailer.
+- `autocommit_debounce_secs` is how long the server waits after the last
+  change before committing. `interval_secs = 0` means no scheduled full
+  sync — sync runs at `serve` start, on `clep sync`, and on shutdown.
+
 ### Encrypted-note files and lock behavior
 
 Encrypted-note key material is stored under the vault's excluded internal
