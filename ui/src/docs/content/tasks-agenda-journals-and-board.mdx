@@ -155,10 +155,11 @@ The Scope rail groups Tasks by Project and Cycle, with Backlog for Tasks not ass
 Every Project page appears in the rail; set `board = false` in a Project
 page's frontmatter to hide it. Pages that declare a `project` slug share one
 row per slug, and `board = true` breaks the tie when several pages declare the
-same slug. A Task's Project must name a slug that a Project page declares; the
-Board, the MCP tools, and the API refuse an unknown slug. Give the Project
-page its `project` slug first (for example with **Assign** or `vault_assign`),
-then file Tasks under it.
+same slug. Every page's Project — a Task's included — must name a slug that a
+Project page declares; the Board, the MCP tools, and the API refuse an unknown
+slug. Only a Project page may declare a new slug: give it its `project` slug
+first (for example with **Assign** or `vault_assign`), then file Tasks and
+other pages under it.
 Switching views does not change Task pages. Dragging a card or editing its
 panel updates the corresponding Task page metadata.
 

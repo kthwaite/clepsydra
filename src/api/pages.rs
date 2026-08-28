@@ -16,6 +16,7 @@ use utoipa::ToSchema;
 use super::AppState;
 use super::error::ApiError;
 use super::pagination::PaginatedResponse;
+use super::projects::{ensure_project_exists, project_exists, unknown_project};
 use crate::api::events::SyncNotification;
 use crate::vault::attendance;
 use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
@@ -819,6 +820,13 @@ pub async fn create_page(
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     meeting::validate(resolved_kind, &meta)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    // A page's project must be one some PROJECT page declares — unless this
+    // page is itself a PROJECT, in which case it is the declaration.
+    if let Some(project) = &meta.project
+        && resolved_kind != Kind::Project
+    {
+        ensure_project_exists(&state, project).await?;
+    }
 
     let page_body = body.body.unwrap_or_default();
     // Scaffolds follow the *declared* kind, as the recipe scaffold always has:
@@ -1544,6 +1552,14 @@ pub async fn assign_page(
     } else {
         ProjectAssignment::Unchanged
     };
+    // The effective kind is the requested one if any, else the page's own,
+    // resolved with the path; a PROJECT page may declare a new slug.
+    if let ProjectAssignment::Set(slug) = &project {
+        let (effective_kind, _) = resolve(vp.as_str(), page.meta.kind);
+        if effective_kind != Kind::Project {
+            ensure_project_exists(&state, slug).await?;
+        }
+    }
     page.meta.updated_at = Some(Utc::now());
 
     let notify = |notification: MutationNotification| {
@@ -1619,11 +1635,14 @@ fn collect_missing_assignment_directories(
     Ok(())
 }
 
+/// `project_declared` says whether some PROJECT page declares `body.project`;
+/// every non-PROJECT path needs that, and one failure fails the whole batch.
 fn plan_bulk_assignment(
     state: &AppState,
     body: &BulkAssignRequest,
     paths: &[VaultPath],
     indexed_paths: &BTreeSet<String>,
+    project_declared: bool,
     now: chrono::DateTime<Utc>,
 ) -> Result<BatchMutationCommand, ApiError> {
     let assigned_kind = body
@@ -1647,12 +1666,18 @@ fn plan_bulk_assignment(
         if let Some(kind) = assigned_kind {
             validate_kind_assignment(&path, &meta, kind)?;
         }
-        if body.project.is_some() && !body.clear_project {
+        if let Some(project) = &body.project
+            && !body.clear_project
+        {
             let mut effective = meta.clone();
             if let Some(kind) = assigned_kind {
                 effective.kind = Some(kind);
             }
             validate_project_assignment(&path, &effective)?;
+            let (effective_kind, _) = resolve(path.as_str(), effective.kind);
+            if effective_kind != Kind::Project && !project_declared {
+                return Err(unknown_project(project));
+            }
         }
         pages.push((path, expected, meta, page_body));
     }
@@ -1827,11 +1852,16 @@ pub async fn assign_bulk(
         }));
     }
 
+    let project_declared = match &body.project {
+        Some(slug) if !body.clear_project => project_exists(&state, slug).await?,
+        _ => false,
+    };
     let command = plan_bulk_assignment(
         &state,
         &body,
         &normalized_paths,
         &indexed_paths,
+        project_declared,
         state.clock.now(),
     )?;
     let moved = command
@@ -2243,6 +2273,12 @@ Some quoted text.\n";
     #[tokio::test]
     async fn bulk_assign_moves_all_and_reports() {
         let (state, _tmp) = make_state().await;
+        seed_and_index(
+            &state,
+            "projects/clep.md",
+            "---\nid: 0190f8a0-0000-7000-8000-00000000001e\ntype: PROJECT\nproject: clep\n---\nhub\n",
+        )
+        .await;
         seed_and_index(
             &state,
             "notes/a.md",

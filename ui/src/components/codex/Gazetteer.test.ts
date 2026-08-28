@@ -73,6 +73,7 @@ vi.mock("#/hooks/useOpenTab", () => ({
 }));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => ["atlas", "clepsydra"],
+  useProjectValues: () => ["atlas", "clepsydra"],
 }));
 
 function GazetteerNavigationHarness() {
@@ -429,11 +430,12 @@ describe("Gazetteer controller", () => {
       "Atlas{Enter}",
     );
 
+    // A strict picker commits the declared slug, whatever the draft's case.
     expect(bulkMutateMock).toHaveBeenCalledWith(
       {
         body: {
           paths: ["notes/alpha.md"],
-          project: "Atlas",
+          project: "atlas",
         },
       },
       expect.objectContaining({ onSuccess: expect.any(Function) }),

@@ -24,9 +24,10 @@ use crate::vault::path::VaultPath;
 
 use super::read::build_board_task_dto;
 use super::{
-    BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, ensure_project_exists,
-    mint_unique_code, path_stem, validate_priority, validate_status,
+    BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, mint_unique_code,
+    path_stem, validate_priority, validate_status,
 };
+use crate::api::projects::ensure_project_exists;
 
 // ---------------------------------------------------------------------------
 // POST /board/tasks

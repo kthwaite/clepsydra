@@ -3773,6 +3773,7 @@ Destination body.
         ("notes/source.md", source),
         ("notes/occupied/source.md", destination),
     ]);
+    support::seed_project(&server, "occupied").await;
 
     let response = server
         .post("/api/vault/pages-assign/notes/source.md")
@@ -3947,6 +3948,7 @@ type: NOTE
 Source body.
 ";
     let (server, tmp) = setup_server_with_files(&[("notes/source.md", source)]);
+    support::seed_project(&server, "project-a").await;
     let original = fs::read_to_string(tmp.path().join("vault/notes/source.md")).unwrap();
 
     let unchanged = server
@@ -6029,6 +6031,9 @@ async fn attachment_upload_with_long_valid_basename_uses_bounded_temporary_name(
 #[tokio::test]
 async fn search_pages() {
     let (server, _tmp) = setup_server();
+    for slug in ["languages", "cellar", "brewery", "laboratory"] {
+        support::seed_project(&server, slug).await;
+    }
 
     for (path, page) in [
         (
@@ -7118,4 +7123,199 @@ async fn create_non_recipe_page_without_body_stays_empty() {
     let res = server.get("/api/vault/pages/notes/plain.md").await;
     let body: serde_json::Value = res.json();
     assert_eq!(body["body"], "");
+}
+
+// ---------------------------------------------------------------------------
+// `project` must name a slug some PROJECT page declares
+// ---------------------------------------------------------------------------
+
+fn assert_unknown_project(error: &serde_json::Value, slug: &str) {
+    assert!(
+        error["error"]
+            .as_str()
+            .is_some_and(|message| message.contains(&format!("unknown project: {slug}"))),
+        "error should name the unknown project: {error}"
+    );
+}
+
+#[tokio::test]
+async fn create_page_rejects_a_project_no_project_page_declares() {
+    let (server, tmp) = setup_server();
+
+    let res = server
+        .post("/api/vault/pages/notes/orphan.md")
+        .json(&serde_json::json!({ "title": "Orphan", "kind": "NOTE", "project": "ghost" }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert_unknown_project(&res.json(), "ghost");
+    assert!(
+        !tmp.path().join("vault/notes/ghost").exists()
+            && !tmp.path().join("vault/notes/orphan.md").exists(),
+        "a rejected create must write nothing"
+    );
+}
+
+#[tokio::test]
+async fn create_page_accepts_a_project_a_project_page_declares() {
+    let (server, tmp) = setup_server();
+    support::seed_project(&server, "atlas").await;
+
+    let res = server
+        .post("/api/vault/pages/notes/filed.md")
+        .json(&serde_json::json!({ "title": "Filed", "kind": "NOTE", "project": "atlas" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["meta"]["project"], "atlas", "{body}");
+    assert_eq!(body["project"], "atlas", "{body}");
+    // An explicit-path create keeps the path it was given; projection under
+    // `notes/atlas/` is the caller's job (the MCP tool derives it).
+    assert_eq!(body["path"], "notes/filed.md", "{body}");
+    assert!(
+        fs::read_to_string(tmp.path().join("vault/notes/filed.md"))
+            .unwrap()
+            .contains("atlas")
+    );
+}
+
+#[tokio::test]
+async fn a_project_page_may_declare_its_own_slug_on_create() {
+    let (server, _tmp) = setup_server();
+
+    // Declared PROJECT kind: the page defines the project.
+    let res = server
+        .post("/api/vault/pages/projects/fresh/hub.md")
+        .json(&serde_json::json!({ "title": "Fresh", "kind": "PROJECT", "project": "fresh" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    assert_eq!(res.json::<serde_json::Value>()["meta"]["project"], "fresh");
+
+    // Kind inferred from the `projects/` folder, none declared.
+    let res = server
+        .post("/api/vault/pages/projects/inferred/hub.md")
+        .json(&serde_json::json!({ "title": "Inferred", "project": "inferred" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+    assert_eq!(
+        res.json::<serde_json::Value>()["meta"]["project"],
+        "inferred"
+    );
+}
+
+#[tokio::test]
+async fn assign_rejects_an_undeclared_project() {
+    let (server, tmp) = setup_server();
+    server
+        .post("/api/vault/pages/notes/loose.md")
+        .json(&serde_json::json!({ "title": "Loose", "kind": "NOTE" }))
+        .await
+        .assert_status(StatusCode::CREATED);
+    let before = fs::read_to_string(tmp.path().join("vault/notes/loose.md")).unwrap();
+
+    let res = server
+        .post("/api/vault/pages-assign/notes/loose.md")
+        .json(&serde_json::json!({ "project": "ghost" }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert_unknown_project(&res.json(), "ghost");
+    assert_eq!(
+        fs::read_to_string(tmp.path().join("vault/notes/loose.md")).unwrap(),
+        before,
+        "a rejected assignment must not touch the page"
+    );
+    assert!(!tmp.path().join("vault/notes/ghost").exists());
+}
+
+#[tokio::test]
+async fn assign_declaring_project_kind_and_a_new_slug_together_succeeds() {
+    let (server, tmp) = setup_server();
+    server
+        .post("/api/vault/pages/notes/becoming.md")
+        .json(&serde_json::json!({ "title": "Becoming", "kind": "NOTE" }))
+        .await
+        .assert_status(StatusCode::CREATED);
+
+    let res = server
+        .post("/api/vault/pages-assign/notes/becoming.md")
+        .json(&serde_json::json!({ "kind": "PROJECT", "project": "brand-new" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["kind"], "PROJECT", "{body}");
+    assert_eq!(body["project"], "brand-new", "{body}");
+    assert_eq!(body["path"], "projects/brand-new/becoming.md", "{body}");
+    assert!(
+        tmp.path()
+            .join("vault/projects/brand-new/becoming.md")
+            .exists()
+    );
+
+    // The slug is declared now, so an ordinary page may name it.
+    let res = server
+        .post("/api/vault/pages/notes/follower.md")
+        .json(&serde_json::json!({ "title": "Follower", "kind": "NOTE", "project": "brand-new" }))
+        .await;
+    res.assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn assign_bulk_rejects_an_undeclared_project_and_changes_nothing() {
+    let (server, tmp) = setup_server();
+    for (path, kind) in [("notes/plain.md", "NOTE"), ("projects/hub.md", "PROJECT")] {
+        server
+            .post(&format!("/api/vault/pages/{path}"))
+            .json(&serde_json::json!({ "title": path, "kind": kind }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+    let vault_root = tmp.path().join("vault");
+    let note_before = fs::read_to_string(vault_root.join("notes/plain.md")).unwrap();
+    let hub_before = fs::read_to_string(vault_root.join("projects/hub.md")).unwrap();
+
+    let res = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["projects/hub.md", "notes/plain.md"],
+            "project": "ghost"
+        }))
+        .await;
+    res.assert_status(StatusCode::BAD_REQUEST);
+    assert_unknown_project(&res.json(), "ghost");
+
+    assert_eq!(
+        fs::read_to_string(vault_root.join("notes/plain.md")).unwrap(),
+        note_before,
+        "the NOTE must be untouched"
+    );
+    assert_eq!(
+        fs::read_to_string(vault_root.join("projects/hub.md")).unwrap(),
+        hub_before,
+        "the PROJECT page must be untouched even though it alone would have been allowed"
+    );
+    assert!(!vault_root.join("notes/ghost").exists());
+    assert!(!vault_root.join("projects/ghost").exists());
+}
+
+#[tokio::test]
+async fn assign_bulk_of_project_pages_may_declare_a_new_slug() {
+    let (server, tmp) = setup_server();
+    for path in ["projects/hub.md", "projects/second.md"] {
+        server
+            .post(&format!("/api/vault/pages/{path}"))
+            .json(&serde_json::json!({ "title": path, "kind": "PROJECT" }))
+            .await
+            .assert_status(StatusCode::CREATED);
+    }
+
+    let res = server
+        .post("/api/vault/pages-assign-bulk")
+        .json(&serde_json::json!({
+            "paths": ["projects/hub.md", "projects/second.md"],
+            "project": "minted"
+        }))
+        .await;
+    res.assert_status_ok();
+    let vault_root = tmp.path().join("vault");
+    assert!(vault_root.join("projects/minted/hub.md").exists());
+    assert!(vault_root.join("projects/minted/second.md").exists());
 }

@@ -224,7 +224,9 @@ pub struct CreatePageParams {
     pub tags: Option<Vec<String>>,
     /// Alternative names the page can be wikilinked by.
     pub aliases: Option<Vec<String>>,
-    /// Project to assign the page to.
+    /// Project to assign the page to. Must be a slug some PROJECT page
+    /// declares; a page of kind PROJECT may declare any well-formed slug (that
+    /// is what creates a project). Anything else is refused with 400.
     pub project: Option<String>,
 }
 
@@ -290,7 +292,10 @@ pub struct AssignParams {
     /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING,
     /// AI_CONVERSATION, AI_JOURNAL).
     pub kind: Option<String>,
-    /// Project to declare in frontmatter.
+    /// Project to declare in frontmatter. Must be a slug some PROJECT page
+    /// declares; a page whose effective kind is PROJECT may declare any
+    /// well-formed slug (that is what creates a project). Anything else is
+    /// refused with 400, and a bulk call then moves nothing.
     pub project: Option<String>,
     /// Clear the project instead (takes precedence over 'project').
     pub clear_project: Option<bool>,
@@ -2041,7 +2046,21 @@ mod tests {
         serde_json::from_str(&result.expect("tool call should succeed")).unwrap()
     }
 
+    /// Declare `slug` through a PROJECT page so ordinary pages may name it.
+    async fn seed_project(server: &VaultMcpServer, slug: &str) {
+        server
+            .client
+            .post_json(
+                &format!("/api/vault/pages/projects/{slug}/{slug}.md"),
+                &json!({ "title": slug, "kind": "PROJECT", "project": slug }),
+            )
+            .await
+            .expect("project page should be created");
+    }
+
     async fn seed_structured_search_pages(server: &VaultMcpServer) {
+        seed_project(server, "atlas").await;
+        seed_project(server, "cellar").await;
         for (path, page) in [
             (
                 "/api/vault/pages/notes/gamma.md",
@@ -2374,6 +2393,7 @@ mod tests {
     #[tokio::test]
     async fn create_page_with_project_files_under_the_project_subfolder() {
         let (server, _tmp) = serve_seeded_vault().await;
+        seed_project(&server, "skunkworks").await;
         let value = parse(
             server
                 .vault_create_page(Parameters(CreatePageParams {
@@ -2481,6 +2501,7 @@ mod tests {
     #[tokio::test]
     async fn list_pages_filters_by_tag_kind_and_project() {
         let (server, _tmp) = serve_seeded_vault().await;
+        seed_project(&server, "skunkworks").await;
         server
             .vault_create_page(Parameters(CreatePageParams {
                 kind: Some("quote".to_string()),
@@ -2557,8 +2578,16 @@ mod tests {
                 }))
                 .await,
         );
-        assert_eq!(by_project["total"], 1);
-        assert_eq!(by_project["items"][0]["title"], "Project Page");
+        // The PROJECT page declares the slug, so it carries the value too.
+        assert_eq!(by_project["total"], 2);
+        assert!(
+            by_project["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["title"] == "Project Page"),
+            "{by_project}"
+        );
 
         let err = server
             .vault_list_pages(Parameters(ListPagesParams {

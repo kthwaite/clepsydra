@@ -151,7 +151,7 @@ vi.mock("#/api/bases", async (importOriginal) => {
 });
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
-vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
+vi.mock("#/lib/useProjects", () => ({ useProjects: () => ["clepsydra"] }));
 
 import { BaseTable } from "#/components/bases/BaseTable";
 

@@ -50,6 +50,7 @@ vi.mock("#/hooks/useOpenTab", () => ({
 }));
 vi.mock("#/lib/useProjects", () => ({
   useProjects: () => ["atlas", "clepsydra"],
+  useProjectValues: () => ["atlas", "clepsydra"],
 }));
 
 import { appendUniqueTag } from "#/components/codex/gazetteer-filter";

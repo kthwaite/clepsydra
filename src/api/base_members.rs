@@ -317,6 +317,13 @@ async fn create_base_member_with_ids(
     if meta.kind.is_none() {
         meta.kind = Some(Kind::Note);
     }
+    // A member's project must be one some PROJECT page declares — unless the
+    // member is itself a PROJECT, in which case it is the declaration.
+    if let Some(project) = &meta.project
+        && meta.kind != Some(Kind::Project)
+    {
+        super::projects::ensure_project_exists(&state, project).await?;
+    }
     let link_base = stored.definition.clone();
     let link_meta = meta.clone();
     let link_targets = state
