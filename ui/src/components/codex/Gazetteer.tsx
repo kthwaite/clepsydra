@@ -8,6 +8,7 @@ import { KindSelect } from "#/components/codex/KindSelect";
 import { MobileGazetteer } from "#/components/codex/MobileGazetteer";
 import { ProjectCombo } from "#/components/codex/ProjectCombo";
 import { FilterBar } from "#/components/filters/FilterBar";
+import { KindIcon } from "#/components/KindIcon";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
@@ -15,7 +16,6 @@ import type { FilterField, FilterState } from "#/lib/filters/model";
 import {
   KINDS,
   type Kind,
-  kindColorVar,
   kindLabel,
   resolveKind,
   sortKindsByLabel,
@@ -388,9 +388,10 @@ export function Gazetteer({ initialTag, filters }: Props) {
                   </td>
                   <td className="cl-mono px-3 py-1.5">
                     <span className="flex items-center gap-1.5">
-                      <span
-                        className="inline-block h-[6px] w-[6px] flex-shrink-0"
-                        style={{ background: kindColorVar(kind) }}
+                      <KindIcon
+                        kind={kind}
+                        size={11}
+                        className="flex-shrink-0"
                         title={kindLabel(kind)}
                       />
                       <span className="text-[10px] text-ink-2">

@@ -1,5 +1,6 @@
-// Note "kind" — a first-class taxonomy driving the coloured pips across
-// GAZETTEER, CONSTELLATION, SHEAF, and link previews.
+// Note "kind" — a first-class taxonomy driving the kind markers (a coloured
+// lucide glyph, see KindIcon) across GAZETTEER, SHEAF, the Folio rails, and
+// link previews, plus CONSTELLATION's node shapes.
 //
 // The kind set mirrors the backend (authoritative) enum exactly. Resolution is:
 //   explicit kind  →  frontmatter `type`/`kind`  →  top-level folder  →  NOTE
@@ -7,6 +8,25 @@
 // folder/frontmatter heuristics remain only as the fallback for callers that
 // lack a backend kind.
 
+import {
+  Archive,
+  BookOpen,
+  Bot,
+  Calendar,
+  Code,
+  Compass,
+  CookingPot,
+  FileText,
+  Inbox,
+  ListChecks,
+  type LucideIcon,
+  MessagesSquare,
+  Quote,
+  Repeat,
+  SquareCheckBig,
+  User,
+  Users,
+} from "lucide-react";
 import type { components } from "#/api/schema";
 
 /** The kind vocabulary, generated from the backend's OpenAPI `Kind` enum
@@ -50,39 +70,47 @@ const KIND_SET = new Set<string>(KINDS);
 
 export type KindMeta = {
   label: string;
-  /** CSS custom-property reference for the pip / accent colour. */
+  /** CSS custom-property reference for the marker / accent colour. */
   color: string;
+  /** Lucide glyph denoting the kind. Distinct per kind: the icon carries the
+   * kind on its own where colour alone would be ambiguous. */
+  icon: LucideIcon;
 };
 
 // Colour assignment leans on the Vessel signal tokens: --accent (primary),
 // --cool (secondary), --warn (attention), with neutral ink ramps for the rest.
 export const KIND_META: Record<Kind, KindMeta> = {
-  PROJECT: { label: "PROJECT", color: "var(--accent)" },
-  TODO: { label: "TODO", color: "var(--warn)" },
-  JOURNAL: { label: "JOURNAL", color: "var(--cool)" },
-  QUOTE: { label: "QUOTE", color: "var(--warn)" },
-  BOOK: { label: "BOOK", color: "var(--accent-deep)" },
-  CODE: { label: "CODE", color: "var(--ink)" },
-  PERSON: { label: "PERSON", color: "var(--cool)" },
-  CAPTURE: { label: "CAPTURE", color: "var(--cool)" },
-  NOTE: { label: "NOTE", color: "var(--ink-mute)" },
-  TASK: { label: "TASK", color: "var(--hot)" },
-  CYCLE: { label: "CYCLE", color: "var(--ink-2)" },
-  RECIPE: { label: "RECIPE", color: "var(--accent-deep)" },
-  // Meetings are about people, so they take PERSON's cool pip. A 1:1 is a
+  PROJECT: { label: "PROJECT", color: "var(--accent)", icon: Compass },
+  TODO: { label: "TODO", color: "var(--warn)", icon: ListChecks },
+  JOURNAL: { label: "JOURNAL", color: "var(--cool)", icon: Calendar },
+  QUOTE: { label: "QUOTE", color: "var(--warn)", icon: Quote },
+  BOOK: { label: "BOOK", color: "var(--accent-deep)", icon: BookOpen },
+  CODE: { label: "CODE", color: "var(--ink)", icon: Code },
+  PERSON: { label: "PERSON", color: "var(--cool)", icon: User },
+  CAPTURE: { label: "CAPTURE", color: "var(--cool)", icon: Inbox },
+  NOTE: { label: "NOTE", color: "var(--ink-mute)", icon: FileText },
+  TASK: { label: "TASK", color: "var(--hot)", icon: SquareCheckBig },
+  CYCLE: { label: "CYCLE", color: "var(--ink-2)", icon: Repeat },
+  RECIPE: { label: "RECIPE", color: "var(--accent-deep)", icon: CookingPot },
+  // Meetings are about people, so they take PERSON's cool hue. A 1:1 is a
   // MEETING tagged `1:1`, not a kind of its own.
-  MEETING: { label: "MEETING", color: "var(--cool)" },
+  MEETING: { label: "MEETING", color: "var(--cool)", icon: Users },
   // Archived pages are inert captures of someone else's writing; a muted ink
-  // pip keeps them legible without competing with authored material.
-  ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)" },
-  AI_CONVERSATION: { label: "AI CONVERSATION", color: "var(--cool)" },
+  // hue keeps them legible without competing with authored material.
+  ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)", icon: Archive },
+  AI_CONVERSATION: {
+    label: "AI CONVERSATION",
+    color: "var(--cool)",
+    icon: MessagesSquare,
+  },
   // The assistants' own daily stream; deep accent separates it from the
-  // human JOURNAL's cool pip at a glance.
-  AI_JOURNAL: { label: "AI JOURNAL", color: "var(--accent-deep)" },
+  // human JOURNAL's cool calendar at a glance.
+  AI_JOURNAL: { label: "AI JOURNAL", color: "var(--accent-deep)", icon: Bot },
 };
 
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
 export const kindColorVar = (kind: Kind): string => KIND_META[kind].color;
+export const kindIcon = (kind: Kind): LucideIcon => KIND_META[kind].icon;
 
 /** Alphabetical picker order — by display label, which is what the user
  * scans. */

@@ -8,6 +8,7 @@ import {
 } from "react-aria-components";
 import type { ContentEntry } from "#/api/types";
 import { FilterBar } from "#/components/filters/FilterBar";
+import { KindIcon } from "#/components/KindIcon";
 import { Button } from "#/components/ui/button";
 import { Radio, RadioGroup } from "#/components/ui/radio-group";
 import { cn } from "#/lib/cn";
@@ -16,7 +17,7 @@ import {
   type FilterField,
   type FilterState,
 } from "#/lib/filters/model";
-import { kindColorVar, kindLabel, resolveKind } from "#/lib/kind";
+import { kindLabel, resolveKind } from "#/lib/kind";
 import { formatRelativeTime } from "#/lib/time";
 import { appendUniqueTag, type GazetteerSort } from "./gazetteer-filter";
 
@@ -126,11 +127,7 @@ export function MobileGazetteer({
 
                     <div className="col-span-2 flex flex-wrap items-center gap-x-2 gap-y-1 cl-mono text-[10px] leading-relaxed text-ink-2">
                       <span className="inline-flex items-center gap-1.5">
-                        <span
-                          aria-hidden="true"
-                          className="h-1.5 w-1.5 shrink-0"
-                          style={{ background: kindColorVar(kind) }}
-                        />
+                        <KindIcon kind={kind} size={11} className="shrink-0" />
                         {kindLabel(kind)}
                       </span>
                       <span aria-hidden="true" className="text-ink-faint">
