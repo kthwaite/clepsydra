@@ -6,7 +6,10 @@
 //! ([`conflict_copy`]). Design: `docs/superpowers/specs/2026-08-27-clep-sync-design.md`,
 //! ADR 0004.
 
+pub mod config_writer;
 pub mod git;
+pub mod init;
+pub mod managed_block;
 #[cfg(test)]
 pub(crate) mod testing;
 
@@ -106,12 +109,33 @@ pub enum SyncError {
 }
 
 impl SyncError {
-    // Unused until Task 2's `git.rs` wraps I/O errors with it.
-    #[allow(dead_code)]
     pub(crate) fn io(path: &Path, source: std::io::Error) -> Self {
         Self::Io {
             path: path.display().to_string(),
             source,
         }
     }
+}
+
+/// A vault is sync-initialised iff its root is a git repository's toplevel
+/// AND the repo-local `clep.sync.version` config key is set (D3, written by
+/// [`init::init`]).
+pub fn is_initialised(vault: &crate::vault::Vault, git: &git::Git) -> Result<bool, SyncError> {
+    let Some(top) = git.toplevel()? else {
+        return Ok(false);
+    };
+    let same_root = top.canonicalize().ok() == vault.root().canonicalize().ok();
+    Ok(same_root && git.config_get(INIT_MARKER_KEY)?.is_some())
+}
+
+/// The local machine's hostname, recorded in every commit's `Device:`
+/// trailer (D9) so a conflict or a `clep sync status` report can say which
+/// device made a change.
+pub fn device_name() -> String {
+    gethostname::gethostname().to_string_lossy().into_owned()
+}
+
+/// Append a `Device: <hostname>` trailer to a commit message.
+pub fn with_device_trailer(message: &str) -> String {
+    format!("{}\n\nDevice: {}\n", message.trim_end(), device_name())
 }

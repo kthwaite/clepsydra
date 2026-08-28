@@ -51,6 +51,8 @@ file's directory without `~` expansion. See [Configuration](/docs/configuration)
 | `clep migrate` | optional `--write`; dry run by default |
 | `clep cas` | nested `migrate`, `backfill`, or `rebuild` command |
 | `clep codes` | nested `migrate` command |
+| `clep sync` | nested `init` (and, from a later phase, `status`) |
+| `clep sync init` | optional `--remote URL`, `--author-name`, `--author-email` |
 | `clep register-url` | optional `--obsidian`; macOS only |
 | `clep grep` | `<QUERY>`, `-n/--limit <N>` (default `20`), `--raw`, `--json` |
 | `clep tree` | optional `--json` |
@@ -551,6 +553,62 @@ rewritten. Config or vault-open failures also return `1`.
 ```bash
 clep codes migrate            # dry run
 clep codes migrate --write    # rename and rewrite in place
+```
+
+## `clep sync`
+
+```text
+clep sync <COMMAND>
+```
+
+This parent command requires one nested command. It drives git-backed vault
+sync (`docs/superpowers/specs/2026-08-27-clep-sync-design.md`): committing
+local changes, fetching, merging, resolving conflicts as Conflict Copies, and
+pushing — see [Sync between devices](/docs/sync) for the full picture. Only
+`clep sync init` exists so far.
+
+## `clep sync init`
+
+```text
+clep sync init [--remote <url>] [--author-name <name>] [--author-email <email>]
+```
+
+Turns the configured vault into a synced git repository, or adopts one
+already there. Idempotent — safe to re-run.
+
+What it does, in order: creates the repository at the vault root, or adopts
+one already there on the configured `[sync] branch` (default `main`);
+requires `git-lfs` (`git lfs version`, then `git lfs install --local`);
+writes the managed `.gitignore`/`.gitattributes` blocks (git-ignoring
+`.clepsydra/cache.db*` and friends; marking `*.md merge=clep` and the
+`.clepsydra/cas/` / `_attachments/` LFS filters) without disturbing any
+existing content in those files; seeds `[sync] author_name`/`author_email`
+from `--author-name`/`--author-email`, else the config already on disk, else
+git's global `user.name`/`user.email`, else an interactive prompt on a TTY;
+migrates a legacy `~/.clepsydra/cas` store into the vault when the vault's
+own CAS store is still empty (ADR 0005:
+`docs/adr/0005-cas-in-vault-frontmatter-metadata.md`); adds `--remote` as
+`origin`; and makes the initial commit (`Device: <hostname>` trailer, author
+from `[sync]`).
+
+Refuses when: the vault root sits inside another git repository (move the
+vault, or remove the outer repository); the checked-out branch differs from
+`[sync] branch`; `origin` already points somewhere else; `git-lfs` is not
+installed, or (with `--remote`) the remote does not answer the git-lfs batch
+API; no author can be resolved from any of the sources above; or a `clep
+serve` is running on the configured address — stop it first, since this
+command must be the vault's only writer while it runs.
+
+The command prints one line per outcome (repository created or adopted,
+branch, managed lines added, author, remote, lfs status, CAS migration
+result, initial commit) followed by any warnings. It returns `0` with no
+warnings and `1` otherwise — including per-blob CAS migration warnings
+(missing, corrupt, or failed blobs), which do not abort the run.
+
+```bash
+clep sync init
+clep sync init --remote git@github.com:me/vault.git
+clep sync init --author-name "Kit Thwaite" --author-email kit@example.com
 ```
 
 ## `clep register-url`

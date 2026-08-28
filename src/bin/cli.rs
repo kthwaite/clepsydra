@@ -54,6 +54,23 @@ enum CasCommands {
 }
 
 #[derive(Debug, Subcommand)]
+enum SyncCommands {
+    #[command(
+        about = "Turn this vault into a synced git repository (idempotent)",
+        long_about = "Initialise git-backed sync (docs/superpowers/specs/2026-08-27-clep-sync-design.md §2): create or adopt the repository at the vault root, write the managed .gitignore/.gitattributes blocks, require git-lfs, seed [sync] author from git's global config (or --author-name/--author-email, or an interactive prompt), migrate a legacy ~/.clepsydra/cas store when the vault store is still empty, add --remote as origin, and make the initial commit. Refuses when the vault sits inside another repository, when origin already points elsewhere, when the checked-out branch differs from [sync] branch, or while a server answers on the configured address (stop `clep serve` first)."
+    )]
+    Init {
+        /// Remote URL to add as `origin` (must speak git-lfs).
+        #[arg(long)]
+        remote: Option<String>,
+        #[arg(long)]
+        author_name: Option<String>,
+        #[arg(long)]
+        author_email: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
 enum CodesCommands {
     #[command(
         about = "One-time migration: recode legacy TASK/CYCLE pages and rewrite prose tokens",
@@ -241,6 +258,11 @@ enum Commands {
     Codes {
         #[command(subcommand)]
         command: CodesCommands,
+    },
+    #[command(about = "Sync the vault through git (commit, fetch, merge, push)")]
+    Sync {
+        #[command(subcommand)]
+        command: SyncCommands,
     },
     #[command(
         about = "Register the clepsydra:// URL scheme with macOS",
@@ -693,6 +715,22 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                         ""
                     }
                 );
+                Ok(if report.warnings.is_empty() { 0 } else { 1 })
+            }
+        },
+        Commands::Sync { command } => match command {
+            SyncCommands::Init {
+                remote,
+                author_name,
+                author_email,
+            } => {
+                let report = clepsydra::sync_command::run_init(clepsydra::sync_command::InitArgs {
+                    remote,
+                    author_name,
+                    author_email,
+                })
+                .await?;
+                print!("{}", clepsydra::sync_command::render_init(&report));
                 Ok(if report.warnings.is_empty() { 0 } else { 1 })
             }
         },
@@ -1408,5 +1446,55 @@ mod cli_tests {
     #[test]
     fn codes_requires_a_subcommand() {
         assert!(Cli::try_parse_from(["clep", "codes"]).is_err());
+    }
+
+    fn sync_init_args(args: &[&str]) -> (Option<String>, Option<String>, Option<String>) {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
+            Commands::Sync {
+                command:
+                    SyncCommands::Init {
+                        remote,
+                        author_name,
+                        author_email,
+                    },
+            } => (remote, author_name, author_email),
+            other => panic!("expected sync init, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sync_requires_a_subcommand() {
+        assert!(Cli::try_parse_from(["clep", "sync"]).is_err());
+    }
+
+    #[test]
+    fn sync_init_defaults_to_no_remote_or_author() {
+        let (remote, author_name, author_email) = sync_init_args(&["clep", "sync", "init"]);
+        assert!(remote.is_none());
+        assert!(author_name.is_none());
+        assert!(author_email.is_none());
+    }
+
+    #[test]
+    fn sync_init_accepts_remote() {
+        let (remote, ..) =
+            sync_init_args(&["clep", "sync", "init", "--remote", "git@github.com:o/r.git"]);
+        assert_eq!(remote.as_deref(), Some("git@github.com:o/r.git"));
+    }
+
+    #[test]
+    fn sync_init_accepts_author_name_and_email() {
+        let (_, author_name, author_email) = sync_init_args(&[
+            "clep",
+            "sync",
+            "init",
+            "--author-name",
+            "Kit",
+            "--author-email",
+            "kit@example.com",
+        ]);
+        assert_eq!(author_name.as_deref(), Some("Kit"));
+        assert_eq!(author_email.as_deref(), Some("kit@example.com"));
     }
 }
