@@ -351,17 +351,66 @@ async fn fetch_cycle_codes(state: &AppState) -> Result<Vec<String>, ApiError> {
         .map_err(|e| ApiError::internal(e.to_string()))
 }
 
-/// Check that `cycle_code` matches the filename stem of an existing CYCLE
-/// page (case-sensitive). Returns 400 with a hint otherwise. Shared by the
-/// task POST/PATCH handlers and the cycle-seal carry_to validation.
-async fn ensure_cycle_exists(state: &AppState, cycle_code: &str) -> Result<(), ApiError> {
-    let codes = fetch_cycle_codes(state).await?;
-    if !codes.iter().any(|c| c == cycle_code) {
-        return Err(ApiError::bad_request(format!(
-            "unknown cycle: '{cycle_code}'; must match the stem of an existing CYCLE page (e.g. 'S-13')"
-        )));
+/// The result of resolving user input to a canonical code stem via
+/// [`resolve_code`].
+pub(crate) enum CodeLookup {
+    Found(String),
+    NotFound,
+    Ambiguous(Vec<String>),
+}
+
+/// Resolve user input to a canonical stem of `kind`: an exact case-insensitive
+/// match wins; otherwise a unique case-insensitive prefix match; otherwise
+/// `NotFound` (no match) or `Ambiguous` (multiple prefix matches, listed).
+/// Codes are never uppercased or otherwise normalized here — whichever stem
+/// is stored on disk is what comes back.
+pub(crate) fn resolve_code(
+    conn: &rusqlite::Connection,
+    kind: Kind,
+    input: &str,
+) -> Result<CodeLookup, rusqlite::Error> {
+    let needle = input.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return Ok(CodeLookup::NotFound);
     }
-    Ok(())
+    let stems = code_stems(conn, kind)?;
+    if let Some(exact) = stems.iter().find(|s| s.to_ascii_lowercase() == needle) {
+        return Ok(CodeLookup::Found(exact.clone()));
+    }
+    let matches: Vec<String> = stems
+        .iter()
+        .filter(|s| s.to_ascii_lowercase().starts_with(&needle))
+        .cloned()
+        .collect();
+    Ok(match matches.len() {
+        0 => CodeLookup::NotFound,
+        1 => CodeLookup::Found(matches.into_iter().next().expect("one")),
+        _ => CodeLookup::Ambiguous(matches),
+    })
+}
+
+/// Resolve `cycle_code` (exact match or unique case-insensitive prefix)
+/// against existing CYCLE page stems. Returns the canonical stem on success,
+/// or 400 (unknown / ambiguous, candidates listed) otherwise. Shared by the
+/// task POST/PATCH handlers and the cycle-seal carry_to validation.
+async fn ensure_cycle_exists(state: &AppState, cycle_code: &str) -> Result<String, ApiError> {
+    let input = cycle_code.to_string();
+    let lookup = state
+        .index
+        .with_index(move |index, _vault| resolve_code(index.connection(), Kind::Cycle, &input))
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    match lookup {
+        CodeLookup::Found(code) => Ok(code),
+        CodeLookup::NotFound => Err(ApiError::bad_request(format!(
+            "unknown cycle '{cycle_code}'; must match an existing cycle code or a unique prefix of one"
+        ))),
+        CodeLookup::Ambiguous(c) => Err(ApiError::bad_request(format!(
+            "ambiguous cycle prefix '{cycle_code}': candidates {}",
+            c.join(", ")
+        ))),
+    }
 }
 
 /// Mint a code no existing page of the family's kind uses. With 43 bits of

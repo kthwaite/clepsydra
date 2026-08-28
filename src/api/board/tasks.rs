@@ -62,10 +62,12 @@ pub(crate) async fn create_task(
         Some(c) => Some(c.to_string()),
     };
 
-    // 2. Validate cycle exists (if specified)
-    if let Some(ref cycle_code) = cycle_opt {
-        ensure_cycle_exists(&state, cycle_code).await?;
-    }
+    // 2. Validate cycle exists (if specified); resolve to its canonical code
+    // (exact match or unique prefix) so what gets stored is always the stem.
+    let cycle_opt: Option<String> = match cycle_opt {
+        Some(cycle_code) => Some(ensure_cycle_exists(&state, &cycle_code).await?),
+        None => None,
+    };
 
     // 3. Mint a fresh TASK code (re-rolls on collision).
     let code = mint_unique_code(&state, CodeFamily::Task).await?;
@@ -195,8 +197,8 @@ pub(crate) async fn patch_task(
     let cycle_field: Option<Option<String>> = match &body.cycle {
         Some(Some(c)) if c == "BACKLOG" => Some(None),
         Some(Some(c)) => {
-            ensure_cycle_exists(&state, c).await?;
-            Some(Some(c.clone()))
+            let canonical = ensure_cycle_exists(&state, c).await?;
+            Some(Some(canonical))
         }
         other => other.clone(),
     };

@@ -161,6 +161,7 @@ fn plan_cycle_patch_and_carryover(
     cycle_path: VaultPath,
     body: &PatchCycleRequest,
     new_state: Option<CycleState>,
+    carry_to: Option<&str>,
     task_paths: &[String],
     now: DateTime<Utc>,
 ) -> Result<BatchMutationCommand, ApiError> {
@@ -197,7 +198,7 @@ fn plan_cycle_patch_and_carryover(
         content: write_page_content(&cycle_meta, &cycle_body).into_bytes(),
     });
 
-    if let Some(carry_to) = &body.carry_to {
+    if let Some(carry_to) = carry_to {
         for task_path in task_paths {
             let path =
                 crate::api::error::parse_internal_path(task_path, "invalid indexed task path")?;
@@ -205,8 +206,10 @@ fn plan_cycle_patch_and_carryover(
             if carry_to == "BACKLOG" {
                 meta.extra.remove("cycle");
             } else {
-                meta.extra
-                    .insert("cycle".to_string(), toml::Value::String(carry_to.clone()));
+                meta.extra.insert(
+                    "cycle".to_string(),
+                    toml::Value::String(carry_to.to_string()),
+                );
             }
             meta.updated_at = Some(now);
             heal_task_update(&path, &expected, &mut meta).map_err(ApiError::bad_request)?;
@@ -260,16 +263,19 @@ pub(crate) async fn patch_cycle(
         .transpose()?;
     let is_closing = new_state == Some(CycleState::Closed);
 
-    if let Some(carry) = &body.carry_to {
-        if !is_closing {
+    // Resolve carry_to to its canonical code ONCE — used below both for the
+    // self-reference check and for the frontmatter rewrite. "BACKLOG" is a
+    // sentinel and is never resolved.
+    let resolved_carry_to: Option<String> = match &body.carry_to {
+        None => None,
+        Some(_) if !is_closing => {
             return Err(ApiError::bad_request(
                 "carry_to is only valid when state is CLOSED",
             ));
         }
-        if carry != "BACKLOG" {
-            ensure_cycle_exists(&state, carry).await?;
-        }
-    }
+        Some(carry) if carry == "BACKLOG" => Some("BACKLOG".to_string()),
+        Some(carry) => Some(ensure_cycle_exists(&state, carry).await?),
+    };
 
     let id_clone = id.clone();
     let page_path = state
@@ -290,13 +296,13 @@ pub(crate) async fn patch_cycle(
         crate::api::error::parse_internal_path(&page_path, "invalid stored cycle path")?;
     let cycle_code = path_stem(&page_path).to_string();
 
-    if matches!(&body.carry_to, Some(carry) if carry != "BACKLOG" && carry == &cycle_code) {
+    if matches!(&resolved_carry_to, Some(carry) if carry != "BACKLOG" && carry == &cycle_code) {
         return Err(ApiError::bad_request(
             "carry_to cannot reference the cycle being closed",
         ));
     }
 
-    let task_paths = if is_closing && body.carry_to.is_some() {
+    let task_paths = if is_closing && resolved_carry_to.is_some() {
         let cycle_code_for_query = cycle_code;
         state
             .index
@@ -334,6 +340,7 @@ pub(crate) async fn patch_cycle(
         cycle_path.clone(),
         &body,
         new_state,
+        resolved_carry_to.as_deref(),
         &task_paths,
         state.clock.now(),
     )?;

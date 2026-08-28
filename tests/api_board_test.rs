@@ -1885,3 +1885,48 @@ async fn explicit_cycle_code_must_be_valid_format() {
         "S-calm-heron-2xm9p"
     );
 }
+
+// ---------------------------------------------------------------------------
+// POST /board/tasks — unique-prefix cycle addressing (task 3)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn task_cycle_field_accepts_unique_prefix_and_stores_canonical() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let cyc = server
+        .post("/api/vault/board/cycles")
+        .json(&serde_json::json!({"label": "c", "code": "S-calm-heron-2xm9p", "start": "2026-09-01", "end": "2026-09-07"}))
+        .await;
+    cyc.assert_status(axum::http::StatusCode::CREATED);
+    let task = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "t", "cycle": "s-CALM-heron"}))
+        .await;
+    task.assert_status(axum::http::StatusCode::CREATED);
+    assert_eq!(
+        task.json::<serde_json::Value>()["cycle"],
+        "S-calm-heron-2xm9p"
+    );
+}
+
+#[tokio::test]
+async fn ambiguous_cycle_prefix_is_rejected_with_candidates() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    for code in ["S-calm-heron-2xm9p", "S-calm-otter-9k2ma"] {
+        server
+            .post("/api/vault/board/cycles")
+            .json(&serde_json::json!({"label": "c", "code": code, "start": "2026-09-01", "end": "2026-09-07"}))
+            .await
+            .assert_status(axum::http::StatusCode::CREATED);
+    }
+    let task = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({"title": "t", "cycle": "S-calm"}))
+        .await;
+    task.assert_status_bad_request();
+    let msg = task.text();
+    assert!(
+        msg.contains("S-calm-heron-2xm9p") && msg.contains("S-calm-otter-9k2ma"),
+        "{msg}"
+    );
+}
