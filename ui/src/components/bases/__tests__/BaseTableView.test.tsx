@@ -394,7 +394,7 @@ describe("BaseTableView", () => {
       "page",
     );
     expect(
-      screen.getByRole("columnheader", { name: "author" }),
+      screen.getByRole("columnheader", { name: /^author/ }),
     ).toBeInTheDocument();
   });
 
@@ -450,15 +450,17 @@ describe("BaseTableView", () => {
       },
     });
 
-    expect(screen.getByRole("columnheader", { name: "Work" })).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Writer" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: /^Work/ })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: /^Writer/ })).toBeVisible();
     expect(
-      screen.getByRole("columnheader", { name: "Custom title" }),
+      screen.getByRole("columnheader", { name: /^Custom title/ }),
     ).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Summary" })).toBeVisible();
+    expect(
+      screen.getByRole("columnheader", { name: /^Summary/ }),
+    ).toBeVisible();
     expect(screen.getByText("Shadow title")).toBeVisible();
 
-    await user.click(screen.getByRole("columnheader", { name: "Work" }));
+    await user.click(screen.getByRole("columnheader", { name: /^Work/ }));
     expect(props.onSortChange).toHaveBeenCalledWith([
       { field: "title", dir: "asc" },
     ]);
@@ -475,13 +477,17 @@ describe("BaseTableView", () => {
     );
 
     props.rerender({ activeView: "Shelf" });
-    expect(screen.getByRole("columnheader", { name: "Book" })).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Creator" })).toBeVisible();
+    expect(screen.getByRole("columnheader", { name: /^Book/ })).toBeVisible();
     expect(
-      screen.getByRole("columnheader", { name: "Personal title" }),
+      screen.getByRole("columnheader", { name: /^Creator/ }),
     ).toBeVisible();
-    expect(screen.getByRole("columnheader", { name: "Excerpt" })).toBeVisible();
-    expect(screen.queryByRole("columnheader", { name: "Work" })).toBeNull();
+    expect(
+      screen.getByRole("columnheader", { name: /^Personal title/ }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("columnheader", { name: /^Excerpt/ }),
+    ).toBeVisible();
+    expect(screen.queryByRole("columnheader", { name: /^Work/ })).toBeNull();
   });
 
   it("links to the definition workspace from a saved base", () => {
@@ -972,11 +978,11 @@ describe("BaseTableView", () => {
       expect(body).toHaveTextContent("Projected body excerpt");
       expect(body).toHaveClass("w-full", "min-w-0", "truncate");
       expect(
-        screen.getByRole("columnheader", { name: "body" }),
+        screen.getByRole("columnheader", { name: /^body/ }),
       ).not.toHaveClass("cursor-pointer");
 
       await user.click(body);
-      await user.click(screen.getByRole("columnheader", { name: "body" }));
+      await user.click(screen.getByRole("columnheader", { name: /^body/ }));
 
       expect(props.onOpenPage).toHaveBeenCalledWith("book.md");
       expect(props.onCommitCell).not.toHaveBeenCalled();
@@ -1089,12 +1095,11 @@ describe("BaseTableView", () => {
     expect(
       screen.getByRole("columnheader", { name: /author/ }),
     ).toHaveAttribute("aria-sort", "descending");
-    expect(screen.getByRole("columnheader", { name: "title" })).toHaveAttribute(
-      "aria-sort",
-      "none",
-    );
+    expect(
+      screen.getByRole("columnheader", { name: /^title/ }),
+    ).toHaveAttribute("aria-sort", "none");
 
-    await user.click(screen.getByRole("columnheader", { name: "title" }));
+    await user.click(screen.getByRole("columnheader", { name: /^title/ }));
     expect(props.onSortChange).toHaveBeenCalledWith([
       { field: "title", dir: "asc" },
     ]);
@@ -1145,11 +1150,13 @@ describe("BaseTableView", () => {
     });
 
     for (const name of ["tags", "aliases", "topics", "related"]) {
-      await user.click(screen.getByRole("columnheader", { name }));
+      await user.click(
+        screen.getByRole("columnheader", { name: new RegExp(`^${name}`) }),
+      );
     }
     expect(props.onSortChange).not.toHaveBeenCalled();
 
-    await user.click(screen.getByRole("columnheader", { name: "author" }));
+    await user.click(screen.getByRole("columnheader", { name: /^author/ }));
     expect(props.onSortChange).toHaveBeenCalledWith([
       { field: "author", dir: "asc" },
     ]);
@@ -1252,7 +1259,7 @@ describe("BaseTableView", () => {
       },
     });
     expect(
-      screen.getByRole("columnheader", { name: "rating" }),
+      screen.getByRole("columnheader", { name: /^rating/ }),
     ).toBeInTheDocument();
     restoreBaseline();
 
@@ -1807,7 +1814,7 @@ describe("BaseTableView", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     expect(screen.getByText("Gene Wolfe").tagName).toBe("SPAN");
     expect(
-      screen.getByRole("columnheader", { name: "title" }),
+      screen.getByRole("columnheader", { name: /^title/ }),
     ).not.toHaveAttribute("aria-sort");
     expect(props.onViewChange).not.toHaveBeenCalled();
     expect(props.onSortChange).not.toHaveBeenCalled();

@@ -1149,6 +1149,7 @@ layout = "table"
                     filter: Some(&filter),
                     sort: None,
                     limit: None,
+                    group_by: None,
                 },
             )
             .unwrap_or_else(|diagnostics| panic!("{label} should validate: {diagnostics:?}"));
@@ -1289,6 +1290,7 @@ layout = "table"
                     filter: Some(&filter),
                     sort: None,
                     limit: None,
+                    group_by: None,
                 },
             )
             .expect_err("unsupported predicate must fail validation");

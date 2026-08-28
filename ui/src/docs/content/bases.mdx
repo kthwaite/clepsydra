@@ -382,6 +382,16 @@ System fields and undeclared columns are read-only. A column backed by a declare
 
 Each commit fetches the page's current revision, sends only the changed property key with its type hint, and updates `updated_at`. For TOML `+++` frontmatter, the server splices that edit into the existing bytes, preserving untouched keys and comments. The first inline property edit on legacy YAML `---` frontmatter instead converts it to TOML through full serialization, so YAML frontmatter comments are not preserved. A stale edit is rejected rather than overwriting a newer page revision; the table refetches the winning state and reports the failed key.
 
+### Column, cell, and row menus
+
+Every column header has a `⋯` menu — also reachable by right-clicking the header, and the first thing keyboard focus lands on in a header (Enter opens it): **Sort ascending**, **Sort descending**, **Filter ▸** presets (is empty / is not empty, checked / unchecked, the relative-date presets, and up to twelve declared select options), **Group by** / **Ungroup**, and **Hide column**. The title column and the last visible column cannot be hidden.
+
+Right-click any cell (or press <kbd>Shift</kbd>+<kbd>F10</kbd> / <kbd>⌃</kbd><kbd>Enter</kbd> on a focused cell control) for a quick filter derived from the cell's value — `Status is reading`, `Tags has fiction`, `Due is 2026-08-28`, `Done is checked`, `Author is empty` — a **Filter by date ▸** submenu on date columns, **Copy value**, and the row actions: **Open**, **Open in new tab**, **Copy wikilink**, **Duplicate**, and **Archive…**. A ghost `⋯` button in the first cell opens the row actions alone.
+
+Sort, quick filters, grouping, and hidden columns are **view overrides**: they apply to the table you are looking at and appear as removable chips in a strip under the toolbar. **Clear** drops them all; **Save to view** writes them into the saved view (`filter`, `sort`, `group_by`, `columns`) through the revision-guarded definition update, so a base edited elsewhere in the meantime is reported instead of overwritten. Switching views drops the overrides.
+
+**Duplicate** creates a new page through the member endpoint with the same declared properties, kind, project, and tags, titled `<title> (copy)`; the body is not copied, and the new page must still match the view. **Archive…** asks for confirmation and moves the page to the Rubbish Bin; focus returns to the next row.
+
 ### Add members inline
 
 Choose **Add member** in a saved table view to open one temporary row. This creates a new page; it does not enroll an existing page in the base. Enter a title and the visible or filter-required properties, then choose **Save** or press <kbd>Ctrl</kbd>/<kbd>Cmd</kbd>+<kbd>Enter</kbd>. Clepsydra creates the Markdown page only when its metadata matches both the base membership filter and the active view filter. A rejected row remains editable and creates no file.
@@ -395,6 +405,8 @@ Renaming or removing a property declaration changes only the base schema. It doe
 ## Embed a Base in a Folio
 
 A Base embed is a live, non-owning view of the same pages as its saved Base. The Folio stores only the Base/view reference and document-local filter, sort, and limit. It does not copy the Base definition, table rows, or member pages into the Folio.
+
+Embedded tables carry the same menus; overrides are yours as a reader and are not written into the fence, while **Save to view** still updates the base definition.
 
 In a Folio editor, open the slash-command menu and choose **Base embed**. The structured **Edit Base embed** inspector opens immediately. Select a Base and one of its saved views, then optionally build an additional nested filter, arrange ordered sort keys, and set a row limit. Choose **Save** to replace the new block with the configured live table; **Cancel** removes a new unconfigured block or leaves an existing configured block unchanged.
 

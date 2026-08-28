@@ -14,8 +14,10 @@ import {
   useBaseViewWindows,
   useCreateBaseMember,
   usePropertyCommit,
+  useUpdateBase,
   type ViewOverrides,
 } from "#/api/bases";
+import { formatApiError, isApiConflict } from "#/api/error";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { useProjects } from "#/lib/useProjects";
 import type { CellValue } from "./cells/types";
@@ -36,6 +38,17 @@ import {
   type BaseMemberDraftValue,
   composeMemberDraftFields,
 } from "./member-draft";
+import { outputContains } from "./query-output";
+import { useRowActions } from "./useRowActions";
+import { type OverridesSaveState, useViewOverrides } from "./useViewOverrides";
+import {
+  applyOverridesToView,
+  composeQuickFilters,
+  definitionPayload,
+  type GroupOverride,
+  type QuickFilter,
+  type ViewOverridesState,
+} from "./view-overrides";
 
 export interface BaseTableControllerOptions {
   mode: "standalone" | "embedded";
@@ -82,6 +95,22 @@ export interface BaseTableControllerModel {
   onMemberEdit(): void;
   focusCreatedId: string | undefined;
   onCreatedRowFocused(createdId: string): void;
+  overrides: ViewOverridesState;
+  onAddQuickFilter(filter: QuickFilter): void;
+  onRemoveQuickFilter(identity: string): void;
+  onSetGroup(group: GroupOverride | undefined): void;
+  onHideColumn(column: string): void;
+  onShowHiddenColumns(): void;
+  onClearOverrides(): void;
+  onSaveOverrides(): void;
+  onReloadDefinition(): void;
+  overridesSave: OverridesSaveState;
+  onOpenPageInNewTab(path: string): void;
+  onCopyWikilink(row: QueryRow): void;
+  onCopyValue(value: CellValue): void;
+  onDuplicateRow(row: QueryRow): void;
+  onArchiveRow(row: QueryRow): Promise<void>;
+  rowActionError: string | undefined;
   /** Windowed loading, for an embedded view that scrolls in place. */
   rowWindow:
     | {
@@ -143,12 +172,6 @@ function emptyMemberState(generation: number): MemberState {
   };
 }
 
-function outputContains(output: QueryOutput, id: string): boolean {
-  return output.shape === "flat"
-    ? output.rows.some((row) => row.id === id)
-    : output.groups.some((group) => group.rows.some((row) => row.id === id));
-}
-
 function genericNotice(message: string): MemberNotice {
   return { scope: "generic", message };
 }
@@ -179,6 +202,16 @@ export function useBaseTableController(
   const openTab = useOpenTab();
   const detail = useBase(slug);
   const activeView = requestedActiveView || detail.data?.views?.[0]?.name || "";
+  const viewResetKey = `${mode}:${slug}:${asciiCaseFold(activeView)}`;
+  const overrides = useViewOverrides(viewResetKey);
+  const effectiveFilter = useMemo(
+    () =>
+      composeQuickFilters(
+        mode === "embedded" ? filter : undefined,
+        overrides.state.quickFilters,
+      ),
+    [filter, mode, overrides.state.quickFilters],
+  );
   const sortOverride = useMemo<ViewOverrides>(() => {
     const first = sort?.[0];
     return first ? { sort: first.field, dir: first.dir } : {};
@@ -187,22 +220,42 @@ export function useBaseTableController(
     () => ({
       base: mode === "embedded" ? slug : "",
       view: mode === "embedded" ? activeView : "",
-      filter: mode === "embedded" ? filter : undefined,
+      filter: mode === "embedded" ? effectiveFilter : undefined,
       sort: mode === "embedded" ? sort : undefined,
       // The author's ceiling, when they set one. Absent means the reader may
       // scroll to the true total.
       limit: mode === "embedded" ? limit : undefined,
+      ...(overrides.state.group === undefined
+        ? {}
+        : { groupBy: overrides.state.group }),
     }),
-    [activeView, filter, limit, mode, slug, sort],
+    [
+      activeView,
+      effectiveFilter,
+      limit,
+      mode,
+      overrides.state.group,
+      slug,
+      sort,
+    ],
   );
   const savedViewQuery = useBaseView(
     mode === "standalone" ? slug : "",
     mode === "standalone" ? activeView : undefined,
-    mode === "standalone" ? sortOverride : {},
+    mode === "standalone"
+      ? {
+          ...sortOverride,
+          ...(effectiveFilter === undefined ? {} : { filter: effectiveFilter }),
+          ...(overrides.state.group === undefined
+            ? {}
+            : { groupBy: overrides.state.group }),
+        }
+      : {},
   );
   const evaluationQuery = useBaseViewWindows(embeddedConfig);
   const commit = usePropertyCommit();
   const { mutateAsync: createMemberAsync } = useCreateBaseMember();
+  const { mutateAsync: updateBaseAsync } = useUpdateBase();
   const projects = useProjects();
   const detailRefetch = detail.refetch;
   const evaluationRefetch = evaluationQuery.refetch;
@@ -298,17 +351,17 @@ export function useBaseTableController(
           baseSlug: slug,
           requestedView: activeView,
           evaluation: evaluationQuery.data,
-          embedFilter: filter,
+          embedFilter: effectiveFilter,
         }
       : undefined;
   }, [
     activeView,
     detail.data,
     detail.data?.revision,
+    effectiveFilter,
     embeddedAuthoritative,
     evaluationQuery.data,
     evaluationQuery.data?.revision,
-    filter,
     mode,
     slug,
   ]);
@@ -320,6 +373,30 @@ export function useBaseTableController(
     [memberCreationSource],
   );
   const memberCapability = memberCreationSession?.capability;
+  const refetchRowActionsView = useCallback(async () => {
+    if (mode === "embedded") {
+      const result = await evaluationRefetch();
+      return { output: result.data?.output };
+    }
+    const result = await savedViewRefetch();
+    return { output: result.data };
+  }, [evaluationRefetch, mode, savedViewRefetch]);
+  const rowActions = useRowActions({
+    slug,
+    activeView,
+    definition: detail.data,
+    capability: memberCapability,
+    embedFilter: mode === "embedded" ? effectiveFilter : undefined,
+    refetchView: refetchRowActionsView,
+    refetchDefinition: detailRefetch,
+    resetKey: viewResetKey,
+  });
+  const handleDuplicateRow = useCallback(
+    (row: QueryRow) => {
+      void rowActions.duplicate(row);
+    },
+    [rowActions.duplicate],
+  );
   const retainedDraftCapability =
     memberCapability ??
     (memberState.draftOpen && mode === "embedded"
@@ -333,6 +410,76 @@ export function useBaseTableController(
       ),
     [activeView, detail.data?.views],
   );
+  const baseColumns = useMemo(
+    () =>
+      activeViewDefinition?.columns && activeViewDefinition.columns.length > 0
+        ? activeViewDefinition.columns
+        : ["title"],
+    [activeViewDefinition?.columns],
+  );
+  const [overridesSave, setOverridesSave] = useState<OverridesSaveState>({
+    phase: "idle",
+  });
+  const overridesClear = overrides.clear;
+  const clearOverrides = useCallback(() => {
+    overridesClear();
+    notifySortChange(undefined);
+    setOverridesSave({ phase: "idle" });
+  }, [notifySortChange, overridesClear]);
+  const saveOverrides = useCallback(async () => {
+    const current = detail.data;
+    const view = activeViewDefinition;
+    if (!current || !view) return;
+    setOverridesSave({ phase: "saving" });
+    const nextView = applyOverridesToView(
+      view,
+      overrides.state,
+      sort,
+      baseColumns,
+    );
+    try {
+      await updateBaseAsync({
+        params: { path: { slug } },
+        body: {
+          expected_revision: current.revision,
+          definition: definitionPayload(current, nextView),
+          view_origins: (current.views ?? []).map((candidate) => ({
+            kind: "existing" as const,
+            name: candidate.name,
+          })),
+        },
+      });
+      overridesClear();
+      notifySortChange(undefined);
+      setOverridesSave({ phase: "idle" });
+    } catch (error) {
+      setOverridesSave(
+        isApiConflict(error)
+          ? {
+              phase: "conflict",
+              message: "This base changed elsewhere. Reload, then save again.",
+            }
+          : {
+              phase: "error",
+              message: formatApiError(error, "The view could not be saved."),
+            },
+      );
+    }
+  }, [
+    activeViewDefinition,
+    baseColumns,
+    detail.data,
+    notifySortChange,
+    overrides.state,
+    overridesClear,
+    slug,
+    sort,
+    updateBaseAsync,
+  ]);
+  const reloadDefinition = useCallback(async () => {
+    await detailRefetch();
+    setOverridesSave({ phase: "idle" });
+  }, [detailRefetch]);
   const memberDraftFields = useMemo(
     () =>
       detail.data && activeView && retainedDraftCapability
@@ -643,6 +790,7 @@ export function useBaseTableController(
       }
       notifySortChange(undefined);
       notifyViewChange(name);
+      setOverridesSave({ phase: "idle" });
     },
     [generation, mode, notifySortChange, notifyViewChange],
   );
@@ -761,7 +909,7 @@ export function useBaseTableController(
     memberSaving,
     memberDiagnostics: memberState.diagnostics,
     memberError: memberState.error,
-    memberNotice: visibleMemberNotice,
+    memberNotice: visibleMemberNotice ?? rowActions.notice,
     projects,
     onAddMember: handleAddMember,
     onSaveMember: handleSaveMember,
@@ -769,6 +917,22 @@ export function useBaseTableController(
     onMemberEdit: handleMemberEdit,
     focusCreatedId,
     onCreatedRowFocused: handleCreatedRowFocused,
+    overrides: overrides.state,
+    onAddQuickFilter: overrides.addQuickFilter,
+    onRemoveQuickFilter: overrides.removeQuickFilter,
+    onSetGroup: overrides.setGroup,
+    onHideColumn: overrides.hideColumn,
+    onShowHiddenColumns: overrides.showHiddenColumns,
+    onClearOverrides: clearOverrides,
+    onSaveOverrides: () => void saveOverrides(),
+    onReloadDefinition: () => void reloadDefinition(),
+    overridesSave,
+    onOpenPageInNewTab: rowActions.openInNewTab,
+    onCopyWikilink: rowActions.copyWikilink,
+    onCopyValue: rowActions.copyValue,
+    onDuplicateRow: handleDuplicateRow,
+    onArchiveRow: rowActions.archive,
+    rowActionError: rowActions.error,
     rowWindow:
       mode === "embedded"
         ? {

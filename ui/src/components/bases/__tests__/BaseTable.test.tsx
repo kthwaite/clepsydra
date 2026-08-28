@@ -146,11 +146,22 @@ vi.mock("#/api/bases", async (importOriginal) => {
       mutateAsync: mocks.createMember,
       isPending: false,
     }),
+    useUpdateBase: () => ({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    }),
     usePropertyCommit: () => mocks.commit,
   };
 });
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({ copied: false, copy: vi.fn() }),
+}));
+vi.mock("#/api/pages", () => ({
+  useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+vi.mock("#/api/client", () => ({ fetchClient: { GET: vi.fn() } }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => ["clepsydra"] }));
 
 import { BaseTable } from "#/components/bases/BaseTable";
@@ -221,7 +232,7 @@ describe("BaseTable standalone regression", () => {
       {},
     );
 
-    await user.click(screen.getByRole("columnheader", { name: "rating" }));
+    await user.click(screen.getByRole("columnheader", { name: /^rating/ }));
     await waitFor(() =>
       expect(mocks.useBaseView).toHaveBeenLastCalledWith(
         "reading",

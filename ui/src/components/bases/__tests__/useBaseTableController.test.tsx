@@ -21,6 +21,7 @@ import type { BaseMemberDraftValue } from "#/components/bases/member-draft";
 const mocks = vi.hoisted(() => ({
   commit: vi.fn(),
   createMember: vi.fn(),
+  updateBase: vi.fn(),
   detailRefetch: vi.fn(),
   savedViewRefetch: vi.fn(),
   evaluationRefetch: vi.fn(),
@@ -28,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   useBase: vi.fn(),
   useBaseView: vi.fn(),
   useBaseViewWindows: vi.fn(),
+  get: vi.fn(),
   currentEvaluationConfig: undefined as unknown,
   evaluationState: {
     data: undefined as BaseViewEvaluateResponse | undefined,
@@ -102,11 +104,22 @@ vi.mock("#/api/bases", async (importOriginal) => {
       mutateAsync: mocks.createMember,
       isPending: false,
     }),
+    useUpdateBase: () => ({
+      mutateAsync: mocks.updateBase,
+      isPending: false,
+    }),
     usePropertyCommit: () => mocks.commit,
   };
 });
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({ copied: false, copy: vi.fn() }),
+}));
+vi.mock("#/api/pages", () => ({
+  useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+vi.mock("#/api/client", () => ({ fetchClient: { GET: mocks.get } }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 
 import { BaseTableView } from "#/components/bases/BaseTableView";
@@ -985,5 +998,217 @@ describe("useBaseTableController standalone mode", () => {
         fields: {},
       },
     });
+  });
+});
+
+describe("view overrides", () => {
+  it("sends quick filters and the group override with the standalone view request", async () => {
+    const user = userEvent.setup();
+    let model!: ReturnType<typeof useBaseTableController>;
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(
+      <Probe value={options({ mode: "standalone", filter: undefined })} />,
+    );
+    act(() => {
+      model.onAddQuickFilter({
+        field: "status",
+        op: "eq",
+        value: "reading",
+        label: "status is reading",
+      });
+      model.onSetGroup({ kind: "flat" });
+    });
+    await waitFor(() =>
+      expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+        "reading",
+        "Continues",
+        {
+          filter: { field: "status", op: "eq", value: "reading" },
+          groupBy: { kind: "flat" },
+        },
+      ),
+    );
+    expect(model.overrides.quickFilters).toHaveLength(1);
+    void user;
+  });
+
+  it("composes the fence filter with quick filters for an embedded view", async () => {
+    let model!: ReturnType<typeof useBaseTableController>;
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(<Probe value={options()} />); // embedded, fence filter = readingFilter
+    act(() => {
+      model.onAddQuickFilter({
+        field: "status",
+        op: "ne",
+        value: "finished",
+        label: "status is not finished",
+      });
+      model.onSetGroup({ kind: "by", field: "status" });
+    });
+    await waitFor(() =>
+      expect(mocks.currentEvaluationConfig).toMatchObject({
+        filter: {
+          all: [
+            readingFilter,
+            { field: "status", op: "ne", value: "finished" },
+          ],
+        },
+        groupBy: { kind: "by", field: "status" },
+      }),
+    );
+  });
+
+  it("posts the effective embed filter when duplicating a row", async () => {
+    mocks.get.mockImplementation(async (path: string) =>
+      path.includes("/properties")
+        ? { data: { properties: [] } }
+        : { data: { meta: { tags: [] } } },
+    );
+    let model!: ReturnType<typeof useBaseTableController>;
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(<Probe value={options()} />); // embedded, fence filter = readingFilter
+    act(() => {
+      model.onAddQuickFilter({
+        field: "status",
+        op: "ne",
+        value: "finished",
+        label: "status is not finished",
+      });
+    });
+    const effectiveFilter = {
+      all: [readingFilter, { field: "status", op: "ne", value: "finished" }],
+    };
+    await waitFor(() =>
+      expect(mocks.currentEvaluationConfig).toMatchObject({
+        filter: effectiveFilter,
+      }),
+    );
+
+    act(() => model.onDuplicateRow(createdRow));
+
+    await waitFor(() =>
+      expect(mocks.createMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({ embed_filter: effectiveFilter }),
+        }),
+      ),
+    );
+  });
+
+  it("resets overrides when the view changes", () => {
+    let model!: ReturnType<typeof useBaseTableController>;
+    const onViewChange = vi.fn();
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    const { rerender } = render(
+      <Probe value={options({ mode: "standalone", onViewChange })} />,
+    );
+    act(() => model.onHideColumn("status"));
+    expect(model.overrides.hiddenColumns).toEqual(["status"]);
+    act(() => model.onViewChange("Shelf"));
+    rerender(
+      <Probe
+        value={options({
+          mode: "standalone",
+          onViewChange,
+          activeView: "Shelf",
+        })}
+      />,
+    );
+    expect(model.overrides.hiddenColumns).toEqual([]);
+  });
+
+  it("saves overrides into the view through the revision-guarded PUT and clears them", async () => {
+    mocks.updateBase.mockResolvedValue({ revision: "r2", diagnostics: [] });
+    let model!: ReturnType<typeof useBaseTableController>;
+    const onSortChange = vi.fn();
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(
+      <Probe
+        value={options({
+          mode: "standalone",
+          filter: undefined,
+          sort: [{ field: "status", dir: "desc" }],
+          onSortChange,
+        })}
+      />,
+    );
+    act(() => {
+      model.onAddQuickFilter({
+        field: "status",
+        op: "eq",
+        value: "reading",
+        label: "status is reading",
+      });
+      model.onHideColumn("status");
+    });
+    await act(async () => model.onSaveOverrides());
+    expect(mocks.updateBase).toHaveBeenCalledWith({
+      params: { path: { slug: "reading" } },
+      body: {
+        expected_revision: definition.revision,
+        definition: {
+          name: "Reading Log",
+          properties: definition.properties,
+          views: [
+            {
+              name: "Continues",
+              layout: "table",
+              columns: ["title"],
+              filter: { field: "status", op: "eq", value: "reading" },
+              sort: [{ field: "status", dir: "desc" }],
+            },
+            { name: "Shelf", layout: "table", columns: ["title"] },
+          ],
+        },
+        view_origins: [
+          { kind: "existing", name: "Continues" },
+          { kind: "existing", name: "Shelf" },
+        ],
+      },
+    });
+    expect(model.overrides.quickFilters).toEqual([]);
+    expect(onSortChange).toHaveBeenCalledWith(undefined);
+    expect(model.overridesSave).toEqual({ phase: "idle" });
+  });
+
+  it("reports a conflict and keeps the overrides", async () => {
+    mocks.updateBase.mockRejectedValue({
+      status: 409,
+      error: "conflict",
+      detail: {},
+    });
+    let model!: ReturnType<typeof useBaseTableController>;
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(
+      <Probe value={options({ mode: "standalone", filter: undefined })} />,
+    );
+    act(() => model.onSetGroup({ kind: "by", field: "status" }));
+    await act(async () => model.onSaveOverrides());
+    expect(model.overridesSave).toEqual({
+      phase: "conflict",
+      message: "This base changed elsewhere. Reload, then save again.",
+    });
+    expect(model.overrides.group).toEqual({ kind: "by", field: "status" });
+    await act(async () => model.onReloadDefinition());
+    expect(mocks.detailRefetch).toHaveBeenCalled();
+    expect(model.overridesSave).toEqual({ phase: "idle" });
   });
 });

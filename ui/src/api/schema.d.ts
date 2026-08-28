@@ -1982,6 +1982,11 @@ export interface components {
         };
         BaseViewEvaluateRequest: {
             filter?: null | components["schemas"]["Filter"];
+            /**
+             * @description Replace the view's `group_by` for this request; the empty string
+             *     evaluates the view flat. Absent keeps the saved grouping.
+             */
+            group_by?: string | null;
             /** Format: int32 */
             limit?: number | null;
             /**
@@ -4926,6 +4931,10 @@ export interface operations {
                 sort?: string;
                 /** @description asc | desc for the sort override */
                 dir?: string;
+                /** @description JSON-encoded filter AND-ed after the base and view filters */
+                filter?: string;
+                /** @description Group-by override; empty string evaluates the view flat */
+                group_by?: string;
             };
             header?: never;
             path: {
@@ -4944,6 +4953,14 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QueryOutput"];
+                };
+            };
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Unknown base or view */
