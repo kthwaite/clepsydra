@@ -1930,3 +1930,38 @@ async fn ambiguous_cycle_prefix_is_rejected_with_candidates() {
         "{msg}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// GET /board — task ordering by creation time, not random code (task 4)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn board_lists_tasks_in_creation_order_not_code_order() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+    let mut created = Vec::new();
+    for title in ["first", "second", "third"] {
+        let r = server
+            .post("/api/vault/board/tasks")
+            .json(&serde_json::json!({"title": title}))
+            .await;
+        r.assert_status(axum::http::StatusCode::CREATED);
+        created.push(
+            r.json::<serde_json::Value>()["code"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let board: serde_json::Value = server.get("/api/vault/board").await.json();
+    let listed: Vec<String> = board["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|t| t["code"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        listed, created,
+        "creation order, independent of the random codes"
+    );
+}

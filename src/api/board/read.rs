@@ -220,7 +220,7 @@ type TaskDtoRow = (
 );
 
 /// Row tuple for the task-list query:
-/// `(id, path, title, meta_json, project, updated_at, tags_raw, body)`.
+/// `(id, path, title, meta_json, project, updated_at, tags_raw, body, created_at)`.
 type TaskListRow = (
     String,
     String,
@@ -229,6 +229,7 @@ type TaskListRow = (
     Option<String>,
     Option<String>,
     String,
+    Option<String>,
     Option<String>,
 );
 
@@ -392,7 +393,8 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         "SELECT p.id, p.path, p.title, p.meta_json, p.project, p.updated_at, \
                 COALESCE((SELECT group_concat(t.tag, char(31)) \
                             FROM tags t WHERE t.page_id = p.id), ''), \
-                CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END \
+                CASE WHEN p.encrypted = 1 THEN NULL ELSE body_index.body END, \
+                p.created_at \
            FROM pages p \
            LEFT JOIN page_bodies body_index ON body_index.page_id = p.id \
           WHERE p.kind = ?1 \
@@ -410,14 +412,17 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
                 row.get::<_, Option<String>>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, Option<String>>(7)?,
+                row.get::<_, Option<String>>(8)?,
             ))
         })?
         .collect::<Result<_, _>>()?;
 
     let checks_by_page = count_checks_by_page(conn)?;
 
-    let mut tasks: Vec<BoardTask> = Vec::new();
-    for (id_str, path, title, meta_json, project, updated_at, tags_raw, body) in task_rows {
+    let mut tasks: Vec<(BoardTask, Option<String>)> = Vec::new();
+    for (id_str, path, title, meta_json, project, updated_at, tags_raw, body, created_at) in
+        task_rows
+    {
         let id = match Uuid::parse_str(&id_str) {
             Ok(u) => u,
             Err(_) => continue,
@@ -453,29 +458,34 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
         let checks = checks_by_page.get(&id_str).copied().unwrap_or([0, 0]);
         let updated_at_str = updated_at.unwrap_or_default();
 
-        tasks.push(BoardTask {
-            id,
-            path,
-            code,
-            title: task_title,
-            body_excerpt: body.as_deref().map(body_excerpt),
-            project,
-            status,
-            priority,
-            cycle,
-            assignee,
-            estimate,
-            due,
-            start: task_start,
-            hold,
-            tags,
-            checks,
-            link,
-            updated_at: updated_at_str,
-        });
+        tasks.push((
+            BoardTask {
+                id,
+                path,
+                code,
+                title: task_title,
+                body_excerpt: body.as_deref().map(body_excerpt),
+                project,
+                status,
+                priority,
+                cycle,
+                assignee,
+                estimate,
+                due,
+                start: task_start,
+                hold,
+                tags,
+                checks,
+                link,
+                updated_at: updated_at_str,
+            },
+            created_at,
+        ));
     }
-    tasks.sort_by(|a, b| a.code.cmp(&b.code));
-    Ok(tasks)
+    tasks.sort_by(|(a, a_created), (b, b_created)| {
+        a_created.cmp(b_created).then_with(|| a.code.cmp(&b.code))
+    });
+    Ok(tasks.into_iter().map(|(task, _)| task).collect())
 }
 
 /// Extract `link` field: if value looks like a wikilink (`[[target]]` or
