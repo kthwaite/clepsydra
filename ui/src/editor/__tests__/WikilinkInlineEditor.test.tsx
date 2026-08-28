@@ -50,6 +50,12 @@ describe("WikilinkInlineEditor", () => {
     expect(input.selectionEnd).toBe("Target|Label".length);
   });
 
+  it("opts the source input out of spellcheck", () => {
+    const { input } = renderEditor();
+
+    expect(input).toHaveAttribute("spellcheck", "false");
+  });
+
   it.each([
     {
       name: "Enter",

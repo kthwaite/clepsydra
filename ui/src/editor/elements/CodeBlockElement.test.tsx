@@ -158,6 +158,21 @@ describe("CodeBlockElement", () => {
     expect(container.querySelector("pre")).not.toHaveClass("sr-only");
   });
 
+  it("offers the expand control only while the diagram is on screen", async () => {
+    const { editor } = renderMermaid();
+    await screen.findByTestId("mermaid-diagram");
+
+    expect(
+      screen.getByRole("button", { name: "Expand diagram" }),
+    ).toBeInTheDocument();
+
+    await act(async () => {
+      Transforms.select(editor, { path: [0, 0], offset: 0 });
+    });
+
+    expect(screen.queryByRole("button", { name: "Expand diagram" })).toBeNull();
+  });
+
   it("clicking the diagram puts the caret in the source", async () => {
     const user = userEvent.setup();
     const { editor, container } = renderMermaid();

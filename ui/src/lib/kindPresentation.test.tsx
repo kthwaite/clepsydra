@@ -8,6 +8,7 @@ describe("presentationFor", () => {
 
     expect(presentation.bodyPresentation).toBe("editor");
     expect(presentation.metaExtras).toBeNull();
+    expect(presentation.headerExtras).toBeNull();
   });
 
   it("selects the transcript presentation for AI conversations", () => {
@@ -35,11 +36,20 @@ describe("presentationFor", () => {
     expect(title).toMatch(/2026/);
   });
 
-  it("gives meetings the bespoke rail block", () => {
+  it("gives meetings the bespoke header block", () => {
     const presentation = presentationFor("MEETING");
     expect(presentation.bodyPresentation).toBe("editor");
-    expect(presentation.metaExtras).not.toBeNull();
-    expect(presentation.metaExtrasLabel).toBe("Meeting");
+    expect(presentation.metaExtras).toBeNull();
+    expect(presentation.metaExtrasLabel).toBeUndefined();
+    expect(presentation.headerExtras).not.toBeNull();
+  });
+
+  it("keeps Journal's day navigation in the rail", () => {
+    for (const kind of ["JOURNAL", "AI_JOURNAL"] as const) {
+      const presentation = presentationFor(kind);
+      expect(presentation.headerExtras).toBeNull();
+      expect(presentation.metaExtras).not.toBeNull();
+    }
   });
 
   it("resolves every known kind without throwing", () => {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   MermaidDiagram,
+  MermaidExpandButton,
   MermaidViewToggle,
   useMermaidRender,
 } from "#/components/MermaidDiagram";
@@ -29,6 +30,9 @@ export function MermaidCodeBlock({ code }: { code: string }) {
             getText={() => code}
             label="Copy code"
             className="opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+          />
+          <MermaidExpandButton
+            svg={state.status === "ready" ? state.svg : null}
           />
           <MermaidViewToggle isDiagram={diagram} onChange={setDiagram} />
         </div>

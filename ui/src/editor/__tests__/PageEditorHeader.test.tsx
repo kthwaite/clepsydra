@@ -149,9 +149,28 @@ describe("PageEditorHeader read-only title", () => {
     render(<PageEditorHeader {...baseProps} onTitleChange={onTitleChange} />);
 
     const title = screen.getByRole("textbox", { name: "Page title" });
-    expect(
-      fireEvent.keyDown(title, { key: "Enter", isComposing: true }),
-    ).toBe(true);
+    expect(fireEvent.keyDown(title, { key: "Enter", isComposing: true })).toBe(
+      true,
+    );
     expect(onTitleChange).not.toHaveBeenCalled();
+  });
+
+  it("renders a Raw Markdown icon button when onOpenRawMarkdown is set, and calls it on click", async () => {
+    const user = userEvent.setup();
+    const onOpenRawMarkdown = vi.fn();
+    render(
+      <PageEditorHeader {...baseProps} onOpenRawMarkdown={onOpenRawMarkdown} />,
+    );
+
+    const button = screen.getByRole("button", { name: "Raw Markdown" });
+    await user.click(button);
+
+    expect(onOpenRawMarkdown).toHaveBeenCalledOnce();
+  });
+
+  it("renders no Raw Markdown button when onOpenRawMarkdown is absent", () => {
+    render(<PageEditorHeader {...baseProps} />);
+
+    expect(screen.queryByRole("button", { name: "Raw Markdown" })).toBeNull();
   });
 });

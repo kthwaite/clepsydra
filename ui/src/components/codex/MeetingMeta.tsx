@@ -1,5 +1,5 @@
 import { Plus, X } from "lucide-react";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { usePropertyCommit } from "#/api/bases";
 import { usePage } from "#/api/pages";
 import type { CellValue } from "#/components/bases/cells/types";
@@ -36,8 +36,10 @@ const GHOST_ICON_BUTTON = cn(
 
 const LABEL = "cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute";
 
-/** MEETING META-rail block: when the meeting happened, which person pages it
- *  names, and whether it is a 1:1.
+/** MEETING header band: when the meeting happened, which person pages it
+ *  names, and whether it is a 1:1. These are facts of the note rather than
+ *  sidebar metadata, so FOLIO renders this under the title/tags header
+ *  (registered as the kind's `headerExtras`) rather than in the META rail.
  *
  *  `occurred_at` and `attendees` are ordinary frontmatter properties, so this
  *  writes through the same property-patch path the Base rail uses — including
@@ -59,6 +61,7 @@ export function MeetingMeta({
   const [saving, setSaving] = useState(false);
   const [creating, setCreating] = useState<string | null>(null);
   const [createError, setCreateError] = useState<string | null>(null);
+  const attendeesLabelId = useId();
 
   const attendees = readAttendees(page?.meta.attendees);
   const occurredAt = readOccurredAt(page?.meta.occurred_at);
@@ -105,9 +108,13 @@ export function MeetingMeta({
   };
 
   return (
-    <div className="flex flex-col gap-3">
-      <div>
-        <div className={cn(LABEL, "mb-1")}>Occurred</div>
+    <section
+      aria-label="Meeting details"
+      data-testid="meeting-header"
+      className="mb-3 flex flex-wrap items-start gap-x-8 gap-y-2"
+    >
+      <div className="flex min-w-[12rem] flex-col gap-1">
+        <div className={LABEL}>Occurred</div>
         <div className="flex items-center gap-1">
           <div className="min-w-0 flex-1">
             <EditableCell
@@ -131,9 +138,11 @@ export function MeetingMeta({
         </div>
       </div>
 
-      <div>
-        <div className="mb-1 flex items-center justify-between gap-2">
-          <span className={LABEL}>Attendees</span>
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <span id={attendeesLabelId} className={LABEL}>
+            Attendees
+          </span>
           <button
             type="button"
             aria-pressed={oneOnOne}
@@ -148,77 +157,81 @@ export function MeetingMeta({
           </button>
         </div>
 
-        {attendees.length === 0 ? (
-          <div className="cl-mono text-[11px] text-ink-mute">no attendees</div>
-        ) : (
-          <ul className="flex flex-col gap-1">
-            {attendees.map((attendee) => {
-              const target = findPageByName(pages, attendee);
-              return (
-                <li
-                  key={attendee}
-                  className="flex items-center justify-between gap-2"
-                >
-                  {target ? (
-                    <CLink
-                      path={target.path}
-                      className="cl-mono min-w-0 truncate text-[12px] text-ink hover:text-accent"
-                    >
-                      {attendee}
-                    </CLink>
-                  ) : (
-                    <span className="flex min-w-0 items-center gap-1">
-                      <span
-                        className="cl-mono truncate text-[12px] text-ink-mute"
-                        title="no page carries this name yet"
+        <div className="flex flex-wrap items-center gap-1.5">
+          {attendees.length === 0 ? (
+            <span className="cl-mono text-[11px] text-ink-mute">
+              no attendees
+            </span>
+          ) : (
+            <ul aria-labelledby={attendeesLabelId} className="contents">
+              {attendees.map((attendee) => {
+                const target = findPageByName(pages, attendee);
+                return (
+                  <li
+                    key={attendee}
+                    className="cl-mono inline-flex max-w-[14rem] min-w-0 items-center gap-1 border border-rule px-1.5 py-0.5 text-[11px] text-ink"
+                  >
+                    {target ? (
+                      <CLink
+                        path={target.path}
+                        className="cl-mono min-w-0 truncate text-[12px] text-ink hover:text-accent"
                       >
                         {attendee}
-                      </span>
-                      {!isDraft && (
-                        <button
-                          type="button"
-                          className={GHOST_ICON_BUTTON}
-                          disabled={creating !== null}
-                          aria-label={`create ${attendee}`}
-                          title="create the person page"
-                          onClick={() => void create(attendee)}
+                      </CLink>
+                    ) : (
+                      <span className="flex min-w-0 items-center gap-1">
+                        <span
+                          className="cl-mono truncate text-[12px] text-ink-mute"
+                          title="no page carries this name yet"
                         >
-                          <Plus size={11} aria-hidden />
-                        </button>
-                      )}
-                    </span>
-                  )}
-                  <button
-                    type="button"
-                    className={GHOST_ICON_BUTTON}
-                    disabled={saving || isDraft}
-                    aria-label={`remove ${attendee}`}
-                    onClick={() =>
-                      void write(
-                        attendees.filter((entry) => entry !== attendee),
-                      )
-                    }
-                  >
-                    <X size={11} aria-hidden />
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+                          {attendee}
+                        </span>
+                        {!isDraft && (
+                          <button
+                            type="button"
+                            className={GHOST_ICON_BUTTON}
+                            disabled={creating !== null}
+                            aria-label={`create ${attendee}`}
+                            title="create the person page"
+                            onClick={() => void create(attendee)}
+                          >
+                            <Plus size={11} aria-hidden />
+                          </button>
+                        )}
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      className={GHOST_ICON_BUTTON}
+                      disabled={saving || isDraft}
+                      aria-label={`remove ${attendee}`}
+                      onClick={() =>
+                        void write(
+                          attendees.filter((entry) => entry !== attendee),
+                        )
+                      }
+                    >
+                      <X size={11} aria-hidden />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+
+          {!isDraft && (
+            <div className="w-56 min-w-[10rem]">
+              <PersonCombo onPick={add} exclude={attendees} disabled={saving} />
+            </div>
+          )}
+        </div>
 
         {createError && (
           <div className="cl-mono mt-1 text-[10px] text-hot">
             ⁂ {createError}
           </div>
         )}
-
-        {!isDraft && (
-          <div className="mt-2">
-            <PersonCombo onPick={add} exclude={attendees} disabled={saving} />
-          </div>
-        )}
       </div>
-    </div>
+    </section>
   );
 }

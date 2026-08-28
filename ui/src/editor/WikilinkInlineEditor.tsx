@@ -106,6 +106,7 @@ export function WikilinkInlineEditor({
         onFocus={(event) => event.stopPropagation()}
         onKeyDown={handleKeyDown}
         onBlur={() => finish("preserve")}
+        spellCheck={false}
         className="min-w-[4ch] bg-transparent px-[2px] font-mono text-[0.95em] text-ink outline-none"
         style={{ width: `${Math.max(draft.length, 4)}ch` }}
       />
