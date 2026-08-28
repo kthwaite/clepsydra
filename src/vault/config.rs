@@ -182,8 +182,14 @@ fn default_cas_path() -> String {
 /// Resolve `[archive].cas_path` to an absolute directory. `~` and `~/…`
 /// expand to the home directory, an absolute path is used as-is, and any
 /// other path is relative to the vault root — so the default
-/// `.clepsydra/cas` lands inside the vault (ADR 0005).
+/// `.clepsydra/cas` lands inside the vault (ADR 0005). A blank value means
+/// "the default": `vault_root.join("")` would otherwise make the vault root
+/// itself the blob store.
 pub fn resolve_cas_path(raw: &str, vault_root: &Path) -> PathBuf {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return vault_root.join(default_cas_path());
+    }
     if let Some(expanded) = crate::expand_tilde(raw) {
         return expanded;
     }
@@ -255,6 +261,15 @@ mod tests {
         assert_eq!(
             resolve_cas_path("cas-here", root),
             PathBuf::from("/vaults/main/cas-here")
+        );
+        // blank / whitespace means the default, never the vault root itself
+        assert_eq!(
+            resolve_cas_path("", root),
+            PathBuf::from("/vaults/main/.clepsydra/cas")
+        );
+        assert_eq!(
+            resolve_cas_path("  ", root),
+            PathBuf::from("/vaults/main/.clepsydra/cas")
         );
         assert_eq!(
             resolve_cas_path("/abs/cas", root),
