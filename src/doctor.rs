@@ -4,6 +4,7 @@
 //! [`Report`]. Checks are read-only and never panic: failures inside a check
 //! become `Status::Err` results so the rest of the report still runs.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
@@ -265,6 +266,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         }
         check_bcl(v, &mut report);
         check_frontmatter(v, &mut report);
+        check_conflicts(v, &mut report);
         check_meetings(v, &mut report);
         check_bases(v, &mut report);
     } else {
@@ -1208,6 +1210,8 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
                         report.push(warn(SECTION, "stats", format!("{e}")))
                     }
                 }
+
+                verify_cas_refs(vault, &conn, &path, report);
             }
         }
         Err(e) => report.push(err(
@@ -1216,6 +1220,271 @@ fn check_cas(vault: &Vault, full: bool, report: &mut Report) {
             format!("cannot open {} read-only: {e}", db_path.display()),
         )),
     }
+}
+
+/// `--full` CAS verify: recount expected refs from a vault-wide scan, subtract
+/// refs already released for still-present rubbish items, then compare against
+/// `blobs.ref_count` and cross-check disk fan-out files against DB rows.
+///
+/// Read-only: never opens the `ContentStore` (would take its flock), and never
+/// writes to `conn`. `cas_path` is the CAS root directory (already validated
+/// as an existing, writable dir by the caller).
+fn verify_cas_refs(vault: &Vault, conn: &Connection, cas_path: &Path, report: &mut Report) {
+    const SECTION: &str = "cas";
+    const LISTED: usize = 10;
+
+    let scan = crate::vault::cas_scan::scan_archive_refs(vault);
+    if !scan.warnings.is_empty() {
+        report.push(warn(
+            SECTION,
+            "scan",
+            listing(
+                &scan.warnings,
+                format!("{} warning(s) during reference scan:", scan.warnings.len()),
+                LISTED,
+            ),
+        ));
+    }
+
+    let mut expected: BTreeMap<String, i64> = scan
+        .refs
+        .iter()
+        .map(|(hash, count)| (hash.clone(), *count as i64))
+        .collect();
+    if let Err(e) = subtract_released_rubbish_refs(vault, conn, &mut expected) {
+        report.push(err(
+            SECTION,
+            "refcounts",
+            format!("failed to read rubbish_archive_releases: {e}"),
+        ));
+        return;
+    }
+
+    let mut stmt = match conn.prepare("SELECT hash, ref_count FROM blobs") {
+        Ok(stmt) => stmt,
+        Err(e) => {
+            report.push(err(
+                SECTION,
+                "refcounts",
+                format!("failed to read blobs table: {e}"),
+            ));
+            return;
+        }
+    };
+    let rows = stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+    });
+    let rows: Vec<(String, i64)> = match rows.and_then(Iterator::collect) {
+        Ok(rows) => rows,
+        Err(e) => {
+            report.push(err(
+                SECTION,
+                "refcounts",
+                format!("failed to read blobs table: {e}"),
+            ));
+            return;
+        }
+    };
+
+    // Rows only tell half the story: a hash the vault expects references
+    // (`expected`) but that never got a `blobs` row at all — never stored,
+    // or a DB desync — would be invisible to a rows-only comparison. Compare
+    // over the union of both sides so a referenced-but-untracked hash still
+    // surfaces (as a refcounts mismatch, and as `missing` if its file is
+    // also absent) instead of silently passing every check.
+    let stored: BTreeMap<String, i64> = rows.iter().cloned().collect();
+    let all_hashes: BTreeSet<String> = expected
+        .keys()
+        .cloned()
+        .chain(stored.keys().cloned())
+        .collect();
+
+    let mut mismatches = Vec::new();
+    let mut missing = Vec::new();
+    let mut checked_for_missing = 0usize;
+    for hash in &all_hashes {
+        let stored_count = stored.get(hash).copied().unwrap_or(0);
+        let expected_count = expected.get(hash).copied().unwrap_or(0);
+        if stored_count != expected_count {
+            let no_row = if stored.contains_key(hash) {
+                ""
+            } else {
+                " (no row)"
+            };
+            mismatches.push(format!(
+                "{hash}: stored ref_count {stored_count}{no_row}, expected {expected_count}"
+            ));
+        }
+        // Only a hash something currently cares about (a live/rubbish
+        // reference, or a DB row still claiming one) needs its file present.
+        // A hash with both at 0 is already fully released; a missing file
+        // for it is unremarkable, not a fault.
+        if expected_count > 0 || stored_count > 0 {
+            checked_for_missing += 1;
+            match cas_blob_path(cas_path, hash) {
+                Some(blob_path) if !blob_path.exists() => missing.push(hash.clone()),
+                Some(_) => {}
+                None => missing.push(format!("{hash} (malformed hash)")),
+            }
+        }
+    }
+
+    if mismatches.is_empty() {
+        report.push(ok(
+            SECTION,
+            "refcounts",
+            format!(
+                "{} blob(s) match expected reference counts",
+                all_hashes.len()
+            ),
+        ));
+    } else {
+        report.push(
+            warn(
+                SECTION,
+                "refcounts",
+                listing(
+                    &mismatches,
+                    format!("{} blob(s) with drifted ref_count:", mismatches.len()),
+                    LISTED,
+                ),
+            )
+            .with_hint("run `clep cas rebuild --write` to recount"),
+        );
+    }
+
+    if missing.is_empty() {
+        report.push(ok(
+            SECTION,
+            "missing",
+            format!("all {checked_for_missing} referenced blob file(s) present on disk"),
+        ));
+    } else {
+        report.push(warn(
+            SECTION,
+            "missing",
+            listing(
+                &missing,
+                format!(
+                    "{} blob(s) referenced (by cas.db or the vault) with no file on disk:",
+                    missing.len()
+                ),
+                LISTED,
+            ),
+        ));
+    }
+
+    // GC-eligible: nothing currently expects this file, regardless of
+    // whether it still has a `blobs` row (a row with ref_count 0 is exactly
+    // as unreferenced as a file with no row at all — see `rebuild_metadata`'s
+    // `unreferenced_blobs`).
+    let orphans: Vec<String> = list_cas_blob_files(cas_path)
+        .into_iter()
+        .filter(|hash| expected.get(hash).copied().unwrap_or(0) <= 0)
+        .collect();
+    if orphans.is_empty() {
+        report.push(ok(SECTION, "orphans", "no orphaned blob files on disk"));
+    } else {
+        report.push(info(
+            SECTION,
+            "orphans",
+            listing(
+                &orphans,
+                format!(
+                    "{} blob file(s) on disk with no expected reference:",
+                    orphans.len()
+                ),
+                LISTED,
+            ),
+        ));
+    }
+}
+
+/// For each rubbish item whose captured-archive release is already recorded
+/// (`rubbish_archive_releases`) but whose item directory still exists on
+/// disk, the scan above counts its `page.md` refs again — the DB was already
+/// decremented for it. Subtract that item's unique hashes back out, floored
+/// at 0.
+fn subtract_released_rubbish_refs(
+    vault: &Vault,
+    conn: &Connection,
+    expected: &mut BTreeMap<String, i64>,
+) -> rusqlite::Result<()> {
+    let mut stmt = conn.prepare("SELECT item_id FROM rubbish_archive_releases")?;
+    let item_ids: Vec<String> = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
+
+    let rubbish_root = vault.root().join(".clepsydra/rubbish");
+    for item_id in item_ids {
+        let page_path = rubbish_root.join(&item_id).join("page.md");
+        let Ok(content) = std::fs::read_to_string(&page_path) else {
+            continue; // item already purged (or never had this dir); nothing to subtract
+        };
+        let (meta, _, _, _) = crate::vault::page::parse_or_repair_frontmatter(&content);
+        for hash in crate::vault::archive_hook::captured_archive_hashes(&meta) {
+            if let Some(count) = expected.get_mut(&hash) {
+                *count = (*count - 1).max(0);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Re-derive a blob's fan-out path (`<cas>/<hex[..2]>/<hex>`) from a
+/// `"sha256:<hex>"` hash. `ContentStore::blob_path` is private, so doctor
+/// reimplements the same two-level layout locally. Returns `None` for a hash
+/// that doesn't match the expected shape.
+fn cas_blob_path(cas_root: &Path, hash: &str) -> Option<PathBuf> {
+    let hex = hash.strip_prefix("sha256:")?;
+    if hex.len() != 64
+        || !hex
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return None;
+    }
+    Some(cas_root.join(&hex[..2]).join(hex))
+}
+
+/// Walk the CAS root's two-level fan-out directories and list every blob file
+/// found, as `"sha256:<hex>"` hashes. Mirrors `ContentStore::scan_blob_files`'s
+/// layout (private, so reimplemented here) but doctor only needs hashes, not
+/// sizes.
+fn list_cas_blob_files(cas_root: &Path) -> Vec<String> {
+    fn is_lowercase_hex(name: &str, len: usize) -> bool {
+        name.len() == len
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    }
+
+    let Ok(entries) = std::fs::read_dir(cas_root) else {
+        return Vec::new();
+    };
+    let mut prefixes: Vec<String> = entries
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+        .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+        .filter(|name| is_lowercase_hex(name, 2))
+        .collect();
+    prefixes.sort();
+
+    let mut hashes = Vec::new();
+    for prefix in prefixes.drain(..) {
+        let Ok(files) = std::fs::read_dir(cas_root.join(&prefix)) else {
+            continue;
+        };
+        let mut names: Vec<String> = files
+            .filter_map(Result::ok)
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+            .filter(|name| is_lowercase_hex(name, 64) && name.starts_with(&prefix))
+            .collect();
+        names.sort();
+        hashes.extend(names.into_iter().map(|name| format!("sha256:{name}")));
+    }
+    hashes
 }
 
 // ---------------------------------------------------------------------------
@@ -1481,6 +1750,58 @@ fn check_frontmatter(vault: &Vault, report: &mut Report) {
         info(SECTION, "legacy census", detail)
             .with_hint("run `clepsydra migrate --write` to convert (commit your vault first)"),
     );
+}
+
+// ---------------------------------------------------------------------------
+// Check: conflict markers and unparseable frontmatter
+// ---------------------------------------------------------------------------
+
+/// Report vault files containing git merge conflict markers. Such files are
+/// indexed read-only and never repaired (docs/adr/0004).
+fn check_conflicts(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "conflicts";
+    const LISTED: usize = 10;
+    let conflicted = crate::vault::conflict::conflicted_pages(vault);
+    if conflicted.is_empty() {
+        report.push(ok(
+            SECTION,
+            "markers",
+            "no files contain merge conflict markers",
+        ));
+    } else {
+        let mut detail = format!(
+            "{} file(s) contain merge conflict markers",
+            conflicted.len()
+        );
+        for path in conflicted.iter().take(LISTED) {
+            detail.push_str(&format!("\n  {}", path.as_str()));
+        }
+        if conflicted.len() > LISTED {
+            detail.push_str(&format!("\n  … and {} more", conflicted.len() - LISTED));
+        }
+        report.push(
+            warn(SECTION, "markers", detail).with_hint(
+                "resolve the merge conflicts by hand; conflicted files are indexed read-only and never auto-repaired",
+            ),
+        );
+    }
+
+    // Check for unparseable frontmatter
+    let unparseable = crate::vault::conflict::unparseable_pages(vault);
+    if unparseable.is_empty() {
+        report.push(ok(SECTION, "unparseable", "all frontmatter parseable"));
+    } else {
+        let mut detail = format!("{} file(s) have unparseable frontmatter", unparseable.len());
+        for (path, warning) in unparseable.iter().take(LISTED) {
+            detail.push_str(&format!("\n  {}: {}", path.as_str(), warning));
+        }
+        if unparseable.len() > LISTED {
+            detail.push_str(&format!("\n  … and {} more", unparseable.len() - LISTED));
+        }
+        report.push(warn(SECTION, "unparseable", detail).with_hint(
+            "these pages are indexed with default metadata; fix the frontmatter by hand",
+        ));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2400,6 +2721,260 @@ mod tests {
                 "{record:#?}"
             );
         }
+    }
+
+    #[test]
+    fn conflicts_check_warns_and_lists_files() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(
+            root.join("notes/clash.md"),
+            "<<<<<<< HEAD\n=======\n>>>>>>> x\n",
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "conflicts")
+            .unwrap();
+        assert!(matches!(result.status, Status::Warn));
+        assert!(result.detail.contains("notes/clash.md"));
+    }
+
+    #[test]
+    fn conflicts_check_ok_when_clean() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        assert!(matches!(report.results[0].status, Status::Ok));
+    }
+
+    #[test]
+    fn unparseable_check_warns_invalid_toml() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(
+            root.join("notes/broken.md"),
+            "+++\ninvalid toml here !!!\n+++\nSome body text\n",
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "conflicts" && r.name == "unparseable")
+            .unwrap();
+        assert!(matches!(result.status, Status::Warn));
+        assert!(result.detail.contains("notes/broken.md"));
+    }
+
+    #[test]
+    fn unparseable_check_ok_all_parseable() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_conflicts(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "conflicts" && r.name == "unparseable")
+            .unwrap();
+        assert!(matches!(result.status, Status::Ok));
+    }
+
+    fn archive_page_with_snapshot(hash: &str) -> String {
+        format!(
+            "+++\nid = \"01900000-0000-7000-8000-000000000009\"\ntitle = \"A\"\n\
+             created_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n\
+             [archive]\nurl = \"https://x\"\ndomain = \"x\"\ncaptured_at = \"2026-01-01T00:00:00Z\"\n\
+             snapshot_hash = \"{hash}\"\n+++\nbody\n"
+        )
+    }
+
+    /// Vault + separate CAS dir wired through `.clepsydra/config.toml`.
+    /// Returns (tempdir, cas_dir, stored snapshot hash) with one archive page
+    /// referencing the stored blob. Config fields absent from the file fall
+    /// back to serde defaults, so overwriting init's config is safe in tests.
+    fn cas_fixture() -> (
+        tempfile::TempDir,
+        std::path::PathBuf,
+        std::path::PathBuf,
+        String,
+    ) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let cas_dir = tmp.path().join("cas");
+        let store = crate::vault::cas::ContentStore::open(&cas_dir).unwrap();
+        let stored = store.store(b"<html>", "text/html").unwrap();
+        drop(store); // release the flock before doctor / direct sqlite access
+        std::fs::write(
+            root.join(".clepsydra/config.toml"),
+            format!("[archive]\ncas_path = \"{}\"\n", cas_dir.display()),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("archive/x")).unwrap();
+        std::fs::write(
+            root.join("archive/x/a.md"),
+            archive_page_with_snapshot(&stored.hash),
+        )
+        .unwrap();
+        (tmp, root, cas_dir, stored.hash)
+    }
+
+    #[test]
+    fn full_cas_verify_reports_refcount_drift() {
+        let (_tmp, root, cas_dir, hash) = cas_fixture();
+        rusqlite::Connection::open(cas_dir.join("cas.db"))
+            .unwrap()
+            .execute("UPDATE blobs SET ref_count = 5", [])
+            .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "refcounts")
+            .unwrap();
+        assert!(matches!(r.status, Status::Warn));
+        assert!(r.detail.contains(&hash));
+    }
+
+    #[test]
+    fn full_cas_verify_ok_when_consistent() {
+        let (_tmp, root, _cas_dir, _hash) = cas_fixture();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        for name in ["refcounts", "orphans", "missing"] {
+            let r = report
+                .results
+                .iter()
+                .find(|r| r.section == "cas" && r.name == name)
+                .unwrap();
+            assert!(
+                matches!(r.status, Status::Ok | Status::Info),
+                "check {name} not clean"
+            );
+        }
+    }
+
+    #[test]
+    fn full_cas_verify_reports_missing_blob_file() {
+        let (_tmp, root, cas_dir, hash) = cas_fixture();
+        let hex = &hash["sha256:".len()..];
+        std::fs::remove_file(cas_dir.join(&hex[..2]).join(hex)).unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "missing")
+            .unwrap();
+        assert!(matches!(r.status, Status::Warn));
+        assert!(r.detail.contains(hex));
+    }
+
+    #[test]
+    fn full_cas_verify_reports_orphan_with_zero_expected_refs() {
+        // A blob is `store()`d (so it has a `blobs` row, ref_count 1) but no
+        // page ever references it — the scan expects 0 refs, so it's
+        // GC-eligible even though the row exists.
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let cas_dir = tmp.path().join("cas");
+        let store = crate::vault::cas::ContentStore::open(&cas_dir).unwrap();
+        let stored = store.store(b"<html>", "text/html").unwrap();
+        drop(store);
+        std::fs::write(
+            root.join(".clepsydra/config.toml"),
+            format!("[archive]\ncas_path = \"{}\"\n", cas_dir.display()),
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "orphans")
+            .unwrap();
+        assert!(matches!(r.status, Status::Info));
+        assert!(r.detail.contains(&stored.hash));
+    }
+
+    #[test]
+    fn full_cas_verify_reports_orphan_untracked_file() {
+        // A raw file planted straight into the fan-out, bypassing
+        // `ContentStore` entirely — no `blobs` row, no page reference.
+        let (_tmp, root, cas_dir, _hash) = cas_fixture();
+        let fake_hex = "c".repeat(64);
+        let fan_out_dir = cas_dir.join(&fake_hex[..2]);
+        std::fs::create_dir_all(&fan_out_dir).unwrap();
+        std::fs::write(fan_out_dir.join(&fake_hex), b"untracked").unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let r = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "orphans")
+            .unwrap();
+        assert!(matches!(r.status, Status::Info));
+        assert!(r.detail.contains(&fake_hex));
+    }
+
+    #[test]
+    fn full_cas_verify_reports_referenced_hash_with_no_row_and_no_file() {
+        // A page references a hash that was never stored: no `blobs` row,
+        // no fan-out file. The union of expected refs and DB rows must
+        // surface this — a DB-rows-only comparison would never see it.
+        let (_tmp, root, _cas_dir, _hash) = cas_fixture();
+        let phantom = format!("sha256:{}", "d".repeat(64));
+        std::fs::write(
+            root.join("archive/x/b.md"),
+            format!(
+                "+++\nid = \"01900000-0000-7000-8000-00000000000a\"\ntitle = \"B\"\n\
+                 created_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n\
+                 [archive]\nurl = \"https://y\"\ndomain = \"y\"\ncaptured_at = \"2026-01-01T00:00:00Z\"\n\
+                 snapshot_hash = \"{phantom}\"\n+++\nbody\n"
+            ),
+        )
+        .unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_cas(&vault, true, &mut report);
+        let refcounts = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "refcounts")
+            .unwrap();
+        assert!(matches!(refcounts.status, Status::Warn));
+        assert!(refcounts.detail.contains(&phantom));
+        let missing = report
+            .results
+            .iter()
+            .find(|r| r.section == "cas" && r.name == "missing")
+            .unwrap();
+        assert!(matches!(missing.status, Status::Warn));
+        assert!(missing.detail.contains(&phantom));
     }
 }
 

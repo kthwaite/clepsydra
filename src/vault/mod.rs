@@ -1,5 +1,6 @@
 pub mod academic;
 pub mod academic_hook;
+pub mod archive_backfill;
 pub mod archive_hook;
 pub mod archive_snapshot;
 pub mod atomic_file;
@@ -16,8 +17,10 @@ pub mod block_id;
 pub mod board_vocab;
 pub mod canonical;
 pub mod cas;
+pub mod cas_scan;
 pub mod checkpoint;
 pub mod config;
+pub mod conflict;
 pub mod context;
 pub mod conversation;
 pub mod derivation;

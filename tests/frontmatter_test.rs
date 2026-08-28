@@ -417,3 +417,36 @@ fn page_from_file_no_frontmatter_creates_uuid() {
     // created_at should be set
     assert!(page.meta.created_at.is_some());
 }
+
+// ---------------------------------------------------------------------------
+// Task 2: Indexer conflict guard
+// ---------------------------------------------------------------------------
+
+#[test]
+fn conflicted_add_add_file_is_never_rewritten() {
+    // The empirically destructive case: markers before the opening fence.
+    let content = "<<<<<<< HEAD\n+++\nid = \"01900000-0000-7000-8000-00000000cccc\"\ntitle = \"Ours\"\n+++\nours body\n=======\n+++\nid = \"01900000-0000-7000-8000-00000000dddd\"\ntitle = \"Theirs\"\n+++\ntheirs body\n>>>>>>> theirs\n";
+    let (_meta, body, rewrote, warning) = parse_or_repair_frontmatter(content);
+    assert!(!rewrote, "conflicted file must never be marked for rewrite");
+    assert!(warning.unwrap().contains("merge conflict markers"));
+    assert_eq!(body, content, "whole conflicted file indexed as body");
+}
+
+#[test]
+fn conflicted_valid_frontmatter_keeps_metadata_without_rewrite() {
+    let content = "+++\nid = \"01900000-0000-7000-8000-0000000000aa\"\ntitle = \"Fine\"\ncreated_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n+++\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> x\n";
+    let (meta, _body, rewrote, warning) = parse_or_repair_frontmatter(content);
+    assert_eq!(meta.title.as_deref(), Some("Fine"));
+    assert!(!rewrote);
+    assert!(warning.unwrap().contains("merge conflict markers"));
+}
+
+#[test]
+fn conflicted_missing_id_is_not_repaired_on_disk() {
+    let content = "+++\ntitle = \"No id\"\n+++\n<<<<<<< HEAD\na\n=======\nb\n>>>>>>> x\n";
+    let (_meta, _body, rewrote, _warning) = parse_or_repair_frontmatter(content);
+    assert!(
+        !rewrote,
+        "id minting must stay in memory for conflicted files"
+    );
+}

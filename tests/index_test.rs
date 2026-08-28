@@ -1944,3 +1944,20 @@ unsearchable-rubbish-token
         page_bytes
     );
 }
+
+// ---------------------------------------------------------------------------
+// Task 2: Indexer conflict guard
+// ---------------------------------------------------------------------------
+
+#[test]
+fn conflicted_file_survives_index_build_byte_identical() {
+    let conflicted = "<<<<<<< HEAD\n+++\ntitle = \"Ours\"\n+++\nours\n=======\n+++\ntitle = \"Theirs\"\n+++\ntheirs\n>>>>>>> theirs\n";
+    let (tmp, vault) = setup_vault(&[("notes/clash.md", conflicted)]);
+    let mut index = VaultIndex::open(&tmp.path().join("cache.db")).unwrap();
+    index.build(&vault).unwrap();
+    let on_disk = std::fs::read_to_string(vault.root().join("notes/clash.md")).unwrap();
+    assert_eq!(
+        on_disk, conflicted,
+        "index build must not rewrite a conflicted file"
+    );
+}

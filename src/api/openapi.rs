@@ -286,6 +286,7 @@ impl Modify for SchemaOverrides {
             crate::api::properties::PropertyPatchResponse,
             // Pages
             crate::api::pages::PageSummary,
+            crate::api::pages::ArchiveBlobResponse,
             crate::api::pages::ArchiveMetaResponse,
             crate::api::pages::PageMetaResponse,
             crate::api::pages::PageDetailResponse,
@@ -682,8 +683,28 @@ mod tests {
             "ArchiveMetaResponse.blobs should be an optional list"
         );
         assert_eq!(
-            properties["blobs"]["items"]["type"], "string",
-            "ArchiveMetaResponse.blobs should contain hash strings"
+            properties["blobs"]["items"]["$ref"], "#/components/schemas/ArchiveBlobResponse",
+            "ArchiveMetaResponse.blobs should reference ArchiveBlobResponse"
+        );
+        let blob = &json["components"]["schemas"]["ArchiveBlobResponse"];
+        let blob_properties: std::collections::BTreeSet<&str> = blob["properties"]
+            .as_object()
+            .expect("ArchiveBlobResponse should define properties")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            blob_properties,
+            ["hash", "type"].into_iter().collect(),
+            "ArchiveBlobResponse should carry hash and type"
+        );
+        assert_eq!(
+            blob["properties"]["hash"]["type"], "string",
+            "ArchiveBlobResponse.hash should be a string"
+        );
+        assert_eq!(
+            blob["properties"]["type"]["type"], "string",
+            "ArchiveBlobResponse.type should be a string"
         );
     }
 

@@ -1,0 +1,285 @@
+//! Vault-wide CAS reference scan: counts captured-archive references and tracks content types.
+
+use crate::vault::Vault;
+use crate::vault::archive_hook::{captured_archive_hashes, captured_blob_types};
+use crate::vault::page::parse_or_repair_frontmatter;
+use std::collections::BTreeMap;
+use walkdir::WalkDir;
+
+#[derive(Debug, Default)]
+pub struct ArchiveRefScan {
+    /// hash → reference count (live pages + rubbish items; one per page per unique hash).
+    pub refs: BTreeMap<String, u32>,
+    /// hash → content type (from typed blob entries; snapshot hashes map to "text/html").
+    pub types: BTreeMap<String, String>,
+    pub warnings: Vec<String>,
+}
+
+/// Scan all live pages and rubbish items for captured-archive references.
+///
+/// Counts each unique hash per page (live or rubbish) contributing +1 to the ref count.
+/// Uses meta from `parse_or_repair_frontmatter` even when it returns a warning —
+/// an unparseable page yields default meta contributing nothing, but the warning is recorded.
+pub fn scan_archive_refs(vault: &Vault) -> ArchiveRefScan {
+    let mut scan = ArchiveRefScan::default();
+
+    // Scan live pages
+    scan_live_pages(vault, &mut scan);
+
+    // Scan rubbish items
+    scan_rubbish_items(vault, &mut scan);
+
+    scan
+}
+
+fn scan_live_pages(vault: &Vault, scan: &mut ArchiveRefScan) {
+    // Collect (path, vault-relative path) for deterministic ordering
+    // (first-writer-wins via or_insert) and for warning messages.
+    let mut paths = Vec::new();
+    for entry in WalkDir::new(vault.root())
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.path();
+        if path.extension().is_none_or(|e| e != "md") {
+            continue;
+        }
+        let Ok(rel) = path.strip_prefix(vault.root()) else {
+            continue;
+        };
+        let rel_str = rel.to_string_lossy().replace('\\', "/");
+        if rel_str.starts_with(".clepsydra/") {
+            continue;
+        }
+        let Ok(vault_path) = crate::vault::path::VaultPath::new(&rel_str) else {
+            continue;
+        };
+        if vault.is_excluded(&vault_path) {
+            continue;
+        }
+        paths.push((path.to_path_buf(), rel_str));
+    }
+
+    // Sort paths for deterministic first-writer-wins via or_insert
+    paths.sort();
+
+    for (path, rel_str) in paths {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => scan_page_content(&content, scan),
+            Err(_) => {
+                // Read failure must never be silently skipped: under-counting
+                // refs is the unsafe direction (a rebuild could zero a
+                // referenced blob's count and GC it).
+                scan.warnings
+                    .push(format!("Failed to read live page: {}", rel_str));
+            }
+        }
+    }
+}
+
+fn scan_rubbish_items(vault: &Vault, scan: &mut ArchiveRefScan) {
+    let rubbish_dir = vault.root().join(".clepsydra/rubbish");
+    if !rubbish_dir.exists() {
+        return;
+    }
+
+    if let Ok(entries) = std::fs::read_dir(&rubbish_dir) {
+        for entry in entries.flatten() {
+            let dir_name = entry.file_name();
+            let dir_name_str = dir_name.to_string_lossy();
+
+            // Skip dirs starting with . (covers .purge-* tombstones)
+            if dir_name_str.starts_with('.') {
+                continue;
+            }
+
+            let page_path = entry.path().join("page.md");
+            match std::fs::read_to_string(&page_path) {
+                Ok(content) => {
+                    scan_page_content(&content, scan);
+                }
+                Err(_) => {
+                    // Missing page.md or other read error
+                    scan.warnings.push(format!(
+                        "Failed to read rubbish item page: {}",
+                        dir_name_str
+                    ));
+                }
+            }
+        }
+    }
+}
+
+fn scan_page_content(content: &str, scan: &mut ArchiveRefScan) {
+    let (meta, _, _, warning) = parse_or_repair_frontmatter(content);
+
+    // Record warning if present (KEY RULE: use meta even when warning returned)
+    if let Some(w) = warning {
+        scan.warnings.push(w);
+    }
+
+    // Count references for each unique hash
+    let hashes = captured_archive_hashes(&meta);
+    for hash in &hashes {
+        *scan.refs.entry(hash.clone()).or_insert(0) += 1;
+    }
+
+    // Merge blob types from the page: first writer wins via or_insert
+    let blob_types = captured_blob_types(&meta);
+    for (hash, ct) in blob_types {
+        scan.types.entry(hash).or_insert(ct);
+    }
+
+    // Add snapshot_hash type if present (defaults to "text/html", first writer wins)
+    if let Some(toml::Value::String(snapshot)) = meta.extra.get("archive").and_then(|archive| {
+        if let toml::Value::Table(t) = archive {
+            t.get("snapshot_hash")
+        } else {
+            None
+        }
+    }) {
+        scan.types
+            .entry(snapshot.clone())
+            .or_insert_with(|| "text/html".into());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const H1: &str = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const H2: &str = "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    fn archive_page(blob_entry: &str) -> String {
+        format!(
+            "+++\nid = \"01900000-0000-7000-8000-000000000001\"\ntitle = \"A\"\n\
+             created_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\n\
+             [archive]\nurl = \"https://x\"\ndomain = \"x\"\ncaptured_at = \"2026-01-01T00:00:00Z\"\n\
+             snapshot_hash = \"{H1}\"\nblobs = [{blob_entry}]\n+++\nbody\n"
+        )
+    }
+
+    fn make_vault(pages: &[(&str, &str)]) -> (tempfile::TempDir, Vault) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        for (rel, content) in pages {
+            let abs = root.join(rel);
+            if let Some(parent) = abs.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(abs, content).unwrap();
+        }
+        let vault = Vault::open(&root).unwrap();
+        (tmp, vault)
+    }
+
+    #[test]
+    fn counts_live_pages_rubbish_and_snapshot_types() {
+        let page_a = archive_page(&format!("{{ hash = \"{H2}\", type = \"image/png\" }}"));
+        let page_b = archive_page(&format!("\"{H2}\"")); // legacy string entry
+        let (_tmp, vault) = make_vault(&[("archive/x/a.md", &page_a)]);
+        // rubbish item holding page_b:
+        let item = vault
+            .root()
+            .join(".clepsydra/rubbish/0190aaaa-0000-7000-8000-000000000001");
+        std::fs::create_dir_all(&item).unwrap();
+        std::fs::write(item.join("page.md"), &page_b).unwrap();
+        std::fs::write(item.join("manifest.json"), "{}").unwrap();
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H1), Some(&2)); // both pages capture the snapshot
+        assert_eq!(scan.refs.get(H2), Some(&2));
+        assert_eq!(scan.types.get(H1).map(String::as_str), Some("text/html")); // snapshot
+        assert_eq!(scan.types.get(H2).map(String::as_str), Some("image/png")); // typed entry wins
+        assert!(scan.warnings.is_empty());
+    }
+
+    #[test]
+    fn purge_tombstone_dirs_are_ignored() {
+        let (_tmp, vault) = make_vault(&[]);
+        let tomb = vault
+            .root()
+            .join(".clepsydra/rubbish/.purge-0190aaaa-0000-7000-8000-000000000002");
+        std::fs::create_dir_all(&tomb).unwrap();
+        let scan = scan_archive_refs(&vault);
+        assert!(scan.refs.is_empty());
+    }
+
+    #[test]
+    fn unreadable_live_page_warns_and_contributes_no_refs() {
+        let (_tmp, vault) = make_vault(&[]);
+        let path = vault.root().join("bad.md");
+        // Invalid UTF-8 bytes: read_to_string must fail on this file.
+        std::fs::write(&path, b"+++\ntitle...\xFF\xFE...").unwrap();
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.warnings.len(), 1);
+        assert!(
+            scan.warnings[0].contains("bad.md"),
+            "warning must name the file: {:?}",
+            scan.warnings
+        );
+        assert!(scan.refs.is_empty());
+    }
+
+    #[test]
+    fn unreadable_rubbish_page_warns_not_panics() {
+        let (_tmp, vault) = make_vault(&[]);
+        let item = vault
+            .root()
+            .join(".clepsydra/rubbish/0190aaaa-0000-7000-8000-000000000003");
+        std::fs::create_dir_all(&item).unwrap(); // no page.md
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.warnings.len(), 1);
+    }
+
+    #[test]
+    fn legacy_yaml_frontmatter_counts_refs() {
+        let legacy_page = format!(
+            "---\nid: 01900000-0000-7000-8000-000000000004\ntitle: \"Legacy\"\n\
+             archive:\n  url: https://example.com\n  \
+             snapshot_hash: {H1}\n---\nbody\n"
+        );
+        let (_tmp, vault) = make_vault(&[("legacy.md", &legacy_page)]);
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H1), Some(&1));
+        assert_eq!(scan.types.get(H1).map(String::as_str), Some("text/html"));
+        assert!(scan.warnings.is_empty());
+    }
+
+    #[test]
+    fn typed_entry_first_reader_wins_over_later_retype() {
+        let page_a = archive_page(&format!("{{ hash = \"{H2}\", type = \"image/png\" }}")); // typed as image
+        let page_b = archive_page(&format!("{{ hash = \"{H2}\", type = \"text/plain\" }}")); // tries to retype
+        let (_tmp, vault) = make_vault(&[("archive/a.md", &page_a), ("archive/b.md", &page_b)]);
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H2), Some(&2));
+        // First typed entry wins; later retype rejected via or_insert
+        assert_eq!(scan.types.get(H2).map(String::as_str), Some("image/png"));
+    }
+
+    #[test]
+    fn untyped_mention_does_not_block_later_typing() {
+        let page_a = archive_page(&format!("\"{H2}\"")); // legacy string entry, no type
+        let page_b = archive_page(&format!("{{ hash = \"{H2}\", type = \"image/png\" }}")); // typed
+        let (_tmp, vault) = make_vault(&[("archive/a.md", &page_a), ("archive/b.md", &page_b)]);
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H2), Some(&2));
+        // Untyped mention doesn't block later typing; page_b's type fills the gap
+        assert_eq!(scan.types.get(H2).map(String::as_str), Some("image/png"));
+    }
+
+    #[test]
+    fn hash_never_typed_by_any_page_stays_absent() {
+        let page_a = archive_page(&format!("\"{H2}\"")); // legacy string, no type
+        let page_b = archive_page(&format!("\"{H2}\"")); // legacy string, no type
+        let (_tmp, vault) = make_vault(&[("archive/a.md", &page_a), ("archive/b.md", &page_b)]);
+        let scan = scan_archive_refs(&vault);
+        assert_eq!(scan.refs.get(H2), Some(&2));
+        // H2 never typed by any page; stays absent from types
+        assert!(scan.types.get(H2).is_none());
+    }
+}
