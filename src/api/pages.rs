@@ -136,13 +136,13 @@ pub struct PageMetaResponse {
     pub updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub archive: Option<ArchiveMetaResponse>,
-    /// Person pages a MEETING or ONE_ON_ONE names, as wikilink strings.
-    /// Clepsydra always writes an array; a hand-written single wikilink
+    /// Person pages a MEETING names, as wikilink strings. Clepsydra always
+    /// writes an array; a hand-written single wikilink
     /// (`attendees = "[[Ada Lovelace]]"`) is read as a one-element list.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attendees: Option<Vec<String>>,
-    /// When a MEETING or ONE_ON_ONE took place, as an ISO date-time. Stored as
-    /// a native TOML date-time, so it sorts and filters like one.
+    /// When a MEETING took place, as an ISO date-time. Stored as a native
+    /// TOML date-time, so it sorts and filters like one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub occurred_at: Option<String>,
 }
@@ -193,15 +193,15 @@ pub struct CreatePageRequest {
     /// part of the same create mutation.
     #[serde(default)]
     pub project: Option<String>,
-    /// Person pages this MEETING or ONE_ON_ONE names, written to the page's
-    /// `attendees:` frontmatter as part of the same create mutation. Bare
-    /// names are wrapped as wikilinks; `[[Already Linked]]` is kept as
-    /// written. A ONE_ON_ONE accepts at most one.
+    /// Person pages this MEETING names, written to the page's `attendees:`
+    /// frontmatter as part of the same create mutation. Bare names are
+    /// wrapped as wikilinks; `[[Already Linked]]` is kept as written. Any
+    /// number is accepted; a 1:1 is a MEETING tagged `1:1`.
     #[serde(default)]
     pub attendees: Option<Vec<String>>,
-    /// When this MEETING or ONE_ON_ONE took place: `2026-08-27T14:00:00Z`, the
-    /// same without an offset, or a bare `2026-08-27` when only the day is
-    /// known. Written as a native TOML date-time.
+    /// When this MEETING took place: `2026-08-27T14:00:00Z`, the same without
+    /// an offset, or a bare `2026-08-27` when only the day is known. Written
+    /// as a native TOML date-time.
     #[serde(default)]
     pub occurred_at: Option<String>,
 }
@@ -662,9 +662,9 @@ const BY_ID_PATH_ATTEMPTS: usize = 8;
 /// because the codec needs all three sections present to read a recipe.
 const RECIPE_SCAFFOLD: &str = "## Ingredients\n\n## Steps\n\n## Notes\n";
 
-/// Body written for a MEETING or ONE_ON_ONE created without one. Unlike the
-/// recipe scaffold nothing parses these headings; they are here because a
-/// meeting note that opens empty is a meeting note nobody takes minutes in.
+/// Body written for a MEETING created without one. Unlike the recipe
+/// scaffold nothing parses these headings; they are here because a meeting
+/// note that opens empty is a meeting note nobody takes minutes in.
 const MEETING_SCAFFOLD: &str = "## Agenda\n\n## Notes\n\n## Actions\n";
 
 async fn indexed_page_path_by_id(state: &AppState, uuid: &str) -> Result<VaultPath, ApiError> {
@@ -813,7 +813,7 @@ pub async fn create_page(
             .insert(meeting::OCCURRED_AT_KEY.to_string(), value);
     }
     // The kind may be inferred from the path when none is declared, and an
-    // inferred MEETING / ONE_ON_ONE is bound by the same meeting rules.
+    // inferred MEETING is bound by the same meeting rules.
     let (resolved_kind, _) = resolve(vault_path.as_str(), meta.kind);
     attendance::validate(resolved_kind, &meta)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
@@ -826,7 +826,7 @@ pub async fn create_page(
     let page_body = if page_body.trim().is_empty() {
         match meta.kind {
             Some(Kind::Recipe) => RECIPE_SCAFFOLD.to_string(),
-            Some(Kind::Meeting | Kind::OneOnOne) => MEETING_SCAFFOLD.to_string(),
+            Some(Kind::Meeting) => MEETING_SCAFFOLD.to_string(),
             _ => page_body,
         }
     } else {
@@ -1470,9 +1470,9 @@ fn validate_kind_assignment(
     if current_kind == Kind::AiJournal && requested_kind != Kind::AiJournal {
         return Err(ApiError::bad_request("AI journal kind cannot be changed"));
     }
-    // Declaring ONE_ON_ONE on a page that already names a roomful of people
-    // would store a state no write path allows; the caller has to trim the
-    // attendees first.
+    // Declaring MEETING on a page whose `attendees` or `occurred_at` is
+    // malformed would store a state no write path allows; the caller has to
+    // repair the property first.
     attendance::validate(requested_kind, meta)
         .map_err(|error| ApiError::bad_request(error.to_string()))?;
     meeting::validate(requested_kind, meta)

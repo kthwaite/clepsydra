@@ -1,26 +1,15 @@
-// Client-side mirror of the `attendees` relation shared by MEETING and
-// ONE_ON_ONE pages (src/vault/attendance.rs). The backend stays authoritative
-// — it re-checks every write — so this exists to render the rail and to stop
-// the editor offering a write the server would refuse.
+// Client-side mirror of the `attendees` relation MEETING pages carry
+// (src/vault/attendance.rs). The backend stays authoritative — it re-checks
+// every write — so this exists to render the rail. A meeting names any number
+// of people; a 1:1 is a MEETING tagged `1:1`, with no cardinality of its own.
 
 import type { Kind } from "#/lib/kind";
 
 /** The frontmatter key holding the relation. */
 export const ATTENDEES_KEY = "attendees";
 
-/** How many people a kind's `attendees` relation may name. */
-export type Cardinality = "many" | "one";
-
-/** Cardinality for `kind`, or null for the kinds that have no attendees. */
-export function attendeeCardinality(kind: Kind): Cardinality | null {
-  if (kind === "MEETING") return "many";
-  if (kind === "ONE_ON_ONE") return "one";
-  return null;
-}
-
 /** Whether this kind names attendees at all. */
-export const hasAttendees = (kind: Kind): boolean =>
-  attendeeCardinality(kind) !== null;
+export const hasAttendees = (kind: Kind): boolean => kind === "MEETING";
 
 /** Strip wikilink brackets and any `|display` alias, mirroring
  * `extract_property_refs` in src/vault/link.rs. */
@@ -53,12 +42,4 @@ export function readAttendees(value: unknown): string[] {
     .filter((entry): entry is string => typeof entry === "string")
     .map(attendeeTarget)
     .filter((target) => target.length > 0);
-}
-
-/** Whether `kind` can take another attendee on top of `current`. A ONE_ON_ONE
- * names one; the server refuses the second. */
-export function canAddAttendee(kind: Kind, current: number): boolean {
-  const cardinality = attendeeCardinality(kind);
-  if (cardinality === null) return false;
-  return cardinality === "many" || current < 1;
 }

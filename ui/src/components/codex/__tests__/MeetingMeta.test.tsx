@@ -1,36 +1,92 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { PageSummary } from "#/api/types";
 
-const { usePageMock, commitMock } = vi.hoisted(() => ({
-  usePageMock: vi.fn(),
-  commitMock: vi.fn(),
+const { usePageMock, usePagesMock, createMutateAsync, commitMock } = vi.hoisted(
+  () => ({
+    usePageMock: vi.fn(),
+    usePagesMock: vi.fn(),
+    createMutateAsync: vi.fn(),
+    commitMock: vi.fn(),
+  }),
+);
+vi.mock("#/api/pages", () => ({
+  usePage: usePageMock,
+  usePages: usePagesMock,
+  useCreatePage: () => ({ mutateAsync: createMutateAsync, isPending: false }),
 }));
-vi.mock("#/api/pages", () => ({ usePage: usePageMock }));
 vi.mock("#/api/bases", () => ({ usePropertyCommit: () => commitMock }));
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 
 import { MeetingMeta } from "../MeetingMeta";
 
-function page(kind: string, attendees?: unknown, occurredAt?: unknown) {
+function page(attendees?: unknown, occurredAt?: unknown) {
   return {
     data: {
       path: "meetings/kickoff.md",
-      kind,
+      kind: "MEETING",
       meta: { id: "page-uuid", attendees, occurred_at: occurredAt },
     },
   };
 }
 
+function person(path: string, title: string): PageSummary {
+  return {
+    id: path,
+    path,
+    title,
+    aliases: [],
+    canonical_name: title,
+    computed_tags: [],
+    encrypted: false,
+    inferred: false,
+    kind: "PERSON",
+    tags: [],
+  };
+}
+
+const people = [
+  person("people/ada.md", "Ada"),
+  person("people/grace.md", "Grace Hopper"),
+];
+
+function renderMeta({
+  tags = [],
+  onTagsChange = vi.fn(),
+  isDraft = false,
+}: {
+  tags?: string[];
+  onTagsChange?: (next: string[]) => void;
+  isDraft?: boolean;
+} = {}) {
+  render(
+    <MeetingMeta
+      path="meetings/kickoff.md"
+      tabId="t1"
+      isDraft={isDraft}
+      tags={tags}
+      onTagsChange={onTagsChange}
+    />,
+  );
+  return { onTagsChange };
+}
+
+const combobox = () => screen.getByRole("combobox", { name: "add attendee" });
+
 beforeEach(() => {
-  commitMock.mockReset();
+  vi.clearAllMocks();
   commitMock.mockResolvedValue(undefined);
+  usePagesMock.mockReturnValue({ data: { items: people } });
+  createMutateAsync.mockImplementation(async (vars) => ({
+    path: vars.params.path.path,
+  }));
 });
 
 describe("MeetingMeta", () => {
   it("labels itself as a landmark the document header can carry", () => {
-    usePageMock.mockReturnValue(page("MEETING", ["[[Ada]]"]));
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-    );
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    renderMeta();
 
     expect(
       screen.getByRole("region", { name: "Meeting details" }),
@@ -38,25 +94,30 @@ describe("MeetingMeta", () => {
   });
 
   it("lists the people a meeting names", () => {
-    usePageMock.mockReturnValue(page("MEETING", ["[[Ada]]", "[[Grace]]"]));
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-    );
+    usePageMock.mockReturnValue(page(["[[Ada]]", "[[Grace]]"]));
+    renderMeta();
 
     expect(screen.getByText("Ada")).toBeInTheDocument();
     expect(screen.getByText("Grace")).toBeInTheDocument();
   });
 
-  it("adds an attendee as a wikilink alongside the existing ones", async () => {
-    usePageMock.mockReturnValue(page("MEETING", ["[[Ada]]"]));
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-    );
+  it("names any number of people and never captions a limit", () => {
+    usePageMock.mockReturnValue(page(["[[Ada]]", "[[Grace Hopper]]"]));
+    renderMeta();
 
-    fireEvent.change(screen.getByLabelText("add attendee"), {
-      target: { value: "Grace Hopper" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+    expect(combobox()).toBeInTheDocument();
+    expect(screen.queryByText(/names one person/)).toBeNull();
+  });
+
+  it("adds a picked person as a wikilink alongside the existing ones", async () => {
+    const user = userEvent.setup();
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    renderMeta();
+
+    await user.type(combobox(), "grace");
+    await user.click(
+      await screen.findByRole("option", { name: /Grace Hopper/ }),
+    );
 
     await waitFor(() =>
       expect(commitMock).toHaveBeenCalledWith(
@@ -68,11 +129,24 @@ describe("MeetingMeta", () => {
     );
   });
 
+  it("does not offer, or re-add, someone already named", async () => {
+    const user = userEvent.setup();
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    renderMeta();
+
+    await user.click(combobox());
+    expect(
+      await screen.findByRole("option", { name: /Grace Hopper/ }),
+    ).toBeVisible();
+    expect(screen.queryByRole("option", { name: /^Ada$/ })).toBeNull();
+
+    await user.type(combobox(), "ada{Enter}");
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+
   it("clears the key rather than storing an empty list", async () => {
-    usePageMock.mockReturnValue(page("MEETING", ["[[Ada]]"]));
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-    );
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    renderMeta();
 
     fireEvent.click(screen.getByRole("button", { name: "remove Ada" }));
 
@@ -86,33 +160,76 @@ describe("MeetingMeta", () => {
     );
   });
 
-  it("stops offering an add field once a 1:1 names someone", () => {
-    usePageMock.mockReturnValue(page("ONE_ON_ONE", ["[[Ada]]"]));
-    render(
-      <MeetingMeta path="one-on-ones/ada.md" tabId="t1" isDraft={false} />,
+  it("removes one person and keeps the rest", async () => {
+    usePageMock.mockReturnValue(page(["[[Ada]]", "[[Grace Hopper]]"]));
+    renderMeta();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "remove Grace Hopper" }),
     );
 
-    expect(screen.queryByLabelText("add attendee")).not.toBeInTheDocument();
-    expect(screen.getByText("a 1:1 names one person")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(commitMock).toHaveBeenCalledWith(
+        { id: "page-uuid", path: "meetings/kickoff.md" },
+        "attendees",
+        ["[[Ada]]"],
+        undefined,
+      ),
+    );
   });
 
-  it("still offers the field on an empty 1:1", () => {
-    usePageMock.mockReturnValue(page("ONE_ON_ONE", undefined));
-    render(
-      <MeetingMeta path="one-on-ones/ada.md" tabId="t1" isDraft={false} />,
-    );
+  it("links an attendee to the page that carries the name", () => {
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    renderMeta();
 
-    expect(screen.getByText("nobody named yet")).toBeInTheDocument();
-    expect(screen.getByLabelText("add attendee")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Ada" })).toHaveAttribute(
+      "href",
+      "/pages/people/ada.md",
+    );
+    expect(screen.queryByRole("button", { name: "create Ada" })).toBeNull();
+  });
+
+  it("offers to create the person page for a name no page carries", async () => {
+    usePageMock.mockReturnValue(page(["[[Grace]]"]));
+    renderMeta();
+
+    expect(screen.queryByRole("link", { name: "Grace" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "create Grace" }));
+
+    await waitFor(() => expect(createMutateAsync).toHaveBeenCalledTimes(1));
+    const [vars] = createMutateAsync.mock.calls[0];
+    expect(vars.params.path.path).toMatch(
+      /^people\/\d{8}\.grace\.[0-9A-Za-z]{8}\.md$/,
+    );
+    expect(vars.body).toEqual({ title: "Grace", kind: "PERSON" });
+    expect(commitMock).not.toHaveBeenCalled();
+  });
+
+  it("tags the meeting 1:1 without touching other tags", () => {
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    const { onTagsChange } = renderMeta({ tags: ["weekly"] });
+
+    const toggle = screen.getByRole("button", { name: "1:1" });
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(toggle);
+
+    expect(onTagsChange).toHaveBeenCalledWith(["weekly", "1:1"]);
+  });
+
+  it("untags a 1:1", () => {
+    usePageMock.mockReturnValue(page(["[[Ada]]"]));
+    const { onTagsChange } = renderMeta({ tags: ["weekly", "1:1"] });
+
+    const toggle = screen.getByRole("button", { name: "1:1" });
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(toggle);
+
+    expect(onTagsChange).toHaveBeenCalledWith(["weekly"]);
   });
 
   it("shows the recorded time and offers no shortcut once it is set", () => {
-    usePageMock.mockReturnValue(
-      page("MEETING", ["[[Ada]]"], "2026-08-27T14:00:00Z"),
-    );
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-    );
+    usePageMock.mockReturnValue(page(["[[Ada]]"], "2026-08-27T14:00:00Z"));
+    renderMeta();
 
     expect(screen.getByText("2026-08-27T14:00:00Z")).toBeInTheDocument();
     expect(
@@ -124,10 +241,8 @@ describe("MeetingMeta", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date(2026, 7, 27, 14, 0, 0));
     try {
-      usePageMock.mockReturnValue(page("MEETING", ["[[Ada]]"], undefined));
-      render(
-        <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-      );
+      usePageMock.mockReturnValue(page(["[[Ada]]"], undefined));
+      renderMeta();
 
       fireEvent.click(screen.getByRole("button", { name: "Now" }));
 
@@ -144,12 +259,8 @@ describe("MeetingMeta", () => {
   });
 
   it("edits the time through the shared datetime picker", async () => {
-    usePageMock.mockReturnValue(
-      page("MEETING", ["[[Ada]]"], "2026-08-27T14:00:00Z"),
-    );
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-    );
+    usePageMock.mockReturnValue(page(["[[Ada]]"], "2026-08-27T14:00:00Z"));
+    renderMeta();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit occurred at" }));
     const input = screen.getByLabelText("occurred at");
@@ -170,12 +281,8 @@ describe("MeetingMeta", () => {
   });
 
   it("clears the time without a hint, so the key is removed", async () => {
-    usePageMock.mockReturnValue(
-      page("MEETING", ["[[Ada]]"], "2026-08-27T14:00:00Z"),
-    );
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={false} />,
-    );
+    usePageMock.mockReturnValue(page(["[[Ada]]"], "2026-08-27T14:00:00Z"));
+    renderMeta();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit occurred at" }));
     fireEvent.change(screen.getByLabelText("occurred at"), {
@@ -194,15 +301,18 @@ describe("MeetingMeta", () => {
   });
 
   it("does not write while the page is still a draft", () => {
-    usePageMock.mockReturnValue(page("MEETING", undefined));
-    render(
-      <MeetingMeta path="meetings/kickoff.md" tabId="t1" isDraft={true} />,
-    );
+    usePageMock.mockReturnValue(page(["[[Grace]]"]));
+    renderMeta({ isDraft: true });
 
-    expect(screen.queryByLabelText("add attendee")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: "add attendee" }),
+    ).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Now" }),
     ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "create Grace" })).toBeNull();
+    expect(screen.getByRole("button", { name: "remove Grace" })).toBeDisabled();
     expect(commitMock).not.toHaveBeenCalled();
+    expect(createMutateAsync).not.toHaveBeenCalled();
   });
 });

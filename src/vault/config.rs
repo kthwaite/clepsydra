@@ -85,8 +85,8 @@ fn default_linkable_properties() -> Vec<String> {
         "tags".to_string(),
         "aliases".to_string(),
         "link".to_string(),
-        // The MEETING / ONE_ON_ONE attendee relation: linkable by default so a
-        // person page collects the backlinks for every meeting naming them.
+        // The MEETING attendee relation: linkable by default so a person page
+        // collects the backlinks for every meeting naming them.
         crate::vault::attendance::ATTENDEES_KEY.to_string(),
     ]
 }

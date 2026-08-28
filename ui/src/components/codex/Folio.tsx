@@ -1035,7 +1035,13 @@ export function Folio({ tabId, path }: FolioProps) {
   // title, not in the META rail: they are content, not sidebar metadata.
   const HeaderExtras = presentation.headerExtras;
   const headerExtras = HeaderExtras ? (
-    <HeaderExtras path={path} tabId={tabId} isDraft={editor.isDraft} />
+    <HeaderExtras
+      path={path}
+      tabId={tabId}
+      isDraft={editor.isDraft}
+      tags={editableTags}
+      onTagsChange={editor.setTags}
+    />
   ) : null;
 
   const document = (
@@ -1323,7 +1329,13 @@ export function Folio({ tabId, path }: FolioProps) {
         const Extras = presentation.metaExtras;
         return Extras ? (
           <Block label={presentation.metaExtrasLabel ?? "Details"}>
-            <Extras path={path} tabId={tabId} isDraft={editor.isDraft} />
+            <Extras
+              path={path}
+              tabId={tabId}
+              isDraft={editor.isDraft}
+              tags={editableTags}
+              onTagsChange={editor.setTags}
+            />
           </Block>
         ) : null;
       })()}

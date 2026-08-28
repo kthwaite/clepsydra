@@ -66,7 +66,12 @@ vi.mock("#/api/pages", () => ({
   useAssignPage: () => ({ mutate: vi.fn() }),
   useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
   usePage: usePageMock,
+  // MeetingMeta resolves attendee names through usePeople, which reads the
+  // page index and creates PERSON pages; CLink opens tabs.
+  usePages: () => ({ data: { items: [] } }),
+  useCreatePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
+vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
 vi.mock("#/api/bases", () => ({ usePropertyCommit: () => commitMock }));
 vi.mock("#/api/encryption", () => ({
   useEncryptionConfig: () => ({
@@ -172,7 +177,7 @@ describe("Folio meeting header band", () => {
     const band = screen.getByRole("region", { name: "Meeting details" });
     expect(within(band).getByText("Ada")).toBeInTheDocument();
     expect(
-      within(band).getByRole("textbox", { name: "add attendee" }),
+      within(band).getByRole("combobox", { name: "add attendee" }),
     ).toBeInTheDocument();
     // The rail is expanded, so a surviving rail block would be mounted.
     expect(screen.getByText("Vitals")).toBeInTheDocument();

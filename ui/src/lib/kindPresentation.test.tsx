@@ -36,14 +36,12 @@ describe("presentationFor", () => {
     expect(title).toMatch(/2026/);
   });
 
-  it("gives meetings and 1:1s the same header block", () => {
-    for (const kind of ["MEETING", "ONE_ON_ONE"] as const) {
-      const presentation = presentationFor(kind);
-      expect(presentation.bodyPresentation).toBe("editor");
-      expect(presentation.metaExtras).toBeNull();
-      expect(presentation.metaExtrasLabel).toBeUndefined();
-      expect(presentation.headerExtras).not.toBeNull();
-    }
+  it("gives meetings the bespoke header block", () => {
+    const presentation = presentationFor("MEETING");
+    expect(presentation.bodyPresentation).toBe("editor");
+    expect(presentation.metaExtras).toBeNull();
+    expect(presentation.metaExtrasLabel).toBeUndefined();
+    expect(presentation.headerExtras).not.toBeNull();
   });
 
   it("keeps Journal's day navigation in the rail", () => {

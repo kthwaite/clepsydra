@@ -31,7 +31,6 @@ export const KINDS = [
   "CYCLE",
   "RECIPE",
   "MEETING",
-  "ONE_ON_ONE",
   "ARCHIVE",
   "AI_CONVERSATION",
   "AI_JOURNAL",
@@ -70,10 +69,9 @@ export const KIND_META: Record<Kind, KindMeta> = {
   TASK: { label: "TASK", color: "var(--hot)" },
   CYCLE: { label: "CYCLE", color: "var(--ink-2)" },
   RECIPE: { label: "RECIPE", color: "var(--accent-deep)" },
-  // Meetings are about people, so they take PERSON's cool pip. The 1:1 shares
-  // it and separates on its label, the way JOURNAL and CAPTURE already do.
+  // Meetings are about people, so they take PERSON's cool pip. A 1:1 is a
+  // MEETING tagged `1:1`, not a kind of its own.
   MEETING: { label: "MEETING", color: "var(--cool)" },
-  ONE_ON_ONE: { label: "1:1", color: "var(--cool)" },
   // Archived pages are inert captures of someone else's writing; a muted ink
   // pip keeps them legible without competing with authored material.
   ARCHIVE: { label: "ARCHIVE", color: "var(--ink-3)" },
@@ -86,8 +84,8 @@ export const KIND_META: Record<Kind, KindMeta> = {
 export const kindLabel = (kind: Kind): string => KIND_META[kind].label;
 export const kindColorVar = (kind: Kind): string => KIND_META[kind].color;
 
-/** Alphabetical picker order — by display label, since "1:1" is what the user
- * scans for ONE_ON_ONE. */
+/** Alphabetical picker order — by display label, which is what the user
+ * scans. */
 export const sortKindsByLabel = <K extends Kind>(kinds: readonly K[]): K[] =>
   [...kinds].sort((a, b) => kindLabel(a).localeCompare(kindLabel(b)));
 
@@ -133,16 +131,18 @@ const FOLDER_KIND: Record<string, Kind> = {
   recipe: "RECIPE",
   meetings: "MEETING",
   meeting: "MEETING",
-  "one-on-ones": "ONE_ON_ONE",
-  "one-on-one": "ONE_ON_ONE",
-  "one-to-ones": "ONE_ON_ONE",
-  "one-to-one": "ONE_ON_ONE",
-  "1-1s": "ONE_ON_ONE",
-  "1-1": "ONE_ON_ONE",
-  "1on1s": "ONE_ON_ONE",
-  "1on1": "ONE_ON_ONE",
-  "121s": "ONE_ON_ONE",
-  "121": "ONE_ON_ONE",
+  // Legacy 1:1 folders: a 1:1 is a MEETING tagged `1:1` (mirrors
+  // Kind::from_folder in src/vault/kind.rs).
+  "one-on-ones": "MEETING",
+  "one-on-one": "MEETING",
+  "one-to-ones": "MEETING",
+  "one-to-one": "MEETING",
+  "1-1s": "MEETING",
+  "1-1": "MEETING",
+  "1on1s": "MEETING",
+  "1on1": "MEETING",
+  "121s": "MEETING",
+  "121": "MEETING",
   conversations: "AI_CONVERSATION",
   conversation: "AI_CONVERSATION",
   chats: "AI_CONVERSATION",

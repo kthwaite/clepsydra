@@ -624,10 +624,6 @@ impl<'a> MutationPlanner<'a> {
 
         let source_abs = self.vault.resolve(&source_vp);
         let source_bytes = fs::read(&source_abs)?;
-        let source_title = std::str::from_utf8(&source_bytes).ok().and_then(|content| {
-            let (meta, _, _, _) = parse_or_repair_frontmatter(content);
-            meta.title
-        });
 
         let old_stem = source_vp.stem().to_string();
         let new_stem = dest_vp.stem().to_string();
@@ -670,17 +666,15 @@ impl<'a> MutationPlanner<'a> {
 
             let mut replacements: Vec<(String, String)> = Vec::new();
 
-            // Stem-based wikilink rewrite
+            // Stem-based wikilink rewrite. A page resolves under several
+            // canonical names (title, filename, path, aliases — see
+            // `derivers::canonical_names`); a move changes only the
+            // filename/path-derived ones, so `[[old-stem]]` must follow the
+            // file while `[[Title]]` and `[[alias]]` keep resolving untouched.
+            // Rewriting title links to the stem here mangled 23 pages on
+            // 2026-08-28 (TSK-0119).
             if old_stem != new_stem {
                 replacements.push((old_stem.clone(), new_stem.clone()));
-            }
-
-            // Title-based wikilink rewrite
-            if let Some(title) = &source_title
-                && title != &old_stem
-                && title != &new_stem
-            {
-                replacements.push((title.clone(), new_stem.clone()));
             }
 
             // Markdown link: old relative path -> new relative path
@@ -920,15 +914,9 @@ impl<'a> MutationPlanner<'a> {
 
         let mut upserted_refs = Vec::<String>::new();
         let source_prefix = format!("{}/", source_vp.as_str());
-        for (old_vp, new_vp, expected_source) in &md_files {
+        for (old_vp, new_vp, _expected_source) in &md_files {
             let old_stem = old_vp.stem().to_string();
             let new_stem = new_vp.stem().to_string();
-            let source_title = std::str::from_utf8(expected_source)
-                .ok()
-                .and_then(|content| {
-                    let (meta, _, _, _) = parse_or_repair_frontmatter(content);
-                    meta.title
-                });
             plan.moved_pages.push((old_vp.clone(), new_vp.clone()));
             plan.index_events.push(ChangeEvent::Remove(old_vp.clone()));
             plan.index_events.push(ChangeEvent::Upsert(new_vp.clone()));
@@ -958,14 +946,10 @@ impl<'a> MutationPlanner<'a> {
                 };
 
                 let mut replacements = Vec::<(String, String)>::new();
+                // Same rule as plan_page_move: only the stem-derived name
+                // changes, so title links stay as written.
                 if old_stem != new_stem {
                     replacements.push((old_stem.clone(), new_stem.clone()));
-                }
-                if let Some(title) = &source_title
-                    && title != &old_stem
-                    && title != &new_stem
-                {
-                    replacements.push((title.clone(), new_stem.clone()));
                 }
                 let old_rel = compute_relative_path(ref_vp.as_str(), old_vp.as_str());
                 let new_rel = compute_relative_path(ref_vp.as_str(), new_vp.as_str());

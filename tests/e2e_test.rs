@@ -232,11 +232,26 @@ async fn full_vault_lifecycle() {
         "architecture.md should exist after move"
     );
 
-    // 7. Read index.md from disk -> verify [[Design Notes]] was rewritten
+    // 7. Read index.md from disk -> the title link survives the move (the
+    //    page still resolves under its title) and still backlinks the new path
     let index_content_before_archive = fs::read_to_string(vault_root.join("index.md")).unwrap();
     assert!(
-        !index_content_before_archive.contains("[[Design Notes]]"),
-        "old wikilink should be rewritten, found: {index_content_before_archive}"
+        index_content_before_archive.contains("[[Design Notes]]"),
+        "title wikilink must not be rewritten by a move, found: {index_content_before_archive}"
+    );
+    let res = server
+        .get("/api/vault/index/backlinks/architecture.md")
+        .await;
+    res.assert_status_ok();
+    let backlinks: Vec<serde_json::Value> = res.json();
+    // (The page's own `architecture` tag also shows up as a property_ref
+    // backlink now that its filename stem is `architecture`; only the wiki
+    // link from index.md matters here.)
+    assert!(
+        backlinks
+            .iter()
+            .any(|b| b["source_path"] == "index.md" && b["kind"] == "wiki"),
+        "expected index.md to still backlink the moved page, got: {backlinks:?}"
     );
 
     // 8. GET /index/stats -> verify 2 pages

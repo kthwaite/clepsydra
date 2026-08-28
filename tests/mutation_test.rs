@@ -1566,6 +1566,9 @@ Content.
     assert!(!plan.index_events.is_empty());
 }
 
+// Referrers in the move tests below link by filename stem or relative path:
+// those are the links a move must rewrite. A title link such as [[Beta]] keeps
+// resolving through the page's title and is deliberately left alone (TSK-0119).
 #[test]
 fn move_plan_batch_intents_cover_every_previewed_path_with_exact_expected_bytes() {
     let alpha = "\
@@ -1573,7 +1576,7 @@ fn move_plan_batch_intents_cover_every_previewed_path_with_exact_expected_bytes(
 id: 00000000-0000-0000-0000-000000000110
 title: Alpha
 ---
-Link to [[Beta]].
+Link to [[beta]].
 ";
     let beta = "\
 ---
@@ -1682,7 +1685,7 @@ fn public_rename_and_delete_file_ops_are_converted_to_batch_intents() {
 #[test]
 fn move_plan_batch_expected_bytes_are_from_the_rewrite_snapshot() {
     let alpha =
-        "---\nid: 00000000-0000-0000-0000-000000000113\ntitle: Alpha\n---\nLink to [[Beta]].\n";
+        "---\nid: 00000000-0000-0000-0000-000000000113\ntitle: Alpha\n---\nLink to [[beta]].\n";
     let beta = "---\nid: 00000000-0000-0000-0000-000000000114\ntitle: Beta\n---\nContent.\n";
     let (_tmp, vault) = setup_vault(&[("alpha.md", alpha), ("beta.md", beta)]);
     let mut index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
@@ -2085,7 +2088,7 @@ fn encrypted_page_move_skips_protected_referrers_but_rewrites_plain_referrers() 
     let protected_plain =
         "---\nid: 00000000-0000-0000-0000-000000000410\ntitle: Protected ref\n---\nSee [[Beta]].\n";
     let plain_ref =
-        "---\nid: 00000000-0000-0000-0000-000000000411\ntitle: Plain ref\n---\nSee [[Beta]].\n";
+        "---\nid: 00000000-0000-0000-0000-000000000411\ntitle: Plain ref\n---\nSee [[beta]].\n";
     let target = "---\nid: 00000000-0000-0000-0000-000000000412\ntitle: Beta\n---\nTarget.\n";
     let (_tmp, vault) = setup_vault(&[
         ("protected-ref.md", protected_plain),
@@ -2372,8 +2375,7 @@ fn plan_folder_move_rewrites_all_contained_pages() {
 fn encrypted_folder_move_skips_protected_referrers_but_rewrites_plain_referrers() {
     let protected_plain =
         "---\nid: 00000000-0000-0000-0000-000000000430\ntitle: Protected ref\n---\nSee [[Beta]].\n";
-    let plain_ref =
-        "---\nid: 00000000-0000-0000-0000-000000000431\ntitle: Plain ref\n---\nSee [[Beta]].\n";
+    let plain_ref = "---\nid: 00000000-0000-0000-0000-000000000431\ntitle: Plain ref\n---\nSee [Beta](notes/beta.md).\n";
     let target = "---\nid: 00000000-0000-0000-0000-000000000432\ntitle: Beta\n---\nTarget.\n";
     let (_tmp, vault) = setup_vault(&[
         ("protected-ref.md", protected_plain),
@@ -3137,4 +3139,137 @@ fn atomic_replace_distinguishes_not_published_from_published_but_not_durable() {
         AtomicPublicationError::PublishedButNotDurable(_)
     ));
     assert_eq!(fs::read(&path).unwrap(), b"new content");
+}
+
+// ---------------------------------------------------------------------------
+// TSK-0119: moves keep [[Title]] wikilinks; only stem/path links are rewritten
+// ---------------------------------------------------------------------------
+
+#[test]
+fn plan_page_move_keeps_title_links_when_stem_unchanged() {
+    let hub = "\
+---
+id: 00000000-0000-0000-0000-000000000501
+title: Clepsydra
+---
+The hub.
+";
+    let referrer = "\
+---
+id: 00000000-0000-0000-0000-000000000502
+title: Journal
+---
+Notes on today's new [[Clepsydra]] features, and [[Clepsydra|the app]].
+";
+
+    let (_tmp, vault) = setup_vault(&[
+        ("notes/20260812.clepsydra.zxKjGxHr.md", hub),
+        ("journals/2026-08-27.md", referrer),
+    ]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::MovePage {
+            source: "notes/20260812.clepsydra.zxKjGxHr.md".to_string(),
+            destination: "projects/clepsydra/20260812.clepsydra.zxKjGxHr.md".to_string(),
+        })
+        .unwrap();
+
+    assert!(
+        plan.text_edits.is_empty(),
+        "a move that keeps the title must not rewrite title links: {:?}",
+        plan.text_edits
+    );
+    assert!(plan.staged_writes.is_empty());
+}
+
+#[test]
+fn plan_page_move_rewrites_stem_links_but_keeps_title_links() {
+    let target = "\
+---
+id: 00000000-0000-0000-0000-000000000503
+title: Target
+---
+Target content.
+";
+    let source = "\
+---
+id: 00000000-0000-0000-0000-000000000504
+title: Source
+---
+See [[Target]] and [[target]] here.
+";
+
+    let (_tmp, vault) = setup_vault(&[("target.md", target), ("source.md", source)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::MovePage {
+            source: "target.md".to_string(),
+            destination: "renamed.md".to_string(),
+        })
+        .unwrap();
+
+    assert_eq!(plan.staged_writes.len(), 1, "one referrer rewritten");
+    let rewritten = &plan.staged_writes[0].content;
+    assert!(
+        rewritten.contains("[[Target]]"),
+        "title link must survive a rename: {rewritten}"
+    );
+    assert!(
+        rewritten.contains("[[renamed]]") && !rewritten.contains("[[target]]"),
+        "stem link must follow the file: {rewritten}"
+    );
+    assert!(
+        plan.text_edits.iter().all(|edit| edit.old_text != "Target"),
+        "no text edit may target the title: {:?}",
+        plan.text_edits
+    );
+}
+
+#[test]
+fn plan_folder_move_keeps_title_links() {
+    let page = "\
+---
+id: 00000000-0000-0000-0000-000000000505
+title: Beta
+---
+Content.
+";
+    let referrer = "\
+---
+id: 00000000-0000-0000-0000-000000000506
+title: Alpha
+---
+Link to [[Beta]].
+";
+
+    let (_tmp, vault) = setup_vault(&[("old/beta.md", page), ("alpha.md", referrer)]);
+    let db_path = vault.root().join(".clepsydra/cache.db");
+    let mut index = VaultIndex::open(&db_path).unwrap();
+    index.build(&vault).unwrap();
+    index.resolve_links().unwrap();
+
+    let planner = MutationPlanner::new(&vault, &index);
+    let plan = planner
+        .plan(&MutationOp::MoveFolder {
+            source: "old".to_string(),
+            destination: "new".to_string(),
+        })
+        .unwrap();
+
+    assert!(
+        plan.text_edits.is_empty(),
+        "a folder move that keeps titles must not rewrite title links: {:?}",
+        plan.text_edits
+    );
+    assert!(plan.staged_writes.is_empty());
 }
