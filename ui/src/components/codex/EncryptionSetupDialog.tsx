@@ -356,10 +356,7 @@ export function EncryptionSetupDialog({
                   Download recovery identity
                 </button>
               ) : null}
-              <Checkbox
-                isSelected={acknowledged}
-                onChange={setAcknowledged}
-              >
+              <Checkbox isSelected={acknowledged} onChange={setAcknowledged}>
                 {method === "password"
                   ? "I understand that losing both my password and recovery identity is unrecoverable."
                   : "I understand that losing this recovery identity is unrecoverable."}

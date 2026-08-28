@@ -8,7 +8,6 @@ import {
 } from "react";
 import { formatApiError, isInvalidSearchQuery } from "#/api/error";
 import { useSearch, useTags } from "#/api/index";
-import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
 import {
   enabledStaticCommands,
@@ -17,13 +16,14 @@ import {
 } from "#/components/codex/commandRegistry";
 import { shortFolio } from "#/components/codex/folio-utils";
 import { goToView } from "#/components/codex/viewRegistry";
+import { useFeatureFlags } from "#/components/FeatureFlagsProvider";
 import { useTheme } from "#/components/ThemeProvider";
 import { useDebounce } from "#/hooks/useDebounce";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   useActivateTabWithFolioHistory,
   useLeaveFolioWorkspace,
 } from "#/hooks/useFolioHistoryNavigation";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { useOpenTodayAiJournal } from "#/hooks/useOpenTodayAiJournal";
 import { useOpenTodayJournal } from "#/hooks/useOpenTodayJournal";
 import { cn } from "#/lib/cn";

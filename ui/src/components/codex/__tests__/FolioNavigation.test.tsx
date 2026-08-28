@@ -25,6 +25,7 @@ import "./FolioProperties.mock";
 import { createEditor, type Descendant, type Editor, Transforms } from "slate";
 import { Editable, Slate, withReact } from "slate-react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal()),
   useIsMutating: () => 0,
@@ -32,6 +33,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 vi.mock("#/components/FeatureFlagsProvider", () => ({
   useFeatureFlags: () => ({ academic: true, feeds: true }),
 }));
+
 import { CodexFrame } from "#/components/codex/CodexFrame";
 import { Constellation } from "#/components/codex/Constellation";
 import { Folio } from "#/components/codex/Folio";
@@ -39,12 +41,12 @@ import { IndexHealthPanel } from "#/components/settings/IndexHealthPanel";
 import { renderElement } from "#/editor/elements/renderElement";
 import { withSchema } from "#/editor/schema/withSchema";
 import type { CustomEditor } from "#/editor/types";
-import { useOpenTab } from "#/hooks/useOpenTab";
 import {
   registerFolioHistoryTraversalGuard,
   useFolioHistoryController,
 } from "#/hooks/useFolioHistoryNavigation";
 import { GlobalShortcuts } from "#/hooks/useGlobalShortcuts";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { useConstellationStore } from "#/store/constellation";
 import * as folioRestorationStore from "#/store/folioRestoration";
 import {
@@ -205,10 +207,7 @@ vi.mock("#/components/page-tree/PageActionsMenu", () => ({
     onArchived,
   }: {
     path: string;
-    onArchived: (archived: {
-      page_id: string;
-      original_path: string;
-    }) => void;
+    onArchived: (archived: { page_id: string; original_path: string }) => void;
   }) => (
     <button
       type="button"
@@ -350,7 +349,6 @@ function RepairsOrigin() {
   return <h1>Reference repairs</h1>;
 }
 
-
 function Workspace() {
   const tabs = useWorkspaceStore((state) => state.tabs);
   useFolioHistoryController();
@@ -419,9 +417,7 @@ function pageTabStillExists() {
     .tabs.some((tab) => tab.type === "page" && tab.path === "notes/alpha.md");
 }
 
-function seedHistoryTabs(
-  activeTabId: "alpha" | "beta" | "graph" = "alpha",
-) {
+function seedHistoryTabs(activeTabId: "alpha" | "beta" | "graph" = "alpha") {
   useWorkspaceStore.setState({
     tabs: [
       {
@@ -983,9 +979,9 @@ describe("mobile Folio Back", () => {
       expect(router.state.location.pathname).toBe("/workspace"),
     );
     expect(useWorkspaceStore.getState().activeTabId).toBe("graph");
-    expect(screen.getByRole("button", { name: /Anchor page/ })).toHaveTextContent(
-      "Alpha · notes/alpha.md",
-    );
+    expect(
+      screen.getByRole("button", { name: /Anchor page/ }),
+    ).toHaveTextContent("Alpha · notes/alpha.md");
     expect(screen.getByRole("button", { name: "Depth 2" })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -1224,9 +1220,7 @@ describe("mobile Folio Back", () => {
           readFolioHistoryDestination(router.history.location.state),
         ).not.toBeNull(),
       );
-      const firstA = readFolioHistoryDestination(
-        router.history.location.state,
-      );
+      const firstA = readFolioHistoryDestination(router.history.location.state);
       setFolioPosition(101, 1);
 
       await user.click(screen.getByRole("button", { name: "Visit Beta" }));
@@ -1330,9 +1324,7 @@ describe("mobile Folio Back", () => {
       await user.click(
         screen.getByRole("button", { name: "Open Reference Repairs" }),
       );
-      await user.click(
-        await screen.findByRole("button", { name: "Leave" }),
-      );
+      await user.click(await screen.findByRole("button", { name: "Leave" }));
 
       await waitFor(() =>
         expect(router.state.location.pathname).toBe("/repairs"),

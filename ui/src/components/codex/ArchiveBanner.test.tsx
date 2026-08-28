@@ -4,7 +4,12 @@ import { describe, expect, it, vi } from "vitest";
 import { ArchiveBanner } from "#/components/codex/ArchiveBanner";
 
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, to, params, ...props }: {
+  Link: ({
+    children,
+    to,
+    params,
+    ...props
+  }: {
     children: ReactNode;
     to: string;
     params?: { _splat?: string };
@@ -39,15 +44,16 @@ describe("ArchiveBanner", () => {
       screen.getByRole("heading", { name: "The Shape of Time" }),
     ).toBeInTheDocument();
     expect(screen.getByText("2026-08-12T14:05:00Z")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /open live page/i })).toMatchObject({
-      href: "https://example.com/articles/time",
-      target: "_blank",
-      rel: "noreferrer",
-    });
-    expect(screen.getByRole("link", { name: /back to vault page/i })).toHaveAttribute(
-      "href",
-      "/pages/archive/example/the-shape-of-time.md",
+    expect(screen.getByRole("link", { name: /open live page/i })).toMatchObject(
+      {
+        href: "https://example.com/articles/time",
+        target: "_blank",
+        rel: "noreferrer",
+      },
     );
+    expect(
+      screen.getByRole("link", { name: /back to vault page/i }),
+    ).toHaveAttribute("href", "/pages/archive/example/the-shape-of-time.md");
   });
 
   it.each([
@@ -62,10 +68,9 @@ describe("ArchiveBanner", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /open live page/i })).toHaveAttribute(
-      "href",
-      expectedHref,
-    );
+    expect(
+      screen.getByRole("link", { name: /open live page/i }),
+    ).toHaveAttribute("href", expectedHref);
   });
 
   it.each([
@@ -73,19 +78,26 @@ describe("ArchiveBanner", () => {
     "data:text/html,<h1>unsafe</h1>",
     "//example.com/protocol-relative",
     "not a URL",
-  ])("renders an invalid legacy archive URL as non-clickable corruption text: %s", (url) => {
-    render(
-      <ArchiveBanner
-        title="The Shape of Time"
-        path="archive/example/the-shape-of-time.md"
-        archive={{ ...archive, url }}
-      />,
-    );
+  ])(
+    "renders an invalid legacy archive URL as non-clickable corruption text: %s",
+    (url) => {
+      render(
+        <ArchiveBanner
+          title="The Shape of Time"
+          path="archive/example/the-shape-of-time.md"
+          archive={{ ...archive, url }}
+        />,
+      );
 
-    expect(screen.queryByRole("link", { name: /open live page/i })).not.toBeInTheDocument();
-    expect(screen.getByText(url)).toBeInTheDocument();
-    expect(screen.getByText(/invalid archive url metadata/i)).toBeInTheDocument();
-  });
+      expect(
+        screen.queryByRole("link", { name: /open live page/i }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(url)).toBeInTheDocument();
+      expect(
+        screen.getByText(/invalid archive url metadata/i),
+      ).toBeInTheDocument();
+    },
+  );
 
   it("shows optional provenance only when retained", () => {
     const { rerender } = render(

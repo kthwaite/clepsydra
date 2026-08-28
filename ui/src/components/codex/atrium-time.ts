@@ -1,8 +1,5 @@
 import { useMemo } from "react";
-import {
-  daystampLabel,
-  formatDotDate,
-} from "#/components/codex/atrium-data";
+import { daystampLabel, formatDotDate } from "#/components/codex/atrium-data";
 import { dayOfYear, isLeapYear } from "#/lib/time";
 
 export function useAtriumCalendar(now: Date) {

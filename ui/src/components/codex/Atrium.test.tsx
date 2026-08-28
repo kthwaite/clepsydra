@@ -219,9 +219,7 @@ describe("Atrium composition", () => {
       screen.getByText("Activity · Rolling 26 weeks"),
     );
 
-    expect(
-      screen.queryByText("Brimley-Cocoon Line"),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByText("Brimley-Cocoon Line")).not.toBeInTheDocument();
     expect(sky).toHaveClass("col-span-12", "lg:col-span-12");
     expect(sky).not.toHaveClass("lg:col-span-5");
     expectBefore(feed, sky);

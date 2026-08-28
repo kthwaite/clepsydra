@@ -223,10 +223,7 @@ vi.mock("#/editor/SlateEditor", () => ({
                           }}
                         >
                           <SelectItem id="user">You</SelectItem>
-                          <SelectItem
-                            id="assistant"
-                            textValue={assistant}
-                          >
+                          <SelectItem id="assistant" textValue={assistant}>
                             {assistant}
                           </SelectItem>
                         </Select>

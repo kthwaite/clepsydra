@@ -380,8 +380,8 @@ export function FolioProperties({
                                 key={declaration.base.slug}
                                 className="cl-mono list-none text-[8px] leading-relaxed text-ink-mute"
                               >
-                                {declaration.base.name} ({declaration.base.slug}){" "}
-                                · {describeDefinition(declaration.definition)}
+                                {declaration.base.name} ({declaration.base.slug}
+                                ) · {describeDefinition(declaration.definition)}
                               </li>
                             ))}
                           </ul>
