@@ -26,7 +26,6 @@ import { EdField, INPUT_CLS, RADIO_CLS_BASE, RADIO_CLS_ON } from "./fields";
 // ── newCyclePrefill ───────────────────────────────────────────────────────────
 
 export interface NewCyclePrefill {
-  code: string;
   label: string;
   start: string;
   end: string;
@@ -35,10 +34,12 @@ export interface NewCyclePrefill {
 /**
  * Pure helper — computes default field values for a new cycle.
  *
- * - code  = "S-" + (max numeric suffix across cycles + 1, min 1)
- * - label = "CYCLE " + same number
+ * - label = "CYCLE " + (cycle count + 1)
  * - start = day after latest cycle end (fallback: now)
  * - end   = start + 6 days
+ *
+ * The code is no longer prefilled here — the server mints it (petname
+ * codes carry no numeric suffix to derive from).
  *
  * @param cycles  Existing board cycles (may be empty).
  * @param now     ISO date string "YYYY-MM-DD" — injected for testability.
@@ -48,12 +49,7 @@ export function newCyclePrefill(
   cycles: Pick<BoardCycle, "code" | "end">[],
   now: string,
 ): NewCyclePrefill {
-  // Max numeric suffix (S-3 → 3, C-01 → 1, etc.)
-  const nums = cycles.map((c) => {
-    const m = c.code.match(/(\d+)$/);
-    return m ? parseInt(m[1], 10) : 0;
-  });
-  const n = (nums.length ? Math.max(...nums) : 0) + 1;
+  const n = cycles.length + 1;
 
   // Latest cycle end date → start is the day after; fallback to now
   const ends = cycles
@@ -65,7 +61,6 @@ export function newCyclePrefill(
   const end = isoAddDays(start, 6);
 
   return {
-    code: `S-${n}`,
     label: `CYCLE ${n}`,
     start,
     end,
@@ -113,7 +108,7 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
   useEffect(() => {
     if (!isOpen) return;
     const pf = newCyclePrefill(cycles, todayISO);
-    setCode(pf.code);
+    setCode("");
     setLabel(pf.label);
     setStart(pf.start);
     setEnd(pf.end);
@@ -194,11 +189,12 @@ export function NewCycleModal({ cycles, now }: NewCycleModalProps) {
               data-testid="new-cycle-label"
             />
           </EdField>
-          <EdField label="ID" hint="S-NN">
+          <EdField label="ID" hint="optional">
             <input
               type="text"
               className={INPUT_CLS}
               aria-label="ID"
+              placeholder="auto (assigned by the server)"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               data-testid="new-cycle-code"
