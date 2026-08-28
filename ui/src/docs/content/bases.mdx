@@ -192,6 +192,9 @@ The operators are:
 | `ne` | Not equal; on multi-valued fields, no element may equal the value. Missing properties also match. |
 | `lt`, `lte`, `gt`, `gte` | Ordering comparisons. For declared properties, use only `number`, `date`, or `datetime`. |
 | `contains` | Substring match on text; exact membership on multi-valued values such as `multi_select`, `tags`, and `aliases`. |
+| `not_contains` | Negation of `contains`: no substring match on text, no element equals the value on multi-valued fields. Missing properties also match. |
+| `starts_with`, `ends_with` | Prefix and suffix match on `text` and `url` properties and text system fields (`title`, `path`, `kind`, `project`, `id`, `created_at`, `updated_at`). ASCII case-insensitive, like `contains`. Not valid on `select`, `multi_select`, `relation`, `tags`, or `aliases`. |
+| `is_today`, `is_this_week`, `is_past_week`, `is_next_week`, `is_this_month` | Relative-date predicates on `date` and `datetime` properties and on `created_at`, `updated_at`, and `journal_date`. Omit `value`. See [Relative dates](#relative-dates). |
 | `in` | Matches any candidate in an array, for example `value = ["queued", "reading"]`. |
 | `links_to` | Relation target match by page UUID or canonical name. Use with `relation` properties. |
 | `is_empty` | The field is absent or empty. Omit `value`; it has no meaningful value. |
@@ -228,6 +231,26 @@ filter = { not = { field = "status", op = "eq", value = "abandoned" } }
 ```
 
 A base's membership filter and a selected view's filter are always ANDed. A view filter narrows membership; it cannot add a page that the base filter excluded.
+
+### Relative dates
+
+A relative-date operator compares the stored value's calendar date — the `YYYY-MM-DD` part of the TOML date or date-time, as written — against the day the query runs. "Today" is the server clock's UTC date, the same day Agenda and Journal use. Windows are:
+
+| Operator | Matches |
+| --- | --- |
+| `is_today` | today |
+| `is_this_week` | Monday through Sunday of the current ISO week |
+| `is_past_week` | the last seven days, including today |
+| `is_next_week` | the next seven days, excluding today |
+| `is_this_month` | the first through the last day of the current month |
+
+```toml
+[[views]]
+name = "Due soon"
+filter = { field = "due", op = "is_next_week" }
+```
+
+The value is never converted between time zones: `2026-08-28T23:30:00-05:00` is 28 August. A saved view with a relative filter re-evaluates every time it is opened, so its rows change from day to day without editing the base.
 
 ### Tag conditions
 
@@ -320,11 +343,23 @@ Each `[[views]]` entry is a saved view. Its fields are:
 - `labels`: per-field display headings for this view. Dotted field keys must be quoted in TOML. Labels do not change `columns` or any data key.
 - `sort`: an ordered list of `{ field, dir }` keys. Directions are `asc` and `desc`; omitted `dir` defaults to `asc`. Equal values use page path as a stable tie-breaker.
 - `group_by`: a grouping field.
-- `aggregates`: aggregate calculations shown with grouped results.
+- `aggregates`: aggregate calculations shown with grouped results, or as a totals row for a flat view.
 
 Use a property in `group_by` only when it is declared. Groupable property types are `select`, `text`, `bool`, `date`, `datetime`, and `url`; scalar system fields such as `kind` are also groupable. `number`, `relation`, and `multi_select` properties are not groupable.
 
-The shipped aggregate functions are `count`, `sum`, `avg`, `min`, and `max`. `count` needs no field. The other functions require a compatible declared `number`, `date`, or `datetime` field (or the numeric system field `word_count`). Aggregates are returned with grouped results. For example:
+The aggregate functions are:
+
+| Function | Field | Result |
+| --- | --- | --- |
+| `count` | none | number of rows |
+| `count_filled`, `count_empty` | any declared property or scalar system field | rows where the field is present / absent |
+| `percent_filled` | same | `100 × count_filled ÷ count`, one decimal |
+| `count_unique` | same | distinct present values (the first element of an array) |
+| `sum`, `avg`, `min`, `max` | `number`, `date`, `datetime`, or `word_count` | the usual folds |
+| `median` | same | the middle value; the mean of the two middle values for numbers |
+| `range` | same | `max − min`; for dates, the number of days between them |
+
+`tags` and `aliases` cannot be aggregated. Aggregates are computed over the whole result — a `limit` or scroll window never changes them. A grouped view returns one set per group; a flat view returns one set for the view, shown as a totals row beneath the table. For example:
 
 ```toml
 [[views]]
@@ -341,7 +376,7 @@ columns = ["title", "author", "rating", "started"]
 
 ## Web UI, saved tables, and inline editing
 
-Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, resolves the active view's display labels by canonical field identity while retaining the original field keys, shows group counts and aggregate values, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
+Open `/bases` to discover, create, configure, open, or delete bases. Open `/bases/<slug>` for a saved table. The UI selects the first view initially and presents the other saved views as tabs. It renders flat or grouped tables, resolves the active view's display labels by canonical field identity while retaining the original field keys, shows group counts and aggregate values, renders a flat view's aggregates as a **Totals** row beneath the table, and lets you click a column header to apply a temporary ascending or descending sort override. **Configure** opens `/bases/<slug>/edit`. Clicking a title opens that page.
 
 System fields and undeclared columns are read-only. A column backed by a declared property opens a type-specific inline editor: text/URL, number, boolean, date, date-time, select, multi-select, or relation. Relation editing accepts comma-separated targets and writes wikilinks; single-target entry offers page-title suggestions.
 
