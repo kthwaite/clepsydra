@@ -11,6 +11,8 @@ use rusqlite::{Connection, OptionalExtension, backup::Backup, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use super::cas_scan::ArchiveRefScan;
+
 /// Result of storing a blob in the CAS.
 pub struct StoreResult {
     pub hash: String,
@@ -1511,6 +1513,143 @@ impl ContentStore {
         Ok(count)
     }
 
+    /// List every blob file on disk (two-level hex fan-out directories under
+    /// `self.root`), sorted by hash, as `(hash, size)`. Ignores anything at
+    /// `self.root` that isn't a fan-out directory (`cas.db`, its
+    /// journal/WAL/SHM siblings, `cas.lock`) and anything inside a fan-out
+    /// directory that isn't a blob file (stray dotfiles, wrong-prefix names).
+    fn scan_blob_files(&self) -> io::Result<Vec<(String, u64)>> {
+        fn is_lowercase_hex(name: &str, len: usize) -> bool {
+            name.len() == len
+                && name
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        }
+
+        let mut prefixes: Vec<String> = Vec::new();
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                continue;
+            };
+            if is_lowercase_hex(&name, 2) {
+                prefixes.push(name);
+            }
+        }
+        prefixes.sort();
+
+        let mut found = Vec::new();
+        for prefix in prefixes {
+            let mut names: Vec<(String, u64)> = Vec::new();
+            for entry in fs::read_dir(self.root.join(&prefix))? {
+                let entry = entry?;
+                if !entry.file_type()?.is_file() {
+                    continue;
+                }
+                let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
+                    continue;
+                };
+                if is_lowercase_hex(&name, 64) && name.starts_with(&prefix) {
+                    names.push((name, entry.metadata()?.len()));
+                }
+            }
+            names.sort();
+            found.extend(
+                names
+                    .into_iter()
+                    .map(|(name, size)| (format!("sha256:{name}"), size)),
+            );
+        }
+        Ok(found)
+    }
+
+    /// Recreate every `blobs` row from files on disk plus a vault-wide
+    /// reference/type scan, discarding whatever the database currently
+    /// claims. Used to repair `cas.db` after it's lost, corrupted, or absent
+    /// on a freshly synced device (ADR 0005: `cas.db` is derived, not source
+    /// of truth).
+    ///
+    /// `write` applies the rebuild; a dry run only computes the report.
+    pub fn rebuild_metadata(
+        &self,
+        scan: &ArchiveRefScan,
+        write: bool,
+    ) -> Result<RebuildReport, Box<dyn std::error::Error>> {
+        let _lock = self.acquire_exclusive_lock()?;
+        let blob_files = self.scan_blob_files()?;
+
+        let mut seen_hashes = BTreeSet::new();
+        let mut untyped_blobs = Vec::new();
+        let mut unreferenced_blobs = 0u64;
+        let mut rows: Vec<(String, u64, String, u32)> = Vec::with_capacity(blob_files.len());
+
+        for (hash, size) in blob_files {
+            let content_type = match scan.types.get(&hash) {
+                Some(content_type) => content_type.clone(),
+                None => {
+                    untyped_blobs.push(hash.clone());
+                    "application/octet-stream".to_string()
+                }
+            };
+            let ref_count = scan.refs.get(&hash).copied().unwrap_or(0);
+            if ref_count == 0 {
+                unreferenced_blobs += 1;
+            }
+            seen_hashes.insert(hash.clone());
+            rows.push((hash, size, content_type, ref_count));
+        }
+
+        let missing_files: Vec<String> = scan
+            .refs
+            .keys()
+            .filter(|hash| !seen_hashes.contains(hash.as_str()))
+            .cloned()
+            .collect();
+        let rows_written = rows.len() as u64;
+
+        if write {
+            // `created_at` resets to now for every rebuilt row. `gc()` only
+            // deletes rows with ref_count 0 that are older than its min_age,
+            // so stamping "now" just delays GC eligibility for these rows —
+            // the safe direction, since a later GC is never wrong, but an
+            // early one could delete a blob a page still points at (spec §7).
+            let now = chrono::Utc::now().to_rfc3339();
+            let transaction = self.database().unchecked_transaction()?;
+            transaction.execute("DELETE FROM blobs", [])?;
+            // The recount above already treats every rubbish item still
+            // present on disk as holding a reference — including one whose
+            // release was already recorded in `rubbish_archive_releases`
+            // before this rebuild ran. If that ledger row survived the
+            // rebuild, the item's eventual purge would see itself as already
+            // completed and skip decrementing, permanently leaking the ref
+            // the recount just added back. Clearing the ledger here forces
+            // every present rubbish item to decrement exactly once on its
+            // next purge, matching the recount (spec §7; over-count-safe:
+            // the failure mode this guards against is under-counting, and
+            // `ref_count > 0` in that UPDATE already blocks a double
+            // decrement in the other direction).
+            transaction.execute("DELETE FROM rubbish_archive_releases", [])?;
+            for (hash, size, content_type, ref_count) in &rows {
+                transaction.execute(
+                    "INSERT INTO blobs (hash, size, content_type, created_at, ref_count) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![hash, *size as i64, content_type, now, *ref_count as i64],
+                )?;
+            }
+            transaction.commit()?;
+        }
+
+        Ok(RebuildReport {
+            rows_written,
+            unreferenced_blobs,
+            untyped_blobs,
+            missing_files,
+            dry_run: !write,
+        })
+    }
+
     /// Return summary stats for the store.
     pub fn stats(&self) -> Result<CasStats, Box<dyn std::error::Error>> {
         let blob_count: i64 =
@@ -1531,6 +1670,21 @@ impl ContentStore {
 pub struct CasStats {
     pub blob_count: u64,
     pub total_size_bytes: u64,
+}
+
+/// Outcome of a `rebuild_metadata` sweep (or dry run).
+#[derive(Debug, Default)]
+pub struct RebuildReport {
+    pub rows_written: u64,
+    /// Blob files written with ref_count 0 — not referenced by any live page
+    /// or rubbish item, so GC-eligible once old enough.
+    pub unreferenced_blobs: u64,
+    /// Blob hashes with no type in the scan; fell back to
+    /// `application/octet-stream`.
+    pub untyped_blobs: Vec<String>,
+    /// Hashes the scan referenced with no corresponding blob file on disk.
+    pub missing_files: Vec<String>,
+    pub dry_run: bool,
 }
 
 #[cfg(test)]
@@ -2317,5 +2471,59 @@ mod tests {
             "membership lookup made {} comparisons for 256 blobs",
             snapshot.membership_comparisons()
         );
+    }
+
+    #[test]
+    fn rebuild_recreates_rows_from_files_and_scan() {
+        let tmp = TempDir::new().unwrap();
+        let store = ContentStore::open(tmp.path()).unwrap();
+        let stored = store.store(b"png-bytes", "image/png").unwrap();
+        let snap = store.store(b"<html>", "text/html").unwrap();
+        // Corrupt the derived state: wrong types, wrong refs.
+        store
+            .database()
+            .execute(
+                "UPDATE blobs SET content_type = 'wrong/type', ref_count = 9",
+                [],
+            )
+            .unwrap();
+        let mut scan = ArchiveRefScan::default();
+        scan.refs.insert(stored.hash.clone(), 2);
+        scan.refs.insert(snap.hash.clone(), 1);
+        scan.types.insert(stored.hash.clone(), "image/png".into());
+        scan.types.insert(snap.hash.clone(), "text/html".into());
+        let report = store.rebuild_metadata(&scan, true).unwrap();
+        assert_eq!(report.rows_written, 2);
+        let (_, ct) = store.retrieve(&stored.hash).unwrap();
+        assert_eq!(ct, "image/png");
+        assert_eq!(store.ref_count(&stored.hash).unwrap(), 2);
+        assert_eq!(store.ref_count(&snap.hash).unwrap(), 1);
+    }
+
+    #[test]
+    fn rebuild_flags_unreferenced_untyped_and_missing() {
+        let tmp = TempDir::new().unwrap();
+        let store = ContentStore::open(tmp.path()).unwrap();
+        let orphan = store.store(b"orphan", "application/pdf").unwrap();
+        let mut scan = ArchiveRefScan::default();
+        let ghost = "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        scan.refs.insert(ghost.into(), 1);
+        let report = store.rebuild_metadata(&scan, true).unwrap();
+        assert_eq!(report.unreferenced_blobs, 1); // orphan file kept, ref_count 0
+        assert_eq!(report.untyped_blobs, vec![orphan.hash.clone()]);
+        assert_eq!(report.missing_files, vec![ghost.to_string()]);
+        assert_eq!(store.ref_count(&orphan.hash).unwrap(), 0);
+    }
+
+    #[test]
+    fn rebuild_dry_run_changes_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let store = ContentStore::open(tmp.path()).unwrap();
+        let stored = store.store(b"x", "image/png").unwrap();
+        let report = store
+            .rebuild_metadata(&ArchiveRefScan::default(), false)
+            .unwrap();
+        assert!(report.dry_run);
+        assert_eq!(store.ref_count(&stored.hash).unwrap(), 1);
     }
 }

@@ -49,7 +49,7 @@ file's directory without `~` expansion. See [Configuration](/docs/configuration)
 | `clep open-url` | `<URL>`, optional `--print` |
 | `clep relabel` | optional `--dry-run` |
 | `clep migrate` | optional `--write`; dry run by default |
-| `clep cas` | nested `backfill` command |
+| `clep cas` | nested `backfill` or `rebuild` command |
 | `clep register-url` | optional `--obsidian`; macOS only |
 | `clep grep` | `<QUERY>`, `-n/--limit <N>` (default `20`), `--raw`, `--json` |
 | `clep tree` | optional `--json` |
@@ -388,6 +388,43 @@ failures also return `1`.
 ```bash
 clep cas backfill
 clep cas backfill --write
+```
+
+## `clep cas rebuild`
+
+```text
+clep cas rebuild [--write]
+```
+
+Recreates `cas.db` from disk truth: the CAS is gitignored and derived (ADR
+0005), so a freshly synced or corrupted device rebuilds it from the blob
+files under `[archive].cas_path` plus a vault-wide scan of live pages and
+rubbish items. For each blob file found: size comes from the file; content
+type comes from the scan's `{hash, type}` frontmatter entries (a snapshot
+hash defaults to `text/html`), falling back to `application/octet-stream`
+and reporting the hash as untyped when no page named a type for it;
+`ref_count` is the number of live pages and rubbish items whose frontmatter
+references the hash, or `0` (unreferenced, GC-eligible once old enough) when
+none do. A hash referenced in frontmatter with no backing blob file is
+reported missing. `created_at` resets to now for every row, which only
+delays a later `gc` — never triggers one early.
+
+The default is a dry run that only computes the report; `--write` applies it
+inside one transaction, replacing every row in `blobs`. `--write` also clears
+`rubbish_archive_releases`: the recount above already credits every rubbish
+item still present on disk with its references, so the ledger of
+already-released items would otherwise cause their next purge to skip
+decrementing and leak those refs. Clearing it makes each present rubbish
+item's next purge decrement exactly once, matching the recount.
+
+The command prints scan warnings, then each untyped and missing hash, then a
+summary line. It returns `0` when there are no missing files and no scan
+warnings, and `1` otherwise, even if rows were written. Config or vault-open
+failures also return `1`.
+
+```bash
+clep cas rebuild
+clep cas rebuild --write
 ```
 
 ## `clep register-url`

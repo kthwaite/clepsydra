@@ -33,6 +33,12 @@ enum CasCommands {
         #[arg(long)]
         write: bool,
     },
+    #[command(about = "Recreate cas.db rows from blob files on disk plus a vault scan")]
+    Rebuild {
+        /// Apply changes (default is a dry run).
+        #[arg(long)]
+        write: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -510,6 +516,59 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                     }
                 );
                 Ok(if report.warnings.is_empty() { 0 } else { 1 })
+            }
+            CasCommands::Rebuild { write } => {
+                let cwd = std::env::current_dir()?;
+                let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+                let vault_root =
+                    clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+                let vault = clepsydra::vault::Vault::open(&vault_root)?;
+                let cas_path_raw = &vault.config().archive.cas_path;
+                let cas_path = clepsydra::expand_tilde(cas_path_raw)
+                    .unwrap_or_else(|| PathBuf::from(cas_path_raw));
+
+                println!(
+                    "Rebuilding {} from blob files under {} plus a vault-wide scan.",
+                    cas_path.join("cas.db").display(),
+                    cas_path.display()
+                );
+                let scan = clepsydra::vault::cas_scan::scan_archive_refs(&vault);
+                for warning in &scan.warnings {
+                    println!("  warning {warning}");
+                }
+
+                let store = clepsydra::vault::cas::ContentStore::open(&cas_path)?;
+                let report = store.rebuild_metadata(&scan, write)?;
+                for hash in &report.untyped_blobs {
+                    println!("  untyped {hash}");
+                }
+                for hash in &report.missing_files {
+                    println!("  missing {hash}");
+                }
+                let verb = if report.dry_run {
+                    "would write"
+                } else {
+                    "wrote"
+                };
+                println!(
+                    "cas rebuild: {verb} {} row(s), {} unreferenced, {} untyped, {} missing{}",
+                    report.rows_written,
+                    report.unreferenced_blobs,
+                    report.untyped_blobs.len(),
+                    report.missing_files.len(),
+                    if report.dry_run {
+                        " (dry run — pass --write to apply)"
+                    } else {
+                        ""
+                    }
+                );
+                Ok(
+                    if report.missing_files.is_empty() && scan.warnings.is_empty() {
+                        0
+                    } else {
+                        1
+                    },
+                )
             }
         },
         Commands::Grep {
@@ -1148,5 +1207,25 @@ mod cli_tests {
     #[test]
     fn cas_requires_a_subcommand() {
         assert!(Cli::try_parse_from(["clep", "cas"]).is_err());
+    }
+
+    fn cas_rebuild_write(args: &[&str]) -> bool {
+        let cli = Cli::try_parse_from(args).unwrap();
+        match cli.command {
+            Commands::Cas {
+                command: CasCommands::Rebuild { write },
+            } => write,
+            other => panic!("expected cas rebuild, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cas_rebuild_defaults_write_off() {
+        assert!(!cas_rebuild_write(&["clep", "cas", "rebuild"]));
+    }
+
+    #[test]
+    fn cas_rebuild_accepts_write() {
+        assert!(cas_rebuild_write(&["clep", "cas", "rebuild", "--write"]));
     }
 }
