@@ -1,0 +1,261 @@
+export const meta = {
+  slug: "sync",
+  title: "Sync between devices",
+  description: "Keep one vault on several devices with git, git-lfs, and Conflict Copies."
+}
+
+Sync keeps one user's vault on more than one machine. The vault root becomes a
+git repository; Clepsydra commits, fetches, merges and pushes it for you. There
+is no Clepsydra sync service — the remote is an ordinary git host you control.
+
+Sync coordinates *your* devices. It is not multi-user collaboration, and it is
+not a backup: see [Capture, Feeds, and Archives](/docs/capture-feeds-and-archives)
+for `clep backup`.
+
+## What sync does
+
+One sync is a single cycle:
+
+1. **Commit** everything outstanding in the vault, with a machine-written
+   message (`sync: 3 pages (Plan, Reading, Meeting)`) and a
+   `Device: <hostname>` trailer.
+2. **Fetch** the configured branch from `origin`.
+3. **Merge** it. Files that changed on only one device merge cleanly.
+4. **Resolve** anything that conflicts by keeping *your* version in place and
+   writing the other device's version beside it as a
+   [Conflict Copy](#conflicts).
+5. **Commit** the merge and **push** it. A rejected push retries the cycle once
+   and then reports; sync never force-pushes.
+
+The working tree is never left conflicted, so the next edit — from the editor,
+the CLI, or another program — always meets ordinary Markdown.
+
+While the server runs a sync, it holds a quiesce window: the file watcher is
+paused and writes wait. When the merge changed files on disk, the index is
+rebuilt once afterwards and the UI receives a single refresh event. Requests
+issued during the window return once the vault has settled.
+
+## Prerequisites
+
+- **git 2.30 or newer** on `PATH`. Sync drives the system `git` binary.
+- **git-lfs**, installed and working (`git lfs version`). This is mandatory,
+  not optional: attachments and the content-addressed store are tracked
+  through LFS filters.
+- **A remote that speaks LFS.** GitHub, GitLab and Gitea all do.
+  `clep sync init --remote URL` probes the remote's LFS batch API and refuses
+  a remote that does not answer it.
+- **Enough LFS quota for your attachments.** GitHub's free tier allows 1 GB of
+  LFS storage and 1 GB of bandwidth per month; a vault with large PDFs or web
+  captures can pass that. Self-hosted Gitea and GitLab have no such cap.
+
+Run `clep doctor` at any point: its `sync` section reports the git binary,
+git-lfs, the repository state, and the working tree.
+
+## Set up the first device
+
+```bash
+clep sync init --remote git@github.com:me/vault.git
+clep sync
+```
+
+`clep sync init` turns the vault into a git repository (or adopts one already
+there), installs git-lfs locally, writes the managed `.gitignore` and
+`.gitattributes` blocks, seeds the `[sync]` author, migrates a legacy
+`~/.clepsydra/cas` store into the vault when the vault's own store is still
+empty, adds `origin`, and makes the initial commit. It is idempotent — re-run
+it whenever `clep doctor` reports a managed line missing.
+
+Stop `clep serve` before running it: `init` must be the vault's only writer
+while it runs. The full option list is in [CLI](/docs/cli#clep-sync-init).
+
+## Set up a second device
+
+Sync does not clone for you. Clone first, then initialise:
+
+```bash
+git clone git@github.com:me/vault.git ~/vault
+cd ~/vault
+clep sync init
+clep serve
+```
+
+Point the second device's application config at the clone (`[vault].root`, see
+[Configuration](/docs/configuration)). `clep sync init` without `--remote`
+adopts the `origin` the clone already has.
+
+Two things do **not** travel over sync and must be set up per device:
+
+- **Encrypted-note identities.** `.clepsydra/crypto/*.identity.age` is ignored
+  on purpose. Move it across yourself, out of band — see
+  [Encryption and Protected Pages](/docs/encryption-and-protected-pages).
+  Clepsydra re-tightens crypto file permissions (directory `0700`, files
+  `0600`) after every merge that touched the tree.
+- **The application config** (`config.toml`): it lives outside the vault.
+
+## What syncs, and what does not
+
+Synced: every page, `_attachments/`, and the parts of `.clepsydra/` that are
+authored rather than derived — `config.toml` (including `[sync]` itself),
+`templates/`, `rubbish/`, `crypto/keyring.toml`, `bcl`, `location.toml`,
+`importers/`, and the CAS blob files under `cas/`.
+
+Not synced — the managed `.gitignore` block, written exactly as:
+
+```text
+.clepsydra/cache.db*
+.clepsydra/feeds.db*
+.clepsydra/*.lock
+.clepsydra/.feeds.db.*.lock
+.clepsydra/transactions/
+.clepsydra/cas/cas.db*
+.clepsydra/cas/cas.lock
+.clepsydra/crypto/*.identity.age
+.DS_Store
+```
+
+These are derived or device-local: the search index, the feed database, lock
+and transaction files, the CAS metadata database (rebuilt per device from the
+blob files), your wrapped identity, and macOS clutter. The managed
+`.gitattributes` block marks `*.md` for Clepsydra's merge driver and routes
+`.clepsydra/cas/**` and `_attachments/**` through git-lfs.
+
+Both blocks sit between `# >>> clep sync (managed) >>>` and
+`# <<< clep sync (managed) <<<` markers. Anything you add to those files
+outside the markers is left alone, and lines already present anywhere in the
+file are never duplicated.
+
+## Cadence
+
+| When | What runs |
+| --- | --- |
+| After a quiet period following any change | Commit only (`autocommit_debounce_secs`, default 300 s) |
+| `clep serve` startup | One full sync, before the watcher starts |
+| `clep serve` shutdown (SIGINT/SIGTERM) | Commit and push, on a 30 s budget |
+| Every `interval_secs` | One full sync (default `0` — off) |
+| `clep sync` | One full sync, now |
+
+Autocommit exists so a fetch never meets a dirty working tree. It commits; it
+does not touch the network. See the `[sync]` table in
+[Configuration](/docs/configuration#sync-settings) for the keys.
+
+`clep sync` asks whether a server is listening on the configured address
+first. If one answers, the sync runs *there*, inside its quiesce window, and
+the CLI prints the report it gets back. If nothing answers, the same engine
+runs standalone against the configured vault. Only one process may write the
+vault at a time.
+
+## Conflicts
+
+When the same page changed on two devices, sync keeps yours and writes theirs
+beside it (`docs/adr/0004-conflict-copies-over-merge-markers.md`):
+
+```text
+notes/plan.md                      your version, untouched
+notes/plan.conflict.ab12cd3.md     the other device's version
+```
+
+The copy is a normal page: fresh id, `conflict_of = "notes/plan.md"` in its
+frontmatter, `title` suffixed with `(conflict ab12cd3)` so wikilinks to the
+original stay unambiguous, and every other frontmatter field copied from the
+other side. The short id is derived from the incoming content, so re-running
+the same merge produces the same filename rather than a pile of copies.
+
+**Resolution is ordinary editing.** Open both, fold across whatever you want to
+keep, and delete the copy. There is no merge tool to learn and no conflicted
+file to repair. Identical edits on both devices produce no copy at all.
+
+Encrypted pages always take the Conflict Copy path — their bodies cannot be
+merged.
+
+`clep sync status` counts the copies still in the tree; `clep doctor`'s
+`conflicts` section reports files that contain literal merge markers, which
+sync never produces (they come from a hand-run `git merge`).
+
+**Coming in the next phase**, not shipped yet: a structural merge driver for
+`*.md` (frontmatter merged field-wise, body merged as text) that will resolve
+many of today's Conflict Copies automatically; an automatic merger for journal
+pages that share a date; and a conflicts panel in the UI. Until then, `*.md
+merge=clep` is written into `.gitattributes` but unregistered, and git falls
+back to its ordinary text merge — whose residue becomes a Conflict Copy.
+
+## Checking on sync
+
+```bash
+clep sync status
+```
+
+```text
+branch:          main (head abc1234)
+remote:          git@github.com:me/vault.git
+ahead/behind:    1 / 0
+worktree:        clean
+conflict copies: 0
+last sync:       2026-08-28T18:20:11Z — committed 2 files; merged; pushed
+autocommit:      idle
+```
+
+`ahead/behind` reads `unknown (no upstream)` until the branch has been pushed
+once, and `last sync` comes from this device's own record — it describes this
+machine, not the remote. The `autocommit` row appears only when a server
+answered.
+
+`clep doctor` adds a `sync` section:
+
+| Check | Reports |
+| --- | --- |
+| `git` | The git version, or an error when git is missing |
+| `repo` | Initialised, not initialised yet, or nested inside another repository |
+| `branch` | Whether the checked-out branch matches `[sync] branch` |
+| `managed files` | Any managed `.gitignore`/`.gitattributes` line that went missing |
+| `lfs` | The git-lfs version, or a warning that it is not installed |
+| `remote` | The `origin` URL, or `none` |
+| `worktree` | Clean, uncommitted files pending autocommit, or unmerged files |
+| `exclusions` | Whether `.git/**` is excluded from the index |
+
+The doctor is read-only: it never fetches, commits, or writes git
+configuration.
+
+## Troubleshooting
+
+**`sync is not initialised for this vault`** — the vault root is a git
+repository but has no init marker, or is not a repository at all. Run
+`clep sync init`.
+
+**`vault root … is inside another git repository`** — a parent directory is a
+git repository, so the vault root cannot be the repository root. Move the
+vault out, or remove the outer repository.
+
+**Push rejected twice.** Sync fetched, merged and pushed again, and the remote
+still refused. Something else pushed in between, or the branch is protected.
+Run `clep sync` again; if it keeps failing, inspect the repository by hand.
+Sync will never force-push over it.
+
+**`fetch failed`, or you are offline.** The commit still happened — your work
+is safe locally. The report says `fetch failed: <detail>` and the exit code is
+`1`. Run `clep sync` again when you have a network.
+
+**`git-lfs not installed`.** Install it (`brew install git-lfs`), then re-run
+`clep sync init` so it can run `git lfs install --local`.
+
+**Unmerged files after a hand-run `git merge`.** `clep doctor` reports them
+under `sync` → `worktree`, and `clep sync status` exits `1`. Run `clep sync`:
+it resolves every unmerged path the normal way — yours stays, theirs becomes a
+Conflict Copy.
+
+**Files with `<<<<<<<` markers in them.** Sync never writes these; a hand-run
+git command did. Clepsydra indexes such files read-only and never rewrites
+them. Fix them by hand; `clep doctor`'s `conflicts` section lists them.
+
+**Managed lines missing.** `clep doctor` names each one. Re-run
+`clep sync init`; it appends only what is absent.
+
+## Related
+
+- [CLI](/docs/cli#clep-sync) for `clep sync`, `clep sync init`, and
+  `clep sync status`
+- [Configuration](/docs/configuration#sync-settings) for the `[sync]` keys
+- [API Reference](/docs/api-reference#sync) for `POST /api/vault/sync` and
+  `GET /api/vault/sync/status`
+- [Encryption and Protected Pages](/docs/encryption-and-protected-pages) for
+  moving identities between devices
+- [Troubleshooting](/docs/troubleshooting) for problems outside sync

@@ -54,13 +54,13 @@ it("declares the approved user-intent hierarchy", () => {
     ["AI and integrations", [...AI_INTEGRATION_GUIDE_SLUGS]],
     [
       "Operations and reference",
-      ["configuration", "troubleshooting", "cli", "api-reference"],
+      ["configuration", "sync", "troubleshooting", "cli", "api-reference"],
     ],
   ]);
 });
 
 it("registers each existing guide exactly once with discovery metadata", () => {
-  expect(DOC_PAGES).toHaveLength(22);
+  expect(DOC_PAGES).toHaveLength(23);
   expect(new Set(DOC_PAGES.map((page) => page.slug)).size).toBe(
     DOC_PAGES.length,
   );
@@ -91,6 +91,7 @@ it("resolves every existing dedicated guide", () => {
     ...CAPTURE_GUIDE_SLUGS,
     ...AI_INTEGRATION_GUIDE_SLUGS,
     "configuration",
+    "sync",
     "troubleshooting",
     "cli",
     "api-reference",
@@ -101,6 +102,7 @@ it("resolves every existing dedicated guide", () => {
   expect(getDocPage("block-references-and-transclusion")?.title).toBe(
     "Block References and Transclusion",
   );
+  expect(getDocPage("sync")?.title).toBe("Sync between devices");
   expect(getDocPage("troubleshooting")?.title).toBe("Troubleshooting");
   expect(getDocPage("browser-extension")?.title).toBe("Browser Extension");
   expect(getDocPage("books-and-reading")?.title).toBe("Books and Reading");
@@ -175,7 +177,15 @@ it("derives previous and next guides across group boundaries", () => {
   });
   expect(getDocNeighbors("configuration")).toMatchObject({
     previous: { slug: "mcp" },
+    next: { slug: "sync" },
+  });
+  expect(getDocNeighbors("sync")).toMatchObject({
+    previous: { slug: "configuration" },
     next: { slug: "troubleshooting" },
+  });
+  expect(getDocNeighbors("troubleshooting")).toMatchObject({
+    previous: { slug: "sync" },
+    next: { slug: "cli" },
   });
   expect(getDocNeighbors("cli")).toMatchObject({
     previous: { slug: "troubleshooting" },
