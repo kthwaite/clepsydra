@@ -1287,7 +1287,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a Task on the Task Board — preferred over vault_create_page because it reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks.",
+        description = "Create a Task on the Task Board — preferred over vault_create_page because it reserves the next TSK-NNNN code and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1326,7 +1326,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_update",
-        description = "Update a Task on the Task Board, addressed by TSK code, vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED).",
+        description = "Update a Task on the Task Board, addressed by TSK code, vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -3409,6 +3409,9 @@ mod tests {
         assert!(create.contains("link"));
         assert!(create.contains("inbox"));
         assert!(create.contains("intake"));
+        assert!(create.contains("existing project"));
+        assert!(create.contains("project page declaring that slug"));
+        assert!(create.contains("unknown slugs are refused"));
 
         let update = description("vault_task_update");
         assert!(update.contains("blocked"));
@@ -3418,6 +3421,9 @@ mod tests {
         assert!(update.contains("clear_project: true"));
         assert!(update.contains("inbox (intake)"));
         assert!(update.contains("done (sealed)"));
+        assert!(update.contains("existing project"));
+        assert!(update.contains("project page declaring that slug"));
+        assert!(update.contains("unknown slugs are refused"));
 
         for (tool_name, field, terms) in [
             ("vault_task_create", "body", ["description", "body"]),
@@ -3451,10 +3457,25 @@ mod tests {
         assert!(!cycle_update.contains("unsealed"));
     }
 
-    /// Serve a seeded vault and create one cycle + one task in it through the
-    /// board tools, returning the server for follow-up assertions.
+    /// Serve a seeded vault with two Projects (`xxii`, `other`) and one
+    /// cycle created through the board tools, returning the server for
+    /// follow-up assertions. Task `project` values must name a Project.
     async fn serve_board_vault() -> (VaultMcpServer, tempfile::TempDir) {
         let (server, tmp) = serve_seeded_vault().await;
+        for slug in ["xxii", "other"] {
+            server
+                .client
+                .post_json(
+                    &format!("/api/vault/pages/projects/{slug}.md"),
+                    &json!({
+                        "title": slug.to_ascii_uppercase(),
+                        "kind": "PROJECT",
+                        "project": slug,
+                    }),
+                )
+                .await
+                .expect("project page create should succeed");
+        }
         server
             .client
             .post_json(
@@ -3464,6 +3485,19 @@ mod tests {
             .await
             .expect("cycle create should succeed");
         (server, tmp)
+    }
+
+    #[tokio::test]
+    async fn task_create_rejects_an_unknown_project() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_task_create(Parameters(TaskCreateParams {
+                project: Some("ghost".to_string()),
+                ..task_create_params("Orphan")
+            }))
+            .await
+            .expect_err("unknown project should be rejected");
+        assert!(err.contains("unknown project: ghost"), "{err}");
     }
 
     fn task_create_params(title: &str) -> TaskCreateParams {

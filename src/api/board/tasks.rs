@@ -23,8 +23,8 @@ use crate::vault::path::VaultPath;
 
 use super::read::build_board_task_dto;
 use super::{
-    BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, path_stem,
-    reserve_next_code_number, validate_priority, validate_status,
+    BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, ensure_project_exists,
+    path_stem, reserve_next_code_number, validate_priority, validate_status,
 };
 
 // ---------------------------------------------------------------------------
@@ -64,6 +64,13 @@ pub(crate) async fn create_task(
     // 2. Validate cycle exists (if specified)
     if let Some(ref cycle_code) = cycle_opt {
         ensure_cycle_exists(&state, cycle_code).await?;
+    }
+
+    // 2b. Validate the project exists (if specified): the slug must be
+    // declared by a PROJECT page, so a typo cannot file the task under a
+    // folder no project backs.
+    if let Some(project) = body.project.as_deref().filter(|p| !p.is_empty()) {
+        ensure_project_exists(&state, project).await?;
     }
 
     // 3. Reserve the next TASK code through the index transaction.
@@ -200,6 +207,12 @@ pub(crate) async fn patch_task(
         }
         other => other.clone(),
     };
+
+    // A set project must be declared by a PROJECT page; the empty string
+    // clears and is not validated.
+    if let Some(project) = body.project.as_deref().filter(|p| !p.is_empty()) {
+        ensure_project_exists(&state, project).await?;
+    }
 
     // 1. Resolve path by UUID
     let id_clone = id.clone();

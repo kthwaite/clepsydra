@@ -226,3 +226,31 @@ describe("InlineEditPopover — global shortcut passthrough", () => {
     }
   });
 });
+
+// ══════════════════════════════════════════════════════════════════════════════
+// stacking (regression: chips rendered over the sticky list-view rows)
+// ══════════════════════════════════════════════════════════════════════════════
+
+describe("InlineEditPopover — stacking", () => {
+  it("lifts the trigger above the row's open button but below the sticky rows", () => {
+    wrap(
+      <InlineEditPopover
+        task={TASK}
+        field="status"
+        testIdPrefix="bk"
+        colLabel={FIXTURE_COL_LABEL}
+      >
+        <span>pip</span>
+      </InlineEditPopover>,
+    );
+
+    const trigger = screen.getByTestId(`bk-inline-status-${TASK.id}`);
+    // The list view's sticky rows sit at z-[4] (quick-add bar), z-[3]
+    // (column header), z-[4] (priority group rows), and the kanban column
+    // header at z-[2]. Each list row's open-card button is `absolute inset-0
+    // z-0`, so the chip only needs to clear that — a Tailwind z-10 (or
+    // higher) would paint the chip over the sticky rows as they scroll past.
+    expect(trigger.className).not.toMatch(/\bz-(?:10|20|30|40|50)\b/);
+    expect(trigger.className).toContain("z-[1]");
+  });
+});

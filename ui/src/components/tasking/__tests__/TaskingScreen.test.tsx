@@ -117,6 +117,7 @@ beforeEach(() => {
     opFilter: "ALL",
     cycleSel: "",
     railOpen: true,
+    showCompleted: false,
     editTaskId: null,
     taskModal: null,
     cycleModal: null,
@@ -900,5 +901,91 @@ describe("TaskingScreen — task slugs with no operation", () => {
       status: "FIELD",
       project: "beta",
     });
+  });
+});
+
+// ── list view: completed (SEALED) hidden by default ───────────────────────────
+
+describe("TaskingScreen — list view completed toggle", () => {
+  it("hides SEALED tasks in backlog mode by default and offers to show them", async () => {
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    // t5 is the only SEALED fixture task
+    expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+    expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("bk-row-t5")).not.toBeInTheDocument();
+
+    const toggle = screen.getByTestId("board-show-completed");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveTextContent("Show 1 completed");
+  });
+
+  it("pressing the toggle reveals SEALED tasks and persists showCompleted", async () => {
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    await userEvent.click(screen.getByTestId("board-show-completed"));
+
+    expect(useBoardStore.getState().showCompleted).toBe(true);
+    expect(await screen.findByTestId("bk-row-t5")).toBeInTheDocument();
+    expect(screen.getByText("Task Sealed")).toBeInTheDocument();
+    const toggle = screen.getByTestId("board-show-completed");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveTextContent("Hide completed");
+
+    // Pressing again hides them once more
+    await userEvent.click(toggle);
+    expect(useBoardStore.getState().showCompleted).toBe(false);
+    await waitFor(() =>
+      expect(screen.queryByTestId("bk-row-t5")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("the FilterBar count strip excludes hidden completed tasks", async () => {
+    useBoardStore.setState({ mode: "backlog" });
+    stubBoardFetch();
+    renderScreenWithFilter();
+    await screen.findByText("Task Board");
+
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-field-project"));
+    await userEvent.click(
+      screen.getByTestId("filter-bar-option-project-alpha"),
+    );
+
+    // alpha = t1, t2, t5; t5 is SEALED and hidden → 2 of (5 − 1 hidden) = 4
+    expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
+    expect(screen.getByText("Task Alpha 2")).toBeInTheDocument();
+    expect(screen.queryByText("Task Sealed")).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
+      "02 OF 04",
+    );
+
+    // Close the facet popover, then reveal completed → 3 of 5
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("board-show-completed"));
+    expect(await screen.findByText("Task Sealed")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
+      "03 OF 05",
+    );
+  });
+
+  it("kanban mode is unaffected: SEALED tasks stay in the Done column and no toggle renders", async () => {
+    useBoardStore.setState({ mode: "card", showCompleted: false });
+    stubBoardFetch();
+    renderScreen();
+    await screen.findByText("Task Board");
+
+    expect(
+      within(screen.getByTestId("kb-col-SEALED")).getByText("Task Sealed"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("board-show-completed"),
+    ).not.toBeInTheDocument();
   });
 });

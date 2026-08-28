@@ -280,6 +280,6 @@ mod tests {
         let scan = scan_archive_refs(&vault);
         assert_eq!(scan.refs.get(H2), Some(&2));
         // H2 never typed by any page; stays absent from types
-        assert!(scan.types.get(H2).is_none());
+        assert!(!scan.types.contains_key(H2));
     }
 }

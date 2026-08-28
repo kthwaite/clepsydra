@@ -144,15 +144,21 @@ The Task Board has four views:
 - **Board** groups Task cards into **Inbox**, **Ready**, **In Progress**,
   **Review**, and **Done**.
 - **List** groups Tasks by **Critical**, **High**, **Medium**, and **Low**
-  priority.
+  priority. List hides Done (`SEALED`) Tasks by default; the **Show N
+  completed** / **Hide completed** toggle beside the view tabs reveals them,
+  and the choice persists with the other board settings.
 - **Cycles** shows the selected Cycle, its progress, and its Tasks. Choose
   **Backlog** for Tasks that are not assigned to a Cycle.
 - **Timeline** lays out scheduled Tasks across Projects and Cycles.
 
 The Scope rail groups Tasks by Project and Cycle, with Backlog for Tasks not assigned to a Cycle.
-Every Project page appears in the rail; set `board: false` in a Project
-page's frontmatter to hide it. A Project that Tasks declare but no Project
-page backs still gets a row.
+Every Project page appears in the rail; set `board = false` in a Project
+page's frontmatter to hide it. Pages that declare a `project` slug share one
+row per slug, and `board = true` breaks the tie when several pages declare the
+same slug. A Task's Project must name a slug that a Project page declares; the
+Board, the MCP tools, and the API refuse an unknown slug. Give the Project
+page its `project` slug first (for example with **Assign** or `vault_assign`),
+then file Tasks under it.
 Switching views does not change Task pages. Dragging a card or editing its
 panel updates the corresponding Task page metadata.
 
