@@ -1,8 +1,8 @@
 import {
-  facetsEqual,
   type FilterFieldSpec,
   type FilterState,
   FLAG_ON,
+  facetsEqual,
 } from "./model";
 
 export interface FilterUrlOptions {

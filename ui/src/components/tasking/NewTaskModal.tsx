@@ -38,12 +38,7 @@ import {
 } from "./BoardModalFrame";
 import { type ColLabelFn, cycleStateLabel } from "./board-constants";
 import { type ProjectScope, scopeLabel } from "./board-projects";
-import {
-  DispositionRow,
-  EdField,
-  INPUT_CLS,
-  PriorityRow,
-} from "./fields";
+import { DispositionRow, EdField, INPUT_CLS, PriorityRow } from "./fields";
 
 // ── NewTaskModal ──────────────────────────────────────────────────────────────
 
@@ -235,9 +230,7 @@ export function NewTaskModal({
             <Select
               aria-label="Project"
               value={project}
-              onChange={(key) =>
-                setProject(key === null ? "" : String(key))
-              }
+              onChange={(key) => setProject(key === null ? "" : String(key))}
               data-testid="new-task-project"
             >
               <SelectItem id="">No project</SelectItem>

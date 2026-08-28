@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react";
 import { useState } from "react";
-import { CheckboxGroup } from "#/components/ui/checkbox-group";
 import { Checkbox } from "#/components/ui/checkbox";
+import { CheckboxGroup } from "#/components/ui/checkbox-group";
 
 const meta: Meta<typeof CheckboxGroup> = {
   title: "UI/CheckboxGroup",
@@ -34,11 +34,7 @@ function ControlledCheckboxGroup() {
 
   return (
     <div className="flex flex-col gap-2">
-      <CheckboxGroup
-        label="Notifications"
-        value={value}
-        onChange={setValue}
-      >
+      <CheckboxGroup label="Notifications" value={value} onChange={setValue}>
         <Checkbox value="product">Product</Checkbox>
         <Checkbox value="security">Security</Checkbox>
       </CheckboxGroup>
@@ -55,12 +51,7 @@ export const Controlled: Story = {
 
 export const RequiredInvalid: Story = {
   render: () => (
-    <CheckboxGroup
-      label="Kinds"
-      isRequired
-      isInvalid
-      errorMessage="Required"
-    >
+    <CheckboxGroup label="Kinds" isRequired isInvalid errorMessage="Required">
       <Checkbox value="note">Note</Checkbox>
       <Checkbox value="folder">Folder</Checkbox>
     </CheckboxGroup>

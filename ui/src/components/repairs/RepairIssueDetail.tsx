@@ -39,7 +39,6 @@ export function RepairIssueDetail({
   const [status, setStatus] = useState<string | null>(null);
   const previewSequence = useRef(0);
 
-
   const canRepair = issue.actions.some(
     (action) => action === "replace" || action === "create",
   );

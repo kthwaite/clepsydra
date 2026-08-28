@@ -21,9 +21,7 @@ export function isInvalidSearchQuery(error: unknown): boolean {
   ) {
     return false;
   }
-  return (
-    "code" in error.detail && error.detail.code === "invalid_search_query"
-  );
+  return "code" in error.detail && error.detail.code === "invalid_search_query";
 }
 
 export function formatApiError(error: unknown, fallback: string): string {

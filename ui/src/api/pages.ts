@@ -71,11 +71,7 @@ export function useUpdatePage() {
   const qc = useQueryClient();
   return $api.useMutation("put", "/api/vault/pages/{path}", {
     onSuccess: (data, variables) =>
-      invalidatePageContent(
-        qc,
-        variables.params.path.path,
-        data.meta.id,
-      ),
+      invalidatePageContent(qc, variables.params.path.path, data.meta.id),
   });
 }
 

@@ -33,9 +33,18 @@ import type {
 } from "#/api/bases";
 import { Button, buttonStyles } from "#/components/ui/button";
 import { cn } from "#/lib/cn";
+import { ArchiveRowDialog } from "./ArchiveRowDialog";
+import { BaseHeaderMenu } from "./BaseHeaderMenu";
 import { BaseMemberDraft } from "./BaseMemberDraft";
+import {
+  CellContextTrigger,
+  RowActionsButton,
+  type RowContextTarget,
+  type RowMenuActions,
+  type RowMenuCell,
+} from "./BaseRowMenu";
 import { type CellValue, formatCellValue } from "./cells/types";
-import { canSort } from "./definition-model";
+import { canGroup, canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import type { EmbedScrollCap } from "./embed-query";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
@@ -44,8 +53,23 @@ import type {
   BaseMemberDraftValue,
 } from "./member-draft";
 import { useIdentifiedRows } from "./ordered-list";
+import {
+  headerFilterPresets,
+  headerOptionOverflow,
+  quickFilterType,
+} from "./quick-filters";
+import type { OverridesSaveState } from "./useViewOverrides";
+import { ViewOverridesStrip } from "./ViewOverridesStrip";
+import {
+  EMPTY_OVERRIDES,
+  type GroupOverride,
+  type QuickFilter,
+  type ViewOverridesState,
+} from "./view-overrides";
 
 const EMPTY_AGGREGATES: readonly Aggregate[] = [];
+const IDLE_SAVE: OverridesSaveState = { phase: "idle" };
+const noop = () => {};
 
 export interface BaseTableViewHandle {
   /**
@@ -53,6 +77,8 @@ export interface BaseTableViewHandle {
    * React Aria table when the view switcher has no enabled control.
    */
   focusEntry(): boolean;
+  /** Focuses one row's title button; false when that row is not rendered. */
+  focusRow(rowId: string): boolean;
 }
 
 export interface BaseTableViewProps {
@@ -104,6 +130,38 @@ export interface BaseTableViewProps {
   onMemberEdit?: () => void;
   focusCreatedId?: string;
   onCreatedRowFocused?: (createdId: string) => void;
+  overrides?: ViewOverridesState;
+  onAddQuickFilter?(filter: QuickFilter): void;
+  onRemoveQuickFilter?(identity: string): void;
+  onSetGroup?(group: GroupOverride | undefined): void;
+  onHideColumn?(column: string): void;
+  onShowHiddenColumns?(): void;
+  onClearOverrides?(): void;
+  onSaveOverrides?(): void;
+  onReloadDefinition?(): void;
+  overridesSave?: OverridesSaveState;
+  onOpenPageInNewTab?(path: string): void;
+  onCopyWikilink?(row: QueryRow): void;
+  onCopyValue?(value: CellValue): void;
+  onDuplicateRow?(row: QueryRow): void;
+  /** Resolves once the page is archived; rejects with an Error whose message the dialog shows. */
+  onArchiveRow?(row: QueryRow): Promise<void>;
+  rowActionError?: string;
+}
+
+/** Which system columns a group-by can key on; the rest are unique per row. */
+const GROUPABLE_SYSTEM: Record<string, true> = {
+  kind: true,
+  project: true,
+  created_at: true,
+  updated_at: true,
+  journal_date: true,
+};
+
+/** The row whose title takes focus once an archived row leaves the output. */
+interface ArchiveFocusRequest {
+  removedRowId: string;
+  nextRowId: string | undefined;
 }
 
 interface ActiveCell {
@@ -309,6 +367,22 @@ export const BaseTableView = forwardRef<
     onMemberEdit,
     focusCreatedId,
     onCreatedRowFocused,
+    overrides = EMPTY_OVERRIDES,
+    onAddQuickFilter,
+    onRemoveQuickFilter,
+    onSetGroup,
+    onHideColumn,
+    onShowHiddenColumns,
+    onClearOverrides,
+    onSaveOverrides,
+    onReloadDefinition,
+    overridesSave = IDLE_SAVE,
+    onOpenPageInNewTab,
+    onCopyWikilink,
+    onCopyValue,
+    onDuplicateRow,
+    onArchiveRow,
+    rowActionError,
   },
   ref,
 ) {
@@ -323,6 +397,11 @@ export const BaseTableView = forwardRef<
   );
   const columns =
     view?.columns && view.columns.length > 0 ? view.columns : ["title"];
+  const hiddenColumns = overrides.hiddenColumns;
+  const visibleColumns = useMemo(
+    () => columns.filter((column) => !hiddenColumns.includes(column)),
+    [columns, hiddenColumns],
+  );
   const displayLabelsByIdentity = useMemo(() => {
     const result = new Map<string, string>();
     for (const [field, label] of Object.entries(view?.labels ?? {})) {
@@ -353,7 +432,9 @@ export const BaseTableView = forwardRef<
         revision: definition.revision,
         view: equivalentActiveView,
         columns: view?.columns ?? ["title"],
+        hidden: hiddenColumns,
         grouping: view?.group_by ?? null,
+        groupOverride: overrides.group ?? null,
         aggregates: view?.aggregates ?? [],
         sort: sort === undefined ? "inherited" : sort,
         outputShape: output?.shape ?? null,
@@ -361,13 +442,25 @@ export const BaseTableView = forwardRef<
     [
       definition.revision,
       equivalentActiveView,
+      hiddenColumns,
       output?.shape,
+      overrides.group,
       sort,
       view?.aggregates,
       view?.columns,
       view?.group_by,
     ],
   );
+  /** The column the rows are actually grouped by, override before saved view. */
+  const effectiveGroup = overrides.group
+    ? overrides.group.kind === "by"
+      ? overrides.group.field
+      : undefined
+    : (view?.group_by ?? undefined);
+  const groupableColumn = (column: string) =>
+    SYSTEM_COLUMNS[column] !== undefined
+      ? GROUPABLE_SYSTEM[column] === true
+      : canGroup(properties.get(column)?.type);
   const [activeCell, setActiveCell] = useState<ActiveCell | null>(null);
   const activeViewIdentityRef = useRef(equivalentActiveView);
   const nextForwardFocusToken = useRef(0);
@@ -377,7 +470,7 @@ export const BaseTableView = forwardRef<
   const [forwardFocusRequest, setForwardFocusRequest] = useState<
     ForwardFocusRequest | undefined
   >(undefined);
-  const editableColumns = columns.filter(
+  const editableColumns = visibleColumns.filter(
     (column) => SYSTEM_COLUMNS[column] === undefined && properties.has(column),
   );
   const nextEditableColumn = (column: string): string | undefined => {
@@ -419,35 +512,42 @@ export const BaseTableView = forwardRef<
   const viewRootRef = useRef<HTMLDivElement | null>(null);
   const activeViewControlRef = useRef<HTMLButtonElement | null>(null);
 
-  useImperativeHandle(
-    ref,
-    () => ({
-      focusEntry() {
-        const target =
-          activeViewControlRef.current ??
-          viewRootRef.current?.querySelector<HTMLElement>(
-            '[role="grid"], table',
-          );
-        if (
-          !target?.isConnected ||
-          (target instanceof HTMLButtonElement &&
-            (target.disabled ||
-              target.getAttribute("aria-disabled") === "true"))
-        ) {
-          return false;
-        }
-        if (!(target instanceof HTMLButtonElement)) {
-          target.tabIndex = -1;
-        }
-        target.focus();
-        return (
-          document.activeElement === target ||
-          target.contains(document.activeElement)
-        );
-      },
-    }),
-    [],
-  );
+  const focusEntry = useCallback(() => {
+    const target =
+      activeViewControlRef.current ??
+      viewRootRef.current?.querySelector<HTMLElement>('[role="grid"], table');
+    if (
+      !target?.isConnected ||
+      (target instanceof HTMLButtonElement &&
+        (target.disabled || target.getAttribute("aria-disabled") === "true"))
+    ) {
+      return false;
+    }
+    if (!(target instanceof HTMLButtonElement)) {
+      target.tabIndex = -1;
+    }
+    target.focus();
+    return (
+      document.activeElement === target ||
+      target.contains(document.activeElement)
+    );
+  }, []);
+
+  // The title buttons carry the row id rather than a ref, so registering them
+  // cannot disturb the created/forward focus refs already on that element.
+  const focusRow = useCallback((rowId: string) => {
+    const button = viewRootRef.current?.querySelector<HTMLButtonElement>(
+      `[data-row-title="${CSS.escape(rowId)}"]`,
+    );
+    if (!button?.isConnected) return false;
+    button.focus();
+    return document.activeElement === button;
+  }, []);
+
+  useImperativeHandle(ref, () => ({ focusEntry, focusRow }), [
+    focusEntry,
+    focusRow,
+  ]);
 
   useLayoutEffect(() => {
     const focusIsBlocked = Boolean(viewError || viewLoading);
@@ -576,7 +676,7 @@ export const BaseTableView = forwardRef<
             group.rows.some((row) => String(row.id) === request.rowId),
           );
     const titleCanRender =
-      columns.includes("title") &&
+      visibleColumns.includes("title") &&
       !readOnly &&
       !memberDraftOpen &&
       !viewError &&
@@ -616,7 +716,6 @@ export const BaseTableView = forwardRef<
       }
     });
   }, [
-    columns,
     equivalentActiveView,
     forwardFocusRequest,
     focusCreatedId,
@@ -625,6 +724,7 @@ export const BaseTableView = forwardRef<
     readOnly,
     viewError,
     viewLoading,
+    visibleColumns,
   ]);
   const memberBlocker =
     memberCapability?.enabled === true
@@ -659,6 +759,70 @@ export const BaseTableView = forwardRef<
     [],
   );
 
+  const [contextTarget, setContextTarget] = useState<RowContextTarget | null>(
+    null,
+  );
+  /** The cell section the row's menu shows, when a cell summoned it. */
+  const contextCell = (row: QueryRow): RowMenuCell | undefined => {
+    const column = contextTarget?.column;
+    if (contextTarget?.rowId !== String(row.id) || column === undefined)
+      return undefined;
+    return {
+      column,
+      label: displayLabelForColumn(column),
+      type: quickFilterType(column, properties.get(column)),
+      value: (row.columns as Record<string, CellValue>)[column],
+    };
+  };
+  const [archiveTarget, setArchiveTarget] = useState<QueryRow | null>(null);
+  const [archiveFocus, setArchiveFocus] = useState<
+    ArchiveFocusRequest | undefined
+  >(undefined);
+  const rowsInOrder = useMemo<QueryRow[]>(() => {
+    if (output?.shape === "flat") return output.rows;
+    if (output?.shape === "grouped")
+      return output.groups.flatMap((group) => group.rows);
+    return [];
+  }, [output]);
+  // Opening the page is what the title button already does, so a menu holding
+  // only that is a button with nothing behind it: the read-only definition
+  // preview wires no row actions at all.
+  const hasRowActions =
+    onOpenPageInNewTab !== undefined ||
+    onCopyWikilink !== undefined ||
+    onDuplicateRow !== undefined ||
+    onArchiveRow !== undefined;
+  const rowActions = useMemo<RowMenuActions>(
+    () => ({
+      onOpenPage,
+      onOpenPageInNewTab,
+      onCopyWikilink,
+      onDuplicateRow,
+      // Without a handler there is no dialog to open, so the item stays inert.
+      onArchiveRow: onArchiveRow
+        ? (row: QueryRow) => setArchiveTarget(row)
+        : undefined,
+    }),
+    [
+      onArchiveRow,
+      onCopyWikilink,
+      onDuplicateRow,
+      onOpenPage,
+      onOpenPageInNewTab,
+    ],
+  );
+
+  // The archived row leaves the output only once the refetch lands; until then
+  // its successor's title button is not there to take focus.
+  useEffect(() => {
+    if (!archiveFocus) return;
+    if (rowsInOrder.some((row) => String(row.id) === archiveFocus.removedRowId))
+      return;
+    const { nextRowId } = archiveFocus;
+    setArchiveFocus(undefined);
+    if (nextRowId === undefined || !focusRow(nextRowId)) focusEntry();
+  }, [archiveFocus, focusEntry, focusRow, rowsInOrder]);
+
   const primarySort = sort?.[0];
   const sortDescriptor = primarySort
     ? {
@@ -689,7 +853,7 @@ export const BaseTableView = forwardRef<
       className="w-full border-collapse"
     >
       <TableHeader>
-        {columns.map((column) => {
+        {visibleColumns.map((column) => {
           const allowsSorting =
             !readOnly &&
             (SYSTEM_COLUMNS[column] !== undefined
@@ -700,7 +864,7 @@ export const BaseTableView = forwardRef<
             <Column
               key={column}
               id={column}
-              isRowHeader={column === columns[0]}
+              isRowHeader={column === visibleColumns[0]}
               allowsSorting={allowsSorting}
               className={cn(
                 "cl-mono border-b border-rule px-1 py-1 text-left text-[10px] uppercase tracking-[0.12em] text-ink-mute",
@@ -709,16 +873,45 @@ export const BaseTableView = forwardRef<
                 compact && "sticky top-0 z-[1] bg-paper",
               )}
             >
-              {({ sortDirection }) => (
-                <span className="inline-flex items-center gap-1">
-                  {displayLabelForColumn(column)}
-                  {sortDirection && (
-                    <span aria-hidden="true">
-                      {sortDirection === "ascending" ? "▲" : "▼"}
-                    </span>
-                  )}
-                </span>
-              )}
+              {({ sortDirection }) => {
+                const label = displayLabelForColumn(column);
+                const heading = (
+                  <span className="inline-flex items-center gap-1">
+                    {label}
+                    {sortDirection && (
+                      <span aria-hidden="true">
+                        {sortDirection === "ascending" ? "▲" : "▼"}
+                      </span>
+                    )}
+                  </span>
+                );
+                if (readOnly) return heading;
+                return (
+                  <BaseHeaderMenu
+                    column={column}
+                    label={label}
+                    allowsSorting={allowsSorting}
+                    groupable={groupableColumn(column)}
+                    groupedByThis={effectiveGroup === column}
+                    hideable={column !== "title" && visibleColumns.length > 1}
+                    presets={headerFilterPresets(
+                      column,
+                      quickFilterType(column, properties.get(column)),
+                      properties.get(column),
+                      label,
+                    )}
+                    optionOverflow={headerOptionOverflow(
+                      properties.get(column),
+                    )}
+                    onSortChange={onSortChange}
+                    onAddQuickFilter={onAddQuickFilter ?? noop}
+                    onSetGroup={onSetGroup ?? noop}
+                    onHideColumn={onHideColumn ?? noop}
+                  >
+                    {heading}
+                  </BaseHeaderMenu>
+                );
+              }}
             </Column>
           );
         })}
@@ -727,131 +920,166 @@ export const BaseTableView = forwardRef<
         key={`${cacheIdentity}:${memberDraftOpen ? "draft" : "active"}`}
         dependencies={[
           activeCell,
+          contextTarget,
           evaluationIdentity,
           focusCreatedId,
           memberDraftOpen,
+          onAddQuickFilter,
+          onCopyValue,
           readOnly,
+          rowActions,
         ]}
         items={rows}
       >
         {(row) => (
           <Row
             id={row.id}
-            className="border-b border-rule/50 data-[hovered]:bg-highlight"
+            className="group border-b border-rule/50 data-[hovered]:bg-highlight"
           >
-            {columns.map((column) => (
+            {visibleColumns.map((column) => (
               <Cell key={column} className="px-1 py-0.5 align-top">
-                {column === "title" ? (
-                  readOnly || memberDraftOpen ? (
-                    <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
-                      {row.title ?? row.path}
-                    </span>
-                  ) : (
-                    <button
-                      ref={
-                        row.id === focusCreatedId
-                          ? setCreatedTitleRef
-                          : forwardFocusRequest?.view ===
-                                equivalentActiveView &&
-                              String(row.id) === forwardFocusRequest.rowId
-                            ? forwardFocusRequest.ref
-                            : undefined
-                      }
-                      type="button"
-                      className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
-                      onClick={() => onOpenPage(row.path)}
-                    >
-                      {row.title ?? row.path}
-                    </button>
-                  )
-                ) : column === "body" ? (
-                  <BodyExcerptCell
-                    value={
-                      (row.columns as Record<string, CellValue>).body ?? null
-                    }
-                    pageLabel={row.title ?? row.path}
-                    path={row.path}
-                    onOpenPage={onOpenPage}
-                  />
-                ) : !readOnly &&
-                  !memberDraftOpen &&
-                  SYSTEM_COLUMNS[column] === undefined &&
-                  properties.has(column) ? (
-                  <EditableCell
-                    value={
-                      (row.columns as Record<string, CellValue>)[column] ?? null
-                    }
-                    definition={properties.get(column)!}
-                    isEditing={
-                      activeCell?.rowId === String(row.id) &&
-                      activeCell.column === column &&
-                      asciiCaseFold(activeCell.view) === equivalentActiveView
-                    }
-                    onEdit={() => {
-                      pendingForwardFocus.current = undefined;
-                      nextForwardFocusToken.current += 1;
-                      setForwardFocusRequest(undefined);
-                      setActiveCell({
-                        rowId: String(row.id),
-                        column,
-                        view: activeView,
-                      });
-                    }}
-                    onCancel={() => {
-                      if (pendingForwardFocus.current) return;
-                      pendingForwardFocus.current = undefined;
-                      setForwardFocusRequest(undefined);
-                      setActiveCell(null);
-                    }}
-                    onCommit={(value, hint) => {
-                      pendingForwardFocus.current = undefined;
-                      nextForwardFocusToken.current += 1;
-                      setForwardFocusRequest(undefined);
-                      setActiveCell(null);
-                      onCommitCell(row, column, value, hint);
-                    }}
-                    onCommitNext={(value, hint) => {
-                      const token = nextForwardFocusToken.current + 1;
-                      nextForwardFocusToken.current = token;
-                      pendingForwardFocus.current = undefined;
-                      setForwardFocusRequest(undefined);
-                      onCommitCell(row, column, value, hint);
-                      const nextColumn = nextEditableColumn(column);
-                      if (nextColumn) {
-                        setActiveCell({
-                          rowId: String(row.id),
-                          column: nextColumn,
-                          view: activeView,
-                        });
-                        return;
-                      }
-                      const rowIndex = rows.findIndex(
-                        (candidate) => String(candidate.id) === String(row.id),
-                      );
-                      const targetRowId = String(
-                        rows[rowIndex + 1]?.id ?? row.id,
-                      );
-                      const request: ForwardFocusRequest = {
-                        token,
-                        view: equivalentActiveView,
-                        rowId: targetRowId,
-                        node: null,
-                        ref: (node) => setForwardTitleRef(token, node),
-                      };
-                      pendingForwardFocus.current = request;
-                      setForwardFocusRequest(request);
-                      setActiveCell(null);
-                    }}
-                  />
-                ) : (
-                  // System fields and undeclared keys are read-only.
-                  <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink-2">
-                    {formatCellValue(
-                      (row.columns as Record<string, CellValue>)[column] ??
-                        null,
+                {/* One menu serves the row; each cell forwards its context
+                    events to the `⋯` button that owns it. */}
+                <div className="flex min-w-0 items-center">
+                  <CellContextTrigger
+                    row={row}
+                    column={column}
+                    onContextTarget={setContextTarget}
+                  >
+                    {column === "title" ? (
+                      readOnly || memberDraftOpen ? (
+                        <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink">
+                          {row.title ?? row.path}
+                        </span>
+                      ) : (
+                        <button
+                          ref={
+                            row.id === focusCreatedId
+                              ? setCreatedTitleRef
+                              : forwardFocusRequest?.view ===
+                                    equivalentActiveView &&
+                                  String(row.id) === forwardFocusRequest.rowId
+                                ? forwardFocusRequest.ref
+                                : undefined
+                          }
+                          type="button"
+                          data-row-title={String(row.id)}
+                          className="cl-mono cursor-pointer truncate text-left text-[12px] text-ink underline-offset-2 hover:text-accent hover:underline"
+                          onClick={() => onOpenPage(row.path)}
+                        >
+                          {row.title ?? row.path}
+                        </button>
+                      )
+                    ) : column === "body" ? (
+                      <BodyExcerptCell
+                        value={
+                          (row.columns as Record<string, CellValue>).body ??
+                          null
+                        }
+                        pageLabel={row.title ?? row.path}
+                        path={row.path}
+                        onOpenPage={onOpenPage}
+                      />
+                    ) : !readOnly &&
+                      !memberDraftOpen &&
+                      SYSTEM_COLUMNS[column] === undefined &&
+                      properties.has(column) ? (
+                      <EditableCell
+                        value={
+                          (row.columns as Record<string, CellValue>)[column] ??
+                          null
+                        }
+                        definition={properties.get(column)!}
+                        isEditing={
+                          activeCell?.rowId === String(row.id) &&
+                          activeCell.column === column &&
+                          asciiCaseFold(activeCell.view) ===
+                            equivalentActiveView
+                        }
+                        onEdit={() => {
+                          pendingForwardFocus.current = undefined;
+                          nextForwardFocusToken.current += 1;
+                          setForwardFocusRequest(undefined);
+                          setActiveCell({
+                            rowId: String(row.id),
+                            column,
+                            view: activeView,
+                          });
+                        }}
+                        onCancel={() => {
+                          if (pendingForwardFocus.current) return;
+                          pendingForwardFocus.current = undefined;
+                          setForwardFocusRequest(undefined);
+                          setActiveCell(null);
+                        }}
+                        onCommit={(value, hint) => {
+                          pendingForwardFocus.current = undefined;
+                          nextForwardFocusToken.current += 1;
+                          setForwardFocusRequest(undefined);
+                          setActiveCell(null);
+                          onCommitCell(row, column, value, hint);
+                        }}
+                        onCommitNext={(value, hint) => {
+                          const token = nextForwardFocusToken.current + 1;
+                          nextForwardFocusToken.current = token;
+                          pendingForwardFocus.current = undefined;
+                          setForwardFocusRequest(undefined);
+                          onCommitCell(row, column, value, hint);
+                          const nextColumn = nextEditableColumn(column);
+                          if (nextColumn) {
+                            setActiveCell({
+                              rowId: String(row.id),
+                              column: nextColumn,
+                              view: activeView,
+                            });
+                            return;
+                          }
+                          const rowIndex = rows.findIndex(
+                            (candidate) =>
+                              String(candidate.id) === String(row.id),
+                          );
+                          const targetRowId = String(
+                            rows[rowIndex + 1]?.id ?? row.id,
+                          );
+                          const request: ForwardFocusRequest = {
+                            token,
+                            view: equivalentActiveView,
+                            rowId: targetRowId,
+                            node: null,
+                            ref: (node) => setForwardTitleRef(token, node),
+                          };
+                          pendingForwardFocus.current = request;
+                          setForwardFocusRequest(request);
+                          setActiveCell(null);
+                        }}
+                      />
+                    ) : (
+                      // System fields and undeclared keys are read-only.
+                      <span className="cl-mono block truncate px-1 py-0.5 text-[12px] text-ink-2">
+                        {formatCellValue(
+                          (row.columns as Record<string, CellValue>)[column] ??
+                            null,
+                        )}
+                      </span>
                     )}
-                  </span>
-                )}
+                  </CellContextTrigger>
+                  {column === visibleColumns[0] && hasRowActions ? (
+                    <RowActionsButton
+                      row={row}
+                      readOnly={readOnly}
+                      actions={rowActions}
+                      cell={contextCell(row)}
+                      restoreFocus={
+                        contextTarget?.rowId === String(row.id)
+                          ? contextTarget.origin
+                          : null
+                      }
+                      onContextTarget={setContextTarget}
+                      onAddQuickFilter={onAddQuickFilter}
+                      onCopyValue={onCopyValue}
+                    />
+                  ) : null}
+                </div>
               </Cell>
             ))}
           </Row>
@@ -1007,6 +1235,20 @@ export const BaseTableView = forwardRef<
         ) : null}
         {toolbarActions}
       </div>
+      <ViewOverridesStrip
+        sort={sort}
+        overrides={overrides}
+        labelFor={displayLabelForColumn}
+        readOnly={readOnly}
+        save={overridesSave}
+        onSortChange={onSortChange}
+        onRemoveQuickFilter={onRemoveQuickFilter ?? noop}
+        onSetGroup={onSetGroup ?? noop}
+        onShowHiddenColumns={onShowHiddenColumns ?? noop}
+        onClear={onClearOverrides ?? noop}
+        onSave={onSaveOverrides ?? noop}
+        onReload={onReloadDefinition ?? noop}
+      />
       {memberDraftOpen && onSaveMember && onCancelMember ? (
         <BaseMemberDraft
           fields={memberDraftFields}
@@ -1037,6 +1279,14 @@ export const BaseTableView = forwardRef<
           className="cl-mono border border-warn px-3 py-2 text-[11px] text-warn"
         >
           View failed: {viewError}
+        </p>
+      ) : null}
+      {rowActionError ? (
+        <p
+          role="alert"
+          className="cl-mono border border-warn px-3 py-2 text-[11px] text-warn"
+        >
+          {rowActionError}
         </p>
       ) : null}
       {viewLoading ? (
@@ -1145,6 +1395,23 @@ export const BaseTableView = forwardRef<
         >
           + Add member…
         </Button>
+      ) : null}
+      {!readOnly && onArchiveRow ? (
+        <ArchiveRowDialog
+          row={archiveTarget}
+          onCancel={() => setArchiveTarget(null)}
+          onConfirm={async (target) => {
+            const ids = rowsInOrder.map((candidate) => String(candidate.id));
+            const index = ids.indexOf(String(target.id));
+            const next = ids[index + 1] ?? ids[index - 1];
+            await onArchiveRow(target);
+            setArchiveFocus({
+              removedRowId: String(target.id),
+              nextRowId: next,
+            });
+            setArchiveTarget(null);
+          }}
+        />
       ) : null}
     </section>
   );

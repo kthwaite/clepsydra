@@ -13,6 +13,9 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
+    // A jsdom render driven through React Aria and userEvent is slow enough
+    // that the 5s default failed on load, not on defects.
+    testTimeout: 15000,
     setupFiles: [path.resolve(__dirname, "src/test-setup.ts")],
   },
 });

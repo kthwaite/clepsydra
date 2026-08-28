@@ -325,9 +325,9 @@ describe("Board mutations", () => {
       true,
     );
     expect(queryClient.getQueryState(pageListKey)?.isInvalidated).toBe(true);
-    expect(queryClient.getQueryState(queryKeys.rubbish.all)?.isInvalidated).toBe(
-      true,
-    );
+    expect(
+      queryClient.getQueryState(queryKeys.rubbish.all)?.isInvalidated,
+    ).toBe(true);
   });
 
   it("toasts when archiving a task fails", async () => {

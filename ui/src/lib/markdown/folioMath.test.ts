@@ -49,10 +49,7 @@ function inlineNode(value: string, data?: Partial<FolioMathData>): InlineMath {
   } as InlineMath;
 }
 
-function blockNode(
-  value: string,
-  data?: Partial<FolioMathData>,
-): MdastMath {
+function blockNode(value: string, data?: Partial<FolioMathData>): MdastMath {
   return {
     type: "math",
     value,

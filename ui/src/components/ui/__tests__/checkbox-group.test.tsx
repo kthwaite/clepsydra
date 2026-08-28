@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { CheckboxGroup } from "#/components/ui/checkbox-group";
 import { Checkbox } from "#/components/ui/checkbox";
+import { CheckboxGroup } from "#/components/ui/checkbox-group";
 
 describe("CheckboxGroup", () => {
   it("updates the selected value array", async () => {
@@ -18,9 +18,7 @@ describe("CheckboxGroup", () => {
         <Checkbox value="security">Security</Checkbox>
       </CheckboxGroup>,
     );
-    expect(
-      screen.getByRole("group", { name: "Notifications" }),
-    ).toBeVisible();
+    expect(screen.getByRole("group", { name: "Notifications" })).toBeVisible();
     await user.click(screen.getByRole("checkbox", { name: "Product" }));
     expect(onChange).toHaveBeenCalledWith(["security", "product"]);
   });

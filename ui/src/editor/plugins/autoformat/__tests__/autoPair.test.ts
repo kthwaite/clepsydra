@@ -1,4 +1,4 @@
-import { createEditor, Editor, Transforms } from "slate";
+import { createEditor, type Editor, Transforms } from "slate";
 import { withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { tryAutoPair, tryOvertype } from "../autoPair";

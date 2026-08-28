@@ -150,6 +150,14 @@ pub struct ServerSettings {
     /// using the provided cert/key or auto-generated defaults.
     #[serde(default)]
     pub tls: TlsSettings,
+    /// Extra browser origins that reach this server through a reverse proxy or
+    /// tunnel, such as `https://clepsydra.localhost`. The archive snapshot viewer
+    /// emits a Content-Security-Policy for exactly one origin — the bind origin or
+    /// one of these — selected by the request's `Host` header. Entries must be bare
+    /// `scheme://host[:port]` origins: no wildcards, paths, queries, or credentials.
+    /// (Default: empty.)
+    #[serde(default)]
+    pub public_origins: Vec<String>,
 }
 
 impl Default for ServerSettings {
@@ -159,6 +167,7 @@ impl Default for ServerSettings {
             port: 16667,
             dev_mode: false,
             tls: TlsSettings::default(),
+            public_origins: Vec::new(),
         }
     }
 }
@@ -1205,6 +1214,10 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     let archive_view_config =
         api::archive::ArchiveViewConfig::from_server_settings(&settings.server)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    tracing::info!(
+        origins = %archive_view_config.allowed_origins().collect::<Vec<_>>().join(", "),
+        "archive snapshot view CSP origins (bind origin first)"
+    );
     // Installed before the startup sync, which can take minutes: without it a
     // Ctrl-C during that window would have nothing to talk to.
     let handle = ServerHandle::new();
@@ -2242,6 +2255,7 @@ mod settings_tests {
                     ..TlsSettings::default()
                 },
                 port,
+                public_origins: Vec::new(),
                 ..ServerSettings::default()
             },
             vault: VaultSettings::default(),

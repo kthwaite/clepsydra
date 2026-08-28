@@ -181,6 +181,7 @@ fn validate_create_embed_filter(
             filter: embed_filter,
             sort: None,
             limit: None,
+            group_by: None,
         },
     )
     .map_err(super::bases::invalid_embed_query)

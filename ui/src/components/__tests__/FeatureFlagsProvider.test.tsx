@@ -53,9 +53,7 @@ describe("FeatureFlagsProvider", () => {
 
     renderProvider();
 
-    expect(
-      await screen.findByText("academic:on feeds:off"),
-    ).toBeVisible();
+    expect(await screen.findByText("academic:on feeds:off")).toBeVisible();
   });
 
   it("fails closed when capability loading fails", async () => {
@@ -67,8 +65,6 @@ describe("FeatureFlagsProvider", () => {
 
     renderProvider();
 
-    expect(
-      await screen.findByText("academic:off feeds:off"),
-    ).toBeVisible();
+    expect(await screen.findByText("academic:off feeds:off")).toBeVisible();
   });
 });

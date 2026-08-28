@@ -1,4 +1,8 @@
 import type { BaseFilter, BaseViewEvaluateRequest, SortKey } from "#/api/bases";
+import {
+  type GroupOverride,
+  groupOverrideParam,
+} from "#/components/bases/view-overrides";
 import { asciiCaseFold } from "./local-validation";
 
 export interface BaseEmbedConfig {
@@ -7,6 +11,7 @@ export interface BaseEmbedConfig {
   filter?: BaseFilter;
   sort?: SortKey[];
   limit?: number;
+  groupBy?: GroupOverride;
 }
 
 export type NormalizedEmbedSort =
@@ -20,6 +25,8 @@ export interface NormalizedEmbedConfig {
   sort: NormalizedEmbedSort;
   /** The author's ceiling on the whole result; absent means the true total. */
   limit: number | undefined;
+  /** The wire sentinel: `""` flat, a field name, or absent (keep saved). */
+  groupBy: string | undefined;
 }
 
 function canonicalize(value: unknown): unknown {
@@ -55,6 +62,7 @@ export function normalizeEmbedConfiguration(
         ? { mode: "inherited" }
         : { mode: "explicit", value: canonicalSort(config.sort) },
     limit: config.limit,
+    groupBy: groupOverrideParam(config.groupBy),
   };
 }
 
@@ -82,6 +90,7 @@ export function queryIdentity(config: BaseEmbedConfig): string {
     // `null` is "no author cap", which scrolls to the true total — a
     // different result from a cap that happens to equal one window.
     limit: normalized.limit ?? null,
+    groupBy: normalized.groupBy ?? null,
   });
 }
 
@@ -95,6 +104,9 @@ export function baseViewEvaluationBody(
     ...(normalized.sort.mode === "inherited"
       ? {}
       : { sort: normalized.sort.value }),
+    ...(normalized.groupBy === undefined
+      ? {}
+      : { group_by: normalized.groupBy }),
     limit: window.limit,
     offset: window.offset,
   };

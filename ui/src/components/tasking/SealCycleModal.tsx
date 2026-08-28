@@ -65,7 +65,10 @@ export function SealCycleModal({ cycle, cycles, tasks }: SealCycleModalProps) {
     { v: "BACKLOG", label: "Move to Backlog" },
     ...(nextPlanned
       ? [
-          { v: nextPlanned.code as CarryChoice, label: `Move to ${nextPlanned.code}` },
+          {
+            v: nextPlanned.code as CarryChoice,
+            label: `Move to ${nextPlanned.code}`,
+          },
         ]
       : []),
     { v: "LEAVE", label: "Keep in this cycle" },

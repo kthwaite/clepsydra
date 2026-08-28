@@ -11,10 +11,7 @@ import type {
   BaseDiagnostic,
   RegisterFocusTarget,
 } from "./BaseDefinitionWorkspace";
-import type {
-  DraftPreviewField,
-  DraftProperty,
-} from "./definition-model";
+import type { DraftPreviewField, DraftProperty } from "./definition-model";
 import { moveItem } from "./definition-model";
 import { presentationFieldIdentity } from "./local-validation";
 import { ReorderHandle, useReorderable } from "./ordered-list";
@@ -120,8 +117,7 @@ export function PreviewPropertiesEditor({
       const preferred = actions?.querySelector<HTMLButtonElement>(
         `button[data-preview-move-direction="${focusRequest.direction}"]`,
       );
-      const fallbackDirection =
-        focusRequest.direction === "up" ? "down" : "up";
+      const fallbackDirection = focusRequest.direction === "up" ? "down" : "up";
       const fallback = actions?.querySelector<HTMLButtonElement>(
         `button[data-preview-move-direction="${fallbackDirection}"]`,
       );
@@ -228,9 +224,7 @@ export function PreviewPropertiesEditor({
                     setFocusRequest({ kind: "field", id: row.id });
                     onChange(
                       preview.map((current) =>
-                        current.id === row.id
-                          ? { ...current, field }
-                          : current,
+                        current.id === row.id ? { ...current, field } : current,
                       ),
                     );
                   }}
@@ -285,7 +279,8 @@ export function PreviewPropertiesEditor({
                     onChange(
                       preview.map((current) => {
                         if (current.id !== row.id) return current;
-                        if (value.length > 0) return { ...current, label: value };
+                        if (value.length > 0)
+                          return { ...current, label: value };
                         const { label: _label, ...withoutLabel } = current;
                         return withoutLabel;
                       }),
@@ -319,7 +314,8 @@ export function PreviewPropertiesEditor({
                     const remaining = preview.filter(
                       (current) => current.id !== row.id,
                     );
-                    const next = remaining[Math.min(index, remaining.length - 1)];
+                    const next =
+                      remaining[Math.min(index, remaining.length - 1)];
                     setFocusRequest(
                       next
                         ? { kind: "label", id: next.id }
@@ -347,7 +343,12 @@ export function PreviewPropertiesEditor({
         })}
       </ol>
 
-      <p role="status" aria-live="polite" aria-atomic="true" className="sr-only">
+      <p
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        className="sr-only"
+      >
         {announcement}
       </p>
       <div className="mt-4 grid items-end gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">

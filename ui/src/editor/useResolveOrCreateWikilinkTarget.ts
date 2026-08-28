@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { fetchClient } from "#/api/client";
 import { useCreatePage } from "#/api/pages";
-import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import { normalizeWikilinkIdentity } from "#/editor/wikilinkIdentity";
+import { useWikilinkResolution } from "#/editor/wikilinkResolution";
 import { generateShortId, intakePath } from "#/lib/intake";
 
 export interface ResolvedWikilinkTarget {
@@ -14,10 +14,7 @@ export interface ResolveOrCreateWikilinkTarget {
   resolveOrCreate(targetRaw: string): Promise<ResolvedWikilinkTarget>;
 }
 
-const inFlightRequests = new Map<
-  string,
-  Promise<ResolvedWikilinkTarget>
->();
+const inFlightRequests = new Map<string, Promise<ResolvedWikilinkTarget>>();
 
 export function useResolveOrCreateWikilinkTarget(): ResolveOrCreateWikilinkTarget {
   const { refetchAndLookup } = useWikilinkResolution();

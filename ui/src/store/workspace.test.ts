@@ -123,6 +123,22 @@ describe("useWorkspaceStore openTab wiring", () => {
       "notes/beta.md",
     ]);
   });
+
+  it("appends a new tab for target.mode 'new' even in replace mode", () => {
+    useWorkspaceStore.setState({
+      tabs: [],
+      activeTabId: null,
+      openHistory: [],
+      quires: {},
+    });
+    const store = useWorkspaceStore.getState();
+    store.setNavigationMode("replace");
+    store.openTab("page", "a.md", "A");
+    store.openTab("page", "b.md", "B", { mode: "new" });
+    const tabs = useWorkspaceStore.getState().tabs;
+    expect(tabs.map((tab) => tab.path)).toEqual(["a.md", "b.md"]);
+    expect(useWorkspaceStore.getState().activeTabId).toBe(tabs[1]?.id);
+  });
 });
 
 describe("useWorkspaceStore block focus requests", () => {

@@ -23,6 +23,26 @@ pub struct EmbedOverrides<'a> {
     pub filter: Option<&'a Filter>,
     pub sort: Option<&'a [SortKey]>,
     pub limit: Option<u32>,
+    pub group_by: Option<&'a str>,
+}
+
+/// A request-time replacement for a saved view's `group_by`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GroupOverride {
+    /// Evaluate the view flat even when it declares a `group_by`.
+    Flat,
+    /// Group by this field instead of the view's own key.
+    By(String),
+}
+
+/// Parse the wire form: absent keeps the view's grouping, the empty string
+/// asks for a flat result, anything else names the group key.
+pub fn group_override(raw: Option<&str>) -> Option<GroupOverride> {
+    match raw {
+        None => None,
+        Some("") => Some(GroupOverride::Flat),
+        Some(field) => Some(GroupOverride::By(field.to_owned())),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -37,13 +57,16 @@ pub struct EmbedValidationDiagnostic {
 /// Request filters narrow the Base membership and saved view filters in that
 /// order. A present sort replaces the saved sort, including an empty
 /// replacement that deliberately clears it. A caller that names no limit
-/// receives one window (`EMBED_WINDOW_ROWS`), never the whole result.
+/// receives one window (`EMBED_WINDOW_ROWS`), never the whole result. A
+/// present group override replaces the saved `group_by`; `Flat` evaluates
+/// the view ungrouped.
 pub fn composed_query_spec(
     base: &BaseDefinition,
     view: &ViewDefinition,
     filter: Option<Filter>,
     sort: Option<Vec<SortKey>>,
     limit: Option<u32>,
+    group_by: Option<GroupOverride>,
 ) -> QuerySpec {
     let mut filters = [base.file.filter.clone(), view.filter.clone(), filter]
         .into_iter()
@@ -63,7 +86,11 @@ pub fn composed_query_spec(
     QuerySpec {
         filter,
         sort: sort.unwrap_or_else(|| view.sort.clone()),
-        group_by: view.group_by.clone(),
+        group_by: match group_by {
+            Some(GroupOverride::Flat) => None,
+            Some(GroupOverride::By(field)) => Some(field),
+            None => view.group_by.clone(),
+        },
         aggregates: view.aggregates.clone(),
         columns: view.columns.clone(),
         limit,
@@ -93,6 +120,11 @@ pub fn validate_embed_overrides(
     if let Some(sort) = overrides.sort {
         validate_sort_semantics(base, sort, &mut diagnostics);
     }
+    if let Some(group_by) = overrides.group_by
+        && !group_by.is_empty()
+    {
+        validate_group_semantics(base, group_by, &mut diagnostics);
+    }
 
     if diagnostics.is_empty() {
         Ok(())
@@ -108,9 +140,15 @@ pub fn validate_embed_overrides(
 /// silently ignored.
 pub fn validate_embed_window(
     view: &ViewDefinition,
+    group_by: Option<&GroupOverride>,
     offset: u32,
 ) -> Result<(), Vec<EmbedValidationDiagnostic>> {
-    if offset > 0 && view.group_by.is_some() {
+    let grouped = match group_by {
+        Some(GroupOverride::Flat) => false,
+        Some(GroupOverride::By(_)) => true,
+        None => view.group_by.is_some(),
+    };
+    if offset > 0 && grouped {
         return Err(vec![diagnostic(
             Some("offset"),
             None,
@@ -448,6 +486,22 @@ fn validate_sort_semantics(
     }
 }
 
+fn validate_group_semantics(
+    base: &BaseDefinition,
+    group_by: &str,
+    diagnostics: &mut Vec<EmbedValidationDiagnostic>,
+) {
+    match resolve_declared_field(base, group_by) {
+        Err(message) => diagnostics.push(diagnostic(Some("group_by"), None, message)),
+        Ok(resolved) if !super::query::is_groupable(&resolved) => diagnostics.push(diagnostic(
+            Some("group_by"),
+            None,
+            format!("field `{group_by}` cannot group"),
+        )),
+        Ok(_) => {}
+    }
+}
+
 fn supports_operator(field: &ResolvedField, op: Op) -> bool {
     match field {
         ResolvedField::Sys(SysField::Tags | SysField::Aliases) => matches!(
@@ -530,7 +584,10 @@ fn diagnostic(
 
 #[cfg(test)]
 mod tests {
-    use super::{EMBED_WINDOW_ROWS, EmbedOverrides, composed_query_spec, validate_embed_overrides};
+    use super::{
+        EMBED_WINDOW_ROWS, EmbedOverrides, GroupOverride, composed_query_spec, group_override,
+        validate_embed_overrides, validate_embed_window,
+    };
     use crate::vault::base::{
         Aggregate, AggregateFn, BaseDefinition, BaseFile, Filter, Op, PropertyDefinition,
         PropertyType, SortDir, SortKey, ViewDefinition,
@@ -604,13 +661,113 @@ mod tests {
     }
 
     #[test]
+    fn composed_query_applies_group_override() {
+        let base = base();
+        let view = view(); // grouped by `status`
+
+        let inherited = composed_query_spec(&base, &view, None, None, None, None);
+        assert_eq!(inherited.group_by.as_deref(), Some("status"));
+
+        let flat = composed_query_spec(&base, &view, None, None, None, Some(GroupOverride::Flat));
+        assert_eq!(flat.group_by, None);
+
+        let by_text = composed_query_spec(
+            &base,
+            &view,
+            None,
+            None,
+            None,
+            Some(GroupOverride::By("text".into())),
+        );
+        assert_eq!(by_text.group_by.as_deref(), Some("text"));
+    }
+
+    #[test]
+    fn group_override_parses_the_empty_sentinel() {
+        assert_eq!(group_override(None), None);
+        assert_eq!(group_override(Some("")), Some(GroupOverride::Flat));
+        assert_eq!(
+            group_override(Some("status")),
+            Some(GroupOverride::By("status".into()))
+        );
+    }
+
+    fn overrides_with_group(group_by: Option<&str>) -> EmbedOverrides<'_> {
+        EmbedOverrides {
+            filter: None,
+            sort: None,
+            limit: None,
+            group_by,
+        }
+    }
+
+    #[test]
+    fn validate_group_override_accepts_groupable_fields_and_the_sentinel() {
+        let base = base();
+        for accepted in [
+            Some(""),
+            Some("status"),
+            Some("text"),
+            Some("due"),
+            Some("kind"),
+            None,
+        ] {
+            assert_eq!(
+                validate_embed_overrides(&base, overrides_with_group(accepted)),
+                Ok(()),
+                "{accepted:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn validate_group_override_rejects_ungroupable_and_unknown_fields() {
+        let base = base();
+        assert_one_error(
+            validate_embed_overrides(&base, overrides_with_group(Some("rating"))),
+            Some("group_by"),
+            None,
+            "field `rating` cannot group",
+        );
+        assert_one_error(
+            validate_embed_overrides(&base, overrides_with_group(Some("tags"))),
+            Some("group_by"),
+            None,
+            "field `tags` cannot group",
+        );
+        assert_one_error(
+            validate_embed_overrides(&base, overrides_with_group(Some("missing"))),
+            Some("group_by"),
+            None,
+            "unknown field `missing`",
+        );
+    }
+
+    #[test]
+    fn window_validation_uses_the_effective_grouping() {
+        let grouped = view();
+        let mut flat = view();
+        flat.group_by = None;
+
+        assert!(validate_embed_window(&grouped, None, 5).is_err());
+        assert_eq!(
+            validate_embed_window(&grouped, Some(&GroupOverride::Flat), 5),
+            Ok(())
+        );
+        assert!(
+            validate_embed_window(&flat, Some(&GroupOverride::By("status".into())), 5).is_err()
+        );
+        assert_eq!(validate_embed_window(&flat, None, 5), Ok(()));
+    }
+
+    #[test]
     fn composed_query_orders_filters_and_preserves_authoritative_view_shape() {
         let mut base = base();
         base.file.filter = Some(cmp("sys.kind", Op::Eq, json!("BOOK")));
         let view = view();
         let embed_filter = cmp("rating", Op::Gte, json!(4));
 
-        let spec = composed_query_spec(&base, &view, Some(embed_filter), None, None);
+        let spec = composed_query_spec(&base, &view, Some(embed_filter), None, None, None);
 
         let Filter::All(filters) = spec.filter.unwrap() else {
             panic!("three filters should compose as all");
@@ -641,12 +798,12 @@ mod tests {
         let base = base();
         let view = view();
 
-        let saved = composed_query_spec(&base, &view, None, None, None);
+        let saved = composed_query_spec(&base, &view, None, None, None, None);
         assert_eq!(saved.sort.len(), 1);
         assert_eq!(saved.sort[0].field, "rating");
         assert_eq!(saved.sort[0].dir, SortDir::Desc);
 
-        let cleared = composed_query_spec(&base, &view, None, Some(Vec::new()), None);
+        let cleared = composed_query_spec(&base, &view, None, Some(Vec::new()), None, None);
         assert!(cleared.sort.is_empty());
 
         let replaced = composed_query_spec(
@@ -657,6 +814,7 @@ mod tests {
                 field: "title".into(),
                 dir: SortDir::Asc,
             }]),
+            None,
             None,
         );
         assert_eq!(replaced.sort.len(), 1);
@@ -669,7 +827,7 @@ mod tests {
         let base = base();
         let view = view();
 
-        let spec = composed_query_spec(&base, &view, None, None, Some(17));
+        let spec = composed_query_spec(&base, &view, None, None, Some(17), None);
 
         assert_eq!(spec.limit, Some(17));
         assert_eq!(spec.group_row_limit, GroupRowLimit::Limit(17));
@@ -685,6 +843,7 @@ mod tests {
                 filter: Some(filter),
                 sort: None,
                 limit: None,
+                group_by: None,
             },
         )
     }
@@ -820,6 +979,7 @@ mod tests {
                     filter: None,
                     sort: Some(&duplicate_system),
                     limit: None,
+                    group_by: None,
                 },
             ),
             Some("title"),
@@ -844,6 +1004,7 @@ mod tests {
                     filter: None,
                     sort: Some(&duplicate_property),
                     limit: None,
+                    group_by: None,
                 },
             ),
             Some("rating"),
@@ -868,6 +1029,7 @@ mod tests {
                         filter: None,
                         sort: Some(&sort),
                         limit: None,
+                        group_by: None,
                     },
                 ),
                 Some(canonical),
@@ -1109,7 +1271,8 @@ mod tests {
                 EmbedOverrides {
                     filter: None,
                     sort: Some(&sort[..8]),
-                    limit: None
+                    limit: None,
+                    group_by: None,
                 },
             )
             .is_ok()
@@ -1121,6 +1284,7 @@ mod tests {
                     filter: None,
                     sort: Some(&sort),
                     limit: None,
+                    group_by: None,
                 },
             ),
             Some("sort"),
@@ -1167,7 +1331,8 @@ mod tests {
                     EmbedOverrides {
                         filter: None,
                         sort: None,
-                        limit: Some(limit)
+                        limit: Some(limit),
+                        group_by: None,
                     },
                 )
                 .is_ok()
@@ -1181,6 +1346,7 @@ mod tests {
                         filter: None,
                         sort: None,
                         limit: Some(limit),
+                        group_by: None,
                     },
                 ),
                 Some("limit"),

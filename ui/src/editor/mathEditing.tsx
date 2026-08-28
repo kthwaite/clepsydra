@@ -80,15 +80,12 @@ export function useMathEditingController(
     [],
   );
 
-  return useMemo(
-    () => {
-      // The revision makes the controller identity reflect session changes,
-      // while the callbacks themselves continue to read the live ref.
-      void sessionVersion;
-      return { begin, commit, close, isActive };
-    },
-    [begin, close, commit, isActive, sessionVersion],
-  );
+  return useMemo(() => {
+    // The revision makes the controller identity reflect session changes,
+    // while the callbacks themselves continue to read the live ref.
+    void sessionVersion;
+    return { begin, commit, close, isActive };
+  }, [begin, close, commit, isActive, sessionVersion]);
 }
 
 const MathEditingContext = createContext<MathEditingController | null>(null);

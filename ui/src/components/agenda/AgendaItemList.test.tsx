@@ -156,9 +156,7 @@ describe("AgendaItemList", () => {
       span_start: 60,
     };
 
-    render(
-      <AgendaItemList items={[todoFixture, todoB, todoC, taskFixture]} />,
-    );
+    render(<AgendaItemList items={[todoFixture, todoB, todoC, taskFixture]} />);
 
     for (const priority of ["A", "B", "C"]) {
       expect(screen.getByText(priority)).toBeInTheDocument();
@@ -182,18 +180,12 @@ describe("AgendaItemList", () => {
   it("opens the source Folio for both row kinds", async () => {
     render(<AgendaItemList items={[todoFixture, taskFixture]} />);
 
-    await userEvent.click(
-      screen.getByRole("button", { name: "Source Folio" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "Source Folio" }));
     await userEvent.click(
       screen.getByRole("button", { name: "tasks/agenda/source-row.md" }),
     );
 
-    expect(mocks.openTab).toHaveBeenNthCalledWith(
-      1,
-      "page",
-      "notes/source.md",
-    );
+    expect(mocks.openTab).toHaveBeenNthCalledWith(1, "page", "notes/source.md");
     expect(mocks.openTab).toHaveBeenNthCalledWith(
       2,
       "page",

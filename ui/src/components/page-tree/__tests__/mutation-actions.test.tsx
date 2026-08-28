@@ -182,7 +182,6 @@ describe("PageActionsMenu", () => {
     expect(events).toEqual(["save", "preview", "move"]);
   });
 
-
   it("discards a preview when the user returns to change the destination", async () => {
     const user = userEvent.setup();
     mocks.movePage.mockResolvedValue({ path: "archive/final.md" });
@@ -273,12 +272,7 @@ describe("FolderActionsMenu", () => {
     await user.click(screen.getByRole("button", { name: /manage folders/i }));
     const dialog = screen.getByRole("dialog");
 
-    await chooseOption(
-      user,
-      dialog,
-      "Folder to delete",
-      "notes/research",
-    );
+    await chooseOption(user, dialog, "Folder to delete", "notes/research");
     await user.click(
       within(dialog).getByRole("button", { name: /review folder deletion/i }),
     );

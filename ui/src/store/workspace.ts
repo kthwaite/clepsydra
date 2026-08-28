@@ -17,6 +17,8 @@ export type NavigationMode = "replace" | "new" | "smart";
 export type TabType = "page" | "graph";
 export interface OpenTabTarget {
   blockId?: string;
+  /** `"new"` appends a tab regardless of the navigation mode. */
+  mode?: "new";
 }
 
 type WorkspaceTransitionGuard = (proceed: () => void) => boolean;
@@ -321,7 +323,11 @@ export const useWorkspaceStore = create<WorkspaceState & WorkspaceActions>()(
             ? pushOpenHistory(state.openHistory, path, Date.now())
             : state.openHistory;
 
-        if (state.navigationMode === "replace" && state.activeTabId) {
+        if (
+          state.navigationMode === "replace" &&
+          state.activeTabId &&
+          target?.mode !== "new"
+        ) {
           if (
             activeTab &&
             (activeTab.type !== type || activeTab.path !== path)

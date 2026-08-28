@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { wikilinkTarget } from "../wikilink-target";
 import {
   CELL_INPUT_CLASS,
   type CellEditorProps,
@@ -6,16 +7,9 @@ import {
   useInitialFocus,
 } from "./types";
 
-/** Strip `[[Target|display]]` down to `Target` for editing. */
-function unwrap(value: CellValue): string {
-  if (typeof value !== "string") return "";
-  const inner = value.trim().replace(/^\[\[/, "").replace(/\]\]$/, "");
-  return inner.split("|")[0] ?? inner;
-}
-
 function targetsOf(value: CellValue): string[] {
   const raw = Array.isArray(value) ? value : value == null ? [] : [value];
-  return raw.map(unwrap).filter((t) => t !== "");
+  return raw.map(wikilinkTarget).filter((t) => t !== "");
 }
 
 /**

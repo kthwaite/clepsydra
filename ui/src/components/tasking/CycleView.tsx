@@ -352,7 +352,8 @@ export function CycleView({
           />
         </div>
         <span className="whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.14em] text-[var(--ink-3)]">
-          {stats.pct}% Completion · {stats.checkDone}/{stats.checkTot} Checklist items
+          {stats.pct}% Completion · {stats.checkDone}/{stats.checkTot} Checklist
+          items
         </span>
       </div>
 

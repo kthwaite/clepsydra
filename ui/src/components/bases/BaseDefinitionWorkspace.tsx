@@ -6,6 +6,7 @@ import { formatApiError, isApiConflict, isApiError } from "#/api/error";
 import { Button } from "#/components/ui/button";
 import { CopyButton } from "#/components/ui/CopyButton";
 import { Dialog } from "#/components/ui/dialog";
+import { BaseFilterEditor } from "./BaseFilterEditor";
 import { BasePreview } from "./BasePreview";
 import {
   DefinitionHeader,
@@ -19,9 +20,8 @@ import {
 } from "./definition-model";
 import { GeneralEditor } from "./GeneralEditor";
 import { asciiCaseFold, validateBaseDraftStructure } from "./local-validation";
-import { BaseFilterEditor } from "./BaseFilterEditor";
-import { PropertiesEditor } from "./PropertiesEditor";
 import { PreviewPropertiesEditor } from "./PreviewPropertiesEditor";
+import { PropertiesEditor } from "./PropertiesEditor";
 import { ValidationSummary } from "./ValidationSummary";
 import { ViewsEditor } from "./ViewsEditor";
 

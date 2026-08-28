@@ -7,12 +7,12 @@ import { useCallback, useMemo } from "react";
 import type { AgendaItem, AgendaResponse } from "#/api/tasks";
 import { useAgenda } from "#/api/tasks";
 import { AgendaItemList } from "#/components/agenda/AgendaItemList";
+import { FilterBar } from "#/components/filters/FilterBar";
 import {
   PRI_LABEL,
   PRI_ORDER,
   taskStatusLabel,
 } from "#/components/tasking/board-constants";
-import { FilterBar } from "#/components/filters/FilterBar";
 import { SectionHeading } from "#/components/ui/section-heading";
 import { Tab, TabList, TabPanel, Tabs } from "#/components/ui/tabs";
 import {
@@ -157,7 +157,10 @@ export function matchesAgendaFilter(
     ) {
       return false;
     }
-    if (project.length > 0 && (!item.project || !project.includes(item.project))) {
+    if (
+      project.length > 0 &&
+      (!item.project || !project.includes(item.project))
+    ) {
       return false;
     }
     if (blocked.length > 0 && !item.hold?.trim()) return false;
@@ -374,7 +377,9 @@ function AgendaTabs({
               <div className="space-y-6">
                 {filtered.upcoming.map((day) => (
                   <section key={day.date}>
-                    <SectionHeading>{formatAgendaDate(day.date)}</SectionHeading>
+                    <SectionHeading>
+                      {formatAgendaDate(day.date)}
+                    </SectionHeading>
                     <AgendaItemList items={day.items} />
                   </section>
                 ))}

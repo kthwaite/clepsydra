@@ -84,9 +84,7 @@ describe("Menu", () => {
       target: screen.getByRole("button", { name: "Target" }),
       keys: "[MouseRight]",
     });
-    expect(
-      await screen.findByRole("menu", { name: "Target" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("menu", { name: "Target" })).toBeVisible();
 
     await user.click(screen.getByRole("menuitem", { name: "Open" }));
     expect(onAction.mock.calls[0]?.[0]).toBe("open");
@@ -240,9 +238,7 @@ describe("Menu", () => {
     await waitFor(() => expect(more).toHaveFocus());
 
     await user.keyboard("{ArrowRight}");
-    expect(
-      await screen.findByRole("menu", { name: "More" }),
-    ).toBeVisible();
+    expect(await screen.findByRole("menu", { name: "More" })).toBeVisible();
 
     await user.keyboard("{Enter}");
     expect(onAction.mock.calls[0]?.[0]).toBe("duplicate");
@@ -266,10 +262,7 @@ describe("Menu", () => {
           </MenuSection>
           <MenuSeparator />
           <MenuSection aria-label="Label actions">
-            <MenuItem
-              id="blue"
-              swatch="rgb(0, 0, 255)"
-            >
+            <MenuItem id="blue" swatch="rgb(0, 0, 255)">
               Blue label
             </MenuItem>
           </MenuSection>

@@ -29,8 +29,8 @@ use crate::vault::base::{
 use crate::vault::base_document::ViewOrigin;
 use crate::vault::base_document::{self, BaseDocumentError, StoredBase};
 use crate::vault::base_embed::{
-    EmbedOverrides, EmbedValidationDiagnostic, composed_query_spec, validate_embed_overrides,
-    validate_embed_window,
+    EmbedOverrides, EmbedValidationDiagnostic, GroupOverride, composed_query_spec, group_override,
+    validate_embed_overrides, validate_embed_window,
 };
 use crate::vault::base_member::{
     BaseMemberCapability, BaseMemberDiagnostic, BaseMemberScope, composed_member_capability,
@@ -190,6 +190,11 @@ pub struct ViewParams {
     pub sort: Option<String>,
     /// Direction for the `sort` override: `asc` (default) or `desc`.
     pub dir: Option<String>,
+    /// A JSON-encoded filter AND-ed after the base and view filters.
+    pub filter: Option<String>,
+    /// Replace the view's `group_by` for this request; the empty string
+    /// evaluates the view flat.
+    pub group_by: Option<String>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
@@ -217,6 +222,9 @@ pub struct BaseViewEvaluateRequest {
     /// Rows to skip before the window. Flat views only.
     #[schema(minimum = 0)]
     pub offset: Option<u32>,
+    /// Replace the view's `group_by` for this request; the empty string
+    /// evaluates the view flat. Absent keeps the saved grouping.
+    pub group_by: Option<String>,
 }
 
 #[derive(Debug, Serialize, ToSchema)]
@@ -254,11 +262,13 @@ where
             filter: request.filter.as_ref(),
             sort: request.sort.as_deref(),
             limit: request.limit,
+            group_by: request.group_by.as_deref(),
         },
     )
     .map_err(invalid_embed_query)?;
+    let group_by = group_override(request.group_by.as_deref());
     let offset = request.offset.unwrap_or(0);
-    validate_embed_window(&view, offset).map_err(invalid_embed_query)?;
+    validate_embed_window(&view, group_by.as_ref(), offset).map_err(invalid_embed_query)?;
 
     let member_creation =
         composed_member_capability(&stored.definition, &view, request.filter.as_ref(), today);
@@ -268,6 +278,7 @@ where
         request.filter,
         request.sort,
         request.limit,
+        group_by,
     );
     spec.offset = offset;
 
@@ -307,6 +318,8 @@ where
     })
 }
 
+/// For the `POST .../evaluate` embed endpoint, whose wire field is literally
+/// named `embed_filter`.
 pub(super) fn invalid_embed_query(diagnostics: Vec<EmbedValidationDiagnostic>) -> ApiError {
     ApiError::invalid_embed_query(
         diagnostics
@@ -316,11 +329,38 @@ pub(super) fn invalid_embed_query(diagnostics: Vec<EmbedValidationDiagnostic>) -
     )
 }
 
+/// For the `GET .../views/{view}` standalone endpoint, whose query parameter
+/// is literally named `filter` — the same name `validate_embed_overrides`
+/// already seeds `filter_path` with, so it must not be remapped.
+pub(super) fn invalid_view_query(diagnostics: Vec<EmbedValidationDiagnostic>) -> ApiError {
+    ApiError::invalid_embed_query(
+        diagnostics
+            .into_iter()
+            .map(|diagnostic| public_diagnostic(diagnostic, None))
+            .collect(),
+    )
+}
+
 fn public_embed_diagnostic(diagnostic: EmbedValidationDiagnostic) -> BaseMemberDiagnostic {
-    let filter_path = diagnostic.filter_path.map(|path| {
-        path.strip_prefix("filter")
-            .map_or(path.clone(), |suffix| format!("embed_filter{suffix}"))
-    });
+    public_diagnostic(diagnostic, Some("embed_filter"))
+}
+
+/// Build the public diagnostic shape, optionally remapping a `filter…` path
+/// prefix to `remapped_filter_prefix…` (the embed endpoint's own field name).
+/// `None` leaves `filter_path` exactly as `validate_embed_overrides` produced
+/// it, which is already correct for a caller whose own parameter is `filter`.
+fn public_diagnostic(
+    diagnostic: EmbedValidationDiagnostic,
+    remapped_filter_prefix: Option<&str>,
+) -> BaseMemberDiagnostic {
+    let filter_path = diagnostic
+        .filter_path
+        .map(|path| match remapped_filter_prefix {
+            Some(replacement) => path
+                .strip_prefix("filter")
+                .map_or(path.clone(), |suffix| format!("{replacement}{suffix}")),
+            None => path,
+        });
     BaseMemberDiagnostic {
         scope: BaseMemberScope::Embed,
         field: diagnostic.field,
@@ -352,6 +392,7 @@ fn internal_evaluation_error(error: impl std::fmt::Debug + std::fmt::Display) ->
     ApiError::internal("base evaluation failed")
 }
 
+#[allow(clippy::too_many_arguments)]
 fn query_spec(
     base: &BaseDefinition,
     view: Option<&ViewDefinition>,
@@ -359,6 +400,8 @@ fn query_spec(
     offset: u32,
     sort_override: Option<&str>,
     sort_dir: Option<&str>,
+    filter: Option<Filter>,
+    group_by: Option<GroupOverride>,
 ) -> QuerySpec {
     let sort = sort_override.map(|field| {
         vec![SortKey {
@@ -372,19 +415,31 @@ fn query_spec(
 
     match view {
         Some(view) => {
-            let mut spec = composed_query_spec(base, view, None, sort, limit);
+            let mut spec = composed_query_spec(base, view, filter, sort, limit, group_by);
             spec.offset = offset;
             spec.group_row_limit = GroupRowLimit::Default;
             spec
         }
-        None => QuerySpec {
-            filter: base.file.filter.clone(),
-            sort: sort.unwrap_or_default(),
-            limit,
-            offset,
-            group_row_limit: GroupRowLimit::Default,
-            ..Default::default()
-        },
+        None => {
+            let filter = match (base.file.filter.clone(), filter) {
+                (Some(base_filter), Some(filter)) => Some(Filter::All(vec![base_filter, filter])),
+                (Some(filter), None) | (None, Some(filter)) => Some(filter),
+                (None, None) => None,
+            };
+            QuerySpec {
+                filter,
+                sort: sort.unwrap_or_default(),
+                group_by: match group_by {
+                    Some(GroupOverride::Flat) => None,
+                    Some(GroupOverride::By(field)) => Some(field),
+                    None => None,
+                },
+                limit,
+                offset,
+                group_row_limit: GroupRowLimit::Default,
+                ..Default::default()
+            }
+        }
     }
 }
 
@@ -407,7 +462,7 @@ pub async fn list_bases(State(state): State<Arc<AppState>>) -> Json<BaseListResp
             count_bases
                 .iter()
                 .map(|base| {
-                    let spec = query_spec(base, None, Some(0), 0, None, None);
+                    let spec = query_spec(base, None, Some(0), 0, None, None, None, None);
                     match evaluate(
                         index.connection(),
                         &spec,
@@ -630,6 +685,8 @@ pub async fn preview_base(
         request.offset.unwrap_or(0),
         None,
         None,
+        None,
+        None,
     );
     let today = state.clock.now().date_naive();
     let evaluation = state
@@ -671,10 +728,13 @@ pub async fn preview_base(
         ("limit" = Option<u32>, Query, description = "Flat row limit"),
         ("offset" = Option<u32>, Query, description = "Flat row offset"),
         ("sort" = Option<String>, Query, description = "Sort-field override"),
-        ("dir" = Option<String>, Query, description = "asc | desc for the sort override")
+        ("dir" = Option<String>, Query, description = "asc | desc for the sort override"),
+        ("filter" = Option<String>, Query, description = "JSON-encoded filter AND-ed after the base and view filters"),
+        ("group_by" = Option<String>, Query, description = "Group-by override; empty string evaluates the view flat")
     ),
     responses(
         (status = 200, body = QueryOutput),
+        (status = 400, body = ApiError),
         (status = 404, description = "Unknown base or view")
     )
 )]
@@ -692,6 +752,32 @@ pub async fn evaluate_view(
         ApiError::not_found(format!("base `{slug}` has no view named `{view_name}`"))
     })?;
 
+    let filter = match params.filter.as_deref() {
+        None => None,
+        Some(raw) => Some(serde_json::from_str::<Filter>(raw).map_err(|_| {
+            invalid_view_query(vec![EmbedValidationDiagnostic {
+                field: Some("filter".to_owned()),
+                filter_path: None,
+                message: "filter is not valid JSON".to_owned(),
+            }])
+        })?),
+    };
+    validate_embed_overrides(
+        &base,
+        EmbedOverrides {
+            filter: filter.as_ref(),
+            sort: None,
+            limit: None,
+            group_by: params.group_by.as_deref(),
+        },
+    )
+    .map_err(invalid_view_query)?;
+    let group_by = group_override(params.group_by.as_deref());
+    // Grouped output has no single row sequence to offset into, so GET refuses
+    // the pairing the evaluate endpoint already refuses.
+    validate_embed_window(&view, group_by.as_ref(), params.offset.unwrap_or(0))
+        .map_err(invalid_view_query)?;
+
     let spec = query_spec(
         &base,
         Some(&view),
@@ -699,6 +785,8 @@ pub async fn evaluate_view(
         params.offset.unwrap_or(0),
         params.sort.as_deref(),
         params.dir.as_deref(),
+        filter,
+        group_by,
     );
 
     let today = state.clock.now().date_naive();
@@ -861,6 +949,7 @@ mod tests {
             sort: None,
             limit: Some(1),
             offset: None,
+            group_by: None,
         };
         let counted_loads = Arc::clone(&load_calls);
         let counted_evaluations = Arc::clone(&evaluation_calls);

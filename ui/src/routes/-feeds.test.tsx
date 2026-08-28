@@ -78,7 +78,6 @@ vi.mock("#/components/FeatureFlagsProvider", () => ({
   useFeatureFlags: () => routeMocks.featureFlags,
 }));
 
-
 vi.mock("#/hooks/useMobileLayout", () => ({
   useMobileLayout: () => routeMocks.mobile,
 }));

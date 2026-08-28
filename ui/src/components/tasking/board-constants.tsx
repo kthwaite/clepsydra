@@ -103,7 +103,6 @@ export function taskStatusLabel(status: string): string {
   return COL_LABEL[status] ?? status;
 }
 
-
 /** Resolves a persisted board status id to its fixed display label. */
 export type ColLabelFn = (id: string) => string;
 

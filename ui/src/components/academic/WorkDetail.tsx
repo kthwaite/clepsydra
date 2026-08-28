@@ -364,9 +364,7 @@ export function WorkDetail({ workId }: { workId: string }) {
           <Select
             label="Reading status"
             selectedKey={status}
-            onSelectionChange={(key) =>
-              setStatus(key as ReadingStatus | "")
-            }
+            onSelectionChange={(key) => setStatus(key as ReadingStatus | "")}
             className="w-full"
           >
             <SelectItem id="">Unspecified</SelectItem>
