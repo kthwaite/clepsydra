@@ -3618,6 +3618,57 @@ mod tests {
         );
     }
 
+    #[test]
+    #[serial_test::serial]
+    fn sync_check_reports_a_repo_without_the_marker_as_uninitialised() {
+        use crate::vault::gitsync::testing;
+        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("v");
+        crate::vault::init::init_vault(&root).unwrap();
+        testing::git(&root).init("main").unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+
+        let mut report = Report::default();
+        check_sync(&vault, &mut report);
+
+        let repo = sync_result(&report, "repo");
+        assert_eq!(repo.status, Status::Info, "{repo:#?}");
+        assert!(repo.detail.contains("clep sync init"), "{repo:#?}");
+        assert!(
+            !has_sync_check(&report, "worktree"),
+            "a git repository without the D3 marker is not initialised: {:#?}",
+            report.results
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn sync_check_warns_when_the_checked_out_branch_is_not_the_configured_one() {
+        use crate::vault::gitsync::testing;
+        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let repos = testing::TestRepos::new();
+        let vault = sync_initialised_vault(&repos.a);
+        testing::git(&repos.a)
+            .run(&["checkout", "-q", "-b", "scratch"])
+            .unwrap();
+
+        let mut report = Report::default();
+        check_sync(&vault, &mut report);
+
+        let branch = sync_result(&report, "branch");
+        assert_eq!(branch.status, Status::Warn, "{branch:#?}");
+        assert!(branch.detail.contains("scratch"), "{branch:#?}");
+        assert!(branch.detail.contains("main"), "{branch:#?}");
+        assert!(
+            branch
+                .hint
+                .as_deref()
+                .is_some_and(|hint| hint.contains("main")),
+            "{branch:#?}"
+        );
+    }
+
     fn archive_page_with_snapshot(hash: &str) -> String {
         format!(
             "+++\nid = \"01900000-0000-7000-8000-000000000009\"\ntitle = \"A\"\n\
