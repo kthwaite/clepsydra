@@ -6,6 +6,7 @@ import type { FilterField, FilterState } from "#/lib/filters/model";
 import { pad2 } from "#/lib/time";
 import { useBoardStore } from "#/store/board";
 import { HealthDot, healthColor, MODES } from "./board-constants";
+import type { ProjectScope } from "./board-projects";
 
 // ── mode glyphs ──────────────────────────────────────────────────────────────
 
@@ -128,7 +129,8 @@ function ModeGlyph({ gl }: { gl: string }) {
 // ── BoardHeader ──────────────────────────────────────────────────────────────
 
 interface BoardHeaderProps {
-  operations: BoardOperation[];
+  /** Project scopes (operations ∪ task slugs) — drives the header count. */
+  projects: ProjectScope[];
   cycles: BoardCycle[];
   /** Op-filtered tasks (already filtered by opFilter in TaskingScreen). */
   tasks: BoardTask[];
@@ -151,7 +153,7 @@ interface BoardHeaderProps {
 }
 
 export function BoardHeader({
-  operations,
+  projects,
   cycles,
   tasks,
   activeOp,
@@ -184,9 +186,8 @@ export function BoardHeader({
         {/* Title block */}
         <div className="flex flex-col gap-[1px]">
           <span className="cl-mono text-[var(--fs-xs)] uppercase tracking-[0.22em] text-[var(--ink-mute)]">
-            {operations.length}{" "}
-            {operations.length === 1 ? "project" : "projects"} · {cycles.length}{" "}
-            {cycles.length === 1 ? "cycle" : "cycles"}
+            {projects.length} {projects.length === 1 ? "project" : "projects"} ·{" "}
+            {cycles.length} {cycles.length === 1 ? "cycle" : "cycles"}
           </span>
           <h1 className="font-sans text-[22px] font-black uppercase leading-none tracking-[0.04em] text-[var(--ink)]">
             Task Board

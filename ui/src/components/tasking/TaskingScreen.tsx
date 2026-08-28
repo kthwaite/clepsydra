@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from "react";
-import type { BoardOperation, BoardTask } from "#/api/board";
+import type { BoardTask } from "#/api/board";
 import { useBoard } from "#/api/board";
 import { useCycleBurndown, useTaskCompletionHistory } from "#/api/tasks";
 import {
@@ -18,11 +18,11 @@ import {
   COL_LABEL,
   COL_SUBLABEL,
   type ColLabelFn,
-  opKey,
   PRI_LABEL,
   PRI_ORDER,
   taskStatusLabel,
 } from "./board-constants";
+import { deriveProjectScopes, type ProjectScope } from "./board-projects";
 import { CycleView, resolveCycle } from "./CycleView";
 import { KanbanView } from "./KanbanView";
 import { NewCycleModal } from "./NewCycleModal";
@@ -38,31 +38,19 @@ import { TimelineView } from "./TimelineView";
 /**
  * Filter tasks by the active opFilter value:
  *  - "ALL"     → return all tasks
- *  - "UNFILED" → tasks whose project is null/empty OR doesn't match any
- *                operation's `project` field
+ *  - "UNFILED" → tasks whose project is null/empty
  *  - <key>     → tasks whose project === opFilter
  *
- * Note: opFilter stores the canonical op key (`opKey(op)` — project slug,
- * falling back to op.code when the op has no slug), except for the sentinels
- * "ALL" and "UNFILED". An op without a project slug correctly yields zero
- * tasks here, since no task carries its code as a project.
+ * Note: opFilter stores a ProjectScope key (the project slug, falling back to
+ * op.code when an operation has no slug), except for the sentinels "ALL" and
+ * "UNFILED". A slug is a project whether or not a PROJECT page backs it, so
+ * UNFILED never absorbs tasks that carry one. An op without a project slug
+ * correctly yields zero tasks here, since no task carries its code as a
+ * project.
  */
-export function filterTasks(
-  tasks: BoardTask[],
-  operations: BoardOperation[],
-  opFilter: string,
-): BoardTask[] {
+export function filterTasks(tasks: BoardTask[], opFilter: string): BoardTask[] {
   if (opFilter === "ALL") return tasks;
-
-  const knownProjects = new Set(
-    operations.map((op) => op.project).filter(Boolean),
-  );
-
-  if (opFilter === "UNFILED") {
-    return tasks.filter((t) => !t.project || !knownProjects.has(t.project));
-  }
-
-  // Specific operation — filter by project slug
+  if (opFilter === "UNFILED") return tasks.filter((t) => !t.project);
   return tasks.filter((t) => t.project === opFilter);
 }
 
@@ -106,20 +94,11 @@ export function TaskingScreen({
   const setEditTaskId = useBoardStore((s) => s.setEditTaskId);
   const setOpFilter = useBoardStore((s) => s.setOpFilter);
 
-  // Self-heal a stale persisted opFilter: if the filter names an op that no
-  // longer exists (renamed/deleted since last session), the board would render
-  // silently empty — reset to ALL once board data is available.
-  useEffect(() => {
-    if (!data || opFilter === "ALL" || opFilter === "UNFILED") return;
-    if (!data.operations.some((op) => opKey(op) === opFilter)) {
-      setOpFilter("ALL");
-    }
-  }, [data, opFilter, setOpFilter]);
-
   const {
-    operations,
+    projects,
     cycles,
     tasks,
+    activeScope,
     activeOp,
     visibleTasks,
     opFilteredCount,
@@ -127,9 +106,10 @@ export function TaskingScreen({
   } = useMemo(() => {
     if (!data) {
       return {
-        operations: [],
+        projects: [] as ProjectScope[],
         cycles: [],
         tasks: [],
+        activeScope: null,
         activeOp: null,
         visibleTasks: [],
         opFilteredCount: 0,
@@ -137,7 +117,8 @@ export function TaskingScreen({
       };
     }
 
-    const opFiltered = filterTasks(data.tasks, data.operations, opFilter);
+    const scopes = deriveProjectScopes(data.operations, data.tasks);
+    const opFiltered = filterTasks(data.tasks, opFilter);
     const filtered = applyClientFilter(
       opFiltered,
       filterState,
@@ -145,14 +126,16 @@ export function TaskingScreen({
     );
     const active =
       opFilter !== "ALL" && opFilter !== "UNFILED"
-        ? (data.operations.find((op) => opKey(op) === opFilter) ?? null)
+        ? (scopes.find((p) => p.key === opFilter) ?? null)
         : null;
 
     return {
-      operations: data.operations,
+      projects: scopes,
       cycles: data.cycles,
       tasks: data.tasks,
-      activeOp: active,
+      activeScope: active,
+      // The backing PROJECT page, when one exists — drives the op-meta strip.
+      activeOp: active?.op ?? null,
       visibleTasks: filtered,
       opFilteredCount: opFiltered.length,
       editTask: editTaskId
@@ -161,24 +144,27 @@ export function TaskingScreen({
     };
   }, [data, opFilter, filterState, editTaskId]);
 
-  // Options are data-derived: unions of operation/task projects, task tags,
-  // and the fixed priority/status vocabularies.
+  // Self-heal a stale persisted opFilter: if the filter names a scope that no
+  // longer exists (project renamed/deleted since last session), the board
+  // would render silently empty — reset to ALL once board data is available.
+  // A slug that only tasks declare is a live scope, so it is kept.
+  useEffect(() => {
+    if (!data || opFilter === "ALL" || opFilter === "UNFILED") return;
+    if (!projects.some((p) => p.key === opFilter)) {
+      setOpFilter("ALL");
+    }
+  }, [data, projects, opFilter, setOpFilter]);
+
+  // Options are data-derived: project scope slugs (operations ∪ task
+  // projects), task tags, and the fixed priority/status vocabularies.
   const filterFields: FilterField[] = useMemo(
     () => [
       {
         id: "project",
         kind: "multi",
         label: "Project",
-        options: [
-          ...new Set([
-            ...operations
-              .map((o) => o.project)
-              .filter((p): p is string => Boolean(p)),
-            ...tasks
-              .map((t) => t.project)
-              .filter((p): p is string => Boolean(p)),
-          ]),
-        ]
+        options: projects
+          .flatMap((p) => (p.slug ? [p.slug] : []))
           .sort()
           .map((value) => ({ value })),
       },
@@ -210,10 +196,10 @@ export function TaskingScreen({
       },
       { id: "hold", kind: "flag", label: "Blocked", options: [] },
     ],
-    [operations, tasks],
+    [projects, tasks],
   );
 
-  const telemetryProject = activeOp?.project ?? undefined;
+  const telemetryProject = activeScope?.slug ?? undefined;
   const telemetryUnfiled = opFilter === "UNFILED";
   const telemetryApplicable =
     opFilter === "ALL" || telemetryUnfiled || Boolean(telemetryProject);
@@ -272,11 +258,7 @@ export function TaskingScreen({
     <>
       {/* Creation modal — rendered at root level so it's not clipped */}
       {taskModal !== null && (
-        <NewTaskModal
-          operations={operations}
-          cycles={cycles}
-          colLabel={colLabel}
-        />
+        <NewTaskModal projects={projects} cycles={cycles} colLabel={colLabel} />
       )}
 
       {/* Cycle lifecycle modals */}
@@ -292,16 +274,16 @@ export function TaskingScreen({
         {/* Left scope rail — renders popout button when collapsed */}
         {railOpen ? (
           <div className="w-[232px] flex-none">
-            <ScopeRail operations={operations} cycles={cycles} tasks={tasks} />
+            <ScopeRail projects={projects} cycles={cycles} tasks={tasks} />
           </div>
         ) : (
-          <ScopeRail operations={operations} cycles={cycles} tasks={tasks} />
+          <ScopeRail projects={projects} cycles={cycles} tasks={tasks} />
         )}
 
         {/* Main — always flex-1, always full width when rail is collapsed */}
         <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           <BoardHeader
-            operations={operations}
+            projects={projects}
             cycles={cycles}
             tasks={visibleTasks}
             activeOp={activeOp}
@@ -328,7 +310,7 @@ export function TaskingScreen({
                 tasks={visibleTasks}
                 cycles={cycles}
                 showOp={opFilter === "ALL"}
-                activeProject={activeOp?.project ?? undefined}
+                activeProject={activeScope?.slug ?? undefined}
                 onOpenDossier={onOpenDossier}
                 colLabel={colLabel}
               />
@@ -340,7 +322,7 @@ export function TaskingScreen({
               <CycleView
                 cycle={resolveCycle(cycleSel, cycles)}
                 tasks={visibleTasks}
-                activeProject={activeOp?.project ?? undefined}
+                activeProject={activeScope?.slug ?? undefined}
                 burndown={
                   telemetryApplicable
                     ? cycleBurndown.data?.points.map((point) => point.remaining)
@@ -355,11 +337,11 @@ export function TaskingScreen({
             {mode === "timeline" && (
               <TimelineView
                 tasks={visibleTasks}
-                operations={
+                projects={
                   opFilter === "ALL" || opFilter === "UNFILED"
-                    ? operations
-                    : activeOp
-                      ? [activeOp]
+                    ? projects
+                    : activeScope
+                      ? [activeScope]
                       : []
                 }
                 cycles={cycles}
@@ -374,7 +356,7 @@ export function TaskingScreen({
               <TaskEditPanel
                 key={editTask.id}
                 task={editTask}
-                operations={operations}
+                projects={projects}
                 cycles={cycles}
                 colLabel={colLabel}
                 onClose={() => setEditTaskId(null)}

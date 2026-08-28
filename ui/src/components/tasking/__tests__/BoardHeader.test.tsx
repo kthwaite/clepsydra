@@ -10,7 +10,7 @@ import {
 } from "#/lib/filters/model";
 import { useBoardStore } from "#/store/board";
 import { BoardHeader } from "../BoardHeader";
-import { BOARD_FIXTURE } from "./fixtures";
+import { BOARD_FIXTURE, PROJECT_SCOPES } from "./fixtures";
 
 const { operations, cycles, tasks } = BOARD_FIXTURE;
 
@@ -43,7 +43,7 @@ function renderHeader(
   return render(
     <QueryClientProvider client={qc}>
       <BoardHeader
-        operations={operations}
+        projects={PROJECT_SCOPES}
         cycles={cycles}
         tasks={tasks}
         activeOp={null}
@@ -88,7 +88,7 @@ describe("BoardHeader", () => {
 
   it("renders singular project and cycle counts", () => {
     renderHeader({
-      operations: operations.slice(0, 1),
+      projects: PROJECT_SCOPES.slice(0, 1),
       cycles: cycles.slice(0, 1),
     });
     expect(screen.getByText("1 project · 1 cycle")).toBeInTheDocument();
@@ -219,7 +219,7 @@ describe("BoardHeader", () => {
 
   it("op-meta HEALTH value uses muted color for unknown health status", () => {
     const noneOp = { ...operations[0], health: "NONE" as const };
-    renderHeader({ operations: [noneOp], activeOp: noneOp });
+    renderHeader({ activeOp: noneOp });
     const healthEl = screen.getByText("NONE") as HTMLElement;
     expect(healthEl.tagName).toBe("B");
     expect(healthEl.style.color).toBe("var(--ink-mute)");

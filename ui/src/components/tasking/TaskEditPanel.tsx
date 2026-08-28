@@ -35,22 +35,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FocusScope } from "react-aria";
-import type {
-  BoardCycle,
-  BoardOperation,
-  BoardTask,
-  PatchTaskRequest,
-} from "#/api/board";
+import type { BoardCycle, BoardTask, PatchTaskRequest } from "#/api/board";
 import { useArchiveTask, usePatchTask } from "#/api/board";
 import { Select, SelectItem } from "#/components/ui/select";
 import { useBoardStore } from "#/store/board";
-import {
-  type ColLabelFn,
-  cycleStateLabel,
-  opKey,
-  priColor,
-} from "./board-constants";
+import { type ColLabelFn, cycleStateLabel, priColor } from "./board-constants";
 import { ChecklistBar } from "./board-presentation";
+import type { ProjectScope } from "./board-projects";
 import { checklistProgress } from "./board-stats";
 import {
   DispositionRow,
@@ -154,7 +145,8 @@ function useDebounced(
 
 export interface TaskEditPanelProps {
   task: BoardTask;
-  operations: BoardOperation[];
+  /** Project scopes (operations ∪ task slugs) — see deriveProjectScopes. */
+  projects: ProjectScope[];
   cycles: BoardCycle[];
   colLabel: ColLabelFn;
   onClose: () => void;
@@ -164,7 +156,7 @@ export interface TaskEditPanelProps {
 
 export function TaskEditPanel({
   task,
-  operations,
+  projects,
   cycles,
   colLabel,
   onClose,
@@ -405,11 +397,11 @@ export function TaskEditPanel({
 
   const { bar: barColor, text: priTextColor } = priColor(task.priority);
 
-  // A board:true PROJECT page with no project: frontmatter has no valid
-  // filter/assignment key (filterTasks compares t.project === opFilter, and
-  // a slug-less op's key can never match a task's project) — exclude it so
-  // a task can't be reassigned to it.
-  const assignableOps = operations.filter((op) => Boolean(op.project));
+  // A PROJECT page with no project: frontmatter has no valid assignment key
+  // (a task's project is a slug, and a slug-less op has none) — exclude it
+  // so a task can't be reassigned to it. Synthesized scopes (slug with no
+  // page) are assignable: the slug is the project.
+  const assignableScopes = projects.filter((p) => p.slug !== null);
 
   // Closed cycles are not assignable except to tasks already in them
   // (so the current value remains representable).
@@ -417,10 +409,9 @@ export function TaskEditPanel({
     (c) => c.state !== "CLOSED" || c.code === task.cycle,
   );
 
-  // Active operation code for header display
+  // Active project code for header display
   const opCode = task.project
-    ? (operations.find((op) => op.project === task.project)?.code ??
-      task.project)
+    ? (projects.find((p) => p.slug === task.project)?.code ?? task.project)
     : "No project";
 
   const confirmArchive = async () => {
@@ -570,13 +561,13 @@ export function TaskEditPanel({
                   data-testid="edit-panel-operation"
                 >
                   <SelectItem id="">No project</SelectItem>
-                  {assignableOps.map((op) => (
+                  {assignableScopes.map((scope) => (
                     <SelectItem
-                      key={op.id}
-                      id={opKey(op)}
-                      textValue={op.code}
+                      key={scope.key}
+                      id={scope.key}
+                      textValue={scope.code}
                     >
-                      {op.code}
+                      {scope.code}
                     </SelectItem>
                   ))}
                 </Select>

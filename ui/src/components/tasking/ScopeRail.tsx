@@ -1,34 +1,22 @@
 import { useShallow } from "zustand/react/shallow";
-import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
+import type { BoardCycle, BoardTask } from "#/api/board";
 import { cn } from "#/lib/cn";
 import { useBoardStore } from "#/store/board";
-import {
-  CycleStatePip,
-  fmtCycleWindow,
-  HealthDot,
-  opKey,
-} from "./board-constants";
+import { CycleStatePip, fmtCycleWindow, HealthDot } from "./board-constants";
+import type { ProjectScope } from "./board-projects";
 
 // ── UNFILED detection ────────────────────────────────────────────────────────
 
-/**
- * Returns true when ≥1 task has project null/empty OR a project code that
- * doesn't match any operation's `project` field.
- */
-export function hasUnfiledTasks(
-  tasks: BoardTask[],
-  operations: BoardOperation[],
-): boolean {
-  const knownProjects = new Set(
-    operations.map((op) => op.project).filter(Boolean),
-  );
-  return tasks.some((t) => !t.project || !knownProjects.has(t.project));
+/** Returns true when ≥1 task has a null/empty project. */
+export function hasUnfiledTasks(tasks: BoardTask[]): boolean {
+  return tasks.some((t) => !t.project);
 }
 
 // ── ScopeRail ────────────────────────────────────────────────────────────────
 
 interface ScopeRailProps {
-  operations: BoardOperation[];
+  /** Operations ∪ task slugs — see deriveProjectScopes. */
+  projects: ProjectScope[];
   cycles: BoardCycle[];
   tasks: BoardTask[];
 }
@@ -83,7 +71,7 @@ function CycleNavRow({
   );
 }
 
-export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
+export function ScopeRail({ projects, cycles, tasks }: ScopeRailProps) {
   // Field selectors (useShallow) — the rail must not re-render on ephemeral
   // modal/edit state changes elsewhere in the store.
   const {
@@ -113,27 +101,16 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
   );
 
   // Derive task counts
-  const knownProjects = new Set(
-    operations.map((op) => op.project).filter(Boolean),
-  );
-
-  const unfiledCount = tasks.filter(
-    (t) => !t.project || !knownProjects.has(t.project),
-  ).length;
-
-  const showUnfiled = hasUnfiledTasks(tasks, operations);
+  const unfiledCount = tasks.filter((t) => !t.project).length;
+  const showUnfiled = hasUnfiledTasks(tasks);
   const backlogCount = tasks.filter((task) => !task.cycle).length;
 
   function handleNewTasking() {
-    if (opFilter === "ALL" || opFilter === "UNFILED") {
-      openTaskModal({});
-      return;
-    }
     // Only preset a real project slug — an op code is not a valid project
-    // label for task creation, so an op without a slug presets nothing.
-    const activeOp = operations.find((op) => opKey(op) === opFilter);
-    const project = activeOp ? (activeOp.project ?? undefined) : opFilter;
-    openTaskModal(project ? { project } : {});
+    // label for task creation, so a slug-less op (and the ALL/UNFILED
+    // sentinels) presets nothing.
+    const active = projects.find((p) => p.key === opFilter);
+    openTaskModal(active?.slug ? { project: active.slug } : {});
   }
 
   // Collapsed popout — absolute so it floats over the board area
@@ -184,7 +161,7 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
             Projects
           </span>
           <span className="cl-mono text-[var(--fs-xs)] tabular-nums tracking-[0.1em] text-[var(--ink-mute)]">
-            {operations.length}
+            {projects.length}
           </span>
         </div>
 
@@ -215,18 +192,17 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
           </span>
         </button>
 
-        {/* Per-operation rows */}
-        {operations.map((op) => {
-          // Count by opKey, not op.project — a slug-less op's own project
-          // is null, and null===null would otherwise match every unfiled
-          // task (the same key filterTasks/opFilter use, so the badge
-          // always matches what clicking the row reveals).
-          const key = opKey(op);
-          const count = tasks.filter((t) => t.project === key).length;
-          const active = opFilter === key;
+        {/* Per-project rows */}
+        {projects.map((scope) => {
+          // Count by scope key, not slug — a slug-less op's slug is null,
+          // and null===null would otherwise match every unfiled task (the
+          // same key filterTasks/opFilter use, so the badge always matches
+          // what clicking the row reveals).
+          const count = tasks.filter((t) => t.project === scope.key).length;
+          const active = opFilter === scope.key;
           return (
             <button
-              key={op.id}
+              key={scope.key}
               type="button"
               className={cn(
                 "cl-mono flex w-full min-w-0 cursor-pointer items-center gap-2 border-l-2 px-[var(--pad)] py-[5px] text-left transition-colors hover:bg-[var(--paper-edge)]",
@@ -234,17 +210,22 @@ export function ScopeRail({ operations, cycles, tasks }: ScopeRailProps) {
                   ? "border-l-[var(--hot)] bg-[var(--paper)]"
                   : "border-l-transparent",
               )}
-              onClick={() => setOpFilter(opKey(op))}
+              onClick={() => setOpFilter(scope.key)}
             >
-              <HealthDot health={op.health} />
+              {scope.health !== null ? (
+                <HealthDot health={scope.health} />
+              ) : (
+                // Synthesized from task slugs — no page, so no health claim.
+                <span className="inline-block h-[7px] w-[7px] flex-shrink-0 border border-[var(--ink-mute)]" />
+              )}
               <span className="text-[var(--fs-s)] tracking-[0.08em] text-[var(--ink)]">
-                {op.code}
+                {scope.code}
               </span>
               <span
                 className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--fs-xs)] uppercase tracking-[0.04em] text-[var(--ink-mute)]"
-                title={op.name}
+                title={scope.name}
               >
-                {op.name}
+                {scope.name}
               </span>
               <span
                 className={cn(

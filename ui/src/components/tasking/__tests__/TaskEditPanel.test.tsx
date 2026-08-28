@@ -24,16 +24,18 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BoardOperation, BoardResponse, BoardTask } from "#/api/board";
+import type { BoardResponse, BoardTask } from "#/api/board";
 import { queryKeys } from "#/api/keys";
 import { useBoardStore } from "#/store/board";
 import { COL_LABEL, type ColLabelFn } from "../board-constants";
+import { deriveProjectScopes, type ProjectScope } from "../board-projects";
 import { TaskEditPanel } from "../TaskEditPanel";
 import {
   BOARD_FIXTURE,
   BOARD_FIXTURE_WITH_CLOSED_CYCLE,
   NO_SLUG_OP,
   SEALED_IN_CLOSED_CYCLE_TASK,
+  PROJECT_SCOPES,
 } from "./fixtures";
 
 const { toastError } = vi.hoisted(() => ({ toastError: vi.fn() }));
@@ -74,7 +76,7 @@ const HELD_TASK: BoardTask = {
 
 interface WrapOpts {
   task?: BoardTask;
-  operations?: BoardOperation[];
+  projects?: ProjectScope[];
   cycles?: typeof cycles;
   onClose?: () => void;
   onOpenPage?: (path: string) => void;
@@ -86,7 +88,7 @@ interface WrapOpts {
 
 function wrap({
   task = FULL_TASK,
-  operations: opsOverride = operations,
+  projects: projectsOverride = PROJECT_SCOPES,
   cycles: cyclesOverride = cycles,
   onClose = vi.fn(),
   onOpenPage = vi.fn(),
@@ -113,7 +115,7 @@ function wrap({
       <QueryClientProvider client={qc}>
         <TaskEditPanel
           task={task}
-          operations={opsOverride}
+          projects={projectsOverride}
           cycles={cyclesOverride}
           colLabel={NEUTRAL_COL_LABEL}
           onClose={onClose}
@@ -304,7 +306,7 @@ describe("TaskEditPanel — render", () => {
   });
 
   it("omits slug-less operations from the Project dropdown", async () => {
-    wrap({ operations: [...operations, NO_SLUG_OP] });
+    wrap({ projects: deriveProjectScopes([...operations, NO_SLUG_OP], []) });
     await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
     expect(screen.getByRole("option", { name: "OPS-1" })).toBeInTheDocument();
     expect(
@@ -312,11 +314,24 @@ describe("TaskEditPanel — render", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("offers a task slug with no PROJECT page as an assignable project", async () => {
+    const ghostTask = { ...FULL_TASK, project: "ghost" };
+    wrap({
+      task: ghostTask,
+      projects: deriveProjectScopes(operations, [ghostTask]),
+    });
+    // Header resolves the synthesized code, not the raw slug
+    expect(screen.getByTestId("edit-panel-op")).toHaveTextContent("GHOST");
+    await userEvent.click(screen.getByRole("button", { name: /Project$/ }));
+    expect(screen.getByRole("option", { name: "GHOST" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "OPS-1" })).toBeInTheDocument();
+  });
+
   it("renders neutral cycle state labels and omits unavailable Closed cycles", async () => {
     // FULL_TASK is in C-01, not C-00 (CLOSED)
     wrap({
       task: FULL_TASK,
-      operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
+      projects: PROJECT_SCOPES,
       cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
     });
     await userEvent.click(screen.getByRole("button", { name: /Cycle/ }));
@@ -335,7 +350,7 @@ describe("TaskEditPanel — render", () => {
     // A closed Cycle must remain representable when it is the current value.
     wrap({
       task: SEALED_IN_CLOSED_CYCLE_TASK,
-      operations: BOARD_FIXTURE_WITH_CLOSED_CYCLE.operations,
+      projects: PROJECT_SCOPES,
       cycles: BOARD_FIXTURE_WITH_CLOSED_CYCLE.cycles,
     });
     const trigger = screen.getByRole("button", { name: /Cycle/ });
@@ -682,7 +697,7 @@ describe("TaskEditPanel — hold toggle", () => {
       <QueryClientProvider client={qc}>
         <TaskEditPanel
           task={updatedTask}
-          operations={operations}
+          projects={PROJECT_SCOPES}
           cycles={cycles}
           colLabel={NEUTRAL_COL_LABEL}
           onClose={vi.fn()}

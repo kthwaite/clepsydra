@@ -12,9 +12,15 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardCycle, BoardOperation, BoardTask } from "#/api/board";
 import { useBoardStore } from "#/store/board";
+import { deriveProjectScopes } from "../board-projects";
 import { TimelineView } from "../TimelineView";
 import { parseDay, pct, windowOf } from "../timeline-math";
-import { BOARD_FIXTURE, FIXTURE_COL_LABEL, stubBoardFetch } from "./fixtures";
+import {
+  BOARD_FIXTURE,
+  FIXTURE_COL_LABEL,
+  NO_SLUG_OP,
+  stubBoardFetch,
+} from "./fixtures";
 
 // ── fixture helpers ───────────────────────────────────────────────────────────
 
@@ -68,6 +74,9 @@ const TL_OPS: BoardOperation[] = [
     note: null,
   },
 ];
+
+/** Project scopes for TL_OPS — what TaskingScreen threads to the view. */
+const TL_SCOPES = deriveProjectScopes(TL_OPS, []);
 
 /** Scheduled task for alpha operation */
 const TL_TASK_ALPHA: BoardTask = {
@@ -195,7 +204,7 @@ describe("TimelineView — empty state", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={undatedCycles}
       />,
     );
@@ -209,7 +218,7 @@ describe("TimelineView — empty state", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_UNSCHEDULED]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -221,7 +230,7 @@ describe("TimelineView — empty state", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -233,7 +242,7 @@ describe("TimelineView — empty state", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={[]}
       />,
     );
@@ -247,7 +256,7 @@ describe("TimelineView — headings", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -265,7 +274,7 @@ describe("TimelineView — axis bands", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -278,7 +287,7 @@ describe("TimelineView — axis bands", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -291,7 +300,7 @@ describe("TimelineView — axis bands", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -304,7 +313,7 @@ describe("TimelineView — axis bands", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -330,7 +339,7 @@ describe("TimelineView — axis bands", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={mixedCycles}
       />,
     );
@@ -349,7 +358,7 @@ describe("TimelineView — operation groups", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNSCHEDULED]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -363,7 +372,7 @@ describe("TimelineView — operation groups", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -377,7 +386,7 @@ describe("TimelineView — operation groups", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_BETA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -396,7 +405,7 @@ describe("TimelineView — UNFILED group", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNFILED]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -408,7 +417,7 @@ describe("TimelineView — UNFILED group", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_UNFILED]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -420,11 +429,44 @@ describe("TimelineView — UNFILED group", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
     expect(screen.queryByTestId("tl-grp-UNFILED")).not.toBeInTheDocument();
+  });
+
+  it("does not put a task whose slug has no operation in UNFILED", () => {
+    const ghost: BoardTask = {
+      ...TL_TASK_ALPHA,
+      id: "t-ghost",
+      project: "ghost",
+    };
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[ghost]}
+        projects={deriveProjectScopes(TL_OPS, [ghost])}
+        cycles={TL_CYCLES}
+      />,
+    );
+    expect(screen.queryByTestId("tl-grp-UNFILED")).not.toBeInTheDocument();
+    const grp = screen.getByTestId("tl-grp-ghost");
+    expect(grp).toHaveTextContent("GHOST");
+    expect(grp.querySelector("[data-testid='tl-row-t-ghost']")).not.toBeNull();
+  });
+
+  it("a slug-less op yields no group and null-project tasks render once", () => {
+    wrap(
+      <TimelineView
+        colLabel={FIXTURE_COL_LABEL}
+        tasks={[TL_TASK_ALPHA, TL_TASK_UNFILED]}
+        projects={deriveProjectScopes([...TL_OPS, NO_SLUG_OP], [])}
+        cycles={TL_CYCLES}
+      />,
+    );
+    expect(screen.queryByTestId("tl-grp-OPS-3")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("tl-row-t-unfiled")).toHaveLength(1);
   });
 
   it("UNFILED group appears after named operation groups", () => {
@@ -432,7 +474,7 @@ describe("TimelineView — UNFILED group", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNFILED]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -457,7 +499,7 @@ describe("TimelineView — bar positioning", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -492,7 +534,7 @@ describe("TimelineView — bar positioning", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[pointTask]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -509,7 +551,7 @@ describe("TimelineView — bar positioning", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -522,7 +564,7 @@ describe("TimelineView — bar positioning", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -536,7 +578,7 @@ describe("TimelineView — bar positioning", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_HOLD]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -549,7 +591,7 @@ describe("TimelineView — bar positioning", () => {
       <TimelineView
         colLabel={(id) => (id === "FIELD" ? "In Progress" : id)}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -563,7 +605,7 @@ describe("TimelineView — bar positioning", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -582,7 +624,7 @@ describe("TimelineView — bar click", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -597,7 +639,7 @@ describe("TimelineView — bar click", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
         onEditTask={spy}
       />,
@@ -620,7 +662,7 @@ describe("TimelineView — no-due footer", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNSCHEDULED]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -645,7 +687,7 @@ describe("TimelineView — no-due footer", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, ...twoUnscheduled]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -659,7 +701,7 @@ describe("TimelineView — no-due footer", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, TL_TASK_UNSCHEDULED]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -673,7 +715,7 @@ describe("TimelineView — no-due footer", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -682,11 +724,14 @@ describe("TimelineView — no-due footer", () => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
-// UNFILED — non-null unmatched project
+// Slug outside the passed scopes
 // ══════════════════════════════════════════════════════════════════════════════
 
-describe("TimelineView — UNFILED non-null project", () => {
-  it("task with non-null project not matching any operation lands in UNFILED", () => {
+describe("TimelineView — slug outside the passed scopes", () => {
+  it("task whose slug has no scope in `projects` renders in no group", () => {
+    // TaskingScreen always derives a scope for every task slug; a unit
+    // caller that omits one is scoping the view, so the task is out of view
+    // rather than mislabelled as No project.
     const orphanTask: BoardTask = {
       ...TL_TASK_ALPHA,
       id: "t-orphan",
@@ -698,17 +743,13 @@ describe("TimelineView — UNFILED non-null project", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA, orphanTask]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
-    // alpha group exists (TL_TASK_ALPHA matches OPS-1)
     expect(screen.getByTestId("tl-grp-alpha")).toBeInTheDocument();
-    // orphan-unknown-project doesn't match any op → UNFILED group
-    expect(screen.getByTestId("tl-grp-UNFILED")).toBeInTheDocument();
-    expect(screen.getByTestId("tl-grp-UNFILED")).toHaveTextContent(
-      "Tasks with no project",
-    );
+    expect(screen.queryByTestId("tl-grp-UNFILED")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tl-row-t-orphan")).not.toBeInTheDocument();
   });
 });
 
@@ -722,7 +763,7 @@ describe("TimelineView — gridlines per row", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -737,7 +778,7 @@ describe("TimelineView — gridlines per row", () => {
       <TimelineView
         colLabel={FIXTURE_COL_LABEL}
         tasks={[TL_TASK_ALPHA]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
@@ -772,7 +813,7 @@ describe("TimelineView — row order within group by start", () => {
         colLabel={FIXTURE_COL_LABEL}
         // Pass laterTask first in the array — the view should still sort it after
         tasks={[laterTask, earlierTask]}
-        operations={TL_OPS}
+        projects={TL_SCOPES}
         cycles={TL_CYCLES}
       />,
     );
