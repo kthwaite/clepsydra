@@ -1634,6 +1634,11 @@ export interface components {
             /** Format: int32 */
             status: number;
         };
+        /** @description One captured archive resource: CAS hash plus its declared content type. */
+        ArchiveBlobResponse: {
+            hash: string;
+            type: string;
+        };
         ArchiveLookupResponse: {
             captured_at?: string | null;
             page_id?: string | null;
@@ -1644,7 +1649,7 @@ export interface components {
         ArchiveLookupStatus: "active" | "rubbish" | "none";
         /** @description OpenAPI schema for the flattened `[archive]` frontmatter table. */
         ArchiveMetaResponse: {
-            blobs?: string[] | null;
+            blobs?: components["schemas"]["ArchiveBlobResponse"][] | null;
             byline?: string | null;
             canonical_url?: string | null;
             captured_at: string;
