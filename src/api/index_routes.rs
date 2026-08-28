@@ -1199,27 +1199,21 @@ pub async fn graph(State(state): State<Arc<AppState>>) -> Result<Json<GraphRespo
     Ok(Json(GraphResponse { nodes, edges }))
 }
 
-#[utoipa::path(
-    post,
-    path = "/index/rebuild",
-    context_path = "/api/vault",
-    tag = "Index",
-    responses(
-        (status = 200, description = "Index rebuilt", body = RebuildResponse),
-        (status = 500, description = "Internal server error", body = ApiError)
-    )
-)]
-pub async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
+/// Rebuild the whole index, republish its warnings, and tell every client to
+/// refresh. Shared by `POST /index/rebuild` and the git sync runtime, which
+/// runs it once after a merge changed the working tree instead of letting the
+/// watcher re-index the merged files one at a time (D10).
+pub(crate) async fn rebuild_index_and_notify(
+    state: &AppState,
+) -> Result<crate::vault::index::BuildStats, IndexError> {
     let build_stats = state
         .index
         .with_index(move |index, vault| {
             let stats = index.build(vault)?;
             index.resolve_links()?;
-            Ok::<_, crate::vault::index::IndexError>(stats)
+            Ok::<_, IndexError>(stats)
         })
-        .await
-        .map_err(|e| ApiError::internal(format!("index build failed: {e}")))?
-        .map_err(|e| ApiError::internal(format!("index build failed: {e}")))?;
+        .await??;
 
     // Store warnings for the /warnings endpoint
     {
@@ -1232,6 +1226,24 @@ pub async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Respons
         upserted: vec!["*".to_string()],
         removed: vec![],
     });
+
+    Ok(build_stats)
+}
+
+#[utoipa::path(
+    post,
+    path = "/index/rebuild",
+    context_path = "/api/vault",
+    tag = "Index",
+    responses(
+        (status = 200, description = "Index rebuilt", body = RebuildResponse),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn rebuild_index(State(state): State<Arc<AppState>>) -> Result<Response, ApiError> {
+    let build_stats = rebuild_index_and_notify(&state)
+        .await
+        .map_err(|e| ApiError::internal(format!("index build failed: {e}")))?;
 
     Ok((
         StatusCode::OK,

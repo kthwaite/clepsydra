@@ -27,6 +27,7 @@ pub mod projects;
 pub mod properties;
 pub mod query;
 pub mod rubbish;
+pub mod sync;
 pub mod tasks;
 pub mod uptime;
 
@@ -84,6 +85,14 @@ pub struct AppState {
     pub delete_hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>>,
     /// Mutation coordinator for serializing vault mutations, shared across all API handlers.
     pub mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator,
+    /// Git-backed sync runtime, present only when the vault is
+    /// sync-initialised (D3). `None` means the sync endpoints report an
+    /// uninitialised vault rather than doing anything.
+    pub sync: Option<Arc<crate::sync_runtime::SyncRuntime>>,
+    /// Pause flag shared with the filesystem watcher. Held set for the whole
+    /// of a sync window so a merge's own writes are dropped instead of being
+    /// re-indexed path by path behind the closed mutation gate (D10).
+    pub watcher_paused: Arc<std::sync::atomic::AtomicBool>,
     /// Resources allocated only when the Feeds feature is enabled.
     pub feed_runtime: Option<crate::feeds::runtime::FeedRuntime>,
     /// Serializes archive ingest to prevent concurrent race conditions
@@ -194,6 +203,7 @@ pub fn api_router_with_archive_limit(
         .nest("/pages-move", pages::move_router())
         .nest("/pages-assign", pages::assign_router())
         .nest("/rubbish", rubbish::router())
+        .nest("/sync", sync::router())
         .route(
             "/pages-assign-bulk",
             axum::routing::post(pages::assign_bulk),

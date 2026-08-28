@@ -8,6 +8,7 @@ pub mod lsp;
 pub mod macos_url_handler;
 pub mod mcp;
 pub mod sync_command;
+pub mod sync_runtime;
 pub mod todo_capture;
 pub mod vault;
 
@@ -42,6 +43,14 @@ const INDEX_DB_RELATIVE: &str = ".clepsydra/cache.db";
 /// drift between commands. `anstream` down-samples this truecolor value to the
 /// nearest palette entry on 16/256-colour terminals.
 pub(crate) const VESSEL_ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
+
+/// How long in-flight requests have to finish after a shutdown signal before
+/// the listener closes anyway (D11).
+const GRACEFUL_SHUTDOWN_BUDGET: Duration = Duration::from_secs(5);
+
+/// The `axum_server` handle for the TCP listener `serve` binds — the shutdown
+/// signal task's only lever on the running server.
+type ServerHandle = axum_server::Handle<std::net::SocketAddr>;
 
 #[derive(Debug, Deserialize)]
 pub struct Settings {
@@ -735,6 +744,7 @@ pub async fn build_app_state_with_settings(
 
     let archive_resource_concurrency =
         api::archive::archive_resource_concurrency(vault.config().archive.max_blob_size_mb);
+    let sync = crate::sync_runtime::SyncRuntime::detect(&vault);
     Ok(Arc::new(AppState {
         started_at: std::time::Instant::now(),
         features,
@@ -748,6 +758,8 @@ pub async fn build_app_state_with_settings(
         hooks,
         delete_hooks,
         mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
+        sync,
+        watcher_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         feed_runtime,
         archive_ingest_lock: tokio::sync::Mutex::new(()),
         archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
@@ -863,7 +875,12 @@ fn spawn_sync_watcher(state: &Arc<AppState>) -> Result<VaultWatcher, Box<dyn std
     // coordinator (path locks), so the loop holds the whole state.
     let reconcile_state = Arc::clone(state);
 
-    let watcher = VaultWatcher::start(vault_root_buf, Duration::from_millis(500), change_tx)?;
+    let watcher = VaultWatcher::start_with_pause(
+        vault_root_buf,
+        Duration::from_millis(500),
+        change_tx,
+        Arc::clone(&state.watcher_paused),
+    )?;
 
     tokio::spawn(async move {
         loop {
@@ -974,10 +991,12 @@ async fn serve_tls(
     app: Router,
     addr: std::net::SocketAddr,
     settings: &Settings,
+    handle: ServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let config = load_tls_config(&settings.server.tls).await?;
     info!(%addr, ?settings.server, "listening (HTTPS)");
     axum_server::bind_rustls(addr, config)
+        .handle(handle)
         .serve(app.into_make_service())
         .await?;
     Ok(())
@@ -988,36 +1007,82 @@ async fn serve_plain(
     app: Router,
     addr: std::net::SocketAddr,
     settings: &Settings,
+    handle: ServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
     info!(%addr, ?settings.server, "listening (HTTP)");
     axum_server::bind(addr)
+        .handle(handle)
         .serve(app.into_make_service())
         .await?;
     Ok(())
 }
 
 /// Resolve the bind address and serve, choosing TLS or plain per settings.
-async fn serve(app: Router, settings: &Settings) -> Result<(), Box<dyn std::error::Error>> {
+async fn serve(
+    app: Router,
+    settings: &Settings,
+    handle: ServerHandle,
+) -> Result<(), Box<dyn std::error::Error>> {
     let addr = resolve_bind_addr(&settings.server.host, settings.server.port).await?;
     if settings.server.tls.enabled {
-        serve_tls(app, addr, settings).await
+        serve_tls(app, addr, settings, handle).await
     } else {
-        serve_plain(app, addr, settings).await
+        serve_plain(app, addr, settings, handle).await
     }
 }
 
-/// One-shot reconcile sweep run at `serve` startup, after the index is built and
-/// `state` exists but before the server accepts connections, to heal folder
-/// drift (a page whose declared kind/project no longer matches its folder is
-/// moved, inbound links rewritten). Conservative: undeclared pages are untouched.
+/// Turn the first SIGINT or SIGTERM into a graceful HTTP shutdown: in-flight
+/// requests get five seconds to finish, then the listener closes and
+/// [`run_server`] runs the shutdown push (D11).
 ///
-/// Serve-only by construction — this is called solely from [`run_server`]. The
+/// A second signal is left to the default disposition, so an operator who
+/// wants out immediately can press Ctrl-C twice.
+async fn shutdown_signal(handle: ServerHandle) {
+    let interrupt = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            tracing::warn!("cannot listen for Ctrl-C: {e}");
+            std::future::pending::<()>().await;
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut signal) => {
+                signal.recv().await;
+            }
+            Err(e) => {
+                tracing::warn!("cannot listen for SIGTERM: {e}");
+                std::future::pending::<()>().await;
+            }
+        }
+    };
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        () = interrupt => {}
+        () = terminate => {}
+    }
+    info!("shutdown signal received; draining connections");
+    handle.graceful_shutdown(Some(GRACEFUL_SHUTDOWN_BUDGET));
+}
+
+/// One-shot reconcile sweep to heal folder drift (a page whose declared
+/// kind/project no longer matches its folder is moved, inbound links
+/// rewritten). Conservative: undeclared pages are untouched. Returns the
+/// number of pages moved.
+///
+/// Run at `serve` startup, after the index is built and `state` exists but
+/// before the server accepts connections, and again after a sync merged
+/// another device's pages into the tree (D10) — both are moments where the
+/// index has just been built from files nobody has reconciled yet. The
 /// read-only index build (`open_vault_and_index`) and `doctor`
 /// (`doctor::run`) never reach it, preserving the read-only boundary
 /// (ADR 0001). Best-effort: failures are logged via tracing and never abort
 /// startup. Real `state.hooks` are forwarded so startup moves of academic work
 /// pages fire `AcademicMoveHook`, mirroring `move_page` and LSP `did_save`.
-pub(crate) async fn run_startup_reconcile(state: &Arc<AppState>) {
+pub(crate) async fn run_startup_reconcile(state: &AppState) -> usize {
     let hooks = Arc::clone(&state.hooks);
     match state
         .index
@@ -1026,10 +1091,20 @@ pub(crate) async fn run_startup_reconcile(state: &Arc<AppState>) {
         })
         .await
     {
-        Ok(Ok(n)) if n > 0 => tracing::info!("reconcile sweep moved {n} drifted page(s)"),
-        Ok(Ok(_)) => {}
-        Ok(Err(e)) => tracing::warn!("reconcile sweep failed: {e}"),
-        Err(e) => tracing::warn!("reconcile sweep failed: {e}"),
+        Ok(Ok(n)) => {
+            if n > 0 {
+                tracing::info!("reconcile sweep moved {n} drifted page(s)");
+            }
+            n
+        }
+        Ok(Err(e)) => {
+            tracing::warn!("reconcile sweep failed: {e}");
+            0
+        }
+        Err(e) => {
+            tracing::warn!("reconcile sweep failed: {e}");
+            0
+        }
     }
 }
 
@@ -1059,6 +1134,12 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     let archive_view_config =
         api::archive::ArchiveViewConfig::from_server_settings(&settings.server)
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidInput, error))?;
+    if let Some(sync) = &state.sync {
+        match sync.run_full_sync(&state).await {
+            Ok(report) => info!("startup sync: {}", report.one_line()),
+            Err(e) => tracing::warn!("startup sync failed: {e}"),
+        }
+    }
     run_startup_reconcile(&state).await;
     let _watcher = spawn_sync_watcher(&state)?;
     // `max_request_size_mb` budgets DECODED resource bytes, but the request
@@ -1073,7 +1154,59 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
         archive_view_config,
         settings.server.dev_mode,
     );
-    serve_with_optional_feed_scheduler(Arc::clone(&state), serve(app, &settings)).await
+    let handle = ServerHandle::new();
+    tokio::spawn(shutdown_signal(handle.clone()));
+    let sync_tasks = state
+        .sync
+        .as_ref()
+        .map(|sync| sync.spawn_background(Arc::clone(&state)))
+        .unwrap_or_default();
+
+    let served =
+        serve_with_optional_feed_scheduler(Arc::clone(&state), serve(app, &settings, handle)).await;
+
+    for task in sync_tasks {
+        task.abort();
+    }
+    if let Some(sync) = &state.sync {
+        match sync.shutdown_push(&state).await {
+            Ok(report) => info!("shutdown sync: {}", report.one_line()),
+            Err(e) => tracing::warn!("shutdown sync failed: {e}"),
+        }
+    }
+    served
+}
+
+#[cfg(test)]
+pub(crate) mod env_test_support {
+    /// RAII guard that records the prior value of an env var on construction
+    /// and restores it on drop, so `#[serial]` tests can't leak state.
+    pub(crate) struct EnvGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvGuard {
+        pub(crate) fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let prior = std::env::var_os(key);
+            // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
+            // so no other thread is racing on the same variable.
+            unsafe { std::env::set_var(key, value) }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            // SAFETY: see `set`.
+            unsafe {
+                match self.prior.take() {
+                    Some(v) => std::env::set_var(self.key, v),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1801,6 +1934,7 @@ mod watcher_reconcile_tests {
 #[cfg(test)]
 mod settings_tests {
     use super::*;
+    use crate::env_test_support::EnvGuard;
 
     fn assert_feature_defaults(features: FeatureFlags) {
         assert!(features.academic);
@@ -1872,35 +2006,6 @@ mod settings_tests {
         std::fs::write(&cfg, "[server]\nport = 9999\n").unwrap();
         let settings = Settings::load_from(&cfg).unwrap();
         assert_eq!(settings.server.port, 9999);
-    }
-
-    /// RAII guard that records the prior value of an env var on construction
-    /// and restores it on drop, so `#[serial]` tests can't leak state.
-    struct EnvGuard {
-        key: &'static str,
-        prior: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let prior = std::env::var_os(key);
-            // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
-            // so no other thread is racing on the same variable.
-            unsafe { std::env::set_var(key, value) }
-            Self { key, prior }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: see `set`.
-            unsafe {
-                match self.prior.take() {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
     }
 
     #[test]

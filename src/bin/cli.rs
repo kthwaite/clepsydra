@@ -68,6 +68,11 @@ enum SyncCommands {
         #[arg(long)]
         author_email: Option<String>,
     },
+    #[command(
+        about = "Report the vault's sync state without changing anything",
+        long_about = "Print the sync branch and head, the remote, how far ahead of and behind it this vault is, how many files are uncommitted or unmerged, how many Conflict Copies are sitting in the tree, and when the last sync ran. Read-only. Asks a running server when one answers on the configured address (so its pending-autocommit state is included) and reads the repository directly otherwise. Exits 1 when the tree holds unmerged paths, or when sync is not initialised."
+    )]
+    Status,
 }
 
 #[derive(Debug, Subcommand)]
@@ -259,10 +264,13 @@ enum Commands {
         #[command(subcommand)]
         command: CodesCommands,
     },
-    #[command(about = "Sync the vault through git (commit, fetch, merge, push)")]
+    #[command(
+        about = "Sync the vault through git (commit, fetch, merge, push)",
+        long_about = "With no subcommand, run one whole sync: commit local changes, fetch, merge origin, resolve every conflict as a Conflict Copy, and push (docs/superpowers/specs/2026-08-27-clep-sync-design.md). When a clepsydra server answers on the configured address the sync runs there — one writer at a time — and this command prints its report; otherwise it runs directly against the configured vault. Exits 1 when the fetch or the push failed."
+    )]
     Sync {
         #[command(subcommand)]
-        command: SyncCommands,
+        command: Option<SyncCommands>,
     },
     #[command(
         about = "Register the clepsydra:// URL scheme with macOS",
@@ -719,11 +727,21 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             }
         },
         Commands::Sync { command } => match command {
-            SyncCommands::Init {
+            None => {
+                let rendered = clepsydra::sync_command::run_sync().await?;
+                print!("{}", rendered.lines);
+                Ok(rendered.exit_code)
+            }
+            Some(SyncCommands::Status) => {
+                let rendered = clepsydra::sync_command::run_status().await?;
+                print!("{}", rendered.lines);
+                Ok(rendered.exit_code)
+            }
+            Some(SyncCommands::Init {
                 remote,
                 author_name,
                 author_email,
-            } => {
+            }) => {
                 let report = clepsydra::sync_command::run_init(clepsydra::sync_command::InitArgs {
                     remote,
                     author_name,
@@ -1453,19 +1471,31 @@ mod cli_tests {
         match cli.command {
             Commands::Sync {
                 command:
-                    SyncCommands::Init {
+                    Some(SyncCommands::Init {
                         remote,
                         author_name,
                         author_email,
-                    },
+                    }),
             } => (remote, author_name, author_email),
             other => panic!("expected sync init, got {other:?}"),
         }
     }
 
     #[test]
-    fn sync_requires_a_subcommand() {
-        assert!(Cli::try_parse_from(["clep", "sync"]).is_err());
+    fn bare_sync_runs_a_sync_without_a_subcommand() {
+        let cli = Cli::try_parse_from(["clep", "sync"]).unwrap();
+        assert!(matches!(cli.command, Commands::Sync { command: None }));
+    }
+
+    #[test]
+    fn sync_status_parses() {
+        let cli = Cli::try_parse_from(["clep", "sync", "status"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Commands::Sync {
+                command: Some(SyncCommands::Status)
+            }
+        ));
     }
 
     #[test]

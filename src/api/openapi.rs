@@ -84,7 +84,8 @@ impl Modify for SchemaOverrides {
         (name = "Uptime", description = "Server uptime"),
         (name = "Board", description = "TASKING board: read model and task/cycle mutations"),
         (name = "Feeds", description = "RSS/Atom subscriptions, entries, and refresh"),
-        (name = "Deeplink", description = "clepsydra:// / obsidian:// deep-link resolution")
+        (name = "Deeplink", description = "clepsydra:// / obsidian:// deep-link resolution"),
+        (name = "Sync", description = "Git-backed vault synchronisation")
     ),
     paths(
         // Features
@@ -228,7 +229,10 @@ impl Modify for SchemaOverrides {
         crate::api::feeds::patch_entry,
         crate::api::feeds::mark_entries_read,
         crate::api::feeds::import_opml,
-        crate::api::feeds::export_opml
+        crate::api::feeds::export_opml,
+        // Sync
+        crate::api::sync::run_sync,
+        crate::api::sync::sync_status
     ),
     components(
         schemas(
@@ -323,6 +327,10 @@ impl Modify for SchemaOverrides {
             crate::api::attachments::AttachmentUploadForm,
             // Events
             crate::api::events::SyncNotification,
+            // Sync
+            crate::api::sync::SyncReportDto,
+            crate::api::sync::ConflictCopyDto,
+            crate::api::sync::SyncStatusDto,
             // Index
             crate::api::index_routes::RebuildResponse,
             crate::api::index_routes::OutlinkEntry,

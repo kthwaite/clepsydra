@@ -149,6 +149,8 @@ impl ApiFixtureBuilder {
             delete_hooks: Arc::new(delete_hooks),
             mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(
             ),
+            sync: None,
+            watcher_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             feed_runtime: Some(
                 clepsydra::feeds::runtime::FeedRuntime::open(
                     &root,
