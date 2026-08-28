@@ -1247,6 +1247,15 @@ pub async fn serve_blob(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),
     );
+    // `@font-face` loads are CORS-mode and the sandboxed snapshot frame has an
+    // opaque (`null`) origin, so without this header every archived font fails
+    // even on the bind origin. Blobs are immutable, content-addressed, and
+    // unauthenticated; `*` adds readability only for callers that already hold
+    // the hash.
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_ORIGIN,
+        HeaderValue::from_static("*"),
+    );
     if is_active_content(&content_type) {
         headers.insert(
             header::CONTENT_DISPOSITION,

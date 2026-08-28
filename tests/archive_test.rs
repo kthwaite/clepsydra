@@ -2335,3 +2335,43 @@ async fn archive_lookup_rejects_non_http_url() {
         .await;
     response.assert_status(StatusCode::BAD_REQUEST);
 }
+
+#[tokio::test]
+async fn cas_blobs_allow_cross_origin_reads_but_snapshot_views_do_not() {
+    // `@font-face` fetches are CORS-mode and the sandboxed frame's origin is
+    // `null`, so archived fonts need an ACAO header even on the bind origin.
+    let (server, _tmp, state) = setup_archive_view_server();
+    let font = store_blob(&state, b"wOF2 fake font bytes", "font/woff2");
+    let view = store_blob(&state, b"<html><body>hi</body></html>", "text/html");
+
+    let blob = server
+        .get(&format!("/api/vault/cas/{font}"))
+        .add_header("origin", "null")
+        .await;
+    blob.assert_status(StatusCode::OK);
+    assert_eq!(
+        blob.headers()
+            .get("access-control-allow-origin")
+            .map(|value| value.to_str().unwrap()),
+        Some("*")
+    );
+    assert_eq!(
+        blob.headers()
+            .get("content-type")
+            .map(|value| value.to_str().unwrap()),
+        Some("font/woff2")
+    );
+
+    let snapshot = server
+        .get(&format!("/api/vault/archive/view/{view}"))
+        .add_header("origin", "null")
+        .await;
+    snapshot.assert_status(StatusCode::OK);
+    assert!(
+        snapshot
+            .headers()
+            .get("access-control-allow-origin")
+            .is_none(),
+        "snapshot documents must stay unreadable cross-origin"
+    );
+}
