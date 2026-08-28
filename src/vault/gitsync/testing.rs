@@ -7,8 +7,8 @@ use std::sync::OnceLock;
 
 use tempfile::TempDir;
 
-use super::Author;
 use super::git::Git;
+use super::{Author, INIT_MARKER_KEY, INIT_MARKER_VALUE};
 use crate::vault::init::init_vault;
 
 /// The path of an empty file used as `GIT_CONFIG_GLOBAL`, so tests never
@@ -110,14 +110,19 @@ impl TestRepos {
     }
 }
 
-/// `init_vault` + `git init` + `remote add origin` + a `[sync]` author +
-/// one `"init"` commit of the whole vault-init layout.
+/// `init_vault` + `git init` + `remote add origin` + the D3 init marker + a
+/// `[sync]` author + one `"init"` commit of the whole vault-init layout —
+/// everything `clep sync init` itself would have left behind, so a
+/// `TestRepos` clone is sync-initialised without every test having to call
+/// `init` directly.
 fn init_clone(root: &Path, remote: &Path) {
     init_vault(root).expect("init_vault for TestRepos clone");
     let g = git(root);
     g.init("main").expect("git init for TestRepos clone");
     g.remote_add("origin", &remote.display().to_string())
         .expect("remote add origin");
+    g.config_set(INIT_MARKER_KEY, INIT_MARKER_VALUE)
+        .expect("set D3 init marker for TestRepos clone");
     seed_sync_author(root);
     g.add_all().expect("add -A for TestRepos clone");
     g.commit("init", &author())

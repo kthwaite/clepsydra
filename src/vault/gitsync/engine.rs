@@ -576,14 +576,12 @@ mod tests {
     use crate::vault::Vault;
     use crate::vault::gitsync::conflict_copy::find_conflict_copies;
     use crate::vault::gitsync::init::{InitOpts, LfsPolicy};
-    use crate::vault::gitsync::{INIT_MARKER_KEY, INIT_MARKER_VALUE, SyncError, testing};
+    use crate::vault::gitsync::{SyncError, testing};
 
-    /// A [`SyncEngine`] over one of `TestRepos`' clones. `TestRepos` builds
-    /// plain git repositories, so the D3 marker that `init` would have
-    /// written is set here.
+    /// A [`SyncEngine`] over one of `TestRepos`' clones. `TestRepos` clones
+    /// already carry the D3 marker `init` would have written.
     fn engine(root: &Path) -> SyncEngine {
         let git = testing::git(root);
-        git.config_set(INIT_MARKER_KEY, INIT_MARKER_VALUE).unwrap();
         let vault = Vault::open(root).unwrap();
         SyncEngine::open_with_git(&vault, git).unwrap()
     }
@@ -630,6 +628,7 @@ mod tests {
                 author: Some(testing::author()),
                 lfs: LfsPolicy::Skip,
                 prompt: None,
+                legacy_cas: None,
             },
         )
         .unwrap();

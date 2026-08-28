@@ -67,6 +67,7 @@ pub async fn run_init(args: InitArgs) -> Result<InitReport, Box<dyn std::error::
         None
     };
     let git = Git::new(vault.root());
+    let legacy_cas = crate::vault::cas_migrate::legacy_store_with_blobs();
     let report = tokio::task::spawn_blocking(move || {
         init(
             &vault,
@@ -76,6 +77,7 @@ pub async fn run_init(args: InitArgs) -> Result<InitReport, Box<dyn std::error::
                 author,
                 lfs: LfsPolicy::Required,
                 prompt,
+                legacy_cas,
             },
         )
     })

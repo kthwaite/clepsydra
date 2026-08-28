@@ -3,7 +3,7 @@
 //! seed the `[sync]` author, migrate a legacy CAS store (D16), add the
 //! remote, and make the initial commit.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::config_writer::{self, SyncSectionPatch};
 use super::git::Git;
@@ -30,11 +30,17 @@ pub type PromptFn = dyn Fn(&str) -> Option<String> + Send;
 
 /// Options for [`init`]. `prompt` is only consulted when neither an explicit
 /// author, a configured one, nor git's global config supplies one.
+/// `legacy_cas` is the resolved D16 migration source, if any — `init` itself
+/// never probes `~/.clepsydra/cas` or any other ambient location; the caller
+/// (`sync_command::run_init`) resolves that via
+/// `cas_migrate::legacy_store_with_blobs()` before calling in, and tests
+/// pass an explicit fixture path or `None`.
 pub struct InitOpts {
     pub remote: Option<String>,
     pub author: Option<Author>,
     pub lfs: LfsPolicy,
     pub prompt: Option<Box<PromptFn>>,
+    pub legacy_cas: Option<PathBuf>,
 }
 
 /// What `init` did, for CLI rendering.
@@ -64,6 +70,7 @@ pub fn init(vault: &Vault, git: &Git, opts: InitOpts) -> Result<InitReport, Sync
         author: explicit_author,
         lfs: lfs_policy,
         prompt,
+        legacy_cas,
     } = opts;
     let mut warnings = Vec::new();
 
@@ -128,8 +135,8 @@ pub fn init(vault: &Vault, git: &Git, opts: InitOpts) -> Result<InitReport, Sync
     write_sync_drift(root, &cfg, &author, &branch)?;
 
     // (7) CAS migration (D16, ADR 0005): only when the vault's own store is
-    // still empty and a legacy store exists to pull from.
-    let cas_migration = migrate_legacy_cas(vault, &mut warnings)?;
+    // still empty and a legacy store was given to pull from.
+    let cas_migration = migrate_legacy_cas(vault, legacy_cas.as_deref(), &mut warnings)?;
 
     // (8) remote.
     let remote = resolve_remote(git, requested_remote.as_deref())?;
@@ -216,16 +223,22 @@ fn write_sync_drift(
 }
 
 /// D16: migrate a legacy CAS store into the vault when the vault's own store
-/// is still empty and a legacy store (with blobs) exists. Never touches the
-/// legacy store. Per-blob problems are reported as warnings, not fatal.
-fn migrate_legacy_cas(vault: &Vault, warnings: &mut Vec<String>) -> Result<String, SyncError> {
+/// is still empty and `legacy_cas` names a source to pull from. `init` never
+/// resolves that source itself (no ambient `~/.clepsydra/cas` probing) — the
+/// caller decides. Never touches the legacy store. Per-blob problems are
+/// reported as warnings, not fatal.
+fn migrate_legacy_cas(
+    vault: &Vault,
+    legacy_cas: Option<&Path>,
+    warnings: &mut Vec<String>,
+) -> Result<String, SyncError> {
     if !crate::vault::cas::list_blob_hashes(&vault.cas_root()).is_empty() {
         return Ok("skipped: vault CAS store already has blobs".to_string());
     }
-    let Some(source) = crate::vault::cas_migrate::legacy_store_with_blobs() else {
+    let Some(source) = legacy_cas else {
         return Ok("skipped: no legacy store".to_string());
     };
-    let report = crate::vault::cas_migrate::migrate(vault, &source, true)
+    let report = crate::vault::cas_migrate::migrate(vault, source, true)
         .map_err(|e| SyncError::Config(format!("CAS migration from {}: {e}", source.display())))?;
     for warning in &report.warnings {
         warnings.push(format!("cas migration: {warning}"));
@@ -363,6 +376,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::vault::cas::{ContentStore, blob_relative_path};
     use crate::vault::gitsync::testing;
     use crate::vault::gitsync::{MANAGED_GITATTRIBUTES, MANAGED_GITIGNORE};
 
@@ -385,6 +399,7 @@ mod tests {
             author: Some(testing::author()),
             lfs: LfsPolicy::Skip,
             prompt: None,
+            legacy_cas: None,
         }
     }
 
@@ -434,6 +449,57 @@ mod tests {
         assert_eq!(second.initial_commit, None);
         assert_eq!(git.log_count().unwrap(), 1);
         assert_eq!(first.initial_commit.unwrap(), git.head().unwrap().unwrap());
+    }
+
+    #[test]
+    fn init_migrates_legacy_cas_only_when_a_source_is_given() {
+        // No `legacy_cas` at all: D16 never runs, regardless of what might
+        // exist on the machine at any ambient default location — `init`
+        // itself never resolves that path.
+        let (_tmp, vault) = fresh_vault();
+        let git = testing::git(vault.root());
+        let report = init(&vault, &git, opts()).unwrap();
+        assert_eq!(report.cas_migration, "skipped: no legacy store");
+        assert!(!vault.root().join(".clepsydra/cas").exists());
+
+        // `legacy_cas: Some(fixture)`: the referenced blob is copied in.
+        let (tmp2, vault2) = fresh_vault();
+        let hash = ContentStore::hash_bytes(b"<html>snap</html>");
+        fs::write(
+            vault2.root().join("archived.md"),
+            format!(
+                "+++\nid = \"0192b6c0-0000-7000-8000-000000000002\"\ntitle = \"Archived\"\n\n[archive]\nsnapshot_hash = \"{hash}\"\n+++\nbody\n"
+            ),
+        )
+        .unwrap();
+        let vault2 = Vault::open(vault2.root()).unwrap();
+        let legacy = tmp2.path().join("legacy-cas");
+        let blob_path = legacy.join(blob_relative_path(&hash).unwrap());
+        fs::create_dir_all(blob_path.parent().unwrap()).unwrap();
+        fs::write(&blob_path, b"<html>snap</html>").unwrap();
+
+        let git2 = testing::git(vault2.root());
+        let report2 = init(
+            &vault2,
+            &git2,
+            InitOpts {
+                legacy_cas: Some(legacy.clone()),
+                ..opts()
+            },
+        )
+        .unwrap();
+        assert!(
+            report2.cas_migration.contains("copied 1 blob"),
+            "{}",
+            report2.cas_migration
+        );
+        assert!(report2.warnings.is_empty(), "{:?}", report2.warnings);
+        assert!(
+            vault2
+                .cas_root()
+                .join(blob_relative_path(&hash).unwrap())
+                .exists()
+        );
     }
 
     #[test]
