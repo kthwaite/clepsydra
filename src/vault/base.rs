@@ -597,6 +597,8 @@ pub(crate) struct MetaFilterContext<'a> {
 /// the completion/diagnostics path, where hitting SQLite per keystroke is
 /// not warranted. Semantics mirror the SQL compilation for the common ops;
 /// anything unresolvable is conservatively `false`.
+/// `word_count` and `journal_date` are never resolved on this path, so any
+/// predicate on them (including `journal_date is_today`) is `false` here.
 ///
 /// Relative-date operators anchor on the wall clock; callers that own an
 /// evaluation date (an API request's clock) call [`base_matches_meta_on`].
@@ -880,6 +882,11 @@ fn property_matches(
             })
         });
     }
+    // A `contains`-family op on a type that has no `contains` is invalid in SQL
+    // (`InvalidOp`); mirror that as a non-match before the absent-value rule.
+    if matches!(op, Op::Contains | Op::NotContains) && !property_type.supports_contains() {
+        return false;
+    }
     let Some(current) = current.filter(|current| !toml_value_is_empty(current)) else {
         return matches!(op, Op::Ne | Op::NotContains)
             && expected_scalar(property_type, value).is_some();
@@ -992,6 +999,9 @@ fn scalar_matches(
             .as_ref()
             .and_then(|value| date_face(&comparable_sql_text(value)))
             .is_some_and(|day| start <= day && day < end);
+    }
+    if matches!(op, Op::Contains | Op::NotContains) && !property_type.supports_contains() {
+        return false;
     }
     let Some(current) = current else {
         return matches!(op, Op::Ne | Op::NotContains)
