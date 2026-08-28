@@ -49,7 +49,7 @@ file's directory without `~` expansion. See [Configuration](/docs/configuration)
 | `clep open-url` | `<URL>`, optional `--print` |
 | `clep relabel` | optional `--dry-run` |
 | `clep migrate` | optional `--write`; dry run by default |
-| `clep cas` | nested `backfill` or `rebuild` command |
+| `clep cas` | nested `migrate`, `backfill`, or `rebuild` command |
 | `clep codes` | nested `migrate` command |
 | `clep register-url` | optional `--obsidian`; macOS only |
 | `clep grep` | `<QUERY>`, `-n/--limit <N>` (default `20`), `--raw`, `--json` |
@@ -360,6 +360,75 @@ clep cas <COMMAND>
 
 This parent command requires one nested command. It maintains the vault's
 content-addressed blob store (the CAS).
+
+Operational order for an existing vault: `clep cas migrate` (bring blobs into
+the vault) → `clep cas backfill` (type legacy string blob entries from the
+migrated `cas.db`; skips legacy-YAML archive pages by design) → `clep cas
+rebuild` (recount after any manual repair). `clep doctor --full` verifies the
+result.
+
+## `clep cas migrate`
+
+```text
+clep cas migrate [--from <path>] [--write]
+```
+
+Moves the content-addressed store into the vault (ADR 0005:
+`docs/adr/0005-cas-in-vault-frontmatter-metadata.md`). Before 2026-08-28 the
+CAS lived outside the vault at `~/.clepsydra/cas`; this command copies this
+vault's own blobs from that legacy store — or any other `--from` path — into
+`[archive].cas_path` (default `.clepsydra/cas` inside the vault), so the
+store travels with the vault (e.g. over `clep sync`).
+
+Only referenced blobs are copied: the command scans every live page and
+rubbish item's `[archive]` frontmatter (`snapshot_hash`, `blobs[].hash`) and
+copies exactly those hashes. Each copied blob's sha256 is verified against
+its filename before it is written; a mismatch is reported as corrupt and
+skipped rather than copied. A per-blob I/O error (reading the source file or
+writing the destination) is reported and skipped too, rather than aborting
+the whole run. Blobs the source holds that nothing in this vault references
+are left behind in the source — they are not deleted, and the source is
+never modified. After copying, the destination `cas.db` is rebuilt from the
+copied blob files plus the same frontmatter scan (the same work `clep cas
+rebuild` does) — `cas.db` is always rebuilt, never copied directly from the
+source.
+
+That rebuild carries the same `--write` semantics as `clep cas rebuild
+--write` (see `clep cas rebuild` above), including clearing
+`rubbish_archive_releases` for the same reason described there. On a first
+migration this is inconsequential since the destination is fresh, but
+`migrate` is safe to re-run, and a later `--write` applies that same reset
+to a store that has already been in service.
+
+Content types for blobs whose pages still carry legacy string `blobs`
+entries (no `type`) are taken from the source store's own `cas.db`, when it
+is readable — frontmatter types always win over it — so running `clep cas
+backfill --write` after the migration can still type those pages from the
+migrated store without loss, instead of finding only the fallback
+`application/octet-stream` `rebuild_metadata` would otherwise have written.
+
+Stop `clep serve` first: the rebuild replaces every `cas.db` row from a
+point-in-time scan, so a capture landing while it runs is miscounted
+(`ref_count` 0 or untyped until the next `clep cas rebuild`); a server
+still on the old binary would also keep writing new blobs into the source
+store after the scan.
+
+The default is a dry run that only computes the report and touches no
+files; `--write` applies it. `--from` defaults to the pre-2026-08-28 store
+at `~/.clepsydra/cas`.
+
+The command prints each blob it copies (or would copy), a count of blobs
+already present at the destination, and every warning (including one per
+missing, corrupt, or failed hash). It returns `0` when there are no warnings
+and `1` when any warning is reported — a missing, corrupt, or failed blob
+always produces a warning, even if other blobs copied successfully. Config
+or vault-open failures also return `1`.
+
+```bash
+clep cas migrate                              # dry run against ~/.clepsydra/cas
+clep cas migrate --write                      # apply
+clep cas migrate --from /old/vault/cas --write
+```
 
 ## `clep cas backfill`
 

@@ -327,7 +327,7 @@ The exact root `feeds.md` is always excluded independently of this list.
 | Key | Type | Default |
 |---|---:|---|
 | `enabled` | bool | `true` |
-| `cas_path` | string | `~/.clepsydra/cas` |
+| `cas_path` | string | `.clepsydra/cas` |
 | `default_path_prefix` | string | `archive` |
 | `max_blob_size_mb` | integer | `100` |
 | `max_request_size_mb` | integer | `250` |
@@ -335,7 +335,9 @@ The exact root `feeds.md` is always excluded independently of this list.
 
 Notes:
 
-- `cas_path` supports `~/...` (expanded to your home directory).
+- `cas_path` is resolved against the vault root when relative (the default
+  keeps the store inside the vault at `.clepsydra/cas`); `~/...` expands to
+  your home directory; absolute paths are used as-is.
 - Archive request size limits are enforced at ingest time. `max_blob_size_mb`
   bounds one deconstructed resource; `max_request_size_mb` bounds the whole
   capture (the deconstructed snapshot plus every resource it references).
@@ -438,7 +440,7 @@ annotations_folder = "library/annotations"
 
 [archive]
 enabled = true
-cas_path = "~/.clepsydra/cas"
+cas_path = ".clepsydra/cas"
 default_path_prefix = "archive"
 max_blob_size_mb = 100
 max_request_size_mb = 250

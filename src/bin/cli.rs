@@ -39,6 +39,18 @@ enum CasCommands {
         #[arg(long)]
         write: bool,
     },
+    #[command(
+        about = "Copy this vault's referenced blobs from an old CAS into the vault's store and rebuild cas.db",
+        long_about = "Moves the content-addressed store into the vault (ADR 0005). Copies only the blobs referenced by this vault's live pages and rubbish items from --from (default: the pre-2026-08-28 store at ~/.clepsydra/cas) into [archive].cas_path (default .clepsydra/cas inside the vault), verifies each blob's sha256, then rebuilds the destination cas.db from blob files plus a vault-wide frontmatter scan. The source store is never modified; blobs no page references stay behind. Stop `clep serve` first: the rebuild replaces every cas.db row from a point-in-time scan, so a capture landing while it runs is miscounted (ref_count 0 or untyped until the next `clep cas rebuild`); a server still on the old binary would also keep writing new blobs into the source store after the scan. Dry run by default; --write applies."
+    )]
+    Migrate {
+        /// Source CAS root to copy from (default: ~/.clepsydra/cas).
+        #[arg(long)]
+        from: Option<PathBuf>,
+        /// Apply changes (default is a dry run).
+        #[arg(long)]
+        write: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -506,9 +518,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 let vault_root =
                     clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
                 let vault = clepsydra::vault::Vault::open(&vault_root)?;
-                let cas_path_raw = &vault.config().archive.cas_path;
-                let cas_path = clepsydra::expand_tilde(cas_path_raw)
-                    .unwrap_or_else(|| PathBuf::from(cas_path_raw));
+                let cas_path = vault.cas_root();
                 let cas_db = cas_path.join("cas.db");
 
                 println!(
@@ -545,9 +555,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 let vault_root =
                     clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
                 let vault = clepsydra::vault::Vault::open(&vault_root)?;
-                let cas_path_raw = &vault.config().archive.cas_path;
-                let cas_path = clepsydra::expand_tilde(cas_path_raw)
-                    .unwrap_or_else(|| PathBuf::from(cas_path_raw));
+                let cas_path = vault.cas_root();
 
                 println!(
                     "Rebuilding {} from blob files under {} plus a vault-wide scan.",
@@ -591,6 +599,67 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                         1
                     },
                 )
+            }
+            CasCommands::Migrate { from, write } => {
+                let cwd = std::env::current_dir()?;
+                let (settings, config_path) = clepsydra::Settings::load(&cwd)?;
+                let vault_root =
+                    clepsydra::resolve_vault_root(&settings.vault.root, &config_path, &cwd);
+                let vault = clepsydra::vault::Vault::open(&vault_root)?;
+
+                let source = from.unwrap_or_else(|| {
+                    clepsydra::expand_tilde(clepsydra::vault::cas_migrate::LEGACY_DEFAULT_CAS_PATH)
+                        .unwrap_or_else(|| {
+                            PathBuf::from(clepsydra::vault::cas_migrate::LEGACY_DEFAULT_CAS_PATH)
+                        })
+                });
+
+                println!(
+                    "Migrating referenced blobs from {} into {}.",
+                    source.display(),
+                    vault.cas_root().display()
+                );
+                let report = clepsydra::vault::cas_migrate::migrate(&vault, &source, write)?;
+                let verb = if report.dry_run {
+                    "would copy"
+                } else {
+                    "copied"
+                };
+                for hash in &report.copied {
+                    println!("  {verb} {hash}");
+                }
+                if !report.already_present.is_empty() {
+                    println!("  {} already present", report.already_present.len());
+                }
+                for warning in &report.warnings {
+                    println!("  warning {warning}");
+                }
+                if let Some(rebuild) = &report.rebuild {
+                    println!(
+                        "cas.db: {} row(s), {} untyped, {} missing",
+                        rebuild.rows_written,
+                        rebuild.untyped_blobs.len(),
+                        rebuild.missing_files.len()
+                    );
+                }
+                println!(
+                    "cas migrate: {} blob(s) {verb} ({} bytes), {} already present, {} missing, {} corrupt, {} failed, {} typed from the source cas.db, {} orphan(s) left in source, {} warning(s){}",
+                    report.copied.len(),
+                    report.bytes_copied,
+                    report.already_present.len(),
+                    report.missing.len(),
+                    report.corrupt.len(),
+                    report.failed.len(),
+                    report.types_from_source,
+                    report.orphans_left,
+                    report.warnings.len(),
+                    if report.dry_run {
+                        " (dry run — pass --write to apply)"
+                    } else {
+                        ""
+                    }
+                );
+                Ok(if report.warnings.is_empty() { 0 } else { 1 })
             }
         },
         Commands::Codes { command } => match command {
@@ -1283,6 +1352,35 @@ mod cli_tests {
     #[test]
     fn cas_rebuild_accepts_write() {
         assert!(cas_rebuild_write(&["clep", "cas", "rebuild", "--write"]));
+    }
+
+    #[test]
+    fn cas_migrate_defaults_to_dry_run_and_legacy_source() {
+        let cli = Cli::try_parse_from(["clep", "cas", "migrate"]).unwrap();
+        match cli.command {
+            Commands::Cas {
+                command: CasCommands::Migrate { from, write },
+            } => {
+                assert!(from.is_none());
+                assert!(!write);
+            }
+            other => panic!("expected cas migrate, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cas_migrate_accepts_from_and_write() {
+        let cli = Cli::try_parse_from(["clep", "cas", "migrate", "--from", "/old/cas", "--write"])
+            .unwrap();
+        match cli.command {
+            Commands::Cas {
+                command: CasCommands::Migrate { from, write },
+            } => {
+                assert_eq!(from.unwrap(), PathBuf::from("/old/cas"));
+                assert!(write);
+            }
+            other => panic!("expected cas migrate, got {other:?}"),
+        }
     }
 
     fn codes_migrate_write(args: &[&str]) -> bool {

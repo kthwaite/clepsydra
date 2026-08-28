@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
@@ -176,7 +176,29 @@ fn default_archive_enabled() -> bool {
 }
 
 fn default_cas_path() -> String {
-    "~/.clepsydra/cas".to_string()
+    ".clepsydra/cas".to_string()
+}
+
+/// Resolve `[archive].cas_path` to an absolute directory. `~` and `~/…`
+/// expand to the home directory, an absolute path is used as-is, and any
+/// other path is relative to the vault root — so the default
+/// `.clepsydra/cas` lands inside the vault (ADR 0005). A blank value means
+/// "the default": `vault_root.join("")` would otherwise make the vault root
+/// itself the blob store.
+pub fn resolve_cas_path(raw: &str, vault_root: &Path) -> PathBuf {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return vault_root.join(default_cas_path());
+    }
+    if let Some(expanded) = crate::expand_tilde(raw) {
+        return expanded;
+    }
+    let path = Path::new(raw);
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        vault_root.join(path)
+    }
 }
 
 fn default_archive_path_prefix() -> String {
@@ -222,11 +244,43 @@ mod tests {
     fn archive_config_defaults() {
         let config = VaultConfig::default();
         assert!(config.archive.enabled);
-        assert_eq!(config.archive.cas_path, "~/.clepsydra/cas");
+        assert_eq!(config.archive.cas_path, ".clepsydra/cas");
         assert_eq!(config.archive.default_path_prefix, "archive");
         assert_eq!(config.archive.max_blob_size_mb, 100);
         assert_eq!(config.archive.max_request_size_mb, 250);
         assert_eq!(config.archive.gc_min_age_days, 30);
+    }
+
+    #[test]
+    fn resolve_cas_path_rules() {
+        let root = Path::new("/vaults/main");
+        assert_eq!(
+            resolve_cas_path(".clepsydra/cas", root),
+            PathBuf::from("/vaults/main/.clepsydra/cas")
+        );
+        assert_eq!(
+            resolve_cas_path("cas-here", root),
+            PathBuf::from("/vaults/main/cas-here")
+        );
+        // blank / whitespace means the default, never the vault root itself
+        assert_eq!(
+            resolve_cas_path("", root),
+            PathBuf::from("/vaults/main/.clepsydra/cas")
+        );
+        assert_eq!(
+            resolve_cas_path("  ", root),
+            PathBuf::from("/vaults/main/.clepsydra/cas")
+        );
+        assert_eq!(
+            resolve_cas_path("/abs/cas", root),
+            PathBuf::from("/abs/cas")
+        );
+        let home = dirs::home_dir().expect("home dir in tests");
+        assert_eq!(
+            resolve_cas_path("~/.clepsydra/cas", root),
+            home.join(".clepsydra/cas")
+        );
+        assert_eq!(resolve_cas_path("~", root), home);
     }
 
     #[test]

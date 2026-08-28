@@ -699,9 +699,16 @@ pub async fn build_app_state_with_settings(
             startup_transaction_error("startup transaction finalization", source, vault.root())
         })?;
     }
-    let cas_path_raw = &vault.config().archive.cas_path;
-    let cas_path = expand_tilde(cas_path_raw).unwrap_or_else(|| PathBuf::from(cas_path_raw));
-    let cas = vault::cas::ContentStore::open(&cas_path)?;
+    let cas = vault::cas::ContentStore::open(&vault.cas_root())?;
+    if cas.stats().map(|s| s.blob_count == 0).unwrap_or(false)
+        && let Some(legacy) = vault::cas_migrate::legacy_store_with_blobs()
+    {
+        tracing::warn!(
+            "CAS at {} is empty but a legacy store exists at {}; archived pages will 404 until `clep cas migrate --write` runs",
+            vault.cas_root().display(),
+            legacy.display()
+        );
+    }
     let feed_runtime = if features.feeds {
         Some(crate::feeds::runtime::FeedRuntime::open(
             vault.root(),
