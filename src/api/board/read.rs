@@ -49,11 +49,10 @@ pub(crate) async fn get_board(
             // --- Columns -------------------------------------------------------
             let columns: Vec<BoardColumn> = COLUMNS
                 .iter()
-                .map(|&(id, label, sub, wip)| BoardColumn {
+                .map(|&(id, label, sub)| BoardColumn {
                     id: id.to_string(),
                     label: label.to_string(),
                     sub: sub.to_string(),
-                    wip,
                 })
                 .collect();
 

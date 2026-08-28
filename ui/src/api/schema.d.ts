@@ -2026,8 +2026,6 @@ export interface components {
             id: string;
             label: string;
             sub: string;
-            /** Format: int32 */
-            wip: number;
         };
         BoardCycle: {
             code: string;
@@ -2183,8 +2181,9 @@ export interface components {
         /** @description POST /board/cycles request body. */
         CreateCycleRequest: {
             /**
-             * @description Optional explicit code (e.g. "S-20"). If absent, auto-generated as
-             *     "S-{max+1}" from existing CYCLE page stems.
+             * @description Optional explicit code (e.g. "S-calm-heron-2xm9p"); must match the
+             *     petname format (docs/adr/0003) and not collide with an existing
+             *     CYCLE page stem. If absent, a fresh code is minted.
              */
             code?: string | null;
             /** @description End date (YYYY-MM-DD string). */

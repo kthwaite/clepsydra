@@ -6,11 +6,11 @@ import { deriveProjectScopes } from "../board-projects";
 /** Minimal BoardResponse fixture reused across tasking view tests. */
 export const BOARD_FIXTURE: BoardResponse = {
   columns: [
-    { id: "INTAKE", label: "INTAKE", sub: "", wip: 0 },
-    { id: "TRIAGE", label: "TRIAGE", sub: "", wip: 0 },
-    { id: "FIELD", label: "IN-FIELD", sub: "", wip: 0 },
-    { id: "REVIEW", label: "REVIEW", sub: "", wip: 0 },
-    { id: "SEALED", label: "SEALED", sub: "", wip: 0 },
+    { id: "INTAKE", label: "INTAKE", sub: "" },
+    { id: "TRIAGE", label: "TRIAGE", sub: "" },
+    { id: "FIELD", label: "IN-FIELD", sub: "" },
+    { id: "REVIEW", label: "REVIEW", sub: "" },
+    { id: "SEALED", label: "SEALED", sub: "" },
   ],
   operations: [
     {

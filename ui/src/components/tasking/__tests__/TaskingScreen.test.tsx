@@ -565,9 +565,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     await userEvent.click(screen.getByTestId("filter-bar-add"));
 
     for (const label of ["Project", "Tags", "Priority", "Status", "Blocked"]) {
-      expect(
-        screen.getByRole("button", { name: label }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
   });
 
@@ -579,17 +577,10 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     await userEvent.click(screen.getByTestId("filter-bar-add"));
     await userEvent.click(screen.getByTestId("filter-bar-field-pri"));
 
-    for (const label of [
-      "P0 Critical",
-      "P1 High",
-      "P2 Medium",
-      "P3 Low",
-    ]) {
+    for (const label of ["P0 Critical", "P1 High", "P2 Medium", "P3 Low"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
-    await userEvent.click(
-      screen.getByRole("button", { name: "P0 Critical" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "P0 Critical" }));
 
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
@@ -611,17 +602,14 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     for (const label of ["Inbox", "Ready", "In Progress", "Review", "Done"]) {
       expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
     }
-    await userEvent.click(
-      screen.getByRole("button", { name: "In Progress" }),
-    );
+    await userEvent.click(screen.getByRole("button", { name: "In Progress" }));
 
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-option-status-FIELD")).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
+    expect(
+      screen.getByTestId("filter-bar-option-status-FIELD"),
+    ).toHaveAttribute("aria-pressed", "true");
   });
 
   it("typing text filters visible cards and shows the N OF M count", async () => {
@@ -746,7 +734,6 @@ describe("TaskingScreen — fixed human-facing status labels", () => {
           id: "PAUSED",
           label: "SERVER PAUSED",
           sub: "server paused",
-          wip: 0,
         },
       ],
     };
@@ -763,13 +750,19 @@ describe("TaskingScreen — fixed human-facing status labels", () => {
     ]) {
       const column = screen.getByTestId(`kb-col-${id}`);
       expect(within(column).getByText(sublabel)).toBeInTheDocument();
-      expect(within(column).queryByText(retiredSublabel)).not.toBeInTheDocument();
+      expect(
+        within(column).queryByText(retiredSublabel),
+      ).not.toBeInTheDocument();
     }
 
     const unknown = screen.getByTestId("kb-col-PAUSED");
     expect(within(unknown).getAllByText("PAUSED")).toHaveLength(2);
-    expect(within(unknown).queryByText("SERVER PAUSED")).not.toBeInTheDocument();
-    expect(within(unknown).queryByText("server paused")).not.toBeInTheDocument();
+    expect(
+      within(unknown).queryByText("SERVER PAUSED"),
+    ).not.toBeInTheDocument();
+    expect(
+      within(unknown).queryByText("server paused"),
+    ).not.toBeInTheDocument();
     expect(relabeled.columns.map((column) => column.sub)).toEqual([
       ...retired,
       "server paused",

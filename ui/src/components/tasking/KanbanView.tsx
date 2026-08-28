@@ -271,10 +271,6 @@ export function KanbanView({
           items.length === 1 ? "task" : "tasks"
         }`;
 
-        const over = col.wip > 0 && items.length > col.wip;
-        const fill =
-          col.wip > 0 ? Math.min(100, (items.length / col.wip) * 100) : 0;
-
         return (
           <KanbanDropColumn
             key={col.id}
@@ -283,8 +279,11 @@ export function KanbanView({
             onMoveTask={moveTask}
             taskStatusById={taskStatusById}
           >
-            {/* Column header */}
-            <div className="sticky top-0 z-[2] flex items-center gap-[8px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)] py-[8px]">
+            {/* Column header — one fixed-height row; only the sub-label may truncate */}
+            <div
+              className="sticky top-0 z-[2] flex h-[36px] items-center gap-[8px] border-b border-[var(--rule)] bg-[var(--bg-2)] px-[var(--pad)]"
+              data-testid={`kb-head-${col.id}`}
+            >
               <span className="cl-display whitespace-nowrap text-[12px] font-bold uppercase tracking-[0.14em] text-[var(--ink)]">
                 {displayLabel}
               </span>
@@ -309,43 +308,18 @@ export function KanbanView({
                 +
               </button>
               <span
-                className="cl-mono ml-auto min-w-[22px] border px-[5px] text-center text-[var(--fs-xs)] tracking-[0.1em] font-variant-numeric"
-                style={
-                  over
-                    ? {
-                        color: "var(--hot)",
-                        borderColor: "var(--hot)",
-                      }
-                    : {
-                        color: "var(--ink-2)",
-                        borderColor: "var(--rule)",
-                      }
-                }
+                className="cl-mono ml-auto min-w-[22px] shrink-0 whitespace-nowrap border border-[var(--rule)] px-[5px] text-center text-[var(--fs-xs)] tracking-[0.1em] text-[var(--ink-2)] font-variant-numeric"
                 data-testid={`kb-cnt-${col.id}`}
               >
                 {taskCount}
-                {col.wip > 0 ? ` · limit ${col.wip}` : ""}
               </span>
             </div>
 
-            {/* WIP fill bar */}
-            {col.wip > 0 ? (
-              <div className="h-[2px] border-b border-[var(--rule)] bg-[var(--bg-3)]">
-                <i
-                  className="block h-full transition-[width] duration-[200ms]"
-                  style={{
-                    width: `${fill}%`,
-                    background: over ? "var(--hot)" : "var(--cool)",
-                  }}
-                />
-              </div>
-            ) : (
-              /* nolimit — transparent spacer so layout stays consistent */
-              <div className="h-[2px] bg-transparent" />
-            )}
-
             {/* Column body */}
-            <div className="flex flex-1 flex-col gap-[9px] overflow-y-auto p-[var(--pad)] min-h-0">
+            <div
+              className="flex flex-1 flex-col gap-[9px] overflow-y-auto p-[var(--pad)] min-h-0"
+              data-testid={`kb-body-${col.id}`}
+            >
               {items.length === 0 ? (
                 <div
                   className="cl-mono border border-dashed border-[var(--rule)] px-[8px] py-[16px] text-center text-[var(--fs-xs)] uppercase tracking-[0.18em] text-[var(--ink-4)]"
