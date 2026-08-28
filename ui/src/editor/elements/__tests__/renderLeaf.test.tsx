@@ -31,6 +31,14 @@ describe("renderLeaf", () => {
     expect(container.querySelector("del")).not.toBeNull();
   });
 
+  it("opts inline code out of spellcheck", () => {
+    const { container } = render(leaf({ code: true }));
+    expect(container.querySelector("code")).toHaveAttribute(
+      "spellcheck",
+      "false",
+    );
+  });
+
   it("renders underline with u tag", () => {
     const { container } = render(leaf({ underline: true }));
     expect(container.querySelector("u")).not.toBeNull();
