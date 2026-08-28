@@ -1922,3 +1922,29 @@ async fn concurrent_create_requests_reserve_unique_task_and_cycle_codes() {
     cycle_codes.sort();
     assert_eq!(cycle_codes, ["S-1", "S-2"]);
 }
+
+// ---------------------------------------------------------------------------
+// Operation code is the project slug, not the ADR-0002 filename stem
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn operation_code_is_the_project_slug_not_the_filename_stem() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/falls")).unwrap();
+        std::fs::write(
+            root.join("projects/falls/20260811.falls.UdpU2tJ3.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000031\n\
+             title: Falls\ntype: PROJECT\nproject: falls\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(ops.len(), 1, "expected one operation, got: {ops:?}");
+    assert_eq!(ops[0]["code"], "FALLS", "code should be the slug: {ops:?}");
+    assert_eq!(ops[0]["name"], "Falls");
+    assert_eq!(ops[0]["project"], "falls");
+}
