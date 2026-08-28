@@ -19,6 +19,7 @@ pub mod canonical;
 pub mod cas;
 pub mod cas_scan;
 pub mod checkpoint;
+pub mod code;
 pub mod config;
 pub mod conflict;
 pub mod context;
