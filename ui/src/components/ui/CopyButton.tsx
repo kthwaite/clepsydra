@@ -1,5 +1,6 @@
 import { Check, Copy } from "lucide-react";
-import { Button, Tooltip, TooltipTrigger } from "react-aria-components";
+import { Button, TooltipTrigger } from "react-aria-components";
+import { VesselTooltip } from "#/components/ui/tooltip";
 import { useCopyToClipboard } from "#/hooks/useCopyToClipboard";
 import { cn } from "#/lib/cn";
 
@@ -41,14 +42,7 @@ export function CopyButton({
       >
         {copied ? <Check size={13} /> : <Copy size={13} />}
       </Button>
-      <Tooltip
-        placement="top"
-        offset={4}
-        className="cl-mono z-50 border border-rule px-2 py-0.5 text-[10px] tracking-[0.08em] text-ink"
-        style={{ background: "#15140f", borderLeft: "2px solid var(--accent)" }}
-      >
-        {text}
-      </Tooltip>
+      <VesselTooltip>{text}</VesselTooltip>
     </TooltipTrigger>
   );
 }
