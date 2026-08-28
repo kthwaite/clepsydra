@@ -202,9 +202,8 @@ export function useBaseTableController(
   const openTab = useOpenTab();
   const detail = useBase(slug);
   const activeView = requestedActiveView || detail.data?.views?.[0]?.name || "";
-  const overrides = useViewOverrides(
-    `${mode}:${slug}:${asciiCaseFold(activeView)}`,
-  );
+  const viewResetKey = `${mode}:${slug}:${asciiCaseFold(activeView)}`;
+  const overrides = useViewOverrides(viewResetKey);
   const effectiveFilter = useMemo(
     () =>
       composeQuickFilters(
@@ -390,6 +389,7 @@ export function useBaseTableController(
     embedFilter: mode === "embedded" ? effectiveFilter : undefined,
     refetchView: refetchRowActionsView,
     refetchDefinition: detailRefetch,
+    resetKey: viewResetKey,
   });
   const handleDuplicateRow = useCallback(
     (row: QueryRow) => {

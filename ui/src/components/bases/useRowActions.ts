@@ -19,10 +19,14 @@ import { outputContains } from "./query-output";
 
 type PageBaseProperty = components["schemas"]["PageBaseProperty"];
 
+/** The filename minus its `.md` extension, for an untitled row's fallbacks. */
+function pathStem(path: string): string {
+  return path.split("/").pop()?.replace(/\.md$/, "") ?? path;
+}
+
 /** `[[Title]]`, or `[[stem]]` when the row has no title. */
 export function wikilinkFor(row: QueryRow): string {
-  const stem = row.path.split("/").pop()?.replace(/\.md$/, "") ?? row.path;
-  return `[[${row.title ?? stem}]]`;
+  return `[[${row.title ?? pathStem(row.path)}]]`;
 }
 
 /**
@@ -67,6 +71,8 @@ export interface RowActionsOptions {
   embedFilter: BaseFilter | undefined;
   refetchView(): Promise<{ output: QueryOutput | undefined }>;
   refetchDefinition(): Promise<unknown>;
+  /** Notice/error are wiped when this changes, e.g. on a view or slug change. */
+  resetKey: string;
 }
 
 export interface RowActionsModel {
@@ -89,13 +95,24 @@ export function useRowActions(options: RowActionsOptions): RowActionsModel {
     embedFilter,
     refetchView,
     refetchDefinition,
+    resetKey,
   } = options;
   const openTab = useOpenTab();
   const { copy } = useCopyToClipboard();
   const archivePage = useArchivePage();
   const { mutateAsync: createMember } = useCreateBaseMember();
-  const [notice, setNotice] = useState<string>();
-  const [error, setError] = useState<string>();
+  const [stored, setStored] = useState<{
+    key: string;
+    notice: string | undefined;
+    error: string | undefined;
+  }>({ key: resetKey, notice: undefined, error: undefined });
+  const notice = stored.key === resetKey ? stored.notice : undefined;
+  const error = stored.key === resetKey ? stored.error : undefined;
+  const setResult = useCallback(
+    (next: { notice?: string; error?: string }) =>
+      setStored({ key: resetKey, notice: next.notice, error: next.error }),
+    [resetKey],
+  );
 
   const openInNewTab = useCallback(
     (path: string) => openTab("page", path, undefined, { mode: "new" }),
@@ -116,8 +133,7 @@ export function useRowActions(options: RowActionsOptions): RowActionsModel {
 
   const duplicate = useCallback(
     async (row: QueryRow) => {
-      setNotice(undefined);
-      setError(undefined);
+      setResult({});
       if (!definition) return;
       try {
         const [propertiesResult, pageResult] = await Promise.all([
@@ -130,7 +146,7 @@ export function useRowActions(options: RowActionsOptions): RowActionsModel {
         ]);
         if (propertiesResult.error) throw propertiesResult.error;
         if (pageResult.error) throw pageResult.error;
-        const title = `${row.title ?? row.path} (copy)`;
+        const title = `${row.title ?? pathStem(row.path)} (copy)`;
         const created = await createMember({
           params: { path: { slug } },
           body: {
@@ -150,24 +166,25 @@ export function useRowActions(options: RowActionsOptions): RowActionsModel {
         const included = refreshed.output
           ? outputContains(refreshed.output, created.id)
           : true;
-        setNotice(
-          included
+        setResult({
+          notice: included
             ? `Duplicated as “${created.title}”.`
             : `Duplicated as “${created.title}”, but it is not included in the current view.`,
-        );
+        });
       } catch (failure) {
         if (isApiConflict(failure)) {
           await refetchDefinition();
-          setError("The base changed elsewhere; try again.");
+          setResult({ error: "The base changed elsewhere; try again." });
           return;
         }
         const diagnostics = decodeBaseMemberDiagnostics(failure);
         const base = formatApiError(failure, "Duplicate failed.");
-        setError(
-          diagnostics.length > 0
-            ? `${base} — ${diagnostics.map((d) => d.message).join("; ")}`
-            : base,
-        );
+        setResult({
+          error:
+            diagnostics.length > 0
+              ? `${base} — ${diagnostics.map((d) => d.message).join("; ")}`
+              : base,
+        });
       }
     },
     [
@@ -178,14 +195,14 @@ export function useRowActions(options: RowActionsOptions): RowActionsModel {
       embedFilter,
       refetchDefinition,
       refetchView,
+      setResult,
       slug,
     ],
   );
 
   const archive = useCallback(
     async (row: QueryRow) => {
-      setNotice(undefined);
-      setError(undefined);
+      setResult({});
       try {
         await archivePage.mutateAsync({ params: { path: { path: row.path } } });
       } catch (failure) {
@@ -195,7 +212,7 @@ export function useRowActions(options: RowActionsOptions): RowActionsModel {
       }
       await refetchView();
     },
-    [archivePage.mutateAsync, refetchView],
+    [archivePage.mutateAsync, refetchView, setResult],
   );
 
   return {

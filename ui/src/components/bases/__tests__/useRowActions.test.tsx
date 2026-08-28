@@ -90,6 +90,7 @@ function options(
       },
     }),
     refetchDefinition: vi.fn().mockResolvedValue(undefined),
+    resetKey: "reading:Continues",
     ...overrides,
   };
 }
@@ -207,6 +208,57 @@ describe("useRowActions", () => {
     expect(result.current.notice).toBe("Duplicated as “Book A (copy)”.");
   });
 
+  it("uses the path stem, not the full path, for an untitled row's duplicate title", async () => {
+    mocks.get.mockResolvedValue({ data: { properties: [], meta: {} } });
+    mocks.createMember.mockResolvedValue({
+      id: "02",
+      path: "books/book-copy.md",
+      title: "book (copy)",
+      revision: "r2",
+    });
+    const { result } = renderHook(() => useRowActions(options()));
+    await act(async () => result.current.duplicate({ ...row, title: null }));
+    expect(mocks.createMember).toHaveBeenCalledWith(
+      expect.objectContaining({
+        body: expect.objectContaining({ title: "book (copy)" }),
+      }),
+    );
+  });
+
+  it("reports the notice when the refreshed view excludes the duplicate", async () => {
+    mocks.get.mockResolvedValue({ data: { properties: [], meta: {} } });
+    mocks.createMember.mockResolvedValue({
+      id: "02",
+      path: "books/book-copy.md",
+      title: "Book A (copy)",
+      revision: "r2",
+    });
+    const opts = options({
+      refetchView: vi.fn().mockResolvedValue({
+        output: { shape: "flat", rows: [], total: 0, aggregates: [] },
+      }),
+    });
+    const { result } = renderHook(() => useRowActions(opts));
+    await act(async () => result.current.duplicate(row));
+    expect(result.current.notice).toBe(
+      "Duplicated as “Book A (copy)”, but it is not included in the current view.",
+    );
+  });
+
+  it("refetches the definition and reports a conflict on a 409", async () => {
+    mocks.get.mockResolvedValue({ data: { properties: [], meta: {} } });
+    mocks.createMember.mockRejectedValue({
+      status: 409,
+      error: "conflict",
+      detail: {},
+    });
+    const opts = options();
+    const { result } = renderHook(() => useRowActions(opts));
+    await act(async () => result.current.duplicate(row));
+    expect(opts.refetchDefinition).toHaveBeenCalled();
+    expect(result.current.error).toBe("The base changed elsewhere; try again.");
+  });
+
   it("reports duplicate failures with diagnostics", async () => {
     mocks.get.mockResolvedValue({ data: { properties: [], meta: {} } });
     mocks.createMember.mockRejectedValue({
@@ -239,5 +291,25 @@ describe("useRowActions", () => {
       params: { path: { path: "books/book.md" } },
     });
     expect(opts.refetchView).toHaveBeenCalled();
+  });
+
+  it("clears the notice and error when resetKey changes", async () => {
+    mocks.get.mockResolvedValue({ data: { properties: [], meta: {} } });
+    mocks.createMember.mockRejectedValue({
+      status: 400,
+      error: "member does not match",
+      detail: { diagnostics: [] },
+    });
+    const { result, rerender } = renderHook(
+      (props: Parameters<typeof useRowActions>[0]) => useRowActions(props),
+      { initialProps: options() },
+    );
+    await act(async () => result.current.duplicate(row));
+    expect(result.current.error).toBe("member does not match");
+
+    rerender(options({ resetKey: "reading:Shelf" }));
+
+    expect(result.current.error).toBeUndefined();
+    expect(result.current.notice).toBeUndefined();
   });
 });
