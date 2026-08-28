@@ -1,5 +1,8 @@
-import { useEffect, useState, useSyncExternalStore } from "react";
-import { ToggleButton } from "react-aria-components";
+import { Maximize2 } from "lucide-react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { Button, ToggleButton, TooltipTrigger } from "react-aria-components";
+import { Lightbox } from "#/components/ui/lightbox";
+import { VesselTooltip } from "#/components/ui/tooltip";
 import { cn } from "#/lib/cn";
 import {
   type MermaidRenderResult,
@@ -55,7 +58,11 @@ export function useMermaidRender(code: string | null): MermaidState {
   return state;
 }
 
-function DiagramSvg({ svg }: { svg: string }) {
+/**
+ * The rendered picture itself. Sized to its container, so it fits the reading
+ * column inline and the stage inside a lightbox.
+ */
+export function DiagramSvg({ svg }: { svg: string }) {
   return (
     <div
       className="cl-mermaid-svg flex justify-center [&>svg]:h-auto [&>svg]:max-w-full"
@@ -109,6 +116,54 @@ export function MermaidDiagram({
         <DiagramSvg svg={state.svg} />
       )}
     </div>
+  );
+}
+
+/**
+ * Header control that opens the rendered diagram in a pan/zoom lightbox, for
+ * diagrams too dense to read at the width of the reading column. Renders
+ * nothing until there is an SVG to show.
+ */
+export function MermaidExpandButton({
+  svg,
+  className,
+}: {
+  svg: string | null;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  // Re-rendering the diagram (on a theme change, say) empties `svg` until
+  // mermaid comes back. An open lightbox holds the last picture across that
+  // gap, rather than closing itself and snatching focus back to this button.
+  const held = useRef<string | null>(null);
+  if (svg !== null) held.current = svg;
+  const shown = svg ?? (open ? held.current : null);
+
+  if (shown === null) return null;
+
+  return (
+    <>
+      <TooltipTrigger delay={300} closeDelay={0}>
+        <Button
+          aria-label="Expand diagram"
+          onPress={() => setOpen(true)}
+          className={cn(
+            "inline-flex cursor-pointer items-center justify-center bg-transparent p-0 text-ink-mute outline-none transition-colors data-[focus-visible]:text-accent data-[hovered]:text-accent",
+            // Stay reachable when a parent uses `className` to hover-reveal us.
+            "data-[focus-visible]:opacity-100",
+            className,
+          )}
+        >
+          <Maximize2 size={13} />
+        </Button>
+        <VesselTooltip>Expand diagram</VesselTooltip>
+      </TooltipTrigger>
+      <Lightbox isOpen={open} onOpenChange={setOpen} label="Diagram">
+        <div className="w-full">
+          <DiagramSvg svg={shown} />
+        </div>
+      </Lightbox>
+    </>
   );
 }
 
