@@ -72,6 +72,9 @@ vi.mock("@tanstack/react-router", () => ({
 vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, refetch: vi.fn() }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: () => ({ data: null, refetch: vi.fn() }),
+}));
 vi.mock("#/api/index", () => ({
   useSearch: useSearchMock,
   useTags: useTagsMock,
@@ -105,7 +108,7 @@ vi.mock("#/store/workspace", () => {
 
 import { CommandPalette } from "#/components/codex/CommandPalette";
 import { STATIC_COMMANDS } from "#/components/codex/commandRegistry";
-import { todayJournalPath } from "#/lib/journal";
+import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
 import { useUiStore } from "#/store/ui";
 
 describe("CommandPalette keyboard navigation", () => {
@@ -157,6 +160,23 @@ describe("CommandPalette keyboard navigation", () => {
 
     expect(screen.getByText("Today's journal")).toBeInTheDocument();
     expect(screen.queryByText("Open Diurnal")).not.toBeInTheDocument();
+  });
+
+  it("lists Today's AI journal and opens a tab when run", async () => {
+    const user = userEvent.setup();
+    render(<CommandPalette />);
+
+    expect(screen.getByText("Today's AI journal")).toBeInTheDocument();
+
+    const query = screen.getByRole("textbox", { name: "Command query" });
+    await user.type(query, "Today's AI journal{Enter}");
+
+    expect(openTabMock).toHaveBeenCalledWith(
+      "page",
+      todayAiJournalPath(),
+      expect.any(String),
+    );
+    expect(useUiStore.getState().isSearchOpen).toBe(false);
   });
 
   it("resets the selected command as soon as typing changes the query", async () => {

@@ -4,6 +4,7 @@ import type { ShortcutId } from "#/lib/shortcuts";
 export type StaticCommandAction =
   | "navigate-atrium"
   | "open-today-journal"
+  | "open-today-ai-journal"
   | "open-capture-aside"
   | "open-constellation"
   | "navigate-gazetteer"
@@ -152,6 +153,11 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
     title: "Today's journal",
     shortcut: "journal.today",
     action: "open-today-journal",
+  },
+  {
+    id: "journal.ai.today",
+    title: "Today's AI journal",
+    action: "open-today-ai-journal",
   },
   {
     id: "journal.capture",

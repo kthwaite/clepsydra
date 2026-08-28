@@ -14,8 +14,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { GraphEdge, GraphNode } from "#/api/types";
 import { type Kind, kindColorVar, resolveKindFromPath } from "#/lib/kind";
 
-/** Kind-coded node glyph: square=PROJECT, triangle=TODO, ring=JOURNAL, dot=other. */
-function nodeShape(kind: Kind): { d: string; filled: boolean } {
+/** Kind-coded node glyph: square=PROJECT, triangle=TODO, ring=JOURNAL,
+ *  dashed ring=AI_JOURNAL, dot=other. */
+function nodeShape(kind: Kind): {
+  d: string;
+  filled: boolean;
+  dashed?: boolean;
+} {
   const s = 6;
   if (kind === "PROJECT")
     return { d: `M${-s} ${-s}h${2 * s}v${2 * s}h${-2 * s}Z`, filled: true };
@@ -25,6 +30,12 @@ function nodeShape(kind: Kind): { d: string; filled: boolean } {
     return {
       d: `M${-s} 0a${s} ${s} 0 1 0 ${2 * s} 0a${s} ${s} 0 1 0 ${-2 * s} 0`,
       filled: false,
+    };
+  if (kind === "AI_JOURNAL")
+    return {
+      d: `M${-s} 0a${s} ${s} 0 1 0 ${2 * s} 0a${s} ${s} 0 1 0 ${-2 * s} 0`,
+      filled: false,
+      dashed: true,
     };
   const r = 4;
   return {
@@ -177,6 +188,9 @@ export function ForceGraph({ nodes, edges, onNodeClick }: ForceGraphProps) {
       .attr("stroke", (d) => kindColorVar(resolveKindFromPath(d.path)))
       .attr("stroke-width", (d) =>
         nodeShape(resolveKindFromPath(d.path)).filled ? 0 : 1.5,
+      )
+      .attr("stroke-dasharray", (d) =>
+        nodeShape(resolveKindFromPath(d.path)).dashed ? "2,2" : null,
       );
 
     // Labels

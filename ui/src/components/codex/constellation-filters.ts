@@ -12,7 +12,11 @@ export function applyFilters(
   opts: FilterOptions,
 ): { nodes: GraphNode[]; edges: GraphEdge[] } {
   let nodes = opts.hideDaily
-    ? graph.nodes.filter((node) => !node.path.startsWith("journals/"))
+    ? graph.nodes.filter(
+        (node) =>
+          !node.path.startsWith("journals/") &&
+          !node.path.startsWith("ai-journals/"),
+      )
     : graph.nodes;
   let nodeIds = new Set(nodes.map((node) => node.id));
   let edges = graph.edges.filter(

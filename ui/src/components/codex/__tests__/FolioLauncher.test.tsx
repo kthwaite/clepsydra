@@ -11,6 +11,9 @@ vi.mock("#/hooks/useOpenTab", () => ({
 vi.mock("#/api/journal", () => ({
   useJournalToday: () => ({ data: null, refetch: vi.fn() }),
 }));
+vi.mock("#/api/aiJournal", () => ({
+  useAiJournalToday: () => ({ data: null, refetch: vi.fn() }),
+}));
 
 import { todayJournalPath } from "#/lib/journal";
 import { useUiStore } from "#/store/ui";
@@ -63,6 +66,13 @@ describe("FolioLauncher", () => {
       todayJournalPath(),
       expect.any(String),
     );
+  });
+
+  it("renders an AI journal action", () => {
+    render(<FolioLauncher />);
+    expect(
+      screen.getByRole("button", { name: /ai journal/i }),
+    ).toBeInTheDocument();
   });
 
   it("opens a recent folio when its row is clicked", async () => {

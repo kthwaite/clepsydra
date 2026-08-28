@@ -14,6 +14,17 @@ const graph = {
   ],
 };
 
+const graphWithAiJournal = {
+  nodes: [
+    ...graph.nodes,
+    { id: "f", path: "ai-journals/2026-08-27.md", title: "AI Journal" },
+  ],
+  edges: [
+    ...graph.edges,
+    { source: "a", target: "f", kind: "wikilink" },
+  ],
+};
+
 describe("applyFilters", () => {
   it("includes orphans by default", () => {
     const out = applyFilters(graph, {
@@ -45,6 +56,17 @@ describe("applyFilters", () => {
     expect(out.nodes.map((n) => n.id)).not.toContain("c");
     // edges referring to removed nodes are dropped
     expect(out.edges.find((e) => e.target === "c")).toBeUndefined();
+  });
+
+  it("hides daily AI journal nodes when toggled", () => {
+    const out = applyFilters(graphWithAiJournal, {
+      orphansVisible: true,
+      hideDaily: true,
+      depth: null,
+      anchorId: null,
+    });
+    expect(out.nodes.map((n) => n.id)).not.toContain("f");
+    expect(out.edges.find((e) => e.target === "f")).toBeUndefined();
   });
 
   it("limits to N hops from anchor when depth is set", () => {
