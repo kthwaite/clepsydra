@@ -75,7 +75,7 @@ export function MeetingMeta({ path, isDraft }: KindMetaExtrasProps) {
     <section
       aria-label="Meeting details"
       data-testid="meeting-header"
-      className="mb-3 flex flex-wrap items-start gap-x-8 gap-y-2 border-b border-rule pb-3"
+      className="mb-3 flex flex-wrap items-start gap-x-8 gap-y-2"
     >
       <div className="flex min-w-[12rem] flex-col gap-1">
         <div className="cl-mono text-[9px] uppercase tracking-[0.14em] text-ink-mute">

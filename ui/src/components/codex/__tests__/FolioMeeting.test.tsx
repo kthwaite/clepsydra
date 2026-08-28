@@ -175,6 +175,7 @@ describe("Folio meeting header band", () => {
       within(band).getByRole("textbox", { name: "add attendee" }),
     ).toBeInTheDocument();
     // The rail is expanded, so a surviving rail block would be mounted.
+    expect(screen.getByText("Vitals")).toBeInTheDocument();
     expect(screen.queryByText("Meeting")).toBeNull();
   });
 

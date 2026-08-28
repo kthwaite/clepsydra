@@ -17,7 +17,7 @@ import {
 import { VesselTooltip } from "#/components/ui/tooltip";
 
 const CONTROL_CLASS =
-  "cl-mono inline-flex h-8 w-8 cursor-pointer items-center justify-center border border-rule bg-paper text-ink-mute outline-none data-[hovered]:text-accent data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-accent";
+  "cl-mono inline-flex h-8 w-8 cursor-pointer items-center justify-center border border-rule bg-paper text-ink-mute outline-none data-[hovered]:text-accent data-[focus-visible]:outline data-[focus-visible]:outline-2 data-[focus-visible]:outline-accent max-md:h-11 max-md:w-11";
 
 function LightboxControl({
   label,
@@ -108,10 +108,15 @@ export function Lightbox({
         >
           {/* The lightbox can be rendered from inside Slate's `Editable`, and
               React portals still bubble synthetic events up the React tree.
-              It owns no text fields, so nothing above it should see its keys —
-              except Tab. React Aria contains focus from a listener on
-              `document`, and React's stopPropagation() stops the native event
-              too, so shielding Tab would let focus walk out of the dialog. */}
+              This shield keeps keys pressed on the controls from reaching the
+              page below. Tab is let through so React Aria's document-level
+              focus containment can still see it and keep focus inside the
+              dialog — React's stopPropagation() would otherwise stop the
+              native event too. It does not shield keys pressed before focus
+              ever reaches a control (RAC focuses the dialog element itself on
+              open, and this wrapper is that element's child), but the global
+              shortcut dispatcher and slate-react's own editable-target check
+              cover that gap. */}
           <div
             role="document"
             className="contents"

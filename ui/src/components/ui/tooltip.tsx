@@ -22,10 +22,9 @@ export function VesselTooltip({
       placement={placement}
       offset={offset}
       className={cn(
-        "cl-mono z-50 border border-rule px-2 py-0.5 text-[10px] tracking-[0.08em] text-ink",
+        "cl-mono z-50 border border-rule border-l-2 border-l-accent bg-paper-2 px-2 py-0.5 text-[10px] tracking-[0.08em] text-ink",
         className,
       )}
-      style={{ background: "#15140f", borderLeft: "2px solid var(--accent)" }}
     >
       {children}
     </Tooltip>

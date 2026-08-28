@@ -62,7 +62,7 @@ export function useMermaidRender(code: string | null): MermaidState {
  * The rendered picture itself. Sized to its container, so it fits the reading
  * column inline and the stage inside a lightbox.
  */
-export function DiagramSvg({ svg }: { svg: string }) {
+function DiagramSvg({ svg }: { svg: string }) {
   return (
     <div
       className="cl-mermaid-svg flex justify-center [&>svg]:h-auto [&>svg]:max-w-full"
