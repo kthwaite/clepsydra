@@ -393,6 +393,13 @@ copied blob files plus the same frontmatter scan (the same work `clep cas
 rebuild` does) — `cas.db` is always rebuilt, never copied directly from the
 source.
 
+That rebuild carries the same `--write` semantics as `clep cas rebuild
+--write` (see `clep cas rebuild` above), including clearing
+`rubbish_archive_releases` for the same reason described there. On a first
+migration this is inconsequential since the destination is fresh, but
+`migrate` is safe to re-run, and a later `--write` applies that same reset
+to a store that has already been in service.
+
 Content types for blobs whose pages still carry legacy string `blobs`
 entries (no `type`) are taken from the source store's own `cas.db`, when it
 is readable — frontmatter types always win over it — so running `clep cas
