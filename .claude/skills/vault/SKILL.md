@@ -16,8 +16,8 @@ files directly, which bypasses locking, link rewriting, and the index.
 - **Kinds** — every page has exactly one kind, declared in frontmatter
   (`type =`) or inferred from its top-level folder. Tokens and canonical
   folders: NOTE→`notes/`, PROJECT→`projects/`, JOURNAL→`journals/`,
-  TODO→`todos/`, QUOTE→`quotes/`, BOOK→`books/`, CAPTURE→`captures/`,
-  CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`,
+  AI_JOURNAL→`ai-journals/`, TODO→`todos/`, QUOTE→`quotes/`, BOOK→`books/`,
+  CAPTURE→`captures/`, CODE→`code/`, PERSON→`people/`, TASK→`tasks/`, CYCLE→`cycles/`,
   RECIPE→`recipes/`, MEETING→`meetings/`, ONE_ON_ONE→`one-on-ones/`,
   AI_CONVERSATION→`conversations/`.
 - **Frontmatter** — `id` (UUID, never touch), `title`, `type`, `tags`,
@@ -40,7 +40,8 @@ files directly, which bypasses locking, link rewriting, and the index.
 
 | Intent | Tool |
 | --- | --- |
-| Fleeting thought, log entry | `vault_journal_capture` |
+| Fleeting thought, log entry (user's own, on request) | `vault_journal_capture` |
+| Agent-initiated note, work log, aside | `vault_ai_journal_capture` |
 | Current visible conversation | `vault_capture_conversation` — not create |
 | New standalone page | `vault_create_page` |
 | Targeted body change | `vault_edit_page` |
@@ -60,11 +61,16 @@ files directly, which bypasses locking, link rewriting, and the index.
 
 ## Workflows
 
-**Capture.** Fleeting input goes to today's journal via
-`vault_journal_capture` (markdown bullet, e.g. `- idea: ...`). Do not add
-`ai-generated` merely because an LLM performed the journal capture.
-Substantial input becomes a page: `vault_create_page` with `kind: CAPTURE`
-if it still needs processing, or its real kind if it's already formed.
+**Capture.** Fleeting input splits by whose journal it belongs in.
+`vault_journal_capture` writes to the user's own journal (markdown bullet,
+e.g. `- idea: ...`) — use it only when the user explicitly asks for a
+journal capture. `vault_ai_journal_capture` writes to the separate AI
+journal instead: it's the default for agent-initiated notes, work logs, and
+session asides, and takes an optional `author` label (e.g. `claude-code`) to
+attribute the entry. Do not add `ai-generated` to either capture merely
+because an LLM performed it. Substantial input becomes a page:
+`vault_create_page` with `kind: CAPTURE` if it still needs processing, or its
+real kind if it's already formed.
 
 **Conversation.** “Send this conversation to Clepsydra” means
 `vault_capture_conversation`, never `vault_create_page`: generic creation
