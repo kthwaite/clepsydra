@@ -95,6 +95,10 @@ authorization. Do not invent an `Authorization` header. An authentication prompt
 or `401` from a deployed setup comes from a reverse proxy or other network layer,
 not the Clepsydra API contract.
 
+An archived snapshot that renders without its images and fonts behind a reverse
+proxy or tunnel means that name is not in `server.public_origins`; see
+[Configuration](/docs/configuration#archive-viewer-origins-serverpublic_origins).
+
 ## API request returns `400`
 
 Open `/api/docs` on the running server and compare the exact parameter location,

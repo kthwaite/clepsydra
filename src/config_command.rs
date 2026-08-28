@@ -25,6 +25,8 @@ const LITERATE_CONFIG_TEMPLATE: &str = r##"# Clepsydra application configuration
 # port = 3000
 # Disable the embedded frontend when true. Default: false.
 # dev_mode = false
+# Reverse-proxy or tunnel origins the archive viewer may name. Default: none.
+# public_origins = ["https://clepsydra.localhost"]
 
 # [server.tls]
 # Serve HTTPS when true. Default: false.
@@ -474,6 +476,7 @@ mod tests {
             "# host = \"localhost\"",
             "# port = 3000",
             "# dev_mode = false",
+            "# public_origins = [\"https://clepsydra.localhost\"]",
             "# [server.tls]",
             "# enabled = false",
             "# cert_path = \"certs/localhost.pem\"",

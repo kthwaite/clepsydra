@@ -54,6 +54,10 @@ fn setup_archive_view_server() -> (TestServer, TempDir, Arc<AppState>) {
             cert_path: None,
             key_path: None,
         },
+        public_origins: vec![
+            "https://clepsydra.example".to_string(),
+            "http://tunnel.example:8080".to_string(),
+        ],
     };
     let view_config = ArchiveViewConfig::from_server_settings(&server_settings).unwrap();
     let app = Router::new()
@@ -1119,6 +1123,76 @@ async fn archive_view_serves_html_with_configuration_bound_sandbox() {
 }
 
 #[tokio::test]
+async fn archive_view_names_the_listed_origin_the_browser_addressed() {
+    let (server, _tmp, state) = setup_archive_view_server();
+    let hash = store_blob(&state, b"<html><body>hi</body></html>", "text/html");
+    let path = format!("/api/vault/archive/view/{hash}");
+    let csp_of = |response: &axum_test::TestResponse| {
+        response
+            .headers()
+            .get("content-security-policy")
+            .expect("view responses carry a CSP")
+            .to_str()
+            .unwrap()
+            .to_string()
+    };
+    let bind = "https://vault.example:7443";
+
+    let listed = server
+        .get(&path)
+        .add_header("host", "clepsydra.example")
+        .await;
+    listed.assert_status(StatusCode::OK);
+    let csp = csp_of(&listed);
+    assert_eq!(csp.matches("https://clepsydra.example").count(), 4, "{csp}");
+    assert!(!csp.contains("vault.example"), "{csp}");
+    assert!(
+        !csp.contains("tunnel.example"),
+        "other listed origins must not widen the policy: {csp}"
+    );
+
+    let default_port = server
+        .get(&path)
+        .add_header("host", "clepsydra.example:443")
+        .await;
+    assert_eq!(
+        csp_of(&default_port),
+        csp,
+        "explicit default port is the same origin"
+    );
+
+    let wrong_port = server.get(&path).add_header("host", "tunnel.example").await;
+    let csp = csp_of(&wrong_port);
+    assert_eq!(
+        csp.matches(bind).count(),
+        4,
+        "port mismatch falls back: {csp}"
+    );
+
+    let injected = server
+        .get(&path)
+        .add_header("host", "clepsydra.example; img-src https://evil.example")
+        .await;
+    let csp = csp_of(&injected);
+    assert!(
+        !csp.contains("evil.example"),
+        "request bytes reached the policy: {csp}"
+    );
+    assert_eq!(csp.matches(bind).count(), 4, "{csp}");
+
+    let head = server
+        .method(axum::http::Method::HEAD, &path)
+        .add_header("host", "clepsydra.example")
+        .await;
+    head.assert_status(StatusCode::OK);
+    assert_eq!(
+        csp_of(&head),
+        csp_of(&listed),
+        "HEAD selects the same policy as GET"
+    );
+}
+
+#[tokio::test]
 async fn archive_view_structurally_neutralizes_navigation_without_losing_resources() {
     let (server, _tmp, state) = setup_archive_view_server();
     let resource_hash = format!("sha256:{}", "b".repeat(64));
@@ -1432,6 +1506,7 @@ fn archive_view_rejects_an_invalid_configured_host() {
                 cert_path: None,
                 key_path: None,
             },
+            public_origins: Vec::new(),
         };
 
         let error = ArchiveViewConfig::from_server_settings(&server_settings).unwrap_err();
@@ -2259,4 +2334,44 @@ async fn archive_lookup_rejects_non_http_url() {
         .add_query_param("url", "clepsydra://pages/notes/x.md")
         .await;
     response.assert_status(StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn cas_blobs_allow_cross_origin_reads_but_snapshot_views_do_not() {
+    // `@font-face` fetches are CORS-mode and the sandboxed frame's origin is
+    // `null`, so archived fonts need an ACAO header even on the bind origin.
+    let (server, _tmp, state) = setup_archive_view_server();
+    let font = store_blob(&state, b"wOF2 fake font bytes", "font/woff2");
+    let view = store_blob(&state, b"<html><body>hi</body></html>", "text/html");
+
+    let blob = server
+        .get(&format!("/api/vault/cas/{font}"))
+        .add_header("origin", "null")
+        .await;
+    blob.assert_status(StatusCode::OK);
+    assert_eq!(
+        blob.headers()
+            .get("access-control-allow-origin")
+            .map(|value| value.to_str().unwrap()),
+        Some("*")
+    );
+    assert_eq!(
+        blob.headers()
+            .get("content-type")
+            .map(|value| value.to_str().unwrap()),
+        Some("font/woff2")
+    );
+
+    let snapshot = server
+        .get(&format!("/api/vault/archive/view/{view}"))
+        .add_header("origin", "null")
+        .await;
+    snapshot.assert_status(StatusCode::OK);
+    assert!(
+        snapshot
+            .headers()
+            .get("access-control-allow-origin")
+            .is_none(),
+        "snapshot documents must stay unreadable cross-origin"
+    );
 }
