@@ -580,6 +580,30 @@ rating = { type = "number" }
     .unwrap();
 }
 
+fn seed_with_grouped_shelf(root: &Path) {
+    seed(root);
+    fs::write(
+        root.join("bases/shelf.base.toml"),
+        r#"
+name = "Shelf"
+
+[filter]
+all = [ { field = "kind", op = "eq", value = "BOOK" } ]
+
+[properties]
+status = { type = "select", options = ["queued", "reading", "finished"] }
+rating = { type = "number" }
+
+[[views]]
+name = "ByStatus"
+layout = "table"
+group_by = "status"
+columns = ["title", "rating"]
+"#,
+    )
+    .unwrap();
+}
+
 #[tokio::test]
 async fn preview_matches_saved_evaluation_without_writing() {
     let (server, tmp) = ApiFixture::builder()
@@ -1013,6 +1037,132 @@ async fn view_evaluation_honors_view_filter_and_sort() {
         .get("/api/vault/bases/reading/views/nope")
         .await
         .assert_status_not_found();
+}
+
+#[tokio::test]
+async fn view_evaluation_accepts_a_request_filter() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed)
+        .build()
+        .into_server_and_temp();
+
+    let filter = serde_json::json!({ "field": "author", "op": "eq", "value": "Le Guin" });
+    let res = server
+        .get("/api/vault/bases/reading/views/continues")
+        .add_query_param("filter", filter.to_string())
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["shape"], "flat");
+    assert_eq!(body["total"], 1);
+    assert_eq!(body["rows"][0]["path"], "b.md");
+}
+
+#[tokio::test]
+async fn view_evaluation_rejects_a_malformed_request_filter() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed)
+        .build()
+        .into_server_and_temp();
+
+    let res = server
+        .get("/api/vault/bases/reading/views/continues?filter=not-json")
+        .await;
+    res.assert_status_bad_request();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["code"], "invalid_embed_query");
+    assert_eq!(body["detail"]["diagnostics"][0]["field"], "filter");
+    assert_eq!(
+        body["detail"]["diagnostics"][0]["message"],
+        "filter is not valid JSON"
+    );
+
+    let unknown = serde_json::json!({ "field": "missing", "op": "eq", "value": 1 });
+    let res = server
+        .get("/api/vault/bases/reading/views/continues")
+        .add_query_param("filter", unknown.to_string())
+        .await;
+    res.assert_status_bad_request();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["diagnostics"][0]["field"], "missing");
+}
+
+#[tokio::test]
+async fn view_evaluation_honors_a_group_override() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_with_grouped_shelf)
+        .build()
+        .into_server_and_temp();
+
+    // Flat view grouped on request.
+    let res = server
+        .get("/api/vault/bases/reading/views/continues?group_by=author")
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["shape"], "grouped");
+    assert_eq!(body["groups"].as_array().unwrap().len(), 2);
+
+    // Grouped view flattened on request.
+    let res = server
+        .get("/api/vault/bases/shelf/views/ByStatus?group_by=")
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["shape"], "flat");
+    assert_eq!(body["total"], 3);
+
+    // Absent keeps the view's grouping.
+    let res = server.get("/api/vault/bases/shelf/views/ByStatus").await;
+    res.assert_status_ok();
+    assert_eq!(res.json::<serde_json::Value>()["shape"], "grouped");
+
+    // Ungroupable key.
+    let res = server
+        .get("/api/vault/bases/shelf/views/ByStatus?group_by=rating")
+        .await;
+    res.assert_status_bad_request();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["code"], "invalid_embed_query");
+    assert_eq!(body["detail"]["diagnostics"][0]["field"], "group_by");
+    assert_eq!(
+        body["detail"]["diagnostics"][0]["message"],
+        "field `rating` cannot group"
+    );
+}
+
+#[tokio::test]
+async fn embedded_evaluation_honors_a_group_override() {
+    let (server, _tmp) = ApiFixture::builder()
+        .pre_index_seed(seed_with_grouped_shelf)
+        .build()
+        .into_server_and_temp();
+
+    let res = server
+        .post("/api/vault/bases/reading/views/Continues/evaluate")
+        .json(&serde_json::json!({ "group_by": "author", "limit": 10 }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["output"]["shape"], "grouped");
+
+    let res = server
+        .post("/api/vault/bases/shelf/views/ByStatus/evaluate")
+        .json(&serde_json::json!({ "group_by": "", "limit": 10, "offset": 0 }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["output"]["shape"], "flat");
+    assert_eq!(body["output"]["total"], 3);
+
+    // A grouped override refuses a window offset, exactly like a grouped view.
+    let res = server
+        .post("/api/vault/bases/reading/views/Continues/evaluate")
+        .json(&serde_json::json!({ "group_by": "author", "limit": 10, "offset": 10 }))
+        .await;
+    res.assert_status_bad_request();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["detail"]["diagnostics"][0]["field"], "offset");
 }
 
 async fn view_paths(fixture: &ApiFixture, slug: &str, view: &str) -> Vec<String> {

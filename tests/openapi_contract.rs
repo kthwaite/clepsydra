@@ -362,7 +362,7 @@ fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
             .unwrap()
             .keys()
             .collect::<Vec<_>>(),
-        vec!["filter", "limit", "offset", "sort"]
+        vec!["filter", "group_by", "limit", "offset", "sort"]
     );
     assert_eq!(
         request["properties"]["filter"]["oneOf"],
@@ -370,6 +370,10 @@ fn openapi_contract_defines_the_embedded_base_evaluation_wire_shape() {
             { "type": "null" },
             { "$ref": "#/components/schemas/Filter" }
         ])
+    );
+    assert_eq!(
+        request["properties"]["group_by"]["type"],
+        serde_json::json!(["string", "null"])
     );
     assert_eq!(
         request["properties"]["sort"]["type"],

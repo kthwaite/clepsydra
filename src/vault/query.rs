@@ -154,6 +154,23 @@ pub enum ResolvedField {
     Prop { key: String, ty: PropertyType },
 }
 
+/// Whether a resolved field may be a `group_by` key: any system field backed
+/// by a `pages` column, or a declared property of a scalar, comparable type.
+pub(crate) fn is_groupable(resolved: &ResolvedField) -> bool {
+    match resolved {
+        ResolvedField::Sys(sys) => sys.column().is_some(),
+        ResolvedField::Prop { ty, .. } => matches!(
+            ty,
+            PropertyType::Select
+                | PropertyType::Text
+                | PropertyType::Bool
+                | PropertyType::Date
+                | PropertyType::Datetime
+                | PropertyType::Url
+        ),
+    }
+}
+
 /// Everything field resolution needs: the enclosing base (view queries) and
 /// an inline type map (the generic endpoint has no base context).
 #[derive(Debug)]
@@ -1098,22 +1115,18 @@ fn evaluate_grouped(
 ) -> Result<QueryOutput, QueryError> {
     // Group key must be a declared, groupable property (or a scalar system
     // field like `kind`).
-    let group_column = match resolve_field(group_key, ctx)? {
-        ResolvedField::Sys(sys) => sys
-            .column()
-            .map(GroupColumn::System)
-            .ok_or_else(|| QueryError::Ungroupable(group_key.to_string()))?,
-        ResolvedField::Prop { key, ty } => match ty {
-            PropertyType::Select
-            | PropertyType::Text
-            | PropertyType::Bool
-            | PropertyType::Date
-            | PropertyType::Datetime
-            | PropertyType::Url => GroupColumn::Property {
-                key,
-                column: typed_column(ty),
-            },
-            _ => return Err(QueryError::Ungroupable(group_key.to_string())),
+    let resolved = resolve_field(group_key, ctx)?;
+    if !is_groupable(&resolved) {
+        return Err(QueryError::Ungroupable(group_key.to_string()));
+    }
+    let group_column = match resolved {
+        ResolvedField::Sys(sys) => GroupColumn::System(
+            sys.column()
+                .expect("is_groupable admits only column-backed system fields"),
+        ),
+        ResolvedField::Prop { key, ty } => GroupColumn::Property {
+            key,
+            column: typed_column(ty),
         },
     };
 
