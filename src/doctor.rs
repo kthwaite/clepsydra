@@ -1808,11 +1808,12 @@ fn check_conflicts(vault: &Vault, report: &mut Report) {
 // Check 8b: meeting frontmatter
 // ---------------------------------------------------------------------------
 
-/// Census of MEETING / ONE_ON_ONE pages whose `attendees` or `occurred_at` the
-/// API would refuse to write. Files are hand-editable, so nothing stops a page
-/// reaching this state; the doctor is where it surfaces. Pages that are merely
-/// unfinished — a 1:1 naming nobody, a meeting with no time — are reported
-/// separately, as information rather than breakage.
+/// Census of MEETING pages whose `attendees` or `occurred_at` the API would
+/// refuse to write. Files are hand-editable, so nothing stops a page reaching
+/// this state; the doctor is where it surfaces. Pages that are merely
+/// unfinished — a meeting with no time — are reported separately, as
+/// information rather than breakage. (A 1:1 is a MEETING tagged `1:1`; it may
+/// name any number of people, so nothing here counts attendees.)
 fn check_meetings(vault: &Vault, report: &mut Report) {
     use crate::vault::attendance;
     use crate::vault::kind::resolve;
@@ -1825,7 +1826,6 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
 
     let mut meetings = 0usize;
     let mut invalid: Vec<String> = Vec::new();
-    let mut unnamed: Vec<String> = Vec::new();
     let mut undated: Vec<String> = Vec::new();
 
     for entry in walkdir::WalkDir::new(vault.root())
@@ -1851,7 +1851,7 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
             continue;
         };
         let (kind, _) = resolve(vault_path.as_str(), page.meta.kind);
-        if attendance::cardinality(kind).is_none() && !meeting::records_occurrence(kind) {
+        if !attendance::has_attendees(kind) && !meeting::records_occurrence(kind) {
             continue;
         }
         meetings += 1;
@@ -1859,8 +1859,6 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
         let path = vault_path.as_str();
         if let Err(error) = attendance::validate(kind, &page.meta) {
             invalid.push(format!("{path}: {error}"));
-        } else if attendance::is_incomplete(kind, &page.meta) {
-            unnamed.push(path.to_string());
         }
         if let Err(error) = meeting::validate(kind, &page.meta) {
             invalid.push(format!("{path}: {error}"));
@@ -1870,7 +1868,7 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
     }
 
     if meetings == 0 {
-        report.push(info(SECTION, "census", "no meeting or 1:1 pages"));
+        report.push(info(SECTION, "census", "no meeting pages"));
         return;
     }
 
@@ -1888,27 +1886,15 @@ fn check_meetings(vault: &Vault, report: &mut Report) {
             warn(
                 SECTION,
                 "frontmatter",
-                listing(&invalid, format!("{} unusable value(s):", invalid.len()), LISTED),
-            )
-            .with_hint(
-                "`attendees` is a list of wikilinks and a ONE_ON_ONE names one; `occurred_at` is an unquoted TOML date-time",
-            ),
-        );
-    }
-
-    if !unnamed.is_empty() {
-        unnamed.sort();
-        report.push(
-            info(
-                SECTION,
-                "unnamed 1:1s",
                 listing(
-                    &unnamed,
-                    format!("{} 1:1 page(s) name nobody:", unnamed.len()),
+                    &invalid,
+                    format!("{} unusable value(s):", invalid.len()),
                     LISTED,
                 ),
             )
-            .with_hint("set `attendees = [\"[[Their Name]]\"]` on each"),
+            .with_hint(
+                "`attendees` is a list of wikilinks; `occurred_at` is an unquoted TOML date-time",
+            ),
         );
     }
 
@@ -2606,7 +2592,7 @@ mod tests {
             "meetings",
             "census",
             Status::Info,
-            "no meeting or 1:1 pages",
+            "no meeting pages",
         );
     }
 
@@ -2621,10 +2607,18 @@ mod tests {
             "meetings/kickoff.md",
             "title = \"Kickoff\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\noccurred_at = 2026-08-27T14:00:00Z\n",
         );
+        // A 1:1 is a MEETING tagged `1:1`; it names whoever it names.
         write_page(
             &vault_root,
-            "one-on-ones/ada.md",
-            "title = \"Ada\"\nattendees = [\"[[Ada]]\"]\noccurred_at = 2026-08-27\n",
+            "meetings/ada.md",
+            "title = \"Ada\"\ntags = [\"1:1\"]\nattendees = [\"[[Ada]]\"]\noccurred_at = 2026-08-27\n",
+        );
+        // The retired ONE_ON_ONE folder infers MEETING, and a MEETING has no
+        // attendee ceiling — a hand-edited crowd here is not breakage.
+        write_page(
+            &vault_root,
+            "one-on-ones/crowd.md",
+            "title = \"Crowd\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\", \"[[Alan]]\"]\noccurred_at = 2026-08-27\n",
         );
         write_top_level_config(tmp.path(), &vault_root);
 
@@ -2635,7 +2629,7 @@ mod tests {
             "meetings",
             "frontmatter",
             Status::Ok,
-            "2 meeting page(s); every `attendees` and `occurred_at` is well-formed",
+            "3 meeting page(s); every `attendees` and `occurred_at` is well-formed",
         );
         for name in ["unnamed 1:1s", "undated"] {
             assert!(
@@ -2655,11 +2649,12 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
         crate::vault::init::init_vault(&vault_root).unwrap();
-        // Two people on a 1:1 — the API refuses this, a text editor does not.
+        // An integer where the wikilink list goes — the API refuses this, a
+        // text editor does not.
         write_page(
             &vault_root,
-            "one-on-ones/crowd.md",
-            "title = \"Crowd\"\nattendees = [\"[[Ada]]\", \"[[Grace]]\"]\noccurred_at = 2026-08-27\n",
+            "meetings/malformed.md",
+            "title = \"Malformed\"\nattendees = 3\noccurred_at = 2026-08-27\n",
         );
         // A quoted date-time is inert text the index never projects as a date.
         write_page(
@@ -2678,7 +2673,7 @@ mod tests {
             .expect("meetings.frontmatter should be reported");
         assert_eq!(frontmatter.status, Status::Warn, "{frontmatter:#?}");
         assert!(
-            frontmatter.detail.contains("one-on-ones/crowd.md"),
+            frontmatter.detail.contains("meetings/malformed.md"),
             "{frontmatter:#?}"
         );
         assert!(
@@ -2693,8 +2688,14 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let vault_root = tmp.path().join("vault");
         crate::vault::init::init_vault(&vault_root).unwrap();
-        // A 1:1 that names nobody and records no time: unfinished, not broken.
-        write_page(&vault_root, "one-on-ones/blank.md", "title = \"Blank\"\n");
+        // A meeting that names nobody and records no time: unfinished, not
+        // broken. Only the missing time is worth a word — with the attendee
+        // cardinality gone, no meeting is "unnamed".
+        write_page(
+            &vault_root,
+            "meetings/blank.md",
+            "title = \"Blank\"\ntags = [\"1:1\"]\n",
+        );
         write_top_level_config(tmp.path(), &vault_root);
 
         let report = run_with_cwd(tmp.path(), DoctorOpts::default()).await;
@@ -2709,18 +2710,21 @@ mod tests {
             "an unfinished page is not breakage: {:#?}",
             report.results
         );
-        for name in ["unnamed 1:1s", "undated"] {
-            let record = report
+        let undated = report
+            .results
+            .iter()
+            .find(|record| record.section == "meetings" && record.name == "undated")
+            .expect("meetings.undated should be reported");
+        assert_eq!(undated.status, Status::Info, "{undated:#?}");
+        assert!(undated.detail.contains("meetings/blank.md"), "{undated:#?}");
+        assert!(
+            !report
                 .results
                 .iter()
-                .find(|record| record.section == "meetings" && record.name == name)
-                .unwrap_or_else(|| panic!("meetings.{name} should be reported"));
-            assert_eq!(record.status, Status::Info, "{record:#?}");
-            assert!(
-                record.detail.contains("one-on-ones/blank.md"),
-                "{record:#?}"
-            );
-        }
+                .any(|record| record.section == "meetings" && record.name == "unnamed 1:1s"),
+            "no meeting is reported as unnamed: {:#?}",
+            report.results
+        );
     }
 
     #[test]

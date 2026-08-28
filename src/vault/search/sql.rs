@@ -3,8 +3,9 @@ use rusqlite::{Connection, params_from_iter, types::Value};
 use super::SearchExecutionError;
 use super::query::{
     SearchDiagnostic, SearchDiagnosticKind, SearchExpr, SearchField, SearchQueryError, SearchSpan,
-    TextMode,
+    TextMode, parse_count_comparison,
 };
+use crate::vault::attendance::ATTENDEES_KEY;
 use crate::vault::index::SearchResult;
 
 struct TextLeaf {
@@ -165,18 +166,37 @@ impl<'a> Compiler<'a> {
                     Ok(CompiledExpression::PositiveText { ordinal, predicate })
                 }
             }
-            SearchExpr::Field { field, value, .. } => {
-                let parameter = self.bind(Value::Text(value.clone()));
+            SearchExpr::Field { field, value, span } => {
                 let predicate = match field {
-                    SearchField::Kind => format!("(p.kind = ?{parameter})"),
+                    SearchField::Kind => {
+                        let parameter = self.bind(Value::Text(value.clone()));
+                        format!("(p.kind = ?{parameter})")
+                    }
                     SearchField::Project => {
+                        let parameter = self.bind(Value::Text(value.clone()));
                         format!("(COALESCE(p.project = ?{parameter}, 0))")
                     }
-                    SearchField::Tag => format!(
-                        "(EXISTS (SELECT 1 FROM tags AS searched_tags \
-                         WHERE searched_tags.page_id = p.id \
-                         AND searched_tags.tag = ?{parameter}))"
-                    ),
+                    SearchField::Tag => {
+                        let parameter = self.bind(Value::Text(value.clone()));
+                        format!(
+                            "(EXISTS (SELECT 1 FROM tags AS searched_tags \
+                             WHERE searched_tags.page_id = p.id \
+                             AND searched_tags.tag = ?{parameter}))"
+                        )
+                    }
+                    SearchField::Attendees => {
+                        // The parser normalized the value; a page without the
+                        // property has no rows and so counts as 0.
+                        let (comparison, count) = parse_count_comparison(value)
+                            .ok_or_else(|| invalid_attendee_count(self.input, *span))?;
+                        let parameter = self.bind(Value::Integer(count));
+                        format!(
+                            "((SELECT COUNT(*) FROM page_properties AS pp \
+                             WHERE pp.page_id = p.id AND pp.key = '{ATTENDEES_KEY}') \
+                             {} ?{parameter})",
+                            comparison.as_str()
+                        )
+                    }
                 };
                 Ok(CompiledExpression::Predicate(if negated {
                     format!("(NOT {predicate})")
@@ -484,6 +504,21 @@ pub(super) fn execute(
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
+/// Unreachable through [`super::query::parse`], which only emits normalized
+/// counts; kept as an error rather than a panic so a hand-built expression
+/// still fails cleanly.
+fn invalid_attendee_count(input: &str, span: SearchSpan) -> SearchQueryError {
+    let column = input[..span.start].chars().count() + 1;
+    SearchQueryError {
+        diagnostic: SearchDiagnostic {
+            message: format!("`attendees` takes a whole number at column {column}"),
+            kind: SearchDiagnosticKind::InvalidFieldValue,
+            span,
+            column,
+        },
+    }
+}
+
 fn fts_expression(
     input: &str,
     value: &str,
@@ -584,6 +619,35 @@ mod tests {
                 Value::Text("\"clep\"*".to_owned()),
                 Value::Integer(7),
             ]
+        );
+    }
+
+    #[test]
+    fn attendee_counts_compile_to_a_property_row_count_bound_as_an_integer() {
+        let input = "attendees:>=3 kind:meeting -attendees:0";
+        let expression = parse(input).unwrap();
+        let compiled = Compiler::new(input).compile(&expression, 5).unwrap();
+
+        assert_eq!(
+            compiled.parameters,
+            [
+                Value::Integer(3),
+                Value::Text("MEETING".to_owned()),
+                Value::Integer(0),
+                Value::Integer(5),
+            ]
+        );
+        let count = "(SELECT COUNT(*) FROM page_properties AS pp \
+                     WHERE pp.page_id = p.id AND pp.key = 'attendees')";
+        assert!(
+            compiled.sql.contains(&format!("({count} >= ?1)")),
+            "{}",
+            compiled.sql
+        );
+        assert!(
+            compiled.sql.contains(&format!("(NOT ({count} = ?3))")),
+            "{}",
+            compiled.sql
         );
     }
 

@@ -99,8 +99,10 @@ const DEFAULT_LIST_LIMIT: u32 = 50;
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchParams {
     /// Structured vault search query. Bare terms prefix-match titles and bodies; quoted text is
-    /// a phrase. Use exact `kind:`, `tag:`, and `project:` fields. Whitespace AND, `|` OR, `-` NOT,
-    /// and parentheses compose expressions. Invalid syntax returns an error.
+    /// a phrase. Use exact `kind:`, `tag:`, and `project:` fields, and `attendees:` for how many
+    /// people a MEETING names (`attendees:1`, `attendees:>1`, `attendees:>=3`, `attendees:0`).
+    /// Whitespace AND, `|` OR, `-` NOT, and parentheses compose expressions. Invalid syntax
+    /// returns an error.
     pub query: String,
     /// Maximum number of results (default 20).
     pub limit: Option<u32>,
@@ -122,7 +124,7 @@ pub struct ListPagesParams {
     /// Offset into the path-ordered page list, for pagination.
     pub offset: Option<u32>,
     /// Only pages of this resolved kind (NOTE, PROJECT, JOURNAL, TODO, QUOTE,
-    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE,
+    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING,
     /// AI_CONVERSATION, AI_JOURNAL).
     pub kind: Option<String>,
     /// Only pages carrying this exact tag.
@@ -168,7 +170,7 @@ pub struct LinksParams {
 }
 
 /// The kind vocabulary, spelled out for tool schemas and error messages.
-const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION, AI_JOURNAL";
+const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, AI_CONVERSATION, AI_JOURNAL";
 
 const MCP_INSTRUCTIONS: &str = "Work with a clepsydra vault (a markdown personal knowledge base) \
 through its running server. Orient with vault_tree and vault_tags, locate pages with vault_search \
@@ -201,8 +203,8 @@ pub struct CreatePageParams {
     /// Page title. Required; also drives the generated filename slug.
     pub title: String,
     /// Kind token (NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE,
-    /// PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION,
-    /// AI_JOURNAL). Defaults to NOTE.
+    /// PERSON, TASK, CYCLE, RECIPE, MEETING, AI_CONVERSATION, AI_JOURNAL).
+    /// Defaults to NOTE. A 1:1 is a MEETING tagged `1:1`.
     /// Declared in frontmatter and used to pick the canonical folder.
     pub kind: Option<String>,
     /// Folder override, vault-relative. With a declared kind it must be the
@@ -282,7 +284,7 @@ pub struct AssignParams {
     pub paths: Vec<String>,
     /// Kind token to declare in frontmatter (NOTE, PROJECT, JOURNAL, TODO,
     /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING,
-    /// ONE_ON_ONE, AI_CONVERSATION, AI_JOURNAL).
+    /// AI_CONVERSATION, AI_JOURNAL).
     pub kind: Option<String>,
     /// Project to declare in frontmatter.
     pub project: Option<String>,
@@ -560,7 +562,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_search",
-        description = "Structured vault search. Bare terms prefix-match titles and bodies; quoted text is a phrase. Exact kind:, tag:, and project: fields compose with whitespace AND, `|` OR, `-` NOT, and parentheses. Invalid syntax returns an error. Results include path, title, and a snippet; metadata-only branches have an empty snippet. Search before creating pages to avoid duplicates or when locating an unknown path.",
+        description = "Structured vault search. Bare terms prefix-match titles and bodies; quoted text is a phrase. Exact kind:, tag:, and project: fields, plus attendees: with a count (attendees:1, attendees:>1, attendees:>=3), compose with whitespace AND, `|` OR, `-` NOT, and parentheses. A 1:1 is a MEETING tagged 1:1 (tag:1:1). Invalid syntax returns an error. Results include path, title, and a snippet; metadata-only branches have an empty snippet. Search before creating pages to avoid duplicates or when locating an unknown path.",
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     pub async fn vault_search(
@@ -1710,6 +1712,7 @@ mod tests {
             "kind",
             "tag",
             "project",
+            "attendees:",
             "quoted",
             "whitespace and",
             "`|` or",
