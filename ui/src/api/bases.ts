@@ -69,6 +69,8 @@ export type PropertyDefinition = components["schemas"]["PropertyDefinition"];
 export type QueryOutput = components["schemas"]["QueryOutput"];
 export type QueryRow = components["schemas"]["QueryRow"];
 export type GroupResult = components["schemas"]["GroupResult"];
+export type BaseViewDefinition = components["schemas"]["ViewDefinition"];
+export type BaseFilePayload = components["schemas"]["BaseFilePayload"];
 
 const BASE_MEMBER_SCOPES: ReadonlySet<string> = new Set([
   "membership",
