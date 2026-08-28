@@ -438,8 +438,10 @@ async fn ensure_cycle_exists(state: &AppState, cycle_code: &str) -> Result<Strin
 }
 
 /// Mint a code no existing page of the family's kind uses. With 43 bits of
-/// entropy a collision is astronomically unlikely; the loop exists so the
-/// guarantee is structural, not probabilistic.
+/// entropy a collision is astronomically unlikely; the re-roll loop only
+/// checks against a snapshot of the index, so it is not what guarantees
+/// uniqueness — the page create downstream is an atomic filesystem create
+/// that maps `AlreadyExists` to a 409, so two pages can never share a code.
 pub(crate) async fn mint_unique_code(
     state: &AppState,
     family: CodeFamily,

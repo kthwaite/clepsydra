@@ -140,7 +140,8 @@ non-empty `hold` means Blocked; Cycle `"BACKLOG"` moves the Task to Backlog.
 
 Create Cycles with `vault_cycle_create` (omit `code` to have the server mint
 an `S-<adjective>-<noun>-<tail>` code; an explicit `code` must match that
-same format or it is rejected; `CLOSED` is rejected at creation).
+same format or it is rejected, and conflicts if a Cycle already uses it;
+`CLOSED` is rejected at creation).
 Close a finished Cycle with `vault_cycle_update` using state `CLOSED`. Pass
 `carry_to` to move unfinished Tasks: `"BACKLOG"` moves them to Backlog, while
 a Cycle code or unique prefix reassigns them.

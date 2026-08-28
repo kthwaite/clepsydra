@@ -530,6 +530,9 @@ fn load_tasks(conn: &rusqlite::Connection) -> Result<Vec<BoardTask>, rusqlite::E
             created_at,
         ));
     }
+    // Creation order (RFC3339 UTC strings sort chronologically), code as the
+    // tie-breaker. A missing `created_at` sorts first; page parsing back-fills
+    // it, so that branch is effectively unreachable.
     tasks.sort_by(|(a, a_created), (b, b_created)| {
         a_created.cmp(b_created).then_with(|| a.code.cmp(&b.code))
     });

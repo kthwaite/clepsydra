@@ -91,7 +91,7 @@ for an explicit destination that assignment cannot express.
 | `vault_board` | read | Task Board columns with WIP limits, Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field; optional `project` filter |
 | `vault_task_create` | write | New Task; the server mints a `TSK-<adjective>-<noun>-<tail>` code and files the page under `tasks/<project>/` |
 | `vault_task_update` | write | Patch a Task addressed by TSK code (or any unique prefix of one), path, or id; tri-state clearing for Cycle, assignee, estimate, due, blocker reason (`hold`), and related page (`link`) |
-| `vault_cycle_create` | write | New Cycle (a CYCLE page under `cycles/`); code auto-generates as `S-<adjective>-<noun>-<tail>`, or an explicit code in that same format (rejected otherwise) |
+| `vault_cycle_create` | write | New Cycle (a CYCLE page under `cycles/`); code auto-generates as `S-<adjective>-<noun>-<tail>`, or an explicit code in that same format (rejected otherwise; conflicts if it already exists) |
 | `vault_cycle_update` | write | Patch a Cycle addressed by S code (or any unique prefix of one), path, or id; closing with `carry_to` moves unfinished Tasks |
 | `vault_assign` | organize | Declare kind/project (single or bulk); the vault relocates files |
 | `vault_move_page` | organize | Explicit rename/relocate with link rewriting |

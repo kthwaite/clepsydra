@@ -46,6 +46,8 @@ export interface NewCyclePrefill {
  *                Pass today's date in production.
  */
 export function newCyclePrefill(
+  // `code` is unused here (codes are server-minted); the pick is kept so call
+  // sites and fixtures can keep passing board cycles as-is.
   cycles: Pick<BoardCycle, "code" | "end">[],
   now: string,
 ): NewCyclePrefill {
