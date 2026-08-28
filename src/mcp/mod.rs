@@ -127,6 +127,7 @@ mod tests {
                 cert_path: None,
                 key_path: None,
             },
+            public_origins: Vec::new(),
         }
     }
 

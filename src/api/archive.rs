@@ -285,11 +285,88 @@ pub fn archive_resource_concurrency(max_blob_size_mb: u64) -> usize {
 
 /// Immutable response policy for the dedicated archive snapshot view.
 ///
-/// The complete CSP value is assembled once from server configuration. Request
-/// headers never participate in the policy.
+/// Every policy string is assembled once from server configuration. The
+/// request's `Host` header only *selects* one of them; its bytes never reach a
+/// response header.
 #[derive(Clone, Debug)]
 pub struct ArchiveViewConfig {
+    /// The bind origin. Also the fallback for absent, unknown, or malformed hosts.
+    bind: AllowedOrigin,
+    /// `server.public_origins`, validated, normalised, deduplicated, in order.
+    public: Vec<AllowedOrigin>,
+}
+
+#[derive(Clone, Debug)]
+struct AllowedOrigin {
+    /// The origin exactly as the CSP names it, e.g. `https://clepsydra.localhost`.
+    source: String,
+    /// Parsed form used to compare against a request `Host`.
+    url: Url,
     content_security_policy: HeaderValue,
+}
+
+impl AllowedOrigin {
+    fn new(source: String) -> Result<Self, String> {
+        let url = Url::parse(&source).map_err(|error| format!("{source}: {error}"))?;
+        let policy = format!(
+            "sandbox; default-src 'none'; img-src {source} data:; \
+             media-src {source} data:; style-src 'unsafe-inline' {source} data:; \
+             font-src {source} data:"
+        );
+        let content_security_policy = HeaderValue::from_str(&policy)
+            .map_err(|error| format!("invalid archive view CSP for {source}: {error}"))?;
+        Ok(Self {
+            source,
+            url,
+            content_security_policy,
+        })
+    }
+
+    /// Does a raw `Host` header value (`host[:port]`) name this origin?
+    ///
+    /// The scheme comes from this entry, so a listed `https://` name never
+    /// matches an `http://` request policy and vice versa. Anything that is not
+    /// a plain host-and-port is rejected before parsing.
+    fn matches_host(&self, host: &str) -> bool {
+        let plain_host_bytes = host.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b':' | b'[' | b']')
+        });
+        if host.is_empty() || !plain_host_bytes {
+            return false;
+        }
+        Url::parse(&format!("{}://{host}", self.url.scheme()))
+            .map(|candidate| candidate.origin() == self.url.origin())
+            .unwrap_or(false)
+    }
+}
+
+/// Validate one `server.public_origins` entry and normalise it to its ASCII
+/// origin serialisation (lowercase host, default port dropped).
+fn validate_public_origin(raw: &str) -> Result<String, &'static str> {
+    // Checked before parsing: the URL parser may reject `*` with a generic error.
+    if raw.contains('*') {
+        return Err("must not contain a wildcard");
+    }
+    let url = Url::parse(raw.trim()).map_err(|_| "must be an absolute http(s) origin")?;
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err("must use the http or https scheme");
+    }
+    match url.host().ok_or("must name a host")? {
+        Host::Ipv4(address) if address.is_unspecified() => {
+            return Err("must name a concrete host, not an unspecified address");
+        }
+        Host::Ipv6(address) if address.is_unspecified() => {
+            return Err("must name a concrete host, not an unspecified address");
+        }
+        _ => {}
+    }
+    if !url.username().is_empty() || url.password().is_some() {
+        return Err("must not carry credentials");
+    }
+    if !matches!(url.path(), "" | "/") || url.query().is_some() || url.fragment().is_some() {
+        return Err("must be a bare origin without path, query, or fragment");
+    }
+    Ok(url.origin().ascii_serialization())
 }
 
 impl ArchiveViewConfig {
@@ -305,18 +382,44 @@ impl ArchiveViewConfig {
         } else {
             "http"
         };
-        let origin = format!("{scheme}://{host}:{}", settings.port);
-        let policy = format!(
-            "sandbox; default-src 'none'; img-src {origin} data:; \
-             media-src {origin} data:; style-src 'unsafe-inline' {origin} data:; \
-             font-src {origin} data:"
-        );
-        let content_security_policy = HeaderValue::from_str(&policy).map_err(|error| {
-            format!("invalid archive view CSP from server configuration: {error}")
-        })?;
-        Ok(Self {
-            content_security_policy,
-        })
+        let bind = AllowedOrigin::new(format!("{scheme}://{host}:{}", settings.port)).map_err(
+            |error| format!("invalid archive view origin from server configuration: {error}"),
+        )?;
+
+        let mut public: Vec<AllowedOrigin> = Vec::with_capacity(settings.public_origins.len());
+        for (index, raw) in settings.public_origins.iter().enumerate() {
+            let source = validate_public_origin(raw)
+                .map_err(|reason| format!("server.public_origins[{index}] {reason}: {raw:?}"))?;
+            let origin = AllowedOrigin::new(source)?;
+            let already_listed = origin.url.origin() == bind.url.origin()
+                || public
+                    .iter()
+                    .any(|listed| listed.url.origin() == origin.url.origin());
+            if !already_listed {
+                public.push(origin);
+            }
+        }
+        Ok(Self { bind, public })
+    }
+
+    /// The policy for the origin the browser addressed, or the bind-origin
+    /// policy when `host` is absent, malformed, or not configured.
+    pub fn policy_for_host(&self, host: Option<&str>) -> &HeaderValue {
+        let Some(host) = host else {
+            return &self.bind.content_security_policy;
+        };
+        std::iter::once(&self.bind)
+            .chain(self.public.iter())
+            .find(|origin| origin.matches_host(host))
+            .map_or(&self.bind.content_security_policy, |origin| {
+                &origin.content_security_policy
+            })
+    }
+
+    /// Every origin the viewer may name, bind origin first. For startup logs.
+    pub fn allowed_origins(&self) -> impl Iterator<Item = &str> {
+        std::iter::once(self.bind.source.as_str())
+            .chain(self.public.iter().map(|origin| origin.source.as_str()))
     }
 }
 
@@ -418,12 +521,12 @@ fn validate_http_url(field: &str, raw: &str) -> Result<(), ApiError> {
     }
 }
 
-fn sandbox_headers(config: &ArchiveViewConfig) -> HeaderMap {
+fn sandbox_headers(config: &ArchiveViewConfig, host: Option<&str>) -> HeaderMap {
     let mut headers = HeaderMap::new();
     headers.insert(header::CONTENT_TYPE, HeaderValue::from_static("text/html"));
     headers.insert(
         header::CONTENT_SECURITY_POLICY,
-        config.content_security_policy.clone(),
+        config.policy_for_host(host).clone(),
     );
     headers.insert(
         header::X_CONTENT_TYPE_OPTIONS,
@@ -506,7 +609,7 @@ fn snapshot_response_with(
                 Some(permit) => admitted_body(data, permit),
                 None => Body::from(data),
             };
-            let mut headers = sandbox_headers(config);
+            let mut headers = sandbox_headers(config, None);
             headers.insert(
                 ARCHIVE_UNCAPTURED_RESOURCE_COUNT_HEADER,
                 HeaderValue::from_str(&uncaptured_resource_count.to_string())
@@ -1507,6 +1610,24 @@ pub async fn ingest_archive(
 mod tests {
     use super::*;
 
+    fn settings_with_public_origins(origins: &[&str]) -> ServerSettings {
+        ServerSettings {
+            host: "vault.example".to_string(),
+            port: 7443,
+            dev_mode: false,
+            tls: crate::TlsSettings {
+                enabled: true,
+                cert_path: None,
+                key_path: None,
+            },
+            public_origins: origins.iter().map(|origin| origin.to_string()).collect(),
+        }
+    }
+
+    fn policy_origin_count(policy: &HeaderValue, origin: &str) -> usize {
+        policy.to_str().unwrap().matches(origin).count()
+    }
+
     #[test]
     fn configured_hosts_and_ports_are_formatted_as_concrete_csp_origins() {
         let explicit = |host: &str, port: u16, tls_enabled: bool| ServerSettings {
@@ -1518,6 +1639,7 @@ mod tests {
                 cert_path: None,
                 key_path: None,
             },
+            public_origins: Vec::new(),
         };
         let cases = [
             (ServerSettings::default(), "http://localhost:16667"),
@@ -1532,15 +1654,138 @@ mod tests {
 
         for (settings, expected_origin) in cases {
             let config = ArchiveViewConfig::from_server_settings(&settings).unwrap();
-            let policy = config.content_security_policy.to_str().unwrap();
+            let policy = config.policy_for_host(None);
 
             assert_eq!(
-                policy.matches(expected_origin).count(),
+                policy_origin_count(policy, expected_origin),
                 4,
-                "CSP did not use {expected_origin:?} in every resource directive: {policy}"
+                "CSP did not use {expected_origin:?} in every resource directive: {policy:?}"
             );
         }
     }
+
+    #[test]
+    fn host_header_selects_a_listed_origin_and_never_reaches_the_policy() {
+        let config = ArchiveViewConfig::from_server_settings(&settings_with_public_origins(&[
+            "https://clepsydra.localhost",
+            "http://tunnel.example:8080",
+        ]))
+        .unwrap();
+        let bind = "https://vault.example:7443";
+
+        let listed = config.policy_for_host(Some("clepsydra.localhost"));
+        assert_eq!(
+            policy_origin_count(listed, "https://clepsydra.localhost"),
+            4
+        );
+        assert_eq!(policy_origin_count(listed, "vault.example"), 0);
+        assert_eq!(
+            policy_origin_count(listed, "tunnel.example"),
+            0,
+            "other listed origins must not widen the policy"
+        );
+
+        // An explicit default port names the same origin.
+        assert_eq!(
+            config.policy_for_host(Some("clepsydra.localhost:443")),
+            listed
+        );
+        // Case-insensitive host.
+        assert_eq!(config.policy_for_host(Some("Clepsydra.LOCALHOST")), listed);
+        // A listed non-default port must match exactly.
+        assert_eq!(
+            policy_origin_count(
+                config.policy_for_host(Some("tunnel.example:8080")),
+                "http://tunnel.example:8080"
+            ),
+            4
+        );
+        assert_eq!(
+            policy_origin_count(config.policy_for_host(Some("tunnel.example")), bind),
+            4,
+            "port mismatch is a different origin"
+        );
+
+        // The bind origin itself.
+        assert_eq!(
+            policy_origin_count(config.policy_for_host(Some("vault.example:7443")), bind),
+            4
+        );
+
+        // Unknown, absent, or malformed hosts fall back to the bind origin.
+        for host in [
+            None,
+            Some(""),
+            Some("attacker.example"),
+            Some("clepsydra.localhost/evil"),
+            Some("clepsydra.localhost?x"),
+            Some("user@clepsydra.localhost"),
+            Some("clepsydra.localhost; img-src https://evil.example"),
+            Some("clepsydra.localhost\u{0}"),
+        ] {
+            let policy = config.policy_for_host(host);
+            assert_eq!(
+                policy_origin_count(policy, bind),
+                4,
+                "host {host:?}: {policy:?}"
+            );
+            assert!(
+                !policy.to_str().unwrap().contains("evil"),
+                "request bytes reached the policy for {host:?}: {policy:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_origins_are_validated_and_normalised() {
+        let config = ArchiveViewConfig::from_server_settings(&settings_with_public_origins(&[
+            "HTTPS://Clepsydra.LOCALHOST:443/",
+        ]))
+        .unwrap();
+        assert_eq!(
+            config.allowed_origins().collect::<Vec<_>>(),
+            vec!["https://vault.example:7443", "https://clepsydra.localhost"]
+        );
+
+        let rejected = [
+            ("clepsydra.localhost", "absolute"),
+            ("ftp://clepsydra.localhost", "http or https"),
+            ("https://*.ts.net", "wildcard"),
+            ("https://0.0.0.0", "unspecified"),
+            ("https://[::]", "unspecified"),
+            ("https://user@clepsydra.localhost", "credentials"),
+            ("https://clepsydra.localhost/api", "bare origin"),
+            ("https://clepsydra.localhost?x=1", "bare origin"),
+            ("https://clepsydra.localhost#top", "bare origin"),
+        ];
+        for (raw, expected_reason) in rejected {
+            let error =
+                ArchiveViewConfig::from_server_settings(&settings_with_public_origins(&[raw]))
+                    .expect_err(raw);
+            assert!(
+                error.contains("server.public_origins[0]") && error.contains(expected_reason),
+                "{raw}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_public_origins_collapse_into_one_entry() {
+        let settings = ServerSettings {
+            public_origins: vec![
+                "http://localhost:16667".to_string(),
+                "https://a.example".to_string(),
+                "https://a.example:443".to_string(),
+            ],
+            ..ServerSettings::default()
+        };
+        let config = ArchiveViewConfig::from_server_settings(&settings).unwrap();
+        assert_eq!(
+            config.allowed_origins().collect::<Vec<_>>(),
+            vec!["http://localhost:16667", "https://a.example"]
+        );
+    }
+
     #[tokio::test]
     async fn archive_view_permit_stays_with_blocking_worker() {
         let semaphore = Arc::new(tokio::sync::Semaphore::new(1));

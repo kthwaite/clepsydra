@@ -54,6 +54,7 @@ fn setup_archive_view_server() -> (TestServer, TempDir, Arc<AppState>) {
             cert_path: None,
             key_path: None,
         },
+        public_origins: Vec::new(),
     };
     let view_config = ArchiveViewConfig::from_server_settings(&server_settings).unwrap();
     let app = Router::new()
@@ -1432,6 +1433,7 @@ fn archive_view_rejects_an_invalid_configured_host() {
                 cert_path: None,
                 key_path: None,
             },
+            public_origins: Vec::new(),
         };
 
         let error = ArchiveViewConfig::from_server_settings(&server_settings).unwrap_err();
