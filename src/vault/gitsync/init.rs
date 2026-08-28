@@ -300,6 +300,10 @@ pub(crate) fn ssh_target(url: &str) -> Option<(String, String)> {
     Some((host.to_string(), path.to_string()))
 }
 
+/// How long the ssh branch of [`probe_lfs_remote`] waits for the host to
+/// answer `git-lfs-authenticate` before giving up.
+const SSH_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Probe whether a remote answers the git-lfs batch API (D12). Never called
 /// by [`init`] itself — the CLI glue calls it up front, before opening the
 /// vault, so a doomed `init` never partially runs.
@@ -338,7 +342,11 @@ pub async fn probe_lfs_remote(url: &str) -> Result<(), SyncError> {
     }
 
     if let Some((target, path)) = ssh_target(url) {
-        let status = tokio::process::Command::new("ssh")
+        // A host that accepts the connection and then says nothing would
+        // otherwise hang `clep sync init` for ever: `BatchMode` only stops
+        // ssh asking for a password. `kill_on_drop` reaps the child the
+        // timeout abandons.
+        let probe = tokio::process::Command::new("ssh")
             .args([
                 "-o",
                 "BatchMode=yes",
@@ -347,12 +355,20 @@ pub async fn probe_lfs_remote(url: &str) -> Result<(), SyncError> {
                 &path,
                 "download",
             ])
-            .status()
-            .await
-            .map_err(|e| SyncError::LfsRemoteUnsupported {
+            .kill_on_drop(true)
+            .status();
+        let status = match tokio::time::timeout(SSH_PROBE_TIMEOUT, probe).await {
+            Ok(result) => result.map_err(|e| SyncError::LfsRemoteUnsupported {
                 url: url.to_string(),
                 detail: e.to_string(),
-            })?;
+            })?,
+            Err(_) => {
+                return Err(SyncError::LfsRemoteUnsupported {
+                    url: url.to_string(),
+                    detail: "ssh probe timed out after 30s".to_string(),
+                });
+            }
+        };
         return if status.success() {
             Ok(())
         } else {

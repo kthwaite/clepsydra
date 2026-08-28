@@ -300,8 +300,16 @@ impl SyncEngine {
             }
             (status, _) => {
                 // Unrelated histories, an unwritable tree, a broken index:
-                // leave nothing half-merged behind.
-                let note = self.abort_merge_note().unwrap_or_default();
+                // leave nothing half-merged behind. Some of those refusals
+                // happen before git writes `MERGE_HEAD` at all, and aborting
+                // a merge that never started only appends a confusing "there
+                // is no merge to abort" to the real reason — so only abort
+                // when we are not certain there is nothing to abort.
+                let note = if matches!(self.git.merge_head(), Ok(None)) {
+                    String::new()
+                } else {
+                    self.abort_merge_note().unwrap_or_default()
+                };
                 Err(SyncError::MergeFailed {
                     reference,
                     detail: format!("exit {status}: {}{note}", out.stderr.trim()),
@@ -1098,6 +1106,13 @@ mod tests {
         g.run(&["push", "-f", "origin", "main"]).unwrap();
         let err = engine(&repos.a).full_sync().unwrap_err();
         assert!(matches!(err, SyncError::MergeFailed { .. }), "{err}");
+        // git refuses unrelated histories before it starts a merge, so there
+        // is nothing to abort — and nothing to confess to having failed to
+        // abort. The error must be about the histories, only.
+        assert!(
+            !err.to_string().contains("merge --abort"),
+            "no merge was started, so none should be aborted: {err}"
+        );
         assert!(
             testing::git(&repos.a).merge_head().unwrap().is_none(),
             "merge aborted"

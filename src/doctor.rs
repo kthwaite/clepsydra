@@ -1825,9 +1825,26 @@ const SYNC_LISTED: usize = 10;
 /// Read-only by contract, like every other check: it only ever asks git
 /// questions (`--version`, `rev-parse`, `config --get`, `remote get-url`,
 /// `status`, `ls-files -u`, `lfs version`). It never fetches, commits,
-/// merges, or writes configuration.
+/// merges, or writes configuration — and on a vault that has no `.git` at
+/// all it never runs git in the first place.
 fn check_sync(vault: &Vault, report: &mut Report) {
     use crate::vault::gitsync::git::Git;
+
+    // A vault with no `.git` at its root is simply not initialised (D3) —
+    // answer from the filesystem rather than spawning git on every `clep
+    // doctor` run in every non-syncing vault. The nesting case still gets its
+    // own error, walked out of the filesystem rather than asked of git.
+    if !crate::vault::gitsync::has_git_entry(vault.root()) {
+        report.push(match enclosing_repo(vault.root()) {
+            Some(outer) => nested_repo_result(&outer),
+            None => info(
+                SYNC_SECTION,
+                "repo",
+                "not initialised — run `clep sync init`",
+            ),
+        });
+        return;
+    }
 
     let version = match Git::version() {
         Ok(version) => version,
@@ -1851,6 +1868,35 @@ fn check_sync(vault: &Vault, report: &mut Report) {
     check_sync_remote(&git, report);
     check_sync_worktree(&git, report);
     check_sync_exclusions(vault, report);
+}
+
+/// The `repo` error for a vault sitting inside `outer` — the one arrangement
+/// `clep sync init` can never adopt.
+fn nested_repo_result(outer: &Path) -> CheckResult {
+    err(
+        SYNC_SECTION,
+        "repo",
+        format!(
+            "the vault root is inside another git repository ({})",
+            outer.display()
+        ),
+    )
+    .with_hint("move the vault out of that repository, or remove the outer repository; `clep sync init` refuses to nest")
+}
+
+/// The nearest ancestor of `root` holding a `.git` entry, or `None` when the
+/// vault is not inside a repository at all.
+///
+/// A filesystem-only stand-in for `git rev-parse --show-toplevel`, used for
+/// the one case where the vault root itself is not a repository: it still
+/// answers the question `clep sync init`'s refusal turns on, without spawning
+/// git in every non-syncing vault.
+fn enclosing_repo(root: &Path) -> Option<PathBuf> {
+    root.ancestors()
+        .skip(1)
+        .filter(|ancestor| !ancestor.as_os_str().is_empty())
+        .find(|ancestor| crate::vault::gitsync::has_git_entry(ancestor))
+        .map(Path::to_path_buf)
 }
 
 /// Push the `repo` result and report whether the rest of the section is
@@ -1884,17 +1930,7 @@ fn check_sync_repo(
         return false;
     };
     if toplevel.canonicalize().ok() != vault.root().canonicalize().ok() {
-        report.push(
-            err(
-                SYNC_SECTION,
-                "repo",
-                format!(
-                    "the vault root is inside another git repository ({})",
-                    toplevel.display()
-                ),
-            )
-            .with_hint("move the vault out of that repository, or remove the outer repository; `clep sync init` refuses to nest"),
-        );
+        report.push(nested_repo_result(&toplevel));
         return false;
     }
     match git.config_get(INIT_MARKER_KEY) {
@@ -3437,7 +3473,6 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn sync_check_reports_uninitialised_vault_as_info() {
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
         crate::vault::init::init_vault(&root).unwrap();
@@ -3446,7 +3481,14 @@ mod tests {
         let mut report = Report::default();
         check_sync(&vault, &mut report);
 
-        assert_eq!(sync_result(&report, "git").status, Status::Info);
+        // A vault with no `.git` is answered from the filesystem alone: the
+        // check must not spawn `git --version` (or anything else) to say so,
+        // which is why this test needs no git isolation guard.
+        assert!(
+            !has_sync_check(&report, "git"),
+            "a vault with no .git must not be probed with git: {:#?}",
+            report.results
+        );
         let repo = sync_result(&report, "repo");
         assert_eq!(repo.status, Status::Info, "{repo:#?}");
         assert!(repo.detail.contains("clep sync init"), "{repo:#?}");
@@ -3632,6 +3674,9 @@ mod tests {
         let mut report = Report::default();
         check_sync(&vault, &mut report);
 
+        // `.git` exists here, so the git binary is still checked — only the
+        // no-repository case skips it.
+        assert_eq!(sync_result(&report, "git").status, Status::Info);
         let repo = sync_result(&report, "repo");
         assert_eq!(repo.status, Status::Info, "{repo:#?}");
         assert!(repo.detail.contains("clep sync init"), "{repo:#?}");

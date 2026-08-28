@@ -120,6 +120,18 @@ impl SyncError {
     }
 }
 
+/// Whether `root` could be a sync repository at all: D3 requires the vault
+/// root to *be* the repository toplevel, so a root with no `.git` entry is
+/// definitively not initialised.
+///
+/// Filesystem-only, and that is the point — it lets every non-syncing vault
+/// answer [`is_initialised`]'s question at startup and on every `clep doctor`
+/// run without spawning a single `git`. Inside a linked worktree or a
+/// submodule `.git` is a file rather than a directory, so either counts.
+pub fn has_git_entry(root: &Path) -> bool {
+    root.join(".git").exists()
+}
+
 /// A vault is sync-initialised iff its root is a git repository's toplevel
 /// AND the repo-local `clep.sync.version` config key is set (D3, written by
 /// [`init::init`]).
@@ -141,4 +153,26 @@ pub fn device_name() -> String {
 /// Append a `Device: <hostname>` trailer to a commit message.
 pub fn with_device_trailer(message: &str) -> String {
     format!("{}\n\nDevice: {}\n", message.trim_end(), device_name())
+}
+
+#[cfg(test)]
+mod tests {
+    use tempfile::TempDir;
+
+    use super::has_git_entry;
+
+    #[test]
+    fn a_git_dir_or_a_git_file_both_count_as_a_repository_entry() {
+        let plain = TempDir::new().unwrap();
+        assert!(!has_git_entry(plain.path()));
+
+        let repo = TempDir::new().unwrap();
+        std::fs::create_dir(repo.path().join(".git")).unwrap();
+        assert!(has_git_entry(repo.path()));
+
+        // A linked worktree or a submodule has a `.git` FILE, not a directory.
+        let linked = TempDir::new().unwrap();
+        std::fs::write(linked.path().join(".git"), "gitdir: /elsewhere/.git\n").unwrap();
+        assert!(has_git_entry(linked.path()));
+    }
 }

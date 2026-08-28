@@ -82,6 +82,12 @@ impl SyncRuntime {
     /// that `clep sync init` has never touched, which is logged so a
     /// surprised operator can see why `clep sync` is refusing.
     pub fn detect(vault: &Vault) -> Option<Arc<Self>> {
+        // Answer for every non-syncing vault from the filesystem: without
+        // this, each one pays two `git` subprocesses at startup to be told it
+        // is not a sync repository.
+        if !gitsync::has_git_entry(vault.root()) {
+            return None;
+        }
         let git = Git::new(vault.root());
         let initialised = match gitsync::is_initialised(vault, &git) {
             Ok(initialised) => initialised,
@@ -167,7 +173,16 @@ impl SyncRuntime {
 
         let engine = Arc::clone(&self.engine);
         let report = match tokio::task::spawn_blocking(move || engine.full_sync()).await {
-            Ok(result) => result?,
+            Ok(Ok(report)) => report,
+            Ok(Err(error)) => {
+                // A failed sync can still have moved the tree — a leftover
+                // merge resolved before the pull failed, a merge committed
+                // before a rejected push and a failed retry. Watcher events
+                // were dropped for the whole window, so this rebuild is the
+                // only thing that can catch the index up.
+                rebuild_after_sync(state).await;
+                return Err(error);
+            }
             Err(join) => return Err(SyncError::Config(format!("sync task panicked: {join}"))),
         };
 
@@ -470,6 +485,37 @@ pub(crate) mod tests {
         format!("+++\nid = \"{id}\"\ntitle = \"{title}\"\n+++\n")
     }
 
+    /// Whether the index holds a row for `path`.
+    async fn indexed(state: &Arc<AppState>, path: &str) -> bool {
+        let path = path.to_string();
+        state
+            .index
+            .with_index(move |index, _| {
+                index
+                    .connection()
+                    .query_row("SELECT 1 FROM pages WHERE path = ?1", [path], |_| Ok(()))
+                    .is_ok()
+            })
+            .await
+            .unwrap()
+    }
+
+    /// Give the bare remote an unrelated root commit, so the next merge in
+    /// `repos.a` fails outright. `push -f` is done by the TEST, never by the
+    /// engine.
+    fn poison_remote_with_unrelated_history(repos: &TestRepos) {
+        let stray = repos.tmp.path().join("stray");
+        std::fs::create_dir_all(&stray).unwrap();
+        let git = testing::git(&stray);
+        git.init("main").unwrap();
+        testing::write(&stray, "stray.md", "stray");
+        git.add_all().unwrap();
+        git.commit("stray", &testing::author()).unwrap();
+        git.remote_add("origin", repos.remote.to_str().unwrap())
+            .unwrap();
+        git.run(&["push", "-f", "origin", "main"]).unwrap();
+    }
+
     /// Wait until a `spawn_background` listener has subscribed to the change
     /// stream, so a notification sent next is actually delivered.
     async fn await_listener(state: &Arc<AppState>) {
@@ -567,6 +613,47 @@ pub(crate) mod tests {
             "the watcher is un-paused when the window closes"
         );
         assert!(state.sync.as_ref().unwrap().last_report().is_some());
+    }
+
+    /// A sync that ends in an error may still have moved the working tree: a
+    /// leftover merge resolved before the pull failed, or a merge committed
+    /// before a rejected push and a failed retry. Watcher events were dropped
+    /// for the whole window, so the rebuild is the only thing that can catch
+    /// the index up — it has to run on the error path too.
+    #[tokio::test]
+    async fn an_engine_error_still_rebuilds_the_index() {
+        let (state, repos) = synced_state().await;
+
+        // Written after the state was built, so only a rebuild can index it.
+        testing::write(
+            &repos.a,
+            "notes/local.md",
+            &page("0192b6c0-0000-7000-8000-0000000000d1", "Local"),
+        );
+        assert!(
+            !indexed(&state, "notes/local.md").await,
+            "the fixture is only meaningful while the page is unindexed"
+        );
+
+        poison_remote_with_unrelated_history(&repos);
+
+        let error = state
+            .sync
+            .as_ref()
+            .unwrap()
+            .run_full_sync(&state)
+            .await
+            .unwrap_err();
+        assert!(matches!(error, SyncError::MergeFailed { .. }), "{error}");
+
+        assert!(
+            indexed(&state, "notes/local.md").await,
+            "the index was not rebuilt after the engine returned an error"
+        );
+        assert!(
+            !state.watcher_paused.load(Ordering::SeqCst),
+            "the watcher is un-paused even when the sync failed"
+        );
     }
 
     /// The gate `run_full_sync` holds for the whole sync window: while it is

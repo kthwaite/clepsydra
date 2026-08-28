@@ -365,7 +365,9 @@ Notes:
   `Device: <hostname>` trailer.
 - `autocommit_debounce_secs` is how long the server waits after the last
   change before committing. `interval_secs = 0` means no scheduled full
-  sync — sync runs at `serve` start, on `clep sync`, and on shutdown.
+  sync — a full sync then runs only at `serve` start and on `clep sync`.
+  Shutdown is not a full sync: it commits what is outstanding and pushes it,
+  on a 30-second budget.
 
 ### Encrypted-note files and lock behavior
 

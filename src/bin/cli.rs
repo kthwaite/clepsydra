@@ -57,7 +57,7 @@ enum CasCommands {
 enum SyncCommands {
     #[command(
         about = "Turn this vault into a synced git repository (idempotent)",
-        long_about = "Initialise git-backed sync (docs/superpowers/specs/2026-08-27-clep-sync-design.md §2): create or adopt the repository at the vault root, write the managed .gitignore/.gitattributes blocks, require git-lfs, seed [sync] author from git's global config (or --author-name/--author-email, or an interactive prompt), migrate a legacy ~/.clepsydra/cas store when the vault store is still empty, add --remote as origin, and make the initial commit. Refuses when the vault sits inside another repository, when origin already points elsewhere, when the checked-out branch differs from [sync] branch, or while a server answers on the configured address (stop `clep serve` first)."
+        long_about = "Initialise git-backed sync (docs/superpowers/specs/2026-08-27-clep-sync-design.md §2): create or adopt the repository at the vault root, write the managed .gitignore/.gitattributes blocks, require git-lfs, seed the [sync] author (--author-name/--author-email if both are passed, else the existing [sync] values, else git's global user.name/user.email, else an interactive prompt on a TTY, else an error), migrate a legacy ~/.clepsydra/cas store when the vault store is still empty, add --remote as origin, and make the initial commit. Refuses when the vault sits inside another repository, when origin already points elsewhere, when the checked-out branch differs from [sync] branch, or while a server answers on the configured address (stop `clep serve` first)."
     )]
     Init {
         /// Remote URL to add as `origin` (must speak git-lfs).

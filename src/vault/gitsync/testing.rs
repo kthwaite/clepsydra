@@ -63,12 +63,10 @@ pub fn read(root: &Path, rel: &str) -> String {
 /// A bare remote plus two cloned vault roots (`a`, `b`), both sharing one
 /// root commit ("init") and both configured with the [`author`] identity.
 pub struct TestRepos {
-    // Held only to keep the temp dir alive for `TestRepos`'s lifetime
-    // (RAII); nothing reads it directly yet.
-    #[allow(dead_code)]
+    /// Keeps the temp dir alive for `TestRepos`'s lifetime (RAII), and gives
+    /// tests somewhere to build a third repository.
     pub tmp: TempDir,
-    // Unused until a later task points tests directly at the bare remote.
-    #[allow(dead_code)]
+    /// The bare remote both clones push to.
     pub remote: PathBuf,
     pub a: PathBuf,
     pub b: PathBuf,

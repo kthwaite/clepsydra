@@ -1,9 +1,12 @@
 //! Subprocess wrapper around the system `git` binary.
 //!
-//! Every invocation runs as `git -C <root> <args>` with the D2 environment
-//! defaults: `GIT_TERMINAL_PROMPT=0`, `LC_ALL=C`, and
-//! `GIT_SSH_COMMAND="ssh -o BatchMode=yes"` unless the calling process
-//! already sets `GIT_SSH_COMMAND`. Tests layer `GIT_CONFIG_GLOBAL` /
+//! Every invocation runs as `git -C <root> -c http.lowSpeedLimit=… -c
+//! http.lowSpeedTime=… <args>` with the D2 environment defaults:
+//! `GIT_TERMINAL_PROMPT=0`, `LC_ALL=C`, and [`SSH_COMMAND_DEFAULT`] unless
+//! the calling process already sets `GIT_SSH_COMMAND`. Between them, the
+//! `-c` overrides and the ssh options are what stops an unreachable remote
+//! from holding a sync window open indefinitely — git has no timeout of its
+//! own. Tests layer `GIT_CONFIG_GLOBAL` /
 //! `GIT_CONFIG_NOSYSTEM` on top via [`super::testing::git`] so the user's
 //! real global git config never influences a test.
 
@@ -14,6 +17,18 @@ use std::process::{Command, Output, Stdio};
 use thiserror::Error;
 
 use super::Author;
+
+/// `GIT_SSH_COMMAND` when the calling process does not set one. `BatchMode`
+/// keeps ssh from prompting; the rest bound how long an unreachable or gone-
+/// silent host can hold a sync window open: 30 s to connect, then keepalive
+/// probes every 15 s and four unanswered probes (≈60 s) before ssh gives up.
+const SSH_COMMAND_DEFAULT: &str =
+    "ssh -o BatchMode=yes -o ConnectTimeout=30 -o ServerAliveInterval=15 -o ServerAliveCountMax=4";
+
+/// `-c key=value` overrides carried by every invocation. They are git's only
+/// timeout for HTTP transports: a fetch or push moving under 1 KiB/s for a
+/// minute is aborted rather than left to stall the sync window for ever.
+const NETWORK_CONFIG: [&str; 2] = ["http.lowSpeedLimit=1024", "http.lowSpeedTime=60"];
 
 /// Thin, synchronous wrapper around `git -C <root> <args>`.
 #[derive(Debug, Clone)]
@@ -33,7 +48,7 @@ impl Git {
         if std::env::var_os("GIT_SSH_COMMAND").is_none() {
             env.push((
                 "GIT_SSH_COMMAND".to_string(),
-                "ssh -o BatchMode=yes".to_string(),
+                SSH_COMMAND_DEFAULT.to_string(),
             ));
         }
         Self {
@@ -66,10 +81,27 @@ impl Git {
             .map(|(_, v)| v.clone())
     }
 
+    /// The arguments that precede every subcommand: the repository root and
+    /// the [`NETWORK_CONFIG`] overrides. Test-only window onto what
+    /// [`Git::command`] builds; production code never needs it.
+    #[cfg(test)]
+    pub(crate) fn base_args(&self) -> Vec<String> {
+        let mut args = vec!["-C".to_string(), self.root.to_string_lossy().into_owned()];
+        args.extend(Self::network_args());
+        args
+    }
+
+    fn network_args() -> impl Iterator<Item = String> {
+        NETWORK_CONFIG
+            .into_iter()
+            .flat_map(|setting| ["-c".to_string(), setting.to_string()])
+    }
+
     fn command(&self, args: &[&str]) -> Command {
         let mut cmd = Command::new(&self.program);
         cmd.arg("-C")
             .arg(&self.root)
+            .args(Self::network_args())
             .args(args)
             .stdin(Stdio::null());
         for (key, value) in &self.env {
@@ -647,10 +679,52 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn env_defaults_disable_prompts() {
+        let _unset = crate::env_test_support::EnvGuard::remove("GIT_SSH_COMMAND");
         let tmp = TempDir::new().unwrap();
         let git = Git::new(tmp.path());
         assert_eq!(git.env_value("GIT_TERMINAL_PROMPT").as_deref(), Some("0"));
         assert_eq!(git.env_value("LC_ALL").as_deref(), Some("C"));
+        // An unreachable host must not hang the sync window for ever: ssh
+        // gets a connect timeout and a keepalive probe budget on top of
+        // BatchMode.
+        let ssh = git.env_value("GIT_SSH_COMMAND").expect("GIT_SSH_COMMAND");
+        for option in [
+            "BatchMode=yes",
+            "ConnectTimeout=30",
+            "ServerAliveInterval=15",
+            "ServerAliveCountMax=4",
+        ] {
+            assert!(ssh.contains(option), "{option} missing from {ssh:?}");
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn an_inherited_ssh_command_is_left_alone() {
+        let _set = crate::env_test_support::EnvGuard::set("GIT_SSH_COMMAND", "ssh -i /custom/key");
+        let tmp = TempDir::new().unwrap();
+        assert_eq!(Git::new(tmp.path()).env_value("GIT_SSH_COMMAND"), None);
+    }
+
+    #[test]
+    fn every_invocation_bounds_stalled_http_transfers() {
+        let tmp = TempDir::new().unwrap();
+        let args = Git::new(tmp.path()).base_args();
+        assert_eq!(args[0], "-C");
+        let pairs: Vec<(&str, &str)> = args
+            .windows(2)
+            .map(|w| (w[0].as_str(), w[1].as_str()))
+            .filter(|(flag, _)| *flag == "-c")
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("-c", "http.lowSpeedLimit=1024"),
+                ("-c", "http.lowSpeedTime=60"),
+            ],
+            "{args:?}"
+        );
     }
 }

@@ -31,9 +31,11 @@ The working tree is never left conflicted, so the next edit — from the editor,
 the CLI, or another program — always meets ordinary Markdown.
 
 While the server runs a sync, it holds a quiesce window: the file watcher is
-paused and writes wait. When the merge changed files on disk, the index is
-rebuilt once afterwards and the UI receives a single refresh event. Requests
-issued during the window return once the vault has settled.
+paused and writes wait. Only writes — reads are served throughout, so the UI
+keeps working; a mutation issued during the window returns once the vault has
+settled. When the merge changed files on disk, the index is rebuilt once
+afterwards and the UI receives one `index_changed` event, plus a second one
+when the reconcile sweep that follows moved any pages.
 
 ## Prerequisites
 
@@ -138,6 +140,11 @@ Autocommit exists so a fetch never meets a dirty working tree. It commits; it
 does not touch the network. See the `[sync]` table in
 [Configuration](/docs/configuration#sync-settings) for the keys.
 
+The startup sync can hold the server for up to 120 seconds against a slow or
+unreachable remote before `clep serve` gives up waiting and opens its listener
+anyway. A Ctrl-C during that window is remembered and honoured as soon as the
+window closes; a second Ctrl-C exits immediately.
+
 `clep sync` asks whether a server is listening on the configured address
 first. If one answers, the sync runs *there*, inside its quiesce window, and
 the CLI prints the report it gets back. If nothing answers, the same engine
@@ -164,8 +171,9 @@ the same merge produces the same filename rather than a pile of copies.
 keep, and delete the copy. There is no merge tool to learn and no conflicted
 file to repair. Identical edits on both devices produce no copy at all.
 
-Encrypted pages always take the Conflict Copy path — their bodies cannot be
-merged.
+Encrypted pages follow the same rule as any other, but in practice always end
+up as Conflict Copies: re-encrypting a note rewrites every armored line, so two
+devices that both touched one leave nothing for a text merge to agree on.
 
 `clep sync status` counts the copies still in the tree; `clep doctor`'s
 `conflicts` section reports files that contain literal merge markers, which

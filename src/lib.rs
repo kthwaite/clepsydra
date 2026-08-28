@@ -1035,37 +1035,81 @@ async fn serve(
 /// requests get five seconds to finish, then the listener closes and
 /// [`run_server`] runs the shutdown push (D11).
 ///
-/// A second signal is left to the default disposition, so an operator who
-/// wants out immediately can press Ctrl-C twice.
+/// The signal streams stay subscribed afterwards, so a second SIGINT or
+/// SIGTERM kills the process outright (exit 130). Nothing else would: tokio
+/// installs its signal handlers for the lifetime of the process, so the
+/// default disposition never comes back, and a runtime dropped while a
+/// `spawn_blocking` `git` child is still running waits for that child for
+/// ever. Without this an operator wanting out of a slow startup sync has to
+/// reach for `SIGKILL`.
 async fn shutdown_signal(handle: ServerHandle) {
-    let interrupt = async {
-        if let Err(e) = tokio::signal::ctrl_c().await {
-            tracing::warn!("cannot listen for Ctrl-C: {e}");
-            std::future::pending::<()>().await;
-        }
-    };
+    let mut signals = ShutdownSignals::new();
+    signals.next().await;
+    info!("shutdown signal received; draining connections");
+    handle.graceful_shutdown(Some(GRACEFUL_SHUTDOWN_BUDGET));
+    signals.next().await;
+    tracing::warn!("second shutdown signal received; exiting immediately");
+    std::process::exit(130);
+}
 
+/// The SIGINT/SIGTERM streams [`shutdown_signal`] watches, held open across
+/// both signals. A stream that could not be installed is `None`, and a
+/// [`ShutdownSignals`] with no stream at all simply never fires.
+struct ShutdownSignals {
     #[cfg(unix)]
-    let terminate = async {
-        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
-            Ok(mut signal) => {
-                signal.recv().await;
+    interrupt: Option<tokio::signal::unix::Signal>,
+    #[cfg(unix)]
+    terminate: Option<tokio::signal::unix::Signal>,
+}
+
+impl ShutdownSignals {
+    fn new() -> Self {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let install = |kind: SignalKind, label: &str| match signal(kind) {
+                Ok(stream) => Some(stream),
+                Err(e) => {
+                    tracing::warn!("cannot listen for {label}: {e}");
+                    None
+                }
+            };
+            Self {
+                interrupt: install(SignalKind::interrupt(), "SIGINT"),
+                terminate: install(SignalKind::terminate(), "SIGTERM"),
             }
-            Err(e) => {
-                tracing::warn!("cannot listen for SIGTERM: {e}");
+        }
+        #[cfg(not(unix))]
+        {
+            Self {}
+        }
+    }
+
+    /// Resolve when the next SIGINT or SIGTERM arrives; never, when no stream
+    /// could be installed or the signal driver has gone away.
+    async fn next(&mut self) {
+        #[cfg(unix)]
+        {
+            let received = match (&mut self.interrupt, &mut self.terminate) {
+                (Some(interrupt), Some(terminate)) => tokio::select! {
+                    v = interrupt.recv() => v,
+                    v = terminate.recv() => v,
+                },
+                (Some(only), None) | (None, Some(only)) => only.recv().await,
+                (None, None) => None,
+            };
+            if received.is_none() {
                 std::future::pending::<()>().await;
             }
         }
-    };
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        () = interrupt => {}
-        () = terminate => {}
+        #[cfg(not(unix))]
+        {
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                tracing::warn!("cannot listen for Ctrl-C: {e}");
+                std::future::pending::<()>().await;
+            }
+        }
     }
-    info!("shutdown signal received; draining connections");
-    handle.graceful_shutdown(Some(GRACEFUL_SHUTDOWN_BUDGET));
 }
 
 /// What the startup sync left behind, and therefore whether `serve` still
@@ -1253,6 +1297,14 @@ pub(crate) mod env_test_support {
             // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
             // so no other thread is racing on the same variable.
             unsafe { std::env::set_var(key, value) }
+            Self { key, prior }
+        }
+
+        /// Unset `key` for as long as the guard lives.
+        pub(crate) fn remove(key: &'static str) -> Self {
+            let prior = std::env::var_os(key);
+            // SAFETY: see `set`.
+            unsafe { std::env::remove_var(key) }
             Self { key, prior }
         }
     }
