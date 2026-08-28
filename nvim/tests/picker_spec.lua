@@ -61,11 +61,11 @@ return {
 		name = "task_items map board tasks with code, stage, and title",
 		fn = function()
 			local items = picker.task_items({
-				{ id = "u1", code = "TSK-0012", status = "FIELD", title = "Fix it", path = "tasks/TSK-0012.md" },
+				{ id = "u1", code = "TSK-brave-finch-7q3zd", status = "FIELD", title = "Fix it", path = "tasks/TSK-brave-finch-7q3zd.md" },
 			}, "/vault")
-			eq("TSK-0012 [FIELD] Fix it", items[1].text)
-			eq("/vault/tasks/TSK-0012.md", items[1].file)
-			eq("TSK-0012", items[1].code)
+			eq("TSK-brave-finch-7q3zd [FIELD] Fix it", items[1].text)
+			eq("/vault/tasks/TSK-brave-finch-7q3zd.md", items[1].file)
+			eq("TSK-brave-finch-7q3zd", items[1].code)
 		end,
 	},
 }

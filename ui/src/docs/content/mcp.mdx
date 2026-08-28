@@ -89,10 +89,10 @@ for an explicit destination that assignment cannot express.
 | `vault_ai_journal_capture` | write | Append an agent-initiated note to today's AI journal, with an optional `author` label |
 | `vault_capture_conversation` | write | Create or safely append a visible user/assistant chat as an `AI_CONVERSATION` Folio |
 | `vault_board` | read | Task Board columns with WIP limits, Tasks with TSK codes, Cycles with S codes, and Projects in the legacy `operations` response field; optional `project` filter |
-| `vault_task_create` | write | New Task; reserves the next `TSK-NNNN` code and files the page under `tasks/<project>/` |
-| `vault_task_update` | write | Patch a Task addressed by TSK code, path, or id; tri-state clearing for Cycle, assignee, estimate, due, blocker reason (`hold`), and related page (`link`) |
-| `vault_cycle_create` | write | New Cycle (a CYCLE page under `cycles/`); code auto-generates as `S-{n}` |
-| `vault_cycle_update` | write | Patch a Cycle addressed by S code, path, or id; closing with `carry_to` moves unfinished Tasks |
+| `vault_task_create` | write | New Task; the server mints a `TSK-<adjective>-<noun>-<tail>` code and files the page under `tasks/<project>/` |
+| `vault_task_update` | write | Patch a Task addressed by TSK code (or any unique prefix of one), path, or id; tri-state clearing for Cycle, assignee, estimate, due, blocker reason (`hold`), and related page (`link`) |
+| `vault_cycle_create` | write | New Cycle (a CYCLE page under `cycles/`); code auto-generates as `S-<adjective>-<noun>-<tail>` |
+| `vault_cycle_update` | write | Patch a Cycle addressed by S code (or any unique prefix of one), path, or id; closing with `carry_to` moves unfinished Tasks |
 | `vault_assign` | organize | Declare kind/project (single or bulk); the vault relocates files |
 | `vault_move_page` | organize | Explicit rename/relocate with link rewriting |
 | `vault_folder` | organize | Create / delete (`recursive` opt-in) / move folders |
@@ -147,27 +147,34 @@ display label from `columns[].id` using the persisted status mapping above.
 `tasks[].checks` is `[done, total]` Checklist Item counts.
 `tasks[].link` and `operations[].dossier` contain Related Page values.
 
-Create Tasks with `vault_task_create` rather than `vault_create_page`: the
-board reserves the next `TSK-NNNN` code and files the page under
-`tasks/<project>/`. Status defaults to Inbox (`INTAKE`), priority to P2 Medium
-(`P2`), and the `body` wire field becomes the Task Description with Checklist
-Items as `- [ ]` Todos beneath it. The `ai-generated` tag requirement applies
-to LLM-authored Tasks.
+Task and Cycle codes are server-minted petnames, `TSK-<adjective>-<noun>-<tail>`
+and `S-<adjective>-<noun>-<tail>` (e.g. `TSK-brave-finch-7q3zd`) — agents never
+choose one. Input is matched case-insensitively, and any unique prefix (e.g.
+`TSK-brave-finch`) addresses the page; an ambiguous prefix is rejected with the
+candidates listed.
 
-The update tools accept a code (`TSK-0012`, `S-13`), a vault path, or a page
-UUID; look codes up with `vault_board`. On `vault_task_update`, title, Project,
-status, priority, and tags update when present. `clear_project: true` clears
-the Project. Cycle, assignee, estimate, due, blocker reason (`hold`), and
-Related Page (`link`) are tri-state: absent keeps the value, `null` or `""`
-clears it, and a value sets it. A non-empty `hold` value means Blocked. The
-Cycle sentinel `"BACKLOG"` moves a Task to Backlog.
+Create Tasks with `vault_task_create` rather than `vault_create_page`: the
+server mints the code and files the page under `tasks/<project>/`. Status
+defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`), and the `body`
+wire field becomes the Task Description with Checklist Items as `- [ ]` Todos
+beneath it. The `ai-generated` tag requirement applies to LLM-authored Tasks.
+
+The update tools accept a code or unique prefix (`TSK-brave-finch-7q3zd` or
+`TSK-brave-finch`), a vault path, or a page UUID; look codes up with
+`vault_board`. On `vault_task_update`, title, Project, status, priority, and
+tags update when present. `clear_project: true` clears the Project. Cycle,
+assignee, estimate, due, blocker reason (`hold`), and Related Page (`link`)
+are tri-state: absent keeps the value, `null` or `""` clears it, and a value
+sets it. A non-empty `hold` value means Blocked. The Cycle sentinel
+`"BACKLOG"` moves a Task to Backlog.
 
 Cycles cannot be created Closed: `vault_cycle_create` accepts Planned
 (`PLANNED`, the default) or Active (`ACTIVE`). Close a finished Cycle with
 `vault_cycle_update` by setting `state: "CLOSED"`. Pass `carry_to` to move
-unfinished Tasks: `"BACKLOG"` moves them to Backlog, while a Cycle code such
-as `"S-14"` reassigns them. `carry_to` is valid only with `state: "CLOSED"`;
-without it, Tasks remain in the closed Cycle.
+unfinished Tasks: `"BACKLOG"` moves them to Backlog, while a Cycle code or
+unique prefix such as `"S-calm-heron-2xm9p"` reassigns them. `carry_to` is
+valid only with `state: "CLOSED"`; without it, Tasks remain in the closed
+Cycle.
 
 ### Capture into a journal
 

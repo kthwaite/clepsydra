@@ -6,14 +6,20 @@ return {
 	{
 		name = "extract_code finds a code in the cursor word, case-insensitively",
 		fn = function()
-			eq("TSK-0012", tasks.extract_code("([[TSK-0012]])", ""))
-			eq("TSK-0012", tasks.extract_code("tsk-0012:", ""))
+			eq("TSK-brave-finch-7q3zd", tasks.extract_code("TSK-brave-finch-7q3zd,", ""))
+			eq("TSK-brave-finch-7q3zd", tasks.extract_code("tsk-brave-finch-7q3zd", ""))
+		end,
+	},
+	{
+		name = "extract_code no longer matches legacy sequential codes",
+		fn = function()
+			eq(nil, tasks.extract_code("TSK-0012", ""))
 		end,
 	},
 	{
 		name = "extract_code falls back to the buffer file name",
 		fn = function()
-			eq("TSK-0007", tasks.extract_code("word", "/vault/tasks/TSK-0007.md"))
+			eq("TSK-calm-heron-2xm9p", tasks.extract_code("word", "/v/tasks/x/TSK-calm-heron-2xm9p.md"))
 			eq(nil, tasks.extract_code("word", "/vault/notes/A.md"))
 			eq(nil, tasks.extract_code("", ""))
 		end,
