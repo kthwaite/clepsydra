@@ -8,6 +8,7 @@ beforeEach(() => {
     opFilter: "ALL",
     cycleSel: "",
     railOpen: true,
+    showCompleted: false,
     editTaskId: null,
     taskModal: null,
     cycleModal: null,
@@ -21,6 +22,7 @@ describe("useBoardStore defaults", () => {
     expect(s.opFilter).toBe("ALL");
     expect(s.cycleSel).toBe("");
     expect(s.railOpen).toBe(true);
+    expect(s.showCompleted).toBe(false);
   });
 
   it("has correct default ephemeral values", () => {
@@ -50,6 +52,13 @@ describe("useBoardStore setters", () => {
   it("setRailOpen updates railOpen", () => {
     useBoardStore.getState().setRailOpen(false);
     expect(useBoardStore.getState().railOpen).toBe(false);
+  });
+
+  it("setShowCompleted updates showCompleted", () => {
+    useBoardStore.getState().setShowCompleted(true);
+    expect(useBoardStore.getState().showCompleted).toBe(true);
+    useBoardStore.getState().setShowCompleted(false);
+    expect(useBoardStore.getState().showCompleted).toBe(false);
   });
 
   it("setEditTaskId updates editTaskId", () => {
@@ -120,6 +129,8 @@ describe("useBoardStore persist partialize", () => {
       opFilter: "OPS-1",
       cycleSel: "2026-Q2",
       railOpen: false,
+      columnWidths: { INTAKE: 300 },
+      showCompleted: true,
       editTaskId: "task-123",
       taskModal: { project: "p" },
       cycleModal: { kind: "new" as const },
@@ -132,6 +143,8 @@ describe("useBoardStore persist partialize", () => {
       opFilter: "OPS-1",
       cycleSel: "2026-Q2",
       railOpen: false,
+      columnWidths: { INTAKE: 300 },
+      showCompleted: true,
     });
     expect("editTaskId" in partial).toBe(false);
     expect("taskModal" in partial).toBe(false);

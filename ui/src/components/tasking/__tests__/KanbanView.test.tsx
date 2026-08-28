@@ -1272,3 +1272,34 @@ describe("KanbanView — QuickAddRow wiring", () => {
     expect(screen.getByTestId("qa-INTAKE")).toBeInTheDocument();
   });
 });
+
+// ── link chip stacking ───────────────────────────────────────────────────────
+
+describe("KanbanView — link chip stacking", () => {
+  it("lifts the dossier link above the card's open button but below sticky headers", () => {
+    const taskWithLink: BoardTask = {
+      ...tasks[0],
+      id: "t-link",
+      code: "TSK-0020",
+      status: "INTAKE",
+      link: "tasks/alpha",
+    };
+    wrap(
+      <KanbanView
+        colLabel={FIXTURE_COL_LABEL}
+        columns={columns}
+        tasks={[taskWithLink]}
+        cycles={cycles}
+        showOp={false}
+      />,
+    );
+
+    const linkButton = screen.getByText("tasks/alpha");
+    // Same layering as InlineEditPopover: the card's open button is
+    // `absolute inset-0 z-0`; the kanban column header is sticky z-[2] and
+    // the list view's sticky rows are z-[3]/z-[4]. z-10 would paint the chip
+    // over those as the column scrolls.
+    expect(linkButton.className).not.toMatch(/\bz-(?:10|20|30|40|50)\b/);
+    expect(linkButton.className).toContain("z-[1]");
+  });
+});

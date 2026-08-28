@@ -19,6 +19,8 @@ interface BoardState {
   railOpen: boolean;
   /** Kanban column id → persisted pixel width (unset = default basis) */
   columnWidths: Record<string, number>;
+  /** List ("backlog") mode: show SEALED tasks (hidden by default). */
+  showCompleted: boolean;
   // Ephemeral
   editTaskId: string | null;
   taskModal: { project?: string; status?: string; cycle?: string } | null;
@@ -35,6 +37,7 @@ interface BoardActions {
   setRailOpen: (open: boolean) => void;
   setColumnWidth: (col: string, width: number) => void;
   resetColumnWidth: (col: string) => void;
+  setShowCompleted: (show: boolean) => void;
   setEditTaskId: (id: string | null) => void;
   openTaskModal: (opts?: {
     project?: string;
@@ -57,6 +60,7 @@ export const useBoardStore = create<BoardState & BoardActions>()(
       cycleSel: "",
       railOpen: true,
       columnWidths: {},
+      showCompleted: false,
       // Ephemeral defaults
       editTaskId: null,
       taskModal: null,
@@ -78,6 +82,7 @@ export const useBoardStore = create<BoardState & BoardActions>()(
           const { [col]: _removed, ...columnWidths } = state.columnWidths;
           return { columnWidths };
         }),
+      setShowCompleted: (showCompleted) => set({ showCompleted }),
       setEditTaskId: (editTaskId) => set({ editTaskId }),
       openTaskModal: (opts = {}) => set({ taskModal: opts }),
       closeTaskModal: () => set({ taskModal: null }),
@@ -93,6 +98,7 @@ export const useBoardStore = create<BoardState & BoardActions>()(
         cycleSel: state.cycleSel,
         railOpen: state.railOpen,
         columnWidths: state.columnWidths,
+        showCompleted: state.showCompleted,
       }),
     },
   ),

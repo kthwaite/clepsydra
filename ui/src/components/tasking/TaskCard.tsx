@@ -200,7 +200,7 @@ export function TaskCard({
         {t.link && (
           <button
             type="button"
-            className="pointer-events-auto relative z-10 cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
+            className="pointer-events-auto relative z-[1] cursor-pointer border-b border-dotted border-[var(--cool)] text-[var(--cool)] hover:bg-[var(--cool)] hover:text-[var(--bg)]"
             onClick={(e) => {
               e.stopPropagation();
               onOpenDossier?.(t.link!);

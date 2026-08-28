@@ -1,21 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   asWikilink,
-  attendeeCardinality,
   attendeeTarget,
-  canAddAttendee,
   hasAttendees,
   readAttendees,
 } from "#/lib/attendance";
 import { KINDS } from "#/lib/kind";
 
-describe("attendeeCardinality", () => {
-  it("covers meetings and 1:1s and nothing else", () => {
-    expect(attendeeCardinality("MEETING")).toBe("many");
-    expect(attendeeCardinality("ONE_ON_ONE")).toBe("one");
+describe("hasAttendees", () => {
+  it("covers meetings and nothing else", () => {
+    expect(hasAttendees("MEETING")).toBe(true);
     for (const kind of KINDS) {
-      if (kind === "MEETING" || kind === "ONE_ON_ONE") continue;
-      expect(attendeeCardinality(kind)).toBeNull();
+      if (kind === "MEETING") continue;
       expect(hasAttendees(kind)).toBe(false);
     }
   });
@@ -51,15 +47,5 @@ describe("readAttendees", () => {
     expect(readAttendees(undefined)).toEqual([]);
     expect(readAttendees(null)).toEqual([]);
     expect(readAttendees(42)).toEqual([]);
-  });
-});
-
-describe("canAddAttendee", () => {
-  it("lets a meeting keep going and stops a 1:1 at one", () => {
-    expect(canAddAttendee("MEETING", 0)).toBe(true);
-    expect(canAddAttendee("MEETING", 9)).toBe(true);
-    expect(canAddAttendee("ONE_ON_ONE", 0)).toBe(true);
-    expect(canAddAttendee("ONE_ON_ONE", 1)).toBe(false);
-    expect(canAddAttendee("NOTE", 0)).toBe(false);
   });
 });

@@ -359,6 +359,30 @@ pub(crate) enum CodeLookup {
     Ambiguous(Vec<String>),
 }
 
+/// Check that `slug` is declared as the `project` of at least one PROJECT
+/// page. Returns 400 otherwise. Shared by the task POST/PATCH handlers, which
+/// only call it for a non-empty slug (the empty string clears on PATCH).
+async fn ensure_project_exists(state: &AppState, slug: &str) -> Result<(), ApiError> {
+    let slug_owned = slug.to_string();
+    let exists = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .prepare("SELECT 1 FROM pages WHERE kind = ?1 AND project = ?2 LIMIT 1")?
+                .exists(params![Kind::Project.as_str(), slug_owned])
+        })
+        .await
+        .map_err(|e| ApiError::internal(e.to_string()))?
+        .map_err(|e| ApiError::internal(e.to_string()))?;
+    if !exists {
+        return Err(ApiError::bad_request(format!(
+            "unknown project: {slug}; must match the project slug declared by an existing PROJECT page"
+        )));
+    }
+    Ok(())
+}
+
 /// Resolve user input to a canonical stem of `kind`: an exact case-insensitive
 /// match wins; otherwise a unique case-insensitive prefix match; otherwise
 /// `NotFound` (no match) or `Ambiguous` (multiple prefix matches, listed).

@@ -28,8 +28,6 @@ pub enum Kind {
     Cycle,
     Recipe,
     Meeting,
-    #[schema(rename = "ONE_ON_ONE")]
-    OneOnOne,
     Archive,
     #[schema(rename = "AI_CONVERSATION")]
     AiConversation,
@@ -55,7 +53,6 @@ impl Kind {
             Kind::Cycle => "cycles",
             Kind::Recipe => "recipes",
             Kind::Meeting => "meetings",
-            Kind::OneOnOne => "one-on-ones",
             // Must stay in step with `ArchiveConfig::default_path_prefix`;
             // a mismatch would relocate every existing archived page.
             Kind::Archive => "archive",
@@ -80,7 +77,6 @@ impl Kind {
             Kind::Cycle => "cycle",
             Kind::Recipe => "recipe",
             Kind::Meeting => "meeting",
-            Kind::OneOnOne => "one_on_one",
             Kind::Archive => "archive",
             Kind::AiConversation => "ai_conversation",
             Kind::AiJournal => "ai_journal",
@@ -103,7 +99,6 @@ impl Kind {
             Kind::Cycle => "CYCLE",
             Kind::Recipe => "RECIPE",
             Kind::Meeting => "MEETING",
-            Kind::OneOnOne => "ONE_ON_ONE",
             Kind::Archive => "ARCHIVE",
             Kind::AiConversation => "AI_CONVERSATION",
             Kind::AiJournal => "AI_JOURNAL",
@@ -125,11 +120,12 @@ impl Kind {
             "TASK" => Some(Kind::Task),
             "CYCLE" => Some(Kind::Cycle),
             "RECIPE" => Some(Kind::Recipe),
-            "MEETING" => Some(Kind::Meeting),
-            // `1:1` and `1-1` are how the kind is spoken and written; accept
-            // them as spellings of the canonical ONE_ON_ONE token.
-            "ONE_ON_ONE" | "ONE-ON-ONE" | "ONEONONE" | "1:1" | "1-1" | "1ON1" => {
-                Some(Kind::OneOnOne)
+            // ONE_ON_ONE was folded into MEETING on 2026-08-28: a 1:1 is a
+            // MEETING carrying the user tag `1:1`. The retired token and the
+            // spellings it accepted still parse, leniently, as MEETING; nothing
+            // is ever written back as ONE_ON_ONE.
+            "MEETING" | "ONE_ON_ONE" | "ONE-ON-ONE" | "ONEONONE" | "1:1" | "1-1" | "1ON1" => {
+                Some(Kind::Meeting)
             }
             "ARCHIVE" => Some(Kind::Archive),
             "AI_CONVERSATION" => Some(Kind::AiConversation),
@@ -154,9 +150,12 @@ impl Kind {
             "tasks" | "task" => Some(Kind::Task),
             "cycles" | "cycle" | "sprints" | "sprint" => Some(Kind::Cycle),
             "recipes" | "recipe" => Some(Kind::Recipe),
-            "meetings" | "meeting" => Some(Kind::Meeting),
-            "one-on-ones" | "one-on-one" | "one-to-ones" | "one-to-one" | "1-1s" | "1-1"
-            | "1on1s" | "1on1" | "121s" | "121" => Some(Kind::OneOnOne),
+            // The folders the retired ONE_ON_ONE kind claimed (see `from_token`)
+            // infer MEETING; the canonical folder is `meetings`.
+            "meetings" | "meeting" | "one-on-ones" | "one-on-one" | "one-to-ones"
+            | "one-to-one" | "1-1s" | "1-1" | "1on1s" | "1on1" | "121s" | "121" => {
+                Some(Kind::Meeting)
+            }
             "archive" | "archives" | "archived" => Some(Kind::Archive),
             "conversations" | "conversation" | "chats" => Some(Kind::AiConversation),
             "ai-journals" | "ai-journal" => Some(Kind::AiJournal),
@@ -332,7 +331,6 @@ mod tests {
             Kind::Cycle,
             Kind::Recipe,
             Kind::Meeting,
-            Kind::OneOnOne,
             Kind::AiConversation,
             Kind::AiJournal,
         ];
@@ -375,7 +373,6 @@ mod tests {
             (Kind::Cycle, "cycle"),
             (Kind::Recipe, "recipe"),
             (Kind::Meeting, "meeting"),
-            (Kind::OneOnOne, "one_on_one"),
             (Kind::AiConversation, "ai_conversation"),
             (Kind::AiJournal, "ai_journal"),
         ];
@@ -449,29 +446,30 @@ mod tests {
     }
 
     #[test]
-    fn meeting_kinds_have_their_own_folders_and_tags() {
+    fn meeting_has_its_own_folder_and_tag() {
         assert_eq!(Kind::Meeting.as_str(), "MEETING");
         assert_eq!(Kind::Meeting.canonical_folder(), "meetings");
         assert_eq!(Kind::Meeting.computed_tag(), "meeting");
-        assert_eq!(Kind::OneOnOne.as_str(), "ONE_ON_ONE");
-        assert_eq!(Kind::OneOnOne.canonical_folder(), "one-on-ones");
-        assert_eq!(Kind::OneOnOne.computed_tag(), "one_on_one");
     }
 
     #[test]
-    fn one_on_one_accepts_the_spellings_people_actually_type() {
+    fn legacy_one_on_one_spellings_parse_as_meeting() {
+        // ONE_ON_ONE stopped being a kind on 2026-08-28: a 1:1 is a MEETING
+        // tagged `1:1`. Every spelling the old kind accepted still parses,
+        // leniently, as MEETING.
         for token in [
             "ONE_ON_ONE",
             "one_on_one",
             "one-on-one",
+            "ONEONONE",
             " 1:1 ",
             "1-1",
             "1on1",
         ] {
             assert_eq!(
                 Kind::from_token(token),
-                Some(Kind::OneOnOne),
-                "token {token:?} should parse as ONE_ON_ONE"
+                Some(Kind::Meeting),
+                "legacy token {token:?} should parse as MEETING"
             );
         }
         assert_eq!(Kind::from_token("meeting"), Some(Kind::Meeting));
@@ -483,34 +481,40 @@ mod tests {
             resolve("meetings/2026-08-27.standup.ab12cd34.md", None),
             (Kind::Meeting, true)
         );
+        assert_eq!(resolve("meeting/x.md", None), (Kind::Meeting, true));
+        // The folders the retired ONE_ON_ONE kind used to claim infer MEETING.
         for folder in [
             "one-on-ones",
             "one-on-one",
             "one-to-ones",
+            "one-to-one",
             "1-1s",
+            "1-1",
+            "1on1s",
             "1on1",
             "121s",
+            "121",
         ] {
             assert_eq!(
                 resolve(&format!("{folder}/x.md"), None),
-                (Kind::OneOnOne, true),
-                "folder {folder:?} should infer ONE_ON_ONE"
+                (Kind::Meeting, true),
+                "legacy folder {folder:?} should infer MEETING"
             );
         }
     }
 
     #[test]
-    fn meeting_kinds_serde_round_trip() {
+    fn meeting_serde_round_trips_and_legacy_one_on_one_decodes_as_meeting() {
         assert_eq!(
             serde_json::to_string(&Kind::Meeting).unwrap(),
             "\"MEETING\""
         );
-        assert_eq!(
-            serde_json::to_string(&Kind::OneOnOne).unwrap(),
-            "\"ONE_ON_ONE\""
-        );
+        let decoded: Kind = serde_json::from_str("\"MEETING\"").unwrap();
+        assert_eq!(decoded, Kind::Meeting);
+        // Legacy input is read leniently; nothing is ever written back as it.
         let decoded: Kind = serde_json::from_str("\"ONE_ON_ONE\"").unwrap();
-        assert_eq!(decoded, Kind::OneOnOne);
+        assert_eq!(decoded, Kind::Meeting);
+        assert_eq!(serde_json::to_string(&decoded).unwrap(), "\"MEETING\"");
     }
 
     #[test]

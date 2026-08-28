@@ -64,6 +64,10 @@ kind:recipe tag:dinner
 -project:Archive
 project:"My Project"
 "local backup"
+kind:meeting tag:"1:1"
+kind:meeting tag:1:1
+attendees:>1
+attendees:0 kind:meeting
 ```
 
 A bare word is a full-text prefix term. Full-text matching uses Porter stemming
@@ -74,6 +78,12 @@ fields are:
   canonical Kind token.
 - `tag` matches an exact, case-sensitive stored or computed tag.
 - `project` matches the exact, case-sensitive stored project value.
+- `attendees` compares how many people a page's `attendees` property names.
+  The value is a whole number, optionally preceded by `=`, `>`, `>=`, `<`, or
+  `<=`; a bare number means equality. A page without the property counts as
+  0, so `attendees:0` finds meetings naming nobody and `-attendees:0` those
+  naming anyone. Anything else (`attendees:many`, `attendees:-1`) is an
+  `invalid_field_value` error.
 
 Field names must be lowercase. Fields do not use prefix or hierarchical
 matching. Separate expressions with whitespace for AND, use `|` for OR, prefix
@@ -85,7 +95,9 @@ operator characters. Within quotes, write `\"` for a literal double quote and
 `\\` for a literal backslash. Outside quotes, parentheses, `|`, leading `-`,
 `:`, whitespace, and `"` are syntax characters; quote literal text that
 resembles structured syntax. A hyphen inside an unquoted word remains part of
-the word.
+the word. An unquoted field value also keeps a colon that runs straight into
+more text, so `tag:1:1` and `tag:model:gpt-5.6-sol` read as one value;
+whitespace on either side of the colon ends the value.
 
 Results with a positive full-text match come first, ordered by best FTS rank.
 Metadata-only results follow in most-recently-updated order, with missing

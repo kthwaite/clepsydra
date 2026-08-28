@@ -2658,10 +2658,13 @@ mod tests {
             "Target",
             "target body",
         );
+        // A stem-form link: it must follow the renamed file, which is what
+        // gives this move a backlink rewrite to roll back. (A title-form
+        // `[[Target]]` keeps resolving and is left alone — TSK-0119.)
         let backlink = batch_page(
             "019fd000-0000-7000-8000-000000000010",
             "Backlink",
-            "See [[Target]].",
+            "See [[target]].",
         );
         let fixture = BatchFixture::new(&[("target.md", &target), ("backlink.md", &backlink)]);
         let original_target = fs::read(fixture.root().join("target.md")).unwrap();

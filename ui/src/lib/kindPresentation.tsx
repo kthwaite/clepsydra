@@ -11,6 +11,10 @@ export type KindMetaExtrasProps = {
   tabId: string;
   /** True while the editor drafts a not-yet-created page (today's journal). */
   isDraft: boolean;
+  /** The page's editable tags — the same values the folio header edits. */
+  tags: string[];
+  /** Replace the editable tags; the editor saves the way the header does. */
+  onTagsChange: (next: string[]) => void;
 };
 
 /** What a per-kind renderer may customise around the shared FOLIO editor. */
@@ -54,11 +58,6 @@ const REGISTRY: Partial<Record<Kind, KindPresentation>> = {
     readOnlyTitle: aiJournalDayLabel,
   },
   MEETING: {
-    bodyPresentation: "editor",
-    metaExtras: MeetingMeta,
-    metaExtrasLabel: "Meeting",
-  },
-  ONE_ON_ONE: {
     bodyPresentation: "editor",
     metaExtras: MeetingMeta,
     metaExtrasLabel: "Meeting",

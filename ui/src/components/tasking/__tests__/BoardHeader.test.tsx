@@ -64,6 +64,7 @@ beforeEach(() => {
     opFilter: "ALL",
     cycleSel: "",
     railOpen: true,
+    showCompleted: false,
     editTaskId: null,
     taskModal: null,
     cycleModal: null,
@@ -282,6 +283,50 @@ describe("BoardHeader", () => {
   it("does NOT render the N OF M count line when the filter is inactive", () => {
     renderHeader();
     expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
+  });
+
+  // ── completed toggle (list mode only) ─────────────────────────────────────
+
+  it("does NOT render the completed toggle outside backlog mode", () => {
+    useBoardStore.setState({ mode: "card" });
+    renderHeader({ hiddenCompletedCount: 3 });
+    expect(
+      screen.queryByTestId("board-show-completed"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("does NOT render the completed toggle when nothing is hidden and nothing is revealed", () => {
+    useBoardStore.setState({ mode: "backlog", showCompleted: false });
+    renderHeader({ hiddenCompletedCount: 0 });
+    expect(
+      screen.queryByTestId("board-show-completed"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the completed toggle in backlog mode, unpressed, labelled with the hidden count", () => {
+    useBoardStore.setState({ mode: "backlog", showCompleted: false });
+    renderHeader({ hiddenCompletedCount: 3 });
+    const toggle = screen.getByTestId("board-show-completed");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(toggle).toHaveTextContent("Show 3 completed");
+  });
+
+  it("labels the toggle Hide completed and marks it pressed when showCompleted is on", () => {
+    useBoardStore.setState({ mode: "backlog", showCompleted: true });
+    renderHeader({ hiddenCompletedCount: 0 });
+    const toggle = screen.getByTestId("board-show-completed");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(toggle).toHaveTextContent("Hide completed");
+    expect(toggle).not.toHaveTextContent(/Show/);
+  });
+
+  it("clicking the toggle flips showCompleted in the store", async () => {
+    useBoardStore.setState({ mode: "backlog", showCompleted: false });
+    renderHeader({ hiddenCompletedCount: 1 });
+    await userEvent.click(screen.getByTestId("board-show-completed"));
+    expect(useBoardStore.getState().showCompleted).toBe(true);
+    await userEvent.click(screen.getByTestId("board-show-completed"));
+    expect(useBoardStore.getState().showCompleted).toBe(false);
   });
 
   it("renders the N OF M count line, zero-padded, when the filter is active", () => {

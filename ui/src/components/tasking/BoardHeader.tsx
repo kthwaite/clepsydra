@@ -140,6 +140,11 @@ interface BoardHeaderProps {
   filteredCount: number;
   /** Task count after op-scoping but before FilterBar filtering. */
   opFilteredCount: number;
+  /**
+   * SEALED tasks dropped by the list-mode default (see TaskingScreen). Labels
+   * the completed toggle; 0 when nothing is hidden or outside backlog mode.
+   */
+  hiddenCompletedCount?: number;
   /** Facet field configs for the shared FilterBar (options are data-derived). */
   filterFields: readonly FilterField[];
   /** URL-backed filter state, owned by the /tasking route. */
@@ -159,6 +164,7 @@ export function BoardHeader({
   activeOp,
   filteredCount,
   opFilteredCount,
+  hiddenCompletedCount = 0,
   filterFields,
   filterState,
   onFilterChange,
@@ -171,6 +177,8 @@ export function BoardHeader({
   // Field selectors — the shell must not re-render on ephemeral modal state.
   const mode = useBoardStore((s) => s.mode);
   const setMode = useBoardStore((s) => s.setMode);
+  const showCompleted = useBoardStore((s) => s.showCompleted);
+  const setShowCompleted = useBoardStore((s) => s.setShowCompleted);
 
   // Stats
   const open = tasks.filter((t) => t.status !== "SEALED").length;
@@ -218,6 +226,27 @@ export function BoardHeader({
             </button>
           ))}
         </div>
+
+        {/* Completed toggle — list mode hides SEALED tasks by default. Absent
+            when there is nothing to reveal and nothing is revealed. */}
+        {mode === "backlog" && (hiddenCompletedCount > 0 || showCompleted) && (
+          <button
+            type="button"
+            aria-pressed={showCompleted}
+            data-testid="board-show-completed"
+            className={cn(
+              "cl-mono inline-flex cursor-pointer items-center border border-[var(--rule)] px-[12px] py-[5px] text-[var(--fs-xs)] uppercase tracking-[0.18em] transition-colors",
+              showCompleted
+                ? "bg-[var(--ink)] text-[var(--paper)]"
+                : "bg-[var(--paper)] text-[var(--ink-mute)] hover:bg-[var(--paper-edge)] hover:text-[var(--ink-2)]",
+            )}
+            onClick={() => setShowCompleted(!showCompleted)}
+          >
+            {showCompleted
+              ? "Hide completed"
+              : `Show ${hiddenCompletedCount} completed`}
+          </button>
+        )}
 
         {/* Stats — pushed to the right */}
         <div className="ml-auto flex items-center gap-[22px]">

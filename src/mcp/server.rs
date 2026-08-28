@@ -99,8 +99,10 @@ const DEFAULT_LIST_LIMIT: u32 = 50;
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchParams {
     /// Structured vault search query. Bare terms prefix-match titles and bodies; quoted text is
-    /// a phrase. Use exact `kind:`, `tag:`, and `project:` fields. Whitespace AND, `|` OR, `-` NOT,
-    /// and parentheses compose expressions. Invalid syntax returns an error.
+    /// a phrase. Use exact `kind:`, `tag:`, and `project:` fields, and `attendees:` for how many
+    /// people a MEETING names (`attendees:1`, `attendees:>1`, `attendees:>=3`, `attendees:0`).
+    /// Whitespace AND, `|` OR, `-` NOT, and parentheses compose expressions. Invalid syntax
+    /// returns an error.
     pub query: String,
     /// Maximum number of results (default 20).
     pub limit: Option<u32>,
@@ -122,7 +124,7 @@ pub struct ListPagesParams {
     /// Offset into the path-ordered page list, for pagination.
     pub offset: Option<u32>,
     /// Only pages of this resolved kind (NOTE, PROJECT, JOURNAL, TODO, QUOTE,
-    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE,
+    /// BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING,
     /// AI_CONVERSATION, AI_JOURNAL).
     pub kind: Option<String>,
     /// Only pages carrying this exact tag.
@@ -168,7 +170,7 @@ pub struct LinksParams {
 }
 
 /// The kind vocabulary, spelled out for tool schemas and error messages.
-const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION, AI_JOURNAL";
+const KIND_TOKENS: &str = "NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING, AI_CONVERSATION, AI_JOURNAL";
 
 const MCP_INSTRUCTIONS: &str = "Work with a clepsydra vault (a markdown personal knowledge base) \
 through its running server. Orient with vault_tree and vault_tags, locate pages with vault_search \
@@ -205,8 +207,8 @@ pub struct CreatePageParams {
     /// Page title. Required; also drives the generated filename slug.
     pub title: String,
     /// Kind token (NOTE, PROJECT, JOURNAL, TODO, QUOTE, BOOK, CAPTURE, CODE,
-    /// PERSON, TASK, CYCLE, RECIPE, MEETING, ONE_ON_ONE, AI_CONVERSATION,
-    /// AI_JOURNAL). Defaults to NOTE.
+    /// PERSON, TASK, CYCLE, RECIPE, MEETING, AI_CONVERSATION, AI_JOURNAL).
+    /// Defaults to NOTE. A 1:1 is a MEETING tagged `1:1`.
     /// Declared in frontmatter and used to pick the canonical folder.
     pub kind: Option<String>,
     /// Folder override, vault-relative. With a declared kind it must be the
@@ -286,7 +288,7 @@ pub struct AssignParams {
     pub paths: Vec<String>,
     /// Kind token to declare in frontmatter (NOTE, PROJECT, JOURNAL, TODO,
     /// QUOTE, BOOK, CAPTURE, CODE, PERSON, TASK, CYCLE, RECIPE, MEETING,
-    /// ONE_ON_ONE, AI_CONVERSATION, AI_JOURNAL).
+    /// AI_CONVERSATION, AI_JOURNAL).
     pub kind: Option<String>,
     /// Project to declare in frontmatter.
     pub project: Option<String>,
@@ -570,7 +572,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_search",
-        description = "Structured vault search. Bare terms prefix-match titles and bodies; quoted text is a phrase. Exact kind:, tag:, and project: fields compose with whitespace AND, `|` OR, `-` NOT, and parentheses. Invalid syntax returns an error. Results include path, title, and a snippet; metadata-only branches have an empty snippet. Search before creating pages to avoid duplicates or when locating an unknown path.",
+        description = "Structured vault search. Bare terms prefix-match titles and bodies; quoted text is a phrase. Exact kind:, tag:, and project: fields, plus attendees: with a count (attendees:1, attendees:>1, attendees:>=3), compose with whitespace AND, `|` OR, `-` NOT, and parentheses. A 1:1 is a MEETING tagged 1:1 (tag:1:1). Invalid syntax returns an error. Results include path, title, and a snippet; metadata-only branches have an empty snippet. Search before creating pages to avoid duplicates or when locating an unknown path.",
         annotations(read_only_hint = true, idempotent_hint = true)
     )]
     pub async fn vault_search(
@@ -1297,7 +1299,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_create",
-        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks.",
+        description = "Create a Task on the Task Board — preferred over vault_create_page because it mints a TSK-<adjective>-<noun>-<tail> code (the server assigns it; never invent one) and files the page under tasks/<project>/. Status defaults to Inbox (`INTAKE`), priority to P2 Medium (`P2`); a Cycle must match an existing code or unique prefix of one (`BACKLOG` means Backlog). The `body` wire field becomes the Task Description, `link` sets its Related Page, and Checklist Items become `- [ ]` Todos. Include `ai-generated` in tags for LLM-authored Tasks. `project` must name an existing Project (a PROJECT page declaring that slug; see vault_board `operations[].project`); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1336,7 +1338,7 @@ impl VaultMcpServer {
 
     #[tool(
         name = "vault_task_update",
-        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED).",
+        description = "Update a Task on the Task Board, addressed by TSK code (or any unique prefix of one, matched case-insensitively), vault path, or page UUID. Plain fields (title, project, status, priority, tags) update when present; `clear_project: true` clears the Project. Clearable fields (cycle, assignee, estimate, due, `hold`, `link`) are tri-state: absent = keep, null or \"\" = clear, value = set; `BACKLOG` clears the Cycle. A non-empty `hold` wire value means Blocked; `link` is the Related Page. Statuses are Inbox (INTAKE), Ready (TRIAGE), In Progress (FIELD), Review (REVIEW), and Done (SEALED). `project` must name an existing Project (a PROJECT page declaring that slug); unknown slugs are refused.",
         annotations(
             read_only_hint = false,
             destructive_hint = false,
@@ -1724,6 +1726,7 @@ mod tests {
             "kind",
             "tag",
             "project",
+            "attendees:",
             "quoted",
             "whitespace and",
             "`|` or",
@@ -3423,6 +3426,9 @@ mod tests {
         assert!(create.contains("link"));
         assert!(create.contains("inbox"));
         assert!(create.contains("intake"));
+        assert!(create.contains("existing project"));
+        assert!(create.contains("project page declaring that slug"));
+        assert!(create.contains("unknown slugs are refused"));
 
         let update = description("vault_task_update");
         assert!(update.contains("blocked"));
@@ -3432,6 +3438,9 @@ mod tests {
         assert!(update.contains("clear_project: true"));
         assert!(update.contains("inbox (intake)"));
         assert!(update.contains("done (sealed)"));
+        assert!(update.contains("existing project"));
+        assert!(update.contains("project page declaring that slug"));
+        assert!(update.contains("unknown slugs are refused"));
 
         for (tool_name, field, terms) in [
             ("vault_task_create", "body", ["description", "body"]),
@@ -3465,14 +3474,29 @@ mod tests {
         assert!(!cycle_update.contains("unsealed"));
     }
 
-    /// Serve a seeded vault and create one cycle + one task in it through the
-    /// board tools, returning the server for follow-up assertions.
     /// The stable, explicit code for the cycle `serve_board_vault` seeds —
     /// pinned rather than minted so tests can address it by a known literal.
     const SEEDED_CYCLE_CODE: &str = "S-orbit-crane-3f8mq";
 
+    /// Serve a seeded vault with two Projects (`xxii`, `other`) and one
+    /// cycle created through the board tools, returning the server for
+    /// follow-up assertions. Task `project` values must name a Project.
     async fn serve_board_vault() -> (VaultMcpServer, tempfile::TempDir) {
         let (server, tmp) = serve_seeded_vault().await;
+        for slug in ["xxii", "other"] {
+            server
+                .client
+                .post_json(
+                    &format!("/api/vault/pages/projects/{slug}.md"),
+                    &json!({
+                        "title": slug.to_ascii_uppercase(),
+                        "kind": "PROJECT",
+                        "project": slug,
+                    }),
+                )
+                .await
+                .expect("project page create should succeed");
+        }
         server
             .client
             .post_json(
@@ -3487,6 +3511,19 @@ mod tests {
             .await
             .expect("cycle create should succeed");
         (server, tmp)
+    }
+
+    #[tokio::test]
+    async fn task_create_rejects_an_unknown_project() {
+        let (server, _tmp) = serve_board_vault().await;
+        let err = server
+            .vault_task_create(Parameters(TaskCreateParams {
+                project: Some("ghost".to_string()),
+                ..task_create_params("Orphan")
+            }))
+            .await
+            .expect_err("unknown project should be rejected");
+        assert!(err.contains("unknown project: ghost"), "{err}");
     }
 
     fn task_create_params(title: &str) -> TaskCreateParams {

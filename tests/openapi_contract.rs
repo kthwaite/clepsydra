@@ -313,14 +313,15 @@ fn openapi_kind_enum_contains_recipe() {
 }
 
 #[test]
-fn openapi_kind_enum_contains_meeting_kinds() {
+fn openapi_kind_enum_contains_meeting_but_not_the_retired_one_on_one() {
     let document = serde_json::to_value(ApiDoc::openapi()).expect("OpenAPI should serialize");
     let kinds = document["components"]["schemas"]["Kind"]["enum"]
         .as_array()
         .expect("Kind should be a string enum");
     assert!(kinds.contains(&serde_json::json!("MEETING")));
-    // The variant is `OneOnOne`; only the schema rename makes it wire-correct.
-    assert!(kinds.contains(&serde_json::json!("ONE_ON_ONE")));
+    // ONE_ON_ONE folded into MEETING (+ tag `1:1`) on 2026-08-28; the wire
+    // vocabulary must not advertise it, even though the server still reads it.
+    assert!(!kinds.contains(&serde_json::json!("ONE_ON_ONE")));
 }
 
 #[test]

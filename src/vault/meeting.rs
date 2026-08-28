@@ -1,7 +1,7 @@
-//! When a MEETING or ONE_ON_ONE took place.
+//! When a MEETING took place.
 //!
 //! The companion to [`crate::vault::attendance`], which owns *who* was there.
-//! Both are frontmatter the two meeting kinds carry; they are separate modules
+//! Both are frontmatter the MEETING kind carries; they are separate modules
 //! because the attendees relation is a link and this is a scalar.
 //!
 //! The value is a native TOML date-time, not a string:
@@ -18,8 +18,7 @@
 //! way a malformed `attendees` list is.
 //!
 //! A meeting with no `occurred_at` is an unfinished note, not an invalid one —
-//! the field is never invented for you. See the attendance module docs for why
-//! this vault enforces ceilings rather than floors.
+//! the field is never invented for you; `clep doctor` lists the undated ones.
 
 use thiserror::Error;
 
@@ -31,7 +30,7 @@ pub const OCCURRED_AT_KEY: &str = "occurred_at";
 
 /// Whether pages of this kind record when they took place.
 pub const fn records_occurrence(kind: Kind) -> bool {
-    matches!(kind, Kind::Meeting | Kind::OneOnOne)
+    matches!(kind, Kind::Meeting)
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -132,9 +131,9 @@ mod tests {
     #[test]
     fn only_meeting_kinds_record_an_occurrence() {
         assert!(records_occurrence(Kind::Meeting));
-        assert!(records_occurrence(Kind::OneOnOne));
         assert!(!records_occurrence(Kind::Note));
         assert!(!records_occurrence(Kind::Journal));
+        assert!(!records_occurrence(Kind::Person));
     }
 
     #[test]
@@ -160,7 +159,7 @@ mod tests {
                 occurred_at(&meta).unwrap().is_some(),
                 "{raw} should be readable"
             );
-            assert!(validate(Kind::OneOnOne, &meta).is_ok());
+            assert!(validate(Kind::Meeting, &meta).is_ok());
         }
     }
 
@@ -204,7 +203,6 @@ mod tests {
         let empty = PageMeta::new();
         assert!(validate(Kind::Meeting, &empty).is_ok());
         assert!(is_undated(Kind::Meeting, &empty));
-        assert!(is_undated(Kind::OneOnOne, &empty));
         assert!(!is_undated(Kind::Note, &empty));
         assert!(!is_undated(Kind::Meeting, &meta_at("2026-08-27")));
     }

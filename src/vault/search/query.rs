@@ -24,6 +24,56 @@ pub(super) enum SearchField {
     Kind,
     Tag,
     Project,
+    /// How many `attendees` a page names. The value is normalized to
+    /// `<comparison><count>` (`=1`, `>=3`, …); see [`parse_count_comparison`].
+    Attendees,
+}
+
+/// The comparison an `attendees:` count is held to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum CountComparison {
+    Equal,
+    Greater,
+    GreaterOrEqual,
+    Less,
+    LessOrEqual,
+}
+
+impl CountComparison {
+    /// The operator as written in a query and as rendered in SQL.
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            Self::Equal => "=",
+            Self::Greater => ">",
+            Self::GreaterOrEqual => ">=",
+            Self::Less => "<",
+            Self::LessOrEqual => "<=",
+        }
+    }
+}
+
+/// Read an `attendees:` value: a whole number, optionally preceded by `=`,
+/// `>`, `>=`, `<`, or `<=`. A bare number means equality. Signs, fractions,
+/// and anything non-numeric are rejected; so is a count too large for SQLite.
+pub(super) fn parse_count_comparison(value: &str) -> Option<(CountComparison, i64)> {
+    let (comparison, digits) = if let Some(rest) = value.strip_prefix(">=") {
+        (CountComparison::GreaterOrEqual, rest)
+    } else if let Some(rest) = value.strip_prefix("<=") {
+        (CountComparison::LessOrEqual, rest)
+    } else if let Some(rest) = value.strip_prefix('>') {
+        (CountComparison::Greater, rest)
+    } else if let Some(rest) = value.strip_prefix('<') {
+        (CountComparison::Less, rest)
+    } else if let Some(rest) = value.strip_prefix('=') {
+        (CountComparison::Equal, rest)
+    } else {
+        (CountComparison::Equal, value)
+    };
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    let count = digits.parse::<i64>().ok()?;
+    Some((comparison, count))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +139,7 @@ pub(super) enum SearchDiagnosticKind {
     UnexpectedColon,
     ExpectedExpression,
     QueryTooComplex,
+    InvalidFieldValue,
 }
 
 impl SearchDiagnosticKind {
@@ -107,6 +158,7 @@ impl SearchDiagnosticKind {
             Self::UnexpectedColon => "unexpected_colon",
             Self::QueryTooComplex => "query_too_complex",
             Self::ExpectedExpression => "expected_expression",
+            Self::InvalidFieldValue => "invalid_field_value",
         }
     }
 }
@@ -659,6 +711,7 @@ impl Parser<'_> {
             "kind" => SearchField::Kind,
             "tag" => SearchField::Tag,
             "project" => SearchField::Project,
+            "attendees" => SearchField::Attendees,
             _ => {
                 return Err(self.error(
                     SearchDiagnosticKind::UnknownField,
@@ -677,6 +730,15 @@ impl Parser<'_> {
             ));
         };
         let value_span = current.span;
+        if field == SearchField::Attendees
+            && matches!(current.kind, TokenKind::Minus)
+            && value_span.start == colon_span.end
+        {
+            // `attendees:-1`: the lexer read the sign as NOT. A count has no
+            // sign, so name the problem rather than claim the value is missing.
+            let span = self.signed_count_span();
+            return Err(self.invalid_count(span));
+        }
         if !matches!(current.kind, TokenKind::Word(_) | TokenKind::Quoted(_)) {
             return Err(self.error(
                 SearchDiagnosticKind::MissingFieldValue,
@@ -685,10 +747,15 @@ impl Parser<'_> {
             ));
         }
 
-        let value = match self.advance().kind {
-            TokenKind::Word(value) | TokenKind::Quoted(value) => value,
+        let (mut value, quoted) = match self.advance().kind {
+            TokenKind::Word(value) => (value, false),
+            TokenKind::Quoted(value) => (value, true),
             _ => unreachable!("the current token was validated as a field value"),
         };
+        let mut value_span = value_span;
+        if !quoted {
+            self.glue_colon_continuations(&mut value, &mut value_span);
+        }
         if value.is_empty() {
             return Err(self.error(
                 SearchDiagnosticKind::EmptyValue,
@@ -697,8 +764,8 @@ impl Parser<'_> {
             ));
         }
 
-        let value = if field == SearchField::Kind {
-            Kind::from_token(&value)
+        let value = match field {
+            SearchField::Kind => Kind::from_token(&value)
                 .map(|kind| kind.as_str().to_owned())
                 .ok_or_else(|| {
                     self.error(
@@ -706,9 +773,11 @@ impl Parser<'_> {
                         value_span,
                         format_args!("unknown kind `{value}`"),
                     )
-                })?
-        } else {
-            value
+                })?,
+            SearchField::Attendees => parse_count_comparison(&value)
+                .map(|(comparison, count)| format!("{}{count}", comparison.as_str()))
+                .ok_or_else(|| self.invalid_count(value_span))?,
+            SearchField::Tag | SearchField::Project => value,
         };
 
         Ok(SearchExpr::Field {
@@ -719,6 +788,62 @@ impl Parser<'_> {
                 end: value_span.end,
             },
         })
+    }
+
+    /// Absorb `:word` continuations that are byte-adjacent to an unquoted
+    /// field value, so `tag:1:1` and `tag:model:gpt-5.6-sol` read as one
+    /// value. Whitespace on either side of the colon ends the value, and a
+    /// trailing colon is left for the caller to report.
+    fn glue_colon_continuations(&mut self, value: &mut String, value_span: &mut SearchSpan) {
+        loop {
+            let Some(colon) = self.tokens.front() else {
+                return;
+            };
+            if !matches!(colon.kind, TokenKind::Colon) || colon.span.start != value_span.end {
+                return;
+            }
+            let colon_end = colon.span.end;
+            let Some(Token {
+                kind: TokenKind::Word(word),
+                span: word_span,
+            }) = self.tokens.get(1)
+            else {
+                return;
+            };
+            if word_span.start != colon_end {
+                return;
+            }
+            value.push(':');
+            value.push_str(word);
+            value_span.end = word_span.end;
+            self.advance();
+            self.advance();
+        }
+    }
+
+    /// The span of `-<digits>` after `attendees:`, consuming those tokens so
+    /// the diagnostic covers the whole would-be number.
+    fn signed_count_span(&mut self) -> SearchSpan {
+        let minus_span = self.advance().span;
+        let mut span = minus_span;
+        if let Some(Token {
+            kind: TokenKind::Word(_),
+            span: word_span,
+        }) = self.current()
+            && word_span.start == minus_span.end
+        {
+            span.end = word_span.end;
+            self.advance();
+        }
+        span
+    }
+
+    fn invalid_count(&self, span: SearchSpan) -> SearchQueryError {
+        self.error(
+            SearchDiagnosticKind::InvalidFieldValue,
+            span,
+            "`attendees` takes a whole number, optionally preceded by =, >, >=, <, or <=",
+        )
     }
 
     fn current(&self) -> Option<&Token> {
@@ -981,6 +1106,118 @@ mod tests {
     }
 
     #[test]
+    fn parses_attendee_counts_to_a_normalized_comparison() {
+        for (input, normalized) in [
+            ("attendees:1", "=1"),
+            ("attendees:=2", "=2"),
+            ("attendees:0", "=0"),
+            ("attendees:007", "=7"),
+            ("attendees:>1", ">1"),
+            ("attendees:>=3", ">=3"),
+            ("attendees:<3", "<3"),
+            ("attendees:<=3", "<=3"),
+            ("attendees:\">1\"", ">1"),
+        ] {
+            assert_eq!(
+                parse(input).unwrap(),
+                field(SearchField::Attendees, normalized, 0, input.len()),
+                "input: {input:?}"
+            );
+        }
+        assert_eq!(
+            parse("kind:meeting -attendees:0").unwrap(),
+            all(
+                vec![
+                    field(SearchField::Kind, "MEETING", 0, 12),
+                    not(field(SearchField::Attendees, "=0", 14, 25), 13, 25),
+                ],
+                0,
+                25,
+            )
+        );
+    }
+
+    #[test]
+    fn rejects_malformed_attendee_counts() {
+        for (input, expected_span) in [
+            ("attendees:x", span(10, 11)),
+            ("attendees:>", span(10, 11)),
+            ("attendees:>=", span(10, 12)),
+            ("attendees:-1", span(10, 12)),
+            ("attendees:-", span(10, 11)),
+            ("attendees:1.5", span(10, 13)),
+            ("attendees:1:1", span(10, 13)),
+            ("attendees:\"two\"", span(10, 15)),
+        ] {
+            assert_diagnostic(
+                input,
+                SearchDiagnosticKind::InvalidFieldValue,
+                expected_span,
+                "attendees",
+            );
+        }
+        // No value at all is still the missing-value diagnostic.
+        assert_diagnostic(
+            "attendees:",
+            SearchDiagnosticKind::MissingFieldValue,
+            span(10, 10),
+            "missing value",
+        );
+    }
+
+    #[test]
+    fn glues_byte_adjacent_colon_continuations_into_field_values() {
+        assert_eq!(
+            parse("tag:1:1").unwrap(),
+            field(SearchField::Tag, "1:1", 0, 7)
+        );
+        assert_eq!(
+            parse("tag:model:gpt-5.6-sol").unwrap(),
+            field(SearchField::Tag, "model:gpt-5.6-sol", 0, 21)
+        );
+        assert_eq!(
+            parse("kind:meeting tag:1:1 review").unwrap(),
+            all(
+                vec![
+                    field(SearchField::Kind, "MEETING", 0, 12),
+                    field(SearchField::Tag, "1:1", 13, 20),
+                    text("review", TextMode::Prefix, 21, 27),
+                ],
+                0,
+                27,
+            )
+        );
+        // The legacy 1:1 spelling of the kind rides along.
+        assert_eq!(
+            parse("kind:1:1").unwrap(),
+            field(SearchField::Kind, "MEETING", 0, 8)
+        );
+    }
+
+    #[test]
+    fn does_not_glue_field_values_across_whitespace() {
+        assert_diagnostic(
+            "tag:1 :1",
+            SearchDiagnosticKind::UnexpectedColon,
+            span(6, 7),
+            "unexpected `:`",
+        );
+        assert_diagnostic(
+            "tag:1: 1",
+            SearchDiagnosticKind::UnexpectedColon,
+            span(5, 6),
+            "unexpected `:`",
+        );
+        // A trailing colon is not a continuation either.
+        assert_diagnostic(
+            "tag:1:",
+            SearchDiagnosticKind::UnexpectedColon,
+            span(5, 6),
+            "unexpected `:`",
+        );
+    }
+
+    #[test]
     fn distinguishes_hyphens_in_words_from_not() {
         assert_eq!(
             parse("ice-cream -ice").unwrap(),
@@ -1077,6 +1314,10 @@ mod tests {
                 SearchDiagnosticKind::ExpectedExpression,
                 "expected_expression",
             ),
+            (
+                SearchDiagnosticKind::InvalidFieldValue,
+                "invalid_field_value",
+            ),
         ];
         for (kind, token) in kinds {
             assert_eq!(kind.as_str(), token);
@@ -1129,6 +1370,12 @@ mod tests {
                 SearchDiagnosticKind::UnknownKind,
                 span(5, 15),
                 "unknown kind",
+            ),
+            (
+                "attendees:many",
+                SearchDiagnosticKind::InvalidFieldValue,
+                span(10, 14),
+                "attendees",
             ),
             (
                 "\"unterminated",

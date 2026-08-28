@@ -64,6 +64,24 @@ describe("ScopeRail", () => {
     expect(screen.getByText("Cycles")).toBeInTheDocument();
   });
 
+  it("shows a project's code once when its name is the same word", () => {
+    // A PROJECT page titled "Falls" with slug `falls` has code "FALLS";
+    // repeating the name beside it would read "FALLS Falls".
+    const falls = {
+      key: "falls",
+      slug: "falls",
+      code: "FALLS",
+      name: "Falls",
+      health: "GREEN",
+      op: null,
+    };
+    wrap(<ScopeRail projects={[falls]} cycles={cycles} tasks={[]} />);
+    const row = screen.getByRole("button", { name: /FALLS/ });
+    expect(within(row).getByText("FALLS")).toBeInTheDocument();
+    expect(within(row).queryByText("Falls")).not.toBeInTheDocument();
+    expect(within(row).queryByTitle("Falls")).not.toBeInTheDocument();
+  });
+
   it("renders All projects row with total task count", () => {
     wrap(<ScopeRail projects={PROJECT_SCOPES} cycles={cycles} tasks={tasks} />);
     expect(screen.getByText("All projects")).toBeInTheDocument();

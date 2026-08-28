@@ -226,7 +226,7 @@ async fn board_aggregates_operations_cycles_tasks() {
     // --- operations ---
     let ops = body["operations"].as_array().unwrap();
     assert_eq!(ops.len(), 1, "expected 1 operation, got: {ops:?}");
-    assert_eq!(ops[0]["code"], "op-sig3");
+    assert_eq!(ops[0]["code"], "OP-SIG3");
     assert_eq!(ops[0]["name"], "SIGNAL-3 MIGRATION");
     assert_eq!(ops[0]["health"], "AMBER");
 
@@ -412,9 +412,129 @@ async fn project_without_board_key_included() {
         1,
         "expected one operation when board key absent, got: {ops:?}"
     );
-    assert_eq!(ops[0]["code"], "no-board");
+    assert_eq!(ops[0]["code"], "NO-BOARD");
     assert_eq!(ops[0]["project"], "no-board");
     assert_eq!(ops[0]["health"], "GREEN");
+}
+
+// ---------------------------------------------------------------------------
+// PROJECT without a `project` slug is still listed, keyed by its code
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn project_page_without_slug_listed_by_code() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        // no slug, no board key — must appear with a null project
+        std::fs::write(
+            root.join("projects/slugless.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000012\n\
+             title: Slugless Op\ntype: PROJECT\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        1,
+        "expected a slug-less PROJECT page to be listed, got: {ops:?}"
+    );
+    assert_eq!(ops[0]["code"], "SLUGLESS");
+    assert!(ops[0]["project"].is_null(), "ops: {ops:?}");
+}
+
+// ---------------------------------------------------------------------------
+// One operation per project slug: board: true wins over canonical name and
+// path order; canonical name == slug wins over path order.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn one_operation_per_project_slug_prefers_board_flag() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/atlas")).unwrap();
+        // Earlier in path order AND canonical name == slug, but not flagged.
+        std::fs::write(
+            root.join("projects/atlas/atlas.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000013\n\
+             title: Atlas\ntype: PROJECT\nproject: atlas\n---\n",
+        )
+        .unwrap();
+        // Later in path order, flagged — must be the one operation.
+        std::fs::write(
+            root.join("projects/atlas/zeta.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000014\n\
+             title: Atlas Board\ntype: PROJECT\nproject: atlas\nboard: true\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        1,
+        "expected exactly one operation per slug, got: {ops:?}"
+    );
+    assert_eq!(ops[0]["path"], "projects/atlas/zeta.md", "ops: {ops:?}");
+    assert_eq!(ops[0]["project"], "atlas");
+}
+
+#[tokio::test]
+async fn one_operation_per_project_slug_prefers_canonical_name_then_path() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/atlas")).unwrap();
+        // Earlier in path order, canonical name "aardvark hub" != slug.
+        std::fs::write(
+            root.join("projects/atlas/aaa.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000015\n\
+             title: Aardvark Hub\ntype: PROJECT\nproject: atlas\n---\n",
+        )
+        .unwrap();
+        // Later in path order, canonical name "atlas" == slug — wins.
+        std::fs::write(
+            root.join("projects/atlas/zzz.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000016\n\
+             title: Atlas\ntype: PROJECT\nproject: atlas\n---\n",
+        )
+        .unwrap();
+        // A second slug with two unflagged, non-matching pages: path order wins.
+        std::fs::create_dir_all(root.join("projects/beacon")).unwrap();
+        std::fs::write(
+            root.join("projects/beacon/first.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000017\n\
+             title: Beacon One\ntype: PROJECT\nproject: beacon\n---\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("projects/beacon/second.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000018\n\
+             title: Beacon Two\ntype: PROJECT\nproject: beacon\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(
+        ops.len(),
+        2,
+        "expected one operation per slug, got: {ops:?}"
+    );
+    let by_slug = |slug: &str| {
+        ops.iter()
+            .find(|op| op["project"] == slug)
+            .unwrap_or_else(|| panic!("no operation for {slug}: {ops:?}"))
+    };
+    assert_eq!(by_slug("atlas")["path"], "projects/atlas/zzz.md");
+    assert_eq!(by_slug("beacon")["path"], "projects/beacon/first.md");
 }
 
 // ---------------------------------------------------------------------------
@@ -776,6 +896,32 @@ async fn create_task_rejects_unknown_cycle() {
 }
 
 // ---------------------------------------------------------------------------
+// POST /board/tasks — project must name a PROJECT page declaring that slug
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn create_task_rejects_unknown_project() {
+    let (server, tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({ "title": "x", "project": "ghost" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown project: ghost")),
+        "error should name the unknown project: {body}"
+    );
+    assert!(
+        !tmp.path().join("vault/tasks/ghost").exists(),
+        "a rejected create must not file anything under tasks/ghost/"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // PATCH /board/tasks/{id} — validation failures + BACKLOG sentinel
 // ---------------------------------------------------------------------------
 
@@ -812,6 +958,31 @@ async fn patch_task_rejects_unknown_cycle() {
         .json(&serde_json::json!({ "cycle": "S-99" }))
         .await;
     res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn patch_task_rejects_unknown_project() {
+    let (server, tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "project": "ghost" }))
+        .await;
+    res.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["error"]
+            .as_str()
+            .is_some_and(|m| m.contains("unknown project: ghost")),
+        "error should name the unknown project: {body}"
+    );
+
+    // The task must be untouched: still at the root, no project key.
+    let content = std::fs::read_to_string(tmp.path().join("vault/tasks/TSK-0481.md")).unwrap();
+    assert!(
+        !content.contains("project"),
+        "a rejected patch must not write a project, got:\n{content}"
+    );
 }
 
 #[tokio::test]
@@ -1009,6 +1180,13 @@ async fn patch_task_start_tri_state() {
 #[tokio::test]
 async fn project_assignment_patch_task_moves_to_set_project() {
     let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/op-b")).unwrap();
+        std::fs::write(
+            root.join("projects/op-b/op-b.md"),
+            "---\nid: 01951234-0000-7000-8000-0000000000b0\n\
+             title: OP-B\ntype: PROJECT\nproject: op-b\n---\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
         std::fs::write(
             root.join("tasks/op-a/TSK-0001.md"),
@@ -1092,6 +1270,13 @@ async fn project_assignment_patch_task_explicit_clear_moves_to_root() {
 #[tokio::test]
 async fn project_assignment_patch_task_destination_collision_returns_409() {
     let (server, tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/op-b")).unwrap();
+        std::fs::write(
+            root.join("projects/op-b/op-b.md"),
+            "---\nid: 01951234-0000-7000-8000-0000000000b1\n\
+             title: OP-B\ntype: PROJECT\nproject: op-b\n---\n",
+        )
+        .unwrap();
         std::fs::create_dir_all(root.join("tasks/op-a")).unwrap();
         std::fs::create_dir_all(root.join("tasks/op-b")).unwrap();
         std::fs::write(
@@ -1803,10 +1988,20 @@ async fn concurrent_create_requests_reserve_unique_task_and_cycle_codes() {
 
 #[tokio::test]
 async fn created_task_gets_petname_code_used_verbatim_as_stem() {
-    let (server, _tmp) = setup_server_with(|_root| {});
+    // Task projects must be declared by a PROJECT page (develop's
+    // `ensure_project_exists`), so seed one for the slug used below.
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects")).unwrap();
+        std::fs::write(
+            root.join("projects/op-sig3.md"),
+            "---\nid: 01951234-0000-7000-8000-0000000000a1\n\
+             title: SIGNAL-3 MIGRATION\ntype: PROJECT\nproject: op-sig3\n---\n",
+        )
+        .unwrap();
+    });
     let resp = server
         .post("/api/vault/board/tasks")
-        .json(&serde_json::json!({"title": "Alpha", "project": "clepsydra"}))
+        .json(&serde_json::json!({"title": "Alpha", "project": "op-sig3"}))
         .await;
     resp.assert_status(axum::http::StatusCode::CREATED);
     let body: serde_json::Value = resp.json();
@@ -1814,7 +2009,7 @@ async fn created_task_gets_petname_code_used_verbatim_as_stem() {
     assert!(clepsydra::vault::code::is_valid_code(&code), "{code}");
     assert_eq!(
         body["path"].as_str().unwrap(),
-        format!("tasks/clepsydra/{code}.md")
+        format!("tasks/op-sig3/{code}.md")
     );
     // lowercase body survives the round trip through the board listing
     let board: serde_json::Value = server.get("/api/vault/board").await.json();
@@ -1964,4 +2159,30 @@ async fn board_lists_tasks_in_creation_order_not_code_order() {
         listed, created,
         "creation order, independent of the random codes"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Operation code is the project slug, not the ADR-0002 filename stem
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn operation_code_is_the_project_slug_not_the_filename_stem() {
+    let (server, _tmp) = setup_server_with(|root| {
+        std::fs::create_dir_all(root.join("projects/falls")).unwrap();
+        std::fs::write(
+            root.join("projects/falls/20260811.falls.UdpU2tJ3.md"),
+            "---\nid: 01951234-0000-7000-8000-000000000031\n\
+             title: Falls\ntype: PROJECT\nproject: falls\n---\n",
+        )
+        .unwrap();
+    });
+
+    let res = server.get("/api/vault/board").await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    let ops = body["operations"].as_array().unwrap();
+    assert_eq!(ops.len(), 1, "expected one operation, got: {ops:?}");
+    assert_eq!(ops[0]["code"], "FALLS", "code should be the slug: {ops:?}");
+    assert_eq!(ops[0]["name"], "Falls");
+    assert_eq!(ops[0]["project"], "falls");
 }
