@@ -61,7 +61,7 @@ const rows = [
   },
 ];
 
-const flat: QueryOutput = { shape: "flat", rows, total: 3 };
+const flat: QueryOutput = { shape: "flat", rows, total: 3, aggregates: [] };
 
 const grouped: QueryOutput = {
   shape: "grouped",

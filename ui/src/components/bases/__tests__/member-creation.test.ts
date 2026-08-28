@@ -47,7 +47,7 @@ function evaluation(
   return {
     revision: "evaluation-r1",
     member_creation: capability(),
-    output: { shape: "flat", rows: [], total: 0 },
+    output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     ...overrides,
   };
 }

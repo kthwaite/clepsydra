@@ -14,7 +14,13 @@ import type {
   ElementEventPayloadMap,
 } from "@atlaskit/pragmatic-drag-and-drop/element/adapter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Mock } from "vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -54,15 +60,12 @@ function register<T>(registrations: T[], registration: T) {
   };
 }
 
-vi.mock(
-  "@atlaskit/pragmatic-drag-and-drop/element/adapter",
-  () => ({
-    draggable: (registration: DraggableRegistration) =>
-      register(dnd.draggables, registration),
-    dropTargetForElements: (registration: DropTargetRegistration) =>
-      register(dnd.dropTargets, registration),
-  }),
-);
+vi.mock("@atlaskit/pragmatic-drag-and-drop/element/adapter", () => ({
+  draggable: (registration: DraggableRegistration) =>
+    register(dnd.draggables, registration),
+  dropTargetForElements: (registration: DropTargetRegistration) =>
+    register(dnd.dropTargets, registration),
+}));
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -115,8 +118,7 @@ function dragLocation(
 
 function sourceFor(card: HTMLElement): DragSource {
   const registration = dnd.draggables.find(
-    (candidate) =>
-      candidate.element === card || candidate.dragHandle === card,
+    (candidate) => candidate.element === card || candidate.dragHandle === card,
   );
   if (!registration) {
     throw new Error(`No draggable registered for "${card.textContent}"`);
@@ -238,7 +240,6 @@ function dispatchDrop(
   });
   return true;
 }
-
 
 function renderDndKanban(fetchStub = makeStub()) {
   vi.stubGlobal("fetch", fetchStub);
@@ -479,69 +480,11 @@ describe("KanbanView — sealed-in-closed-cycle exclusion", () => {
   });
 });
 
-// ── WIP count and over-capacity styling ──────────────────────────────────────
+// ── Column header ─────────────────────────────────────────────────────────────
 
-describe("KanbanView — WIP count and over-capacity", () => {
-  it("shows plural task count with the WIP limit", () => {
-    const wipColumns = columns.map((c) =>
-      c.id === "INTAKE" ? { ...c, wip: 3 } : c,
-    );
-    wrap(
-      <KanbanView
-        colLabel={FIXTURE_COL_LABEL}
-        columns={wipColumns}
-        tasks={tasks}
-        cycles={cycles}
-        showOp={false}
-      />,
-    );
-    // INTAKE has 2 tasks (t2, t4), wip=3
-    expect(screen.getByTestId("kb-cnt-INTAKE")).toHaveTextContent(
-      "2 tasks · limit 3",
-    );
-  });
-
-  it("shows singular task count with the WIP limit", () => {
-    const wipColumns = columns.map((c) =>
-      c.id === "TRIAGE" ? { ...c, wip: 4 } : c,
-    );
-    wrap(
-      <KanbanView
-        colLabel={FIXTURE_COL_LABEL}
-        columns={wipColumns}
-        tasks={tasks}
-        cycles={cycles}
-        showOp={false}
-      />,
-    );
-    expect(screen.getByTestId("kb-cnt-TRIAGE")).toHaveTextContent(
-      "1 task · limit 4",
-    );
-  });
-
-  it("shows over flag when count exceeds wip", () => {
-    const wipColumns = columns.map((c) =>
-      c.id === "INTAKE" ? { ...c, wip: 1 } : c,
-    );
-    wrap(
-      <KanbanView
-        colLabel={FIXTURE_COL_LABEL}
-        columns={wipColumns}
-        tasks={tasks}
-        cycles={cycles}
-        showOp={false}
-      />,
-    );
-    // INTAKE has 2 tasks (t2, t4), wip=1 → over
-    const cnt = screen.getByTestId("kb-cnt-INTAKE");
-    expect(cnt).toHaveTextContent("2 tasks · limit 1");
-    // The over state uses var(--hot) colour
-    expect(cnt).toHaveStyle({ color: "var(--hot)" });
-  });
-
-  it("shows plural task count without a limit when wip=0", () => {
-    // BOARD_FIXTURE has wip=0 on all columns
-    wrap(
+describe("KanbanView — column header", () => {
+  function renderBoard() {
+    return wrap(
       <KanbanView
         colLabel={FIXTURE_COL_LABEL}
         columns={columns}
@@ -550,8 +493,77 @@ describe("KanbanView — WIP count and over-capacity", () => {
         showOp={false}
       />,
     );
-    // INTAKE: 2 tasks, no limit suffix
-    expect(screen.getByTestId("kb-cnt-INTAKE")).toHaveTextContent("2 tasks");
+  }
+
+  it("shows a plain plural task count with no limit text", () => {
+    renderBoard();
+    // INTAKE has 2 tasks (t2, t4)
+    const cnt = screen.getByTestId("kb-cnt-INTAKE");
+    expect(cnt).toHaveTextContent(/^2 tasks$/);
+    expect(cnt.textContent).not.toMatch(/limit/i);
+  });
+
+  it("shows a plain singular task count with no limit text", () => {
+    renderBoard();
+    const cnt = screen.getByTestId("kb-cnt-TRIAGE");
+    expect(cnt).toHaveTextContent(/^1 task$/);
+    expect(cnt.textContent).not.toMatch(/limit/i);
+  });
+
+  it("never mentions a limit in any column", () => {
+    renderBoard();
+    for (const col of columns) {
+      expect(screen.getByTestId(`kb-cnt-${col.id}`).textContent).not.toMatch(
+        /limit/i,
+      );
+    }
+  });
+
+  it("keeps the count pill on one line and unshrinkable", () => {
+    renderBoard();
+    for (const col of columns) {
+      const cnt = screen.getByTestId(`kb-cnt-${col.id}`);
+      expect(cnt).toHaveClass("whitespace-nowrap");
+      expect(cnt).toHaveClass("shrink-0");
+      expect(cnt).toHaveClass("ml-auto");
+    }
+  });
+
+  it("always styles the pill with the neutral ink/rule colours", () => {
+    renderBoard();
+    for (const col of columns) {
+      const cnt = screen.getByTestId(`kb-cnt-${col.id}`);
+      expect(cnt).toHaveClass("text-[var(--ink-2)]");
+      expect(cnt).toHaveClass("border-[var(--rule)]");
+      // No per-column inline colour override (the old hot/over branch).
+      expect(cnt.style.color).toBe("");
+      expect(cnt.style.borderColor).toBe("");
+    }
+  });
+
+  it("has no fill bar between the header and the body", () => {
+    renderBoard();
+    expect(screen.queryAllByTestId(/^kb-wip-/)).toHaveLength(0);
+    for (const col of columns) {
+      const head = screen.getByTestId(`kb-head-${col.id}`);
+      const body = screen.getByTestId(`kb-body-${col.id}`);
+      expect(head.nextElementSibling).toBe(body);
+      // Nothing under the header is a percentage-width fill element.
+      for (const el of head.querySelectorAll<HTMLElement>("*")) {
+        expect(el.style.width).not.toMatch(/%$/);
+      }
+    }
+  });
+
+  it("gives every column header the same fixed height", () => {
+    renderBoard();
+    const classNames = columns.map(
+      (col) => screen.getByTestId(`kb-head-${col.id}`).className,
+    );
+    expect(classNames[0]).toContain("h-[36px]");
+    for (const cls of classNames) {
+      expect(cls).toBe(classNames[0]);
+    }
   });
 });
 

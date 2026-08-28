@@ -1691,7 +1691,7 @@ export interface components {
             fn: components["schemas"]["AggregateFn"];
         };
         /** @enum {string} */
-        AggregateFn: "count" | "sum" | "avg" | "min" | "max";
+        AggregateFn: "count" | "sum" | "avg" | "min" | "max" | "count_empty" | "count_filled" | "percent_filled" | "count_unique" | "median" | "range";
         AiCaptureRequest: {
             /**
              * @description Short label naming the writing agent (e.g. `claude-code`), rendered
@@ -2026,8 +2026,6 @@ export interface components {
             id: string;
             label: string;
             sub: string;
-            /** Format: int32 */
-            wip: number;
         };
         BoardCycle: {
             code: string;
@@ -2183,8 +2181,9 @@ export interface components {
         /** @description POST /board/cycles request body. */
         CreateCycleRequest: {
             /**
-             * @description Optional explicit code (e.g. "S-20"). If absent, auto-generated as
-             *     "S-{max+1}" from existing CYCLE page stems.
+             * @description Optional explicit code (e.g. "S-calm-heron-2xm9p"); must match the
+             *     petname format (docs/adr/0003) and not collide with an existing
+             *     CYCLE page stem. If absent, a fresh code is minted.
              */
             code?: string | null;
             /** @description End date (YYYY-MM-DD string). */
@@ -2577,7 +2576,7 @@ export interface components {
          * @description Comparison operators for filter predicates.
          * @enum {string}
          */
-        Op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "contains" | "in" | "links_to" | "is_empty" | "not_empty";
+        Op: "eq" | "ne" | "lt" | "lte" | "gt" | "gte" | "contains" | "not_contains" | "starts_with" | "ends_with" | "in" | "links_to" | "is_empty" | "not_empty" | "is_today" | "is_this_week" | "is_past_week" | "is_next_week" | "is_this_month";
         OutlinkEntry: {
             kind: string;
             source_field?: string | null;
@@ -2854,6 +2853,11 @@ export interface components {
             expected_revision: string;
         };
         QueryOutput: {
+            /**
+             * @description One value per requested aggregate, in request order, computed
+             *     over the whole predicate (unaffected by `limit`/`offset`).
+             */
+            aggregates: unknown[];
             rows: components["schemas"]["QueryRow"][];
             /** @enum {string} */
             shape: "flat";

@@ -32,6 +32,11 @@ const textEncoder = new TextEncoder();
 const VALUELESS_OPERATORS: Record<string, true> = {
   is_empty: true,
   not_empty: true,
+  is_today: true,
+  is_this_week: true,
+  is_past_week: true,
+  is_next_week: true,
+  is_this_month: true,
 };
 const FILTER_OPERATORS: Record<string, true> = {
   eq: true,
@@ -41,17 +46,25 @@ const FILTER_OPERATORS: Record<string, true> = {
   gt: true,
   gte: true,
   contains: true,
+  not_contains: true,
+  starts_with: true,
+  ends_with: true,
   in: true,
   links_to: true,
   is_empty: true,
   not_empty: true,
+  is_today: true,
+  is_this_week: true,
+  is_past_week: true,
+  is_next_week: true,
+  is_this_month: true,
 };
 const TOML_SHORT_ESCAPE_BY_CODE: Record<number, string> = {
-  0x08: "\\b",
-  0x09: "\\t",
-  0x0a: "\\n",
-  0x0c: "\\f",
-  0x0d: "\\r",
+  8: "\\b",
+  9: "\\t",
+  10: "\\n",
+  12: "\\f",
+  13: "\\r",
 };
 
 class BaseEmbedValidationError extends Error {
@@ -206,6 +219,9 @@ function validateFilter(
     fail("Filter comparison has an unknown operator", `${path}.op`);
   }
   const carriesValue = !Object.hasOwn(VALUELESS_OPERATORS, value.op);
+  if (!carriesValue && Object.hasOwn(value, "value")) {
+    fail(`op \`${value.op}\` does not accept a value`, `${path}.value`);
+  }
   assertClosedKeys(
     value,
     carriesValue ? ["field", "op", "value"] : ["field", "op"],

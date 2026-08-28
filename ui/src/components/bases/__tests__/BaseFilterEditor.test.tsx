@@ -2,9 +2,10 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, type Mock, vi } from "vitest";
 import type { BaseFilter } from "#/api/bases";
+import { BaseFilterEditor } from "#/components/bases/BaseFilterEditor";
 import { CreateBaseDialog } from "#/components/bases/CreateBaseDialog";
 import type { DraftProperty } from "#/components/bases/definition-model";
-import { BaseFilterEditor } from "#/components/bases/BaseFilterEditor";
+
 function selectTriggerName(label: string) {
   return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
 }
@@ -29,11 +30,12 @@ async function chooseSelectOption(
   label: string,
   option: string,
 ) {
-  const trigger = screen.getByRole("button", { name: selectTriggerName(label) });
+  const trigger = screen.getByRole("button", {
+    name: selectTriggerName(label),
+  });
   await user.click(trigger);
   await user.click(await screen.findByRole("option", { name: option }));
 }
-
 
 const navigateMock = vi.fn();
 
@@ -97,7 +99,11 @@ describe("BaseFilterEditor", () => {
     const onChange = vi.fn();
     const user = userEvent.setup();
     render(
-      <BaseFilterEditor value={undefined} properties={[]} onChange={onChange} />,
+      <BaseFilterEditor
+        value={undefined}
+        properties={[]}
+        onChange={onChange}
+      />,
     );
 
     await chooseMenuAction(user, "Add rule", "Condition");
@@ -116,11 +122,7 @@ describe("BaseFilterEditor", () => {
       all: [{ field: "kind", op: "eq", value: "NOTE" }],
     });
 
-    await chooseMenuAction(
-      user,
-      "Condition 1 actions",
-      "Negate condition",
-    );
+    await chooseMenuAction(user, "Condition 1 actions", "Negate condition");
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith({
@@ -332,7 +334,7 @@ describe("BaseFilterEditor", () => {
       ],
     });
 
-    await chooseSelectOption(user, "Operator for condition 1", "ne");
+    await chooseSelectOption(user, "Operator for condition 1", "is not");
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith({
@@ -367,10 +369,7 @@ describe("BaseFilterEditor", () => {
 
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenLastCalledWith({
-      all: [
-        { not: { any: [] } },
-        { field: "kind", op: "eq", value: "NOTE" },
-      ],
+      all: [{ not: { any: [] } }, { field: "kind", op: "eq", value: "NOTE" }],
     });
   });
 
@@ -517,7 +516,7 @@ describe("BaseFilterEditor", () => {
     expect(screen.getByText("All pages")).toBeInTheDocument();
     await chooseMenuAction(user, "Add rule", "Condition");
     await chooseSelectOption(user, "Field for condition 1", "Kind");
-    await chooseSelectOption(user, "Operator for condition 1", "eq");
+    await chooseSelectOption(user, "Operator for condition 1", "is");
     await user.type(screen.getByLabelText("Value for condition 1"), "BOOK");
 
     expect(latest(onChange)).toEqual({
@@ -567,7 +566,9 @@ describe("BaseFilterEditor", () => {
     });
     expect(operator).toHaveTextContent(/has all of/i);
     await user.click(operator);
-    await user.click(await screen.findByRole("option", { name: /has any of/i }));
+    await user.click(
+      await screen.findByRole("option", { name: /has any of/i }),
+    );
     const values = screen.getByRole("combobox", {
       name: /values for condition 1/i,
     });
@@ -619,9 +620,9 @@ describe("BaseFilterEditor", () => {
     expect(
       within(all).getByRole("group", { name: "Match any conditions" }),
     ).toBeInTheDocument();
-    await userEvent.setup().click(
-      within(all).getByRole("button", { name: "Condition 2 actions" }),
-    );
+    await userEvent
+      .setup()
+      .click(within(all).getByRole("button", { name: "Condition 2 actions" }));
     expect(
       await screen.findByRole("menuitem", { name: "Negate condition" }),
     ).toBeInTheDocument();
@@ -709,29 +710,43 @@ describe("BaseFilterEditor", () => {
         name: /edit condition 1 as an advanced condition/i,
       }),
     );
-    const field = screen.getByRole("button", { name: selectTriggerName("Field for condition 1") });
+    const field = screen.getByRole("button", {
+      name: selectTriggerName("Field for condition 1"),
+    });
     await user.click(field);
-    expect(await screen.findByRole("option", { name: "ID" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("option", { name: "ID" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Page fields")).toBeInTheDocument();
     expect(screen.getByText("Declared properties")).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    const operator = screen.getByRole("button", { name: selectTriggerName("Operator for condition 1") });
+    const operator = screen.getByRole("button", {
+      name: selectTriggerName("Operator for condition 1"),
+    });
     await user.click(operator);
     expect(
       screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual(["contains", "in", "is empty", "not empty"]);
+    ).toEqual([
+      "contains",
+      "does not contain",
+      "is any of",
+      "is empty",
+      "is not empty",
+    ]);
     await user.click(screen.getByRole("option", { name: "is empty" }));
     expect(latest(onChange)).toEqual({ field: "tags", op: "is_empty" });
     expect(screen.queryByLabelText("Value for condition 1")).toBeNull();
 
     await chooseSelectOption(user, "Field for condition 1", "source");
     await user.click(
-      screen.getByRole("button", { name: selectTriggerName("Operator for condition 1") }),
+      screen.getByRole("button", {
+        name: selectTriggerName("Operator for condition 1"),
+      }),
     );
     expect(
       screen.getAllByRole("option").map((option) => option.textContent),
-    ).toEqual(["eq", "ne", "links to", "is empty", "not empty"]);
+    ).toEqual(["is", "is not", "links to", "is empty", "is not empty"]);
   });
 
   it("uses declared option, boolean, numeric, and relation value affordances", async () => {
@@ -739,12 +754,16 @@ describe("BaseFilterEditor", () => {
     renderEditor({ field: "status", op: "eq", value: "queued" });
 
     expect(
-      screen.getByRole("button", { name: selectTriggerName("Value for condition 1") }),
+      screen.getByRole("button", {
+        name: selectTriggerName("Value for condition 1"),
+      }),
     ).toHaveTextContent("queued");
 
     await chooseSelectOption(user, "Field for condition 1", "published");
     expect(
-      screen.getByRole("button", { name: selectTriggerName("Value for condition 1") }),
+      screen.getByRole("button", {
+        name: selectTriggerName("Value for condition 1"),
+      }),
     ).toHaveTextContent("True");
 
     await chooseSelectOption(user, "Field for condition 1", "rating");
@@ -767,8 +786,10 @@ describe("BaseFilterEditor", () => {
       value: true,
     });
 
-    await chooseSelectOption(user, "Operator for condition 1", "in");
-    const boolValues = screen.getByRole("button", { name: selectTriggerName("Value for condition 1") });
+    await chooseSelectOption(user, "Operator for condition 1", "is any of");
+    const boolValues = screen.getByRole("button", {
+      name: selectTriggerName("Value for condition 1"),
+    });
     await user.click(boolValues);
     expect(await screen.findByRole("listbox")).toBeInTheDocument();
     await user.click(screen.getByRole("option", { name: "False" }));
@@ -780,7 +801,7 @@ describe("BaseFilterEditor", () => {
 
     await user.keyboard("{Escape}");
     await chooseSelectOption(user, "Field for condition 1", "Title");
-    await chooseSelectOption(user, "Operator for condition 1", "in");
+    await chooseSelectOption(user, "Operator for condition 1", "is any of");
     const freeform = screen.getByLabelText("Value for condition 1");
     await user.clear(freeform);
     await user.type(freeform, "alpha, beta");
@@ -806,7 +827,9 @@ describe("BaseFilterEditor", () => {
       value: "Old Page",
     });
 
-    const field = screen.getByRole("button", { name: selectTriggerName("Field for condition 1") });
+    const field = screen.getByRole("button", {
+      name: selectTriggerName("Field for condition 1"),
+    });
     expect(field).toHaveTextContent("prop.legacy_relation (undeclared)");
     await user.click(field);
     expect(
@@ -816,7 +839,9 @@ describe("BaseFilterEditor", () => {
     ).toBeInTheDocument();
     await user.keyboard("{Escape}");
 
-    const operator = screen.getByRole("button", { name: selectTriggerName("Operator for condition 1") });
+    const operator = screen.getByRole("button", {
+      name: selectTriggerName("Operator for condition 1"),
+    });
     expect(operator).toHaveTextContent("links_to (unsupported)");
     await user.click(operator);
     expect(
@@ -829,7 +854,9 @@ describe("BaseFilterEditor", () => {
       op: "eq",
       value: "retired",
     });
-    const removedValue = screen.getByRole("button", { name: selectTriggerName("Value for condition 1") });
+    const removedValue = screen.getByRole("button", {
+      name: selectTriggerName("Value for condition 1"),
+    });
     expect(removedValue).toHaveTextContent("retired (not declared)");
     await user.click(removedValue);
     expect(
@@ -843,7 +870,9 @@ describe("BaseFilterEditor", () => {
       value: ["craft", "lost", "other"],
     });
     await user.click(
-      screen.getByRole("button", { name: selectTriggerName("Value for condition 1") }),
+      screen.getByRole("button", {
+        name: selectTriggerName("Value for condition 1"),
+      }),
     );
     const lost = await screen.findByRole("option", {
       name: "lost (not declared)",
@@ -857,15 +886,13 @@ describe("BaseFilterEditor", () => {
 
   it("registers only the exact live recursive native focus targets", () => {
     const liveTargets = new Map<string, HTMLElement>();
-    const registerFocus = vi.fn(
-      (path: string, element: HTMLElement | null) => {
-        if (element) {
-          liveTargets.set(path, element);
-        } else {
-          liveTargets.delete(path);
-        }
-      },
-    );
+    const registerFocus = vi.fn((path: string, element: HTMLElement | null) => {
+      if (element) {
+        liveTargets.set(path, element);
+      } else {
+        liveTargets.delete(path);
+      }
+    });
     renderEditor(
       {
         all: [
@@ -907,7 +934,9 @@ describe("BaseFilterEditor", () => {
     await user.tab();
     expect(screen.getByRole("button", { name: "Add rule" })).toHaveFocus();
     await user.keyboard("{Enter}");
-    await user.click(await screen.findByRole("menuitem", { name: "Condition" }));
+    await user.click(
+      await screen.findByRole("menuitem", { name: "Condition" }),
+    );
     expect(latest(onChange)).toEqual({ field: "kind", op: "eq", value: "" });
     expect(screen.getByLabelText("Field for condition 1")).toBeInTheDocument();
   });

@@ -253,6 +253,7 @@ describe("base definition model", () => {
   it("offers operators that match field type and cardinality", () => {
     expect(operatorsFor("system-multi")).toEqual([
       "contains",
+      "not_contains",
       "in",
       "is_empty",
       "not_empty",
@@ -261,6 +262,9 @@ describe("base definition model", () => {
       "eq",
       "ne",
       "contains",
+      "not_contains",
+      "starts_with",
+      "ends_with",
       "in",
       "is_empty",
       "not_empty",
@@ -284,6 +288,7 @@ describe("base definition model", () => {
       "eq",
       "ne",
       "contains",
+      "not_contains",
       "in",
       "is_empty",
       "not_empty",
@@ -292,6 +297,7 @@ describe("base definition model", () => {
       "eq",
       "ne",
       "contains",
+      "not_contains",
       "in",
       "is_empty",
       "not_empty",
@@ -305,7 +311,7 @@ describe("base definition model", () => {
     ]);
   });
 
-  it("matches grouping and aggregate capabilities", () => {
+  it("matches grouping capabilities", () => {
     for (const type of [
       "text",
       "bool",
@@ -320,14 +326,6 @@ describe("base definition model", () => {
       expect(canGroup(type)).toBe(false);
     }
     expect(canGroup(undefined)).toBe(true);
-
-    const numericFunctions = ["count", "sum", "avg", "min", "max"];
-    expect(aggregateFunctions("number")).toEqual(numericFunctions);
-    expect(aggregateFunctions("date")).toEqual(numericFunctions);
-    expect(aggregateFunctions("datetime")).toEqual(numericFunctions);
-    expect(aggregateFunctions("word_count")).toEqual(numericFunctions);
-    expect(aggregateFunctions("select")).toEqual(["count"]);
-    expect(aggregateFunctions(undefined)).toEqual(["count"]);
   });
 
   it("moves an item immutably while preserving tuple order", () => {
@@ -367,8 +365,128 @@ describe("title templates", () => {
   });
 
   it("omits an absent template from the wire form", () => {
-    const draft = fromWire({ name: "Books", properties: [], views: [] } as never);
+    const draft = fromWire({
+      name: "Books",
+      properties: [],
+      views: [],
+    } as never);
     expect(draft.titleTemplate).toBeUndefined();
     expect(toWire(draft)).not.toHaveProperty("title_template");
+  });
+});
+
+describe("operatorsFor", () => {
+  it("offers relative-date operators for date-like fields", () => {
+    for (const type of ["date", "datetime"] as const) {
+      expect(operatorsFor(type)).toEqual([
+        "eq",
+        "ne",
+        "lt",
+        "lte",
+        "gt",
+        "gte",
+        "is_today",
+        "is_this_week",
+        "is_past_week",
+        "is_next_week",
+        "is_this_month",
+        "is_empty",
+        "not_empty",
+      ]);
+    }
+  });
+  it("offers affix and negated contains on substring fields", () => {
+    for (const type of ["text", "url", "system-scalar"] as const) {
+      expect(operatorsFor(type)).toEqual([
+        "eq",
+        "ne",
+        "contains",
+        "not_contains",
+        "starts_with",
+        "ends_with",
+        "in",
+        "is_empty",
+        "not_empty",
+      ]);
+    }
+  });
+  it("offers not_contains but no affix on membership fields", () => {
+    expect(operatorsFor("select")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "not_contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("multi_select")).toEqual([
+      "eq",
+      "ne",
+      "contains",
+      "not_contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("system-multi")).toEqual([
+      "contains",
+      "not_contains",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("number")).toEqual([
+      "eq",
+      "ne",
+      "lt",
+      "lte",
+      "gt",
+      "gte",
+    ]);
+    expect(operatorsFor("relation")).toEqual([
+      "eq",
+      "ne",
+      "links_to",
+      "is_empty",
+      "not_empty",
+    ]);
+    expect(operatorsFor("bool")).toEqual([
+      "eq",
+      "ne",
+      "in",
+      "is_empty",
+      "not_empty",
+    ]);
+  });
+});
+
+describe("aggregateFunctions", () => {
+  it("offers every function on numeric and temporal fields", () => {
+    for (const type of ["number", "date", "datetime", "word_count"] as const) {
+      expect(aggregateFunctions(type)).toEqual([
+        "count",
+        "count_filled",
+        "count_empty",
+        "percent_filled",
+        "count_unique",
+        "sum",
+        "avg",
+        "min",
+        "max",
+        "median",
+        "range",
+      ]);
+    }
+  });
+  it("offers only the count family elsewhere", () => {
+    expect(aggregateFunctions("select")).toEqual([
+      "count",
+      "count_filled",
+      "count_empty",
+      "percent_filled",
+      "count_unique",
+    ]);
+    expect(aggregateFunctions(undefined)).toEqual(["count"]);
   });
 });

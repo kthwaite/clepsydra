@@ -394,12 +394,20 @@ describe("Base fence recognition and closed TOML shapes", () => {
       "gt",
       "gte",
       "contains",
+      "not_contains",
+      "starts_with",
+      "ends_with",
       "links_to",
     ].map((op) => comparison(`field-${op}`, op));
     carrying.push(comparison("field-in", "in", "[1, 2]"));
     const valueless = [
       `{ field = "empty", op = "is_empty" }`,
       `{ field = "present", op = "not_empty" }`,
+      `{ field = "started", op = "is_today" }`,
+      `{ field = "started", op = "is_this_week" }`,
+      `{ field = "started", op = "is_past_week" }`,
+      `{ field = "started", op = "is_next_week" }`,
+      `{ field = "started", op = "is_this_month" }`,
     ];
 
     expectConfigured(
@@ -409,6 +417,35 @@ describe("Base fence recognition and closed TOML shapes", () => {
         ),
       ),
     );
+  });
+
+  it("rejects a relative-date operator carrying a value with a clear message", () => {
+    const node = expectInvalid(
+      baseFence(
+        documentBody(
+          `filter = { field = "started", op = "is_today", value = "x" }`,
+        ),
+      ),
+    );
+    expect(node.parseError).toMatch(/does not accept a value/i);
+  });
+
+  it("parses starts_with with a string value", () => {
+    expectConfigured(
+      baseFence(
+        documentBody(
+          `filter = { field = "note", op = "starts_with", value = "Chapter" }`,
+        ),
+      ),
+    );
+  });
+
+  it("round-trips a relative-date filter byte-identically", () => {
+    const raw = baseFence(
+      documentBody(`filter = { field = "started", op = "is_this_week" }`),
+    );
+    const node = expectConfigured(raw);
+    expect(slateToMarkdown([node as never])).toBe(raw);
   });
 });
 

@@ -12,6 +12,7 @@
     "preview": "vite preview",
     "storybook": "storybook dev -p 6006",
     "openapi": "openapi-typescript http://localhost:3000/api/openapi.json -o src/api/schema.d.ts",
+    "openapi:file": "openapi-typescript ../target/openapi.json -o src/api/schema.d.ts",
     "knip": "knip",
     "build-storybook": "storybook build",
     "test": "vitest run",

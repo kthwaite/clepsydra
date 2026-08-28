@@ -456,6 +456,7 @@ pub async fn get_page_base_properties(
 
     let bases = BaseRegistry::load(state.vault.root()).bases;
     let membership_id = page_id.clone();
+    let today = state.clock.now().date_naive();
     let matching = state
         .index
         .with_index(move |index, _vault| {
@@ -476,8 +477,11 @@ pub async fn get_page_base_properties(
                         limit: Some(0),
                         ..Default::default()
                     };
-                    let result =
-                        evaluate(index.connection(), &spec, &QueryContext::for_base(&base));
+                    let result = evaluate(
+                        index.connection(),
+                        &spec,
+                        &QueryContext::for_base(&base).with_today(today),
+                    );
                     match result {
                         Ok(QueryOutput::Flat { total: 1, .. }) => Some(Ok(base)),
                         Ok(QueryOutput::Flat { total: 0, .. }) => None,

@@ -89,8 +89,9 @@ pub fn candidate_matches(
     meta: &PageMeta,
     path: &str,
     derived: &CandidateDerived,
+    today: chrono::NaiveDate,
 ) -> Result<(), Vec<BaseMemberDiagnostic>> {
-    composed_candidate_matches(base, view, None, meta, path, derived)
+    composed_candidate_matches(base, view, None, meta, path, derived, today)
 }
 
 pub fn composed_candidate_matches(
@@ -100,6 +101,7 @@ pub fn composed_candidate_matches(
     meta: &PageMeta,
     path: &str,
     derived: &CandidateDerived,
+    today: chrono::NaiveDate,
 ) -> Result<(), Vec<BaseMemberDiagnostic>> {
     let link_targets = candidate_link_targets(base, meta, |_| {
         Ok::<Option<String>, std::convert::Infallible>(None)
@@ -113,9 +115,13 @@ pub fn composed_candidate_matches(
         path,
         derived,
         &link_targets,
+        today,
     )
 }
 
+// Every argument is one field of the `MetaFilterContext` this builds; bundling
+// them into a struct would only move the same list one call earlier.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn composed_candidate_matches_with_link_targets(
     base: &BaseDefinition,
     view: &ViewDefinition,
@@ -124,6 +130,7 @@ pub(crate) fn composed_candidate_matches_with_link_targets(
     path: &str,
     derived: &CandidateDerived,
     link_targets: &CandidateLinkTargets,
+    today: chrono::NaiveDate,
 ) -> Result<(), Vec<BaseMemberDiagnostic>> {
     let context = MetaFilterContext {
         base,
@@ -132,6 +139,7 @@ pub(crate) fn composed_candidate_matches_with_link_targets(
         word_count: Some(derived.word_count),
         journal_date: derived.journal_date,
         link_targets: Some(link_targets),
+        today,
     };
     let mut diagnostics = Vec::new();
 
@@ -176,11 +184,14 @@ pub(crate) fn composed_candidate_matches_with_link_targets(
     }
 }
 
-pub fn creation_capabilities(base: &BaseDefinition) -> Vec<BaseMemberCapability> {
+pub fn creation_capabilities(
+    base: &BaseDefinition,
+    today: chrono::NaiveDate,
+) -> Vec<BaseMemberCapability> {
     base.file
         .views
         .iter()
-        .map(|view| composed_member_capability(base, view, None))
+        .map(|view| composed_member_capability(base, view, None, today))
         .collect()
 }
 
@@ -188,6 +199,7 @@ pub fn composed_member_capability(
     base: &BaseDefinition,
     view: &ViewDefinition,
     embed_filter: Option<&Filter>,
+    today: chrono::NaiveDate,
 ) -> BaseMemberCapability {
     let mut fields = Vec::new();
     let membership = base
@@ -195,16 +207,16 @@ pub fn composed_member_capability(
         .filter
         .as_ref()
         .map_or(Possibility::AlwaysTrue, |filter| {
-            filter_possibility(base, filter)
+            filter_possibility(base, filter, today)
         });
     let view_possibility = view
         .filter
         .as_ref()
         .map_or(Possibility::AlwaysTrue, |filter| {
-            filter_possibility(base, filter)
+            filter_possibility(base, filter, today)
         });
     let embed_possibility = embed_filter.map_or(Possibility::AlwaysTrue, |filter| {
-        filter_possibility(base, filter)
+        filter_possibility(base, filter, today)
     });
 
     if let Some(filter) = &base.file.filter {
@@ -231,6 +243,7 @@ pub fn composed_member_capability(
                 "filter",
                 Possibility::AlwaysFalse,
                 BaseMemberScope::Membership,
+                today,
                 &mut blockers,
             );
         }
@@ -241,6 +254,7 @@ pub fn composed_member_capability(
                 &format!("views.{}.filter", view.name),
                 Possibility::AlwaysFalse,
                 BaseMemberScope::View,
+                today,
                 &mut blockers,
             );
         }
@@ -251,6 +265,7 @@ pub fn composed_member_capability(
                 "embed_filter",
                 Possibility::AlwaysFalse,
                 BaseMemberScope::Embed,
+                today,
                 &mut blockers,
             );
         }
@@ -502,16 +517,24 @@ fn candidate_diagnostic(
     }
 }
 
-fn filter_possibility(base: &BaseDefinition, filter: &Filter) -> Possibility {
+fn filter_possibility(
+    base: &BaseDefinition,
+    filter: &Filter,
+    today: chrono::NaiveDate,
+) -> Possibility {
     match filter {
-        Filter::All(children) => all(children.iter().map(|child| filter_possibility(base, child))),
-        Filter::Any(children) => any(children.iter().map(|child| filter_possibility(base, child))),
-        Filter::Not(child) => match filter_possibility(base, child) {
+        Filter::All(children) => all(children
+            .iter()
+            .map(|child| filter_possibility(base, child, today))),
+        Filter::Any(children) => any(children
+            .iter()
+            .map(|child| filter_possibility(base, child, today))),
+        Filter::Not(child) => match filter_possibility(base, child, today) {
             Possibility::AlwaysTrue => Possibility::AlwaysFalse,
             Possibility::Maybe => Possibility::Maybe,
             Possibility::AlwaysFalse => Possibility::AlwaysTrue,
         },
-        Filter::Cmp { field, op, value } => comparison_possibility(base, field, *op, value),
+        Filter::Cmp { field, op, value } => comparison_possibility(base, field, *op, value, today),
     }
 }
 
@@ -520,8 +543,9 @@ fn comparison_possibility(
     field: &str,
     op: Op,
     value: &serde_json::Value,
+    today: chrono::NaiveDate,
 ) -> Possibility {
-    match fixed_candidate_comparison_matches(base, field, op, value) {
+    match fixed_candidate_comparison_matches(base, field, op, value, today) {
         Some(true) => Possibility::AlwaysTrue,
         Some(false) => Possibility::AlwaysFalse,
         None => Possibility::Maybe,
@@ -534,18 +558,20 @@ fn collect_contributors(
     path: &str,
     desired: Possibility,
     scope: BaseMemberScope,
+    today: chrono::NaiveDate,
     blockers: &mut Vec<BaseMemberDiagnostic>,
 ) {
     match filter {
         Filter::All(children) => {
             for (index, child) in children.iter().enumerate() {
-                if filter_possibility(base, child) == desired {
+                if filter_possibility(base, child, today) == desired {
                     collect_contributors(
                         base,
                         child,
                         &format!("{path}.all[{index}]"),
                         desired,
                         scope,
+                        today,
                         blockers,
                     );
                 }
@@ -553,13 +579,14 @@ fn collect_contributors(
         }
         Filter::Any(children) => {
             for (index, child) in children.iter().enumerate() {
-                if filter_possibility(base, child) == desired {
+                if filter_possibility(base, child, today) == desired {
                     collect_contributors(
                         base,
                         child,
                         &format!("{path}.any[{index}]"),
                         desired,
                         scope,
+                        today,
                         blockers,
                     );
                 }
@@ -577,11 +604,12 @@ fn collect_contributors(
                 &format!("{path}.not"),
                 opposite,
                 scope,
+                today,
                 blockers,
             );
         }
         Filter::Cmp { field, .. } => {
-            if filter_possibility(base, filter) == desired {
+            if filter_possibility(base, filter, today) == desired {
                 blockers.push(BaseMemberDiagnostic {
                     scope,
                     field: Some(
@@ -613,6 +641,11 @@ mod tests {
         parse_base(Path::new("bases/reading.base.toml"), source)
             .0
             .expect("valid base")
+    }
+
+    /// Sunday; Monday of its ISO week is 2026-08-03.
+    fn fixed_today() -> chrono::NaiveDate {
+        chrono::NaiveDate::from_ymd_opt(2026, 8, 9).unwrap()
     }
 
     const READING_SOURCE: &str = r#"
@@ -671,8 +704,12 @@ filter = { field = "status", op = "eq", value = "reading" }
             ]),
         ]);
 
-        let capability =
-            composed_member_capability(&base, &base.file.views[0], Some(&embed_filter));
+        let capability = composed_member_capability(
+            &base,
+            &base.file.views[0],
+            Some(&embed_filter),
+            fixed_today(),
+        );
 
         assert!(capability.enabled);
         assert_eq!(
@@ -737,8 +774,12 @@ layout = "table"
             serde_json::json!(0),
         )))]);
 
-        let capability =
-            composed_member_capability(&base, &base.file.views[0], Some(&embed_filter));
+        let capability = composed_member_capability(
+            &base,
+            &base.file.views[0],
+            Some(&embed_filter),
+            fixed_today(),
+        );
 
         assert!(!capability.enabled);
         assert_eq!(capability.blockers.len(), 1);
@@ -791,6 +832,7 @@ layout = "table"
                 &meta,
                 "notes/typed.md",
                 &derived(),
+                fixed_today(),
             )
             .is_ok()
         );
@@ -803,6 +845,7 @@ layout = "table"
             &meta,
             "notes/typed.md",
             &derived(),
+            fixed_today(),
         )
         .unwrap_err();
         assert_eq!(errors.len(), 1);
@@ -1015,6 +1058,66 @@ layout = "table"
                 true,
             ));
         }
+        // Relative dates anchored on `fixed_today()` (Sunday 2026-08-09; the
+        // candidate's `date_value` is that same day).
+        for (op, expected) in [
+            (Op::IsToday, true),
+            (Op::IsThisWeek, true),
+            (Op::IsPastWeek, true),
+            (Op::IsNextWeek, false),
+            (Op::IsThisMonth, true),
+        ] {
+            cases.push((
+                format!("date_value {op:?}"),
+                comparison("date_value", op, serde_json::Value::Null),
+                expected,
+            ));
+        }
+        for (field, op, value, expected) in [
+            (
+                "text_value",
+                Op::NotContains,
+                serde_json::json!("Alph"),
+                false,
+            ),
+            (
+                "text_value",
+                Op::StartsWith,
+                serde_json::json!("Alph"),
+                true,
+            ),
+            ("text_value", Op::EndsWith, serde_json::json!("Alph"), false),
+            (
+                "select_value",
+                Op::NotContains,
+                serde_json::json!("reading"),
+                false,
+            ),
+            (
+                "select_value",
+                Op::NotContains,
+                serde_json::json!("queued"),
+                true,
+            ),
+            (
+                "multi_value",
+                Op::NotContains,
+                serde_json::json!("memory"),
+                false,
+            ),
+            (
+                "multi_value",
+                Op::NotContains,
+                serde_json::json!("identity"),
+                true,
+            ),
+        ] {
+            cases.push((
+                format!("{field} {op:?} {value}"),
+                comparison(field, op, value),
+                expected,
+            ));
+        }
         for target in ["Solar Cycle", "Science Fiction", TARGET_ID, TARGET_MIXED_ID] {
             cases.push((
                 format!("relation_value links_to {target}"),
@@ -1037,7 +1140,7 @@ layout = "table"
             ]),
             true,
         ));
-        assert_eq!(cases.len(), 69);
+        assert_eq!(cases.len(), 81);
 
         for (label, filter, expected) in cases {
             validate_embed_overrides(
@@ -1055,7 +1158,7 @@ layout = "table"
                     filter: Some(filter.clone()),
                     ..Default::default()
                 },
-                &QueryContext::for_base(&base),
+                &QueryContext::for_base(&base).with_today(fixed_today()),
             )
             .unwrap_or_else(|error| panic!("{label} query failed: {error}"));
             let query_matches = match output {
@@ -1070,6 +1173,7 @@ layout = "table"
                 "a.md",
                 &derived(),
                 &link_targets,
+                fixed_today(),
             )
             .is_ok();
 
@@ -1136,6 +1240,44 @@ layout = "table"
                 filters.push(comparison(field, op, serde_json::json!("value")));
             }
         }
+        filters.push(comparison(
+            "number_value",
+            Op::NotContains,
+            serde_json::json!(7),
+        ));
+        // Relative dates need a date field; affixes need a substring field.
+        for field in [
+            "text_value",
+            "number_value",
+            "bool_value",
+            "select_value",
+            "multi_value",
+            "url_value",
+            "relation_value",
+        ] {
+            for op in [
+                Op::IsToday,
+                Op::IsThisWeek,
+                Op::IsPastWeek,
+                Op::IsNextWeek,
+                Op::IsThisMonth,
+            ] {
+                filters.push(comparison(field, op, serde_json::Value::Null));
+            }
+        }
+        for field in [
+            "number_value",
+            "bool_value",
+            "date_value",
+            "datetime_value",
+            "select_value",
+            "multi_value",
+            "relation_value",
+        ] {
+            for op in [Op::StartsWith, Op::EndsWith] {
+                filters.push(comparison(field, op, serde_json::json!("value")));
+            }
+        }
 
         for filter in filters {
             let Filter::Cmp { field, op, .. } = &filter else {
@@ -1177,7 +1319,7 @@ columns = ["title", "rating"]
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         assert!(capability.enabled);
         assert_eq!(
             capability.fields,
@@ -1220,7 +1362,7 @@ layout = "table"
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         let implied: Vec<_> = capability
             .fields
             .iter()
@@ -1259,7 +1401,7 @@ layout = "table"
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         assert_eq!(
             capability.fields[0].implied,
             Some(BaseMemberImplication::Choice {
@@ -1284,7 +1426,7 @@ layout = "table"
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         assert_eq!(
             capability.fields[0].implied,
             Some(BaseMemberImplication::Choice {
@@ -1308,7 +1450,7 @@ filter = { field = "status", op = "eq", value = "reading" }
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         let status = capability
             .fields
             .iter()
@@ -1339,7 +1481,7 @@ layout = "table"
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         assert!(
             capability
                 .fields
@@ -1366,7 +1508,7 @@ layout = "table"
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         assert_eq!(
             capability.fields[0].implied, None,
             "a contradiction must not prefill either value"
@@ -1384,7 +1526,7 @@ name = "All"
 layout = "table"
 "#,
         );
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         assert!(!capability.enabled);
         assert_eq!(capability.blockers[0].field.as_deref(), Some("word_count"));
         assert_eq!(
@@ -1412,6 +1554,7 @@ layout = "table"
                 word_count: 0,
                 journal_date: None,
             },
+            fixed_today(),
         )
         .unwrap_err();
 
@@ -1442,6 +1585,7 @@ layout = "table"
                     word_count: 0,
                     journal_date: None,
                 },
+                fixed_today(),
             )
             .is_ok()
         );
@@ -1491,7 +1635,7 @@ layout = "table"
             );
             let base = base(&source);
             let view = &base.file.views[0];
-            let capability = creation_capabilities(&base).remove(0);
+            let capability = creation_capabilities(&base, fixed_today()).remove(0);
             let candidate = candidate_matches(
                 &base,
                 view,
@@ -1501,6 +1645,63 @@ layout = "table"
                     word_count: 0,
                     journal_date: None,
                 },
+                fixed_today(),
+            );
+
+            assert_eq!(
+                capability.enabled, expected,
+                "unexpected capability for {field} {op}"
+            );
+            assert_eq!(
+                candidate.is_ok(),
+                expected,
+                "unexpected candidate result for {field} {op}"
+            );
+        }
+    }
+
+    #[test]
+    fn relative_dates_on_creation_timestamps_are_decided_not_deferred() {
+        // A blank member is stamped "now", so `created_at`/`updated_at`
+        // relative-date predicates settle before anything is written.
+        let cases = [
+            ("created_at", "is_today", true),
+            ("created_at", "is_this_week", true),
+            ("created_at", "is_past_week", true),
+            ("created_at", "is_next_week", false),
+            ("created_at", "is_this_month", true),
+            ("updated_at", "is_today", true),
+            ("updated_at", "is_next_week", false),
+            // A blank member has no journal date at all.
+            ("journal_date", "is_today", false),
+        ];
+        let mut meta = PageMeta::new();
+        let stamp = fixed_today().and_hms_opt(12, 34, 56).unwrap().and_utc();
+        meta.created_at = Some(stamp);
+        meta.updated_at = Some(stamp);
+
+        for (field, op, expected) in cases {
+            let source = format!(
+                r#"
+name = "Fresh"
+filter = {{ field = "{field}", op = "{op}" }}
+[[views]]
+name = "All"
+layout = "table"
+"#
+            );
+            let base = base(&source);
+            let capability = creation_capabilities(&base, fixed_today()).remove(0);
+            let candidate = candidate_matches(
+                &base,
+                &base.file.views[0],
+                &meta,
+                "notes/20260809.fresh.Ab3xYz90.md",
+                &CandidateDerived {
+                    word_count: 0,
+                    journal_date: None,
+                },
+                fixed_today(),
             );
 
             assert_eq!(
@@ -1534,7 +1735,7 @@ layout = "table"
 "#,
         );
         let view = &base.file.views[0];
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         let mut meta = PageMeta::new();
         meta.extra
             .insert("word_count".into(), toml::Value::Integer(7));
@@ -1552,6 +1753,7 @@ layout = "table"
                     word_count: 0,
                     journal_date: None,
                 },
+                fixed_today(),
             )
             .is_ok()
         );
@@ -1584,7 +1786,7 @@ layout = "table"
 "#,
         );
 
-        let fields = creation_capabilities(&base).remove(0).fields;
+        let fields = creation_capabilities(&base, fixed_today()).remove(0).fields;
         assert_eq!(
             fields
                 .iter()
@@ -1624,7 +1826,7 @@ name = "All"
 layout = "table"
 "#
             ));
-            let capability = creation_capabilities(&base).remove(0);
+            let capability = creation_capabilities(&base, fixed_today()).remove(0);
 
             assert_eq!(
                 capability.enabled, expected,
@@ -1708,6 +1910,7 @@ layout = "table"
                     word_count: 0,
                     journal_date: None,
                 },
+                fixed_today(),
             );
 
             assert_eq!(
@@ -1748,6 +1951,7 @@ layout = "table"
                     word_count: 0,
                     journal_date: None,
                 },
+                fixed_today(),
             );
 
             assert_eq!(result.is_ok(), expected, "unexpected alias result for {op}");
@@ -1789,7 +1993,9 @@ layout = "table"
             let mut meta = PageMeta::new();
             meta.extra.insert("value".into(), current);
             assert_eq!(
-                creation_capabilities(&base).remove(0).enabled,
+                creation_capabilities(&base, fixed_today())
+                    .remove(0)
+                    .enabled,
                 expected,
                 "unexpected capability for {property_type} contains"
             );
@@ -1804,6 +2010,7 @@ layout = "table"
                         word_count: 0,
                         journal_date: None,
                     },
+                    fixed_today(),
                 )
                 .is_ok(),
                 expected,
@@ -1820,7 +2027,11 @@ name = "All"
 layout = "table"
 "#,
         );
-        assert!(!creation_capabilities(&base).remove(0).enabled);
+        assert!(
+            !creation_capabilities(&base, fixed_today())
+                .remove(0)
+                .enabled
+        );
         assert!(
             candidate_matches(
                 &base,
@@ -1831,6 +2042,7 @@ layout = "table"
                     word_count: 0,
                     journal_date: None,
                 },
+                fixed_today(),
             )
             .is_err()
         );
@@ -1864,6 +2076,7 @@ filter = { field = "prop.kind", op = "eq", value = "genre" }
                 word_count: 0,
                 journal_date: None,
             },
+            fixed_today(),
         )
         .unwrap_err();
 
@@ -1898,6 +2111,7 @@ layout = "table"
                 word_count: 0,
                 journal_date: None,
             },
+            fixed_today(),
         )
         .unwrap_err();
         assert_eq!(errors[0].field.as_deref(), Some("prop.word_count"));
@@ -1919,7 +2133,7 @@ layout = "table"
 "#,
         );
 
-        let capability = creation_capabilities(&base).remove(0);
+        let capability = creation_capabilities(&base, fixed_today()).remove(0);
         assert!(!capability.enabled);
         assert_eq!(
             capability
@@ -1956,7 +2170,11 @@ layout = "table"
         meta.extra
             .insert("author".into(), toml::Value::String("Wolfe".into()));
 
-        assert!(!creation_capabilities(&base).remove(0).enabled);
+        assert!(
+            !creation_capabilities(&base, fixed_today())
+                .remove(0)
+                .enabled
+        );
         assert!(
             candidate_matches(
                 &base,
@@ -1967,6 +2185,7 @@ layout = "table"
                     word_count: 0,
                     journal_date: None,
                 },
+                fixed_today(),
             )
             .is_err()
         );
@@ -1986,6 +2205,10 @@ layout = "table"
 "#,
         );
 
-        assert!(!creation_capabilities(&base).remove(0).enabled);
+        assert!(
+            !creation_capabilities(&base, fixed_today())
+                .remove(0)
+                .enabled
+        );
     }
 }

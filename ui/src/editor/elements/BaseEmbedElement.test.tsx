@@ -168,7 +168,7 @@ function controllerModel(
     detailLoading: false,
     detailMissing: false,
     activeView: "All",
-    output: { shape: "flat", rows: [], total: 0 },
+    output: { shape: "flat", rows: [], total: 0, aggregates: [] },
     viewError: undefined,
     viewLoading: false,
     sort: [
@@ -462,7 +462,7 @@ describe("EmbeddedBaseTable live Slate adapter", () => {
       "cached query error",
       controllerModel({
         viewError: "Refresh failed",
-        output: { shape: "flat", rows: [], total: 0 },
+        output: { shape: "flat", rows: [], total: 0, aggregates: [] },
       }),
     ],
   ])(

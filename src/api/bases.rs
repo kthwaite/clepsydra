@@ -238,6 +238,7 @@ fn prepare_embedded_evaluation<L>(
     slug: &str,
     view_name: &str,
     request: BaseViewEvaluateRequest,
+    today: chrono::NaiveDate,
     load: L,
 ) -> Result<PreparedEmbeddedEvaluation, ApiError>
 where
@@ -260,7 +261,7 @@ where
     validate_embed_window(&view, offset).map_err(invalid_embed_query)?;
 
     let member_creation =
-        composed_member_capability(&stored.definition, &view, request.filter.as_ref());
+        composed_member_capability(&stored.definition, &view, request.filter.as_ref(), today);
     let mut spec = composed_query_spec(
         &stored.definition,
         &view,
@@ -283,6 +284,7 @@ async fn evaluate_embedded_view_with<L, E, F>(
     slug: &str,
     view_name: &str,
     request: BaseViewEvaluateRequest,
+    today: chrono::NaiveDate,
     load: L,
     evaluate_prepared: E,
 ) -> Result<BaseViewEvaluateResponse, ApiError>
@@ -296,7 +298,7 @@ where
         spec,
         revision,
         member_creation,
-    } = prepare_embedded_evaluation(root, slug, view_name, request, load)?;
+    } = prepare_embedded_evaluation(root, slug, view_name, request, today, load)?;
     let output = evaluate_prepared(base, spec).await?;
     Ok(BaseViewEvaluateResponse {
         output,
@@ -398,6 +400,7 @@ pub async fn list_bases(State(state): State<Arc<AppState>>) -> Json<BaseListResp
     let registry = BaseRegistry::load(state.vault.root());
     let count_bases = registry.bases.clone();
     let base_count = count_bases.len();
+    let today = state.clock.now().date_naive();
     let match_counts = state
         .index
         .with_index(move |index, _vault| {
@@ -405,7 +408,11 @@ pub async fn list_bases(State(state): State<Arc<AppState>>) -> Json<BaseListResp
                 .iter()
                 .map(|base| {
                     let spec = query_spec(base, None, Some(0), 0, None, None);
-                    match evaluate(index.connection(), &spec, &QueryContext::for_base(base)) {
+                    match evaluate(
+                        index.connection(),
+                        &spec,
+                        &QueryContext::for_base(base).with_today(today),
+                    ) {
                         Ok(QueryOutput::Flat { total, .. }) => u32::try_from(total).ok(),
                         Ok(QueryOutput::Grouped { .. }) | Err(_) => None,
                     }
@@ -462,7 +469,7 @@ pub async fn get_base(
     Path(slug): Path<String>,
 ) -> Result<Json<BaseDetailResponse>, ApiError> {
     let stored = base_document::load(state.vault.root(), &slug).map_err(document_error)?;
-    let member_creation = creation_capabilities(&stored.definition);
+    let member_creation = creation_capabilities(&stored.definition, state.clock.now().date_naive());
     Ok(Json(BaseDetailResponse {
         definition: stored.definition.into(),
         diagnostics: stored.diagnostics,
@@ -624,10 +631,15 @@ pub async fn preview_base(
         None,
         None,
     );
+    let today = state.clock.now().date_naive();
     let evaluation = state
         .index
         .with_index(move |index, _vault| {
-            evaluate(index.connection(), &spec, &QueryContext::for_base(&base))
+            evaluate(
+                index.connection(),
+                &spec,
+                &QueryContext::for_base(&base).with_today(today),
+            )
         })
         .await;
     let (output, evaluation_error) = match evaluation {
@@ -689,10 +701,11 @@ pub async fn evaluate_view(
         params.dir.as_deref(),
     );
 
+    let today = state.clock.now().date_naive();
     let mut output = state
         .index
         .with_index(move |index, _vault| {
-            let ctx = QueryContext::for_base(&base);
+            let ctx = QueryContext::for_base(&base).with_today(today);
             evaluate(index.connection(), &spec, &ctx)
         })
         .await
@@ -730,16 +743,22 @@ pub async fn evaluate_embedded_view(
     let request =
         serde_json::from_slice(&bytes).map_err(|_| ApiError::invalid_embed_query(Vec::new()))?;
     let index = state.index.clone();
+    let today = state.clock.now().date_naive();
     let response = evaluate_embedded_view_with(
         state.vault.root(),
         &slug,
         &view_name,
         request,
+        today,
         base_document::load,
         move |base, spec| async move {
             index
                 .with_index(move |index, _vault| {
-                    evaluate(index.connection(), &spec, &QueryContext::for_base(&base))
+                    evaluate(
+                        index.connection(),
+                        &spec,
+                        &QueryContext::for_base(&base).with_today(today),
+                    )
                 })
                 .await
                 .map_err(internal_evaluation_error)?
@@ -851,6 +870,7 @@ mod tests {
             "embedded",
             "CONFIGURED VIEW",
             request,
+            chrono::Utc::now().date_naive(),
             move |_, _| {
                 counted_loads.fetch_add(1, Ordering::SeqCst);
                 Ok(snapshot)
@@ -871,6 +891,7 @@ mod tests {
                         columns: serde_json::Map::new(),
                     }],
                     total: 1,
+                    aggregates: Vec::new(),
                 })
             },
         )
