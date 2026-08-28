@@ -38,6 +38,8 @@ import {
   type BaseMemberDraftValue,
   composeMemberDraftFields,
 } from "./member-draft";
+import { outputContains } from "./query-output";
+import { useRowActions } from "./useRowActions";
 import { type OverridesSaveState, useViewOverrides } from "./useViewOverrides";
 import {
   applyOverridesToView,
@@ -103,6 +105,12 @@ export interface BaseTableControllerModel {
   onSaveOverrides(): void;
   onReloadDefinition(): void;
   overridesSave: OverridesSaveState;
+  onOpenPageInNewTab(path: string): void;
+  onCopyWikilink(row: QueryRow): void;
+  onCopyValue(value: CellValue): void;
+  onDuplicateRow(row: QueryRow): void;
+  onArchiveRow(row: QueryRow): Promise<void>;
+  rowActionError: string | undefined;
   /** Windowed loading, for an embedded view that scrolls in place. */
   rowWindow:
     | {
@@ -162,12 +170,6 @@ function emptyMemberState(generation: number): MemberState {
     creation: IDLE_MEMBER_CREATION,
     notice: undefined,
   };
-}
-
-function outputContains(output: QueryOutput, id: string): boolean {
-  return output.shape === "flat"
-    ? output.rows.some((row) => row.id === id)
-    : output.groups.some((group) => group.rows.some((row) => row.id === id));
 }
 
 function genericNotice(message: string): MemberNotice {
@@ -372,6 +374,29 @@ export function useBaseTableController(
     [memberCreationSource],
   );
   const memberCapability = memberCreationSession?.capability;
+  const refetchRowActionsView = useCallback(async () => {
+    if (mode === "embedded") {
+      const result = await evaluationRefetch();
+      return { output: result.data?.output };
+    }
+    const result = await savedViewRefetch();
+    return { output: result.data };
+  }, [evaluationRefetch, mode, savedViewRefetch]);
+  const rowActions = useRowActions({
+    slug,
+    activeView,
+    definition: detail.data,
+    capability: memberCapability,
+    embedFilter: mode === "embedded" ? effectiveFilter : undefined,
+    refetchView: refetchRowActionsView,
+    refetchDefinition: detailRefetch,
+  });
+  const handleDuplicateRow = useCallback(
+    (row: QueryRow) => {
+      void rowActions.duplicate(row);
+    },
+    [rowActions.duplicate],
+  );
   const retainedDraftCapability =
     memberCapability ??
     (memberState.draftOpen && mode === "embedded"
@@ -884,7 +909,7 @@ export function useBaseTableController(
     memberSaving,
     memberDiagnostics: memberState.diagnostics,
     memberError: memberState.error,
-    memberNotice: visibleMemberNotice,
+    memberNotice: visibleMemberNotice ?? rowActions.notice,
     projects,
     onAddMember: handleAddMember,
     onSaveMember: handleSaveMember,
@@ -902,6 +927,12 @@ export function useBaseTableController(
     onSaveOverrides: () => void saveOverrides(),
     onReloadDefinition: () => void reloadDefinition(),
     overridesSave,
+    onOpenPageInNewTab: rowActions.openInNewTab,
+    onCopyWikilink: rowActions.copyWikilink,
+    onCopyValue: rowActions.copyValue,
+    onDuplicateRow: handleDuplicateRow,
+    onArchiveRow: rowActions.archive,
+    rowActionError: rowActions.error,
     rowWindow:
       mode === "embedded"
         ? {

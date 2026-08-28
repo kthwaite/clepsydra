@@ -155,6 +155,13 @@ vi.mock("#/api/bases", async (importOriginal) => {
 });
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({ copied: false, copy: vi.fn() }),
+}));
+vi.mock("#/api/pages", () => ({
+  useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+vi.mock("#/api/client", () => ({ fetchClient: { GET: vi.fn() } }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 
 import { BaseTable } from "#/components/bases/BaseTable";

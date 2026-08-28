@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   useBase: vi.fn(),
   useBaseView: vi.fn(),
   useBaseViewWindows: vi.fn(),
+  get: vi.fn(),
   currentEvaluationConfig: undefined as unknown,
   evaluationState: {
     data: undefined as BaseViewEvaluateResponse | undefined,
@@ -112,6 +113,13 @@ vi.mock("#/api/bases", async (importOriginal) => {
 });
 
 vi.mock("#/hooks/useOpenTab", () => ({ useOpenTab: () => vi.fn() }));
+vi.mock("#/hooks/useCopyToClipboard", () => ({
+  useCopyToClipboard: () => ({ copied: false, copy: vi.fn() }),
+}));
+vi.mock("#/api/pages", () => ({
+  useArchivePage: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
+vi.mock("#/api/client", () => ({ fetchClient: { GET: mocks.get } }));
 vi.mock("#/lib/useProjects", () => ({ useProjects: () => [] }));
 
 import { BaseTableView } from "#/components/bases/BaseTableView";
@@ -1053,6 +1061,46 @@ describe("view overrides", () => {
         },
         groupBy: { kind: "by", field: "status" },
       }),
+    );
+  });
+
+  it("posts the effective embed filter when duplicating a row", async () => {
+    mocks.get.mockImplementation(async (path: string) =>
+      path.includes("/properties")
+        ? { data: { properties: [] } }
+        : { data: { meta: { tags: [] } } },
+    );
+    let model!: ReturnType<typeof useBaseTableController>;
+    function Probe({ value }: { value: BaseTableControllerOptions }) {
+      model = useBaseTableController(value);
+      return null;
+    }
+    render(<Probe value={options()} />); // embedded, fence filter = readingFilter
+    act(() => {
+      model.onAddQuickFilter({
+        field: "status",
+        op: "ne",
+        value: "finished",
+        label: "status is not finished",
+      });
+    });
+    const effectiveFilter = {
+      all: [readingFilter, { field: "status", op: "ne", value: "finished" }],
+    };
+    await waitFor(() =>
+      expect(mocks.currentEvaluationConfig).toMatchObject({
+        filter: effectiveFilter,
+      }),
+    );
+
+    act(() => model.onDuplicateRow(createdRow));
+
+    await waitFor(() =>
+      expect(mocks.createMember).toHaveBeenCalledWith(
+        expect.objectContaining({
+          body: expect.objectContaining({ embed_filter: effectiveFilter }),
+        }),
+      ),
     );
   });
 

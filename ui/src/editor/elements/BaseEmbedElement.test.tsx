@@ -206,6 +206,12 @@ function controllerModel(
     onSaveOverrides: vi.fn(),
     onReloadDefinition: vi.fn(),
     overridesSave: { phase: "idle" },
+    onOpenPageInNewTab: vi.fn(),
+    onCopyWikilink: vi.fn(),
+    onCopyValue: vi.fn(),
+    onDuplicateRow: vi.fn(),
+    onArchiveRow: vi.fn(),
+    rowActionError: undefined,
     rowWindow: {
       total: 0,
       loaded: 0,
