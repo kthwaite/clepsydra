@@ -163,7 +163,7 @@ impl SyncRuntime {
         let _window = self.sync_lock.lock().await;
         let _syncing = FlagGuard::set(&self.syncing);
         let exclusion = state.mutation_coordinator.exclude_mutations().await;
-        let _paused = FlagGuard::set(&state.watcher_paused);
+        let paused = FlagGuard::set(&state.watcher_paused);
 
         let engine = Arc::clone(&self.engine);
         let report = match tokio::task::spawn_blocking(move || engine.full_sync()).await {
@@ -176,6 +176,11 @@ impl SyncRuntime {
         }
         // Whatever was outstanding is in the commit this sync just made.
         self.pending.store(false, Ordering::SeqCst);
+        // Un-pause before re-opening the gate, never the other way round: a
+        // mutation admitted while the watcher is still paused writes a file
+        // whose change event is dropped, leaving the index behind the disk.
+        // (The early returns above unwind in this order already.)
+        drop(paused);
         drop(exclusion);
         *self.last.lock() = Some(report.clone());
         Ok(report)

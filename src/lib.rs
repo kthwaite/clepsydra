@@ -1068,6 +1068,33 @@ async fn shutdown_signal(handle: ServerHandle) {
     handle.graceful_shutdown(Some(GRACEFUL_SHUTDOWN_BUDGET));
 }
 
+/// What the startup sync left behind, and therefore whether `serve` still
+/// owes the vault a reconcile sweep of its own.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StartupSync {
+    /// The vault has no sync runtime, so nothing ever held it.
+    Skipped,
+    /// The window closed — whether the sync succeeded or failed, it is no
+    /// longer holding anything.
+    Done,
+    /// The window went over budget and is still open in its own task.
+    StillRunning,
+}
+
+impl StartupSync {
+    /// Whether `serve` may run its startup reconcile sweep now.
+    ///
+    /// `reconcile_all` renames files on disk and does not take the mutation
+    /// gate, so it must never run beside a sync window: an over-budget window
+    /// still holds the gate and may have a `git` child mid-merge, and renaming
+    /// files under a running checkout corrupts both. Nothing is lost by
+    /// standing down — the window runs the very same sweep itself when it
+    /// finishes (`sync_runtime::rebuild_after_sync`).
+    fn allows_reconcile(self) -> bool {
+        !matches!(self, Self::StillRunning)
+    }
+}
+
 /// One-shot reconcile sweep to heal folder drift (a page whose declared
 /// kind/project no longer matches its folder is moved, inbound links
 /// rewritten). Conservative: undeclared pages are untouched. Returns the
@@ -1138,26 +1165,40 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
     // Ctrl-C during that window would have nothing to talk to.
     let handle = ServerHandle::new();
     tokio::spawn(shutdown_signal(handle.clone()));
-    if let Some(sync) = &state.sync {
+    let startup_sync = match &state.sync {
+        None => StartupSync::Skipped,
         // Bounded wait, not a bounded sync: on a timeout the window keeps
         // running in its own task (gate held, watcher paused, both released by
         // its own guards) and startup carries on rather than blocking the
         // listener behind a slow remote.
-        match tokio::time::timeout(
+        Some(sync) => match tokio::time::timeout(
             crate::sync_runtime::STARTUP_SYNC_BUDGET,
             sync.run_full_sync(&state),
         )
         .await
         {
-            Ok(Ok(report)) => info!("startup sync: {}", report.one_line()),
-            Ok(Err(e)) => tracing::warn!("startup sync failed: {e}"),
-            Err(_) => info!(
-                "startup sync still running in the background after {}s; continuing startup",
-                crate::sync_runtime::STARTUP_SYNC_BUDGET.as_secs()
-            ),
-        }
+            Ok(Ok(report)) => {
+                info!("startup sync: {}", report.one_line());
+                StartupSync::Done
+            }
+            Ok(Err(e)) => {
+                tracing::warn!("startup sync failed: {e}");
+                StartupSync::Done
+            }
+            Err(_) => {
+                info!(
+                    "startup sync still running in the background after {}s; continuing startup",
+                    crate::sync_runtime::STARTUP_SYNC_BUDGET.as_secs()
+                );
+                StartupSync::StillRunning
+            }
+        },
+    };
+    if startup_sync.allows_reconcile() {
+        run_startup_reconcile(&state).await;
+    } else {
+        info!("deferring the startup reconcile sweep to the sync window still running");
     }
-    run_startup_reconcile(&state).await;
     let _watcher = spawn_sync_watcher(&state)?;
     // `max_request_size_mb` budgets DECODED resource bytes, but the request
     // carries base64, which inflates by 4/3. Without the multiplier the
@@ -1645,6 +1686,15 @@ mod state_tests {
 #[cfg(test)]
 mod startup_reconcile_tests {
     use super::*;
+
+    /// A sweep that renames files must not run beside a sync window that is
+    /// still holding the mutation gate and may have a `git` child mid-merge.
+    #[test]
+    fn only_a_still_running_startup_sync_defers_the_sweep() {
+        assert!(StartupSync::Skipped.allows_reconcile());
+        assert!(StartupSync::Done.allows_reconcile());
+        assert!(!StartupSync::StillRunning.allows_reconcile());
+    }
 
     /// The one-shot startup sweep must heal folder drift: a page declaring
     /// `type: quote` that still lives under `notes/` is moved to `quotes/`.
