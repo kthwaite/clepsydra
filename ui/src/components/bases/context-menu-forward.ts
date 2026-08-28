@@ -51,16 +51,31 @@ export function isContextMenuKey(
   return event.key === "Enter" && event.ctrlKey && isMacPlatform();
 }
 
+/** Marks the events this module re-fires, so a trigger can tell them from a
+ * gesture the reader aimed at the trigger itself. */
+const FORWARDED = "__clepsydraForwardedContextMenu";
+
 /** Opens `trigger`'s context menu at `point`. */
 export function forwardContextMenu(
   trigger: HTMLElement | null,
   point: ContextMenuPoint,
 ): void {
-  trigger?.dispatchEvent(
-    new MouseEvent("contextmenu", {
-      bubbles: true,
-      cancelable: true,
-      ...point,
-    }),
+  if (!trigger) return;
+  const event = new MouseEvent("contextmenu", {
+    bubbles: true,
+    cancelable: true,
+    ...point,
+  });
+  Object.defineProperty(event, FORWARDED, { value: true });
+  trigger.dispatchEvent(event);
+}
+
+/** True when this event was re-fired here rather than raised by the platform. */
+export function isForwardedContextMenu(
+  event: ReactMouseEvent<Element>,
+): boolean {
+  return (
+    (event.nativeEvent as unknown as Record<string, unknown>)[FORWARDED] ===
+    true
   );
 }

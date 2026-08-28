@@ -416,6 +416,39 @@ describe("cell and row menu", () => {
     );
   });
 
+  it("forgets the cell when the ⋯ button is right-clicked in turn", async () => {
+    const user = userEvent.setup();
+    renderView({ ...overrideSpies(), overrides: EMPTY_OVERRIDES });
+    await user.pointer({
+      target: screen.getByRole("button", { name: "reading" }),
+      keys: "[MouseRight]",
+    });
+    expect(
+      await screen.findByRole("menuitem", { name: "status is reading" }),
+    ).toBeVisible();
+    await user.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+    // Right-click reaches React Aria's own handler without a press, so the
+    // button has to claim the target itself or the cell's items linger.
+    await user.pointer({
+      target: screen.getByRole("button", {
+        name: "Row actions for The Book of the New Sun",
+      }),
+      keys: "[MouseRight]",
+    });
+    const menu = await screen.findByRole("menu", {
+      name: "Row actions for The Book of the New Sun",
+    });
+    expect(within(menu).getByRole("menuitem", { name: "Open" })).toBeVisible();
+    expect(
+      within(menu).queryByRole("menuitem", { name: "Copy value" }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(menu).queryByRole("menuitem", { name: "status is reading" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("keeps only navigation items when read-only", async () => {
     const user = userEvent.setup();
     renderView({

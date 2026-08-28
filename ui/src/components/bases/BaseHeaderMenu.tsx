@@ -1,4 +1,4 @@
-import { type ReactNode, useRef } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import type { SortKey } from "#/api/bases";
 import { Button } from "#/components/ui/button";
 import {
@@ -11,7 +11,6 @@ import {
 import {
   type ContextMenuPoint,
   forwardContextMenu,
-  isContextMenuKey,
   pointOfContextMenu,
   pointUnder,
 } from "./context-menu-forward";
@@ -139,38 +138,38 @@ function HeaderMenu({
  * the button live outside the `<Column>`.
  */
 export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
-  const { children, label } = props;
+  const { children, ...rest } = props;
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const summon = (point: ContextMenuPoint) =>
+  const [isOpen, setIsOpen] = useState(false);
+  const summon = (point: ContextMenuPoint) => {
+    if (!triggerRef.current) return false;
     forwardContextMenu(triggerRef.current, point);
+    return true;
+  };
   return (
-    <div className="flex items-center gap-1" data-column={props.column}>
+    <div className="flex items-center gap-1" data-column={rest.column}>
       {/* Not focusable: React Aria focuses a column header's first focusable
-          child, which must stay the `⋯` button. */}
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: these handlers only forward the platform's context-menu gesture to the `⋯` button, which is the real, focusable control; a role here would both misdescribe the header and claim the focus React Aria owes that button. */}
+          child, which must stay the `⋯` button. Nothing inside can hold focus,
+          so there is no context-menu key to catch here — only the pointer. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: this handler only forwards the platform's context-menu gesture to the `⋯` button, which is the real, focusable control; a role here would both misdescribe the header and claim the focus React Aria owes that button. */}
       <div
         className="flex min-w-0 flex-1 items-center"
         onContextMenu={(event) => {
-          event.preventDefault();
-          summon(pointOfContextMenu(event));
-        }}
-        onKeyDown={(event) => {
-          if (!isContextMenuKey(event)) return;
-          event.preventDefault();
-          summon(pointUnder(event.target as Element));
+          if (summon(pointOfContextMenu(event))) event.preventDefault();
         }}
       >
         {children}
       </div>
-      <MenuTrigger trigger="contextMenu">
+      <MenuTrigger trigger="contextMenu" onOpenChange={setIsOpen}>
         <Button
           ref={triggerRef}
           variant="ghost"
           size="sm"
-          aria-label={`${label} column menu`}
+          aria-label={`${rest.label} column menu`}
           // A context-menu trigger neither presses open nor advertises a
-          // popup, so the button supplies both itself.
+          // popup, and this button does both, so it says so itself.
           aria-haspopup="menu"
+          aria-expanded={isOpen}
           className="px-1 py-0 opacity-60 hover:opacity-100"
           onPress={() => {
             const trigger = triggerRef.current;
@@ -179,7 +178,10 @@ export function BaseHeaderMenu(props: BaseHeaderMenuProps) {
         >
           ⋯
         </Button>
-        <HeaderMenu {...props} />
+        {/* Built eagerly, unlike the row menu's `isOpen` gate: a header menu's
+            items are bounded by the column's options (`HEADER_OPTION_CAP`) and
+            there is one per column, not one per cell. */}
+        <HeaderMenu {...rest} />
       </MenuTrigger>
     </div>
   );

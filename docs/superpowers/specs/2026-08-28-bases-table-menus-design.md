@@ -231,7 +231,7 @@ Rendered by `ViewOverridesStrip.tsx` between the toolbar and the member draft wh
 
 ## Keyboard
 
-- Column header: Tab to the `⋯` button, Enter opens; right-click or the context-menu key on the header content opens the same menu.
+- Column header: arrow/Tab focus lands on the `⋯` button (the header's only focusable child); Enter opens the menu, which carries Sort ascending/descending. Right-click anywhere on the header, or the context-menu key on the button, opens the same menu. Pointer press on the header label still toggles the sort.
 - Cell: arrow keys move focus between cells (RAC grid); Tab enters the cell's control (title button / editor button); Shift+F10 / ⌃Enter / Menu key open the cell menu at that control. The `⋯` button is reachable by Tab in the first cell.
 - Menus close on Escape and return focus to the trigger (RAC).
 

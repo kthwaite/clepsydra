@@ -13,6 +13,7 @@ import {
   type ContextMenuPoint,
   forwardContextMenu,
   isContextMenuKey,
+  isForwardedContextMenu,
   pointOfContextMenu,
   pointUnder,
 } from "./context-menu-forward";
@@ -190,7 +191,7 @@ export interface RowActionsButtonProps {
   cell?: RowMenuCell;
   /** The control to hand focus back to when the menu closes. */
   restoreFocus?: HTMLElement | null;
-  onContextTarget(target: RowContextTarget): void;
+  onContextTarget(target: RowContextTarget | null): void;
   onAddQuickFilter?(filter: QuickFilter): void;
   onCopyValue?(value: CellValue): void;
 }
@@ -213,11 +214,12 @@ export function RowActionsButton({
   const label = `Row actions for ${rowMenuLabel(row)}`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [isOpen, setIsOpen] = useState(false);
-  const restoreRef = useRef<HTMLElement | null>(null);
-  restoreRef.current = restoreFocus ?? null;
 
-  const restore = () => {
-    const origin = restoreRef.current;
+  /** The menu is about the row alone: no cell, nothing to restore focus to. */
+  const claimForButton = () =>
+    onContextTarget({ rowId: String(row.id), column: undefined, origin: null });
+
+  const restore = (origin: HTMLElement | null) => {
     if (!origin) return;
     // React Aria returns focus to this button as the popover unmounts; the
     // reader summoned the menu from a cell control, so hand it back — unless
@@ -240,7 +242,11 @@ export function RowActionsButton({
       trigger="contextMenu"
       onOpenChange={(open) => {
         setIsOpen(open);
-        if (!open) restore();
+        if (open) return;
+        restore(restoreFocus ?? null);
+        // Forget the cell, so the next menu cannot inherit its items or hold
+        // on to a control that may be detached by then.
+        onContextTarget(null);
       }}
     >
       <Button
@@ -249,19 +255,22 @@ export function RowActionsButton({
         size="sm"
         aria-label={label}
         // A context-menu trigger neither presses open nor advertises a popup,
-        // so the button supplies both itself.
+        // and this button does both, so it says so itself.
         aria-haspopup="menu"
+        aria-expanded={isOpen}
         data-row-menu=""
         className="ml-auto shrink-0 px-1 py-0 opacity-0 focus-visible:opacity-100 group-data-[hovered]:opacity-100 group-focus-within:opacity-100"
         onPress={() => {
           const trigger = triggerRef.current;
           if (!trigger) return;
-          onContextTarget({
-            rowId: String(row.id),
-            column: undefined,
-            origin: null,
-          });
+          claimForButton();
           forwardContextMenu(trigger, pointUnder(trigger));
+        }}
+        // Right-click, mac Ctrl+click and long-press reach React Aria's own
+        // handler without a press, so the target is claimed here too — but not
+        // for the events a cell forwarded, which carry their own target.
+        onContextMenu={(event) => {
+          if (!isForwardedContextMenu(event)) claimForButton();
         }}
       >
         ⋯
@@ -285,7 +294,7 @@ export function RowActionsButton({
 export interface CellContextTriggerProps {
   row: QueryRow;
   column: string;
-  onContextTarget(target: RowContextTarget): void;
+  onContextTarget(target: RowContextTarget | null): void;
   children: ReactNode;
 }
 
@@ -301,15 +310,19 @@ export function CellContextTrigger({
   onContextTarget,
   children,
 }: CellContextTriggerProps) {
-  const summon = (origin: HTMLElement, point: ContextMenuPoint) => {
+  /** True once the gesture has been handed to the row's menu button. */
+  const summon = (origin: HTMLElement, point: ContextMenuPoint): boolean => {
     const trigger =
       origin
         .closest("tr")
         ?.querySelector<HTMLElement>(`[${ROW_MENU_ATTRIBUTE}]`) ?? null;
     // The button's own events are React Aria's to handle, not ours to forward.
-    if (!trigger || trigger.contains(origin)) return;
+    // A portaled descendant (an open cell editor's listbox) has no row to look
+    // in either, and must keep the browser's own menu.
+    if (!trigger || trigger.contains(origin)) return false;
     onContextTarget({ rowId: String(row.id), column, origin });
     forwardContextMenu(trigger, point);
+    return true;
   };
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: these handlers only forward the platform's context-menu gesture to the row's `⋯` button, which is the real, focusable control; an interactive role here would both mislead about the cell's semantics and take React Aria's in-cell focus off the cell's own control.
@@ -318,14 +331,13 @@ export function CellContextTrigger({
       data-row-id={row.id}
       data-column={column}
       onContextMenu={(event) => {
-        event.preventDefault();
-        summon(event.target as HTMLElement, pointOfContextMenu(event));
+        if (summon(event.target as HTMLElement, pointOfContextMenu(event)))
+          event.preventDefault();
       }}
       onKeyDown={(event) => {
         if (!isContextMenuKey(event)) return;
-        event.preventDefault();
         const origin = event.target as HTMLElement;
-        summon(origin, pointUnder(origin));
+        if (summon(origin, pointUnder(origin))) event.preventDefault();
       }}
     >
       {children}
