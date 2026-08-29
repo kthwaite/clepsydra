@@ -18,7 +18,7 @@ After implementing any change, always run typecheck, lint, and the test suite be
 
 **Frontend:** all commands run from `ui/` with Bun; scripts live in `ui/package.json` (`dev`, `build`, `typecheck`, `lint`, `format`, `test`, `test:watch`, `openapi`, `knip`, `storybook`). Single test: `bun run test <file>` or `bun run test -t "<pattern>"`.
 
-**Backend:** standard cargo (`build`, `test`, `clippy`, `fmt`). `cargo run -- serve` starts the API server; `cargo run -- lsp` starts a standalone, read-only LSP on stdio that can run concurrently with `serve` (see `ui/src/docs/content/lsp.mdx`). Single integration test file: `cargo test --test <name>`. The CLI binary is named `clep` (clap displays "clepsydra"); `clep --help` and `ui/src/docs/content/cli.mdx` cover subcommands and config lookup order.
+**Backend:** standard cargo (`build`, `test`, `clippy`, `fmt`). `cargo run -- serve` starts the API server; `cargo run -- lsp` starts a standalone, read-only LSP on stdio that can run concurrently with `serve` (see `ui/src/docs/content/lsp.mdx`); `clep sync [init|status]` drives git-backed sync (`ui/src/docs/content/sync.mdx`). Single integration test file: `cargo test --test <name>`. The CLI binary is named `clep` (clap displays "clepsydra"); `clep --help` and `ui/src/docs/content/cli.mdx` cover subcommands and config lookup order.
 
 ## Feature Workflow
 
@@ -34,11 +34,13 @@ Rust 2024 edition. Axum 0.8 + Tokio; rusqlite (bundled, FTS5 powers `grep`); pul
 - `src/vault/` — the domain layer, independent of HTTP: paths (`VaultPath`, NFC-normalized), page/frontmatter parsing, SQLite index + derivation chain (`derivers/`), link extraction/rewriting, mutation coordinator, filesystem sync/reconcile, content-addressed attachment storage (`cas.rs`), academic imports (DOI/ISBN/Zotero), hooks
 - `src/api/` — one module per resource (pages, blocks, tasks, journal, agenda, board, folders, attachments, archive, academic, …); `events.rs` is the SSE stream the UI's sync indicator consumes; `frontend.rs` serves the embedded UI; `openapi.rs` + Swagger UI at `/api/docs`
 - `src/lsp/` — tower-lsp server (completion, hover, references, rename, diagnostics, code actions) over its own private, read-only vault index; started standalone with `clep lsp` (see `ui/src/docs/content/lsp.mdx`)
+- `src/vault/gitsync/` — git-backed vault sync, distinct from `src/vault/sync/` (which turns filesystem events into index updates): `git.rs` subprocess wrapper, `init.rs`, `engine.rs` (commit → pull → resolve → fold journals → push), `conflict_copy.rs`, `merge_driver.rs` (the hidden `clep merge-driver` git invokes for `*.md`), `journal_merge.rs`, `state.rs` (`<git-dir>/clep-sync.toml`). Driven by `src/sync_runtime.rs` (the server's quiesce window) and `src/sync_command.rs` (CLI). See `ui/src/docs/content/sync.mdx`
+- `src/doctor/` — `clep doctor`'s read-only checks, one section per concern (`mod.rs` + `sync.rs`); never writes to the vault or the repo
 - `tests/` — integration tests using axum-test, wiremock, serial_test
 
 ### API contract
 
-The OpenAPI spec is the typed bridge between backend and frontend: utoipa annotations → `/api/openapi.json` → `bun run openapi` → `ui/src/api/schema.d.ts` → `openapi-fetch` + `openapi-react-query` clients in `ui/src/api/`. **After changing any backend route or DTO, regenerate `schema.d.ts`** (server must be running).
+The OpenAPI spec is the typed bridge between backend and frontend: utoipa annotations → `/api/openapi.json` → `bun run openapi` → `ui/src/api/schema.d.ts` → `openapi-fetch` + `openapi-react-query` clients in `ui/src/api/`. **After changing any backend route or DTO, regenerate `schema.d.ts`.** `bun run openapi` needs a running server; to regenerate without one (and without the ambient-config risk of starting `clep` against the live vault), use `cargo run -q --example openapi > target/openapi.json && (cd ui && bun run openapi:file)`.
 
 ### Frontend
 
