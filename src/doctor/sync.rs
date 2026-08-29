@@ -11,7 +11,8 @@ const SYNC_LISTED: usize = 10;
 
 /// Report the vault's `clep sync` state: the git binary, whether the vault is
 /// an initialised sync repository, and — when it is — its branch, managed
-/// files, git-lfs, remote, working tree and index exclusions.
+/// files, merge driver registration, Conflict Copies, git-lfs, remote,
+/// working tree and index exclusions.
 ///
 /// Read-only by contract, like every other check: it only ever asks git
 /// questions (`--version`, `rev-parse`, `config --get`, `remote get-url`,
@@ -41,8 +42,9 @@ pub(super) fn check_sync(vault: &Vault, report: &mut Report) {
         Ok(version) => version,
         Err(e) => {
             report.push(
-                err(SYNC_SECTION, "git", format!("git is unavailable: {e}"))
-                    .with_hint("install git (2.30 or newer); sync drives the system git binary"),
+                warn(SYNC_SECTION, "git", format!("git is unavailable: {e}")).with_hint(
+                    "install git to sync this vault (e.g. `xcode-select --install` or `brew install git`)",
+                ),
             );
             return;
         }
@@ -55,6 +57,8 @@ pub(super) fn check_sync(vault: &Vault, report: &mut Report) {
     }
     check_sync_branch(vault, &git, report);
     check_sync_managed_files(vault, report);
+    check_sync_driver(&git, report);
+    check_sync_conflict_copies(vault, report);
     check_sync_lfs(&git, report);
     check_sync_remote(&git, report);
     check_sync_worktree(&git, report);
@@ -241,6 +245,62 @@ fn check_sync_managed_files(vault: &Vault, report: &mut Report) {
             "re-run `clep sync init` — it is idempotent and only appends what is missing",
         ),
     );
+}
+
+/// The `*.md merge=clep` driver is only as good as `merge.clep.driver` being
+/// registered (spec §5) — `clep sync init` writes it, but it lives in local
+/// git config, so nothing stops a hand-edit or a fresh clone from dropping it.
+fn check_sync_driver(git: &crate::vault::gitsync::git::Git, report: &mut Report) {
+    let key = crate::vault::gitsync::MERGE_DRIVER_KEYS
+        .iter()
+        .find(|(k, _)| k.ends_with(".driver"))
+        .map(|(k, _)| *k)
+        .expect("driver key present");
+    match git.config_get_local(key) {
+        Ok(Some(_)) => report.push(ok(SYNC_SECTION, "driver", "markdown merge driver registered")),
+        Ok(None) => report.push(
+            warn(
+                SYNC_SECTION,
+                "driver",
+                "markdown merge driver is not registered; *.md merges fall back to plain text merge",
+            )
+            .with_hint("run `clep sync init` to register `clep merge-driver`"),
+        ),
+        Err(e) => report.push(warn(
+            SYNC_SECTION,
+            "driver",
+            format!("could not read merge driver config: {e}"),
+        )),
+    }
+}
+
+/// Conflict Copies are the intentional, permanent side effect of a resolved
+/// merge (D-series design): the loser survives beside the winner so nothing
+/// is silently dropped. They pile up if nobody folds them back by hand.
+fn check_sync_conflict_copies(vault: &Vault, report: &mut Report) {
+    let copies = crate::vault::gitsync::conflict_copy::find_conflict_copies(vault.root());
+    if copies.is_empty() {
+        report.push(ok(SYNC_SECTION, "conflict-copies", "none"));
+        return;
+    }
+    let listed: Vec<&str> = copies
+        .iter()
+        .take(SYNC_LISTED)
+        .map(String::as_str)
+        .collect();
+    let more = copies.len().saturating_sub(SYNC_LISTED);
+    let mut detail = format!(
+        "{} conflict cop{}: {}",
+        copies.len(),
+        if copies.len() == 1 { "y" } else { "ies" },
+        listed.join(", ")
+    );
+    if more > 0 {
+        detail.push_str(&format!(" (+{more} more)"));
+    }
+    report.push(warn(SYNC_SECTION, "conflict-copies", detail).with_hint(
+        "each copy holds the other device's version of its page — fold what you want into the original (the /conflicts view lists them), then delete the copy",
+    ));
 }
 
 /// git-lfs is mandatory for sync (spec §3): attachments and the CAS store are
@@ -705,5 +765,54 @@ mod tests {
                 .is_some_and(|hint| hint.contains("main")),
             "{branch:#?}"
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn driver_check_warns_until_init_registers_it() {
+        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        // `sync_initialised_vault` runs `gitsync::init`, which now registers
+        // the merge driver (Task 3) -> ok. Unset it by hand -> warn.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("v");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = sync_initialised_vault(&root);
+        let mut report = Report::default();
+        check_sync(&vault, &mut report);
+        assert!(matches!(sync_result(&report, "driver").status, Status::Ok));
+
+        let git = crate::vault::gitsync::git::Git::new(vault.root());
+        git.run(&["config", "--unset", "merge.clep.driver"])
+            .unwrap();
+
+        let mut report = Report::default();
+        check_sync(&vault, &mut report);
+        let result = sync_result(&report, "driver");
+        assert!(matches!(result.status, Status::Warn));
+        assert!(
+            result
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("clep sync init")
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn conflict_copies_check_lists_copies() {
+        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("v");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = sync_initialised_vault(&root);
+        std::fs::create_dir_all(vault.root().join("notes")).unwrap();
+        std::fs::write(vault.root().join("notes/p.conflict.abc1234.md"), "x").unwrap();
+
+        let mut report = Report::default();
+        check_sync(&vault, &mut report);
+        let result = sync_result(&report, "conflict-copies");
+        assert!(matches!(result.status, Status::Warn));
+        assert!(result.detail.contains("notes/p.conflict.abc1234.md"));
     }
 }

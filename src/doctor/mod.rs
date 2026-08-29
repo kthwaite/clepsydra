@@ -270,6 +270,7 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
         check_frontmatter(v, &mut report);
         check_projects(v, &mut report);
         check_conflicts(v, &mut report);
+        check_journals(v, &mut report);
         sync::check_sync(v, &mut report);
         check_meetings(v, &mut report);
         check_bases(v, &mut report);
@@ -288,6 +289,11 @@ pub async fn run_with_cwd(cwd: &Path, opts: DoctorOpts) -> Report {
             "skipped — vault unavailable",
         ));
         report.push(skip("projects", "census", "skipped — vault unavailable"));
+        report.push(skip(
+            "journals",
+            "duplicates",
+            "skipped — vault unavailable",
+        ));
         report.push(skip("sync", "repo", "skipped — vault unavailable"));
         report.push(skip("meetings", "census", "skipped — vault unavailable"));
         report.push(skip("bases", "registry", "skipped — vault unavailable"));
@@ -1813,6 +1819,49 @@ fn check_conflicts(vault: &Vault, report: &mut Report) {
 }
 
 // ---------------------------------------------------------------------------
+// Check: duplicate journal pages
+// ---------------------------------------------------------------------------
+
+/// Duplicate journal-dated pages: `clep sync` mints an independent filename
+/// per device for the same date, and a resolved merge can leave a Conflict
+/// Copy behind. `clep sync`'s post-sync journal merger folds both cases into
+/// one page automatically; the doctor is where an un-synced or hand-edited
+/// vault surfaces them.
+fn check_journals(vault: &Vault, report: &mut Report) {
+    const SECTION: &str = "journals";
+    const LISTED: usize = 10;
+
+    let groups = crate::vault::gitsync::journal_merge::duplicate_journal_groups(vault.root());
+    if groups.is_empty() {
+        report.push(ok(SECTION, "duplicates", "one page per journal date"));
+        return;
+    }
+    let entries: Vec<String> = groups
+        .iter()
+        .map(|group| {
+            format!(
+                "{}/{}: {}",
+                group.folder,
+                group.date,
+                group.paths.join(", ")
+            )
+        })
+        .collect();
+    report.push(
+        warn(
+            SECTION,
+            "duplicates",
+            listing(
+                &entries,
+                format!("{} duplicate journal date(s):", entries.len()),
+                LISTED,
+            ),
+        )
+        .with_hint("run `clep sync` to fold duplicates automatically, or merge the pages by hand"),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Check 8b: meeting frontmatter
 // ---------------------------------------------------------------------------
 
@@ -3064,6 +3113,59 @@ mod tests {
             .find(|r| r.section == "conflicts" && r.name == "unparseable")
             .unwrap();
         assert!(matches!(result.status, Status::Ok));
+    }
+
+    #[test]
+    fn journals_check_ok_when_one_page_per_date() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_journals(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "journals")
+            .unwrap();
+        assert!(matches!(result.status, Status::Ok));
+    }
+
+    #[test]
+    fn journals_check_warns_on_duplicate_dates() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("vault");
+        crate::vault::init::init_vault(&root).unwrap();
+        std::fs::create_dir_all(root.join("journals")).unwrap();
+        for (name, tail) in [
+            ("20260829.2026-08-29.aaaaaaaa.md", "01"),
+            ("20260829.2026-08-29.bbbbbbbb.md", "02"),
+        ] {
+            std::fs::write(
+                root.join("journals").join(name),
+                format!(
+                    "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{tail}\"\ntitle = \"2026-08-29\"\n+++\n"
+                ),
+            )
+            .unwrap();
+        }
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        let mut report = Report::default();
+        check_journals(&vault, &mut report);
+        let result = report
+            .results
+            .iter()
+            .find(|r| r.section == "journals")
+            .unwrap();
+        assert!(matches!(result.status, Status::Warn));
+        assert!(result.detail.contains("2026-08-29"));
+        assert!(
+            result
+                .hint
+                .as_deref()
+                .unwrap_or_default()
+                .contains("clep sync")
+        );
     }
 
     fn archive_page_with_snapshot(hash: &str) -> String {
