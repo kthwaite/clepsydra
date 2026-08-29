@@ -4,9 +4,23 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 generator="$repo/scripts/debug-vault.sh"
 tmp="$(mktemp -d)"
-trap 'rm -rf "$tmp"' EXIT
+server_pid=""
+destination="$tmp/vault-one"
+destination_two="$tmp/vault-two"
 
-destination="$tmp/vault"
+stop_server() {
+  if [[ -n "$server_pid" ]] && kill -0 "$server_pid" 2>/dev/null; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
+  server_pid=""
+}
+
+cleanup() {
+  stop_server
+  rm -rf "$tmp"
+}
+trap cleanup EXIT
 
 fail() {
   printf 'FAIL: %s\n' "$1" >&2
@@ -25,6 +39,20 @@ assert_line() {
   done < "$file"
 
   fail "$file does not contain: $expected"
+}
+
+assert_contains() {
+  local file="$1"
+  local expected="$2"
+  local line
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    if [[ "$line" == *"$expected"* ]]; then
+      return 0
+    fi
+  done < "$file"
+
+  fail "$file does not contain text: $expected"
 }
 
 assert_page() {
@@ -54,6 +82,20 @@ if "$generator" >/dev/null 2>&1; then
 fi
 
 "$generator" "$destination"
+"$generator" "$destination_two"
+if ! diff -r "$destination" "$destination_two" >"$tmp/determinism.diff"; then
+  cat "$tmp/determinism.diff" >&2
+  fail "fresh fixture trees differ"
+fi
+
+option_parent="$tmp/option-like-parent"
+mkdir -p "$option_parent"
+(
+  cd "$option_parent"
+  "$generator" -fixture
+)
+[[ -f "$option_parent/-fixture/.clepsydra/config.toml" ]] \
+  || fail "option-like relative destination was not initialized"
 
 [[ -f "$destination/.clepsydra/config.toml" ]] || fail "missing initialized vault config"
 [[ -d "$destination/.clepsydra/templates" ]] || fail "missing initialized templates directory"
@@ -132,9 +174,80 @@ assert_line "$feeds" '## Engineering #debug'
 assert_line "$feeds" '- [Clepsydra Example](https://example.invalid/feed.xml) #fixture'
 
 printf 'sentinel-before\n' > "$destination/sentinel"
+snapshot="$tmp/vault-one-before-repeat"
+cp -R "$destination" "$snapshot"
 if "$generator" "$destination" >"$tmp/second-run.out" 2>&1; then
   fail "generator accepted an initialized destination"
 fi
-[[ "$(cat "$destination/sentinel")" == 'sentinel-before' ]] || fail "second run modified sentinel"
+if ! diff -r "$snapshot" "$destination" >"$tmp/repeat.diff"; then
+  cat "$tmp/repeat.diff" >&2
+  fail "rejected repeat modified the initialized destination"
+fi
+cmp -s "$snapshot/sentinel" "$destination/sentinel" \
+  || fail "rejected repeat modified sentinel bytes"
 
-printf 'PASS: debug vault fixture is initialized, deterministic, representative, and non-destructive\n'
+validation="$tmp/validation"
+validation_home="$validation/home"
+validation_xdg="$validation/xdg"
+mkdir -p "$validation_home" "$validation_xdg"
+port=$((20000 + ($$ % 20000)))
+cat > "$validation/config.toml" <<EOF
+[server]
+host = "127.0.0.1"
+port = $port
+
+[vault]
+root = "$destination_two"
+
+[features]
+academic = false
+feeds = true
+EOF
+
+clep="$repo/target/debug/clep"
+[[ -x "$clep" ]] || fail "cargo run did not produce $clep"
+(
+  cd "$validation"
+  exec env HOME="$validation_home" XDG_CONFIG_HOME="$validation_xdg" \
+    "$clep" serve --port "$port"
+) >"$tmp/server.out" 2>&1 &
+server_pid=$!
+
+feed_response="$tmp/feed-response.json"
+server_ready=false
+for _ in {1..100}; do
+  if curl --fail --silent --show-error \
+    "http://127.0.0.1:$port/api/vault/feeds" \
+    >"$feed_response" 2>/dev/null; then
+    server_ready=true
+    break
+  fi
+  if ! kill -0 "$server_pid" 2>/dev/null; then
+    cat "$tmp/server.out" >&2
+    fail "authoritative index server exited before readiness"
+  fi
+  sleep 0.1
+done
+if [[ "$server_ready" != true ]]; then
+  cat "$tmp/server.out" >&2
+  fail "authoritative index server did not become ready"
+fi
+assert_contains "$feed_response" '"diagnostics":[]'
+assert_contains "$feed_response" '"name":"Engineering"'
+assert_contains "$feed_response" '"url":"https://example.invalid/feed.xml"'
+stop_server
+
+(
+  cd "$validation"
+  env HOME="$validation_home" XDG_CONFIG_HOME="$validation_xdg" \
+    "$clep" doctor --full
+) >"$tmp/doctor.out"
+assert_contains "$tmp/doctor.out" '11 pages'
+assert_contains "$tmp/doctor.out" '11 indexed, 0 skipped, 0 removed'
+assert_contains "$tmp/doctor.out" 'build warnings         none'
+assert_contains "$tmp/doctor.out" 'all frontmatter parseable'
+assert_contains "$tmp/doctor.out" '1 base(s) parsed cleanly'
+assert_contains "$tmp/doctor.out" 'no type violations'
+assert_contains "$tmp/doctor.out" 'every `attendees` and `occurred_at` is well-formed'
+
+printf 'PASS: debug vault fixture is initialized, deterministic, indexable, representative, and non-destructive\n'

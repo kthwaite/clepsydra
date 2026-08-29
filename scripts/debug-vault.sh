@@ -8,6 +8,9 @@ fi
 
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 destination="$1"
+if [[ "$destination" != /* ]]; then
+  destination="$PWD/$destination"
+fi
 
 cargo run --quiet --manifest-path "$repo/Cargo.toml" --bin clep -- init "$destination"
 
