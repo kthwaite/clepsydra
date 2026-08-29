@@ -114,8 +114,9 @@ struct Member {
 }
 
 /// Fold one group, or `None` when fewer than two of its members could be
-/// read (nothing to merge), the winner could not be written, or not one
-/// loser could be deleted (nothing was actually folded away).
+/// read (nothing to merge), any member is encrypted, every member is a
+/// Conflict Copy, the winner could not be written, or not one loser could be
+/// deleted (nothing was actually folded away).
 ///
 /// The link rewrites the fold implies are appended to `repoints` rather than
 /// applied here, so one vault pass serves every group.
@@ -133,6 +134,37 @@ fn merge_group(
         }
     }
     if members.len() < 2 {
+        return None;
+    }
+    // An encrypted body is one age armor block: `split_blocks` sees no entry
+    // lines in it, so a fold would concatenate two armors into a body that no
+    // longer parses (`validate_encrypted_body`) — or leak plaintext entries
+    // into a page marked encrypted — and then delete the losers. The driver
+    // refuses encrypted pages for the same reason (D18); the merger refuses
+    // the whole group, `duplicate_journal_groups` still reports it, and
+    // doctor's `journals.duplicates` is the backstop.
+    if members
+        .iter()
+        .any(|member| member.meta.encryption.is_some())
+    {
+        warnings.push(format!(
+            "journal merge: {}/{} has an encrypted page; left for hand resolution",
+            group.folder, group.date
+        ));
+        return None;
+    }
+    // Copies always lose, so a group of nothing but Conflict Copies has no
+    // winner: electing one would strip its `conflict_of` and leave a
+    // copy-named page that neither `/sync/conflicts` nor the journal view can
+    // see.
+    if members
+        .iter()
+        .all(|member| is_conflict_copy_name(file_name(&member.path)))
+    {
+        warnings.push(format!(
+            "journal merge: {}/{} is only conflict copies, with no original to fold into; left for hand resolution",
+            group.folder, group.date
+        ));
         return None;
     }
     members.sort_by(|a, b| {
@@ -399,6 +431,31 @@ mod tests {
             path,
             format!(
                 "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{id_tail}\"\ntitle = \"2026-08-29\"\ncreated_at = {created}\nupdated_at = {created}\n+++\n{body}"
+            ),
+        )
+        .unwrap();
+    }
+
+    /// Two distinct, canonically-armored age bodies. Real armor is required:
+    /// `parse_frontmatter` validates it on every parse. Same fixture shape as
+    /// `merge_driver.rs`'s `encrypted_bodies_never_text_merge`.
+    const ARMOR_A: &str = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0ZXN0LUEKLS0tCloK\n-----END AGE ENCRYPTED FILE-----\n";
+    const ARMOR_B: &str = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0ZXN0LUIKLS0tCloK\n-----END AGE ENCRYPTED FILE-----\n";
+
+    /// A journal page carrying real `[encryption]` meta and an age armor body.
+    fn encrypted_journal(
+        dir: &std::path::Path,
+        name: &str,
+        id_tail: &str,
+        created: &str,
+        armor: &str,
+    ) {
+        let path = dir.join("journals").join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{id_tail}\"\ntitle = \"2026-08-29\"\ncreated_at = {created}\nupdated_at = {created}\n\n[encryption]\nformat = \"age\"\nversion = 1\nkey_id = \"test-key\"\n+++\n{armor}"
             ),
         )
         .unwrap();
@@ -735,6 +792,137 @@ mod tests {
             winner.contains("- 09:00 — theirs"),
             "the content was still folded in, so nothing is lost: {winner}"
         );
+    }
+
+    /// An encrypted body is a single age armor: folding two of them would
+    /// concatenate the armors under one page's `[encryption]` meta and delete
+    /// the other, leaving a page that no longer parses. The whole group is
+    /// left for hand resolution.
+    #[test]
+    fn a_group_with_an_encrypted_member_is_left_alone() {
+        let tmp = TempDir::new().unwrap();
+        encrypted_journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            ARMOR_A,
+        );
+        encrypted_journal(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            ARMOR_B,
+        );
+        let paths = [
+            tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md"),
+            tmp.path().join("journals/20260829.2026-08-29.bbbbbbbb.md"),
+        ];
+        let before: Vec<Vec<u8>> = paths.iter().map(|p| std::fs::read(p).unwrap()).collect();
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert!(merges.is_empty(), "{merges:?}");
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("journals/2026-08-29 has an encrypted page"),
+            "{warnings:?}"
+        );
+        for (path, bytes) in paths.iter().zip(&before) {
+            assert_eq!(
+                &std::fs::read(path).unwrap(),
+                bytes,
+                "{} changed",
+                path.display()
+            );
+        }
+        // The group is still reported, so doctor's `journals.duplicates` sees it.
+        assert_eq!(duplicate_journal_groups(tmp.path()).len(), 1);
+    }
+
+    /// The mixed case is no safer: a plaintext loser's entries would land
+    /// inside a page marked encrypted, or an armor would land as body text in
+    /// a plaintext winner.
+    #[test]
+    fn a_mixed_encrypted_and_plaintext_group_is_left_alone() {
+        let tmp = TempDir::new().unwrap();
+        encrypted_journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            ARMOR_A,
+        );
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — plaintext\n",
+        );
+        let plain = tmp.path().join("journals/20260829.2026-08-29.bbbbbbbb.md");
+        let encrypted = tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md");
+        let (plain_before, encrypted_before) = (
+            std::fs::read(&plain).unwrap(),
+            std::fs::read(&encrypted).unwrap(),
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert!(merges.is_empty(), "{merges:?}");
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("has an encrypted page"),
+            "{warnings:?}"
+        );
+        assert_eq!(std::fs::read(&plain).unwrap(), plain_before);
+        assert_eq!(std::fs::read(&encrypted).unwrap(), encrypted_before);
+    }
+
+    /// Copies always lose, so a group of nothing but Conflict Copies has no
+    /// winner at all — electing one would strand a copy-named page.
+    #[test]
+    fn a_group_of_only_conflict_copies_is_left_alone() {
+        let tmp = TempDir::new().unwrap();
+        // The original was deleted after the merge; two copies of it survive.
+        let copy = |name: &str, id_tail: &str, body: &str| {
+            let path = tmp.path().join("journals").join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(
+                &path,
+                format!(
+                    "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{id_tail}\"\ntitle = \"2026-08-29 (conflict {id_tail})\"\nconflict_of = \"journals/20260829.2026-08-29.aaaaaaaa.md\"\n+++\n{body}"
+                ),
+            )
+            .unwrap();
+            path
+        };
+        let first = copy(
+            "20260829.2026-08-29.aaaaaaaa.conflict.abc1234.md",
+            "01",
+            "- 08:00 — one\n",
+        );
+        let second = copy(
+            "20260829.2026-08-29.aaaaaaaa.conflict.def5678.md",
+            "02",
+            "- 09:00 — two\n",
+        );
+        let before = (
+            std::fs::read(&first).unwrap(),
+            std::fs::read(&second).unwrap(),
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert!(merges.is_empty(), "{merges:?}");
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("is only conflict copies"),
+            "{warnings:?}"
+        );
+        assert_eq!(std::fs::read(&first).unwrap(), before.0);
+        assert_eq!(std::fs::read(&second).unwrap(), before.1);
     }
 
     #[test]
