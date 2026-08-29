@@ -22,7 +22,7 @@ export function VesselTooltip({
       placement={placement}
       offset={offset}
       className={cn(
-        "cl-mono z-50 border border-rule border-l-2 border-l-accent bg-paper-2 px-2 py-0.5 text-[10px] tracking-[0.08em] text-ink",
+        "cl-serif z-50 border border-rule border-l-2 border-l-accent bg-paper-2 px-2 py-0.5  tracking-[0.08em] text-ink",
         className,
       )}
     >

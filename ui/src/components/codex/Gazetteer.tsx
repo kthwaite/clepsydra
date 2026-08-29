@@ -335,7 +335,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
       <div className="cl-noscroll min-h-0 flex-1 overflow-auto">
         <table className="w-full border-collapse text-left">
           <thead className="sticky top-0 z-10 bg-paper">
-            <tr className="cl-mono border-b border-rule text-[9px] uppercase tracking-[0.14em] text-ink-mute">
+            <tr className="cl-mono border-b border-rule text-xs uppercase tracking-[0.14em] text-ink-mute">
               <th className="w-[36px] px-3 py-2">
                 <input
                   type="checkbox"
@@ -346,7 +346,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
                   className="cursor-pointer accent-accent"
                 />
               </th>
-              <Th w="48px">№</Th>
+              <Th w="48px">No</Th>
               <Th w="150px">File-ID</Th>
               <Th>Title · excerpt</Th>
               <Th w="200px">Tags</Th>
@@ -358,7 +358,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
               </Th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="">
             {rows.map((n, i) => {
               const kind = resolveKind({ path: n.path, kind: n.kind });
               return (
@@ -381,7 +381,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
                       className="cursor-pointer accent-accent"
                     />
                   </td>
-                  <td className="cl-mono px-3 py-1.5 text-[10px] tabular-nums text-ink-mute">
+                  <td className="cl-mono px-3 py-1.5 text-xs tabular-nums text-ink-mute">
                     {String(
                       (currentPage - 1) * MOBILE_GAZETTEER_PAGE_SIZE + i + 1,
                     ).padStart(3, "0")}
@@ -394,23 +394,23 @@ export function Gazetteer({ initialTag, filters }: Props) {
                         className="flex-shrink-0"
                         title={kindLabel(kind)}
                       />
-                      <span className="text-[10px] text-ink-2">
+                      <span className="text-xs text-ink-2">
                         {shortFolio(n.path)}
                       </span>
                     </span>
                   </td>
                   <td className="px-3 py-1.5">
-                    <span className="font-sans text-[13px] text-ink">
+                    <span className="font-sans text-sm text-ink">
                       {n.title || n.path}
                     </span>
                     {n.description && (
-                      <span className="cl-mono ml-2 text-[10px] text-ink-mute">
+                      <span className="cl-mono ml-2 text-xs text-ink-mute">
                         {n.description.slice(0, 80)}
                         {n.description.length > 80 ? "…" : ""}
                       </span>
                     )}
                   </td>
-                  <td className="cl-mono max-w-[200px] overflow-hidden px-3 py-1.5 text-[9px] text-accent">
+                  <td className="cl-mono max-w-[200px] overflow-hidden px-3 py-1.5 text-xs text-accent">
                     {(n.tags ?? []).length > 0 ? (
                       <div className="flex gap-1 overflow-hidden whitespace-nowrap">
                         {(n.tags ?? []).map((tag) => {
@@ -426,7 +426,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
                                 applyResultTag(tag);
                               }}
                               className={cn(
-                                "cl-mono shrink-0 text-[9px] outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-accent",
+                                "cl-mono shrink-0 text-xs outline-none focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-1 focus-visible:outline-accent",
                                 isSelected
                                   ? "cursor-default text-ink-mute"
                                   : "cursor-pointer text-accent hover:text-hot",
@@ -441,10 +441,10 @@ export function Gazetteer({ initialTag, filters }: Props) {
                       "—"
                     )}
                   </td>
-                  <td className="cl-mono px-3 py-1.5 text-right text-[10px] tabular-nums text-ink-mute">
+                  <td className="cl-mono px-3 py-1.5 text-right text-xs tabular-nums text-ink-mute">
                     {n.word_count ?? "—"}
                   </td>
-                  <td className="cl-mono px-3 py-1.5 text-right text-[10px] text-ink-mute">
+                  <td className="cl-mono px-3 py-1.5 text-right text-xs text-ink-mute">
                     {formatRelativeTime(n.updated_at)}
                   </td>
                 </tr>
