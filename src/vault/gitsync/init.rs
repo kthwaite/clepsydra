@@ -146,6 +146,9 @@ pub fn init(vault: &Vault, git: &Git, opts: InitOpts) -> Result<InitReport, Sync
 
     // (5) initialised marker.
     git.config_set(INIT_MARKER_KEY, INIT_MARKER_VALUE)?;
+    for (key, value) in super::MERGE_DRIVER_KEYS {
+        git.config_set(key, value)?;
+    }
 
     // (6) author, seeded and persisted to [sync] when it (or the branch)
     // drifted from what was already on disk.
@@ -735,6 +738,30 @@ mod tests {
             git.current_branch().unwrap().as_deref(),
             Some("scratch"),
             "HEAD was not repointed"
+        );
+    }
+
+    #[test]
+    fn init_registers_the_merge_driver_and_rerun_is_idempotent() {
+        let (_tmp, vault) = fresh_vault();
+        let git = testing::git(vault.root());
+        init(&vault, &git, opts()).unwrap();
+        for (key, value) in crate::vault::gitsync::MERGE_DRIVER_KEYS {
+            assert_eq!(
+                git.config_get_local(key).unwrap().as_deref(),
+                Some(*value),
+                "{key}"
+            );
+        }
+
+        // Re-run on the already-initialised vault: still there, still Ok.
+        let vault = Vault::open(vault.root()).unwrap();
+        init(&vault, &git, opts()).unwrap();
+        assert_eq!(
+            git.config_get_local("merge.clep.driver")
+                .unwrap()
+                .as_deref(),
+            Some("clep merge-driver %O %A %B %P")
         );
     }
 
