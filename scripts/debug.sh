@@ -7,6 +7,7 @@ vault="$workspace/vault"
 requested_status=0
 fixture_pid=""
 fixture_group=""
+fixture_report_group=""
 backend_pid=""
 backend_group=""
 frontend_pid=""
@@ -121,7 +122,8 @@ set -m
 "$repo/scripts/debug-vault.sh" "$vault" &
 fixture_pid=$!
 fixture_group=$fixture_pid
-printf 'Fixture process group: %s\n' "$fixture_group"
+fixture_report_group=$fixture_group
+printf 'Fixture process group: %s\n' "$fixture_report_group"
 exit_if_requested
 
 while kill -0 "$fixture_pid" 2>/dev/null; do
@@ -131,6 +133,15 @@ done
 fixture_status=0
 wait "$fixture_pid" || fixture_status=$?
 fixture_pid=""
+if group_alive "$fixture_group"; then
+  printf 'Fixture process group %s remained after initialization\n' "$fixture_group" >&2
+  if (( fixture_status != 0 )); then
+    exit "$fixture_status"
+  fi
+  exit 1
+fi
+fixture_group=""
+printf 'Fixture process group released: %s\n' "$fixture_report_group"
 exit_if_requested
 if (( fixture_status != 0 )); then
   exit "$fixture_status"
@@ -187,11 +198,17 @@ status=0
 if ! kill -0 "$backend_pid" 2>/dev/null; then
   wait "$backend_pid" || status=$?
   backend_pid=""
+  if ! group_alive "$backend_group"; then
+    backend_group=""
+  fi
 fi
 if ! kill -0 "$frontend_pid" 2>/dev/null; then
   frontend_status=0
   wait "$frontend_pid" || frontend_status=$?
   frontend_pid=""
+  if ! group_alive "$frontend_group"; then
+    frontend_group=""
+  fi
   if (( status == 0 )); then
     status=$frontend_status
   fi

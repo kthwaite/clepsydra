@@ -14,6 +14,7 @@ case_pid=""
 case_status=""
 case_workspace=""
 fixture_group=""
+fixture_released_group=""
 backend_group=""
 frontend_group=""
 
@@ -21,6 +22,7 @@ refresh_case_state() {
   [[ -f "$case_log" ]] || return 0
   [[ -n "$case_workspace" ]] || case_workspace="$(sed -n 's/^Temporary workspace: //p' "$case_log")"
   [[ -n "$fixture_group" ]] || fixture_group="$(sed -n 's/^Fixture process group: //p' "$case_log")"
+  [[ -n "$fixture_released_group" ]] || fixture_released_group="$(sed -n 's/^Fixture process group released: //p' "$case_log")"
   [[ -n "$backend_group" ]] || backend_group="$(sed -n 's/^Backend process group: //p' "$case_log")"
   [[ -n "$frontend_group" ]] || frontend_group="$(sed -n 's/^Frontend process group: //p' "$case_log")"
 }
@@ -39,14 +41,14 @@ kill_group() {
 
 cleanup_case() {
   refresh_case_state
-  terminate_group "$fixture_group"
+  if [[ -z "$fixture_released_group" ]]; then terminate_group "$fixture_group"; fi
   terminate_group "$backend_group"
   terminate_group "$frontend_group"
   if [[ "$case_pid" =~ ^[0-9]+$ ]]; then
     terminate_group "$case_pid"
   fi
   sleep 1
-  kill_group "$fixture_group"
+  if [[ -z "$fixture_released_group" ]]; then kill_group "$fixture_group"; fi
   kill_group "$backend_group"
   kill_group "$frontend_group"
   if [[ "$case_pid" =~ ^[0-9]+$ ]]; then
@@ -81,6 +83,7 @@ reset_case() {
   case_status=""
   case_workspace=""
   fixture_group=""
+  fixture_released_group=""
   backend_group=""
   frontend_group=""
 }
@@ -165,7 +168,9 @@ assert_case_cleaned() {
   refresh_case_state
   [[ -n "$case_workspace" ]] || fail "missing temporary-workspace report"
   [[ ! -e "$case_workspace" ]] || fail "temporary workspace remains after shutdown: $case_workspace"
-  assert_group_gone "fixture" "$fixture_group"
+  if [[ -z "$fixture_released_group" ]]; then
+    assert_group_gone "fixture" "$fixture_group"
+  fi
   assert_group_gone "backend" "$backend_group"
   assert_group_gone "frontend" "$frontend_group"
   assert_url_closed "backend" "http://127.0.0.1:3100/api/vault/index/stats"
@@ -177,6 +182,7 @@ finish_case() {
   case_log=""
   case_workspace=""
   fixture_group=""
+  fixture_released_group=""
   backend_group=""
   frontend_group=""
 }
@@ -242,6 +248,8 @@ start_case just debug
 wait_for_url "http://127.0.0.1:3100/api/vault/index/stats"
 wait_for_url "http://127.0.0.1:5174"
 wait_for_log '^Frontend process group: '
+wait_for_log '^Fixture process group released: '
+[[ "$fixture_released_group" == "$fixture_group" ]] || fail "fixture group release does not match its report"
 require_group "fixture" "$fixture_group"
 require_group "backend" "$backend_group"
 require_group "frontend" "$frontend_group"
