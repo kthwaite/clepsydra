@@ -97,7 +97,7 @@ describe("PageEditorHeader read-only title", () => {
     );
   });
 
-  it("wraps a complete mobile title while retaining desktop and save semantics", () => {
+  it("wraps a complete title at every viewport while retaining save semantics", () => {
     const longTitle =
       "A complete title that must remain visible on a narrow mobile folio";
     const onTitleChange = vi.fn();
@@ -117,10 +117,15 @@ describe("PageEditorHeader read-only title", () => {
     expect(title).toHaveAttribute("rows", "1");
     expect(title).toHaveClass(
       "field-sizing-content",
+      "overflow-hidden",
       "whitespace-pre-wrap",
       "break-words",
+    );
+    expect(title).not.toHaveClass(
       "md:field-sizing-fixed",
       "md:whitespace-nowrap",
+      "md:break-normal",
+      "md:overflow-x-auto",
     );
 
     expect(fireEvent.keyDown(title, { key: "Enter" })).toBe(false);
