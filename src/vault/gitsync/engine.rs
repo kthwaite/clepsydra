@@ -211,6 +211,7 @@ impl SyncEngine {
     /// in the working tree into an ordinary commit and push them to every
     /// device.
     pub fn commit_local(&self) -> Result<Option<CommitSummary>, SyncError> {
+        self.refuse_foreign_operation()?;
         let leftover = self.commit_leftover_merge()?;
         let entries = self.git.status()?;
         if entries.is_empty() {
@@ -241,6 +242,33 @@ impl SyncEngine {
         }))
     }
 
+    /// Refuse to sync while a cherry-pick or a rebase owns the repository
+    /// (D24). Only a merge is ours to finish: `git add -A` over a half-applied
+    /// pick would commit the user's in-progress work as a sync commit — and it
+    /// needs no unmerged path to do so, a pick whose conflicts the user has
+    /// already resolved but not continued is enough.
+    ///
+    /// A rebase is detected by its state directory rather than `REBASE_HEAD`,
+    /// which git leaves behind after a successful `rebase --continue`
+    /// (verified on git 2.55): a ref-based check would refuse every sync
+    /// thereafter. `git_dir` is the per-worktree directory, so a rebase in
+    /// another worktree of the same repository does not block this one.
+    fn refuse_foreign_operation(&self) -> Result<(), SyncError> {
+        let rebasing = ["rebase-merge", "rebase-apply"]
+            .iter()
+            .any(|dir| self.git_dir.join(dir).is_dir());
+        let operation = if self.git.rev_parse("CHERRY_PICK_HEAD")?.is_some() {
+            "cherry-pick"
+        } else if rebasing {
+            "rebase"
+        } else {
+            return Ok(());
+        };
+        Err(SyncError::GitOperationInProgress {
+            operation: operation.to_string(),
+        })
+    }
+
     /// Finish a merge an earlier run left in progress — a process killed
     /// between the merge and its resolution, a merge run by hand, or an
     /// abort that itself failed. `None` when none is in progress.
@@ -249,19 +277,6 @@ impl SyncEngine {
         let unmerged = self.git.unmerged()?;
         if !in_progress && unmerged.is_empty() {
             return Ok(None);
-        }
-        // A merge is ours to finish; a cherry-pick or a rebase is the user's,
-        // and committing its unmerged state would turn half of one into a
-        // sync commit (D24).
-        for (reference, operation) in [
-            ("CHERRY_PICK_HEAD", "cherry-pick"),
-            ("REBASE_HEAD", "rebase"),
-        ] {
-            if self.git.rev_parse(reference)?.is_some() {
-                return Err(SyncError::GitOperationInProgress {
-                    operation: operation.to_string(),
-                });
-            }
         }
         let files = self.git.status()?.len();
         let (sha, copies, warnings) =
@@ -927,25 +942,31 @@ mod tests {
         assert!(gb.status().unwrap().is_empty(), "tree is clean");
     }
 
+    /// Start a conflicting cherry-pick in `root`: `side` edits `c.md` on its
+    /// own branch, `main` edits it too, and picking `side` onto `main`
+    /// conflicts. Leaves `CHERRY_PICK_HEAD` set.
+    fn start_conflicting_cherry_pick(root: &Path, id_tail: &str) {
+        let g = testing::git(root);
+        testing::write(root, "c.md", &page(id_tail, "C", "base"));
+        engine(root).full_sync().unwrap();
+        g.run(&["checkout", "-q", "-b", "side"]).unwrap();
+        testing::write(root, "c.md", &page(id_tail, "C", "side edit"));
+        g.add_all().unwrap();
+        let side = g.commit("side", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "main"]).unwrap();
+        testing::write(root, "c.md", &page(id_tail, "C", "main edit"));
+        g.add_all().unwrap();
+        g.commit("main", &testing::author()).unwrap();
+        let _ = g.run_raw(&["cherry-pick", &side]);
+        assert!(g.rev_parse("CHERRY_PICK_HEAD").unwrap().is_some());
+    }
+
     /// D24: only a merge is ours to finish. A cherry-pick or rebase owning
     /// the unmerged state is refused rather than committed as sync residue.
     #[test]
     fn cherry_pick_in_progress_refuses_to_sync() {
         let repos = testing::TestRepos::new();
-        testing::write(&repos.a, "c.md", &page("31", "C", "base"));
-        let ga = testing::git(&repos.a);
-        engine(&repos.a).full_sync().unwrap();
-        ga.run(&["checkout", "-q", "-b", "side"]).unwrap();
-        testing::write(&repos.a, "c.md", &page("31", "C", "side edit"));
-        ga.add_all().unwrap();
-        let side = ga.commit("side", &testing::author()).unwrap();
-        ga.run(&["checkout", "-q", "main"]).unwrap();
-        testing::write(&repos.a, "c.md", &page("31", "C", "main edit"));
-        ga.add_all().unwrap();
-        ga.commit("main", &testing::author()).unwrap();
-        // Conflicts, leaving CHERRY_PICK_HEAD and an unmerged path behind.
-        let _ = ga.run_raw(&["cherry-pick", &side]);
-        assert!(ga.rev_parse("CHERRY_PICK_HEAD").unwrap().is_some());
+        start_conflicting_cherry_pick(&repos.a, "31");
 
         let err = engine(&repos.a).full_sync().unwrap_err();
 
@@ -954,9 +975,103 @@ mod tests {
             "{err}"
         );
         assert!(
-            ga.rev_parse("CHERRY_PICK_HEAD").unwrap().is_some(),
+            testing::git(&repos.a)
+                .rev_parse("CHERRY_PICK_HEAD")
+                .unwrap()
+                .is_some(),
             "the refusal leaves the cherry-pick for the user to finish"
         );
+    }
+
+    /// The dangerous shape: the user resolved the pick's conflicts and staged
+    /// them but has not run `--continue`, so nothing is unmerged. Without the
+    /// guard, `git add -A` would commit their half-finished pick as a sync
+    /// commit and push it to every device.
+    #[test]
+    fn a_resolved_but_uncontinued_cherry_pick_refuses_to_sync() {
+        let repos = testing::TestRepos::new();
+        start_conflicting_cherry_pick(&repos.a, "32");
+        let g = testing::git(&repos.a);
+        testing::write(&repos.a, "c.md", &page("32", "C", "resolved by hand"));
+        g.add(&["c.md"]).unwrap();
+        assert!(g.unmerged().unwrap().is_empty(), "nothing is unmerged");
+        assert!(g.merge_head().unwrap().is_none(), "no merge is in progress");
+        let before = g.log_count().unwrap();
+
+        let err = engine(&repos.a).full_sync().unwrap_err();
+
+        assert!(
+            matches!(err, SyncError::GitOperationInProgress { ref operation } if operation == "cherry-pick"),
+            "{err}"
+        );
+        assert_eq!(
+            g.log_count().unwrap(),
+            before,
+            "the user's staged resolution was not committed"
+        );
+    }
+
+    #[test]
+    fn a_rebase_in_progress_refuses_to_sync() {
+        let repos = testing::TestRepos::new();
+        let g = testing::git(&repos.a);
+        testing::write(&repos.a, "r.md", &page("33", "R", "base"));
+        engine(&repos.a).full_sync().unwrap();
+        g.run(&["checkout", "-q", "-b", "topic"]).unwrap();
+        testing::write(&repos.a, "r.md", &page("33", "R", "topic edit"));
+        g.add_all().unwrap();
+        g.commit("topic", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "main"]).unwrap();
+        testing::write(&repos.a, "r.md", &page("33", "R", "main edit"));
+        g.add_all().unwrap();
+        g.commit("main", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "topic"]).unwrap();
+        let _ = g.run_raw(&["rebase", "main"]); // conflicts, stops mid-rebase
+
+        let err = engine(&repos.a).full_sync().unwrap_err();
+
+        assert!(
+            matches!(err, SyncError::GitOperationInProgress { ref operation } if operation == "rebase"),
+            "{err}"
+        );
+    }
+
+    /// Git leaves `REBASE_HEAD` resolvable after a *successful* `rebase
+    /// --continue` (verified on git 2.55), so detecting a rebase by that ref
+    /// would refuse every sync from then on. Only the state directory means
+    /// "in progress".
+    #[test]
+    fn a_finished_rebase_does_not_block_syncing() {
+        let repos = testing::TestRepos::new();
+        let g = testing::git(&repos.a);
+        testing::write(&repos.a, "r.md", &page("34", "R", "base"));
+        engine(&repos.a).full_sync().unwrap();
+        g.run(&["checkout", "-q", "-b", "topic"]).unwrap();
+        testing::write(&repos.a, "r.md", &page("34", "R", "topic edit"));
+        g.add_all().unwrap();
+        g.commit("topic", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "main"]).unwrap();
+        testing::write(&repos.a, "r.md", &page("34", "R", "main edit"));
+        g.add_all().unwrap();
+        g.commit("main", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "topic"]).unwrap();
+        let _ = g.run_raw(&["rebase", "main"]);
+        // Resolve and finish the rebase, as the user would.
+        testing::write(&repos.a, "r.md", &page("34", "R", "rebased"));
+        g.add(&["r.md"]).unwrap();
+        testing::git(&repos.a)
+            .with_env("GIT_EDITOR", "true")
+            .run(&["rebase", "--continue"])
+            .unwrap();
+        assert!(
+            g.rev_parse("REBASE_HEAD").unwrap().is_some(),
+            "the fixture only bites while git leaves REBASE_HEAD behind"
+        );
+
+        testing::write(&repos.a, "after.md", &page("35", "After", "x"));
+        let report = engine(&repos.a).full_sync().expect("sync after a rebase");
+
+        assert!(report.committed.is_some(), "{report:?}");
     }
 
     /// A git-LFS pointer is a stand-in for a blob the repository does not

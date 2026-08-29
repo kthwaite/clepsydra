@@ -172,11 +172,13 @@ impl From<&SyncReport> for SyncReportDto {
     }
 }
 
-/// `NotInitialised` is the one sync failure a client can act on, so it gets a
-/// `409` with the `clep sync init` hint; everything else is a `500`.
+/// The sync failures a client can act on get a `409` — an uninitialised
+/// vault (with the `clep sync init` hint) and a repository already busy with
+/// a cherry-pick or rebase the user has to finish. Everything else is a `500`.
 fn sync_error(error: SyncError) -> ApiError {
     match error {
         SyncError::NotInitialised => ApiError::conflict(NOT_INITIALISED),
+        busy @ SyncError::GitOperationInProgress { .. } => ApiError::conflict(busy.to_string()),
         other => ApiError::internal(other.to_string()),
     }
 }
@@ -188,7 +190,7 @@ fn sync_error(error: SyncError) -> ApiError {
     tag = "Sync",
     responses(
         (status = 200, description = "Sync report", body = SyncReportDto),
-        (status = 409, description = "Sync is not initialised for this vault", body = ApiError),
+        (status = 409, description = "Sync is not initialised for this vault, or a cherry-pick or rebase is in progress", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
@@ -237,6 +239,22 @@ mod tests {
     use axum_test::TestServer;
 
     use super::*;
+
+    /// The failures the user can act on are conflicts, not server errors: an
+    /// uninitialised vault, and a repository busy with an operation only they
+    /// can finish.
+    #[test]
+    fn user_actionable_sync_errors_are_conflicts() {
+        assert_eq!(sync_error(SyncError::NotInitialised).status, 409);
+        assert_eq!(
+            sync_error(SyncError::GitOperationInProgress {
+                operation: "cherry-pick".to_string(),
+            })
+            .status,
+            409
+        );
+        assert_eq!(sync_error(SyncError::MissingAuthor).status, 500);
+    }
 
     #[tokio::test]
     async fn status_reports_uninitialised_for_plain_vault_and_sync_is_409() {
