@@ -744,4 +744,26 @@ describe("BaseTable view restore", () => {
       expect.anything(),
     );
   });
+
+  it("lets a URL change back to an earlier view win over the session's choice", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(
+      <BaseTable slug="reading" requestedView="Continues" />,
+    );
+    await user.click(screen.getByRole("button", { name: "Shelf" }));
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+      "reading",
+      "Shelf",
+      expect.anything(),
+    );
+    rerender(<BaseTable slug="reading" requestedView="Shelf" />);
+    rerender(<BaseTable slug="reading" requestedView="Continues" />);
+    await waitFor(() =>
+      expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+        "reading",
+        "Continues",
+        expect.anything(),
+      ),
+    );
+  });
 });

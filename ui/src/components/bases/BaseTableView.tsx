@@ -287,6 +287,10 @@ const VIEWPORT_CLASS = "max-h-[26rem] overflow-auto";
 
 interface ScrollViewportProps {
   enabled: boolean;
+  /** Ask for the next window when the content is too short to scroll. Off while
+   * groups are folded: folded rows add no height, so autofill would page the
+   * whole base. Scroll-driven loading stays live. */
+  autofill?: boolean;
   onApproachEnd(): void;
   children: ReactNode;
 }
@@ -296,6 +300,7 @@ interface ScrollViewportProps {
  * there. Full-chrome tables render their rows in the page, unwrapped. */
 function ScrollViewport({
   enabled,
+  autofill = true,
   onApproachEnd,
   children,
 }: ScrollViewportProps) {
@@ -313,7 +318,7 @@ function ScrollViewport({
   useEffect(() => {
     const node = ref.current;
     // A zero height is an unmeasured viewport, not an empty one.
-    if (!enabled || !node || node.clientHeight === 0) return;
+    if (!enabled || !autofill || !node || node.clientHeight === 0) return;
     if (node.scrollHeight <= node.clientHeight) approach.current();
   });
 
@@ -1101,13 +1106,15 @@ export const BaseTableView = forwardRef<
     output?.shape === "grouped" ? output.groups : null;
   // A row that is about to take focus must be on screen, so its group is
   // rendered open and the stored fold is dropped.
-  const forcedOpenRowIds: Array<string | undefined> = [
-    focusCreatedId,
-    archiveFocus?.nextRowId,
-  ];
-  const forcedOpenGroup = groups?.find((group) =>
-    group.rows.some((row) => forcedOpenRowIds.includes(String(row.id))),
+  const forcedOpenRowIds = [focusCreatedId, archiveFocus?.nextRowId].filter(
+    (id): id is string => id !== undefined,
   );
+  const forcedOpenGroup =
+    forcedOpenRowIds.length === 0
+      ? undefined
+      : groups?.find((group) =>
+          group.rows.some((row) => forcedOpenRowIds.includes(String(row.id))),
+        );
   const forcedOpenIdentity =
     forcedOpenGroup === undefined
       ? undefined
@@ -1119,6 +1126,9 @@ export const BaseTableView = forwardRef<
     groupIdentity(group.key),
   );
   const anyGroupExpanded = groupIdentities.some(isGroupExpanded);
+  const anyGroupCollapsed = groupIdentities.some(
+    (identity) => !isGroupExpanded(identity),
+  );
   const expandGroup = groupCollapse.expand;
   useEffect(() => {
     if (
@@ -1379,7 +1389,11 @@ export const BaseTableView = forwardRef<
       ) : null}
       {shouldRenderGrid ? (
         <>
-          <ScrollViewport enabled={compact} onApproachEnd={approachEnd}>
+          <ScrollViewport
+            enabled={compact}
+            autofill={!anyGroupCollapsed}
+            onApproachEnd={approachEnd}
+          >
             {groups ? (
               <div className="flex flex-col gap-4">
                 {groups.map((group, index) => {

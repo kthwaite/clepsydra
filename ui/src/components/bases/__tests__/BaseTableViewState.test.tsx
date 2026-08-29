@@ -105,6 +105,11 @@ describe("group collapse", () => {
     expect(screen.getAllByRole("grid")).toHaveLength(2);
     const trigger = screen.getByRole("button", { name: "reading" });
     expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const panelId = trigger.getAttribute("aria-controls");
+    expect(panelId).toBeTruthy();
+    expect(document.getElementById(panelId as string)).toContainElement(
+      screen.getByRole("grid", { name: "Reading Log — reading" }),
+    );
 
     await user.click(trigger);
     expect(trigger).toHaveAttribute("aria-expanded", "false");
@@ -149,6 +154,10 @@ describe("group collapse", () => {
 
   it("scopes the fold to the grouping field", () => {
     window.localStorage.setItem(GROUPS_KEY, '["\\"reading\\""]');
+    window.localStorage.setItem(
+      "clepsydra.bases.groups.reading.shelf.kind",
+      '["\\"reading\\""]',
+    );
     renderView({
       overrides: { ...EMPTY_OVERRIDES, group: { kind: "by", field: "kind" } },
       output: {
@@ -160,7 +169,7 @@ describe("group collapse", () => {
     });
     expect(screen.getByRole("button", { name: "reading" })).toHaveAttribute(
       "aria-expanded",
-      "true",
+      "false",
     );
   });
 
@@ -175,6 +184,36 @@ describe("group collapse", () => {
     await waitFor(() =>
       expect(window.localStorage.getItem(GROUPS_KEY)).toBe("[]"),
     );
+  });
+
+  it("stops the compact viewport autofill while a group is folded", async () => {
+    const user = userEvent.setup();
+    const loadMore = vi.fn();
+    renderView({
+      chrome: "compact",
+      rowWindow: {
+        total: 40,
+        loaded: 2,
+        hasMore: true,
+        isLoadingMore: false,
+        cappedBy: undefined,
+        loadMore,
+      },
+    });
+    // jsdom measures nothing; report a viewport taller than the folded
+    // headers so the short-content effect would fire on the next render.
+    const scroller = screen.getByTestId("base-table-scroller");
+    Object.defineProperty(scroller, "clientHeight", {
+      value: 400,
+      configurable: true,
+    });
+    Object.defineProperty(scroller, "scrollHeight", {
+      value: 60,
+      configurable: true,
+    });
+    await user.click(screen.getByRole("button", { name: "Collapse all" }));
+    expect(screen.queryAllByRole("grid")).toHaveLength(0);
+    expect(loadMore).not.toHaveBeenCalled();
   });
 });
 

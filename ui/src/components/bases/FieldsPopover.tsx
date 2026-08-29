@@ -6,6 +6,7 @@ import { Popover } from "#/components/ui/popover";
 export interface FieldsPopoverProps {
   /** The saved view's columns, in saved order. */
   columns: string[];
+  /** Hidden overrides; entries no longer in `columns` are not counted. */
   hidden: string[];
   labelFor(column: string): string;
   onHideColumn(column: string): void;
@@ -30,10 +31,13 @@ export function FieldsPopover({
   onShowAll,
 }: FieldsPopoverProps) {
   const visibleCount = columns.filter((c) => !hidden.includes(c)).length;
+  const hiddenInView = hidden.filter((c) => columns.includes(c));
   return (
     <DialogTrigger>
       <Button variant="secondary" size="sm">
-        {hidden.length === 0 ? "Fields" : `Fields (${hidden.length} hidden)`}
+        {hiddenInView.length === 0
+          ? "Fields"
+          : `Fields (${hiddenInView.length} hidden)`}
       </Button>
       <Popover hideArrow placement="bottom start">
         <Dialog

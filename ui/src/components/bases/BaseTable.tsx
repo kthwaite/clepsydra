@@ -41,6 +41,12 @@ export function BaseTable({
     [slug],
   );
   const [chosen, setChosen] = useState<ChosenView | undefined>();
+  // The URL is authoritative once it changes — including back to a view the
+  // session had already left.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the URL view changes
+  useEffect(() => {
+    setChosen(undefined);
+  }, [requestedView]);
   const chosenName =
     chosen !== undefined && chosen.under === requestedView
       ? chosen.name
@@ -54,6 +60,10 @@ export function BaseTable({
     if (scrub) onScrubView?.();
   }, [onScrubView, scrub]);
   const [sort, setSort] = useState<SortKey[] | undefined>();
+  // biome-ignore lint/correctness/useExhaustiveDependencies: reset only when the active view changes
+  useEffect(() => {
+    setSort(undefined);
+  }, [activeView]);
   const handleViewChange = useCallback(
     (name: string) => {
       setChosen({ under: requestedView, name });
