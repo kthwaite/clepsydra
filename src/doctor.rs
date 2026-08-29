@@ -1933,7 +1933,11 @@ fn check_sync_repo(
         report.push(nested_repo_result(&toplevel));
         return false;
     }
-    match git.config_get(INIT_MARKER_KEY) {
+    // `--local`, exactly as `gitsync::is_initialised` reads it (D25): a
+    // `clep.sync.version` inherited from the user's global config would
+    // otherwise have doctor calling every vault on the machine initialised
+    // while `clep sync` refuses each one with `NotInitialised`.
+    match git.config_get_local(INIT_MARKER_KEY) {
         Ok(Some(_)) => {
             report.push(ok(
                 SYNC_SECTION,
@@ -3683,6 +3687,53 @@ mod tests {
         assert!(
             !has_sync_check(&report, "worktree"),
             "a git repository without the D3 marker is not initialised: {:#?}",
+            report.results
+        );
+    }
+
+    /// D25: the marker is repo-local. A `clep.sync.version` in the user's
+    /// global config must not have doctor reporting every vault on the machine
+    /// as initialised while `clep sync` refuses each one.
+    #[test]
+    #[serial_test::serial]
+    fn sync_check_ignores_a_marker_inherited_from_the_global_config() {
+        use crate::vault::gitsync::INIT_MARKER_KEY;
+        use crate::vault::gitsync::git::Git;
+        use crate::vault::gitsync::testing;
+        let tmp = TempDir::new().unwrap();
+        // A private global config carrying the marker, pointed at process-wide
+        // because `check_sync` builds its own `Git::new`.
+        let global = tmp.path().join("gitconfig-with-marker");
+        std::fs::write(&global, "[clep \"sync\"]\n\tversion = 1\n").unwrap();
+        let _global = crate::env_test_support::EnvGuard::set("GIT_CONFIG_GLOBAL", &global);
+        let _nosystem = crate::env_test_support::EnvGuard::set("GIT_CONFIG_NOSYSTEM", "1");
+
+        let root = tmp.path().join("v");
+        crate::vault::init::init_vault(&root).unwrap();
+        testing::git(&root).init("main").unwrap();
+        let vault = crate::vault::Vault::open(&root).unwrap();
+        assert_eq!(
+            Git::new(&root)
+                .config_get(INIT_MARKER_KEY)
+                .unwrap()
+                .as_deref(),
+            Some("1"),
+            "the merged config does see the global marker"
+        );
+
+        let mut report = Report::default();
+        check_sync(&vault, &mut report);
+
+        let repo = sync_result(&report, "repo");
+        assert_eq!(
+            repo.status,
+            Status::Info,
+            "a global marker is not this repository's marker: {repo:#?}"
+        );
+        assert!(repo.detail.contains("clep sync init"), "{repo:#?}");
+        assert!(
+            !has_sync_check(&report, "worktree"),
+            "the rest of the section is skipped for an uninitialised vault: {:#?}",
             report.results
         );
     }

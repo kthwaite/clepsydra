@@ -38,6 +38,15 @@ pub struct SyncEngine {
     author: Author,
 }
 
+/// The commit that finished a merge an earlier run left behind, with every
+/// path it saw or created. A loose commit may follow it over paths it already
+/// covered, and the report counts each path once.
+#[derive(Debug, Clone)]
+struct LeftoverMerge {
+    summary: CommitSummary,
+    paths: Vec<String>,
+}
+
 /// One commit the engine made.
 #[derive(Debug, Clone)]
 pub struct CommitSummary {
@@ -215,22 +224,27 @@ impl SyncEngine {
         let leftover = self.commit_leftover_merge()?;
         let entries = self.git.status()?;
         if entries.is_empty() {
-            return Ok(leftover);
+            return Ok(leftover.map(|leftover| leftover.summary));
         }
         self.git.add_all()?;
         let message = commit_message(&self.root, &entries);
         let sha = self.git.commit(&message, &self.author)?;
         Ok(Some(match leftover {
             // Both commits are this sync's work, so the report counts both;
-            // the leftover's own sha would otherwise go unmentioned.
+            // the leftover's own sha would otherwise go unmentioned. The two
+            // overlap — a path dirty before the leftover merge is still dirty
+            // after it unless the merge staged it — so each path counts once.
             Some(leftover) => {
                 tracing::info!(
                     "sync: committed a leftover merge as {} before {sha}",
-                    leftover.sha
+                    leftover.summary.sha
                 );
+                let mut paths: std::collections::BTreeSet<&str> =
+                    leftover.paths.iter().map(String::as_str).collect();
+                paths.extend(entries.iter().map(|entry| entry.path.as_str()));
                 CommitSummary {
                     sha,
-                    files: leftover.files + entries.len(),
+                    files: paths.len(),
                     message,
                 }
             }
@@ -281,13 +295,23 @@ impl SyncEngine {
     /// Finish a merge an earlier run left in progress — a process killed
     /// between the merge and its resolution, a merge run by hand, or an
     /// abort that itself failed. `None` when none is in progress.
-    fn commit_leftover_merge(&self) -> Result<Option<CommitSummary>, SyncError> {
+    fn commit_leftover_merge(&self) -> Result<Option<LeftoverMerge>, SyncError> {
         let in_progress = self.git.merge_head()?.is_some();
         let unmerged = self.git.unmerged()?;
         if !in_progress && unmerged.is_empty() {
             return Ok(None);
         }
-        let files = self.git.status()?.len();
+        // Every path this step touches: what was dirty when it started, plus
+        // the Conflict Copies it goes on to write. `commit_local` unions this
+        // with what is left dirty afterwards, so a path the two commits share
+        // is reported once.
+        let mut paths: Vec<String> = self
+            .git
+            .status()?
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect();
+        let files = paths.len();
         let (sha, copies, warnings) =
             self.resolve_and_commit("MERGE_HEAD", LEFTOVER_MERGE_HEADLINE, !unmerged.is_empty())?;
         for warning in warnings {
@@ -298,10 +322,16 @@ impl SyncEngine {
             unmerged.len(),
             copies.len()
         );
-        Ok(Some(CommitSummary {
-            sha,
-            files,
-            message: merge_message(LEFTOVER_MERGE_HEADLINE, &copies),
+        paths.extend(copies.iter().map(|copy| copy.copy.clone()));
+        Ok(Some(LeftoverMerge {
+            summary: CommitSummary {
+                sha,
+                // Nothing survives this commit when no loose entry follows —
+                // `commit_local` returns the summary as it stands then.
+                files,
+                message: merge_message(LEFTOVER_MERGE_HEADLINE, &copies),
+            },
+            paths,
         }))
     }
 
@@ -1156,6 +1186,59 @@ mod tests {
             rb.warnings
         );
         assert_eq!(testing::read(&repos.b, "blob.bin"), POINTER_B, "ours stays");
+    }
+
+    /// The combining branch: a leftover merge AND loose changes in one
+    /// `commit_local`. The two commits overlap — the loose files were already
+    /// dirty when the merge was finished — so the report counts each path
+    /// once. Summing the two counts would say five.
+    #[test]
+    fn a_leftover_merge_plus_loose_changes_counts_each_path_once() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "a.md", &page("40", "A", "a"));
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+        // A publishes a second page, so B has something real to merge.
+        testing::write(&repos.a, "a2.md", &page("41", "A2", "a2"));
+        engine(&repos.a).full_sync().unwrap();
+
+        // B diverges, then a merge is started by hand and left uncommitted.
+        // It conflicts with nothing, so it stages `a2.md` and no Conflict Copy
+        // is written.
+        let gb = testing::git(&repos.b);
+        testing::write(&repos.b, "b.md", &page("42", "B", "b"));
+        gb.add_all().unwrap();
+        gb.commit("b", &testing::author()).unwrap();
+        gb.fetch("origin", "main").unwrap();
+        assert_eq!(gb.merge_no_commit("origin/main").unwrap().status, 0);
+        assert!(gb.merge_head().unwrap().is_some(), "a merge is in progress");
+        assert!(
+            gb.unmerged().unwrap().is_empty(),
+            "it conflicted with nothing"
+        );
+
+        // Two loose files, dirty across both commits.
+        testing::write(&repos.b, "loose1.md", &page("43", "Loose1", "l1"));
+        testing::write(&repos.b, "loose2.md", &page("44", "Loose2", "l2"));
+
+        let summary = engine(&repos.b).commit_local().unwrap().unwrap();
+
+        // Two commits were made: the loose one on top of the finished merge.
+        assert!(gb.merge_head().unwrap().is_none(), "the merge was finished");
+        assert_eq!(summary.sha, gb.head().unwrap().unwrap());
+        let parents = gb
+            .run(&["rev-list", "--parents", "-n", "1", "HEAD~1"])
+            .unwrap();
+        assert_eq!(
+            parents.split_whitespace().count(),
+            3,
+            "HEAD~1 is the leftover merge commit: {parents}"
+        );
+        assert_eq!(
+            summary.files, 3,
+            "a2.md from the merge, plus loose1.md and loose2.md: {summary:?}"
+        );
+        assert!(gb.status().unwrap().is_empty(), "tree is clean");
     }
 
     #[test]

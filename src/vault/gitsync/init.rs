@@ -99,11 +99,24 @@ pub fn init(vault: &Vault, git: &Git, opts: InitOpts) -> Result<InitReport, Sync
                         configured: branch.clone(),
                     });
                 }
-            } else if git.current_branch()?.as_deref() != Some(branch.as_str()) {
-                // HEAD is unborn: `git init` picked a default branch name and
-                // no commit was ever made on it, so repointing HEAD at the
-                // configured branch renames nothing and loses nothing.
-                git.run(&["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])?;
+            } else {
+                let actual = git.current_branch()?;
+                if actual.as_deref() != Some(branch.as_str()) {
+                    // HEAD is unborn: `git init` picked a default branch name
+                    // and no commit was ever made on it, so repointing HEAD at
+                    // the configured branch renames nothing and loses nothing
+                    // — but only while the configured branch is unborn too.
+                    // After `git switch --orphan`, it can already carry
+                    // commits, and attaching this empty checkout to it would
+                    // have step (9) commit a deletion of every file it holds.
+                    if git.rev_parse(&format!("refs/heads/{branch}"))?.is_some() {
+                        return Err(SyncError::BranchMismatch {
+                            actual: actual.unwrap_or_default(),
+                            configured: branch.clone(),
+                        });
+                    }
+                    git.run(&["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])?;
+                }
             }
             false
         }
@@ -694,6 +707,35 @@ mod tests {
             "the initial commit landed on the configured branch"
         );
         assert!(git.rev_parse("refs/heads/master").unwrap().is_none());
+    }
+
+    /// The repoint is only safe while the configured branch is unborn too.
+    /// After `git switch --orphan`, `main` can already carry commits the empty
+    /// orphan checkout does not — attaching to it would have init commit a
+    /// deletion of every one of them.
+    #[test]
+    fn init_refuses_an_orphan_head_over_a_branch_that_has_commits() {
+        let (_tmp, vault) = fresh_vault();
+        let git = testing::git(vault.root());
+        init(&vault, &git, opts()).unwrap();
+        let main = git.head().unwrap().unwrap();
+        git.run(&["switch", "--orphan", "scratch"]).unwrap();
+        assert!(git.head().unwrap().is_none(), "the orphan HEAD is unborn");
+        let vault = Vault::open(vault.root()).unwrap();
+
+        let err = init(&vault, &git, opts()).unwrap_err();
+
+        assert!(matches!(err, SyncError::BranchMismatch { .. }), "{err}");
+        assert_eq!(
+            git.rev_parse("refs/heads/main").unwrap().as_deref(),
+            Some(main.as_str()),
+            "main is untouched: no commit was made on it"
+        );
+        assert_eq!(
+            git.current_branch().unwrap().as_deref(),
+            Some("scratch"),
+            "HEAD was not repointed"
+        );
     }
 
     #[test]

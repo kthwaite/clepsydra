@@ -180,7 +180,16 @@ impl SyncRuntime {
                 // before a rejected push and a failed retry. Watcher events
                 // were dropped for the whole window, so this rebuild is the
                 // only thing that can catch the index up.
-                rebuild_after_sync(state).await;
+                //
+                // A refused sync is the exception: the engine raises
+                // `GitOperationInProgress` before its first git call, so
+                // nothing moved. It also describes a state the user can leave
+                // sitting for hours (a paused rebase), and this path runs once
+                // per scheduled tick — a full rebuild, reconcile sweep and SSE
+                // broadcast each time, for a tree the sync never touched.
+                if !matches!(error, SyncError::GitOperationInProgress { .. }) {
+                    rebuild_after_sync(state).await;
+                }
                 return Err(error);
             }
             Err(join) => return Err(SyncError::Config(format!("sync task panicked: {join}"))),
@@ -691,6 +700,64 @@ pub(crate) mod tests {
         assert!(
             !state.watcher_paused.load(Ordering::SeqCst),
             "the watcher is un-paused even when the sync failed"
+        );
+    }
+
+    /// The mirror of the test above. A refusal is raised before the engine's
+    /// first git call, so nothing moved and the rebuild must be skipped —
+    /// otherwise a rebase the user leaves paused over lunch costs a full index
+    /// rebuild, reconcile sweep and SSE broadcast on every scheduled tick.
+    #[tokio::test]
+    async fn a_refusal_that_touched_nothing_does_not_rebuild_the_index() {
+        let (state, repos) = synced_state().await;
+        let g = testing::git(&repos.a);
+
+        // Leave a conflicted cherry-pick in the repository.
+        let c = "0192b6c0-0000-7000-8000-0000000000c9";
+        testing::write(&repos.a, "c.md", &page(c, "C base"));
+        g.add_all().unwrap();
+        g.commit("base", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "-b", "side"]).unwrap();
+        testing::write(&repos.a, "c.md", &page(c, "C side"));
+        g.add_all().unwrap();
+        let side = g.commit("side", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "main"]).unwrap();
+        testing::write(&repos.a, "c.md", &page(c, "C main"));
+        g.add_all().unwrap();
+        g.commit("main", &testing::author()).unwrap();
+        let _ = g.run_raw(&["cherry-pick", &side]);
+        assert!(g.rev_parse("CHERRY_PICK_HEAD").unwrap().is_some());
+
+        // Written after the state was built, so only a rebuild could index it.
+        testing::write(
+            &repos.a,
+            "notes/local.md",
+            &page("0192b6c0-0000-7000-8000-0000000000d2", "Local"),
+        );
+        assert!(
+            !indexed(&state, "notes/local.md").await,
+            "the fixture is only meaningful while the page is unindexed"
+        );
+
+        let error = state
+            .sync
+            .as_ref()
+            .unwrap()
+            .run_full_sync(&state)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, SyncError::GitOperationInProgress { .. }),
+            "{error}"
+        );
+        assert!(
+            !indexed(&state, "notes/local.md").await,
+            "a refusal that touched nothing must not rebuild the index"
+        );
+        assert!(
+            !state.watcher_paused.load(Ordering::SeqCst),
+            "the watcher is un-paused even when the sync was refused"
         );
     }
 
