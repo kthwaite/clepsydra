@@ -47,6 +47,7 @@ import { type CellValue, formatCellValue } from "./cells/types";
 import { canGroup, canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import type { EmbedScrollCap } from "./embed-query";
+import { FieldsPopover } from "./FieldsPopover";
 import { groupCollapseKey, groupIdentity } from "./group-collapse";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
 import type {
@@ -375,6 +376,7 @@ export const BaseTableView = forwardRef<
     onRemoveQuickFilter,
     onSetGroup,
     onHideColumn,
+    onShowColumn,
     onShowHiddenColumns,
     onClearOverrides,
     onSaveOverrides,
@@ -1250,6 +1252,16 @@ export const BaseTableView = forwardRef<
             {anyGroupExpanded ? "Collapse all" : "Expand all"}
           </Button>
         ) : null}
+        {!readOnly && onHideColumn && onShowColumn ? (
+          <FieldsPopover
+            columns={columns}
+            hidden={hiddenColumns}
+            labelFor={displayLabelForColumn}
+            onHideColumn={onHideColumn}
+            onShowColumn={onShowColumn}
+            onShowAll={onShowHiddenColumns ?? noop}
+          />
+        ) : null}
         {!readOnly && configureSlug && (
           <Link
             to="/bases/$slug/edit"
@@ -1388,7 +1400,7 @@ export const BaseTableView = forwardRef<
                           aria-expanded={expanded}
                           aria-controls={panelId}
                           onPress={() => groupCollapse.toggle(identity)}
-                          className="cl-mono h-auto gap-1 px-1 py-0 text-[12px] uppercase tracking-[0.1em] text-ink"
+                          className="cl-mono h-auto gap-1 px-1 py-0 font-normal text-[12px] uppercase tracking-[0.1em] text-ink"
                         >
                           {expanded ? (
                             <ChevronDown

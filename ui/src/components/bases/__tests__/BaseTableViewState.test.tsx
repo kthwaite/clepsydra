@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -175,5 +175,88 @@ describe("group collapse", () => {
     await waitFor(() =>
       expect(window.localStorage.getItem(GROUPS_KEY)).toBe("[]"),
     );
+  });
+});
+
+describe("Fields popover", () => {
+  it("hides and shows columns through the override callbacks", async () => {
+    const user = userEvent.setup();
+    const onHideColumn = vi.fn();
+    const onShowColumn = vi.fn();
+    const onShowHiddenColumns = vi.fn();
+    renderView({ onHideColumn, onShowColumn, onShowHiddenColumns });
+
+    await user.click(screen.getByRole("button", { name: "Fields" }));
+    const dialog = screen.getByRole("dialog", { name: "Fields" });
+    const title = within(dialog).getByRole("checkbox", { name: "title" });
+    expect(title).toBeChecked();
+    expect(title).toBeDisabled();
+    expect(dialog).toHaveTextContent("The title column stays visible");
+    expect(
+      within(dialog).getByRole("button", { name: "Show all" }),
+    ).toBeDisabled();
+
+    await user.click(within(dialog).getByRole("checkbox", { name: "Writer" }));
+    expect(onHideColumn).toHaveBeenCalledWith("author");
+    expect(onShowColumn).not.toHaveBeenCalled();
+  });
+
+  it("counts hidden columns, re-shows one, and shows all", async () => {
+    const user = userEvent.setup();
+    const onHideColumn = vi.fn();
+    const onShowColumn = vi.fn();
+    const onShowHiddenColumns = vi.fn();
+    renderView({
+      overrides: { ...EMPTY_OVERRIDES, hiddenColumns: ["author"] },
+      onHideColumn,
+      onShowColumn,
+      onShowHiddenColumns,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Fields (1 hidden)" }));
+    const dialog = screen.getByRole("dialog", { name: "Fields" });
+    const writer = within(dialog).getByRole("checkbox", { name: "Writer" });
+    expect(writer).not.toBeChecked();
+    await user.click(writer);
+    expect(onShowColumn).toHaveBeenCalledWith("author");
+    await user.click(within(dialog).getByRole("button", { name: "Show all" }));
+    expect(onShowHiddenColumns).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the last visible column when the view has no title column", async () => {
+    const user = userEvent.setup();
+    renderView({
+      activeView: "Bare",
+      output: { shape: "flat", total: 1, rows: [readingRow], aggregates: [] },
+      overrides: { ...EMPTY_OVERRIDES, hiddenColumns: ["rating"] },
+      onHideColumn: vi.fn(),
+      onShowColumn: vi.fn(),
+      onShowHiddenColumns: vi.fn(),
+    });
+    await user.click(screen.getByRole("button", { name: "Fields (1 hidden)" }));
+    const dialog = screen.getByRole("dialog", { name: "Fields" });
+    expect(
+      within(dialog).getByRole("checkbox", { name: "author" }),
+    ).toBeDisabled();
+    expect(dialog).toHaveTextContent("The last column stays visible");
+    expect(
+      within(dialog).getByRole("checkbox", { name: "rating" }),
+    ).toBeEnabled();
+  });
+
+  it("is absent when read-only or when a callback is missing", () => {
+    const { unmount } = renderView({
+      readOnly: true,
+      onHideColumn: vi.fn(),
+      onShowColumn: vi.fn(),
+    });
+    expect(
+      screen.queryByRole("button", { name: /^Fields/ }),
+    ).not.toBeInTheDocument();
+    unmount();
+    renderView({ onHideColumn: vi.fn() });
+    expect(
+      screen.queryByRole("button", { name: /^Fields/ }),
+    ).not.toBeInTheDocument();
   });
 });
