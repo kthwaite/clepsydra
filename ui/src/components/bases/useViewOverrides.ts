@@ -6,6 +6,7 @@ import {
   type ViewOverridesState,
   withGroup,
   withHiddenColumn,
+  withoutHiddenColumn,
   withoutHiddenColumns,
   withoutQuickFilter,
   withQuickFilter,
@@ -23,6 +24,7 @@ export interface ViewOverridesModel {
   removeQuickFilter(identity: string): void;
   setGroup(group: GroupOverride | undefined): void;
   hideColumn(column: string): void;
+  showColumn(column: string): void;
   showHiddenColumns(): void;
   clear(): void;
 }
@@ -63,6 +65,10 @@ export function useViewOverrides(resetKey: string): ViewOverridesModel {
     ),
     hideColumn: useCallback(
       (column) => update((s) => withHiddenColumn(s, column)),
+      [update],
+    ),
+    showColumn: useCallback(
+      (column) => update((s) => withoutHiddenColumn(s, column)),
       [update],
     ),
     showHiddenColumns: useCallback(

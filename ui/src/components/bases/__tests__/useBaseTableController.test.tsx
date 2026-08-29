@@ -1211,4 +1211,27 @@ describe("view overrides", () => {
     expect(mocks.detailRefetch).toHaveBeenCalled();
     expect(model.overridesSave).toEqual({ phase: "idle" });
   });
+
+  it("exposes onShowColumn, which undoes one onHideColumn", () => {
+    const { result } = renderHook(() =>
+      useBaseTableController({
+        mode: "standalone",
+        slug: "reading",
+        activeView: "Continues",
+        sort: undefined,
+        onViewChange: vi.fn(),
+        onSortChange: vi.fn(),
+      }),
+    );
+    act(() => {
+      result.current.onHideColumn("status");
+      result.current.onHideColumn("rating");
+    });
+    expect(result.current.overrides.hiddenColumns).toEqual([
+      "status",
+      "rating",
+    ]);
+    act(() => result.current.onShowColumn("status"));
+    expect(result.current.overrides.hiddenColumns).toEqual(["rating"]);
+  });
 });

@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Settings } from "lucide-react";
+import { ChevronDown, ChevronRight, Settings } from "lucide-react";
 import {
   forwardRef,
   type ReactNode,
@@ -47,6 +47,8 @@ import { type CellValue, formatCellValue } from "./cells/types";
 import { canGroup, canSort } from "./definition-model";
 import { EditableCell } from "./EditableCell";
 import type { EmbedScrollCap } from "./embed-query";
+import { FieldsPopover } from "./FieldsPopover";
+import { groupCollapseKey, groupIdentity } from "./group-collapse";
 import { asciiCaseFold, presentationFieldIdentity } from "./local-validation";
 import type {
   BaseMemberDraftField,
@@ -58,6 +60,7 @@ import {
   headerOptionOverflow,
   quickFilterType,
 } from "./quick-filters";
+import { useGroupCollapse } from "./useGroupCollapse";
 import type { OverridesSaveState } from "./useViewOverrides";
 import { ViewOverridesStrip } from "./ViewOverridesStrip";
 import {
@@ -135,6 +138,7 @@ export interface BaseTableViewProps {
   onRemoveQuickFilter?(identity: string): void;
   onSetGroup?(group: GroupOverride | undefined): void;
   onHideColumn?(column: string): void;
+  onShowColumn?(column: string): void;
   onShowHiddenColumns?(): void;
   onClearOverrides?(): void;
   onSaveOverrides?(): void;
@@ -283,6 +287,10 @@ const VIEWPORT_CLASS = "max-h-[26rem] overflow-auto";
 
 interface ScrollViewportProps {
   enabled: boolean;
+  /** Ask for the next window when the content is too short to scroll. Off while
+   * groups are folded: folded rows add no height, so autofill would page the
+   * whole base. Scroll-driven loading stays live. */
+  autofill?: boolean;
   onApproachEnd(): void;
   children: ReactNode;
 }
@@ -292,6 +300,7 @@ interface ScrollViewportProps {
  * there. Full-chrome tables render their rows in the page, unwrapped. */
 function ScrollViewport({
   enabled,
+  autofill = true,
   onApproachEnd,
   children,
 }: ScrollViewportProps) {
@@ -309,7 +318,7 @@ function ScrollViewport({
   useEffect(() => {
     const node = ref.current;
     // A zero height is an unmeasured viewport, not an empty one.
-    if (!enabled || !node || node.clientHeight === 0) return;
+    if (!enabled || !autofill || !node || node.clientHeight === 0) return;
     if (node.scrollHeight <= node.clientHeight) approach.current();
   });
 
@@ -372,6 +381,7 @@ export const BaseTableView = forwardRef<
     onRemoveQuickFilter,
     onSetGroup,
     onHideColumn,
+    onShowColumn,
     onShowHiddenColumns,
     onClearOverrides,
     onSaveOverrides,
@@ -457,6 +467,10 @@ export const BaseTableView = forwardRef<
       ? overrides.group.field
       : undefined
     : (view?.group_by ?? undefined);
+  const groupCollapse = useGroupCollapse(
+    groupCollapseKey(definition.slug, activeView, effectiveGroup ?? ""),
+  );
+  const groupPanelIdBase = useId();
   const groupableColumn = (column: string) =>
     SYSTEM_COLUMNS[column] !== undefined
       ? GROUPABLE_SYSTEM[column] === true
@@ -1090,6 +1104,40 @@ export const BaseTableView = forwardRef<
 
   const groups: GroupResult[] | null =
     output?.shape === "grouped" ? output.groups : null;
+  // A row that is about to take focus must be on screen, so its group is
+  // rendered open and the stored fold is dropped.
+  const forcedOpenRowIds = [focusCreatedId, archiveFocus?.nextRowId].filter(
+    (id): id is string => id !== undefined,
+  );
+  const forcedOpenGroup =
+    forcedOpenRowIds.length === 0
+      ? undefined
+      : groups?.find((group) =>
+          group.rows.some((row) => forcedOpenRowIds.includes(String(row.id))),
+        );
+  const forcedOpenIdentity =
+    forcedOpenGroup === undefined
+      ? undefined
+      : groupIdentity(forcedOpenGroup.key);
+  const collapsedGroups = groupCollapse.collapsed;
+  const isGroupExpanded = (identity: string) =>
+    identity === forcedOpenIdentity || !collapsedGroups.has(identity);
+  const groupIdentities = (groups ?? []).map((group) =>
+    groupIdentity(group.key),
+  );
+  const anyGroupExpanded = groupIdentities.some(isGroupExpanded);
+  const anyGroupCollapsed = groupIdentities.some(
+    (identity) => !isGroupExpanded(identity),
+  );
+  const expandGroup = groupCollapse.expand;
+  useEffect(() => {
+    if (
+      forcedOpenIdentity !== undefined &&
+      collapsedGroups.has(forcedOpenIdentity)
+    ) {
+      expandGroup(forcedOpenIdentity);
+    }
+  }, [collapsedGroups, expandGroup, forcedOpenIdentity]);
   const capStatus = (() => {
     // A compact view scrolls, so it reports how far it has read rather than
     // what a limit excluded.
@@ -1201,6 +1249,29 @@ export const BaseTableView = forwardRef<
             ),
           )}
         </nav>
+        {groups && groups.length > 0 ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            onPress={() =>
+              anyGroupExpanded
+                ? groupCollapse.collapseAll(groupIdentities)
+                : groupCollapse.expandAll()
+            }
+          >
+            {anyGroupExpanded ? "Collapse all" : "Expand all"}
+          </Button>
+        ) : null}
+        {!readOnly && onHideColumn && onShowColumn ? (
+          <FieldsPopover
+            columns={columns}
+            hidden={hiddenColumns}
+            labelFor={displayLabelForColumn}
+            onHideColumn={onHideColumn}
+            onShowColumn={onShowColumn}
+            onShowAll={onShowHiddenColumns ?? noop}
+          />
+        ) : null}
         {!readOnly && configureSlug && (
           <Link
             to="/bases/$slug/edit"
@@ -1318,21 +1389,46 @@ export const BaseTableView = forwardRef<
       ) : null}
       {shouldRenderGrid ? (
         <>
-          <ScrollViewport enabled={compact} onApproachEnd={approachEnd}>
+          <ScrollViewport
+            enabled={compact}
+            autofill={!anyGroupCollapsed}
+            onApproachEnd={approachEnd}
+          >
             {groups ? (
               <div className="flex flex-col gap-4">
-                {groups.map((group) => {
+                {groups.map((group, index) => {
                   const key =
                     group.key == null
                       ? "(empty)"
                       : formatCellValue(group.key as CellValue);
-                  const groupIdentity = `${evaluationIdentity}:group:${JSON.stringify(group.key)}`;
+                  const cacheIdentity = `${evaluationIdentity}:group:${JSON.stringify(group.key)}`;
+                  const identity = groupIdentity(group.key);
+                  const expanded = isGroupExpanded(identity);
+                  const panelId = `${groupPanelIdBase}-group-${index}`;
                   return (
-                    <section key={groupIdentity}>
+                    <section key={cacheIdentity}>
                       <header className="mb-1 flex items-baseline gap-2 border-b border-rule pb-1">
-                        <span className="cl-mono text-[12px] uppercase tracking-[0.1em] text-ink">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          aria-expanded={expanded}
+                          aria-controls={panelId}
+                          onPress={() => groupCollapse.toggle(identity)}
+                          className="cl-mono h-auto gap-1 px-1 py-0 font-normal text-[12px] uppercase tracking-[0.1em] text-ink"
+                        >
+                          {expanded ? (
+                            <ChevronDown
+                              aria-hidden="true"
+                              className="h-3 w-3"
+                            />
+                          ) : (
+                            <ChevronRight
+                              aria-hidden="true"
+                              className="h-3 w-3"
+                            />
+                          )}
                           {key}
-                        </span>
+                        </Button>
                         <span className="cl-mono text-[10px] text-ink-mute">
                           {group.rows.length < group.total
                             ? `${group.rows.length} of ${group.total} rows`
@@ -1345,11 +1441,15 @@ export const BaseTableView = forwardRef<
                           rows={displayAggregateRows}
                         />
                       </header>
-                      {grid(
-                        group.rows,
-                        `${definition.name} — ${key}`,
-                        groupIdentity,
-                      )}
+                      <div id={panelId}>
+                        {expanded
+                          ? grid(
+                              group.rows,
+                              `${definition.name} — ${key}`,
+                              cacheIdentity,
+                            )
+                          : null}
+                      </div>
                     </section>
                   );
                 })}

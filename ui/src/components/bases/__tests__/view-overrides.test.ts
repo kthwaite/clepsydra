@@ -11,6 +11,7 @@ import {
   quickFilterIdentity,
   withGroup,
   withHiddenColumn,
+  withoutHiddenColumn,
   withoutHiddenColumns,
   withoutQuickFilter,
   withQuickFilter,
@@ -161,6 +162,23 @@ describe("applyOverridesToView", () => {
       [],
     );
     expect("group_by" in next).toBe(false);
+  });
+});
+
+describe("withoutHiddenColumn", () => {
+  it("removes one hidden column and keeps the rest", () => {
+    const state = withHiddenColumn(
+      withHiddenColumn(EMPTY_OVERRIDES, "author"),
+      "rating",
+    );
+    expect(withoutHiddenColumn(state, "author").hiddenColumns).toEqual([
+      "rating",
+    ]);
+  });
+
+  it("returns the same state when the column is not hidden", () => {
+    const state = withHiddenColumn(EMPTY_OVERRIDES, "author");
+    expect(withoutHiddenColumn(state, "rating")).toBe(state);
   });
 });
 

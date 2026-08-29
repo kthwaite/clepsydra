@@ -122,6 +122,17 @@ function gfmToMarkdownWithEmptyTasks(): Options {
 // Text leaf → mdast phrasing content
 // ---------------------------------------------------------------------------
 
+const UNSAFE_STYLE_VALUE_RE = /[;'"<>&]/;
+
+function safeColorValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed || UNSAFE_STYLE_VALUE_RE.test(trimmed)) return undefined;
+  for (let index = 0; index < trimmed.length; index++) {
+    const code = trimmed.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return undefined;
+  }
+  return trimmed;
+}
 function textToMdast(leaf: CustomText): PhrasingContent | PhrasingContent[] {
   // Inline code takes absolute precedence — markdown cannot nest marks inside code spans
   if (leaf.code) {
@@ -140,35 +151,56 @@ function textToMdast(leaf: CustomText): PhrasingContent | PhrasingContent[] {
   if (leaf.strikethrough) {
     node = { type: "delete", children: [node] };
   }
+  const color = safeColorValue(leaf.color);
+  const backgroundColor = safeColorValue(leaf.backgroundColor);
+  const style = color
+    ? `color: ${color}${
+        backgroundColor ? `; background-color: ${backgroundColor}` : ""
+      }`
+    : backgroundColor
+      ? `background-color: ${backgroundColor}`
+    : undefined;
+  let htmlMarkedNodes: PhrasingContent[] | undefined;
 
   // Underline has no native markdown representation; emit as inline HTML
   // <u>…</u> so it roundtrips through save/reload.
   if (leaf.underline) {
-    return [
+    htmlMarkedNodes = [
       { type: "html", value: "<u>" } as unknown as PhrasingContent,
       node,
       { type: "html", value: "</u>" } as unknown as PhrasingContent,
     ];
-  }
-
-  // Superscript/subscript have no native markdown; emit as inline HTML
-  // <sup>…</sup> / <sub>…</sub> so they roundtrip through save/reload.
-  if (leaf.superscript) {
-    return [
+  } else if (leaf.superscript) {
+    // Superscript/subscript have no native markdown; emit as inline HTML
+    // <sup>…</sup> / <sub>…</sub> so they roundtrip through save/reload.
+    htmlMarkedNodes = [
       { type: "html", value: "<sup>" } as unknown as PhrasingContent,
       node,
       { type: "html", value: "</sup>" } as unknown as PhrasingContent,
     ];
-  }
-  if (leaf.subscript) {
-    return [
+  } else if (leaf.subscript) {
+    htmlMarkedNodes = [
       { type: "html", value: "<sub>" } as unknown as PhrasingContent,
       node,
       { type: "html", value: "</sub>" } as unknown as PhrasingContent,
     ];
   }
 
-  return node;
+  if (style) {
+    return [
+      {
+        type: "html",
+        value: `<span style="${style}">`,
+      } as unknown as PhrasingContent,
+      ...(htmlMarkedNodes ?? [node]),
+      {
+        type: "html",
+        value: "</span>",
+      } as unknown as PhrasingContent,
+    ];
+  }
+
+  return htmlMarkedNodes ?? node;
 }
 
 // ---------------------------------------------------------------------------

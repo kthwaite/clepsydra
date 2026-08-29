@@ -164,7 +164,7 @@ export function Sheaf({
     <div
       ref={sheafRef}
       className={cn(
-        "cl-mono cl-noscroll flex flex-shrink-0 items-stretch overflow-x-auto border-b border-rule bg-paper-2",
+        "cl-serif cl-noscroll flex flex-shrink-0 items-stretch overflow-x-auto border-b border-rule bg-paper-2",
         className,
       )}
     >

@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import type { RenderLeafProps } from "slate-react";
 import { TOKEN_COLOR } from "../decorate-code";
 
@@ -30,12 +31,18 @@ export function renderLeaf({ attributes, children, leaf }: RenderLeafProps) {
   if (leaf.subscript) {
     children = <sub>{children}</sub>;
   }
-  if (leaf.token) {
-    children = (
-      <span style={{ color: TOKEN_COLOR[leaf.token] ?? "inherit" }}>
-        {children}
-      </span>
-    );
-  }
-  return <span {...attributes}>{children}</span>;
+  const style: CSSProperties | undefined =
+    leaf.color || leaf.backgroundColor || leaf.token
+      ? {
+          color:
+            leaf.color ||
+            (leaf.token ? (TOKEN_COLOR[leaf.token] ?? "inherit") : undefined),
+          backgroundColor: leaf.backgroundColor,
+        }
+      : undefined;
+  return (
+    <span {...attributes} style={style}>
+      {children}
+    </span>
+  );
 }

@@ -75,6 +75,17 @@ export function withHiddenColumn(
   return { ...state, hiddenColumns: [...state.hiddenColumns, column] };
 }
 
+export function withoutHiddenColumn(
+  state: ViewOverridesState,
+  column: string,
+): ViewOverridesState {
+  if (!state.hiddenColumns.includes(column)) return state;
+  return {
+    ...state,
+    hiddenColumns: state.hiddenColumns.filter((c) => c !== column),
+  };
+}
+
 export function withoutHiddenColumns(
   state: ViewOverridesState,
 ): ViewOverridesState {

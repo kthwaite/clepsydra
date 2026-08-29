@@ -7,13 +7,29 @@ describe("code-block purity invariant", () => {
   it("strips marks from code-block text children", () => {
     const editor = withSchema(createEditor());
     editor.children = [
-      { type: "code-block", children: [{ text: "x", bold: true }] },
+      {
+        type: "code-block",
+        children: [
+          {
+            text: "x",
+            bold: true,
+            italic: true,
+            underline: true,
+            code: true,
+            strikethrough: true,
+            superscript: true,
+            subscript: true,
+            color: "#ff0000",
+            backgroundColor: "#00ff00",
+          },
+        ],
+      },
     ] as never;
     Editor.normalize(editor, { force: true });
     const cb = editor.children[0] as unknown as {
       children: Record<string, unknown>[];
     };
-    expect(cb.children[0].bold).toBeUndefined();
+    expect(cb.children[0]).toEqual({ text: "x" });
   });
 
   it("unwraps an inline element inside a code-block to plain text", () => {

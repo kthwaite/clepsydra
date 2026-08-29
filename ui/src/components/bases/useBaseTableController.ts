@@ -100,6 +100,7 @@ export interface BaseTableControllerModel {
   onRemoveQuickFilter(identity: string): void;
   onSetGroup(group: GroupOverride | undefined): void;
   onHideColumn(column: string): void;
+  onShowColumn(column: string): void;
   onShowHiddenColumns(): void;
   onClearOverrides(): void;
   onSaveOverrides(): void;
@@ -922,6 +923,7 @@ export function useBaseTableController(
     onRemoveQuickFilter: overrides.removeQuickFilter,
     onSetGroup: overrides.setGroup,
     onHideColumn: overrides.hideColumn,
+    onShowColumn: overrides.showColumn,
     onShowHiddenColumns: overrides.showHiddenColumns,
     onClearOverrides: clearOverrides,
     onSaveOverrides: () => void saveOverrides(),

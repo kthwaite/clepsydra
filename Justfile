@@ -1,4 +1,8 @@
-default: install
+set default-list := true
+
+# Start an isolated backend and live-reloading frontend
+debug:
+    ./scripts/debug.sh
 
 # Build the React frontend into ui/dist
 ui:

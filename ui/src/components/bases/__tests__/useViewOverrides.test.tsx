@@ -30,6 +30,16 @@ describe("useViewOverrides", () => {
     expect(result.current.state.hiddenColumns).toEqual([]);
   });
 
+  it("shows one hidden column again", () => {
+    const { result } = renderHook(() => useViewOverrides("k"));
+    act(() => {
+      result.current.hideColumn("author");
+      result.current.hideColumn("rating");
+      result.current.showColumn("author");
+    });
+    expect(result.current.state.hiddenColumns).toEqual(["rating"]);
+  });
+
   it("clears everything on demand", () => {
     const { result } = renderHook(() => useViewOverrides("k"));
     act(() => {

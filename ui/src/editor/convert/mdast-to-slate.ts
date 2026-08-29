@@ -42,6 +42,8 @@ interface Marks {
   strikethrough?: true;
   superscript?: true;
   subscript?: true;
+  color?: string;
+  backgroundColor?: string;
 }
 
 interface ConversionContext {
@@ -471,6 +473,52 @@ const SUP_CLOSE_RE = /^<\/sup\s*>$/i;
 const SUB_OPEN_RE = /^<sub\s*>$/i;
 /** Match an isolated </sub> closing tag (case-insensitive, optional whitespace). */
 const SUB_CLOSE_RE = /^<\/sub\s*>$/i;
+/** Match an isolated span opening tag with one quoted style attribute. */
+const SPAN_OPEN_RE =
+  /^<span\s+style\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>$/i;
+/** Match any isolated, non-self-closing span opening tag. */
+const SPAN_ANY_OPEN_RE = /^<span(?:\s[\s\S]*)?>$/i;
+/** Match an isolated </span> closing tag (case-insensitive, optional whitespace). */
+const SPAN_CLOSE_RE = /^<\/span\s*>$/i;
+const UNSAFE_STYLE_VALUE_RE = /['"<>&]/;
+
+function isSafeColorValue(value: string): boolean {
+  if (!value || UNSAFE_STYLE_VALUE_RE.test(value)) return false;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x1f || code === 0x7f) return false;
+  }
+  return true;
+}
+
+type ColorMarks = Pick<Marks, "color" | "backgroundColor">;
+interface SpanFrame {
+  consumed: boolean;
+  marks: ColorMarks;
+}
+
+function parseSpanMarks(tag: string): ColorMarks | null {
+  const match = SPAN_OPEN_RE.exec(tag);
+  if (!match) return null;
+
+  const spanMarks: ColorMarks = {};
+  for (const declaration of (match[1] ?? match[2] ?? "").split(";")) {
+    const separator = declaration.indexOf(":");
+    if (separator < 0) continue;
+
+    const property = declaration.slice(0, separator).trim().toLowerCase();
+    const value = declaration.slice(separator + 1).trim();
+    if (!isSafeColorValue(value)) continue;
+
+    if (property === "color") {
+      spanMarks.color = value;
+    } else if (property === "background-color") {
+      spanMarks.backgroundColor = value;
+    }
+  }
+
+  return spanMarks;
+}
 
 function convertPhrasingContent(
   nodes: readonly (RootContent | WikiLinkMdastNode)[],
@@ -481,10 +529,31 @@ function convertPhrasingContent(
   let underlineDepth = 0;
   let superscriptDepth = 0;
   let subscriptDepth = 0;
+  const spanStack: SpanFrame[] = [];
 
   for (const node of nodes) {
     if (node.type === "html") {
       const value = (node as { value: string }).value.trim();
+      const spanMarks = parseSpanMarks(value);
+      if (SPAN_ANY_OPEN_RE.test(value) && !/\/\s*>$/.test(value)) {
+        const inherited =
+          spanStack[spanStack.length - 1]?.marks ??
+          ({
+            ...(marks.color ? { color: marks.color } : {}),
+            ...(marks.backgroundColor
+              ? { backgroundColor: marks.backgroundColor }
+              : {}),
+          } satisfies ColorMarks);
+        spanStack.push({
+          consumed: spanMarks !== null,
+          marks: spanMarks ? { ...inherited, ...spanMarks } : inherited,
+        });
+        if (spanMarks) continue;
+      }
+      if (SPAN_CLOSE_RE.test(value)) {
+        const frame = spanStack.pop();
+        if (frame?.consumed) continue;
+      }
       if (U_OPEN_RE.test(value)) {
         underlineDepth++;
         continue;
@@ -510,8 +579,10 @@ function convertPhrasingContent(
         continue;
       }
     }
+    const activeSpanMarks = spanStack[spanStack.length - 1]?.marks;
     const effectiveMarks: Marks = {
       ...marks,
+      ...activeSpanMarks,
       ...(underlineDepth > 0 ? { underline: true } : {}),
       ...(superscriptDepth > 0 ? { superscript: true } : {}),
       ...(subscriptDepth > 0 ? { subscript: true } : {}),
@@ -673,6 +744,8 @@ function textNode(text: string, marks: Marks): CustomText {
   if (marks.strikethrough) node.strikethrough = true;
   if (marks.superscript) node.superscript = true;
   if (marks.subscript) node.subscript = true;
+  if (marks.color) node.color = marks.color;
+  if (marks.backgroundColor) node.backgroundColor = marks.backgroundColor;
   return node;
 }
 
