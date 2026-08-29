@@ -171,6 +171,14 @@ function CommandPaletteContent() {
                 leaveWorkspace,
               });
               return;
+            case "navigate-conflicts":
+              goToView("conflicts", {
+                navigate,
+                openTab,
+                activateTab,
+                leaveWorkspace,
+              });
+              return;
             case "navigate-rubbish":
               goToView("rubbish", {
                 navigate,

@@ -38,6 +38,7 @@ const VAULT_OPERATIONS: &[(&str, &str)] = &[
     ("/api/vault/rubbish/{item_id}/restore", "post"),
     ("/api/vault/sync", "post"),
     ("/api/vault/sync/status", "get"),
+    ("/api/vault/sync/conflicts", "get"),
 ];
 
 #[test]
@@ -74,8 +75,8 @@ fn openapi_documents_every_registered_vault_operation() {
         })
         .sum::<usize>();
     assert_eq!(
-        operation_count, 123,
-        "OpenAPI should document all 123 registered /api/vault operations"
+        operation_count, 124,
+        "OpenAPI should document all 124 registered /api/vault operations"
     );
 }
 

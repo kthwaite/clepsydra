@@ -104,6 +104,10 @@ impl Git {
             .args(Self::network_args())
             .args(args)
             .stdin(Stdio::null());
+        if let Some(path) = driver_path() {
+            cmd.env("PATH", path);
+        }
+        // After the PATH default, so a caller that sets PATH explicitly wins.
         for (key, value) in &self.env {
             cmd.env(key, value);
         }
@@ -196,6 +200,14 @@ impl Git {
         })
     }
 
+    /// The repository's real git directory (`.git`, or the per-worktree dir
+    /// inside the main repository for a linked worktree, whose `.git` is a
+    /// file rather than a directory).
+    pub fn git_dir(&self) -> Result<PathBuf, GitError> {
+        self.run(&["rev-parse", "--absolute-git-dir"])
+            .map(|out| PathBuf::from(out.trim()))
+    }
+
     /// `git init -q -b <branch>`.
     pub fn init(&self, branch: &str) -> Result<(), GitError> {
         self.run(&["init", "-q", "-b", branch]).map(|_| ())
@@ -242,6 +254,22 @@ impl Git {
             1 => Ok(None),
             _ => Err(GitError::Failed {
                 args: format!("config --get {key}"),
+                status: raw.status,
+                stderr: raw.stderr,
+            }),
+        }
+    }
+
+    /// `git config --local --get`: repo-local values only, so a value
+    /// inherited from the global or system config can never satisfy a
+    /// repo-scoped marker.
+    pub fn config_get_local(&self, key: &str) -> Result<Option<String>, GitError> {
+        let raw = self.run_raw(&["config", "--local", "--get", key])?;
+        match raw.status {
+            0 => Ok(Some(raw.stdout.trim_end().to_string())),
+            1 => Ok(None),
+            _ => Err(GitError::Failed {
+                args: format!("config --local --get {key}"),
                 status: raw.status,
                 stderr: raw.stderr,
             }),
@@ -371,38 +399,52 @@ impl Git {
     }
 
     /// `git ls-files -u -z`, grouped per path. `stages[n]` is `true` when
-    /// stage `n` (1=base, 2=ours, 3=theirs) is present; index 0 is unused.
+    /// stage `n` (1=base, 2=ours, 3=theirs) is present, and `oids[n]` is that
+    /// stage's blob id; index 0 is unused.
     pub fn unmerged(&self) -> Result<Vec<UnmergedEntry>, GitError> {
         let bytes = self.run_bytes(&["ls-files", "-u", "-z"])?;
         let text = String::from_utf8(bytes).map_err(|_| GitError::Utf8 {
             args: "ls-files -u -z".to_string(),
         })?;
         let mut order: Vec<String> = Vec::new();
-        let mut by_path: HashMap<String, [bool; 4]> = HashMap::new();
+        let mut by_path: HashMap<String, UnmergedEntry> = HashMap::new();
         for record in text.split('\0').filter(|s| !s.is_empty()) {
+            // `<mode> <object> <stage>\t<path>`.
             let Some((meta, path)) = record.split_once('\t') else {
                 continue;
             };
-            let stage: usize = meta
-                .split(' ')
-                .nth(2)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+            let mut fields = meta.split(' ').skip(1);
+            let oid = fields.next();
+            let stage: usize = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let entry = by_path.entry(path.to_string()).or_insert_with(|| {
                 order.push(path.to_string());
-                [false; 4]
+                UnmergedEntry {
+                    path: path.to_string(),
+                    stages: [false; 4],
+                    oids: Default::default(),
+                }
             });
             if stage < 4 {
-                entry[stage] = true;
+                entry.stages[stage] = true;
+                entry.oids[stage] = oid.map(str::to_string);
             }
         }
         Ok(order
             .into_iter()
-            .map(|path| {
-                let stages = by_path[&path];
-                UnmergedEntry { path, stages }
-            })
+            .filter_map(|path| by_path.remove(&path))
             .collect())
+    }
+
+    /// `git hash-object --path <path> -- <path>`: the blob id the working
+    /// tree file at `path` would be stored as if it were staged there.
+    ///
+    /// `--path` is what makes it comparable to an index entry: git applies
+    /// the same clean filter and end-of-line conversion it would apply on
+    /// `git add`, so a file that only differs from a stage by checkout
+    /// conversion (`core.autocrlf`, an `eol` attribute) hashes to that
+    /// stage's blob. Writes nothing — no `-w`.
+    pub fn hash_object(&self, path: &str) -> Result<String, GitError> {
+        self.run(&["hash-object", "--path", path, "--", path])
     }
 
     pub fn show_stage(&self, stage: u8, path: &str) -> Result<Vec<u8>, GitError> {
@@ -500,6 +542,27 @@ impl Git {
     }
 }
 
+/// This process's `PATH` with the running binary's own directory first.
+///
+/// The merge driver is registered as `clep merge-driver %O %A %B %P` (spec
+/// §5), which git resolves through the child's `PATH`. A server started by
+/// launchd or a service manager — or run from a build directory — need not
+/// have `clep` on `PATH` at all, and git then reports "command not found",
+/// marks the path CONFLICT, and turns every concurrent `*.md` edit into a
+/// Conflict Copy that the default text merge would have resolved cleanly.
+/// Putting the running binary first makes the driver resolve to the very
+/// binary that is driving the merge. `None` when the executable's own path
+/// cannot be determined, in which case the child inherits `PATH` unchanged.
+fn driver_path() -> Option<std::ffi::OsString> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.to_path_buf();
+    let mut dirs = vec![dir];
+    if let Some(existing) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(dirs).ok()
+}
+
 /// The raw result of a git invocation, exit status included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawOutput {
@@ -516,12 +579,15 @@ pub struct StatusEntry {
 }
 
 /// One unmerged path from `git ls-files -u -z`, with the index stages
-/// present for it. `stages[1..=3]` correspond to base/ours/theirs; index 0
-/// is unused and always `false`.
+/// present for it. `stages[1..=3]` and `oids[1..=3]` correspond to
+/// base/ours/theirs; index 0 is unused, always `false` and always `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnmergedEntry {
     pub path: String,
     pub stages: [bool; 4],
+    /// Each present stage's blob id, for comparing a working tree file
+    /// against a stage without re-reading either ([`Git::hash_object`]).
+    pub oids: [Option<String>; 4],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -560,6 +626,33 @@ mod tests {
     #[test]
     fn version_reports_git() {
         assert!(Git::version().unwrap().starts_with("git version"));
+    }
+
+    /// The registered merge driver is `clep merge-driver …`, resolved by
+    /// git's child through `PATH`: the running binary's directory has to be
+    /// on it, or the driver is "command not found" and every both-changed
+    /// `*.md` becomes a Conflict Copy. (In a unit test `current_exe()` is the
+    /// test binary — the invariant under test is the ordering, not the name.)
+    #[test]
+    fn the_child_path_starts_with_the_running_binary_directory() {
+        let tmp = TempDir::new().unwrap();
+        let cmd = testing::git(tmp.path()).command(&["status"]);
+        let path = cmd
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("PATH"))
+            .and_then(|(_, value)| value)
+            .expect("the child gets an explicit PATH");
+        let exe_dir = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_owned();
+        let mut dirs = std::env::split_paths(path);
+        assert_eq!(dirs.next().as_deref(), Some(exe_dir.as_path()));
+        // The inherited PATH is kept behind it, never replaced.
+        let inherited: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        assert_eq!(dirs.collect::<Vec<_>>(), inherited);
     }
 
     #[test]
@@ -608,6 +701,58 @@ mod tests {
         git.config_set("clep.sync.version", "1").unwrap();
         assert_eq!(
             git.config_get("clep.sync.version").unwrap().as_deref(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn git_dir_resolves_the_real_git_directory() {
+        let repos = testing::TestRepos::new();
+        let dir = testing::git(&repos.a).git_dir().unwrap();
+        assert_eq!(dir, repos.a.join(".git").canonicalize().unwrap());
+    }
+
+    #[test]
+    fn git_dir_of_a_linked_worktree_is_its_own_per_worktree_dir() {
+        let repos = testing::TestRepos::new();
+        let linked = repos.tmp.path().join("a-linked");
+        testing::git(&repos.a)
+            .run(&["worktree", "add", "-q", linked.to_str().unwrap(), "-b", "w"])
+            .unwrap();
+        let dir = testing::git(&linked).git_dir().unwrap();
+        assert!(dir.is_dir(), "{dir:?}");
+        assert!(
+            dir.ends_with("worktrees/a-linked"),
+            "the linked worktree has its own git dir, not the main one: {dir:?}"
+        );
+    }
+
+    #[test]
+    fn config_get_local_ignores_an_inherited_global_value() {
+        let tmp = TempDir::new().unwrap();
+        let global = tmp.path().join("gitconfig");
+        std::fs::write(&global, "[clep \"sync\"]\n\tversion = 1\n").unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let git = Git::new(&root)
+            .with_env("GIT_CONFIG_GLOBAL", global.to_str().unwrap())
+            .with_env("GIT_CONFIG_NOSYSTEM", "1");
+        git.init("main").unwrap();
+        assert_eq!(
+            git.config_get("clep.sync.version").unwrap().as_deref(),
+            Some("1"),
+            "the merged config sees the global value"
+        );
+        assert_eq!(
+            git.config_get_local("clep.sync.version").unwrap(),
+            None,
+            "the local scope does not"
+        );
+        git.config_set("clep.sync.version", "1").unwrap();
+        assert_eq!(
+            git.config_get_local("clep.sync.version")
+                .unwrap()
+                .as_deref(),
             Some("1")
         );
     }

@@ -11,7 +11,9 @@ pub mod conflict_copy;
 pub mod engine;
 pub mod git;
 pub mod init;
+pub mod journal_merge;
 pub mod managed_block;
+pub mod merge_driver;
 pub mod state;
 #[cfg(test)]
 pub(crate) mod testing;
@@ -46,6 +48,19 @@ pub const MANAGED_GITATTRIBUTES: &[&str] = &[
     "*.md merge=clep",
     ".clepsydra/cas/** filter=lfs diff=lfs merge=lfs -text",
     "_attachments/** filter=lfs diff=lfs merge=lfs -text",
+];
+
+/// The key naming the driver command — the one registration key whose
+/// presence means `*.md` merges go through `clep merge-driver` (D19).
+pub const MERGE_DRIVER_KEY: &str = "merge.clep.driver";
+
+/// Repo-local merge-driver registration `clep sync init` writes (spec §5).
+/// `recursive = binary` keeps the driver out of the recursive strategy's
+/// internal virtual-ancestor merges.
+pub const MERGE_DRIVER_KEYS: &[(&str, &str)] = &[
+    ("merge.clep.name", "clepsydra structural markdown merge"),
+    (MERGE_DRIVER_KEY, "clep merge-driver %O %A %B %P"),
+    ("merge.clep.recursive", "binary"),
 ];
 
 /// Commit identity taken from `[sync] author_name` / `author_email`.
@@ -101,6 +116,10 @@ pub enum SyncError {
     LfsRemoteUnsupported { url: String, detail: String },
     #[error("merge of {reference} failed: {detail}")]
     MergeFailed { reference: String, detail: String },
+    #[error(
+        "a {operation} is in progress in this repository; finish or abort it (`git {operation} --continue|--abort`), then sync again"
+    )]
+    GitOperationInProgress { operation: String },
     #[error("I/O error at {path}: {source}")]
     Io {
         path: String,
@@ -135,12 +154,16 @@ pub fn has_git_entry(root: &Path) -> bool {
 /// A vault is sync-initialised iff its root is a git repository's toplevel
 /// AND the repo-local `clep.sync.version` config key is set (D3, written by
 /// [`init::init`]).
+///
+/// The marker is read in the `--local` scope only: a `clep.sync.version` a
+/// user has in `~/.gitconfig` would otherwise make every repository on the
+/// machine claim to be sync-initialised.
 pub fn is_initialised(vault: &crate::vault::Vault, git: &git::Git) -> Result<bool, SyncError> {
     let Some(top) = git.toplevel()? else {
         return Ok(false);
     };
     let same_root = top.canonicalize().ok() == vault.root().canonicalize().ok();
-    Ok(same_root && git.config_get(INIT_MARKER_KEY)?.is_some())
+    Ok(same_root && git.config_get_local(INIT_MARKER_KEY)?.is_some())
 }
 
 /// The local machine's hostname, recorded in every commit's `Device:`
@@ -155,11 +178,52 @@ pub fn with_device_trailer(message: &str) -> String {
     format!("{}\n\nDevice: {}\n", message.trim_end(), device_name())
 }
 
+pub(crate) fn plural(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+/// Git's stderr is multi-line; a one-line report takes the first of it.
+pub(crate) fn first_line(text: &str) -> &str {
+    text.lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty())
+        .unwrap_or("")
+}
+
 #[cfg(test)]
 mod tests {
     use tempfile::TempDir;
 
-    use super::has_git_entry;
+    use super::{INIT_MARKER_KEY, has_git_entry};
+    use crate::vault::gitsync::git::Git;
+    use crate::vault::gitsync::testing;
+
+    #[test]
+    fn a_global_marker_does_not_count_as_initialised() {
+        let repos = testing::TestRepos::new();
+        // A private `GIT_CONFIG_GLOBAL`: writing the marker into the shared
+        // one `testing::git` uses would leak into every other test in the
+        // process.
+        let global = repos.tmp.path().join("gitconfig-with-marker");
+        std::fs::write(&global, "[clep \"sync\"]\n\tversion = 1\n").unwrap();
+        let git = Git::new(&repos.a)
+            .with_env("GIT_CONFIG_GLOBAL", global.to_str().unwrap())
+            .with_env("GIT_CONFIG_NOSYSTEM", "1");
+        // `TestRepos` writes the marker locally; only the global one is left.
+        git.run(&["config", "--local", "--unset", INIT_MARKER_KEY])
+            .unwrap();
+        assert_eq!(
+            git.config_get(INIT_MARKER_KEY).unwrap().as_deref(),
+            Some("1"),
+            "the merged config does see the global marker"
+        );
+
+        let vault = crate::vault::Vault::open(&repos.a).unwrap();
+        assert!(
+            !super::is_initialised(&vault, &git).unwrap(),
+            "a global clep.sync.version must not make a vault look initialised"
+        );
+    }
 
     #[test]
     fn a_git_dir_or_a_git_file_both_count_as_a_repository_entry() {

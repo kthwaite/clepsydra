@@ -193,6 +193,15 @@ export const VIEW_REGISTRY: Record<CodexView, ViewDescriptor> = {
     mobile: null,
     go: ({ navigate }) => void navigate({ to: "/agenda" }),
   },
+  conflicts: {
+    label: "CONFLICTS",
+    folioCode: "CONFLICTS",
+    showsSheaf: false,
+    feature: null,
+    navRoot: null,
+    mobile: null,
+    go: ({ navigate }) => void navigate({ to: "/conflicts" }),
+  },
 };
 
 /** Header rail order with diegetic index = position (pad2). */

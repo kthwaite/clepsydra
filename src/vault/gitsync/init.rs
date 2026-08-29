@@ -99,6 +99,24 @@ pub fn init(vault: &Vault, git: &Git, opts: InitOpts) -> Result<InitReport, Sync
                         configured: branch.clone(),
                     });
                 }
+            } else {
+                let actual = git.current_branch()?;
+                if actual.as_deref() != Some(branch.as_str()) {
+                    // HEAD is unborn: `git init` picked a default branch name
+                    // and no commit was ever made on it, so repointing HEAD at
+                    // the configured branch renames nothing and loses nothing
+                    // — but only while the configured branch is unborn too.
+                    // After `git switch --orphan`, it can already carry
+                    // commits, and attaching this empty checkout to it would
+                    // have step (9) commit a deletion of every file it holds.
+                    if git.rev_parse(&format!("refs/heads/{branch}"))?.is_some() {
+                        return Err(SyncError::BranchMismatch {
+                            actual: actual.unwrap_or_default(),
+                            configured: branch.clone(),
+                        });
+                    }
+                    git.run(&["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])?;
+                }
             }
             false
         }
@@ -128,6 +146,9 @@ pub fn init(vault: &Vault, git: &Git, opts: InitOpts) -> Result<InitReport, Sync
 
     // (5) initialised marker.
     git.config_set(INIT_MARKER_KEY, INIT_MARKER_VALUE)?;
+    for (key, value) in super::MERGE_DRIVER_KEYS {
+        git.config_set(key, value)?;
+    }
 
     // (6) author, seeded and persisted to [sync] when it (or the branch)
     // drifted from what was already on disk.
@@ -284,13 +305,16 @@ pub(crate) fn lfs_batch_url(url: &str) -> Option<String> {
 }
 
 /// `git@host:path` or `ssh://user@host/path` → `(user@host, path)`. `None`
-/// for an http(s) URL (or anything else [`lfs_batch_url`] already handles).
+/// for a URL carrying any other scheme.
 pub(crate) fn ssh_target(url: &str) -> Option<(String, String)> {
     if let Some(rest) = url.strip_prefix("ssh://") {
         let (host, path) = rest.split_once('/')?;
         return Some((host.to_string(), path.to_string()));
     }
-    if url.starts_with("http://") || url.starts_with("https://") {
+    // Only the scp-like `host:path` form is left, and it has no scheme. A
+    // `file://` or `https://` remote split on `:` would otherwise probe the
+    // scheme itself as an ssh host.
+    if url.contains("://") {
         return None;
     }
     let (host, path) = url.split_once(':')?;
@@ -668,6 +692,80 @@ mod tests {
     }
 
     #[test]
+    fn init_repoints_an_unborn_head_at_the_configured_branch() {
+        let (_tmp, vault) = fresh_vault();
+        let git = testing::git(vault.root());
+        // A repo git created with another default branch name, no commits.
+        git.init("master").unwrap();
+        assert_eq!(git.current_branch().unwrap().as_deref(), Some("master"));
+
+        let report = init(&vault, &git, opts()).unwrap();
+
+        assert!(!report.created_repo);
+        assert_eq!(report.branch, "main");
+        assert_eq!(git.current_branch().unwrap().as_deref(), Some("main"));
+        assert_eq!(
+            git.rev_parse("refs/heads/main").unwrap(),
+            report.initial_commit,
+            "the initial commit landed on the configured branch"
+        );
+        assert!(git.rev_parse("refs/heads/master").unwrap().is_none());
+    }
+
+    /// The repoint is only safe while the configured branch is unborn too.
+    /// After `git switch --orphan`, `main` can already carry commits the empty
+    /// orphan checkout does not — attaching to it would have init commit a
+    /// deletion of every one of them.
+    #[test]
+    fn init_refuses_an_orphan_head_over_a_branch_that_has_commits() {
+        let (_tmp, vault) = fresh_vault();
+        let git = testing::git(vault.root());
+        init(&vault, &git, opts()).unwrap();
+        let main = git.head().unwrap().unwrap();
+        git.run(&["switch", "--orphan", "scratch"]).unwrap();
+        assert!(git.head().unwrap().is_none(), "the orphan HEAD is unborn");
+        let vault = Vault::open(vault.root()).unwrap();
+
+        let err = init(&vault, &git, opts()).unwrap_err();
+
+        assert!(matches!(err, SyncError::BranchMismatch { .. }), "{err}");
+        assert_eq!(
+            git.rev_parse("refs/heads/main").unwrap().as_deref(),
+            Some(main.as_str()),
+            "main is untouched: no commit was made on it"
+        );
+        assert_eq!(
+            git.current_branch().unwrap().as_deref(),
+            Some("scratch"),
+            "HEAD was not repointed"
+        );
+    }
+
+    #[test]
+    fn init_registers_the_merge_driver_and_rerun_is_idempotent() {
+        let (_tmp, vault) = fresh_vault();
+        let git = testing::git(vault.root());
+        init(&vault, &git, opts()).unwrap();
+        for (key, value) in crate::vault::gitsync::MERGE_DRIVER_KEYS {
+            assert_eq!(
+                git.config_get_local(key).unwrap().as_deref(),
+                Some(*value),
+                "{key}"
+            );
+        }
+
+        // Re-run on the already-initialised vault: still there, still Ok.
+        let vault = Vault::open(vault.root()).unwrap();
+        init(&vault, &git, opts()).unwrap();
+        assert_eq!(
+            git.config_get_local("merge.clep.driver")
+                .unwrap()
+                .as_deref(),
+            Some("clep merge-driver %O %A %B %P")
+        );
+    }
+
+    #[test]
     fn lfs_url_helpers() {
         assert_eq!(
             lfs_batch_url("https://github.com/o/r").as_deref(),
@@ -686,7 +784,12 @@ mod tests {
             ssh_target("ssh://git@host/o/r"),
             Some(("git@host".into(), "o/r".into()))
         );
+        // Only ssh is probed over ssh: another scheme's own name would
+        // otherwise be taken for the host of an scp-like target.
         assert_eq!(ssh_target("https://host/o/r"), None);
+        assert_eq!(ssh_target("file:///x/y.git"), None);
+        assert_eq!(ssh_target("https://example.com/x.git"), None);
+        assert_eq!(ssh_target("git://host/x.git"), None);
     }
 
     #[tokio::test]

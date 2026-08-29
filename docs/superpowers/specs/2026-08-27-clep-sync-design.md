@@ -123,6 +123,9 @@ author_email = "..."
   appended in source order; the older page keeps id/filename; the younger page
   is properly deleted (links rewritten). Doctor rule detects duplicates
   independently (hand-git case).
+  (Amended by the 4b plan, D20: entries are `- HH:MM — ` bullets, not
+  `## HH:MM` headings — journal pages have never used heading sections for
+  time entries. The interleave and dedupe rules above apply to those bullets.)
 
 ## 9. Surfacing (v1)
 

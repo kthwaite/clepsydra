@@ -180,7 +180,16 @@ impl SyncRuntime {
                 // before a rejected push and a failed retry. Watcher events
                 // were dropped for the whole window, so this rebuild is the
                 // only thing that can catch the index up.
-                rebuild_after_sync(state).await;
+                //
+                // A refused sync is the exception: the engine raises
+                // `GitOperationInProgress` before its first git call, so
+                // nothing moved. It also describes a state the user can leave
+                // sitting for hours (a paused rebase), and this path runs once
+                // per scheduled tick — a full rebuild, reconcile sweep and SSE
+                // broadcast each time, for a tree the sync never touched.
+                if !matches!(error, SyncError::GitOperationInProgress { .. }) {
+                    rebuild_after_sync(state).await;
+                }
                 return Err(error);
             }
             Err(join) => return Err(SyncError::Config(format!("sync task panicked: {join}"))),
@@ -189,8 +198,12 @@ impl SyncRuntime {
         if report.tree_changed() {
             rebuild_after_sync(state).await;
         }
-        // Whatever was outstanding is in the commit this sync just made.
-        self.pending.store(false, Ordering::SeqCst);
+        // A tree-changing merge may be followed by reconcile moves in
+        // `rebuild_after_sync`, and those are still uncommitted here; the
+        // debounced autocommit sweeps them up. Marking pending costs nothing
+        // when there is nothing to sweep: `commit_local` on a clean tree is
+        // two cheap git calls.
+        self.pending.store(report.tree_changed(), Ordering::SeqCst);
         // Un-pause before re-opening the gate, never the other way round: a
         // mutation admitted while the watcher is still paused writes a file
         // whose change event is dropped, leaving the index behind the disk.
@@ -244,9 +257,15 @@ impl SyncRuntime {
         Ok(pushed)
     }
 
-    pub async fn status(&self) -> Result<SyncStatus, SyncError> {
+    /// [`SyncEngine::status_with_copies`], off the blocking pool — the
+    /// Conflict Copy count comes from the caller's index, not a vault walk.
+    pub async fn status_with_copies(
+        &self,
+        conflict_copies: usize,
+    ) -> Result<SyncStatus, SyncError> {
         let engine = Arc::clone(&self.engine);
-        match tokio::task::spawn_blocking(move || engine.status()).await {
+        match tokio::task::spawn_blocking(move || engine.status_with_copies(conflict_copies)).await
+        {
             Ok(result) => result,
             Err(join) => Err(SyncError::Config(format!("status task panicked: {join}"))),
         }
@@ -615,6 +634,40 @@ pub(crate) mod tests {
         assert!(state.sync.as_ref().unwrap().last_report().is_some());
     }
 
+    /// A merge that changed the tree can be followed by reconcile moves in
+    /// `rebuild_after_sync`, and those are uncommitted when the window closes.
+    /// The window must leave the autocommit marked pending so the debounce
+    /// loop sweeps them up.
+    #[tokio::test]
+    async fn a_tree_changing_sync_leaves_an_autocommit_pending() {
+        let (state, repos) = synced_state().await;
+        let runtime = Arc::clone(state.sync.as_ref().unwrap());
+
+        runtime.run_full_sync(&state).await.unwrap();
+        assert!(
+            !runtime.pending_autocommit(),
+            "a sync that changed nothing leaves nothing to sweep up"
+        );
+
+        // Device B publishes a page, so A's next sync fast-forwards onto it.
+        testing::write(
+            &repos.b,
+            "notes/from-b.md",
+            &page("0192b6c0-0000-7000-8000-0000000000b2", "From B"),
+        );
+        SyncEngine::open_with_git(&Vault::open(&repos.b).unwrap(), testing::git(&repos.b))
+            .unwrap()
+            .full_sync()
+            .unwrap();
+
+        let report = runtime.run_full_sync(&state).await.unwrap();
+        assert!(report.tree_changed(), "{:?}", report.merge);
+        assert!(
+            runtime.pending_autocommit(),
+            "a tree-changing sync leaves the autocommit pending"
+        );
+    }
+
     /// A sync that ends in an error may still have moved the working tree: a
     /// leftover merge resolved before the pull failed, or a merge committed
     /// before a rejected push and a failed retry. Watcher events were dropped
@@ -653,6 +706,64 @@ pub(crate) mod tests {
         assert!(
             !state.watcher_paused.load(Ordering::SeqCst),
             "the watcher is un-paused even when the sync failed"
+        );
+    }
+
+    /// The mirror of the test above. A refusal is raised before the engine's
+    /// first git call, so nothing moved and the rebuild must be skipped —
+    /// otherwise a rebase the user leaves paused over lunch costs a full index
+    /// rebuild, reconcile sweep and SSE broadcast on every scheduled tick.
+    #[tokio::test]
+    async fn a_refusal_that_touched_nothing_does_not_rebuild_the_index() {
+        let (state, repos) = synced_state().await;
+        let g = testing::git(&repos.a);
+
+        // Leave a conflicted cherry-pick in the repository.
+        let c = "0192b6c0-0000-7000-8000-0000000000c9";
+        testing::write(&repos.a, "c.md", &page(c, "C base"));
+        g.add_all().unwrap();
+        g.commit("base", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "-b", "side"]).unwrap();
+        testing::write(&repos.a, "c.md", &page(c, "C side"));
+        g.add_all().unwrap();
+        let side = g.commit("side", &testing::author()).unwrap();
+        g.run(&["checkout", "-q", "main"]).unwrap();
+        testing::write(&repos.a, "c.md", &page(c, "C main"));
+        g.add_all().unwrap();
+        g.commit("main", &testing::author()).unwrap();
+        let _ = g.run_raw(&["cherry-pick", &side]);
+        assert!(g.rev_parse("CHERRY_PICK_HEAD").unwrap().is_some());
+
+        // Written after the state was built, so only a rebuild could index it.
+        testing::write(
+            &repos.a,
+            "notes/local.md",
+            &page("0192b6c0-0000-7000-8000-0000000000d2", "Local"),
+        );
+        assert!(
+            !indexed(&state, "notes/local.md").await,
+            "the fixture is only meaningful while the page is unindexed"
+        );
+
+        let error = state
+            .sync
+            .as_ref()
+            .unwrap()
+            .run_full_sync(&state)
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(error, SyncError::GitOperationInProgress { .. }),
+            "{error}"
+        );
+        assert!(
+            !indexed(&state, "notes/local.md").await,
+            "a refusal that touched nothing must not rebuild the index"
+        );
+        assert!(
+            !state.watcher_paused.load(Ordering::SeqCst),
+            "the watcher is un-paused even when the sync was refused"
         );
     }
 

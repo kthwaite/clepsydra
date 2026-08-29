@@ -277,6 +277,21 @@ export function useApplyReferenceRepair(): UseMutationResult<
   });
 }
 
+export type ConflictPage = components["schemas"]["ConflictPageDto"];
+
+export function useSyncConflicts() {
+  return useQuery({
+    queryKey: queryKeys.sync.conflicts(),
+    queryFn: async () => {
+      const { data, error } = await fetchClient.GET(
+        queryKeys.sync.conflictsPath,
+      );
+      if (error) throw new Error("failed to load conflict copies");
+      return data;
+    },
+  });
+}
+
 function useIndexInvalidation(includeAcademic = false) {
   const queryClient = useQueryClient();
   return () => {

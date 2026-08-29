@@ -73,8 +73,12 @@ The stable identifier of a Task or Cycle: two short words and a five-character t
 _Avoid_: TSK number, sequential code, ticket number
 
 **Conflict Copy**:
-A sibling page holding the version of a page that lost an automatic merge after the same page was edited on two devices. It remains until the user reconciles or discards it.
+A sibling page holding the version of a page that lost an automatic merge after the same page was edited on two devices. It remains until the user reconciles or discards it. Journal Conflict Copies are the exception: the journal merger folds them back automatically.
 _Avoid_: conflicted file, merge artifact
+
+**Journal Merge**:
+The post-sync fold of duplicate journal pages for one date; oldest page wins, entries interleave by time.
+_Avoid_: journal dedupe, journal conflict resolution
 
 **Sync**:
 The git-backed exchange of a vault's files between one user's devices: commit, fetch, merge, push, run by `clep sync` or the server.
