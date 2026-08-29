@@ -232,7 +232,8 @@ impl Modify for SchemaOverrides {
         crate::api::feeds::export_opml,
         // Sync
         crate::api::sync::run_sync,
-        crate::api::sync::sync_status
+        crate::api::sync::sync_status,
+        crate::api::sync::list_conflicts
     ),
     components(
         schemas(
@@ -332,6 +333,8 @@ impl Modify for SchemaOverrides {
             crate::api::sync::ConflictCopyDto,
             crate::api::sync::JournalMergeDto,
             crate::api::sync::SyncStatusDto,
+            crate::api::sync::ConflictPageDto,
+            crate::api::sync::ConflictListDto,
             // Index
             crate::api::index_routes::RebuildResponse,
             crate::api::index_routes::OutlinkEntry,

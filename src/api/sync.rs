@@ -38,6 +38,25 @@ pub struct ConflictCopyDto {
     pub copy: String,
 }
 
+/// One Conflict Copy page, as indexed.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ConflictPageDto {
+    /// Vault-relative path of the copy.
+    pub path: String,
+    pub title: Option<String>,
+    /// `conflict_of`: the page whose local version won the merge.
+    pub original: String,
+    pub original_title: Option<String>,
+    /// False when the original has since been deleted or moved.
+    pub original_exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ConflictListDto {
+    pub items: Vec<ConflictPageDto>,
+    pub total: usize,
+}
+
 /// Duplicate journal pages for one date, folded into one page (D22).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct JournalMergeDto {
@@ -249,7 +268,22 @@ pub async fn sync_status(
     let Some(runtime) = state.sync.clone() else {
         return Ok(Json(SyncStatusDto::uninitialised()));
     };
-    let status = runtime.status().await.map_err(sync_error)?;
+    let conflict_copies = state
+        .index
+        .with_index(|index, _vault| {
+            index.connection().query_row(
+                "SELECT count(*) FROM page_properties WHERE key = 'conflict_of'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))? as usize;
+    let status = runtime
+        .status_with_copies(conflict_copies)
+        .await
+        .map_err(sync_error)?;
     Ok(Json(SyncStatusDto::from_status(
         &status,
         runtime.pending_autocommit(),
@@ -257,10 +291,60 @@ pub async fn sync_status(
     )))
 }
 
+#[utoipa::path(
+    get,
+    path = "/sync/conflicts",
+    context_path = "/api/vault",
+    tag = "Sync",
+    responses(
+        (status = 200, description = "Conflict Copies present in the vault, from the index", body = ConflictListDto),
+        (status = 500, description = "Internal server error", body = ApiError)
+    )
+)]
+pub async fn list_conflicts(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<ConflictListDto>, ApiError> {
+    let items = state
+        .index
+        .with_index(move |index, _vault| {
+            index
+                .connection()
+                .prepare(
+                    "SELECT p.path, p.title, pp.value_text, o.path, o.title \
+                     FROM page_properties pp \
+                     JOIN pages p ON p.id = pp.page_id \
+                     LEFT JOIN pages o ON o.path = pp.value_text \
+                     WHERE pp.key = 'conflict_of' AND pp.value_text IS NOT NULL \
+                     ORDER BY p.path",
+                )?
+                .query_map([], |row| {
+                    let original: String = row.get(2)?;
+                    let original_exists: Option<String> = row.get(3)?;
+                    Ok(ConflictPageDto {
+                        path: row.get(0)?,
+                        title: row.get(1)?,
+                        original_exists: original_exists.is_some(),
+                        original,
+                        original_title: row.get(4)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, rusqlite::Error>>()
+        })
+        .await
+        .map_err(|error| ApiError::internal(error.to_string()))?
+        .map_err(|error| ApiError::internal(error.to_string()))?;
+
+    Ok(Json(ConflictListDto {
+        total: items.len(),
+        items,
+    }))
+}
+
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/", post(run_sync))
         .route("/status", get(sync_status))
+        .route("/conflicts", get(list_conflicts))
 }
 
 #[cfg(test)]
@@ -298,6 +382,38 @@ mod tests {
 
         let response = server.post("/sync").await;
         assert_eq!(response.status_code(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn conflicts_endpoint_lists_copies_from_the_index() {
+        let (state, _tmp) = crate::state_test_support::make_state().await;
+        let server =
+            TestServer::new(crate::api::api_router().with_state(Arc::clone(&state))).unwrap();
+        // A conflict copy page + its original, indexed.
+        let root = state.vault.root().to_path_buf();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(
+            root.join("notes/plan.md"),
+            "+++\nid = \"0192b6c0-0000-7000-8000-0000000000c1\"\ntitle = \"Plan\"\n+++\nours\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join("notes/plan.conflict.abc1234.md"),
+            "+++\nid = \"0192b6c0-0000-7000-8000-0000000000c2\"\ntitle = \"Plan (conflict abc1234)\"\nconflict_of = \"notes/plan.md\"\n+++\ntheirs\n",
+        )
+        .unwrap();
+        let rebuild = server.post("/index/rebuild").await;
+        assert_eq!(rebuild.status_code(), StatusCode::OK);
+
+        let list: ConflictListDto = server.get("/sync/conflicts").await.json();
+        assert_eq!(list.total, 1);
+        assert_eq!(list.items[0].path, "notes/plan.conflict.abc1234.md");
+        assert_eq!(list.items[0].original, "notes/plan.md");
+        assert!(list.items[0].original_exists);
+        assert_eq!(list.items[0].original_title.as_deref(), Some("Plan"));
+        // A plain vault (no sync runtime) still answers.
+        let status: SyncStatusDto = server.get("/sync/status").await.json();
+        assert!(!status.initialised);
     }
 
     #[tokio::test]

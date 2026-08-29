@@ -388,6 +388,11 @@ Read the vault's sync state without changing anything. Returns `initialised: fal
 
 Fields: `branch`, `remote`, `head`, `ahead`/`behind` relative to `origin/<branch>` (`null` when there is no remote-tracking branch yet), `dirty_files`, `unmerged_files`, `conflict_copies`, `last_sync_at`/`last_sync_result` from this device's own record, and the server's live `pending_autocommit` and `syncing` flags.
 
+### `GET /api/vault/sync/conflicts`
+List the Conflict Copies present in the vault, read from the index rather than a filesystem walk. Works on any vault, sync-initialised or not — a Conflict Copy can exist from a hand-run git merge. Responses: `200` Conflict Copies present in the vault, from the index; `500` Internal server error.
+
+Each item names the copy's `path` and `title`, its `original` (the `conflict_of` path whose local version won the merge) and that page's `original_title`, and `original_exists` — `false` when the original has since been deleted or moved.
+
 ## Tasks
 
 ### `GET /api/vault/tasks`

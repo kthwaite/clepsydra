@@ -1576,6 +1576,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/vault/sync/conflicts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_conflicts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/vault/sync/status": {
         parameters: {
             query?: never;
@@ -2176,6 +2192,21 @@ export interface components {
         ConflictDetail: {
             fields: components["schemas"]["FieldDiff"][];
         };
+        ConflictListDto: {
+            items: components["schemas"]["ConflictPageDto"][];
+            total: number;
+        };
+        /** @description One Conflict Copy page, as indexed. */
+        ConflictPageDto: {
+            /** @description `conflict_of`: the page whose local version won the merge. */
+            original: string;
+            /** @description False when the original has since been deleted or moved. */
+            original_exists: boolean;
+            original_title?: string | null;
+            /** @description Vault-relative path of the copy. */
+            path: string;
+            title?: string | null;
+        };
         /**
          * @description How to handle items that already exist locally.
          * @enum {string}
@@ -2552,6 +2583,14 @@ export interface components {
             database_path?: string | null;
             dry_run?: boolean;
             since?: string | null;
+        };
+        /** @description Duplicate journal pages for one date, folded into one page (D22). */
+        JournalMergeDto: {
+            date: string;
+            /** @description `journals` or `ai-journals`. */
+            folder: string;
+            merged: string[];
+            winner: string;
         };
         JournalSummary: {
             id: string;
@@ -3129,7 +3168,12 @@ export interface components {
             /** Format: int64 */
             duration_ms: number;
             files_committed: number;
-            /** @description `no_remote` | `fetch_failed` | `up_to_date` | `fast_forward` | `merged`. */
+            /** @description Duplicate journal pages this sync folded into one. */
+            journal_merges: components["schemas"]["JournalMergeDto"][];
+            /**
+             * @description `no_remote` | `fetch_failed` | `not_fetched` | `up_to_date` |
+             *     `fast_forward` | `merged`.
+             */
             merge: string;
             /**
              * @description The new head for `fast_forward`/`merged`, the failure for
@@ -8692,13 +8736,42 @@ export interface operations {
                     "application/json": components["schemas"]["SyncReportDto"];
                 };
             };
-            /** @description Sync is not initialised for this vault */
+            /** @description Sync is not initialised for this vault, or a cherry-pick, revert or rebase is in progress */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal server error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    list_conflicts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conflict Copies present in the vault, from the index */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConflictListDto"];
                 };
             };
             /** @description Internal server error */

@@ -734,8 +734,9 @@ impl SyncEngine {
         })
     }
 
-    /// What `clep sync status` reads.
-    pub fn status(&self) -> Result<SyncStatus, SyncError> {
+    /// [`SyncEngine::status`] with the Conflict Copy count supplied — the
+    /// server counts from the index instead of walking the vault per poll.
+    pub fn status_with_copies(&self, conflict_copies: usize) -> Result<SyncStatus, SyncError> {
         let state = state::load(&self.git_dir);
         let upstream = format!("{REMOTE_NAME}/{}", self.branch);
         let (ahead, behind) = match self.git.ahead_behind(&upstream)? {
@@ -752,10 +753,17 @@ impl SyncEngine {
             behind,
             dirty_files: self.git.status()?.len(),
             unmerged_files: self.git.unmerged()?.len(),
-            conflict_copies: find_conflict_copies(&self.root).len(),
+            conflict_copies,
             last_sync_at: state.last_sync_at,
             last_sync_result: state.last_result,
         })
+    }
+
+    /// What `clep sync status` reads standalone (no server index to count
+    /// from): the Conflict Copy count comes from walking the vault.
+    pub fn status(&self) -> Result<SyncStatus, SyncError> {
+        let copies = find_conflict_copies(&self.root).len();
+        self.status_with_copies(copies)
     }
 
     /// Record the report as this device's state (D8). A state file that

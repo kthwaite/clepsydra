@@ -257,9 +257,15 @@ impl SyncRuntime {
         Ok(pushed)
     }
 
-    pub async fn status(&self) -> Result<SyncStatus, SyncError> {
+    /// [`SyncEngine::status_with_copies`], off the blocking pool — the
+    /// Conflict Copy count comes from the caller's index, not a vault walk.
+    pub async fn status_with_copies(
+        &self,
+        conflict_copies: usize,
+    ) -> Result<SyncStatus, SyncError> {
         let engine = Arc::clone(&self.engine);
-        match tokio::task::spawn_blocking(move || engine.status()).await {
+        match tokio::task::spawn_blocking(move || engine.status_with_copies(conflict_copies)).await
+        {
             Ok(result) => result,
             Err(join) => Err(SyncError::Config(format!("status task panicked: {join}"))),
         }
