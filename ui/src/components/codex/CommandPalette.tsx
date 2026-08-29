@@ -330,10 +330,8 @@ function CommandPaletteContent() {
     >
       {/* header / channel */}
       <div className="flex items-center gap-[10px] border-b border-ink px-[14px] py-[8px]">
-        <span className="cl-mono text-[9px] tracking-[0.16em] text-ink-mute">
-          CHANNEL
-        </span>
-        <span className="cl-mono text-[13px] font-bold tracking-[0.08em] text-accent">
+        <span className="cl-mono tracking-[0.16em] text-ink-mute">CHANNEL</span>
+        <span className="cl-mono font-bold tracking-[0.08em] text-accent">
           CLP&gt;
         </span>
         <input
@@ -403,7 +401,7 @@ function CommandPaletteContent() {
             >
               <span
                 className={cn(
-                  "cl-mono text-[9px] tracking-[0.16em]",
+                  "cl-mono  tracking-[0.16em]",
                   active ? "text-paper" : "text-accent",
                 )}
               >
@@ -411,7 +409,7 @@ function CommandPaletteContent() {
               </span>
               <span
                 className={cn(
-                  "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] tracking-[0.04em]",
+                  "cl-mono overflow-hidden text-ellipsis whitespace-nowrap  tracking-[0.04em]",
                   active ? "text-paper" : "text-ink-2",
                 )}
               >
@@ -420,7 +418,7 @@ function CommandPaletteContent() {
               <span className="flex min-w-0 flex-col">
                 <span
                   className={cn(
-                    "cl-mono overflow-hidden text-ellipsis whitespace-nowrap text-[10px] uppercase tracking-[0.02em]",
+                    "cl-mono overflow-hidden text-ellipsis whitespace-nowrap uppercase tracking-[0.02em]",
                     active ? "text-paper" : "text-ink",
                   )}
                 >
@@ -429,7 +427,7 @@ function CommandPaletteContent() {
                 {c.sub && (
                   <span
                     className={cn(
-                      "cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap text-[9px] normal-case",
+                      "cl-mono mt-[1px] overflow-hidden text-ellipsis whitespace-nowrap normal-case",
                       active ? "text-paper/75" : "text-ink-mute",
                     )}
                   >
@@ -437,12 +435,7 @@ function CommandPaletteContent() {
                   </span>
                 )}
               </span>
-              <span
-                className={cn(
-                  "text-[10px]",
-                  active ? "text-paper" : "text-ink-faint",
-                )}
-              >
+              <span className={cn(active ? "text-paper" : "text-ink-faint")}>
                 ⏎
               </span>
             </button>
@@ -450,7 +443,7 @@ function CommandPaletteContent() {
         })}
       </div>
       {/* footer / keycap legend */}
-      <div className="cl-mono flex items-center gap-[18px] border-t border-ink px-[14px] py-[6px] text-[9px] uppercase tracking-[0.14em] text-ink-faint">
+      <div className="cl-mono flex items-center gap-[18px] border-t border-ink px-[14px] py-[6px] uppercase tracking-[0.14em] text-ink">
         <span>
           <span className="border border-ink/40 px-[4px] py-[1px]">↑</span>
           <span className="ml-[3px] border border-ink/40 px-[4px] py-[1px]">
