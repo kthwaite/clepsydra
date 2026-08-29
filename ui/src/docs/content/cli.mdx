@@ -686,8 +686,9 @@ once. `last sync` comes from this device's own record (`clep-sync.toml` in the
 repository's git directory — the per-worktree directory in a linked
 worktree), so it describes this machine, not the remote; `no fetch` there
 means the last sync recorded was a shutdown push, which skips fetching and
-merging outright, and the line grows a trailing `; folded N duplicate journal
-page(s)` whenever that sync folded one. `conflict copies` counts the
+merging outright — and so never folds a journal either. After an ordinary
+sync the line instead grows a trailing `; folded N duplicate journal page(s)`
+whenever that sync folded one. `conflict copies` counts the
 `*.conflict.<id>.md` files still sitting in the tree when this command runs
 standalone, or reads the same count from the index when a server answers;
 either way it counts a Conflict Copy from a hand-run `git merge` too — each

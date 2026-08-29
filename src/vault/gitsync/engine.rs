@@ -330,7 +330,6 @@ impl SyncEngine {
             .into_iter()
             .map(|entry| entry.path)
             .collect();
-        let files = paths.len();
         let (sha, copies, warnings) =
             self.resolve_and_commit("MERGE_HEAD", LEFTOVER_MERGE_HEADLINE, !unmerged.is_empty())?;
         for warning in warnings {
@@ -345,9 +344,11 @@ impl SyncEngine {
         Ok(Some(LeftoverMerge {
             summary: CommitSummary {
                 sha,
-                // Nothing survives this commit when no loose entry follows —
-                // `commit_local` returns the summary as it stands then.
-                files,
+                // Counted after the copies join `paths`: this commit wrote
+                // them too. Nothing survives this commit when no loose entry
+                // follows — `commit_local` returns the summary as it stands
+                // then.
+                files: paths.len(),
                 message: merge_message(LEFTOVER_MERGE_HEADLINE, &copies),
             },
             paths,
@@ -1015,6 +1016,10 @@ mod tests {
         let copies = find_conflict_copies(&repos.b);
         assert_eq!(copies.len(), 1, "{copies:?}");
         assert!(copies[0].starts_with("notes/p.conflict."));
+        assert_eq!(
+            summary.files, 2,
+            "the conflicted page and the copy this commit wrote: {summary:?}"
+        );
         let committed = gb.run(&["show", "HEAD:notes/p.md"]).unwrap();
         assert!(
             !committed.contains("<<<<<<<"),

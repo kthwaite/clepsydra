@@ -6,6 +6,7 @@ export function ConflictsPanel() {
   const conflictsQuery = useSyncConflicts();
   const openTab = useOpenTab();
   const items = conflictsQuery.data?.items ?? [];
+  const total = conflictsQuery.data?.total ?? 0;
 
   return (
     <main className="mx-auto flex h-full min-h-screen w-full max-w-[1440px] flex-col bg-paper text-ink">
@@ -20,7 +21,7 @@ export function ConflictsPanel() {
             </h1>
           </div>
           <p className="cl-mono text-[10px] tabular-nums text-ink-mute">
-            {conflictsQuery.data?.total ?? 0} copies
+            {total} {total === 1 ? "copy" : "copies"}
           </p>
         </div>
         <p className="mt-3 max-w-2xl text-sm text-ink-2">
@@ -62,10 +63,16 @@ export function ConflictsPanel() {
               className="flex flex-wrap items-start justify-between gap-3 px-3 py-4 md:px-5"
             >
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold">
+                <p
+                  className="truncate text-sm font-semibold"
+                  title={item.title ?? item.path}
+                >
                   {item.title ?? item.path}
                 </p>
-                <p className="cl-mono mt-1 truncate text-[11px] text-ink-mute">
+                <p
+                  className="cl-mono mt-1 truncate text-[11px] text-ink-mute"
+                  title={item.path}
+                >
                   {item.path}
                 </p>
                 <p className="mt-2 text-xs text-ink-2">

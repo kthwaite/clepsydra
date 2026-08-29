@@ -201,7 +201,9 @@ merges structurally rather than line by line:
 It gives up — and hands the page back as an ordinary conflict — when a field
 changed on both sides to different values, when the two sides are different
 pages that happen to share a path (their `id` fields disagree), or when either
-side is an encrypted page. Running through `clep sync`, every one of these
+side is an encrypted page whose body differs from the other side's (an
+encrypted page both sides left alone still merges its frontmatter). Running
+through `clep sync`, every one of these
 still ends as an ordinary Conflict Copy: yours stays, theirs is written beside
 it. The one place the driver's own residue shows through is a **hand-run
 `git merge`** left unresolved — a body-level conflict comes back with literal
@@ -213,8 +215,15 @@ way.
 
 The registration lives in local git config, so it does not travel with the
 repository — a fresh clone needs its own `clep sync init` (see
-[Set up a second device](#set-up-a-second-device)). `clep doctor`'s `sync`
-section (`driver`) warns when it is missing.
+[Set up a second device](#set-up-a-second-device)). It is a command line git
+runs through a shell, so `clep` has to resolve on the `PATH` of whatever
+started the merge: `clep sync`'s own merges always find it (the running binary's
+directory goes first on the `PATH` git inherits), but a `git merge` run by hand
+where `clep` is not on `PATH` cannot start the driver at all, and git then
+conflicts every page both sides changed — including the ones it would otherwise
+have merged line by line. `clep doctor`'s `sync` section warns when the
+registration is missing (`driver`) and when `clep` does not resolve on `PATH`
+(`driver-path`).
 
 ## Journal merging
 
@@ -236,12 +245,19 @@ are repointed to the winner, except a bare date link (`[[2026-08-29]]`), which
 is left alone: once the duplicate is gone it resolves through the winner's own
 title.
 
-The fold is a warning, never a failure: an unreadable page is skipped and left
-for next time, and a fold that writes the winner but cannot delete every loser
-reports nothing folded rather than losing content. `clep sync`'s own report
-names each fold (see [CLI](/docs/cli#clep-sync)). `clep doctor`'s `journals`
-section (`duplicates`) is the backstop for anything sync did not see — a vault
-synced or edited by hand, say — and points back at `clep sync` to fold them.
+Two dates are left alone rather than folded, each with a warning: one whose
+pages include an encrypted page — an encrypted body is a single sealed block,
+so there are no entries to interleave — and one left with nothing but Conflict
+Copies, which have no original to fold into. Both are yours to resolve by hand.
+
+The fold is a warning, never a failure: a page it cannot read is skipped and
+left for next time, and a fold that deletes some losers but not others still
+reports the folds that did happen. Only when not one loser could be deleted
+does it report nothing folded — the winner keeps the merged content either way,
+so nothing is lost. `clep sync`'s own report names each fold (see
+[CLI](/docs/cli#clep-sync)). `clep doctor`'s `journals` section (`duplicates`)
+is the backstop for anything sync did not see — a vault synced or edited by
+hand, or a date it left for you — and points back at `clep sync` to fold them.
 
 ## Checking on sync
 
@@ -273,6 +289,7 @@ answered.
 | `branch` | Whether the checked-out branch matches `[sync] branch` |
 | `managed files` | Any managed `.gitignore`/`.gitattributes` line that went missing |
 | `driver` | Whether the markdown merge driver is registered |
+| `driver-path` | Whether `clep` resolves on `PATH`, so a hand-run `git merge` can start the driver |
 | `conflict-copies` | The Conflict Copies still in the tree, listed |
 | `lfs` | The git-lfs version, or a warning that it is not installed |
 | `remote` | The `origin` URL, or `none` |

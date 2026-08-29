@@ -48,6 +48,16 @@ describe("ConflictsPanel", () => {
 
     expect(screen.getByText("Plan (conflict abc1234)")).toBeInTheDocument();
     expect(screen.getByText(/notes\/plan\.md/)).toBeInTheDocument();
+    expect(screen.getByText("1 copy")).toBeInTheDocument();
+    // The lines are truncated, so the full value has to stay recoverable.
+    expect(screen.getByText("Plan (conflict abc1234)")).toHaveAttribute(
+      "title",
+      "Plan (conflict abc1234)",
+    );
+    expect(screen.getByText("notes/plan.conflict.abc1234.md")).toHaveAttribute(
+      "title",
+      "notes/plan.conflict.abc1234.md",
+    );
 
     await user.click(screen.getByRole("button", { name: /open copy/i }));
     expect(mocks.openTab).toHaveBeenCalledWith(
@@ -78,6 +88,7 @@ describe("ConflictsPanel", () => {
     mocks.data = { items: [], total: 0 };
     rerender(<ConflictsPanel />);
     expect(screen.getByText(/no conflict copies/i)).toBeInTheDocument();
+    expect(screen.getByText("0 copies")).toBeInTheDocument();
 
     mocks.data = {
       total: 1,
