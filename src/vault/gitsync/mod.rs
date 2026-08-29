@@ -11,6 +11,7 @@ pub mod conflict_copy;
 pub mod engine;
 pub mod git;
 pub mod init;
+pub mod journal_merge;
 pub mod managed_block;
 pub mod merge_driver;
 pub mod state;

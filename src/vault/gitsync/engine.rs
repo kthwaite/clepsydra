@@ -16,6 +16,7 @@ use chrono::{DateTime, Utc};
 
 use super::conflict_copy::{ConflictCopy, file_stem, find_conflict_copies, write_conflict_copy};
 use super::git::{Git, GitError, PushOutcome, Side, StatusEntry};
+use super::journal_merge::{JournalMerge, merge_duplicate_journals};
 use super::state::{self, SyncState};
 use super::{Author, REMOTE_NAME, SyncError, first_line, plural};
 use crate::vault::Vault;
@@ -88,12 +89,23 @@ pub enum PushStatus {
     Failed(String),
 }
 
+/// What a push retry's second pull did, folded into the report by
+/// [`SyncEngine::full_sync_inner`].
+#[derive(Debug)]
+struct RetryPull {
+    merge: MergeSummary,
+    warnings: Vec<String>,
+    journal_merges: Vec<JournalMerge>,
+}
+
 /// The result of one whole sync.
 #[derive(Debug, Clone)]
 pub struct SyncReport {
     pub committed: Option<CommitSummary>,
     pub merge: MergeSummary,
     pub push: PushStatus,
+    /// Duplicate journal pages this sync folded into one (D22).
+    pub journal_merges: Vec<JournalMerge>,
     /// Non-fatal problems worth surfacing (odd merge stages, unwritable
     /// state file).
     pub warnings: Vec<String>,
@@ -155,6 +167,13 @@ impl SyncReport {
             PushStatus::Rejected(detail) => format!("push rejected: {}", first_line(detail)),
             PushStatus::Failed(detail) => format!("push failed: {}", first_line(detail)),
         });
+        if !self.journal_merges.is_empty() {
+            let folded = self.journal_merges.len();
+            parts.push(format!(
+                "folded {folded} duplicate journal page{}",
+                plural(folded)
+            ));
+        }
         parts.join("; ")
     }
 
@@ -335,8 +354,44 @@ impl SyncEngine {
         }))
     }
 
+    /// D22: after a tree-changing pull, fold duplicate journal pages and
+    /// commit the fold so the push carries it. Failures are warnings.
+    fn merge_journals_after_pull(
+        &self,
+        summary: &MergeSummary,
+        warnings: &mut Vec<String>,
+        merges: &mut Vec<JournalMerge>,
+    ) -> Result<(), SyncError> {
+        if !matches!(
+            summary,
+            MergeSummary::FastForward { .. } | MergeSummary::Merged { .. }
+        ) {
+            return Ok(());
+        }
+        let (folded, merge_warnings) = merge_duplicate_journals(&self.root);
+        warnings.extend(merge_warnings);
+        if folded.is_empty() {
+            return Ok(());
+        }
+        self.git.add_all()?;
+        let dates: Vec<String> = folded.iter().map(|merge| merge.date.clone()).collect();
+        let message = super::with_device_trailer(&format!(
+            "sync: merge {} duplicate journal page{} ({})",
+            folded.len(),
+            plural(folded.len()),
+            dates.join(", ")
+        ));
+        self.git.commit(&message, &self.author)?;
+        merges.extend(folded);
+        Ok(())
+    }
+
     /// Fetch, merge, resolve every conflict, and commit the merge (D4).
     /// Never leaves a merge in progress.
+    ///
+    /// The journal merger is deliberately not wired in here: folding
+    /// duplicate journals is part of a whole sync, which commits and pushes
+    /// the fold. A bare `pull` leaves the tree exactly as the merge left it.
     pub fn pull(&self) -> Result<MergeSummary, SyncError> {
         let (summary, warnings) = self.pull_inner()?;
         for warning in warnings {
@@ -547,26 +602,32 @@ impl SyncEngine {
     /// once more and push again. A second rejection is reported as it is.
     pub fn push_with_retry(&self) -> Result<PushStatus, SyncError> {
         let (status, retried) = self.push_with_retry_inner()?;
-        if let Some((_, warnings)) = retried {
-            for warning in warnings {
+        if let Some(retry) = retried {
+            for warning in retry.warnings {
                 tracing::warn!("sync: {warning}");
             }
         }
         Ok(status)
     }
 
-    /// [`SyncEngine::push_with_retry`], keeping the retry's merge summary
-    /// and warnings for [`SyncReport`].
-    #[allow(clippy::type_complexity)]
-    fn push_with_retry_inner(
-        &self,
-    ) -> Result<(PushStatus, Option<(MergeSummary, Vec<String>)>), SyncError> {
+    /// [`SyncEngine::push_with_retry`], keeping the retry's merge summary,
+    /// journal merges and warnings for [`SyncReport`].
+    fn push_with_retry_inner(&self) -> Result<(PushStatus, Option<RetryPull>), SyncError> {
         let first = self.push()?;
         if !matches!(first, PushStatus::Rejected(_)) {
             return Ok((first, None));
         }
-        let retried = self.pull_inner()?;
-        Ok((self.push()?, Some(retried)))
+        let (merge, mut warnings) = self.pull_inner()?;
+        let mut journal_merges = Vec::new();
+        self.merge_journals_after_pull(&merge, &mut warnings, &mut journal_merges)?;
+        Ok((
+            self.push()?,
+            Some(RetryPull {
+                merge,
+                warnings,
+                journal_merges,
+            }),
+        ))
     }
 
     /// Commit, pull, push: the whole sync (D7), recording the result (D8).
@@ -596,13 +657,16 @@ impl SyncEngine {
     fn full_sync_inner(&self, started_at: DateTime<Utc>) -> Result<SyncReport, SyncError> {
         let committed = self.commit_local()?;
         let (mut merge, mut warnings) = self.pull_inner()?;
+        let mut journal_merges = Vec::new();
+        self.merge_journals_after_pull(&merge, &mut warnings, &mut journal_merges)?;
         let push = match merge {
             MergeSummary::NoRemote | MergeSummary::FetchFailed(_) => PushStatus::NotAttempted,
             _ => {
                 let (status, retried) = self.push_with_retry_inner()?;
-                if let Some((retry_merge, retry_warnings)) = retried {
-                    warnings.extend(retry_warnings);
-                    merge = fold_merges(merge, retry_merge);
+                if let Some(retry) = retried {
+                    warnings.extend(retry.warnings);
+                    journal_merges.extend(retry.journal_merges);
+                    merge = fold_merges(merge, retry.merge);
                 }
                 status
             }
@@ -611,6 +675,7 @@ impl SyncEngine {
             committed,
             merge,
             push,
+            journal_merges,
             warnings,
             started_at,
             finished_at: Utc::now(),
@@ -637,6 +702,9 @@ impl SyncEngine {
             committed,
             merge,
             push,
+            // The shutdown path never fetches, so no pull can have produced a
+            // duplicate journal to fold.
+            journal_merges: Vec::new(),
             warnings: Vec::new(),
             started_at,
             finished_at: Utc::now(),
@@ -1656,6 +1724,105 @@ mod tests {
             0o600,
             "keyring file is owner-only"
         );
+    }
+
+    #[test]
+    fn sync_folds_two_devices_journals_for_one_date() {
+        let repos = testing::TestRepos::new();
+        let journal = |body: &str, tail: &str, suffix: &str| {
+            format!(
+                "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{tail}\"\ntitle = \"2026-08-29\"\ncreated_at = 2026-08-29T0{suffix}:00:00Z\n+++\n{body}"
+            )
+        };
+        testing::write(
+            &repos.a,
+            "journals/20260829.2026-08-29.aaaaaaaa.md",
+            &journal("- 08:00 — from A\n", "40", "8"),
+        );
+        engine(&repos.a).full_sync().unwrap();
+        testing::write(
+            &repos.b,
+            "journals/20260829.2026-08-29.bbbbbbbb.md",
+            &journal("- 10:00 — from B\n", "41", "9"),
+        );
+        let rb = engine(&repos.b).full_sync().unwrap();
+        assert_eq!(rb.journal_merges.len(), 1, "{:?}", rb.journal_merges);
+        assert_eq!(
+            rb.journal_merges[0].winner,
+            "journals/20260829.2026-08-29.aaaaaaaa.md"
+        );
+        assert!(
+            rb.one_line().contains("1 duplicate journal"),
+            "{}",
+            rb.one_line()
+        );
+        assert!(
+            matches!(rb.push, PushStatus::Pushed),
+            "the fold commit is pushed: {:?}",
+            rb.push
+        );
+        assert!(
+            !repos
+                .b
+                .join("journals/20260829.2026-08-29.bbbbbbbb.md")
+                .exists()
+        );
+        let body = testing::read(&repos.b, "journals/20260829.2026-08-29.aaaaaaaa.md");
+        assert!(
+            body.contains("- 08:00 — from A") && body.contains("- 10:00 — from B"),
+            "{body}"
+        );
+        assert!(
+            testing::git(&repos.b).status().unwrap().is_empty(),
+            "tree clean after fold"
+        );
+        // A pulls the fold: fast-forward, nothing further to merge.
+        let ra = engine(&repos.a).full_sync().unwrap();
+        assert!(ra.journal_merges.is_empty());
+        assert!(
+            !repos
+                .a
+                .join("journals/20260829.2026-08-29.bbbbbbbb.md")
+                .exists()
+        );
+    }
+
+    #[test]
+    fn journal_conflict_copy_is_folded_back() {
+        let repos = testing::TestRepos::new();
+        let journal = |body: &str| {
+            format!(
+                "+++\nid = \"0192b6c0-0000-7000-8000-000000000042\"\ntitle = \"2026-08-29\"\n+++\n{body}"
+            )
+        };
+        testing::write(
+            &repos.a,
+            "journals/20260829.2026-08-29.aaaaaaaa.md",
+            &journal("- 08:00 — base\n"),
+        );
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+        testing::write(
+            &repos.a,
+            "journals/20260829.2026-08-29.aaaaaaaa.md",
+            &journal("- 08:00 — base\n- 09:00 — from A\n"),
+        );
+        engine(&repos.a).full_sync().unwrap();
+        testing::write(
+            &repos.b,
+            "journals/20260829.2026-08-29.aaaaaaaa.md",
+            &journal("- 08:00 — base\n- 10:00 — from B\n"),
+        );
+        let rb = engine(&repos.b).full_sync().unwrap();
+        // The merge produced a copy; the merger immediately folded it back.
+        assert_eq!(rb.conflict_copies().len(), 1);
+        assert_eq!(rb.journal_merges.len(), 1);
+        assert!(
+            find_conflict_copies(&repos.b).is_empty(),
+            "copy folded and deleted"
+        );
+        let body = testing::read(&repos.b, "journals/20260829.2026-08-29.aaaaaaaa.md");
+        assert!(body.contains("from A") && body.contains("from B"), "{body}");
     }
 
     #[test]

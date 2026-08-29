@@ -248,6 +248,25 @@ pub fn render_report(report: &SyncReportDto) -> String {
         let _ = writeln!(out, "{REPORT_INDENT}- {} → {}", copy.original, copy.copy);
     }
 
+    if !report.journal_merges.is_empty() {
+        let folded = report.journal_merges.len();
+        let _ = writeln!(
+            out,
+            "journals:  folded {folded} duplicate journal page{}:",
+            plural(folded)
+        );
+        for merge in &report.journal_merges {
+            let pages = merge.merged.len();
+            let _ = writeln!(
+                out,
+                "{REPORT_INDENT}- {} → {} ({pages} page{})",
+                merge.date,
+                merge.winner,
+                plural(pages)
+            );
+        }
+    }
+
     let push = match report.push.as_str() {
         "not_attempted" => "not attempted".to_string(),
         "nothing_to_push" => "nothing to push".to_string(),
@@ -408,7 +427,7 @@ pub fn render_init(report: &InitReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::sync::ConflictCopyDto;
+    use crate::api::sync::{ConflictCopyDto, JournalMergeDto};
     use crate::vault::gitsync::Author;
 
     fn report(warnings: Vec<String>) -> InitReport {
@@ -460,6 +479,12 @@ mod tests {
                 original: "notes/p.md".to_string(),
                 copy: "notes/p.conflict.ab12cd3.md".to_string(),
             }],
+            journal_merges: vec![JournalMergeDto {
+                folder: "journals".to_string(),
+                date: "2026-08-29".to_string(),
+                winner: "journals/20260829.2026-08-29.aaaaaaaa.md".to_string(),
+                merged: vec!["journals/20260829.2026-08-29.bbbbbbbb.md".to_string()],
+            }],
             push: "pushed".to_string(),
             push_detail: None,
             warnings: vec!["could not record sync state".to_string()],
@@ -502,6 +527,14 @@ mod tests {
             rendered.contains("notes/p.md → notes/p.conflict."),
             "{rendered}"
         );
+        assert!(
+            rendered.contains("journals:  folded 1 duplicate journal page:"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("- 2026-08-29 → journals/20260829.2026-08-29.aaaaaaaa.md (1 page)"),
+            "{rendered}"
+        );
         assert!(rendered.contains("push:      pushed"), "{rendered}");
         assert!(
             rendered.contains("warnings:  could not record sync state"),
@@ -517,6 +550,7 @@ mod tests {
         dto.merge = "up_to_date".to_string();
         dto.merge_detail = None;
         dto.conflict_copies.clear();
+        dto.journal_merges.clear();
         dto.push = "nothing_to_push".to_string();
         dto.warnings.clear();
         let rendered = render_report(&dto);
@@ -530,6 +564,7 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("warnings:"), "{rendered}");
+        assert!(!rendered.contains("journals:"), "{rendered}");
 
         // The shutdown path pushes without fetching, and says so rather than
         // claiming to be up to date with a remote it never asked.

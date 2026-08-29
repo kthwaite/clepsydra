@@ -2125,7 +2125,7 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
 /// Returns `Some("YYYY-MM-DD")` if the path matches, `None` otherwise.
 /// Only matches the top-level prefix — e.g. `other/journals/2026-02-17.md`
 /// is rejected.
-fn extract_journal_date(path: &str) -> Option<String> {
+pub(crate) fn extract_journal_date(path: &str) -> Option<String> {
     let filename = path
         .strip_prefix("journals/")
         .or_else(|| path.strip_prefix("ai-journals/"))?;

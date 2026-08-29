@@ -23,6 +23,7 @@ use super::error::ApiError;
 use crate::vault::gitsync::SyncError;
 use crate::vault::gitsync::conflict_copy::ConflictCopy;
 use crate::vault::gitsync::engine::{MergeSummary, PushStatus, SyncReport, SyncStatus};
+use crate::vault::gitsync::journal_merge::JournalMerge;
 
 /// Message used wherever an uninitialised vault is refused, so the API and
 /// the CLI say the same thing.
@@ -35,6 +36,16 @@ pub struct ConflictCopyDto {
     pub original: String,
     /// Vault-relative path of the copy holding the incoming content.
     pub copy: String,
+}
+
+/// Duplicate journal pages for one date, folded into one page (D22).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct JournalMergeDto {
+    /// `journals` or `ai-journals`.
+    pub folder: String,
+    pub date: String,
+    pub winner: String,
+    pub merged: Vec<String>,
 }
 
 /// The result of one sync.
@@ -50,6 +61,8 @@ pub struct SyncReportDto {
     /// `fetch_failed`, `null` otherwise.
     pub merge_detail: Option<String>,
     pub conflict_copies: Vec<ConflictCopyDto>,
+    /// Duplicate journal pages this sync folded into one.
+    pub journal_merges: Vec<JournalMergeDto>,
     /// `not_attempted` | `nothing_to_push` | `pushed` | `rejected` | `failed`.
     pub push: String,
     pub push_detail: Option<String>,
@@ -135,6 +148,17 @@ impl From<&ConflictCopy> for ConflictCopyDto {
     }
 }
 
+impl From<&JournalMerge> for JournalMergeDto {
+    fn from(merge: &JournalMerge) -> Self {
+        Self {
+            folder: merge.folder.clone(),
+            date: merge.date.clone(),
+            winner: merge.winner.clone(),
+            merged: merge.merged.clone(),
+        }
+    }
+}
+
 impl From<&SyncReport> for SyncReportDto {
     fn from(report: &SyncReport) -> Self {
         let (merge, merge_detail) = match &report.merge {
@@ -161,6 +185,11 @@ impl From<&SyncReport> for SyncReportDto {
                 .conflict_copies()
                 .iter()
                 .map(ConflictCopyDto::from)
+                .collect(),
+            journal_merges: report
+                .journal_merges
+                .iter()
+                .map(JournalMergeDto::from)
                 .collect(),
             push: push.to_string(),
             push_detail,

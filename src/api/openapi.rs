@@ -330,6 +330,7 @@ impl Modify for SchemaOverrides {
             // Sync
             crate::api::sync::SyncReportDto,
             crate::api::sync::ConflictCopyDto,
+            crate::api::sync::JournalMergeDto,
             crate::api::sync::SyncStatusDto,
             // Index
             crate::api::index_routes::RebuildResponse,
