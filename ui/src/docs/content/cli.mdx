@@ -588,10 +588,19 @@ merge:     merged (0123abc), 1 conflict copy:
            - notes/p.md → notes/p.conflict.ab12cd3.md
            | up to date | fast-forward (def5678) | no remote
            | fetch failed: <detail>
+journals:  folded 1 duplicate journal page:
+           - 2026-08-29 → journals/20260829.2026-08-29.aaaaaaaa.md (1 page)
 push:      pushed | nothing to push | not attempted
            | rejected: <detail> | failed: <detail>
 warnings:  <one line each, when any>
 ```
+
+The `journals:` row appears only when a sync folded a duplicate journal date,
+one line per fold. `merge: no fetch (shutdown push)` is the one outcome this
+command never produces itself — it is what `clep serve`'s shutdown push
+records instead of fetching and merging (see [Cadence](/docs/sync#cadence)),
+and it is what `clep sync status`'s `last sync:` row shows as `no fetch` after
+one.
 
 Exit code `1` when the fetch failed or the push was rejected or failed;
 otherwise `0`. Conflict Copies are a success, not a failure — they are how a
@@ -662,6 +671,7 @@ ahead/behind:    1 / 0                          | unknown (no upstream)
 worktree:        clean | 3 uncommitted files | 1 unmerged file (!)
 conflict copies: 0
 last sync:       2026-08-28T18:20:11Z — committed 2 files; merged; pushed
+                 | committed 2 files; no fetch; pushed
                  | never
 autocommit:      idle | pending | pending (sync running)
 ```
@@ -672,10 +682,16 @@ change is waiting out its quiet period and `idle` otherwise, with
 ` (sync running)` appended while a sync is actually in progress.
 
 `ahead/behind` reads `unknown (no upstream)` until the branch has been pushed
-once. `last sync` comes from this device's own record (`.git/clep-sync.toml`),
-so it describes this machine, not the remote. `conflict copies` counts the
-`*.conflict.<id>.md` files still sitting in the tree — each one is a merge
-waiting for you to fold it back in and delete it.
+once. `last sync` comes from this device's own record (`clep-sync.toml` in the
+repository's git directory — the per-worktree directory in a linked
+worktree), so it describes this machine, not the remote; `no fetch` there
+means the last sync recorded was a shutdown push, which skips fetching and
+merging outright, and the line grows a trailing `; folded N duplicate journal
+page(s)` whenever that sync folded one. `conflict copies` counts the
+`*.conflict.<id>.md` files still sitting in the tree when this command runs
+standalone, or reads the same count from the index when a server answers;
+either way it counts a Conflict Copy from a hand-run `git merge` too — each
+one is a merge waiting for you to fold it back in and delete it.
 
 Exit code `1` when the working tree holds unmerged paths, or when sync is not
 initialised for this vault; otherwise `0`.

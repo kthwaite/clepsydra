@@ -175,18 +175,73 @@ original, with a button to open either.
 
 Encrypted pages follow the same rule as any other, but in practice always end
 up as Conflict Copies: re-encrypting a note rewrites every armored line, so two
-devices that both touched one leave nothing for a text merge to agree on.
+devices that both touched one leave nothing for a text merge to agree on. The
+same applies when the incoming side of a both-changed path is only a git-LFS
+pointer — the blob itself is not on this device — sync keeps yours and warns,
+rather than writing a Conflict Copy of a pointer file.
 
 `clep sync status` counts the copies still in the tree; `clep doctor`'s
 `conflicts` section reports files that contain literal merge markers, which
 sync never produces (they come from a hand-run `git merge`).
 
-**Coming in the next phase**, not shipped yet: a structural merge driver for
-`*.md` (frontmatter merged field-wise, body merged as text) that will resolve
-many of today's Conflict Copies automatically, plus an automatic merger for
-journal pages that share a date. Until then, `*.md merge=clep` is written into
-`.gitattributes` but unregistered, and git falls back to its ordinary text
-merge — whose residue becomes a Conflict Copy.
+## The merge driver
+
+`clep sync init` registers a custom git merge driver for every `*.md` file
+(`merge.clep.driver`, matched by the `*.md merge=clep` line in
+`.gitattributes`). It runs ahead of Clepsydra's own Conflict Copy step, on
+every merge — `clep sync`'s own and any hand-run `git merge` alike — and
+merges structurally rather than line by line:
+
+- **Frontmatter, field by field.** `updated_at` takes the later of the two
+  timestamps, `created_at` the earlier; `tags` and `aliases` merge as sets (an
+  addition on either side survives, a removal on either side sticks); every
+  other field takes whichever side actually changed it.
+- **Body, as an ordinary three-way text merge** (`git merge-file`).
+
+It gives up — and hands the page back as an ordinary conflict — when a field
+changed on both sides to different values, when the two sides are different
+pages that happen to share a path (their `id` fields disagree), or when either
+side is an encrypted page. Running through `clep sync`, every one of these
+still ends as an ordinary Conflict Copy: yours stays, theirs is written beside
+it. The one place the driver's own residue shows through is a **hand-run
+`git merge`** left unresolved — a body-level conflict comes back with literal
+`<<<<<<<` markers embedded in the page, same as git's default merge would
+leave. Clepsydra indexes that page read-only and never rewrites it; `clep
+doctor`'s `conflicts` section (`markers`) flags it same as any other
+conflict-marked file. Running `clep sync` afterwards resolves it the normal
+way.
+
+The registration lives in local git config, so it does not travel with the
+repository — a fresh clone needs its own `clep sync init` (see
+[Set up a second device](#set-up-a-second-device)). `clep doctor`'s `sync`
+section (`driver`) warns when it is missing.
+
+## Journal merging
+
+Sync makes duplicate journal pages routine: two devices editing the same day
+mint two different filenames for it, and a journal page that changed on both
+devices can also become a Conflict Copy. After every sync that changed the
+working tree, Clepsydra folds every date's pages — `journals/` and
+`ai-journals/` counted separately — back into one, before the index rebuild
+runs, and commits the fold as its own commit
+(`sync: merge 2 duplicate journal page(s) (2026-08-29)`).
+
+The oldest page by `created_at` wins and keeps its filename; everything else
+folds into it and is deleted. A Conflict Copy of a journal page always loses,
+regardless of its own `created_at` — it is Clepsydra's own residue, not a
+second device's page. Entries interleave by their `- HH:MM — ` time,
+byte-identical entries dedupe, and anything without a time — a multi-line
+capture, a stray note — is appended in source order. Links to a deleted page
+are repointed to the winner, except a bare date link (`[[2026-08-29]]`), which
+is left alone: once the duplicate is gone it resolves through the winner's own
+title.
+
+The fold is a warning, never a failure: an unreadable page is skipped and left
+for next time, and a fold that writes the winner but cannot delete every loser
+reports nothing folded rather than losing content. `clep sync`'s own report
+names each fold (see [CLI](/docs/cli#clep-sync)). `clep doctor`'s `journals`
+section (`duplicates`) is the backstop for anything sync did not see — a vault
+synced or edited by hand, say — and points back at `clep sync` to fold them.
 
 ## Checking on sync
 
@@ -217,10 +272,19 @@ answered.
 | `repo` | Initialised, not initialised yet, or nested inside another repository |
 | `branch` | Whether the checked-out branch matches `[sync] branch` |
 | `managed files` | Any managed `.gitignore`/`.gitattributes` line that went missing |
+| `driver` | Whether the markdown merge driver is registered |
+| `conflict-copies` | The Conflict Copies still in the tree, listed |
 | `lfs` | The git-lfs version, or a warning that it is not installed |
 | `remote` | The `origin` URL, or `none` |
 | `worktree` | Clean, uncommitted files pending autocommit, or unmerged files |
 | `exclusions` | Whether `.git/**` is excluded from the index |
+
+A machine with no git installed reports it as a warning, not an error: doctor
+still reports the rest of the vault.
+
+A separate `journals` section adds `duplicates` — every journal date with more
+than one page, from a vault sync did not fold (an un-synced vault, or one
+edited by hand).
 
 The doctor is read-only: it never fetches, commits, or writes git
 configuration.
@@ -234,6 +298,13 @@ repository but has no init marker, or is not a repository at all. Run
 **`vault root … is inside another git repository`** — a parent directory is a
 git repository, so the vault root cannot be the repository root. Move the
 vault out, or remove the outer repository.
+
+**`a cherry-pick/revert/rebase is in progress in this repository`** — sync
+refuses to run on top of another git operation you have not finished. Finish
+or abort it (`git cherry-pick --continue`/`--abort`; the same for `revert` and
+`rebase`), then run `clep sync` again. `git revert -n` sets `REVERT_HEAD` even
+after a clean apply, so a no-commit revert refuses sync until you commit or
+abort it.
 
 **Push rejected twice.** Sync fetched, merged and pushed again, and the remote
 still refused. Something else pushed in between, or the branch is protected.
@@ -250,7 +321,9 @@ is safe locally. The report says `fetch failed: <detail>` and the exit code is
 **Unmerged files after a hand-run `git merge`.** `clep doctor` reports them
 under `sync` → `worktree`, and `clep sync status` exits `1`. Run `clep sync`:
 it resolves every unmerged path the normal way — yours stays, theirs becomes a
-Conflict Copy.
+Conflict Copy. A path you already resolved by hand — the working tree differs
+from your side and carries no `<<<<<<<` markers — is kept exactly as you left
+it instead.
 
 **Files with `<<<<<<<` markers in them.** Sync never writes these; a hand-run
 git command did. Clepsydra indexes such files read-only and never rewrites
@@ -264,8 +337,8 @@ them. Fix them by hand; `clep doctor`'s `conflicts` section lists them.
 - [CLI](/docs/cli#clep-sync) for `clep sync`, `clep sync init`, and
   `clep sync status`
 - [Configuration](/docs/configuration#sync-settings) for the `[sync]` keys
-- [API Reference](/docs/api-reference#sync) for `POST /api/vault/sync` and
-  `GET /api/vault/sync/status`
+- [API Reference](/docs/api-reference#sync) for `POST /api/vault/sync`,
+  `GET /api/vault/sync/status`, and `GET /api/vault/sync/conflicts`
 - [Encryption and Protected Pages](/docs/encryption-and-protected-pages) for
   moving identities between devices
 - [Troubleshooting](/docs/troubleshooting) for problems outside sync

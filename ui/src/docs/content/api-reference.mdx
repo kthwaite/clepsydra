@@ -379,9 +379,9 @@ Restore an item to its original page path. Responses: `200` Restored page identi
 ## Sync
 
 ### `POST /api/vault/sync`
-Run one whole sync inside the quiesce window — commit local changes, fetch, merge `origin`, write a Conflict Copy for every unmerged path, commit and push — then, when the merge changed the working tree, rebuild the index once, reconcile drifted folders, and emit one `index_changed` event (`upserted: ["*"]`) after the rebuild, plus a second one when the reconcile sweep moved pages. Mutations wait for the window; the request returns only when the vault is settled. Responses: `200` Sync report; `409` Sync is not initialised for this vault (run `clep sync init`); `500` Internal server error.
+Run one whole sync inside the quiesce window — commit local changes, fetch, merge `origin`, write a Conflict Copy for every unmerged path, fold any duplicate journal pages the merge left behind, commit and push — then, when the merge changed the working tree, rebuild the index once, reconcile drifted folders, and emit one `index_changed` event (`upserted: ["*"]`) after the rebuild, plus a second one when the reconcile sweep moved pages. Mutations wait for the window; the request returns only when the vault is settled. Responses: `200` Sync report; `409` Sync is not initialised for this vault (run `clep sync init`), or a cherry-pick, revert or rebase is in progress; `500` Internal server error.
 
-The report names what each phase did: `committed` (commit sha or `null`) with `files_committed`; `merge` (`no_remote` | `fetch_failed` | `up_to_date` | `fast_forward` | `merged`) with `merge_detail` (the new head, or the fetch failure) and `conflict_copies` (`original` → `copy` pairs); `push` (`not_attempted` | `nothing_to_push` | `pushed` | `rejected` | `failed`) with `push_detail`; plus `warnings` and `duration_ms`. Conflict Copies are a success, not a failure — they are how a conflict is meant to end.
+The report names what each phase did: `committed` (commit sha or `null`) with `files_committed`; `merge` (`no_remote` | `fetch_failed` | `not_fetched` | `up_to_date` | `fast_forward` | `merged`) with `merge_detail` (the new head, or the fetch failure) and `conflict_copies` (`original` → `copy` pairs); `journal_merges` (`folder`, `date`, `winner`, `merged` — the duplicate journal pages this sync folded into `winner`); `push` (`not_attempted` | `nothing_to_push` | `pushed` | `rejected` | `failed`) with `push_detail`; plus `warnings` and `duration_ms`. Conflict Copies are a success, not a failure — they are how a conflict is meant to end.
 
 ### `GET /api/vault/sync/status`
 Read the vault's sync state without changing anything. Returns `initialised: false` (with placeholder values) rather than an error when the vault is not a sync repository. Responses: `200` Sync status; `500` Internal server error.
@@ -391,7 +391,7 @@ Fields: `branch`, `remote`, `head`, `ahead`/`behind` relative to `origin/<branch
 ### `GET /api/vault/sync/conflicts`
 List the Conflict Copies present in the vault, read from the index rather than a filesystem walk. Works on any vault, sync-initialised or not — a Conflict Copy can exist from a hand-run git merge. Responses: `200` Conflict Copies present in the vault, from the index; `500` Internal server error.
 
-Each item names the copy's `path` and `title`, its `original` (the `conflict_of` path whose local version won the merge) and that page's `original_title`, and `original_exists` — `false` when the original has since been deleted or moved.
+The response is `items` plus `total` (the item count). Each item names the copy's `path` and `title`, its `original` (the `conflict_of` path whose local version won the merge) and that page's `original_title`, and `original_exists` — `false` when the original has since been deleted or moved.
 
 ## Tasks
 
