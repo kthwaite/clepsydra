@@ -284,8 +284,14 @@ enum Commands {
         ours: std::path::PathBuf,
         /// The incoming version (%B).
         theirs: std::path::PathBuf,
-        /// The path being merged (%P); informational.
-        pathname: Option<String>,
+        /// The path being merged (%P); informational. Collected as a list
+        /// because git only started quoting `%P` in 2.44 (Apple's bundled git
+        /// is 2.39): before that a pathname containing spaces arrives as
+        /// several arguments, which a single positional would reject — and a
+        /// driver that exits non-zero conflicts the page. The pieces rejoin
+        /// with single spaces.
+        #[arg(trailing_var_arg = true, num_args = 0..)]
+        pathname: Vec<String>,
     },
     #[command(
         about = "Register the clepsydra:// URL scheme with macOS",
@@ -1487,6 +1493,45 @@ mod cli_tests {
     #[test]
     fn codes_requires_a_subcommand() {
         assert!(Cli::try_parse_from(["clep", "codes"]).is_err());
+    }
+
+    /// Git only started quoting `%P` in 2.44; Apple's bundled git is 2.39, so
+    /// a pathname with spaces routinely reaches the driver as several
+    /// arguments. Rejecting them would exit 2, which git reads as a conflict
+    /// for a page it could have merged.
+    #[test]
+    fn merge_driver_accepts_a_pathname_git_split_on_spaces() {
+        let cli = Cli::try_parse_from(["clep", "merge-driver", "a", "b", "c", "notes/x", "y.md"])
+            .expect("an unquoted %P must parse");
+        let Commands::MergeDriver {
+            base,
+            ours,
+            theirs,
+            pathname,
+        } = cli.command
+        else {
+            panic!("expected merge-driver");
+        };
+        assert_eq!(base, std::path::PathBuf::from("a"));
+        assert_eq!(ours, std::path::PathBuf::from("b"));
+        assert_eq!(theirs, std::path::PathBuf::from("c"));
+        assert_eq!(pathname.join(" "), "notes/x y.md");
+    }
+
+    /// The quoted form git ≥ 2.44 passes is one argument, unchanged.
+    #[test]
+    fn merge_driver_accepts_a_quoted_pathname_and_none_at_all() {
+        let pathname = |args: &[&str]| -> Vec<String> {
+            match Cli::try_parse_from(args).unwrap().command {
+                Commands::MergeDriver { pathname, .. } => pathname,
+                _ => panic!("expected merge-driver"),
+            }
+        };
+        assert_eq!(
+            pathname(&["clep", "merge-driver", "a", "b", "c", "notes/x y.md"]).join(" "),
+            "notes/x y.md"
+        );
+        assert!(pathname(&["clep", "merge-driver", "a", "b", "c"]).is_empty());
     }
 
     fn sync_init_args(args: &[&str]) -> (Option<String>, Option<String>, Option<String>) {

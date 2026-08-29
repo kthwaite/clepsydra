@@ -50,12 +50,16 @@ pub const MANAGED_GITATTRIBUTES: &[&str] = &[
     "_attachments/** filter=lfs diff=lfs merge=lfs -text",
 ];
 
+/// The key naming the driver command — the one registration key whose
+/// presence means `*.md` merges go through `clep merge-driver` (D19).
+pub const MERGE_DRIVER_KEY: &str = "merge.clep.driver";
+
 /// Repo-local merge-driver registration `clep sync init` writes (spec §5).
 /// `recursive = binary` keeps the driver out of the recursive strategy's
 /// internal virtual-ancestor merges.
 pub const MERGE_DRIVER_KEYS: &[(&str, &str)] = &[
     ("merge.clep.name", "clepsydra structural markdown merge"),
-    ("merge.clep.driver", "clep merge-driver %O %A %B %P"),
+    (MERGE_DRIVER_KEY, "clep merge-driver %O %A %B %P"),
     ("merge.clep.recursive", "binary"),
 ];
 

@@ -251,13 +251,11 @@ fn check_sync_managed_files(vault: &Vault, report: &mut Report) {
 /// registered (spec §5) — `clep sync init` writes it, but it lives in local
 /// git config, so nothing stops a hand-edit or a fresh clone from dropping it.
 fn check_sync_driver(git: &crate::vault::gitsync::git::Git, report: &mut Report) {
-    let key = crate::vault::gitsync::MERGE_DRIVER_KEYS
-        .iter()
-        .find(|(k, _)| k.ends_with(".driver"))
-        .map(|(k, _)| *k)
-        .expect("driver key present");
-    match git.config_get_local(key) {
-        Ok(Some(_)) => report.push(ok(SYNC_SECTION, "driver", "markdown merge driver registered")),
+    match git.config_get_local(crate::vault::gitsync::MERGE_DRIVER_KEY) {
+        Ok(Some(_)) => {
+            report.push(ok(SYNC_SECTION, "driver", "markdown merge driver registered"));
+            report.push(driver_path_result(std::env::var_os("PATH").as_deref()));
+        }
         Ok(None) => report.push(
             warn(
                 SYNC_SECTION,
@@ -272,6 +270,47 @@ fn check_sync_driver(git: &crate::vault::gitsync::git::Git, report: &mut Report)
             format!("could not read merge driver config: {e}"),
         )),
     }
+}
+
+/// The registration is a command line — `clep merge-driver %O %A %B %P` —
+/// which git resolves through its child's `PATH`. `clep sync`'s own merges
+/// always find it (the engine puts the running binary's own directory first),
+/// but a `git merge` run by hand from a shell without `clep` on `PATH` gets
+/// "command not found", and git turns every page both sides changed into a
+/// conflict — including the disjoint edits the default text merge would have
+/// merged cleanly.
+fn driver_path_result(path: Option<&std::ffi::OsStr>) -> CheckResult {
+    if clep_on_path(path) {
+        return ok(SYNC_SECTION, "driver-path", "`clep` resolves on PATH");
+    }
+    warn(
+        SYNC_SECTION,
+        "driver-path",
+        "`clep` does not resolve on PATH; a `git merge` run by hand cannot start the merge driver and conflicts every page both sides changed",
+    )
+    .with_hint(
+        "put `clep` on PATH (for example symlink it into /usr/local/bin), or run it from an installed location",
+    )
+}
+
+/// Whether `clep` resolves to an executable file on `path` (a `PATH`-shaped
+/// value), the way git's child shell resolves the driver command.
+fn clep_on_path(path: Option<&std::ffi::OsStr>) -> bool {
+    path.is_some_and(|path| {
+        std::env::split_paths(path).any(|dir| is_executable_file(&dir.join("clep")))
+    })
+}
+
+#[cfg(unix)]
+fn is_executable_file(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .is_ok_and(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+}
+
+#[cfg(not(unix))]
+fn is_executable_file(path: &Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|meta| meta.is_file())
 }
 
 /// Conflict Copies are the intentional, permanent side effect of a resolved
@@ -780,6 +819,11 @@ mod tests {
         let mut report = Report::default();
         check_sync(&vault, &mut report);
         assert!(matches!(sync_result(&report, "driver").status, Status::Ok));
+        assert!(
+            has_sync_check(&report, "driver-path"),
+            "a registered driver is also asked whether git could resolve it: {:#?}",
+            report.results
+        );
 
         let git = crate::vault::gitsync::git::Git::new(vault.root());
         git.run(&["config", "--unset", "merge.clep.driver"])
@@ -796,6 +840,48 @@ mod tests {
                 .unwrap_or_default()
                 .contains("clep sync init")
         );
+        assert!(
+            !has_sync_check(&report, "driver-path"),
+            "nothing is registered, so there is no command to resolve: {:#?}",
+            report.results
+        );
+    }
+
+    /// The registration is a command line git runs through a shell, so the
+    /// driver is only reachable when `clep` resolves on the `PATH` that shell
+    /// inherits. Checked against synthetic `PATH`s: the ambient one is the
+    /// developer's, and would make this test say different things on
+    /// different machines.
+    #[cfg(unix)]
+    #[test]
+    fn driver_path_result_follows_whether_clep_resolves_on_path() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        let (bin, empty) = (tmp.path().join("bin"), tmp.path().join("empty"));
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&empty).unwrap();
+        let with_bin = std::env::join_paths([&empty, &bin]).unwrap();
+        let without_bin = std::env::join_paths([&empty]).unwrap();
+
+        // Present but not executable: git's shell could not run it either.
+        let clep = bin.join("clep");
+        std::fs::write(&clep, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&clep, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let unrunnable = driver_path_result(Some(with_bin.as_os_str()));
+        assert!(matches!(unrunnable.status, Status::Warn), "{unrunnable:#?}");
+
+        std::fs::set_permissions(&clep, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let found = driver_path_result(Some(with_bin.as_os_str()));
+        assert!(matches!(found.status, Status::Ok), "{found:#?}");
+
+        let missing = driver_path_result(Some(without_bin.as_os_str()));
+        assert!(matches!(missing.status, Status::Warn), "{missing:#?}");
+        assert!(
+            missing.hint.as_deref().unwrap_or_default().contains("PATH"),
+            "{missing:#?}"
+        );
+        assert!(matches!(driver_path_result(None).status, Status::Warn));
     }
 
     #[test]

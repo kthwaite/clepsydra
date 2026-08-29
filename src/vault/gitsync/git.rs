@@ -104,6 +104,10 @@ impl Git {
             .args(Self::network_args())
             .args(args)
             .stdin(Stdio::null());
+        if let Some(path) = driver_path() {
+            cmd.env("PATH", path);
+        }
+        // After the PATH default, so a caller that sets PATH explicitly wins.
         for (key, value) in &self.env {
             cmd.env(key, value);
         }
@@ -524,6 +528,27 @@ impl Git {
     }
 }
 
+/// This process's `PATH` with the running binary's own directory first.
+///
+/// The merge driver is registered as `clep merge-driver %O %A %B %P` (spec
+/// §5), which git resolves through the child's `PATH`. A server started by
+/// launchd or a service manager — or run from a build directory — need not
+/// have `clep` on `PATH` at all, and git then reports "command not found",
+/// marks the path CONFLICT, and turns every concurrent `*.md` edit into a
+/// Conflict Copy that the default text merge would have resolved cleanly.
+/// Putting the running binary first makes the driver resolve to the very
+/// binary that is driving the merge. `None` when the executable's own path
+/// cannot be determined, in which case the child inherits `PATH` unchanged.
+fn driver_path() -> Option<std::ffi::OsString> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?.to_path_buf();
+    let mut dirs = vec![dir];
+    if let Some(existing) = std::env::var_os("PATH") {
+        dirs.extend(std::env::split_paths(&existing));
+    }
+    std::env::join_paths(dirs).ok()
+}
+
 /// The raw result of a git invocation, exit status included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RawOutput {
@@ -584,6 +609,33 @@ mod tests {
     #[test]
     fn version_reports_git() {
         assert!(Git::version().unwrap().starts_with("git version"));
+    }
+
+    /// The registered merge driver is `clep merge-driver …`, resolved by
+    /// git's child through `PATH`: the running binary's directory has to be
+    /// on it, or the driver is "command not found" and every both-changed
+    /// `*.md` becomes a Conflict Copy. (In a unit test `current_exe()` is the
+    /// test binary — the invariant under test is the ordering, not the name.)
+    #[test]
+    fn the_child_path_starts_with_the_running_binary_directory() {
+        let tmp = TempDir::new().unwrap();
+        let cmd = testing::git(tmp.path()).command(&["status"]);
+        let path = cmd
+            .get_envs()
+            .find(|(key, _)| *key == std::ffi::OsStr::new("PATH"))
+            .and_then(|(_, value)| value)
+            .expect("the child gets an explicit PATH");
+        let exe_dir = std::env::current_exe()
+            .unwrap()
+            .parent()
+            .unwrap()
+            .to_owned();
+        let mut dirs = std::env::split_paths(path);
+        assert_eq!(dirs.next().as_deref(), Some(exe_dir.as_path()));
+        // The inherited PATH is kept behind it, never replaced.
+        let inherited: Vec<PathBuf> =
+            std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).collect();
+        assert_eq!(dirs.collect::<Vec<_>>(), inherited);
     }
 
     #[test]
