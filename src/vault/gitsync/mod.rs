@@ -12,6 +12,7 @@ pub mod engine;
 pub mod git;
 pub mod init;
 pub mod managed_block;
+pub mod merge_driver;
 pub mod state;
 #[cfg(test)]
 pub(crate) mod testing;

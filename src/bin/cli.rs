@@ -273,6 +273,21 @@ enum Commands {
         command: Option<SyncCommands>,
     },
     #[command(
+        hide = true,
+        about = "Git merge driver for vault markdown (registered by `clep sync init`)",
+        long_about = "Invoked by git as `clep merge-driver %O %A %B %P`. Merges frontmatter structurally and the body as 3-way text; writes the result over OURS and exits 0 (clean) or 1 (conflict). Not intended for direct use."
+    )]
+    MergeDriver {
+        /// The common-ancestor version (%O).
+        base: std::path::PathBuf,
+        /// The current version (%A); receives the result.
+        ours: std::path::PathBuf,
+        /// The incoming version (%B).
+        theirs: std::path::PathBuf,
+        /// The path being merged (%P); informational.
+        pathname: Option<String>,
+    },
+    #[command(
         about = "Register the clepsydra:// URL scheme with macOS",
         long_about = "Build and install a small URL-handler app at ~/Applications/Clepsydra URL Handler.app that routes clepsydra:// links (and optionally obsidian:// links) to this clepsydra binary via `open-url`.\n\nmacOS only.",
         after_help = "Examples:\n  clepsydra register-url\n  clepsydra register-url --obsidian   # also claim obsidian:// (competes with Obsidian if installed)"
@@ -752,6 +767,14 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 Ok(if report.warnings.is_empty() { 0 } else { 1 })
             }
         },
+        Commands::MergeDriver {
+            base,
+            ours,
+            theirs,
+            pathname: _,
+        } => Ok(clepsydra::vault::gitsync::merge_driver::run_cli(
+            &base, &ours, &theirs,
+        )),
         Commands::Grep {
             query,
             limit,
