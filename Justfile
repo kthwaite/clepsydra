@@ -1,4 +1,4 @@
-default: install
+set default-list := true
 
 # Start an isolated backend and live-reloading frontend
 debug:
