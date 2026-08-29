@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import type { ReactNode } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type * as BasesApi from "#/api/bases";
 import type { BaseDetailResponse, QueryOutput } from "#/api/bases";
 
@@ -211,6 +211,13 @@ async function fillMemberDraft(user: UserEvent) {
   );
   return title;
 }
+
+// A view switch now writes to real `window.localStorage` (view-state.ts).
+// Clear it before every test in this file so a switch in one test (e.g. the
+// "Shelf" clicks below) can't leak a remembered view into an unrelated test.
+beforeEach(() => {
+  window.localStorage.clear();
+});
 
 describe("BaseTable standalone regression", () => {
   it("keeps the saved-view GET query, first-key sorting, and property commit path", async () => {
@@ -659,4 +666,82 @@ describe("BaseTable member creation", () => {
     // budget on an idle machine, and over it on a loaded CI runner. Same
     // allowance the comparably long fixtures in this directory already take.
   }, 15_000);
+});
+
+describe("BaseTable view restore", () => {
+  const LAST_VIEW_KEY = "clepsydra.bases.lastView.reading";
+
+  beforeEach(() => {
+    window.localStorage.clear();
+    mocks.useBaseView.mockClear();
+  });
+
+  it("opens the URL view, case-insensitively, over memory", () => {
+    window.localStorage.setItem(LAST_VIEW_KEY, "Continues");
+    const onScrubView = vi.fn();
+    render(
+      <BaseTable
+        slug="reading"
+        requestedView="shelf"
+        onScrubView={onScrubView}
+      />,
+    );
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+      "reading",
+      "Shelf",
+      expect.anything(),
+    );
+    expect(onScrubView).not.toHaveBeenCalled();
+    expect(window.localStorage.getItem(LAST_VIEW_KEY)).toBe("Continues");
+  });
+
+  it("scrubs an unknown URL view and falls back to memory", async () => {
+    window.localStorage.setItem(LAST_VIEW_KEY, "Shelf");
+    const onScrubView = vi.fn();
+    render(
+      <BaseTable
+        slug="reading"
+        requestedView="bogus"
+        onScrubView={onScrubView}
+      />,
+    );
+    await waitFor(() => expect(onScrubView).toHaveBeenCalledTimes(1));
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+      "reading",
+      "Shelf",
+      expect.anything(),
+    );
+  });
+
+  it("restores the remembered view on a plain open and ignores a stale one", () => {
+    window.localStorage.setItem(LAST_VIEW_KEY, "Shelf");
+    const { unmount } = render(<BaseTable slug="reading" />);
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+      "reading",
+      "Shelf",
+      expect.anything(),
+    );
+    unmount();
+    window.localStorage.setItem(LAST_VIEW_KEY, "Gone");
+    render(<BaseTable slug="reading" />);
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+      "reading",
+      "Continues",
+      expect.anything(),
+    );
+  });
+
+  it("remembers and reports an explicit switch", async () => {
+    const user = userEvent.setup();
+    const onViewChange = vi.fn();
+    render(<BaseTable slug="reading" onViewChange={onViewChange} />);
+    await user.click(screen.getByRole("button", { name: "Shelf" }));
+    expect(onViewChange).toHaveBeenCalledWith("Shelf");
+    expect(window.localStorage.getItem(LAST_VIEW_KEY)).toBe("Shelf");
+    expect(mocks.useBaseView).toHaveBeenLastCalledWith(
+      "reading",
+      "Shelf",
+      expect.anything(),
+    );
+  });
 });
