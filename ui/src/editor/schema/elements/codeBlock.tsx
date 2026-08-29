@@ -19,6 +19,10 @@ const CODE_MARKS = [
   "underline",
   "code",
   "strikethrough",
+  "superscript",
+  "subscript",
+  "color",
+  "backgroundColor",
 ] as const;
 
 function normalizeCodeBlock(

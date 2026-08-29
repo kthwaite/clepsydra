@@ -59,6 +59,7 @@ import {
 } from "./plugins/withOutliner";
 import { moveToAdjacentCell, withTables } from "./plugins/withTables";
 import { useRefractor } from "./refractor-lazy";
+import { SelectionBubbleMenu } from "./SelectionBubbleMenu";
 import { SlashCombobox, type SlashCommand } from "./SlashCombobox";
 import { makeBaseEmbed } from "./schema/elements/baseEmbed";
 import { makeBlockRef } from "./schema/elements/blockRef";
@@ -782,6 +783,7 @@ export function SlateEditor({
                   className="min-h-[200px] w-full min-w-0 outline-none"
                   spellCheck
                 />
+                <SelectionBubbleMenu readOnly={readOnly} />
               </TaskPropertyPopoverProvider>
               {!readOnly && isVimEnabled && (
                 <VimStatusBar mode={vim.mode} pending={vim.pending} />
