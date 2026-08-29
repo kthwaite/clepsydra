@@ -242,31 +242,40 @@ impl SyncEngine {
         }))
     }
 
-    /// Refuse to sync while a cherry-pick or a rebase owns the repository
-    /// (D24). Only a merge is ours to finish: `git add -A` over a half-applied
-    /// pick would commit the user's in-progress work as a sync commit — and it
-    /// needs no unmerged path to do so, a pick whose conflicts the user has
-    /// already resolved but not continued is enough.
+    /// Refuse to sync while a cherry-pick, a revert or a rebase owns the
+    /// repository (D24). Only a merge is ours to finish: `git add -A` over a
+    /// half-applied pick would commit the user's in-progress work as a sync
+    /// commit — and it needs no unmerged path to do so, an operation whose
+    /// conflicts the user has already resolved but not continued is enough.
     ///
-    /// A rebase is detected by its state directory rather than `REBASE_HEAD`,
-    /// which git leaves behind after a successful `rebase --continue`
-    /// (verified on git 2.55): a ref-based check would refuse every sync
-    /// thereafter. `git_dir` is the per-worktree directory, so a rebase in
-    /// another worktree of the same repository does not block this one.
+    /// Cherry-pick and revert are read from their refs, which git clears on
+    /// `--continue`, `--abort` and an ordinary `git commit`. A rebase is
+    /// detected by its state directory instead: git leaves `REBASE_HEAD`
+    /// resolvable after a *successful* `rebase --continue` (verified on git
+    /// 2.55), so a ref-based check there would refuse every sync thereafter.
+    /// `git_dir` is the per-worktree directory, so a rebase in another
+    /// worktree of the same repository does not block this one.
     fn refuse_foreign_operation(&self) -> Result<(), SyncError> {
+        let busy = |operation: &str| {
+            Err(SyncError::GitOperationInProgress {
+                operation: operation.to_string(),
+            })
+        };
+        for (reference, operation) in [
+            ("CHERRY_PICK_HEAD", "cherry-pick"),
+            ("REVERT_HEAD", "revert"),
+        ] {
+            if self.git.rev_parse(reference)?.is_some() {
+                return busy(operation);
+            }
+        }
         let rebasing = ["rebase-merge", "rebase-apply"]
             .iter()
             .any(|dir| self.git_dir.join(dir).is_dir());
-        let operation = if self.git.rev_parse("CHERRY_PICK_HEAD")?.is_some() {
-            "cherry-pick"
-        } else if rebasing {
-            "rebase"
-        } else {
-            return Ok(());
-        };
-        Err(SyncError::GitOperationInProgress {
-            operation: operation.to_string(),
-        })
+        if rebasing {
+            return busy("rebase");
+        }
+        Ok(())
     }
 
     /// Finish a merge an earlier run left in progress — a process killed
@@ -1009,6 +1018,53 @@ mod tests {
             before,
             "the user's staged resolution was not committed"
         );
+    }
+
+    /// A revert is the identical hazard to a cherry-pick: `REVERT_HEAD`
+    /// outlives the user resolving and staging, so nothing is unmerged by the
+    /// time a sync runs. (Unlike `cherry-pick -n`, even a cleanly applying
+    /// `revert --no-commit` sets the ref — which is right: that staged revert
+    /// is the user's to commit, not ours.)
+    #[test]
+    fn a_resolved_but_uncontinued_revert_refuses_to_sync() {
+        let repos = testing::TestRepos::new();
+        let g = testing::git(&repos.a);
+        testing::write(&repos.a, "v.md", &page("36", "V", "base"));
+        engine(&repos.a).full_sync().unwrap();
+        testing::write(&repos.a, "v.md", &page("36", "V", "second"));
+        g.add_all().unwrap();
+        let target = g.commit("second", &testing::author()).unwrap();
+        testing::write(&repos.a, "v.md", &page("36", "V", "third"));
+        g.add_all().unwrap();
+        g.commit("third", &testing::author()).unwrap();
+        // Reverting "second" under "third" touches the same lines: conflict.
+        let _ = g.run_raw(&["revert", "--no-edit", &target]);
+        assert!(g.rev_parse("REVERT_HEAD").unwrap().is_some());
+        testing::write(&repos.a, "v.md", &page("36", "V", "resolved by hand"));
+        g.add(&["v.md"]).unwrap();
+        assert!(g.unmerged().unwrap().is_empty(), "nothing is unmerged");
+        let before = g.log_count().unwrap();
+
+        let err = engine(&repos.a).full_sync().unwrap_err();
+
+        assert!(
+            matches!(err, SyncError::GitOperationInProgress { ref operation } if operation == "revert"),
+            "{err}"
+        );
+        assert_eq!(
+            g.log_count().unwrap(),
+            before,
+            "the user's staged revert was not committed"
+        );
+
+        // And once they finish it, syncing works again: git clears REVERT_HEAD
+        // on `--continue`, so the refusal cannot become permanent.
+        testing::git(&repos.a)
+            .with_env("GIT_EDITOR", "true")
+            .run(&["revert", "--continue"])
+            .unwrap();
+        assert!(g.rev_parse("REVERT_HEAD").unwrap().is_none());
+        engine(&repos.a).full_sync().expect("sync after the revert");
     }
 
     #[test]

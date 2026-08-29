@@ -174,7 +174,8 @@ impl From<&SyncReport> for SyncReportDto {
 
 /// The sync failures a client can act on get a `409` — an uninitialised
 /// vault (with the `clep sync init` hint) and a repository already busy with
-/// a cherry-pick or rebase the user has to finish. Everything else is a `500`.
+/// a cherry-pick, revert or rebase the user has to finish. Everything else is
+/// a `500`.
 fn sync_error(error: SyncError) -> ApiError {
     match error {
         SyncError::NotInitialised => ApiError::conflict(NOT_INITIALISED),
@@ -190,7 +191,7 @@ fn sync_error(error: SyncError) -> ApiError {
     tag = "Sync",
     responses(
         (status = 200, description = "Sync report", body = SyncReportDto),
-        (status = 409, description = "Sync is not initialised for this vault, or a cherry-pick or rebase is in progress", body = ApiError),
+        (status = 409, description = "Sync is not initialised for this vault, or a cherry-pick, revert or rebase is in progress", body = ApiError),
         (status = 500, description = "Internal server error", body = ApiError)
     )
 )]
