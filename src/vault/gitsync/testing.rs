@@ -26,9 +26,11 @@ pub(crate) fn empty_global_config() -> PathBuf {
     path.clone()
 }
 
-/// A [`Git`] rooted at `root`, isolated from the developer's real git
-/// config: `GIT_CONFIG_GLOBAL` points at an empty file and
-/// `GIT_CONFIG_NOSYSTEM=1` skips `/etc/gitconfig`.
+/// A [`Git`] rooted at `root`, isolated from every host-provided identity:
+/// global/system config are disabled and the standard author/committer
+/// environment variables carry the fixture's deterministic identity. This
+/// also covers Git operations such as `rebase --continue` that create a
+/// commit without going through [`Git::commit`].
 pub fn git(root: &Path) -> Git {
     Git::new(root)
         .with_env(
@@ -36,6 +38,10 @@ pub fn git(root: &Path) -> Git {
             &empty_global_config().display().to_string(),
         )
         .with_env("GIT_CONFIG_NOSYSTEM", "1")
+        .with_env("GIT_AUTHOR_NAME", "Test Author")
+        .with_env("GIT_AUTHOR_EMAIL", "test@example.com")
+        .with_env("GIT_COMMITTER_NAME", "Test Author")
+        .with_env("GIT_COMMITTER_EMAIL", "test@example.com")
 }
 
 /// The `[sync]` author every `TestRepos` clone is seeded with.

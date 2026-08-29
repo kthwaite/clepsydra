@@ -438,7 +438,7 @@ impl SyncEngine {
             return Ok((MergeSummary::UpToDate, Vec::new()));
         }
         let before = self.git.head()?;
-        let out = self.git.merge_no_commit(&reference)?;
+        let out = self.git.merge_no_commit(&reference, &self.author)?;
         let merge_head = self.git.merge_head()?;
         match (out.status, merge_head) {
             (0, None) => {
@@ -987,7 +987,12 @@ mod tests {
         gb.add_all().unwrap();
         gb.commit("b", &testing::author()).unwrap();
         gb.fetch("origin", "main").unwrap();
-        assert_eq!(gb.merge_no_commit("origin/main").unwrap().status, 1);
+        assert_eq!(
+            gb.merge_no_commit("origin/main", &testing::author())
+                .unwrap()
+                .status,
+            1
+        );
         assert!(gb.merge_head().unwrap().is_some());
         assert!(
             testing::read(&repos.b, "notes/p.md").contains("<<<<<<<"),
@@ -1093,7 +1098,12 @@ mod tests {
         gb.add_all().unwrap();
         gb.commit("b", &testing::author()).unwrap();
         gb.fetch("origin", "main").unwrap();
-        assert_eq!(gb.merge_no_commit("origin/main").unwrap().status, 1);
+        assert_eq!(
+            gb.merge_no_commit("origin/main", &testing::author())
+                .unwrap()
+                .status,
+            1
+        );
 
         // The user resolves by hand: no markers, not equal to either side.
         testing::write(&repos.b, "notes/p.md", &page("30", "Plan", "hand-merged"));
@@ -1340,7 +1350,12 @@ mod tests {
         gb.add_all().unwrap();
         gb.commit("b", &testing::author()).unwrap();
         gb.fetch("origin", "main").unwrap();
-        assert_eq!(gb.merge_no_commit("origin/main").unwrap().status, 0);
+        assert_eq!(
+            gb.merge_no_commit("origin/main", &testing::author())
+                .unwrap()
+                .status,
+            0
+        );
         assert!(gb.merge_head().unwrap().is_some(), "a merge is in progress");
         assert!(
             gb.unmerged().unwrap().is_empty(),

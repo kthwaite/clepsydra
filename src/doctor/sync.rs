@@ -590,7 +590,8 @@ mod tests {
         gb.add_all().unwrap();
         gb.commit("b edit", &testing::author()).unwrap();
         gb.fetch("origin", "main").unwrap();
-        gb.merge_no_commit("origin/main").unwrap();
+        gb.merge_no_commit("origin/main", &testing::author())
+            .unwrap();
         assert_eq!(
             gb.unmerged().unwrap().len(),
             1,

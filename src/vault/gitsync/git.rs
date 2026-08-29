@@ -114,6 +114,15 @@ impl Git {
         cmd
     }
 
+    fn command_as(&self, args: &[&str], author: &Author) -> Command {
+        let mut cmd = self.command(args);
+        cmd.env("GIT_AUTHOR_NAME", &author.name)
+            .env("GIT_AUTHOR_EMAIL", &author.email)
+            .env("GIT_COMMITTER_NAME", &author.name)
+            .env("GIT_COMMITTER_EMAIL", &author.email);
+        cmd
+    }
+
     fn spawn(cmd: &mut Command) -> Result<Output, GitError> {
         cmd.output().map_err(GitError::Spawn)
     }
@@ -359,11 +368,7 @@ impl Git {
     /// `git commit -q -m <message>` under `author`'s identity for both the
     /// author and committer. Returns the new commit's sha.
     pub fn commit(&self, message: &str, author: &Author) -> Result<String, GitError> {
-        let mut cmd = self.command(&["commit", "-q", "-m", message]);
-        cmd.env("GIT_AUTHOR_NAME", &author.name)
-            .env("GIT_AUTHOR_EMAIL", &author.email)
-            .env("GIT_COMMITTER_NAME", &author.name)
-            .env("GIT_COMMITTER_EMAIL", &author.email);
+        let mut cmd = self.command_as(&["commit", "-q", "-m", message], author);
         let output = Self::spawn(&mut cmd)?;
         let status = output.status.code().unwrap_or(-1);
         if status != 0 {
@@ -384,10 +389,25 @@ impl Git {
         self.run(&["fetch", "-q", remote, branch]).map(|_| ())
     }
 
-    /// `git merge --no-commit --no-edit <reference>`. Never maps the exit
-    /// status to an error — callers branch on `MERGE_HEAD` / unmerged paths.
-    pub fn merge_no_commit(&self, reference: &str) -> Result<RawOutput, GitError> {
-        self.run_raw(&["merge", "--no-commit", "--no-edit", reference])
+    /// `git merge --no-commit --no-edit <reference>` under `author`'s
+    /// identity. Git validates the committer before starting some merges even
+    /// though `--no-commit` leaves the final commit to the caller. Never maps
+    /// the exit status to an error — callers branch on `MERGE_HEAD` / unmerged
+    /// paths.
+    pub fn merge_no_commit(&self, reference: &str, author: &Author) -> Result<RawOutput, GitError> {
+        let args = ["merge", "--no-commit", "--no-edit", reference];
+        let mut cmd = self.command_as(&args, author);
+        let output = Self::spawn(&mut cmd)?;
+        let status = output.status.code().unwrap_or(-1);
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        let stdout = String::from_utf8(output.stdout).map_err(|_| GitError::Utf8 {
+            args: args.join(" "),
+        })?;
+        Ok(RawOutput {
+            status,
+            stdout,
+            stderr,
+        })
     }
 
     pub fn merge_head(&self) -> Result<Option<String>, GitError> {
@@ -758,6 +778,37 @@ mod tests {
     }
 
     #[test]
+    fn merge_no_commit_uses_supplied_identity_when_environment_is_blank() {
+        let repos = testing::TestRepos::new();
+        let a = testing::git(&repos.a);
+        testing::write(&repos.a, "a.md", "a");
+        a.add_all().unwrap();
+        a.commit("a", &testing::author()).unwrap();
+        a.push("origin", "main").unwrap();
+
+        let mut b = testing::git(&repos.b);
+        testing::write(&repos.b, "b.md", "b");
+        b.add_all().unwrap();
+        b.commit("b", &testing::author()).unwrap();
+        b.fetch("origin", "main").unwrap();
+        for key in [
+            "GIT_AUTHOR_NAME",
+            "GIT_AUTHOR_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_COMMITTER_EMAIL",
+        ] {
+            b = b.with_env(key, "");
+        }
+
+        let out = b
+            .merge_no_commit("origin/main", &testing::author())
+            .unwrap();
+        assert_eq!(out.status, 0, "{}", out.stderr);
+        assert!(b.merge_head().unwrap().is_some());
+        b.abort_merge().unwrap();
+    }
+
+    #[test]
     fn unmerged_reports_stages_and_show_stage_returns_bytes() {
         let repos = testing::TestRepos::new();
         let a = testing::git(&repos.a);
@@ -773,7 +824,9 @@ mod tests {
         b.add_all().unwrap();
         b.commit("b", &testing::author()).unwrap();
         b.fetch("origin", "main").unwrap();
-        let out = b.merge_no_commit("origin/main").unwrap();
+        let out = b
+            .merge_no_commit("origin/main", &testing::author())
+            .unwrap();
         assert_eq!(out.status, 1);
         let unmerged = b.unmerged().unwrap();
         assert_eq!(unmerged.len(), 1);
