@@ -7,6 +7,13 @@ a bespoke personal knowledge management system.
 - Local setup: [ui/src/docs/content/getting-started.mdx](ui/src/docs/content/getting-started.mdx) (in app: `/docs/getting-started`)
 - Tailnet HTTPS via Caddy: [ui/src/docs/content/getting-started.mdx#6-optional-expose-over-tailscale-with-caddy](ui/src/docs/content/getting-started.mdx#6-optional-expose-over-tailscale-with-caddy)
 
+## Development
+
+Run `just debug` to start an isolated backend at <http://127.0.0.1:3100>
+and a Vite frontend with HMR at <http://127.0.0.1:5174>. Each invocation
+creates a fresh, representative disposable vault. Press Ctrl-C to stop both
+services and remove all temporary data.
+
 ## Documentation
 
 - Frontend guide: [ui/README.md](ui/README.md)
