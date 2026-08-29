@@ -215,6 +215,8 @@ export type ElementType = CustomElement["type"];
 
 export interface CustomText {
   text: string;
+  color?: string;
+  backgroundColor?: string;
   bold?: true;
   italic?: true;
   underline?: true;

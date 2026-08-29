@@ -119,6 +119,99 @@ describe("markdownToSlate", () => {
     });
   });
 
+  describe("colour marks", () => {
+    it("parses text and highlight colours while ignoring unrelated styles", () => {
+      const result = markdownToSlate(
+        'before <span style="font-size: 20px; color: #336699; background-color: rgb(255, 240, 120); letter-spacing: 2px">painted</span> after',
+      );
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: "before " },
+            {
+              text: "painted",
+              color: "#336699",
+              backgroundColor: "rgb(255, 240, 120)",
+            },
+            { text: " after" },
+          ],
+        },
+      ]);
+    });
+
+    it("combines a colour with an existing markdown mark", () => {
+      const result = markdownToSlate(
+        '<span style="color: rebeccapurple">**nested**</span>',
+      );
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: "nested", bold: true, color: "rebeccapurple" },
+          ],
+        },
+      ]);
+    });
+
+    it("represents cleared colours as absent marks", () => {
+      const result = markdownToSlate(
+        '<span style="color: red">red</span> plain <span style="background-color: yellow">highlight</span>',
+      );
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: "red", color: "red" },
+            { text: " plain " },
+            { text: "highlight", backgroundColor: "yellow" },
+          ],
+        },
+      ]);
+    });
+
+    it("keeps unsupported nested spans literal without clearing outer colour", () => {
+      const result = markdownToSlate(
+        '<span style="color: red"><span class="x">inner</span> outer</span>',
+      );
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            { text: '<span class="x">', color: "red" },
+            { text: "inner", color: "red" },
+            { text: "</span>", color: "red" },
+            { text: " outer", color: "red" },
+          ],
+        },
+      ]);
+    });
+
+    it("consumes style spans with only unsupported declarations", () => {
+      const result = markdownToSlate(
+        '<span style="font-size: 20px">plain</span>',
+      );
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [{ text: "plain" }],
+        },
+      ]);
+    });
+
+    it("consumes style spans with only an unsafe colour value", () => {
+      const result = markdownToSlate(
+        '<span style="color: url(&quot;javascript:alert(1)&quot;)">plain</span>',
+      );
+      expect(result).toEqual([
+        {
+          type: "paragraph",
+          children: [{ text: "plain" }],
+        },
+      ]);
+    });
+  });
+
   describe("code blocks", () => {
     it("converts a code block without language", () => {
       const result = markdownToSlate("```\nconst x = 1;\n```");

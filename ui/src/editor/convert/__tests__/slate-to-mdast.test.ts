@@ -261,6 +261,93 @@ describe("slateToMarkdown", () => {
     expect(slateToMarkdown(slate).trim()).toBe("`code`");
   });
 
+  describe("colour mark serialization", () => {
+    it("serializes text and highlight colours as minimal inline styles", () => {
+      const slate = [
+        {
+          type: "paragraph",
+          children: [
+            { text: "before " },
+            {
+              text: "painted",
+              color: "#336699",
+              backgroundColor: "#fff078",
+            },
+            { text: " after" },
+          ],
+        },
+      ] as unknown as Descendant[];
+
+      expect(slateToMarkdown(slate).trim()).toBe(
+        'before <span style="color: #336699; background-color: #fff078">painted</span> after',
+      );
+    });
+
+    it("nests an existing markdown mark inside the colour span", () => {
+      const slate = [
+        {
+          type: "paragraph",
+          children: [{ text: "nested", bold: true, color: "rebeccapurple" }],
+        },
+      ] as unknown as Descendant[];
+
+      expect(slateToMarkdown(slate).trim()).toBe(
+        '<span style="color: rebeccapurple">**nested**</span>',
+      );
+    });
+
+    it("round-trips nested text and hex highlight colours", () => {
+      const slate = [
+        {
+          type: "paragraph",
+          children: [
+            {
+              text: "nested",
+              bold: true,
+              color: "#336699",
+              backgroundColor: "#fff078",
+            },
+          ],
+        },
+      ] as unknown as Descendant[];
+
+      const markdown = slateToMarkdown(slate).trim();
+      expect(markdown).toBe(
+        '<span style="color: #336699; background-color: #fff078">**nested**</span>',
+      );
+      expect(markdownToSlate(markdown)).toEqual([
+        {
+          type: "paragraph",
+          children: [
+            {
+              text: "nested",
+              bold: true,
+              color: "#336699",
+              backgroundColor: "#fff078",
+            },
+          ],
+        },
+      ]);
+    });
+
+    it("omits colour styles from leaves whose marks were cleared", () => {
+      const slate = [
+        {
+          type: "paragraph",
+          children: [
+            { text: "red", color: "red" },
+            { text: " plain " },
+            { text: "highlight", backgroundColor: "yellow" },
+          ],
+        },
+      ] as unknown as Descendant[];
+
+      expect(slateToMarkdown(slate).trim()).toBe(
+        '<span style="color: red">red</span> plain <span style="background-color: yellow">highlight</span>',
+      );
+    });
+  });
+
   it("handles empty document", () => {
     const slate: Descendant[] = [];
     expect(slateToMarkdown(slate).trim()).toBe("");
