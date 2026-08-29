@@ -355,26 +355,50 @@ impl SyncEngine {
     }
 
     /// D22: after a tree-changing pull, fold duplicate journal pages and
-    /// commit the fold so the push carries it. Failures are warnings.
+    /// commit the fold so the push carries it.
+    ///
+    /// Every failure here is a warning, never an error: a merger problem must
+    /// not fail a sync that has already merged. A fold whose commit fails
+    /// stays in the working tree and is committed by the next sync.
     fn merge_journals_after_pull(
         &self,
         summary: &MergeSummary,
         warnings: &mut Vec<String>,
         merges: &mut Vec<JournalMerge>,
-    ) -> Result<(), SyncError> {
+    ) {
         if !matches!(
             summary,
             MergeSummary::FastForward { .. } | MergeSummary::Merged { .. }
         ) {
-            return Ok(());
+            return;
         }
         let (folded, merge_warnings) = merge_duplicate_journals(&self.root);
         warnings.extend(merge_warnings);
+        // Empty means nothing left the tree, so there may be nothing staged to
+        // commit — and `git commit` with an empty index fails.
         if folded.is_empty() {
-            return Ok(());
+            return;
         }
+        if let Err(e) = self.commit_journal_fold(&folded) {
+            warnings.push(format!(
+                "journal merge: folded {} duplicate journal page{} but could not commit the fold: {e}",
+                folded.len(),
+                plural(folded.len())
+            ));
+        }
+        merges.extend(folded);
+    }
+
+    /// Stage and commit a fold. One date per fold, listed once however many
+    /// folders folded it.
+    fn commit_journal_fold(&self, folded: &[JournalMerge]) -> Result<(), SyncError> {
         self.git.add_all()?;
-        let dates: Vec<String> = folded.iter().map(|merge| merge.date.clone()).collect();
+        let mut dates: Vec<&str> = Vec::new();
+        for merge in folded {
+            if !dates.contains(&merge.date.as_str()) {
+                dates.push(&merge.date);
+            }
+        }
         let message = super::with_device_trailer(&format!(
             "sync: merge {} duplicate journal page{} ({})",
             folded.len(),
@@ -382,7 +406,6 @@ impl SyncEngine {
             dates.join(", ")
         ));
         self.git.commit(&message, &self.author)?;
-        merges.extend(folded);
         Ok(())
     }
 
@@ -619,7 +642,7 @@ impl SyncEngine {
         }
         let (merge, mut warnings) = self.pull_inner()?;
         let mut journal_merges = Vec::new();
-        self.merge_journals_after_pull(&merge, &mut warnings, &mut journal_merges)?;
+        self.merge_journals_after_pull(&merge, &mut warnings, &mut journal_merges);
         Ok((
             self.push()?,
             Some(RetryPull {
@@ -658,7 +681,7 @@ impl SyncEngine {
         let committed = self.commit_local()?;
         let (mut merge, mut warnings) = self.pull_inner()?;
         let mut journal_merges = Vec::new();
-        self.merge_journals_after_pull(&merge, &mut warnings, &mut journal_merges)?;
+        self.merge_journals_after_pull(&merge, &mut warnings, &mut journal_merges);
         let push = match merge {
             MergeSummary::NoRemote | MergeSummary::FetchFailed(_) => PushStatus::NotAttempted,
             _ => {
@@ -1784,6 +1807,138 @@ mod tests {
                 .a
                 .join("journals/20260829.2026-08-29.bbbbbbbb.md")
                 .exists()
+        );
+    }
+
+    /// `journals` and `ai-journals` fold independently in one sync, and the
+    /// single fold commit names their shared date once rather than twice.
+    #[test]
+    fn both_journal_folders_fold_under_one_commit_naming_the_date_once() {
+        let repos = testing::TestRepos::new();
+        let journal = |body: &str, tail: &str, suffix: &str| {
+            format!(
+                "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{tail}\"\ntitle = \"2026-08-29\"\ncreated_at = 2026-08-29T0{suffix}:00:00Z\n+++\n{body}"
+            )
+        };
+        for (folder, tail) in [("journals", "60"), ("ai-journals", "61")] {
+            testing::write(
+                &repos.a,
+                &format!("{folder}/20260829.2026-08-29.aaaaaaaa.md"),
+                &journal("- 08:00 — from A\n", tail, "8"),
+            );
+        }
+        engine(&repos.a).full_sync().unwrap();
+        for (folder, tail) in [("journals", "62"), ("ai-journals", "63")] {
+            testing::write(
+                &repos.b,
+                &format!("{folder}/20260829.2026-08-29.bbbbbbbb.md"),
+                &journal("- 10:00 — from B\n", tail, "9"),
+            );
+        }
+
+        let rb = engine(&repos.b).full_sync().unwrap();
+
+        let mut folders: Vec<&str> = rb
+            .journal_merges
+            .iter()
+            .map(|merge| merge.folder.as_str())
+            .collect();
+        folders.sort_unstable();
+        assert_eq!(folders, vec!["ai-journals", "journals"]);
+        let message = testing::git(&repos.b)
+            .run(&["log", "-1", "--format=%B", "HEAD"])
+            .unwrap();
+        assert!(
+            message.starts_with("sync: merge 2 duplicate journal pages (2026-08-29)"),
+            "the shared date is named once: {message}"
+        );
+        for folder in ["journals", "ai-journals"] {
+            let body = testing::read(
+                &repos.b,
+                &format!("{folder}/20260829.2026-08-29.aaaaaaaa.md"),
+            );
+            assert!(
+                body.contains("- 08:00 — from A") && body.contains("- 10:00 — from B"),
+                "{folder}: {body}"
+            );
+        }
+        assert!(testing::git(&repos.b).status().unwrap().is_empty());
+    }
+
+    /// A `commit-msg` hook in `root` that rejects any commit whose message
+    /// contains `reject` — the one way to fail a specific engine commit
+    /// through real git, leaving every other commit of the sync alone.
+    #[cfg(unix)]
+    fn reject_commit_message(root: &Path, reject: &str) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let hook = root.join(".git/hooks/commit-msg");
+        fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        fs::write(
+            &hook,
+            format!("#!/bin/sh\nif grep -q '{reject}' \"$1\"; then exit 1; fi\nexit 0\n"),
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// D22: a merger problem is a warning, never a failed sync. A fold whose
+    /// commit fails stays in the working tree for the next sync to pick up —
+    /// no content is lost and the sync still reports success.
+    #[cfg(unix)]
+    #[test]
+    fn a_fold_whose_commit_fails_warns_instead_of_failing_the_sync() {
+        let repos = testing::TestRepos::new();
+        let journal = |body: &str, tail: &str, suffix: &str| {
+            format!(
+                "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{tail}\"\ntitle = \"2026-08-29\"\ncreated_at = 2026-08-29T0{suffix}:00:00Z\n+++\n{body}"
+            )
+        };
+        testing::write(
+            &repos.a,
+            "journals/20260829.2026-08-29.aaaaaaaa.md",
+            &journal("- 08:00 — from A\n", "50", "8"),
+        );
+        engine(&repos.a).full_sync().unwrap();
+        testing::write(
+            &repos.b,
+            "journals/20260829.2026-08-29.bbbbbbbb.md",
+            &journal("- 10:00 — from B\n", "51", "9"),
+        );
+        reject_commit_message(&repos.b, "duplicate journal page");
+
+        let rb = engine(&repos.b)
+            .full_sync()
+            .expect("the sync still succeeds");
+
+        assert_eq!(rb.journal_merges.len(), 1, "the fold happened on disk");
+        assert!(
+            rb.warnings
+                .iter()
+                .any(|w| w.contains("could not commit the fold")),
+            "{:?}",
+            rb.warnings
+        );
+        assert!(
+            !repos
+                .b
+                .join("journals/20260829.2026-08-29.bbbbbbbb.md")
+                .exists()
+        );
+        assert!(
+            !testing::git(&repos.b).status().unwrap().is_empty(),
+            "the uncommitted fold is left in the tree"
+        );
+
+        // Nothing was lost: with the hook gone the next sync commits it.
+        fs::remove_file(repos.b.join(".git/hooks/commit-msg")).unwrap();
+        let again = engine(&repos.b).full_sync().unwrap();
+        assert!(again.committed.is_some(), "{again:?}");
+        assert!(testing::git(&repos.b).status().unwrap().is_empty());
+        let body = testing::read(&repos.b, "journals/20260829.2026-08-29.aaaaaaaa.md");
+        assert!(
+            body.contains("- 08:00 — from A") && body.contains("- 10:00 — from B"),
+            "{body}"
         );
     }
 

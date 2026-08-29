@@ -93,11 +93,15 @@ pub fn duplicate_journal_groups(root: &Path) -> Vec<JournalGroup> {
 pub fn merge_duplicate_journals(root: &Path) -> (Vec<JournalMerge>, Vec<String>) {
     let mut merges = Vec::new();
     let mut warnings = Vec::new();
+    // Every group's rewrites are collected first and applied in one pass, so
+    // the vault is read once however many pages were folded.
+    let mut repoints: Vec<(String, String)> = Vec::new();
     for group in duplicate_journal_groups(root) {
-        if let Some(merge) = merge_group(root, &group, &mut warnings) {
+        if let Some(merge) = merge_group(root, &group, &mut repoints, &mut warnings) {
             merges.push(merge);
         }
     }
+    repoint_links(root, &repoints, &mut warnings);
     (merges, warnings)
 }
 
@@ -110,10 +114,15 @@ struct Member {
 }
 
 /// Fold one group, or `None` when fewer than two of its members could be
-/// read (nothing to merge) or the winner could not be written.
+/// read (nothing to merge), the winner could not be written, or not one
+/// loser could be deleted (nothing was actually folded away).
+///
+/// The link rewrites the fold implies are appended to `repoints` rather than
+/// applied here, so one vault pass serves every group.
 fn merge_group(
     root: &Path,
     group: &JournalGroup,
+    repoints: &mut Vec<(String, String)>,
     warnings: &mut Vec<String>,
 ) -> Option<JournalMerge> {
     let mut members: Vec<Member> = Vec::new();
@@ -173,8 +182,14 @@ fn merge_group(
             ));
             continue;
         }
-        repoint_links(root, &loser.path, &winner.path, warnings);
+        repoints.extend(repoint_pairs(&loser.path, &winner.path, &group.date));
         merged.push(loser.path.clone());
+    }
+    if merged.is_empty() {
+        // Nothing left the tree, so there is no fold to report and — with the
+        // winner's rewrite the only change, if it changed at all — possibly
+        // nothing for the caller to commit either.
+        return None;
     }
     Some(JournalMerge {
         folder: group.folder.clone(),
@@ -182,6 +197,32 @@ fn merge_group(
         winner: winner.path,
         merged,
     })
+}
+
+/// The link rewrites a deleted loser implies, oldest form first.
+///
+/// Three forms reach a page: the directory-qualified path stem a
+/// `[[journals/…]]` link carries, the `.md` path a markdown link carries, and
+/// the bare filename stem. The filename stem is dropped when it *is* the
+/// group's date — a legacy-named `journals/2026-08-29.md` would otherwise
+/// turn every `[[2026-08-29]]` in the vault into a filename link, and D21
+/// leaves date links alone. It does not need them: a date link resolves
+/// through the winner's title, which deleting the loser makes unambiguous by
+/// itself. The path stem is kept even for a legacy name, because
+/// `[[journals/2026-08-29]]` resolves through the loser's own path and would
+/// dangle once the loser is gone.
+fn repoint_pairs(loser_rel: &str, winner_rel: &str, date: &str) -> Vec<(String, String)> {
+    let path_stem = |rel: &str| rel.strip_suffix(".md").unwrap_or(rel).to_string();
+    let stem = |rel: &str| path_stem(file_name(rel));
+    let mut pairs = vec![
+        (path_stem(loser_rel), path_stem(winner_rel)),
+        (loser_rel.to_string(), winner_rel.to_string()),
+    ];
+    let (old_stem, new_stem) = (stem(loser_rel), stem(winner_rel));
+    if old_stem != date {
+        pairs.push((old_stem, new_stem));
+    }
+    pairs
 }
 
 fn read_member(root: &Path, rel: &str) -> Result<Member, String> {
@@ -295,23 +336,18 @@ fn interleave(winner: &str, losers: &[&str]) -> String {
     blocks.into_iter().map(|b| b.text).collect()
 }
 
-/// Rewrite stem- and path-form links from a deleted loser to the winner —
-/// a filesystem pass, because the merger runs before any index exists.
-/// Title links (`[[2026-08-29]]`) already resolve to the winner.
-fn repoint_links(root: &Path, loser_rel: &str, winner_rel: &str, warnings: &mut Vec<String>) {
-    let stem = |rel: &str| {
-        rel.rsplit('/')
-            .next()
-            .unwrap_or(rel)
-            .strip_suffix(".md")
-            .unwrap_or(rel)
-            .to_string()
-    };
-    let (old_stem, new_stem) = (stem(loser_rel), stem(winner_rel));
-    let pairs = [
-        (old_stem.as_str(), new_stem.as_str()),
-        (loser_rel, winner_rel),
-    ];
+/// Rewrite every deleted loser's links to its winner in one vault pass — a
+/// filesystem walk, because the merger runs before any index exists.
+/// Date links (`[[2026-08-29]]`) are deliberately not among the pairs; see
+/// [`repoint_pairs`].
+fn repoint_links(root: &Path, pairs: &[(String, String)], warnings: &mut Vec<String>) {
+    if pairs.is_empty() {
+        return;
+    }
+    let pairs: Vec<(&str, &str)> = pairs
+        .iter()
+        .map(|(old, new)| (old.as_str(), new.as_str()))
+        .collect();
     for entry in walkdir::WalkDir::new(root)
         .into_iter()
         .filter_entry(|e| {
@@ -324,12 +360,13 @@ fn repoint_links(root: &Path, loser_rel: &str, winner_rel: &str, warnings: &mut 
         let Ok(content) = std::fs::read_to_string(entry.path()) else {
             continue;
         };
-        if !content.contains(&old_stem) {
+        if !pairs.iter().any(|(old, _)| content.contains(old)) {
             continue;
         }
         let rewritten = rewrite_links_in_content(&content, &pairs);
         if rewritten != content
-            && let Err(e) = std::fs::write(entry.path(), rewritten)
+            && let Err(e) =
+                crate::vault::atomic_file::atomic_replace(entry.path(), rewritten.as_bytes())
         {
             warnings.push(format!(
                 "journal merge: could not rewrite links in {}: {e}",
@@ -345,7 +382,18 @@ mod tests {
     use tempfile::TempDir;
 
     fn journal(dir: &std::path::Path, name: &str, id_tail: &str, created: &str, body: &str) {
-        let path = dir.join("journals").join(name);
+        journal_in(dir, "journals", name, id_tail, created, body);
+    }
+
+    fn journal_in(
+        dir: &std::path::Path,
+        folder: &str,
+        name: &str,
+        id_tail: &str,
+        created: &str,
+        body: &str,
+    ) {
+        let path = dir.join(folder).join(name);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(
             path,
@@ -354,6 +402,20 @@ mod tests {
             ),
         )
         .unwrap();
+    }
+
+    /// A page under `notes/` whose body is exactly `body`.
+    fn note(dir: &std::path::Path, name: &str, id_tail: &str, body: &str) -> std::path::PathBuf {
+        let path = dir.join("notes").join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "+++\nid = \"0192b6c0-0000-7000-8000-0000000000{id_tail}\"\ntitle = \"Ref\"\n+++\n{body}"
+            ),
+        )
+        .unwrap();
+        path
     }
 
     #[test]
@@ -484,6 +546,194 @@ mod tests {
         assert!(
             referer.contains("[[20260829.2026-08-29.aaaaaaaa]]"),
             "{referer}"
+        );
+    }
+
+    /// D21: a date link is the vault's own name for the day and must survive
+    /// a fold untouched. A legacy-named loser makes that load-bearing — its
+    /// filename stem IS the date, so an unguarded stem rewrite would turn
+    /// every `[[2026-08-29]]` in the vault into a filename link.
+    #[test]
+    fn a_legacy_named_loser_leaves_date_links_alone() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — canonical\n",
+        );
+        journal(
+            tmp.path(),
+            "2026-08-29.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — legacy\n",
+        );
+        let dated = note(
+            tmp.path(),
+            "dated.md",
+            "09",
+            "see [[2026-08-29]] and nothing else\n",
+        );
+        let before = std::fs::read_to_string(&dated).unwrap();
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges[0].merged, vec!["journals/2026-08-29.md"]);
+        assert_eq!(
+            std::fs::read_to_string(&dated).unwrap(),
+            before,
+            "the date link is untouched"
+        );
+    }
+
+    /// The path form resolves through the loser's own path, so it would
+    /// dangle once the loser is deleted: it is repointed even though the
+    /// bare date inside it is not.
+    #[test]
+    fn a_path_form_link_to_a_legacy_loser_is_repointed() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — canonical\n",
+        );
+        journal(
+            tmp.path(),
+            "2026-08-29.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — legacy\n",
+        );
+        let pathy = note(
+            tmp.path(),
+            "pathy.md",
+            "09",
+            "see [[journals/2026-08-29]]\n",
+        );
+
+        merge_duplicate_journals(tmp.path());
+
+        let text = std::fs::read_to_string(&pathy).unwrap();
+        assert!(
+            text.contains("[[journals/20260829.2026-08-29.aaaaaaaa]]"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn ai_journals_fold_on_their_own() {
+        let tmp = TempDir::new().unwrap();
+        journal_in(
+            tmp.path(),
+            "ai-journals",
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — a\n",
+        );
+        journal_in(
+            tmp.path(),
+            "ai-journals",
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — b\n",
+        );
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        assert_eq!(warnings, Vec::<String>::new());
+        assert_eq!(merges.len(), 1);
+        assert_eq!(merges[0].folder, "ai-journals");
+        assert_eq!(
+            merges[0].winner,
+            "ai-journals/20260829.2026-08-29.aaaaaaaa.md"
+        );
+        let body = std::fs::read_to_string(tmp.path().join(&merges[0].winner)).unwrap();
+        assert!(
+            body.contains("- 08:00 — a") && body.contains("- 09:00 — b"),
+            "{body}"
+        );
+    }
+
+    /// The two folders are separate journals that happen to share a calendar.
+    /// A user's day and an agent's log of it must never fold together.
+    #[test]
+    fn a_journal_and_an_ai_journal_of_one_date_do_not_group() {
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — mine\n",
+        );
+        journal_in(
+            tmp.path(),
+            "ai-journals",
+            "20260829.2026-08-29.bbbbbbbb.md",
+            "02",
+            "2026-08-29T09:00:00Z",
+            "- 09:00 — the agent's\n",
+        );
+
+        assert!(duplicate_journal_groups(tmp.path()).is_empty());
+        assert_eq!(merge_duplicate_journals(tmp.path()).0.len(), 0);
+        assert!(
+            tmp.path()
+                .join("ai-journals/20260829.2026-08-29.bbbbbbbb.md")
+                .exists()
+        );
+    }
+
+    /// D22: a merger problem is a warning. When not one loser can be deleted
+    /// nothing was folded away, so no fold is reported — and the caller is
+    /// left with nothing to commit rather than an empty commit that fails.
+    #[cfg(unix)]
+    #[test]
+    fn a_group_whose_deletes_all_fail_reports_no_fold() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = TempDir::new().unwrap();
+        journal(
+            tmp.path(),
+            "20260829.2026-08-29.aaaaaaaa.md",
+            "01",
+            "2026-08-29T08:00:00Z",
+            "- 08:00 — winner\n",
+        );
+        // A conflict copy in a subdirectory: it joins the top-level group
+        // through `conflict_of`, and its own directory can be made read-only
+        // without stopping the winner from being rewritten.
+        let locked = tmp.path().join("journals/locked");
+        std::fs::create_dir_all(&locked).unwrap();
+        let loser = locked.join("20260829.2026-08-29.aaaaaaaa.conflict.abc1234.md");
+        std::fs::write(
+            &loser,
+            "+++\nid = \"0192b6c0-0000-7000-8000-000000000002\"\ntitle = \"2026-08-29 (conflict abc1234)\"\nconflict_of = \"journals/20260829.2026-08-29.aaaaaaaa.md\"\n+++\n- 09:00 — theirs\n",
+        )
+        .unwrap();
+        // Unlinking needs write permission on the parent directory.
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o555)).unwrap();
+
+        let (merges, warnings) = merge_duplicate_journals(tmp.path());
+
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(merges.is_empty(), "{merges:?}");
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(warnings[0].contains("could not delete it"), "{warnings:?}");
+        assert!(loser.exists(), "the loser survives");
+        let winner =
+            std::fs::read_to_string(tmp.path().join("journals/20260829.2026-08-29.aaaaaaaa.md"))
+                .unwrap();
+        assert!(
+            winner.contains("- 09:00 — theirs"),
+            "the content was still folded in, so nothing is lost: {winner}"
         );
     }
 
