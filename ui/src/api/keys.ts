@@ -85,6 +85,12 @@ export const queryKeys = {
     ],
   },
   query: { pathPrefix: "/api/vault/query" },
+
+  sync: {
+    prefix: ["sync"] as const,
+    conflicts: () => [...queryKeys.sync.prefix, "conflicts"] as const,
+    conflictsPath: "/api/vault/sync/conflicts" as const,
+  },
 } as const;
 
 /** Invalidate all openapi-react-query queries whose path (queryKey[1]) starts with `prefix`. */

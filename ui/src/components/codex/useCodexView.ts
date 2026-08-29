@@ -16,7 +16,8 @@ export type CodexView =
   | "repairs"
   | "archive"
   | "rubbish"
-  | "agenda";
+  | "agenda"
+  | "conflicts";
 
 /** Views resolvable from the route alone, plus the "workspace" marker that
  * defers to the workspace store (folio/constellation/launcher split). */

@@ -52,6 +52,8 @@ export function useVaultEvents(): ConnectionStatus {
             // Page edits move rows in and out of base views (the Neovim case).
             invalidateByPath(queryClient, queryKeys.bases.pathPrefix);
             invalidateByPath(queryClient, queryKeys.query.pathPrefix);
+            // A sync merge can add or remove Conflict Copies.
+            queryClient.invalidateQueries({ queryKey: queryKeys.sync.prefix });
           }
           if (data.type === "base_registry_changed") {
             invalidateByPath(queryClient, queryKeys.bases.pathPrefix);

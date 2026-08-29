@@ -169,7 +169,9 @@ the same merge produces the same filename rather than a pile of copies.
 
 **Resolution is ordinary editing.** Open both, fold across whatever you want to
 keep, and delete the copy. There is no merge tool to learn and no conflicted
-file to repair. Identical edits on both devices produce no copy at all.
+file to repair. Identical edits on both devices produce no copy at all. The
+[Conflicts view](/conflicts) lists every copy still in the vault alongside its
+original, with a button to open either.
 
 Encrypted pages follow the same rule as any other, but in practice always end
 up as Conflict Copies: re-encrypting a note rewrites every armored line, so two
@@ -181,10 +183,10 @@ sync never produces (they come from a hand-run `git merge`).
 
 **Coming in the next phase**, not shipped yet: a structural merge driver for
 `*.md` (frontmatter merged field-wise, body merged as text) that will resolve
-many of today's Conflict Copies automatically; an automatic merger for journal
-pages that share a date; and a conflicts panel in the UI. Until then, `*.md
-merge=clep` is written into `.gitattributes` but unregistered, and git falls
-back to its ordinary text merge — whose residue becomes a Conflict Copy.
+many of today's Conflict Copies automatically, plus an automatic merger for
+journal pages that share a date. Until then, `*.md merge=clep` is written into
+`.gitattributes` but unregistered, and git falls back to its ordinary text
+merge — whose residue becomes a Conflict Copy.
 
 ## Checking on sync
 

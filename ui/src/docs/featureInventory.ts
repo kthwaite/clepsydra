@@ -74,6 +74,12 @@ export const FEATURE_INVENTORY = [
     disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
   },
   {
+    id: "/conflicts",
+    label: "Sync conflicts",
+    surface: "route",
+    disposition: { kind: "reference", slug: "sync" },
+  },
+  {
     id: "/rubbish",
     label: "Rubbish Bin",
     surface: "route",
@@ -188,6 +194,12 @@ export const FEATURE_INVENTORY = [
     label: "Open reference repairs",
     surface: "command",
     disposition: { kind: "guide", slug: "links-search-graph-and-repair" },
+  },
+  {
+    id: "nav.conflicts",
+    label: "Open Sync Conflicts",
+    surface: "command",
+    disposition: { kind: "reference", slug: "sync" },
   },
   {
     id: "nav.rubbish",

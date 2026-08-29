@@ -11,6 +11,7 @@ export type StaticCommandAction =
   | "navigate-bases"
   | "navigate-academic"
   | "navigate-repairs"
+  | "navigate-conflicts"
   | "navigate-rubbish"
   | "create-base"
   | "add-book"
@@ -192,6 +193,11 @@ export const STATIC_COMMANDS: readonly StaticCommandDescriptor[] = [
     id: "nav.repairs",
     title: "Open Reference Repairs",
     action: "navigate-repairs",
+  },
+  {
+    id: "nav.conflicts",
+    title: "Open Sync Conflicts",
+    action: "navigate-conflicts",
   },
   {
     id: "nav.rubbish",

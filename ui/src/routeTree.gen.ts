@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AcademicRouteImport } from './routes/academic'
 import { Route as AgendaRouteImport } from './routes/agenda'
+import { Route as ConflictsRouteImport } from './routes/conflicts'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as FeedsRouteImport } from './routes/feeds'
 import { Route as GazetteerRouteImport } from './routes/gazetteer'
@@ -41,6 +42,11 @@ const AcademicRoute = AcademicRouteImport.update({
 const AgendaRoute = AgendaRouteImport.update({
   id: '/agenda',
   path: '/agenda',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ConflictsRoute = ConflictsRouteImport.update({
+  id: '/conflicts',
+  path: '/conflicts',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DocsRoute = DocsRouteImport.update({
@@ -123,6 +129,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
+  '/conflicts': typeof ConflictsRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
@@ -143,6 +150,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
+  '/conflicts': typeof ConflictsRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
@@ -164,6 +172,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/academic': typeof AcademicRoute
   '/agenda': typeof AgendaRoute
+  '/conflicts': typeof ConflictsRoute
   '/docs': typeof DocsRouteWithChildren
   '/feeds': typeof FeedsRoute
   '/gazetteer': typeof GazetteerRoute
@@ -186,6 +195,7 @@ export interface FileRouteTypes {
     | '/'
     | '/academic'
     | '/agenda'
+    | '/conflicts'
     | '/docs'
     | '/feeds'
     | '/gazetteer'
@@ -206,6 +216,7 @@ export interface FileRouteTypes {
     | '/'
     | '/academic'
     | '/agenda'
+    | '/conflicts'
     | '/docs'
     | '/feeds'
     | '/gazetteer'
@@ -226,6 +237,7 @@ export interface FileRouteTypes {
     | '/'
     | '/academic'
     | '/agenda'
+    | '/conflicts'
     | '/docs'
     | '/feeds'
     | '/gazetteer'
@@ -247,6 +259,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AcademicRoute: typeof AcademicRoute
   AgendaRoute: typeof AgendaRoute
+  ConflictsRoute: typeof ConflictsRoute
   DocsRoute: typeof DocsRouteWithChildren
   FeedsRoute: typeof FeedsRoute
   GazetteerRoute: typeof GazetteerRoute
@@ -283,6 +296,13 @@ declare module '@tanstack/react-router' {
       path: '/agenda'
       fullPath: '/agenda'
       preLoaderRoute: typeof AgendaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/conflicts': {
+      id: '/conflicts'
+      path: '/conflicts'
+      fullPath: '/conflicts'
+      preLoaderRoute: typeof ConflictsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/docs': {
@@ -419,6 +439,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AcademicRoute: AcademicRoute,
   AgendaRoute: AgendaRoute,
+  ConflictsRoute: ConflictsRoute,
   DocsRoute: DocsRouteWithChildren,
   FeedsRoute: FeedsRoute,
   GazetteerRoute: GazetteerRoute,
