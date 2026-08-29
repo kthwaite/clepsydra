@@ -170,7 +170,7 @@ pub fn find_conflict_copies(root: &Path) -> Vec<String> {
 }
 
 /// `notes/plan.md` -> `plan`.
-fn file_stem(rel: &str) -> &str {
+pub(crate) fn file_stem(rel: &str) -> &str {
     let name = rel.rsplit('/').next().unwrap_or(rel);
     name.strip_suffix(".md").unwrap_or(name)
 }

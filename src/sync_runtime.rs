@@ -189,8 +189,12 @@ impl SyncRuntime {
         if report.tree_changed() {
             rebuild_after_sync(state).await;
         }
-        // Whatever was outstanding is in the commit this sync just made.
-        self.pending.store(false, Ordering::SeqCst);
+        // A tree-changing merge may be followed by reconcile moves in
+        // `rebuild_after_sync`, and those are still uncommitted here; the
+        // debounced autocommit sweeps them up. Marking pending costs nothing
+        // when there is nothing to sweep: `commit_local` on a clean tree is
+        // two cheap git calls.
+        self.pending.store(report.tree_changed(), Ordering::SeqCst);
         // Un-pause before re-opening the gate, never the other way round: a
         // mutation admitted while the watcher is still paused writes a file
         // whose change event is dropped, leaving the index behind the disk.
@@ -613,6 +617,40 @@ pub(crate) mod tests {
             "the watcher is un-paused when the window closes"
         );
         assert!(state.sync.as_ref().unwrap().last_report().is_some());
+    }
+
+    /// A merge that changed the tree can be followed by reconcile moves in
+    /// `rebuild_after_sync`, and those are uncommitted when the window closes.
+    /// The window must leave the autocommit marked pending so the debounce
+    /// loop sweeps them up.
+    #[tokio::test]
+    async fn a_tree_changing_sync_leaves_an_autocommit_pending() {
+        let (state, repos) = synced_state().await;
+        let runtime = Arc::clone(state.sync.as_ref().unwrap());
+
+        runtime.run_full_sync(&state).await.unwrap();
+        assert!(
+            !runtime.pending_autocommit(),
+            "a sync that changed nothing leaves nothing to sweep up"
+        );
+
+        // Device B publishes a page, so A's next sync fast-forwards onto it.
+        testing::write(
+            &repos.b,
+            "notes/from-b.md",
+            &page("0192b6c0-0000-7000-8000-0000000000b2", "From B"),
+        );
+        SyncEngine::open_with_git(&Vault::open(&repos.b).unwrap(), testing::git(&repos.b))
+            .unwrap()
+            .full_sync()
+            .unwrap();
+
+        let report = runtime.run_full_sync(&state).await.unwrap();
+        assert!(report.tree_changed(), "{:?}", report.merge);
+        assert!(
+            runtime.pending_autocommit(),
+            "a tree-changing sync leaves the autocommit pending"
+        );
     }
 
     /// A sync that ends in an error may still have moved the working tree: a

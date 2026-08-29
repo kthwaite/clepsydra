@@ -14,10 +14,10 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
 
-use super::conflict_copy::{ConflictCopy, find_conflict_copies, write_conflict_copy};
+use super::conflict_copy::{ConflictCopy, file_stem, find_conflict_copies, write_conflict_copy};
 use super::git::{Git, GitError, PushOutcome, Side, StatusEntry};
 use super::state::{self, SyncState};
-use super::{Author, REMOTE_NAME, SyncError};
+use super::{Author, REMOTE_NAME, SyncError, first_line, plural};
 use crate::vault::Vault;
 
 /// How many page titles a generated commit message names.
@@ -31,6 +31,9 @@ const LEFTOVER_MERGE_HEADLINE: &str = "sync: resolve in-progress merge";
 pub struct SyncEngine {
     git: Git,
     root: PathBuf,
+    /// Where the per-device state file lives (D8). Resolved once at open,
+    /// because in a linked worktree it is not `<root>/.git` — that is a file.
+    git_dir: PathBuf,
     branch: String,
     author: Author,
 }
@@ -52,6 +55,8 @@ pub enum MergeSummary {
     /// The fetch failed (offline, auth, bad URL). Not fatal, and no push is
     /// attempted afterwards.
     FetchFailed(String),
+    /// Nothing was fetched — the shutdown path pushes without pulling.
+    NotFetched,
     UpToDate,
     FastForward {
         head: String,
@@ -116,6 +121,7 @@ impl SyncReport {
         parts.push(match &self.merge {
             MergeSummary::NoRemote => "no remote".to_string(),
             MergeSummary::FetchFailed(detail) => format!("fetch failed: {}", first_line(detail)),
+            MergeSummary::NotFetched => "no fetch".to_string(),
             MergeSummary::UpToDate => "up to date".to_string(),
             MergeSummary::FastForward { .. } => "fast-forwarded".to_string(),
             MergeSummary::Merged {
@@ -184,9 +190,11 @@ impl SyncEngine {
             return Err(SyncError::NotInitialised);
         }
         let author = Author::from_config(&vault.config().sync).ok_or(SyncError::MissingAuthor)?;
+        let git_dir = git.git_dir()?;
         Ok(Self {
             git,
             root: vault.root().to_path_buf(),
+            git_dir,
             branch: vault.config().sync.branch.clone(),
             author,
         })
@@ -211,10 +219,25 @@ impl SyncEngine {
         self.git.add_all()?;
         let message = commit_message(&self.root, &entries);
         let sha = self.git.commit(&message, &self.author)?;
-        Ok(Some(CommitSummary {
-            sha,
-            files: entries.len(),
-            message,
+        Ok(Some(match leftover {
+            // Both commits are this sync's work, so the report counts both;
+            // the leftover's own sha would otherwise go unmentioned.
+            Some(leftover) => {
+                tracing::info!(
+                    "sync: committed a leftover merge as {} before {sha}",
+                    leftover.sha
+                );
+                CommitSummary {
+                    sha,
+                    files: leftover.files + entries.len(),
+                    message,
+                }
+            }
+            None => CommitSummary {
+                sha,
+                files: entries.len(),
+                message,
+            },
         }))
     }
 
@@ -226,6 +249,19 @@ impl SyncEngine {
         let unmerged = self.git.unmerged()?;
         if !in_progress && unmerged.is_empty() {
             return Ok(None);
+        }
+        // A merge is ours to finish; a cherry-pick or a rebase is the user's,
+        // and committing its unmerged state would turn half of one into a
+        // sync commit (D24).
+        for (reference, operation) in [
+            ("CHERRY_PICK_HEAD", "cherry-pick"),
+            ("REBASE_HEAD", "rebase"),
+        ] {
+            if self.git.rev_parse(reference)?.is_some() {
+                return Err(SyncError::GitOperationInProgress {
+                    operation: operation.to_string(),
+                });
+            }
         }
         let files = self.git.status()?.len();
         let (sha, copies, warnings) =
@@ -372,13 +408,35 @@ impl SyncEngine {
                 (true, true) => {
                     let ours = self.git.show_stage(2, path)?;
                     let theirs = self.git.show_stage(3, path)?;
-                    self.git.checkout_side(Side::Ours, path)?;
-                    if ours == theirs {
+                    // A hand-made resolution (differs from ours, carries no
+                    // conflict markers) is kept as it is — overwriting it
+                    // with stage 2 would throw the user's merge away (D24).
+                    let worktree = std::fs::read(self.root.join(path)).ok();
+                    let hand_resolved = worktree.as_deref().is_some_and(|w| {
+                        w != ours.as_slice()
+                            && std::str::from_utf8(w)
+                                .map(|t| !crate::vault::conflict::has_conflict_markers(t))
+                                .unwrap_or(true)
+                    });
+                    if hand_resolved {
                         self.git.add(&[path])?;
                     } else {
-                        let copy = write_conflict_copy(&self.root, path, &theirs)?;
-                        self.git.add(&[path, copy.copy.as_str()])?;
-                        copies.push(copy);
+                        self.git.checkout_side(Side::Ours, path)?;
+                        if ours == theirs {
+                            self.git.add(&[path])?;
+                        } else if is_lfs_pointer(&theirs) {
+                            // The pointer stands in for a blob this
+                            // repository does not hold: a copy of it would be
+                            // metadata, not the user's content.
+                            warnings.push(format!(
+                                "both sides changed {path}, but the incoming side is a git-LFS pointer; kept ours and wrote no conflict copy"
+                            ));
+                            self.git.add(&[path])?;
+                        } else {
+                            let copy = write_conflict_copy(&self.root, path, &theirs)?;
+                            self.git.add(&[path, copy.copy.as_str()])?;
+                            copies.push(copy);
+                        }
                     }
                 }
                 // They deleted it, we did not: a page in the tree wins.
@@ -460,10 +518,18 @@ impl SyncEngine {
     /// Commit, pull, push: the whole sync (D7), recording the result (D8).
     pub fn full_sync(&self) -> Result<SyncReport, SyncError> {
         let started_at = Utc::now();
-        match self.full_sync_inner(started_at) {
+        self.record_outcome(self.full_sync_inner(started_at))
+    }
+
+    /// Record what a sync did (D8): the report on success, an `error:` line
+    /// on failure — a failed sync must not leave the last success on show.
+    fn record_outcome(
+        &self,
+        outcome: Result<SyncReport, SyncError>,
+    ) -> Result<SyncReport, SyncError> {
+        match outcome {
             Ok(report) => Ok(self.record(report)),
             Err(e) => {
-                // A failed sync must not leave the last success on show.
                 let line = format!("error: {}", first_line(&e.to_string()));
                 if let Err(save) = self.save_state(&line, Utc::now()) {
                     tracing::warn!("sync: could not record sync state: {save}");
@@ -502,27 +568,30 @@ impl SyncEngine {
     /// than the push itself.
     pub fn commit_and_push(&self) -> Result<SyncReport, SyncError> {
         let started_at = Utc::now();
+        self.record_outcome(self.commit_and_push_inner(started_at))
+    }
+
+    fn commit_and_push_inner(&self, started_at: DateTime<Utc>) -> Result<SyncReport, SyncError> {
         let committed = self.commit_local()?;
         let merge = if self.git.remote_url(REMOTE_NAME)?.is_none() {
             MergeSummary::NoRemote
         } else {
-            // Nothing was fetched, so nothing merged.
-            MergeSummary::UpToDate
+            MergeSummary::NotFetched
         };
         let push = self.push()?;
-        Ok(self.record(SyncReport {
+        Ok(SyncReport {
             committed,
             merge,
             push,
             warnings: Vec::new(),
             started_at,
             finished_at: Utc::now(),
-        }))
+        })
     }
 
     /// What `clep sync status` reads.
     pub fn status(&self) -> Result<SyncStatus, SyncError> {
-        let state = state::load(&self.root);
+        let state = state::load(&self.git_dir);
         let upstream = format!("{REMOTE_NAME}/{}", self.branch);
         let (ahead, behind) = match self.git.ahead_behind(&upstream)? {
             Some((ahead, behind)) => (Some(ahead), Some(behind)),
@@ -555,10 +624,11 @@ impl SyncEngine {
         report
     }
 
-    /// Write one line of outcome and its timestamp to `.git/clep-sync.toml`.
+    /// Write one line of outcome and its timestamp to the git dir's
+    /// `clep-sync.toml`.
     fn save_state(&self, result: &str, at: DateTime<Utc>) -> Result<(), SyncError> {
         state::save(
-            &self.root,
+            &self.git_dir,
             &SyncState {
                 last_sync_at: Some(at),
                 last_result: Some(result.to_string()),
@@ -657,14 +727,7 @@ fn fold_merges(first: MergeSummary, retry: MergeSummary) -> MergeSummary {
 /// A page's frontmatter title, falling back to its filename stem — a deleted
 /// page has no frontmatter left to read.
 fn page_title(root: &Path, rel: &str) -> String {
-    let stem = || {
-        rel.rsplit('/')
-            .next()
-            .unwrap_or(rel)
-            .strip_suffix(".md")
-            .unwrap_or(rel)
-            .to_string()
-    };
+    let stem = || file_stem(rel).to_string();
     let Ok(content) = std::fs::read_to_string(root.join(rel)) else {
         return stem();
     };
@@ -674,16 +737,9 @@ fn page_title(root: &Path, rel: &str) -> String {
     }
 }
 
-fn plural(count: usize) -> &'static str {
-    if count == 1 { "" } else { "s" }
-}
-
-/// Git's stderr is multi-line; a one-line report takes the first of it.
-fn first_line(text: &str) -> &str {
-    text.lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or("")
+/// Git-LFS pointer files start with this exact line (LFS spec v1).
+fn is_lfs_pointer(bytes: &[u8]) -> bool {
+    bytes.starts_with(b"version https://git-lfs.github.com/spec/v1")
 }
 
 #[cfg(test)]
@@ -786,6 +842,149 @@ mod tests {
             "no conflict markers were committed: {committed}"
         );
         assert_eq!(committed.trim(), page("12", "Plan", "B's edit").trim());
+    }
+
+    /// A linked worktree's `.git` is a FILE, so the state file has to follow
+    /// the resolved git dir rather than `<root>/.git/` (D25).
+    #[test]
+    fn state_lands_in_the_linked_worktree_git_dir() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "n.md", &page("20", "N", "x"));
+        engine(&repos.a).full_sync().unwrap();
+        let linked = repos.tmp.path().join("a-linked");
+        testing::git(&repos.a)
+            .run(&[
+                "worktree",
+                "add",
+                "-q",
+                linked.to_str().unwrap(),
+                "-b",
+                "linked",
+                "main",
+            ])
+            .unwrap();
+        assert!(
+            linked.join(".git").is_file(),
+            "a linked worktree's .git is a file"
+        );
+
+        // The linked checkout carries `.clepsydra/config.toml` (it is in the
+        // tree), and repo-local config (the D3 marker) is shared, so the
+        // engine opens over it.
+        let vault = Vault::open(&linked).unwrap();
+        let eng = SyncEngine::open_with_git(&vault, testing::git(&linked)).unwrap();
+        testing::write(&linked, "m.md", &page("21", "M", "y"));
+        let report = eng.commit_and_push().expect("commit_and_push");
+        assert_eq!(
+            report.warnings,
+            Vec::<String>::new(),
+            "the state file was written without complaint"
+        );
+
+        let git_dir = testing::git(&linked).git_dir().unwrap();
+        assert!(
+            git_dir.join("clep-sync.toml").is_file(),
+            "state in {git_dir:?}"
+        );
+        assert!(
+            !linked.join(".git").is_dir(),
+            "nothing turned the .git file into a directory"
+        );
+        assert!(eng.status().unwrap().last_sync_at.is_some());
+    }
+
+    /// D24: a leftover merge the user resolved by hand is committed as it
+    /// stands. Overwriting it with stage 2 would throw their merge away.
+    #[test]
+    fn hand_resolved_leftover_merge_is_kept_without_a_copy() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "notes/p.md", &page("30", "Plan", "base"));
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+        testing::write(&repos.a, "notes/p.md", &page("30", "Plan", "A's edit"));
+        engine(&repos.a).full_sync().unwrap();
+
+        testing::write(&repos.b, "notes/p.md", &page("30", "Plan", "B's edit"));
+        let gb = testing::git(&repos.b);
+        gb.add_all().unwrap();
+        gb.commit("b", &testing::author()).unwrap();
+        gb.fetch("origin", "main").unwrap();
+        assert_eq!(gb.merge_no_commit("origin/main").unwrap().status, 1);
+
+        // The user resolves by hand: no markers, not equal to either side.
+        testing::write(&repos.b, "notes/p.md", &page("30", "Plan", "hand-merged"));
+        engine(&repos.b).commit_local().unwrap().unwrap();
+
+        assert_eq!(
+            testing::read(&repos.b, "notes/p.md"),
+            page("30", "Plan", "hand-merged")
+        );
+        assert!(
+            find_conflict_copies(&repos.b).is_empty(),
+            "hand resolution needs no copy"
+        );
+        assert!(gb.merge_head().unwrap().is_none(), "merge finished");
+        assert!(gb.status().unwrap().is_empty(), "tree is clean");
+    }
+
+    /// D24: only a merge is ours to finish. A cherry-pick or rebase owning
+    /// the unmerged state is refused rather than committed as sync residue.
+    #[test]
+    fn cherry_pick_in_progress_refuses_to_sync() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "c.md", &page("31", "C", "base"));
+        let ga = testing::git(&repos.a);
+        engine(&repos.a).full_sync().unwrap();
+        ga.run(&["checkout", "-q", "-b", "side"]).unwrap();
+        testing::write(&repos.a, "c.md", &page("31", "C", "side edit"));
+        ga.add_all().unwrap();
+        let side = ga.commit("side", &testing::author()).unwrap();
+        ga.run(&["checkout", "-q", "main"]).unwrap();
+        testing::write(&repos.a, "c.md", &page("31", "C", "main edit"));
+        ga.add_all().unwrap();
+        ga.commit("main", &testing::author()).unwrap();
+        // Conflicts, leaving CHERRY_PICK_HEAD and an unmerged path behind.
+        let _ = ga.run_raw(&["cherry-pick", &side]);
+        assert!(ga.rev_parse("CHERRY_PICK_HEAD").unwrap().is_some());
+
+        let err = engine(&repos.a).full_sync().unwrap_err();
+
+        assert!(
+            matches!(err, SyncError::GitOperationInProgress { .. }),
+            "{err}"
+        );
+        assert!(
+            ga.rev_parse("CHERRY_PICK_HEAD").unwrap().is_some(),
+            "the refusal leaves the cherry-pick for the user to finish"
+        );
+    }
+
+    /// A git-LFS pointer is a stand-in for a blob the repository does not
+    /// hold; writing one as a Conflict Copy would leave the user a file of
+    /// metadata, not their content.
+    #[test]
+    fn lfs_pointer_theirs_is_not_written_as_a_copy() {
+        const POINTER_A: &str =
+            "version https://git-lfs.github.com/spec/v1\noid sha256:aaaa\nsize 1\n";
+        const POINTER_B: &str =
+            "version https://git-lfs.github.com/spec/v1\noid sha256:bbbb\nsize 2\n";
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "blob.bin", "base");
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+        testing::write(&repos.a, "blob.bin", POINTER_A);
+        engine(&repos.a).full_sync().unwrap();
+        testing::write(&repos.b, "blob.bin", POINTER_B);
+
+        let rb = engine(&repos.b).full_sync().unwrap();
+
+        assert!(rb.conflict_copies().is_empty(), "{:?}", rb.merge);
+        assert!(
+            rb.warnings.iter().any(|w| w.contains("LFS pointer")),
+            "{:?}",
+            rb.warnings
+        );
+        assert_eq!(testing::read(&repos.b, "blob.bin"), POINTER_B, "ours stays");
     }
 
     #[test]
@@ -1118,6 +1317,49 @@ mod tests {
             "merge aborted"
         );
         assert!(testing::git(&repos.a).status().unwrap().is_empty());
+    }
+
+    #[test]
+    fn commit_and_push_reports_not_fetched_with_a_remote() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "n.md", &page("22", "N", "x"));
+        let report = engine(&repos.a).commit_and_push().unwrap();
+        assert!(
+            matches!(report.merge, MergeSummary::NotFetched),
+            "{report:?}"
+        );
+        assert!(
+            report.one_line().contains("no fetch"),
+            "{}",
+            report.one_line()
+        );
+        assert!(!report.tree_changed());
+    }
+
+    #[test]
+    fn commit_and_push_failure_records_an_error_state() {
+        let repos = testing::TestRepos::new();
+        testing::write(&repos.a, "n.md", &page("23", "N", "x"));
+        engine(&repos.a).full_sync().unwrap();
+        let git_dir = testing::git(&repos.a).git_dir().unwrap();
+        assert!(
+            !state::load(&git_dir)
+                .last_result
+                .unwrap_or_default()
+                .starts_with("error:"),
+            "the successful sync is on show before the failure"
+        );
+
+        // Poison the index so `commit_local` fails hard.
+        fs::write(git_dir.join("index"), "garbage").unwrap();
+        testing::write(&repos.a, "n2.md", &page("24", "N2", "y"));
+        assert!(engine(&repos.a).commit_and_push().is_err());
+
+        let state = state::load(&git_dir);
+        assert!(
+            state.last_result.unwrap_or_default().starts_with("error:"),
+            "state records the failure"
+        );
     }
 
     #[test]

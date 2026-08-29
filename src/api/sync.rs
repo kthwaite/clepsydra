@@ -43,7 +43,8 @@ pub struct SyncReportDto {
     /// Sha of the commit this sync made, or `null` when the tree was clean.
     pub committed: Option<String>,
     pub files_committed: usize,
-    /// `no_remote` | `fetch_failed` | `up_to_date` | `fast_forward` | `merged`.
+    /// `no_remote` | `fetch_failed` | `not_fetched` | `up_to_date` |
+    /// `fast_forward` | `merged`.
     pub merge: String,
     /// The new head for `fast_forward`/`merged`, the failure for
     /// `fetch_failed`, `null` otherwise.
@@ -139,6 +140,7 @@ impl From<&SyncReport> for SyncReportDto {
         let (merge, merge_detail) = match &report.merge {
             MergeSummary::NoRemote => ("no_remote", None),
             MergeSummary::FetchFailed(detail) => ("fetch_failed", Some(detail.clone())),
+            MergeSummary::NotFetched => ("not_fetched", None),
             MergeSummary::UpToDate => ("up_to_date", None),
             MergeSummary::FastForward { head } => ("fast_forward", Some(head.clone())),
             MergeSummary::Merged { commit, .. } => ("merged", Some(commit.clone())),

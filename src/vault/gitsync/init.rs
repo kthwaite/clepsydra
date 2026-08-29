@@ -99,6 +99,11 @@ pub fn init(vault: &Vault, git: &Git, opts: InitOpts) -> Result<InitReport, Sync
                         configured: branch.clone(),
                     });
                 }
+            } else if git.current_branch()?.as_deref() != Some(branch.as_str()) {
+                // HEAD is unborn: `git init` picked a default branch name and
+                // no commit was ever made on it, so repointing HEAD at the
+                // configured branch renames nothing and loses nothing.
+                git.run(&["symbolic-ref", "HEAD", &format!("refs/heads/{branch}")])?;
             }
             false
         }
@@ -284,13 +289,16 @@ pub(crate) fn lfs_batch_url(url: &str) -> Option<String> {
 }
 
 /// `git@host:path` or `ssh://user@host/path` → `(user@host, path)`. `None`
-/// for an http(s) URL (or anything else [`lfs_batch_url`] already handles).
+/// for a URL carrying any other scheme.
 pub(crate) fn ssh_target(url: &str) -> Option<(String, String)> {
     if let Some(rest) = url.strip_prefix("ssh://") {
         let (host, path) = rest.split_once('/')?;
         return Some((host.to_string(), path.to_string()));
     }
-    if url.starts_with("http://") || url.starts_with("https://") {
+    // Only the scp-like `host:path` form is left, and it has no scheme. A
+    // `file://` or `https://` remote split on `:` would otherwise probe the
+    // scheme itself as an ssh host.
+    if url.contains("://") {
         return None;
     }
     let (host, path) = url.split_once(':')?;
@@ -668,6 +676,27 @@ mod tests {
     }
 
     #[test]
+    fn init_repoints_an_unborn_head_at_the_configured_branch() {
+        let (_tmp, vault) = fresh_vault();
+        let git = testing::git(vault.root());
+        // A repo git created with another default branch name, no commits.
+        git.init("master").unwrap();
+        assert_eq!(git.current_branch().unwrap().as_deref(), Some("master"));
+
+        let report = init(&vault, &git, opts()).unwrap();
+
+        assert!(!report.created_repo);
+        assert_eq!(report.branch, "main");
+        assert_eq!(git.current_branch().unwrap().as_deref(), Some("main"));
+        assert_eq!(
+            git.rev_parse("refs/heads/main").unwrap(),
+            report.initial_commit,
+            "the initial commit landed on the configured branch"
+        );
+        assert!(git.rev_parse("refs/heads/master").unwrap().is_none());
+    }
+
+    #[test]
     fn lfs_url_helpers() {
         assert_eq!(
             lfs_batch_url("https://github.com/o/r").as_deref(),
@@ -686,7 +715,12 @@ mod tests {
             ssh_target("ssh://git@host/o/r"),
             Some(("git@host".into(), "o/r".into()))
         );
+        // Only ssh is probed over ssh: another scheme's own name would
+        // otherwise be taken for the host of an scp-like target.
         assert_eq!(ssh_target("https://host/o/r"), None);
+        assert_eq!(ssh_target("file:///x/y.git"), None);
+        assert_eq!(ssh_target("https://example.com/x.git"), None);
+        assert_eq!(ssh_target("git://host/x.git"), None);
     }
 
     #[tokio::test]

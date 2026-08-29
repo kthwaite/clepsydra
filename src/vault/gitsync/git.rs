@@ -196,6 +196,14 @@ impl Git {
         })
     }
 
+    /// The repository's real git directory (`.git`, or the per-worktree dir
+    /// inside the main repository for a linked worktree, whose `.git` is a
+    /// file rather than a directory).
+    pub fn git_dir(&self) -> Result<PathBuf, GitError> {
+        self.run(&["rev-parse", "--absolute-git-dir"])
+            .map(|out| PathBuf::from(out.trim()))
+    }
+
     /// `git init -q -b <branch>`.
     pub fn init(&self, branch: &str) -> Result<(), GitError> {
         self.run(&["init", "-q", "-b", branch]).map(|_| ())
@@ -242,6 +250,22 @@ impl Git {
             1 => Ok(None),
             _ => Err(GitError::Failed {
                 args: format!("config --get {key}"),
+                status: raw.status,
+                stderr: raw.stderr,
+            }),
+        }
+    }
+
+    /// `git config --local --get`: repo-local values only, so a value
+    /// inherited from the global or system config can never satisfy a
+    /// repo-scoped marker.
+    pub fn config_get_local(&self, key: &str) -> Result<Option<String>, GitError> {
+        let raw = self.run_raw(&["config", "--local", "--get", key])?;
+        match raw.status {
+            0 => Ok(Some(raw.stdout.trim_end().to_string())),
+            1 => Ok(None),
+            _ => Err(GitError::Failed {
+                args: format!("config --local --get {key}"),
                 status: raw.status,
                 stderr: raw.stderr,
             }),
@@ -608,6 +632,58 @@ mod tests {
         git.config_set("clep.sync.version", "1").unwrap();
         assert_eq!(
             git.config_get("clep.sync.version").unwrap().as_deref(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn git_dir_resolves_the_real_git_directory() {
+        let repos = testing::TestRepos::new();
+        let dir = testing::git(&repos.a).git_dir().unwrap();
+        assert_eq!(dir, repos.a.join(".git").canonicalize().unwrap());
+    }
+
+    #[test]
+    fn git_dir_of_a_linked_worktree_is_its_own_per_worktree_dir() {
+        let repos = testing::TestRepos::new();
+        let linked = repos.tmp.path().join("a-linked");
+        testing::git(&repos.a)
+            .run(&["worktree", "add", "-q", linked.to_str().unwrap(), "-b", "w"])
+            .unwrap();
+        let dir = testing::git(&linked).git_dir().unwrap();
+        assert!(dir.is_dir(), "{dir:?}");
+        assert!(
+            dir.ends_with("worktrees/a-linked"),
+            "the linked worktree has its own git dir, not the main one: {dir:?}"
+        );
+    }
+
+    #[test]
+    fn config_get_local_ignores_an_inherited_global_value() {
+        let tmp = TempDir::new().unwrap();
+        let global = tmp.path().join("gitconfig");
+        std::fs::write(&global, "[clep \"sync\"]\n\tversion = 1\n").unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(&root).unwrap();
+        let git = Git::new(&root)
+            .with_env("GIT_CONFIG_GLOBAL", global.to_str().unwrap())
+            .with_env("GIT_CONFIG_NOSYSTEM", "1");
+        git.init("main").unwrap();
+        assert_eq!(
+            git.config_get("clep.sync.version").unwrap().as_deref(),
+            Some("1"),
+            "the merged config sees the global value"
+        );
+        assert_eq!(
+            git.config_get_local("clep.sync.version").unwrap(),
+            None,
+            "the local scope does not"
+        );
+        git.config_set("clep.sync.version", "1").unwrap();
+        assert_eq!(
+            git.config_get_local("clep.sync.version")
+                .unwrap()
+                .as_deref(),
             Some("1")
         );
     }

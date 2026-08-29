@@ -223,6 +223,7 @@ pub fn render_report(report: &SyncReportDto) -> String {
             "fetch failed: {}",
             detail_or(report.merge_detail.as_ref(), "unknown error")
         ),
+        "not_fetched" => "no fetch (shutdown push)".to_string(),
         "up_to_date" => "up to date".to_string(),
         "fast_forward" => format!(
             "fast-forward ({})",
@@ -529,6 +530,16 @@ mod tests {
             "{rendered}"
         );
         assert!(!rendered.contains("warnings:"), "{rendered}");
+
+        // The shutdown path pushes without fetching, and says so rather than
+        // claiming to be up to date with a remote it never asked.
+        dto.merge = "not_fetched".to_string();
+        let rendered = render_report(&dto);
+        assert!(
+            rendered.contains("merge:     no fetch (shutdown push)"),
+            "{rendered}"
+        );
+        assert_eq!(exit_code(&dto), 0, "a shutdown push is not a failure");
     }
 
     #[test]
