@@ -122,7 +122,7 @@ export function DesktopCodexFrame({
                   })
                 }
                 className={cn(
-                  "cl-mono flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
+                  "cl-serif flex shrink-0 cursor-pointer items-center gap-1.5 border-r border-rule-soft px-3 uppercase tracking-[0.18em]",
                   active
                     ? "text-ink shadow-[inset_0_-2px_0_0_var(--accent)]"
                     : "text-ink-mute hover:text-ink",
@@ -138,7 +138,7 @@ export function DesktopCodexFrame({
         <div className="flex-1" />
 
         {/* HEADER META — minimal status that survives diegetic-off */}
-        <div className="cl-mono flex shrink-0 items-stretch text-[10px]">
+        <div className="cl-serif flex shrink-0 items-stretch text-[10px]">
           <button
             type="button"
             onClick={openSearch}

@@ -1006,14 +1006,11 @@ export function Folio({ tabId, path }: FolioProps) {
   const dossierHeader = (
     <>
       <div className="flex items-baseline justify-between gap-3">
-        <span className="cl-mono text-[9px] uppercase tracking-[0.18em] text-ink-mute">
-          FILE / {folioCode}
+        <span className="cl-mono inline-flex gap-1.5 text-xs uppercase tracking-[0.18em] text-ink-mute items-center">
+          <KindIcon kind={kind} size={11} className="flex-shrink-0" />
+          {kindLabel(kind)} / {folioCode}
         </span>
         <div className="flex items-center gap-3">
-          <span className="cl-mono inline-flex items-center gap-1.5 text-[9px] uppercase tracking-[0.16em] text-ink-mute">
-            <KindIcon kind={kind} size={11} className="flex-shrink-0" />
-            {kindLabel(kind)}
-          </span>
           {folioReadOnly && !archiveTagEditor && editor.revisionConflict ? (
             <span className="text-xs text-destructive">
               Page changed on disk
