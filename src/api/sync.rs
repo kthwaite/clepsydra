@@ -29,6 +29,18 @@ use crate::vault::gitsync::journal_merge::JournalMerge;
 /// the CLI say the same thing.
 const NOT_INITIALISED: &str = "sync is not initialised for this vault — run `clep sync init`";
 
+/// What counts as a Conflict Copy row in `page_properties`, shared between
+/// the status count and the conflict list so the two can never disagree.
+///
+/// `page_properties`' primary key is `(page_id, key, ord)` — a schema-blind
+/// projection stores one row per array element, so a page whose `conflict_of`
+/// was ever hand-edited (or foreign-tool-written) into a TOML array would
+/// otherwise be counted and listed once per element. `ord = 0` keeps exactly
+/// one row per page regardless of whether the value is a scalar string (the
+/// sync engine's own shape, ADR 0004, always `ord = 0`) or an array.
+const CONFLICT_OF_FILTER: &str =
+    "pp.key = 'conflict_of' AND pp.ord = 0 AND pp.value_text IS NOT NULL";
+
 /// One "theirs" side written beside the page it conflicted with (ADR 0004).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ConflictCopyDto {
@@ -272,7 +284,7 @@ pub async fn sync_status(
         .index
         .with_index(|index, _vault| {
             index.connection().query_row(
-                "SELECT count(*) FROM page_properties WHERE key = 'conflict_of'",
+                &format!("SELECT count(*) FROM page_properties pp WHERE {CONFLICT_OF_FILTER}"),
                 [],
                 |row| row.get::<_, i64>(0),
             )
@@ -309,14 +321,14 @@ pub async fn list_conflicts(
         .with_index(move |index, _vault| {
             index
                 .connection()
-                .prepare(
+                .prepare(&format!(
                     "SELECT p.path, p.title, pp.value_text, o.path, o.title \
                      FROM page_properties pp \
                      JOIN pages p ON p.id = pp.page_id \
                      LEFT JOIN pages o ON o.path = pp.value_text \
-                     WHERE pp.key = 'conflict_of' AND pp.value_text IS NOT NULL \
-                     ORDER BY p.path",
-                )?
+                     WHERE {CONFLICT_OF_FILTER} \
+                     ORDER BY p.path"
+                ))?
                 .query_map([], |row| {
                     let original: String = row.get(2)?;
                     let original_exists: Option<String> = row.get(3)?;
@@ -414,6 +426,89 @@ mod tests {
         // A plain vault (no sync runtime) still answers.
         let status: SyncStatusDto = server.get("/sync/status").await.json();
         assert!(!status.initialised);
+    }
+
+    /// A hand-edited (or foreign-tool-written) `conflict_of` can legitimately
+    /// be a TOML array rather than the sync engine's own scalar string (ADR
+    /// 0004) — `page_properties` then holds one row per element. The status
+    /// count and the conflict list must still agree, and both must count the
+    /// page once, not once per element.
+    #[tokio::test]
+    async fn conflicts_endpoint_dedupes_a_list_typed_conflict_of() {
+        let (state, repos) = crate::sync_runtime::tests::synced_state().await;
+        let server =
+            TestServer::new(crate::api::api_router().with_state(Arc::clone(&state))).unwrap();
+        std::fs::create_dir_all(repos.a.join("notes")).unwrap();
+        std::fs::write(
+            repos.a.join("notes/plan.md"),
+            "+++\nid = \"0192b6c0-0000-7000-8000-0000000000d1\"\ntitle = \"Plan\"\n+++\nours\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repos.a.join("notes/plan.conflict.def5678.md"),
+            "+++\nid = \"0192b6c0-0000-7000-8000-0000000000d2\"\ntitle = \"Plan (conflict def5678)\"\nconflict_of = [\"notes/plan.md\", \"notes/other.md\"]\n+++\ntheirs\n",
+        )
+        .unwrap();
+        assert_eq!(
+            server.post("/index/rebuild").await.status_code(),
+            StatusCode::OK
+        );
+
+        let list: ConflictListDto = server.get("/sync/conflicts").await.json();
+        assert_eq!(list.total, 1, "{list:?}");
+        assert_eq!(list.items.len(), 1, "{list:?}");
+        assert_eq!(list.items[0].path, "notes/plan.conflict.def5678.md");
+
+        let status: SyncStatusDto = server.get("/sync/status").await.json();
+        assert!(status.initialised);
+        assert_eq!(
+            status.conflict_copies, 1,
+            "the status count and the list must never disagree"
+        );
+    }
+
+    /// No Conflict Copies at all: an empty list, not an error, and the status
+    /// count (computed by the same real query, since a sync runtime is
+    /// present here) agrees.
+    #[tokio::test]
+    async fn conflicts_endpoint_reports_zero_when_there_are_no_copies() {
+        let (state, _repos) = crate::sync_runtime::tests::synced_state().await;
+        let server =
+            TestServer::new(crate::api::api_router().with_state(Arc::clone(&state))).unwrap();
+
+        let list: ConflictListDto = server.get("/sync/conflicts").await.json();
+        assert!(list.items.is_empty(), "{list:?}");
+        assert_eq!(list.total, 0);
+
+        let status: SyncStatusDto = server.get("/sync/status").await.json();
+        assert!(status.initialised);
+        assert_eq!(status.conflict_copies, 0);
+    }
+
+    /// The original a copy names has since been deleted or moved: the copy
+    /// still lists, but `original_exists` is false and there is no title to
+    /// report for a page that is not there.
+    #[tokio::test]
+    async fn conflicts_endpoint_reports_a_deleted_original_as_absent() {
+        let (state, _tmp) = crate::state_test_support::make_state().await;
+        let server =
+            TestServer::new(crate::api::api_router().with_state(Arc::clone(&state))).unwrap();
+        let root = state.vault.root().to_path_buf();
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(
+            root.join("notes/plan.conflict.ghi9012.md"),
+            "+++\nid = \"0192b6c0-0000-7000-8000-0000000000e2\"\ntitle = \"Plan (conflict ghi9012)\"\nconflict_of = \"notes/plan.md\"\n+++\ntheirs\n",
+        )
+        .unwrap();
+        assert_eq!(
+            server.post("/index/rebuild").await.status_code(),
+            StatusCode::OK
+        );
+
+        let list: ConflictListDto = server.get("/sync/conflicts").await.json();
+        assert_eq!(list.total, 1, "{list:?}");
+        assert!(!list.items[0].original_exists);
+        assert_eq!(list.items[0].original_title, None);
     }
 
     #[tokio::test]
