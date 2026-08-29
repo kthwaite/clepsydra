@@ -201,6 +201,7 @@ function controllerModel(
     onRemoveQuickFilter: vi.fn(),
     onSetGroup: vi.fn(),
     onHideColumn: vi.fn(),
+    onShowColumn: vi.fn(),
     onShowHiddenColumns: vi.fn(),
     onClearOverrides: vi.fn(),
     onSaveOverrides: vi.fn(),

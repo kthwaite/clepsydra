@@ -135,6 +135,7 @@ export interface BaseTableViewProps {
   onRemoveQuickFilter?(identity: string): void;
   onSetGroup?(group: GroupOverride | undefined): void;
   onHideColumn?(column: string): void;
+  onShowColumn?(column: string): void;
   onShowHiddenColumns?(): void;
   onClearOverrides?(): void;
   onSaveOverrides?(): void;
