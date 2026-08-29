@@ -543,13 +543,22 @@ impl SyncEngine {
                     // A hand-made resolution (differs from ours, carries no
                     // conflict markers) is kept as it is — overwriting it
                     // with stage 2 would throw the user's merge away (D24).
+                    // The marker check runs over a lossy decode: the markers
+                    // are ASCII and survive it, so a file that is not UTF-8
+                    // can never pass as marker-free and get its markers
+                    // committed.
                     let worktree = std::fs::read(self.root.join(path)).ok();
-                    let hand_resolved = worktree.as_deref().is_some_and(|w| {
-                        w != ours.as_slice()
-                            && std::str::from_utf8(w)
-                                .map(|t| !crate::vault::conflict::has_conflict_markers(t))
-                                .unwrap_or(true)
-                    });
+                    let hand_resolved = match worktree.as_deref() {
+                        Some(w)
+                            if w != ours.as_slice()
+                                && !crate::vault::conflict::has_conflict_markers(
+                                    &String::from_utf8_lossy(w),
+                                ) =>
+                        {
+                            !self.worktree_is_ours(path, entry.oids[2].as_deref())?
+                        }
+                        _ => false,
+                    };
                     if hand_resolved {
                         self.git.add(&[path])?;
                     } else {
@@ -592,6 +601,23 @@ impl SyncEngine {
             }
         }
         Ok((copies, warnings))
+    }
+
+    /// Whether the working tree file at `path` is still "ours" — the stage-2
+    /// blob — once git's own conversions are accounted for.
+    ///
+    /// Byte inequality is not enough to call a file hand-resolved: under
+    /// `core.autocrlf` or an `eol` attribute git writes the merge result
+    /// through `convert_to_working_tree`, so ours verbatim reaches the tree
+    /// with different line endings than the blob it came from. Hashing the
+    /// working tree file the way `git add` would (`hash-object --path`) puts
+    /// both sides back in the same terms, so the untouched file compares
+    /// equal and theirs still gets its Conflict Copy.
+    fn worktree_is_ours(&self, path: &str, ours_oid: Option<&str>) -> Result<bool, SyncError> {
+        let Some(ours_oid) = ours_oid else {
+            return Ok(false);
+        };
+        Ok(self.git.hash_object(path)? == ours_oid)
     }
 
     /// Commit the merge git left staged, naming the Conflict Copies it
@@ -1440,6 +1466,113 @@ mod tests {
         assert!(matches!(ra.merge, MergeSummary::FastForward { .. }));
         assert!(repos.a.join(&conflict_copies[0].copy).is_file());
         assert_eq!(ra.warnings, Vec::<String>::new());
+    }
+
+    /// Conflict markers are ASCII, so they are legible in any encoding: a
+    /// both-changed Latin-1 file must take the Conflict Copy path like any
+    /// other, never pass as a hand resolution because it would not decode.
+    #[test]
+    fn a_conflicted_latin1_file_is_resolved_not_committed_with_markers() {
+        let repos = testing::TestRepos::new();
+        // 0xE9 is `é` in Latin-1 and not valid UTF-8; no NULs, so git treats
+        // the file as text and merges it line by line.
+        let latin1 = |line: &str| {
+            let mut bytes = b"caf\xe9 header\n".to_vec();
+            bytes.extend_from_slice(line.as_bytes());
+            bytes
+        };
+        let has_markers = |bytes: &[u8]| bytes.windows(7).any(|w| w == b"<<<<<<<");
+
+        fs::write(repos.a.join("n.txt"), latin1("base\n")).unwrap();
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+        fs::write(repos.a.join("n.txt"), latin1("A's edit\n")).unwrap();
+        engine(&repos.a).full_sync().unwrap();
+        fs::write(repos.b.join("n.txt"), latin1("B's edit\n")).unwrap();
+
+        let rb = engine(&repos.b).full_sync().unwrap();
+
+        let copies = rb.conflict_copies();
+        assert_eq!(copies.len(), 1, "{:?}", rb.merge);
+        assert_eq!(copies[0].original, "n.txt");
+        assert_eq!(
+            fs::read(repos.b.join("n.txt")).unwrap(),
+            latin1("B's edit\n"),
+            "ours stays, byte for byte"
+        );
+        let committed = testing::git(&repos.b)
+            .run_bytes(&["show", "HEAD:n.txt"])
+            .unwrap();
+        assert!(
+            !has_markers(&committed),
+            "no conflict markers reach a sync commit"
+        );
+        assert!(
+            fs::read(repos.b.join(&copies[0].copy))
+                .unwrap()
+                .ends_with(b"A's edit\n"),
+            "theirs survives as the copy"
+        );
+    }
+
+    /// With `core.autocrlf` (or an `eol` attribute) git writes a merge result
+    /// into the working tree converted, so a driver's "ours verbatim" reaches
+    /// the tree differing from stage 2 by line endings alone. That is not a
+    /// hand resolution, and treating it as one would drop theirs with no
+    /// Conflict Copy.
+    #[test]
+    fn ours_verbatim_under_autocrlf_is_not_mistaken_for_a_hand_resolution() {
+        let repos = testing::TestRepos::new();
+        // A merge driver that leaves `%A` (ours) untouched and exits 1 — the
+        // shape `clep merge-driver` produces for every conflict it refuses.
+        testing::write(&repos.a, ".gitattributes", "*.txt merge=keepours\n");
+        for root in [&repos.a, &repos.b] {
+            let git = testing::git(root);
+            git.run(&["config", "merge.keepours.name", "keep ours"])
+                .unwrap();
+            git.run(&["config", "merge.keepours.driver", "false"])
+                .unwrap();
+        }
+        testing::git(&repos.b)
+            .run(&["config", "core.autocrlf", "true"])
+            .unwrap();
+
+        testing::write(&repos.a, "n.txt", "one\ntwo\n");
+        engine(&repos.a).full_sync().unwrap();
+        engine(&repos.b).full_sync().unwrap();
+        testing::write(&repos.a, "n.txt", "one\nA's edit\n");
+        engine(&repos.a).full_sync().unwrap();
+        testing::write(&repos.b, "n.txt", "one\nB's edit\n");
+        engine(&repos.b).commit_local().unwrap();
+        // Materialise the working tree the way a checkout under
+        // `core.autocrlf` leaves it: CRLF on disk, LF in the index. Writing
+        // the file from the test would not — nothing has converted it yet.
+        let gb = testing::git(&repos.b);
+        fs::remove_file(repos.b.join("n.txt")).unwrap();
+        gb.run(&["checkout", "--", "n.txt"]).unwrap();
+        assert!(
+            fs::read(repos.b.join("n.txt")).unwrap().contains(&b'\r'),
+            "the fixture needs a converted working tree"
+        );
+
+        let rb = engine(&repos.b).full_sync().unwrap();
+
+        let copies = rb.conflict_copies();
+        assert_eq!(
+            copies.len(),
+            1,
+            "theirs must still be copied beside ours: {:?}",
+            rb.merge
+        );
+        assert_eq!(copies[0].original, "n.txt");
+        assert!(
+            testing::read(&repos.b, &copies[0].copy).contains("A's edit"),
+            "the copy carries theirs"
+        );
+        assert!(
+            testing::git(&repos.b).status().unwrap().is_empty(),
+            "tree is clean after sync"
+        );
     }
 
     #[test]

@@ -399,38 +399,52 @@ impl Git {
     }
 
     /// `git ls-files -u -z`, grouped per path. `stages[n]` is `true` when
-    /// stage `n` (1=base, 2=ours, 3=theirs) is present; index 0 is unused.
+    /// stage `n` (1=base, 2=ours, 3=theirs) is present, and `oids[n]` is that
+    /// stage's blob id; index 0 is unused.
     pub fn unmerged(&self) -> Result<Vec<UnmergedEntry>, GitError> {
         let bytes = self.run_bytes(&["ls-files", "-u", "-z"])?;
         let text = String::from_utf8(bytes).map_err(|_| GitError::Utf8 {
             args: "ls-files -u -z".to_string(),
         })?;
         let mut order: Vec<String> = Vec::new();
-        let mut by_path: HashMap<String, [bool; 4]> = HashMap::new();
+        let mut by_path: HashMap<String, UnmergedEntry> = HashMap::new();
         for record in text.split('\0').filter(|s| !s.is_empty()) {
+            // `<mode> <object> <stage>\t<path>`.
             let Some((meta, path)) = record.split_once('\t') else {
                 continue;
             };
-            let stage: usize = meta
-                .split(' ')
-                .nth(2)
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(0);
+            let mut fields = meta.split(' ').skip(1);
+            let oid = fields.next();
+            let stage: usize = fields.next().and_then(|s| s.parse().ok()).unwrap_or(0);
             let entry = by_path.entry(path.to_string()).or_insert_with(|| {
                 order.push(path.to_string());
-                [false; 4]
+                UnmergedEntry {
+                    path: path.to_string(),
+                    stages: [false; 4],
+                    oids: Default::default(),
+                }
             });
             if stage < 4 {
-                entry[stage] = true;
+                entry.stages[stage] = true;
+                entry.oids[stage] = oid.map(str::to_string);
             }
         }
         Ok(order
             .into_iter()
-            .map(|path| {
-                let stages = by_path[&path];
-                UnmergedEntry { path, stages }
-            })
+            .filter_map(|path| by_path.remove(&path))
             .collect())
+    }
+
+    /// `git hash-object --path <path> -- <path>`: the blob id the working
+    /// tree file at `path` would be stored as if it were staged there.
+    ///
+    /// `--path` is what makes it comparable to an index entry: git applies
+    /// the same clean filter and end-of-line conversion it would apply on
+    /// `git add`, so a file that only differs from a stage by checkout
+    /// conversion (`core.autocrlf`, an `eol` attribute) hashes to that
+    /// stage's blob. Writes nothing — no `-w`.
+    pub fn hash_object(&self, path: &str) -> Result<String, GitError> {
+        self.run(&["hash-object", "--path", path, "--", path])
     }
 
     pub fn show_stage(&self, stage: u8, path: &str) -> Result<Vec<u8>, GitError> {
@@ -565,12 +579,15 @@ pub struct StatusEntry {
 }
 
 /// One unmerged path from `git ls-files -u -z`, with the index stages
-/// present for it. `stages[1..=3]` correspond to base/ours/theirs; index 0
-/// is unused and always `false`.
+/// present for it. `stages[1..=3]` and `oids[1..=3]` correspond to
+/// base/ours/theirs; index 0 is unused, always `false` and always `None`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnmergedEntry {
     pub path: String,
     pub stages: [bool; 4],
+    /// Each present stage's blob id, for comparing a working tree file
+    /// against a stage without re-reading either ([`Git::hash_object`]).
+    pub oids: [Option<String>; 4],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
