@@ -1,13 +1,14 @@
 import { useMemo } from "react";
 import { useGraph } from "#/api/index";
 import type { GraphNode } from "#/api/types";
-import { ASCII_COMPASS } from "#/components/codex/ascii";
 import { applyFilters } from "#/components/codex/constellation-filters";
 import { MobileConstellation } from "#/components/codex/MobileConstellation";
 import { ForceGraph } from "#/components/ForceGraph";
+import { Checkbox } from "#/components/ui/checkbox";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { useOpenTab } from "#/hooks/useOpenTab";
 import { type Kind, kindColorVar } from "#/lib/kind";
+import { pluralize } from "#/lib/string";
 import { useConstellationStore } from "#/store/constellation";
 import { useWorkspaceStore } from "#/store/workspace";
 
@@ -86,9 +87,6 @@ export function Constellation() {
       />
     );
   }
-  const orphans = filtered.nodes.filter(
-    (n) => !filtered.edges.some((e) => e.source === n.id || e.target === n.id),
-  );
   const degrees = countDegrees(filtered.edges);
   const hubs = [...filtered.nodes]
     .map((n) => ({ ...n, degree: degrees.get(n.id) ?? 0 }))
@@ -101,14 +99,13 @@ export function Constellation() {
       <div className="flex min-h-0 flex-col">
         <div className="mb-1 flex items-baseline justify-between">
           <div>
-            <div className="cl-cap cl-cap-wide text-[14px]">CONSTELLATION</div>
-            <div className="cl-marg">
-              — a map of one's mind, drawn from the connexions —
+            <div className="cl-serif cl-cap cl-cap-wide text-[14px]">
+              CONSTELLATION
             </div>
           </div>
           <div className="cl-mono text-[10px] text-ink-mute">
-            fig. v · {filtered.nodes.length} nodes · {filtered.edges.length}{" "}
-            vertices
+            {filtered.nodes.length} {pluralize(filtered.nodes.length, "node")} |{" "}
+            {filtered.edges.length} {pluralize(filtered.edges.length, "edge")}
           </div>
         </div>
         <hr className="cl-rule-double" />
@@ -121,19 +118,6 @@ export function Constellation() {
           <div className="absolute bottom-2 left-2 h-3 w-3 border-b border-l border-rule" />
           <div className="absolute bottom-2 right-2 h-3 w-3 border-b border-r border-rule" />
 
-          <div className="cl-cap absolute left-4 top-2 text-[9px] text-ink-mute">
-            PL. V · CONSTELLATION OF ATTENTION
-          </div>
-          <div className="cl-mono absolute right-4 top-2 text-[9px]">
-            N ↑ · scale 1:1
-          </div>
-
-          <div className="absolute bottom-2 right-4">
-            <pre className="cl-ascii cl-ascii-faint text-[6px]">
-              {ASCII_COMPASS}
-            </pre>
-          </div>
-
           <ForceGraph
             nodes={filtered.nodes}
             edges={filtered.edges}
@@ -144,9 +128,9 @@ export function Constellation() {
 
       {/* SIDEBAR */}
       <aside className="cl-noscroll overflow-auto border-l border-rule-soft pl-4">
-        <div className="cl-cap mb-1 text-[9px]">§ Hubs, by degree</div>
+        <div className="cl-cap mb-1">Hubs</div>
         <hr className="cl-rule-soft" />
-        <div className="cl-serif mt-1 text-[11px]">
+        <div className="cl-serif mt-1 ">
           {hubs.map((h) => (
             <button
               key={h.id}
@@ -163,43 +147,21 @@ export function Constellation() {
             <p className="cl-marg m-0">No connexions yet.</p>
           )}
         </div>
-
-        <div className="cl-cap mb-1 mt-4 text-[9px]">
-          § Orphans · {orphans.length}
-        </div>
+        <div className="cl-cap mb-1 mt-4">Filters</div>
         <hr className="cl-rule-soft" />
-        {orphans.length === 0 ? (
-          <p className="cl-marg mt-1">
-            All folios connect to the body of work.
-          </p>
-        ) : (
-          <p className="cl-marg mt-1">
-            {orphans.length} folios stand alone, with no connexion to the body
-            of work — reader, attend to them, or release them.
-          </p>
-        )}
-
-        <div className="cl-cap mb-1 mt-4 text-[9px]">§ Filters</div>
-        <hr className="cl-rule-soft" />
-        <div className="cl-mono mt-1 text-[11px]">
-          <label style={{ display: "block", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={orphansVisible}
-              onChange={(e) => setOrphansVisible(e.target.checked)}
-              style={{ marginRight: 4 }}
-            />
+        <div className="cl-serif mt-1 ">
+          <Checkbox
+            isSelected={orphansVisible}
+            onChange={(checked) => setOrphansVisible(checked)}
+          >
             orphans visible
-          </label>
-          <label style={{ display: "block", cursor: "pointer" }}>
-            <input
-              type="checkbox"
-              checked={hideDaily}
-              onChange={(e) => setHideDaily(e.target.checked)}
-              style={{ marginRight: 4 }}
-            />
+          </Checkbox>
+          <Checkbox
+            isSelected={hideDaily}
+            onChange={(checked) => setHideDaily(checked)}
+          >
             daily nodes hidden
-          </label>
+          </Checkbox>
           <div style={{ marginTop: 4 }}>
             depth ·{" "}
             {([1, 2, null] as const).map((d) => (
@@ -229,9 +191,9 @@ export function Constellation() {
           </div>
         </div>
 
-        <div className="cl-cap mb-1 mt-4 text-[9px]">§ Legend</div>
+        <div className="cl-cap mb-1 mt-4">Legend</div>
         <hr className="cl-rule-soft" />
-        <div className="cl-mono mt-1 flex flex-col gap-[3px] text-[10px] text-ink-mute">
+        <div className="cl-serif mt-1 flex flex-col gap-[3px] text-ink-mute">
           {(
             [
               ["▪", "PROJECT", "project"],
