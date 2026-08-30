@@ -1,4 +1,5 @@
 import { Editor, Node, type Path, Transforms } from "slate";
+import { makeParagraph } from "#/editor/schema/elements/paragraph";
 import {
   makeTable,
   makeTableCell,
@@ -97,4 +98,80 @@ export function appendTableRow(editor: Editor, tablePath: Path): Path {
   });
 
   return [...tablePath, rowIndex, 0];
+}
+
+function removeTable(editor: Editor, tablePath: Path): Path {
+  let nearestPath = tablePath;
+
+  Editor.withoutNormalizing(editor, () => {
+    Transforms.removeNodes(editor, { at: tablePath });
+    if (Node.has(editor, tablePath)) return;
+
+    const previousPath = [...tablePath];
+    previousPath[previousPath.length - 1] -= 1;
+    const previousIndex = previousPath.at(-1);
+    if (
+      previousIndex !== undefined &&
+      previousIndex >= 0 &&
+      Node.has(editor, previousPath)
+    ) {
+      nearestPath = previousPath;
+      return;
+    }
+
+    Transforms.insertNodes(editor, makeParagraph({}), { at: tablePath });
+  });
+
+  return nearestPath;
+}
+
+export function deleteTableColumn(
+  editor: Editor,
+  tablePath: Path,
+  columnIndex: number,
+): Path | null {
+  const table = Node.get(editor, tablePath) as TableElement;
+  const columnCount = Math.max(
+    ...table.children.map((row) => row.children.length),
+  );
+
+  if (columnCount === 1) {
+    return removeTable(editor, tablePath);
+  }
+
+  const align = Array.from(
+    { length: columnCount },
+    (_, index) => table.align?.[index] ?? null,
+  );
+  align.splice(columnIndex, 1);
+
+  Editor.withoutNormalizing(editor, () => {
+    Transforms.setNodes(editor, { align } as Partial<TableElement>, {
+      at: tablePath,
+    });
+    table.children.forEach((row, rowIndex) => {
+      if (columnIndex < row.children.length) {
+        Transforms.removeNodes(editor, {
+          at: [...tablePath, rowIndex, columnIndex],
+        });
+      }
+    });
+  });
+
+  return [...tablePath, 0, Math.min(columnIndex, columnCount - 2)];
+}
+
+export function deleteTableRow(
+  editor: Editor,
+  tablePath: Path,
+  rowIndex: number,
+): Path | null {
+  const table = Node.get(editor, tablePath) as TableElement;
+
+  if (table.children.length === 1) {
+    return removeTable(editor, tablePath);
+  }
+
+  Transforms.removeNodes(editor, { at: [...tablePath, rowIndex] });
+  return [...tablePath, Math.min(rowIndex, table.children.length - 2), 0];
 }

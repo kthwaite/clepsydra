@@ -96,6 +96,94 @@ function twoByTwoTable(): TableElement {
   };
 }
 
+function oneColumnTable(): TableElement {
+  return {
+    type: "table",
+    align: ["center"],
+    children: [
+      {
+        type: "table-row",
+        children: [
+          {
+            type: "table-cell",
+            header: true,
+            align: "center",
+            children: [{ text: "Only" }],
+          },
+        ],
+      },
+      {
+        type: "table-row",
+        children: [
+          {
+            type: "table-cell",
+            align: "center",
+            children: [{ text: "Value" }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function oneRowTable(): TableElement {
+  return {
+    type: "table",
+    align: ["left", "right"],
+    children: [
+      {
+        type: "table-row",
+        children: [
+          {
+            type: "table-cell",
+            header: true,
+            align: "left",
+            children: [{ text: "Name" }],
+          },
+          {
+            type: "table-cell",
+            header: true,
+            align: "right",
+            children: [{ text: "Count" }],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+function widerBodyTable(): TableElement {
+  return {
+    type: "table",
+    align: ["left"],
+    children: [
+      {
+        type: "table-row",
+        children: [
+          {
+            type: "table-cell",
+            header: true,
+            align: "left",
+            children: [{ text: "Name" }],
+          },
+        ],
+      },
+      {
+        type: "table-row",
+        children: [
+          {
+            type: "table-cell",
+            align: "left",
+            children: [{ text: "Alpha" }],
+          },
+          { type: "table-cell", children: [{ text: "1" }] },
+          { type: "table-cell", children: [{ text: "Active" }] },
+        ],
+      },
+    ],
+  };
+}
+
 function renderEditor(
   initialValue: Descendant[],
   { readOnly = false }: { readOnly?: boolean } = {},
@@ -257,31 +345,188 @@ describe("SlateEditor table slash command and affordances", () => {
     expect(tableEntries(editor)[0][0].children).toHaveLength(2);
   });
 
-  it("tabs from the last cell through both append controls", async () => {
+  it("renders keyboard-focusable delete controls with indexed accessible names", () => {
+    renderEditor([twoByTwoTable()]);
+
+    const deleteColumnOne = screen.getByRole("button", {
+      name: "Delete column 1",
+    });
+    const deleteColumnTwo = screen.getByRole("button", {
+      name: "Delete column 2",
+    });
+    const deleteRowOne = screen.getByRole("button", { name: "Delete row 1" });
+    const deleteRowTwo = screen.getByRole("button", { name: "Delete row 2" });
+
+    for (const control of [
+      deleteColumnOne,
+      deleteColumnTwo,
+      deleteRowOne,
+      deleteRowTwo,
+    ]) {
+      expect(control).toBeVisible();
+      expect(control.tabIndex).toBe(0);
+    }
+  });
+
+  it("normalizes a wider body row and exposes a control for every column", async () => {
+    const { editor, user } = renderEditor([widerBodyTable()]);
+
+    await waitFor(() => {
+      const table = tableEntries(editor)[0][0];
+      expect(table.align).toEqual(["left", null, null]);
+      expect(table.children.map((row) => row.children.length)).toEqual([3, 3]);
+      expect(
+        screen.getByRole("button", { name: "Delete column 3" }),
+      ).toBeVisible();
+    });
+
+    await user.click(screen.getByRole("button", { name: "Delete column 3" }));
+
+    await waitFor(() => {
+      const [table, tablePath] = tableEntries(editor)[0];
+      expect(table.children.map((row) => row.children.length)).toEqual([2, 2]);
+      expectCaret(editor, [...tablePath, 0, 1, 0]);
+      expect(editor.selection).not.toBeNull();
+      if (!editor.selection) throw new Error("Expected editor selection");
+      expect(Node.has(editor, editor.selection.anchor.path)).toBe(true);
+    });
+  });
+
+  it("deletes a column in one undo step and selects the nearest surviving cell", async () => {
+    const { editor, user } = renderEditor([twoByTwoTable()]);
+
+    await user.click(screen.getByRole("button", { name: "Delete column 1" }));
+
+    await waitFor(() => {
+      const [table, tablePath] = tableEntries(editor)[0];
+      expect(table.align).toEqual(["right"]);
+      expect(table.children.map((row) => Node.string(row))).toEqual([
+        "Count",
+        "1",
+      ]);
+      expectCaret(editor, [...tablePath, 0, 0, 0]);
+    });
+
+    act(() => HistoryEditor.undo(editor));
+    const restored = tableEntries(editor)[0][0];
+    expect(restored.align).toEqual(["left", "right"]);
+    expect(restored.children.map((row) => Node.string(row))).toEqual([
+      "NameCount",
+      "Alpha1",
+    ]);
+  });
+
+  it("deletes a row in one undo step and selects the nearest surviving cell", async () => {
+    const { editor, user } = renderEditor([twoByTwoTable()]);
+
+    await user.click(screen.getByRole("button", { name: "Delete row 1" }));
+
+    await waitFor(() => {
+      const [table, tablePath] = tableEntries(editor)[0];
+      expect(table.align).toEqual(["left", "right"]);
+      expect(table.children.map((row) => Node.string(row))).toEqual(["Alpha1"]);
+      expect(table.children[0].children.map((cell) => cell.header)).toEqual([
+        true,
+        true,
+      ]);
+      expectCaret(editor, [...tablePath, 0, 0, 0]);
+    });
+
+    act(() => HistoryEditor.undo(editor));
+    expect(
+      tableEntries(editor)[0][0].children.map((row) => Node.string(row)),
+    ).toEqual(["NameCount", "Alpha1"]);
+  });
+
+  it("removes the table at its final column and selects the following block", async () => {
+    const { editor, user } = renderEditor([
+      oneColumnTable(),
+      { type: "paragraph", children: [{ text: "After" }] } as Descendant,
+    ]);
+
+    await user.click(screen.getByRole("button", { name: "Delete column 1" }));
+
+    await waitFor(() => {
+      expect(tableEntries(editor)).toHaveLength(0);
+      expect(editor.children).toEqual([
+        { type: "paragraph", children: [{ text: "After" }] },
+      ]);
+      expectCaret(editor, [0, 0]);
+    });
+  });
+
+  it("replaces a sole table at its final column with a selected paragraph and undoes once", async () => {
+    const { editor, user } = renderEditor([oneColumnTable()]);
+
+    await user.click(screen.getByRole("button", { name: "Delete column 1" }));
+
+    await waitFor(() => {
+      expect(tableEntries(editor)).toHaveLength(0);
+      expect(editor.children).toEqual([
+        { type: "paragraph", children: [{ text: "" }] },
+      ]);
+      expectCaret(editor, [0, 0]);
+    });
+    act(() => HistoryEditor.undo(editor));
+    expect(tableEntries(editor)).toHaveLength(1);
+    expect(editor.children).toEqual([
+      oneColumnTable(),
+      { type: "paragraph", children: [{ text: "" }] },
+    ]);
+  });
+
+  it("replaces a sole table at its final row with a selected paragraph and undoes once", async () => {
+    const { editor, user } = renderEditor([oneRowTable()]);
+
+    await user.click(screen.getByRole("button", { name: "Delete row 1" }));
+
+    await waitFor(() => {
+      expect(tableEntries(editor)).toHaveLength(0);
+      expect(editor.children).toEqual([
+        { type: "paragraph", children: [{ text: "" }] },
+      ]);
+      expectCaret(editor, [0, 0]);
+    });
+    act(() => HistoryEditor.undo(editor));
+    expect(tableEntries(editor)).toHaveLength(1);
+    expect(editor.children).toEqual([
+      oneRowTable(),
+      { type: "paragraph", children: [{ text: "" }] },
+    ]);
+  });
+  it("tabs from the table through every delete and append control", async () => {
     const { editor, user } = renderEditor([twoByTwoTable()]);
     const editable = screen.getByRole("textbox");
     await user.click(editable);
     act(() => Transforms.select(editor, Editor.end(editor, [0, 1, 1])));
 
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Add column" })).toHaveFocus();
-
-    await user.tab();
-    expect(screen.getByRole("button", { name: "Add row" })).toHaveFocus();
-
-    await user.tab();
-    expect(screen.getByRole("button", { name: "After editor" })).toHaveFocus();
+    for (const name of [
+      "Delete column 1",
+      "Delete row 1",
+      "Delete column 2",
+      "Delete row 2",
+      "Add column",
+      "Add row",
+      "After editor",
+    ]) {
+      await user.tab();
+      expect(screen.getByRole("button", { name })).toHaveFocus();
+    }
   });
 
-  it("hides table append controls in read-only mode", () => {
+  it("hides table controls in read-only mode", () => {
     renderEditor([twoByTwoTable()], { readOnly: true });
 
     expect(screen.getByRole("table")).toBeVisible();
-    expect(
-      screen.queryByRole("button", { name: "Add column" }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Add row" }),
-    ).not.toBeInTheDocument();
+    for (const name of [
+      "Add column",
+      "Add row",
+      "Delete column 1",
+      "Delete column 2",
+      "Delete row 1",
+      "Delete row 2",
+    ]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
   });
 });
