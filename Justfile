@@ -4,6 +4,18 @@ set default-list := true
 debug:
     ./scripts/debug.sh
 
+# Run UI tests
+test-ui:
+    bun --cwd ui test
+
+# Run API tests
+test-api:
+    cargo test --quiet
+
+# Run all tests
+test: test-ui test-api
+    echo 'Running all tests...'
+
 # Build the React frontend into ui/dist
 ui:
     bun run --cwd ui build
