@@ -580,8 +580,8 @@ it("documents warning-only archive deletion hooks and CAS recovery limits", () =
 
   expect(source).toMatch(/warning after the Folio\s+deletion has succeeded/);
   expect(source).toMatch(/leaked reference\s+counts/);
-  expect(source).toContain("archive-import or reference-replay");
-  expect(source).toContain("complete CAS directory, including `cas.db`");
+  expect(source).toContain("archive-import/reference-replay");
+  expect(source).toMatch(/matching complete\s+CAS directory, including `cas\.db`/);
 });
 
 function runtimeRoutePaths(): string[] {

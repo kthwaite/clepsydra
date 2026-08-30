@@ -1,26 +1,14 @@
-import { act, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { createMutate, assignMutate, openTabMock, basesQuery, intakeProps } =
-  vi.hoisted(() => ({
-    createMutate: vi.fn(),
-    assignMutate: vi.fn(),
-    openTabMock: vi.fn(),
-    basesQuery: {
-      data: {
-        bases: [
-          { slug: "reading", name: "Reading Log" },
-          { slug: "recipes", name: "Recipes" },
-        ],
-      },
-    },
-    intakeProps: vi.fn(),
-  }));
+const { createMutate, openTabMock } = vi.hoisted(() => ({
+  createMutate: vi.fn(),
+  openTabMock: vi.fn(),
+}));
 
 vi.mock("#/api/pages", () => ({
   useCreatePage: () => ({ mutate: createMutate, isPending: false }),
-  useAssignPage: () => ({ mutate: assignMutate, isPending: false }),
 }));
 vi.mock("#/api/index", () => ({
   useTags: () => ({
@@ -35,30 +23,6 @@ vi.mock("#/lib/useProjects", () => ({
 }));
 vi.mock("#/hooks/useOpenTab", () => ({
   useOpenTab: () => openTabMock,
-}));
-vi.mock("#/api/bases", () => ({
-  useBases: () => basesQuery,
-}));
-vi.mock("#/components/bases/BaseMemberIntake", () => ({
-  BaseMemberIntake: (props: {
-    slug: string;
-    onCreated(path: string, title: string): void;
-  }) => {
-    intakeProps(props);
-    return (
-      <div data-testid="member-intake">
-        {props.slug}
-        <button
-          type="button"
-          onClick={() =>
-            props.onCreated("books/the-dispossessed.md", "The Dispossessed")
-          }
-        >
-          Complete member intake
-        </button>
-      </div>
-    );
-  },
 }));
 
 import { InscribeModal } from "#/components/codex/InscribeModal";
@@ -79,51 +43,6 @@ describe("InscribeModal", () => {
     expect(screen.queryByPlaceholderText("ideas/new-page")).toBeNull();
   });
 
-  it("hands intake over to the Base member draft when a Base is chosen", async () => {
-    const user = userEvent.setup();
-    render(<InscribeModal />);
-
-    // Nothing Base-shaped until a Base is picked.
-    expect(screen.queryByTestId("member-intake")).toBeNull();
-    expect(screen.getByRole("textbox", { name: "Title" })).toBeVisible();
-
-    await user.click(screen.getByRole("button", { name: /Base$/ }));
-    await user.click(
-      await screen.findByRole("option", { name: "Reading Log" }),
-    );
-
-    expect(screen.getByTestId("member-intake")).toHaveTextContent("reading");
-    // The page-shaped fields step aside; the member draft owns the form.
-    expect(screen.queryByRole("textbox", { name: "Title" })).toBeNull();
-    expect(intakeProps).toHaveBeenCalledWith(
-      expect.objectContaining({ slug: "reading" }),
-    );
-  });
-
-  it("opens the created member, closes the modal, and resets intake", async () => {
-    const user = userEvent.setup();
-    const view = render(<InscribeModal />);
-    await user.click(screen.getByRole("button", { name: /Base$/ }));
-    await user.click(
-      await screen.findByRole("option", { name: "Reading Log" }),
-    );
-
-    await user.click(
-      screen.getByRole("button", { name: "Complete member intake" }),
-    );
-
-    expect(openTabMock).toHaveBeenCalledWith(
-      "page",
-      "books/the-dispossessed.md",
-      "The Dispossessed",
-    );
-    expect(useUiStore.getState().isInscribeOpen).toBe(false);
-
-    act(() => useUiStore.setState({ isInscribeOpen: true }));
-    view.rerender(<InscribeModal />);
-    expect(screen.queryByTestId("member-intake")).toBeNull();
-    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("");
-  });
 
   it("does not offer quotation as a creation kind", async () => {
     const user = userEvent.setup();
@@ -142,7 +61,7 @@ describe("InscribeModal", () => {
     expect(useUiStore.getState().isInscribeOpen).toBe(false);
   });
 
-  it("cancels without creating, assigning, or opening a page", async () => {
+  it("cancels without creating or opening a page", async () => {
     const user = userEvent.setup();
     render(<InscribeModal />);
 
@@ -150,7 +69,6 @@ describe("InscribeModal", () => {
 
     expect(useUiStore.getState().isInscribeOpen).toBe(false);
     expect(createMutate).not.toHaveBeenCalled();
-    expect(assignMutate).not.toHaveBeenCalled();
     expect(openTabMock).not.toHaveBeenCalled();
   });
 
@@ -200,7 +118,6 @@ describe("InscribeModal", () => {
     const [createVars] = createMutate.mock.calls[0];
     expect(createVars.body.kind).toBe("RECIPE");
     expect(createVars.params.path.path).toMatch(/^recipes\//);
-    expect(assignMutate).not.toHaveBeenCalled();
     expect(openTabMock).toHaveBeenCalledWith(
       "page",
       expect.stringMatching(/^recipes\//),
@@ -221,7 +138,6 @@ describe("InscribeModal", () => {
 
     expect(useUiStore.getState().isInscribeOpen).toBe(true);
     expect(screen.getByText(/page already exists/)).toBeInTheDocument();
-    expect(assignMutate).not.toHaveBeenCalled();
     expect(openTabMock).not.toHaveBeenCalled();
   });
 

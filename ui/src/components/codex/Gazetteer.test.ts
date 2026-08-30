@@ -181,7 +181,9 @@ describe("Gazetteer controller", () => {
     await user.type(within(filters).getByTestId("filter-bar-input"), "Al");
     await user.click(screen.getByTestId("filter-bar-add"));
     await user.click(screen.getByTestId("filter-bar-field-tags"));
-    await user.click(screen.getByTestId("filter-bar-option-tags-research"));
+    await user.click(
+      await screen.findByTestId("filter-bar-option-tags-research"),
+    );
     // multi-select keeps the add-filter popover open; close it explicitly.
     await user.click(screen.getByTestId("filter-bar-add"));
     await user.click(within(filters).getByRole("radio", { name: "Title" }));

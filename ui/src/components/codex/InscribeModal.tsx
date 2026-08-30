@@ -34,8 +34,6 @@ export function InscribeModal() {
   const openTab = useOpenTab();
   const projects = useProjects();
   const { data: tagIndex } = useTags();
-  // Choosing a Base hands the form to the member draft: same composition and
-  // same endpoint as the Base table's own Add member.
 
   if (!isOpen) return null;
 

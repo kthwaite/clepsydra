@@ -356,7 +356,7 @@ describe("Sheaf quire rendering", () => {
   it("counts hidden members in the SHEAF total", () => {
     seed(true);
     render(<Sheaf activeTabId="t3" />);
-    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("3 tabs")).toBeInTheDocument();
   });
 
   it("an active quire member renders both the quire and active rules", () => {
@@ -435,7 +435,7 @@ describe("Sheaf creation action", () => {
     seed(false);
     render(<Sheaf activeTabId="t3" />);
 
-    expect(screen.getByText("3")).toBeInTheDocument();
+    expect(screen.getByText("3 tabs")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "New page" }),
     ).not.toHaveAttribute("aria-selected");

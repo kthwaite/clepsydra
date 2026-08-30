@@ -163,7 +163,7 @@ describe("CodeBlockElement", () => {
     await screen.findByTestId("mermaid-diagram");
 
     expect(
-      screen.getByRole("button", { name: "Expand diagram" }),
+      await screen.findByRole("button", { name: "Expand diagram" }),
     ).toBeInTheDocument();
 
     await act(async () => {
