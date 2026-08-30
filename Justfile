@@ -10,7 +10,7 @@ test-ui:
 
 # Run API tests
 test-api:
-    cargo test --quiet
+    cargo test --quiet -- --test-threads=4
 
 # Run all tests
 test: test-ui test-api
