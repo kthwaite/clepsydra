@@ -228,6 +228,7 @@ filter the menu, then choose a command with the pointer, `Enter`, or `Tab`.
 | --- | --- |
 | **Time Heading** | Current local time as a section heading |
 | **Base embed** | A live saved Base view |
+| **Table** | Empty three-column, three-row GFM table |
 | **Heading 1** through **Heading 6** | Markdown heading levels 1–6 |
 | **Bullet list** | Unordered list |
 | **Numbered list** | Ordered list |
@@ -235,6 +236,10 @@ filter the menu, then choose a command with the pointer, `Enter`, or `Tab`.
 | **Blockquote** | Quoted block |
 | **Code block** | Fenced code block |
 | **Divider** | Horizontal rule |
+
+Editable tables show circular **+** controls while the table is hovered or
+focused. The control at the right edge adds a trailing column. The control at
+the bottom edge adds a trailing row.
 
 A slash command is offered only when the paragraph consists of the leading
 slash and its query and the cursor is at the end. Slash text inside existing
@@ -258,11 +263,15 @@ save. Cell text is edited in place and takes the usual inline marks, links,
 wikilinks, and math.
 
 `Tab` moves the caret to the next cell and `Shift+Tab` to the previous one,
-wrapping across row boundaries. A cell is a single line of inline content, so
-`Enter` inside one does nothing, and a delete at a cell boundary stops there
-rather than merging two cells. Folio has no command for creating a table or
-adding rows and columns — paste the Markdown for the shape you want, then edit
-the cells.
+wrapping across row boundaries. From the final cell, `Tab` moves through **Add
+column** and **Add row**, then leaves the editor. A cell is a single line of
+inline content, so `Enter` inside one does nothing, and a delete at a cell
+boundary stops there rather than merging two cells.
+
+Choose **Table** from the slash menu to insert an empty three-column,
+three-row table. While an editable table is hovered or focused, use the
+circular control at its right edge to add a trailing column or the control
+below it to add a trailing row. Touch layouts keep both controls visible.
 
 ### Embed a Base
 
@@ -308,8 +317,8 @@ not retry automatically.
 ## Failures and conflicts
 
 - A table cell holds one line of inline content. `Enter` inside a cell does
-  nothing rather than splitting the cell, and there is no command to insert a
-  table or add a row or column; write the Markdown elsewhere and paste it in.
+  nothing rather than splitting the cell, and deletion stops at cell
+  boundaries rather than merging cells.
 - A normal save failure leaves the Folio in **Save failed**. Correct the server
   or network problem and save again.
 - If the page changed after it was loaded, the server returns a revision
