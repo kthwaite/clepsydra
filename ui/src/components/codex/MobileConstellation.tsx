@@ -23,11 +23,13 @@ export interface MobileConstellationProps {
   anchorId: string | null;
   depth: 1 | 2;
   hideDaily: boolean;
+  hideTasks?: boolean;
   orphansVisible: boolean;
   onModeChange: (mode: ConstellationViewMode) => void;
   onAnchorChange: (anchorId: string | null) => void;
   onDepthChange: (depth: 1 | 2) => void;
   onHideDailyChange: (hidden: boolean) => void;
+  onHideTasksChange?: (hidden: boolean) => void;
   onOrphansVisibleChange: (visible: boolean) => void;
   onOpen: (node: GraphNode) => void;
 }
@@ -63,11 +65,13 @@ export function MobileConstellation({
   anchorId,
   depth,
   hideDaily,
+  hideTasks = false,
   orphansVisible,
   onModeChange,
   onAnchorChange,
   onDepthChange,
   onHideDailyChange,
+  onHideTasksChange,
   onOrphansVisibleChange,
   onOpen,
 }: MobileConstellationProps) {
@@ -83,9 +87,10 @@ export function MobileConstellation({
         anchorId,
         depth: anchorId ? depth : null,
         hideDaily,
+        hideTasks,
         orphansVisible,
       }),
-    [graph, anchorId, depth, hideDaily, orphansVisible],
+    [graph, anchorId, depth, hideDaily, hideTasks, orphansVisible],
   );
   const sortedVisibleNodes = useMemo(
     () => [...visibleGraph.nodes].sort(compareNodes),
@@ -178,6 +183,18 @@ export function MobileConstellation({
             />
             Hide journals
           </label>
+          {onHideTasksChange ? (
+            <label className="cl-mono inline-flex min-h-11 items-center gap-2 text-[10px] text-ink-2">
+              <input
+                type="checkbox"
+                role="switch"
+                aria-checked={hideTasks}
+                checked={hideTasks}
+                onChange={(event) => onHideTasksChange(event.target.checked)}
+              />
+              Hide tasks
+            </label>
+          ) : null}
           <label className="cl-mono inline-flex min-h-11 items-center gap-2 text-[10px] text-ink-2">
             <input
               type="checkbox"

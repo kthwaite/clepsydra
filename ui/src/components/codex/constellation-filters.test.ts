@@ -22,6 +22,19 @@ const graphWithAiJournal = {
   edges: [...graph.edges, { source: "a", target: "f", kind: "wikilink" }],
 };
 
+const graphWithTasks = {
+  nodes: [
+    ...graph.nodes,
+    { id: "t1", path: "tasks/feature.md", title: "Feature Task" },
+    { id: "t2", path: "todos/chore.md", title: "Chore Todo" },
+  ],
+  edges: [
+    ...graph.edges,
+    { source: "a", target: "t1", kind: "wikilink" },
+    { source: "b", target: "t2", kind: "wikilink" },
+  ],
+};
+
 describe("applyFilters", () => {
   it("includes orphans by default", () => {
     const out = applyFilters(graph, {
@@ -64,6 +77,32 @@ describe("applyFilters", () => {
     });
     expect(out.nodes.map((n) => n.id)).not.toContain("f");
     expect(out.edges.find((e) => e.target === "f")).toBeUndefined();
+  });
+
+  it("hides task nodes when toggled", () => {
+    const out = applyFilters(graphWithTasks, {
+      orphansVisible: true,
+      hideDaily: false,
+      hideTasks: true,
+      depth: null,
+      anchorId: null,
+    });
+    expect(out.nodes.map((n) => n.id)).not.toContain("t1");
+    expect(out.nodes.map((n) => n.id)).not.toContain("t2");
+    expect(out.edges.find((e) => e.target === "t1")).toBeUndefined();
+    expect(out.edges.find((e) => e.target === "t2")).toBeUndefined();
+  });
+
+  it("retains task nodes by default or when hideTasks is false", () => {
+    const out = applyFilters(graphWithTasks, {
+      orphansVisible: true,
+      hideDaily: false,
+      hideTasks: false,
+      depth: null,
+      anchorId: null,
+    });
+    expect(out.nodes.map((n) => n.id)).toContain("t1");
+    expect(out.nodes.map((n) => n.id)).toContain("t2");
   });
 
   it("limits to N hops from anchor when depth is set", () => {

@@ -21,11 +21,13 @@ export function Constellation() {
     selectedAnchorId,
     depth,
     hideDaily,
+    hideTasks,
     orphansVisible,
     mode,
     setSelectedAnchorId,
     setDepth,
     setHideDaily,
+    setHideTasks,
     setOrphansVisible,
     setMode,
   } = useConstellationStore();
@@ -51,9 +53,15 @@ export function Constellation() {
   const filtered = useMemo(
     () =>
       graph
-        ? applyFilters(graph, { orphansVisible, hideDaily, depth, anchorId })
+        ? applyFilters(graph, {
+            orphansVisible,
+            hideDaily,
+            hideTasks,
+            depth,
+            anchorId,
+          })
         : { nodes: [], edges: [] },
-    [graph, orphansVisible, hideDaily, depth, anchorId],
+    [graph, orphansVisible, hideDaily, hideTasks, depth, anchorId],
   );
 
   if (isLoading || !graph) {
@@ -77,11 +85,13 @@ export function Constellation() {
         anchorId={anchorId}
         depth={depth === 2 ? 2 : 1}
         hideDaily={hideDaily}
+        hideTasks={hideTasks}
         orphansVisible={orphansVisible}
         onModeChange={setMode}
         onAnchorChange={setSelectedAnchorId}
         onDepthChange={(nextDepth) => setDepth(nextDepth)}
         onHideDailyChange={setHideDaily}
+        onHideTasksChange={setHideTasks}
         onOrphansVisibleChange={setOrphansVisible}
         onOpen={handle}
       />
@@ -161,6 +171,12 @@ export function Constellation() {
             onChange={(checked) => setHideDaily(checked)}
           >
             daily nodes hidden
+          </Checkbox>
+          <Checkbox
+            isSelected={hideTasks}
+            onChange={(checked) => setHideTasks(checked)}
+          >
+            tasks hidden
           </Checkbox>
           <div style={{ marginTop: 4 }}>
             depth ·{" "}

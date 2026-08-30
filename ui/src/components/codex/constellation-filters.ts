@@ -3,6 +3,7 @@ import type { GraphEdge, GraphNode } from "#/api/types";
 export type FilterOptions = {
   orphansVisible: boolean;
   hideDaily: boolean;
+  hideTasks?: boolean;
   depth: number | null; // null = unlimited
   anchorId: string | null; // required when depth is set
 };
@@ -18,6 +19,15 @@ export function applyFilters(
           !node.path.startsWith("ai-journals/"),
       )
     : graph.nodes;
+  if (opts.hideTasks) {
+    nodes = nodes.filter(
+      (node) =>
+        !node.path.startsWith("tasks/") &&
+        !node.path.startsWith("task/") &&
+        !node.path.startsWith("todos/") &&
+        !node.path.startsWith("todo/"),
+    );
+  }
   let nodeIds = new Set(nodes.map((node) => node.id));
   let edges = graph.edges.filter(
     (edge) => nodeIds.has(edge.source) && nodeIds.has(edge.target),
