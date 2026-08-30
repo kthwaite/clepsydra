@@ -20,7 +20,7 @@ import {
   Text,
   Transforms,
 } from "slate";
-import { withHistory } from "slate-history";
+import { HistoryEditor, withHistory } from "slate-history";
 import { Editable, ReactEditor, Slate, withReact } from "slate-react";
 import type { BlockResponse } from "#/api/blocks";
 import { useAssignBlockId } from "#/api/blocks";
@@ -29,6 +29,7 @@ import {
   applyBlockConversion,
   type BlockConversion,
 } from "#/editor/transforms/blockConversions";
+import { createTableGrid } from "#/editor/transforms/table";
 import type { CustomEditor } from "#/editor/types";
 import { useResolveOrCreateWikilinkTarget } from "#/editor/useResolveOrCreateWikilinkTarget";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
@@ -125,6 +126,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: "base",
     label: "Base embed",
     description: "Insert a live saved Base view",
+  },
+  {
+    id: "table",
+    label: "Table",
+    description: "Insert a 3×3 table",
   },
   { id: "h1", label: "Heading 1", description: "Large heading" },
   { id: "h2", label: "Heading 2", description: "Medium heading" },
@@ -485,6 +491,21 @@ export function SlateEditor({
         setSlashTrigger(null);
         return;
       }
+      if (cmd.id === "table") {
+        const table = createTableGrid({ columns: 3, rows: 3 });
+        HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+          Editor.withoutNormalizing(editor, () => {
+            Transforms.delete(editor, {
+              at: { anchor: slashTrigger.anchor, focus: selection.focus },
+            });
+            Transforms.removeNodes(editor, { at: entry[1] });
+            Transforms.insertNodes(editor, table, { at: entry[1] });
+            Transforms.select(editor, Editor.start(editor, entry[1]));
+          });
+        });
+        setSlashTrigger(null);
+        return;
+      }
 
       const conversion = slashCommandToConversion(cmd.id);
       if (!conversion) {
@@ -514,6 +535,12 @@ export function SlateEditor({
   }, [slashTrigger, editor]);
 
   const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (
+      event.target instanceof Element &&
+      event.target.closest('[contenteditable="false"]')
+    ) {
+      return;
+    }
     if (event.nativeEvent.isComposing || event.keyCode === 229) return;
     if (wikilinkTrigger || blockRefTrigger || slashTrigger) {
       if (
@@ -579,15 +606,26 @@ export function SlateEditor({
       }
     }
 
-    // Inside a table, Tab walks the cells; everywhere else it falls through to
-    // the outliner's indent/outdent below.
+    // Inside a table, Tab walks the cells. At either boundary it falls through
+    // to the native tab order so the adjacent append control stays reachable.
+    // Everywhere else it falls through to the outliner's indent/outdent below.
     if (
       matchesChord(event, SHORTCUTS["editor.indent"].chord) ||
       matchesChord(event, SHORTCUTS["editor.outdent"].chord)
     ) {
-      const direction = event.shiftKey ? "previous" : "next";
-      if (moveToAdjacentCell(editor, direction)) {
-        event.preventDefault();
+      const tableCell =
+        editor.selection &&
+        Editor.above(editor, {
+          at: editor.selection,
+          match: (node) =>
+            SlateElement.isElement(node) && node.type === "table-cell",
+          mode: "lowest",
+        });
+      if (tableCell) {
+        const direction = event.shiftKey ? "previous" : "next";
+        if (moveToAdjacentCell(editor, direction)) {
+          event.preventDefault();
+        }
         return;
       }
     }
