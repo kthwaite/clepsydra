@@ -363,9 +363,9 @@ function convertBlockNode(
  * Convert a GFM table to a Slate table element.
  *
  * The delimiter row's alignment is kept on the table (authoritative for
- * serialization) and mirrored onto each cell so rendering needs no lookup;
- * the table normalizer maintains that mirror from then on. Rows keep their
- * source cell count — a short row stays short, exactly as GFM renders it.
+ * serialization) and mirrored onto each cell so rendering needs no lookup.
+ * The table normalizer reconciles alignment and pads every row to the widest
+ * source row, giving each logical column a header cell and editing control.
  */
 function convertTable(
   node: Extract<RootContent, { type: "table" }>,
@@ -474,8 +474,7 @@ const SUB_OPEN_RE = /^<sub\s*>$/i;
 /** Match an isolated </sub> closing tag (case-insensitive, optional whitespace). */
 const SUB_CLOSE_RE = /^<\/sub\s*>$/i;
 /** Match an isolated span opening tag with one quoted style attribute. */
-const SPAN_OPEN_RE =
-  /^<span\s+style\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>$/i;
+const SPAN_OPEN_RE = /^<span\s+style\s*=\s*(?:"([^"]*)"|'([^']*)')\s*>$/i;
 /** Match any isolated, non-self-closing span opening tag. */
 const SPAN_ANY_OPEN_RE = /^<span(?:\s[\s\S]*)?>$/i;
 /** Match an isolated </span> closing tag (case-insensitive, optional whitespace). */

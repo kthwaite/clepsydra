@@ -1,8 +1,10 @@
-import { Plus } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 import type { Table, TableCell, TableRow } from "mdast";
+import { useLayoutEffect } from "react";
 import {
   Editor,
   type NodeEntry,
+  type Path,
   Element as SlateElement,
   Transforms,
 } from "slate";
@@ -13,7 +15,12 @@ import {
   useReadOnly,
   useSlateStatic,
 } from "slate-react";
-import { appendTableColumn, appendTableRow } from "#/editor/transforms/table";
+import {
+  appendTableColumn,
+  appendTableRow,
+  deleteTableColumn,
+  deleteTableRow,
+} from "#/editor/transforms/table";
 import { cn } from "#/lib/cn";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type {
@@ -38,9 +45,31 @@ type TableRendererProps = RenderElementProps & { element: TableElement };
 const APPEND_BUTTON_CLASS =
   "pointer-events-none z-10 flex size-6 cursor-pointer items-center justify-center rounded-full border border-rule bg-paper text-ink-mute opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:border-accent hover:text-accent focus:pointer-events-auto focus:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent max-md:size-11 [@media(hover:none)]:pointer-events-auto [@media(hover:none)]:size-11 [@media(hover:none)]:opacity-100";
 
+const TOUCH_CONTROL_TRACK_CLASS =
+  "max-md:h-11 max-md:min-w-11 [@media(hover:none)]:h-11 [@media(hover:none)]:min-w-11";
+
 function TableRenderer({ attributes, children, element }: TableRendererProps) {
   const editor = useSlateStatic();
   const readOnly = useReadOnly();
+  const columnCount = Math.max(
+    ...element.children.map((row) => row.children.length),
+  );
+  const shapeNeedsNormalization =
+    element.align?.length !== columnCount ||
+    element.children.some((row) => row.children.length !== columnCount);
+
+  useLayoutEffect(() => {
+    if (readOnly || !shapeNeedsNormalization) return;
+
+    const normalize = () => {
+      Editor.normalize(editor, { force: true });
+    };
+    if (HistoryEditor.isHistoryEditor(editor)) {
+      HistoryEditor.withoutSaving(editor, normalize);
+    } else {
+      normalize();
+    }
+  }, [editor, readOnly, shapeNeedsNormalization]);
 
   const appendColumn = () => {
     HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
@@ -72,7 +101,14 @@ function TableRenderer({ attributes, children, element }: TableRendererProps) {
     >
       {/* The table keeps its own scroll port; controls occupy reserved gutters
           outside it, clear of both the scrollbar and following content. */}
-      <div className="min-w-0 max-w-full overflow-x-auto">
+      <div
+        className={cn(
+          "min-w-0 max-w-full overflow-x-auto",
+          readOnly
+            ? null
+            : "pl-6 pt-6 max-md:pl-11 max-md:pt-11 [@media(hover:none)]:pl-11 [@media(hover:none)]:pt-11",
+        )}
+      >
         <table className="w-full border-collapse border border-rule text-[0.95em]">
           <tbody>{children}</tbody>
         </table>
@@ -111,6 +147,120 @@ function TableRenderer({ attributes, children, element }: TableRendererProps) {
   );
 }
 
+type TableCellRendererProps = RenderElementProps & {
+  element: TableCellElement;
+};
+
+function tableCellCoordinates(path: Path) {
+  const rowIndex = path.at(-2);
+  const columnIndex = path.at(-1);
+  if (rowIndex === undefined || columnIndex === undefined) {
+    throw new Error("Table cell path must include row and column indices");
+  }
+  return { rowIndex, columnIndex };
+}
+
+function TableCellRenderer({
+  attributes,
+  children,
+  element,
+}: TableCellRendererProps) {
+  const editor = useSlateStatic();
+  const readOnly = useReadOnly();
+  const cellPath = ReactEditor.findPath(editor, element);
+  const { rowIndex, columnIndex } = tableCellCoordinates(cellPath);
+
+  const selectAfterDelete = (path: number[] | null) => {
+    if (path) Transforms.select(editor, Editor.start(editor, path));
+  };
+
+  const deleteColumn = () => {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+      const currentCellPath = ReactEditor.findPath(editor, element);
+      const tablePath = currentCellPath.slice(0, -2);
+      const { columnIndex: currentColumnIndex } =
+        tableCellCoordinates(currentCellPath);
+      selectAfterDelete(
+        deleteTableColumn(editor, tablePath, currentColumnIndex),
+      );
+    });
+    ReactEditor.focus(editor);
+  };
+
+  const deleteRow = () => {
+    HistoryEditor.withNewBatch(editor as HistoryEditor, () => {
+      const currentCellPath = ReactEditor.findPath(editor, element);
+      const tablePath = currentCellPath.slice(0, -2);
+      const { rowIndex: currentRowIndex } =
+        tableCellCoordinates(currentCellPath);
+      selectAfterDelete(deleteTableRow(editor, tablePath, currentRowIndex));
+    });
+    ReactEditor.focus(editor);
+  };
+
+  const controls = readOnly ? null : (
+    <>
+      {rowIndex === 0 ? (
+        <button
+          type="button"
+          aria-label={`Delete column ${columnIndex + 1}`}
+          contentEditable={false}
+          className={cn(
+            APPEND_BUTTON_CLASS,
+            "absolute bottom-full left-1/2 -translate-x-1/2",
+          )}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={deleteColumn}
+        >
+          <Minus aria-hidden size={14} strokeWidth={1.75} />
+        </button>
+      ) : null}
+      {columnIndex === 0 ? (
+        <button
+          type="button"
+          aria-label={`Delete row ${rowIndex + 1}`}
+          contentEditable={false}
+          className={cn(
+            APPEND_BUTTON_CLASS,
+            "absolute right-full top-1/2 -translate-y-1/2",
+          )}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={deleteRow}
+        >
+          <Minus aria-hidden size={14} strokeWidth={1.75} />
+        </button>
+      ) : null}
+    </>
+  );
+
+  return element.header ? (
+    <th
+      {...attributes}
+      scope="col"
+      className={cn(
+        "relative border border-rule bg-paper-2 px-3 py-1.5 font-bold text-ink",
+        readOnly ? null : TOUCH_CONTROL_TRACK_CLASS,
+        element.align ? ALIGN_CLASS[element.align] : "text-left",
+      )}
+    >
+      {children}
+      {controls}
+    </th>
+  ) : (
+    <td
+      {...attributes}
+      className={cn(
+        "relative border border-rule px-3 py-1.5 align-top text-ink-2",
+        readOnly ? null : TOUCH_CONTROL_TRACK_CLASS,
+        element.align && ALIGN_CLASS[element.align],
+      )}
+    >
+      {children}
+      {controls}
+    </td>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Normalization
 //
@@ -139,6 +289,43 @@ function normalizeTable(
       Transforms.wrapNodes(editor, makeTableRow({ children: [] }), {
         at: [...path, r],
       });
+      return true;
+    }
+  }
+
+  const columnCount = Math.max(
+    ...node.children.map((row) => row.children.length),
+  );
+  const align = Array.from(
+    { length: columnCount },
+    (_, columnIndex) => node.align?.[columnIndex] ?? null,
+  );
+
+  if (
+    node.align?.length !== columnCount ||
+    align.some(
+      (columnAlign, columnIndex) => node.align?.[columnIndex] !== columnAlign,
+    )
+  ) {
+    Transforms.setNodes(editor, { align } as Partial<TableElement>, {
+      at: path,
+    });
+    return true;
+  }
+
+  for (let r = 0; r < node.children.length; r++) {
+    const row = node.children[r];
+    if (row.children.length < columnCount) {
+      const columnIndex = row.children.length;
+      const columnAlign = align[columnIndex];
+      Transforms.insertNodes(
+        editor,
+        makeTableCell({
+          ...(r === 0 ? { header: true as const } : {}),
+          ...(columnAlign ? { align: columnAlign } : {}),
+        }),
+        { at: [...path, r, columnIndex] },
+      );
       return true;
     }
   }
@@ -285,29 +472,7 @@ export const tableCellDescriptor: ElementDescriptor<TableCellElement> = {
     ...rest,
     children,
   }),
-  render: ({ attributes, children, element }) =>
-    element.header ? (
-      <th
-        {...attributes}
-        scope="col"
-        className={cn(
-          "border border-rule bg-paper-2 px-3 py-1.5 font-bold text-ink",
-          element.align ? ALIGN_CLASS[element.align] : "text-left",
-        )}
-      >
-        {children}
-      </th>
-    ) : (
-      <td
-        {...attributes}
-        className={cn(
-          "border border-rule px-3 py-1.5 align-top text-ink-2",
-          element.align && ALIGN_CLASS[element.align],
-        )}
-      >
-        {children}
-      </td>
-    ),
+  render: (props) => <TableCellRenderer {...props} />,
   normalize: normalizeTableCell,
 };
 

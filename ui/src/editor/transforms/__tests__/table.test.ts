@@ -1,9 +1,4 @@
-import {
-  createEditor,
-  type Editor,
-  Node,
-  Element as SlateElement,
-} from "slate";
+import { createEditor, Editor, Node, Element as SlateElement } from "slate";
 import { describe, expect, it } from "vitest";
 import { withTables } from "#/editor/plugins/withTables";
 import {
@@ -13,7 +8,13 @@ import {
 } from "#/editor/schema/elements/table";
 import type { TableElement } from "#/editor/schema/types";
 import { withSchema } from "#/editor/schema/withSchema";
-import { appendTableColumn, appendTableRow, createTableGrid } from "../table";
+import {
+  appendTableColumn,
+  appendTableRow,
+  createTableGrid,
+  deleteTableColumn,
+  deleteTableRow,
+} from "../table";
 
 function alignedTable(): TableElement {
   return makeTable({
@@ -37,6 +38,35 @@ function alignedTable(): TableElement {
         children: [
           makeTableCell({ align: "left", children: [{ text: "1" }] }),
           makeTableCell({ align: "right", children: [{ text: "2" }] }),
+        ],
+      }),
+    ],
+  });
+}
+
+function threeByThreeTable(): TableElement {
+  return makeTable({
+    align: ["left", "center", "right"],
+    children: [
+      makeTableRow({
+        children: [
+          makeTableCell({ header: true, children: [{ text: "A" }] }),
+          makeTableCell({ header: true, children: [{ text: "B" }] }),
+          makeTableCell({ header: true, children: [{ text: "C" }] }),
+        ],
+      }),
+      makeTableRow({
+        children: [
+          makeTableCell({ children: [{ text: "1" }] }),
+          makeTableCell({ children: [{ text: "2" }] }),
+          makeTableCell({ children: [{ text: "3" }] }),
+        ],
+      }),
+      makeTableRow({
+        children: [
+          makeTableCell({ children: [{ text: "4" }] }),
+          makeTableCell({ children: [{ text: "5" }] }),
+          makeTableCell({ children: [{ text: "6" }] }),
         ],
       }),
     ],
@@ -152,6 +182,77 @@ describe("table transforms", () => {
     ]);
   });
 
+  it("normalizes a wider body row into header cells and aligned columns before deletion", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [
+      makeTable({
+        align: ["left"],
+        children: [
+          makeTableRow({
+            children: [
+              makeTableCell({ header: true, children: [{ text: "A" }] }),
+            ],
+          }),
+          makeTableRow({
+            children: [
+              makeTableCell({ children: [{ text: "1" }] }),
+              makeTableCell({ children: [{ text: "2" }] }),
+              makeTableCell({ children: [{ text: "3" }] }),
+            ],
+          }),
+        ],
+      }),
+    ];
+
+    Editor.normalize(editor, { force: true });
+    const normalized = firstTable(editor);
+    expect(normalized.align).toEqual(["left", null, null]);
+    expect(normalized.children.map((row) => row.children.length)).toEqual([
+      3, 3,
+    ]);
+    expect(normalized.children[0].children.map((cell) => cell.header)).toEqual([
+      true,
+      true,
+      true,
+    ]);
+
+    const nearestCellPath = deleteTableColumn(editor, [0], 2);
+    expect(nearestCellPath).toEqual([0, 0, 1]);
+    expect(nearestCellPath && Node.has(editor, nearestCellPath)).toBe(true);
+  });
+
+  it("pads a shorter body row and truncates stale alignment before deletion", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [
+      makeTable({
+        align: ["left", "center", "right", "left"],
+        children: [
+          makeTableRow({
+            children: [
+              makeTableCell({ header: true, children: [{ text: "A" }] }),
+              makeTableCell({ header: true, children: [{ text: "B" }] }),
+              makeTableCell({ header: true, children: [{ text: "C" }] }),
+            ],
+          }),
+          makeTableRow({
+            children: [makeTableCell({ children: [{ text: "1" }] })],
+          }),
+        ],
+      }),
+    ];
+
+    Editor.normalize(editor, { force: true });
+    const normalized = firstTable(editor);
+    expect(normalized.align).toEqual(["left", "center", "right"]);
+    expect(normalized.children.map((row) => row.children.length)).toEqual([
+      3, 3,
+    ]);
+
+    const nearestCellPath = deleteTableColumn(editor, [0], 1);
+    expect(nearestCellPath).toEqual([0, 0, 1]);
+    expect(nearestCellPath && Node.has(editor, nearestCellPath)).toBe(true);
+  });
+
   it("appends a matching-width body row and returns its first cell path", () => {
     const editor = editorWithTable();
 
@@ -178,6 +279,81 @@ describe("table transforms", () => {
     expect(table.children.slice(0, 2).map((row) => Node.string(row))).toEqual([
       "AB",
       "12",
+    ]);
+  });
+
+  it("deletes a middle column from every row and returns the next surviving header cell", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [threeByThreeTable()];
+
+    const nearestCellPath = deleteTableColumn(editor, [0], 1);
+    const table = firstTable(editor);
+
+    expect(nearestCellPath).toEqual([0, 0, 1]);
+    expect(table.align).toEqual(["left", "right"]);
+    expect(table.children.map((row) => Node.string(row))).toEqual([
+      "AC",
+      "13",
+      "46",
+    ]);
+    expect(table.children.map((row) => row.children.length)).toEqual([2, 2, 2]);
+  });
+
+  it("returns the previous column when deleting the trailing column", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [threeByThreeTable()];
+
+    expect(deleteTableColumn(editor, [0], 2)).toEqual([0, 0, 1]);
+    expect(firstTable(editor).align).toEqual(["left", "center"]);
+  });
+
+  it("deletes a middle row, preserves alignment, and returns the next surviving row", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [threeByThreeTable()];
+
+    const nearestCellPath = deleteTableRow(editor, [0], 1);
+    const table = firstTable(editor);
+
+    expect(nearestCellPath).toEqual([0, 1, 0]);
+    expect(table.align).toEqual(["left", "center", "right"]);
+    expect(table.children.map((row) => Node.string(row))).toEqual([
+      "ABC",
+      "456",
+    ]);
+  });
+
+  it("returns the previous row when deleting the trailing row", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [threeByThreeTable()];
+
+    expect(deleteTableRow(editor, [0], 2)).toEqual([0, 1, 0]);
+    expect(firstTable(editor).children.map((row) => Node.string(row))).toEqual([
+      "ABC",
+      "123",
+    ]);
+  });
+
+  it("replaces a sole table with an empty paragraph when its final column is deleted", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [createTableGrid({ columns: 1, rows: 2 })];
+
+    const nearestPath = deleteTableColumn(editor, [0], 0);
+    expect(nearestPath).toEqual([0]);
+    expect(nearestPath && Node.has(editor, nearestPath)).toBe(true);
+    expect(editor.children).toEqual([
+      { type: "paragraph", children: [{ text: "" }] },
+    ]);
+  });
+
+  it("replaces a sole table with an empty paragraph when its final row is deleted", () => {
+    const editor = withTables(withSchema(createEditor()));
+    editor.children = [createTableGrid({ columns: 3, rows: 1 })];
+
+    const nearestPath = deleteTableRow(editor, [0], 0);
+    expect(nearestPath).toEqual([0]);
+    expect(nearestPath && Node.has(editor, nearestPath)).toBe(true);
+    expect(editor.children).toEqual([
+      { type: "paragraph", children: [{ text: "" }] },
     ]);
   });
 });

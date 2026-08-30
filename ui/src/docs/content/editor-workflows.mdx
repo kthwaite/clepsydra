@@ -237,9 +237,10 @@ filter the menu, then choose a command with the pointer, `Enter`, or `Tab`.
 | **Code block** | Fenced code block |
 | **Divider** | Horizontal rule |
 
-Editable tables show circular **+** controls while the table is hovered or
-focused. The control at the right edge adds a trailing column. The control at
-the bottom edge adds a trailing row.
+Editable tables show circular controls while the table is hovered or focused.
+The **+** controls at the right and bottom edges add a trailing column or row.
+The **−** controls above each column and left of each row remove that column or
+row.
 
 A slash command is offered only when the paragraph consists of the leading
 slash and its query and the cursor is at the end. Slash text inside existing
@@ -263,15 +264,18 @@ save. Cell text is edited in place and takes the usual inline marks, links,
 wikilinks, and math.
 
 `Tab` moves the caret to the next cell and `Shift+Tab` to the previous one,
-wrapping across row boundaries. From the final cell, `Tab` moves through **Add
-column** and **Add row**, then leaves the editor. A cell is a single line of
-inline content, so `Enter` inside one does nothing, and a delete at a cell
-boundary stops there rather than merging two cells.
+wrapping across row boundaries. From the table, `Tab` moves through its **Delete
+column N** and **Delete row N** controls, then **Add column** and **Add row**,
+before leaving the editor. A cell is a single line of inline content, so `Enter`
+inside one does nothing, and a delete at a cell boundary stops there rather
+than merging two cells.
 
 Choose **Table** from the slash menu to insert an empty three-column,
 three-row table. While an editable table is hovered or focused, use the
-circular control at its right edge to add a trailing column or the control
-below it to add a trailing row. Touch layouts keep both controls visible.
+circular **+** controls at its right and bottom edges to add a trailing column
+or row. Use the circular **−** controls above columns and left of rows to remove
+them. Removing the final column or row removes the table. Touch layouts keep
+all controls visible.
 
 ### Embed a Base
 

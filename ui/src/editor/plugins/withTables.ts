@@ -10,7 +10,7 @@ import {
 import type { TableCellElement } from "#/editor/types";
 
 /**
- * Slate plugin that keeps table structure intact while the caret is inside it.
+ * Slate plugin that keeps table structure intact during editing.
  *
  * A GFM cell holds one line of phrasing content and a table's shape is
  * positional, so the default block edits are wrong here: Enter would split a
@@ -32,7 +32,7 @@ export function withTables(editor: Editor): Editor {
   };
 
   editor.deleteForward = (unit) => {
-    if (atCellEdge(editor, "end")) return;
+    if (atCellEdge(editor, "end") || deleteAtTableBoundary(editor)) return;
     deleteForward(unit);
   };
 
@@ -66,6 +66,37 @@ function atCellEdge(editor: Editor, edge: "start" | "end"): boolean {
       ? Editor.start(editor, cell[1])
       : Editor.end(editor, cell[1]);
   return Point.equals(selection.anchor, point);
+}
+
+/**
+ * Protect a table from Slate's default cross-block merge. At the exact
+ * top-level boundary before a table, an empty block is removed and a
+ * non-empty block refuses the delete.
+ */
+function deleteAtTableBoundary(editor: Editor): boolean {
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return false;
+
+  const blockPath = [selection.anchor.path[0]];
+  if (!Point.equals(selection.anchor, Editor.end(editor, blockPath))) {
+    return false;
+  }
+
+  const block = Editor.node(editor, blockPath)[0];
+  if (!SlateElement.isElement(block)) return false;
+
+  const nextPath = Path.next(blockPath);
+  if (!Editor.hasPath(editor, nextPath)) return false;
+  const next = Editor.node(editor, nextPath)[0];
+  if (!(SlateElement.isElement(next) && next.type === "table")) return false;
+
+  if (Editor.isEmpty(editor, block)) {
+    Editor.withoutNormalizing(editor, () => {
+      Transforms.removeNodes(editor, { at: blockPath });
+      Transforms.select(editor, Editor.start(editor, blockPath));
+    });
+  }
+  return true;
 }
 
 /**
