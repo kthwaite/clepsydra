@@ -59,4 +59,14 @@ describe("pageHasExactWikilinkIdentity", () => {
   it("does not treat an empty query as exact", () => {
     expect(pageHasExactWikilinkIdentity(page, "   ")).toBe(false);
   });
+
+  it("handles a page without an aliases array without throwing", () => {
+    const pageWithoutAliases = {
+      ...page,
+      aliases: undefined as unknown as string[],
+    };
+    expect(
+      pageHasExactWikilinkIdentity(pageWithoutAliases, "design-notes"),
+    ).toBe(true);
+  });
 });

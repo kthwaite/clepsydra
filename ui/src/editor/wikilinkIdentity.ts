@@ -16,7 +16,7 @@ export function pageHasExactWikilinkIdentity(
   const expected = normalizeWikilinkIdentity(query);
   if (!expected) return false;
 
-  return [page.title, page.canonical_name, page.path, ...page.aliases]
+  return [page.title, page.canonical_name, page.path, ...(page.aliases ?? [])]
     .filter((value): value is string => typeof value === "string")
     .some((value) => normalizeWikilinkIdentity(value) === expected);
 }
