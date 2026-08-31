@@ -451,6 +451,7 @@ export function RubbishBin({
             <div className="border-b border-rule-soft px-4 py-3 md:px-5">
               <FilterBar
                 fields={filterFields}
+                primaryFieldIds={["kind"]}
                 state={filterState}
                 onChange={onFilterChange}
                 textPlaceholder="Title or original path…"

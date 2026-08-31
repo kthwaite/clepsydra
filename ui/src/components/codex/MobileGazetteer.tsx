@@ -247,6 +247,7 @@ export function MobileGazetteer({
             <div className="cl-noscroll min-h-0 flex-1 space-y-6 overflow-y-auto px-4 py-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
               <FilterBar
                 fields={filterFields}
+                primaryFieldIds={["kind", "project", "tags"]}
                 state={filterState}
                 onChange={onFilterChange}
                 textPlaceholder="Title, path, description, or tag"

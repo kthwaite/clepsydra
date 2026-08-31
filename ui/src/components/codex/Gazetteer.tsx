@@ -287,6 +287,7 @@ export function Gazetteer({ initialTag, filters }: Props) {
       <div className="flex flex-shrink-0 items-center border-b border-rule-soft px-5 py-2">
         <FilterBar
           fields={filterFields}
+          primaryFieldIds={["kind", "project", "tags"]}
           state={filterState}
           onChange={onFilterChange}
           textPlaceholder="grep…"

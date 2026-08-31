@@ -557,16 +557,36 @@ describe("TaskingScreen — onOpenPage / onOpenDossier prop threading", () => {
 // ── filter strip: shared FilterBar composition ────────────────────────────────
 
 describe("TaskingScreen — shared FilterBar composition", () => {
-  it("offers neutral filter labels", async () => {
+  it("uses Project, Status, and Priority as primary facets in that order", async () => {
     stubBoardFetch();
     renderScreenWithFilter();
     await screen.findByText("Task Board");
 
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    const project = screen.getByTestId("filter-bar-chip-project");
+    const status = screen.getByTestId("filter-bar-chip-status");
+    const priority = screen.getByTestId("filter-bar-chip-pri");
+    expect(project).toHaveTextContent("Project");
+    expect(status).toHaveTextContent("Status");
+    expect(priority).toHaveTextContent("Priority");
 
-    for (const label of ["Project", "Tags", "Priority", "Status", "Blocked"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
-    }
+    expect(
+      project.compareDocumentPosition(status) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      status.compareDocumentPosition(priority) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByTestId("filter-bar-chip-tags")).toBeNull();
+    expect(screen.queryByTestId("filter-bar-chip-hold")).toBeNull();
+
+    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    expect(screen.getByTestId("filter-bar-field-tags")).toHaveTextContent(
+      "Tags",
+    );
+    expect(screen.getByTestId("filter-bar-field-hold")).toHaveTextContent(
+      "Blocked",
+    );
   });
 
   it("renders priority filter labels while applying the raw priority id", async () => {
@@ -574,19 +594,18 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     renderScreenWithFilter();
     await screen.findByText("Task Board");
 
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
-    await userEvent.click(screen.getByTestId("filter-bar-field-pri"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-pri"));
 
     for (const label of ["P0 Critical", "P1 High", "P2 Medium", "P3 Low"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
     }
-    await userEvent.click(screen.getByRole("button", { name: "P0 Critical" }));
+    await userEvent.click(screen.getByTestId("filter-bar-option-pri-P0"));
 
     expect(screen.getByText("Alpha task")).toBeInTheDocument();
     expect(screen.queryByText("Beta task")).not.toBeInTheDocument();
     expect(screen.queryByText("Gamma task")).not.toBeInTheDocument();
     expect(screen.getByTestId("filter-bar-option-pri-P0")).toHaveAttribute(
-      "aria-pressed",
+      "aria-selected",
       "true",
     );
   });
@@ -596,20 +615,21 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     renderScreenWithFilter();
     await screen.findByText("Task Board");
 
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
-    await userEvent.click(screen.getByTestId("filter-bar-field-status"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-status"));
 
     for (const label of ["Inbox", "Ready", "In Progress", "Review", "Done"]) {
-      expect(screen.getByRole("button", { name: label })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: label })).toBeInTheDocument();
     }
-    await userEvent.click(screen.getByRole("button", { name: "In Progress" }));
+    await userEvent.click(
+      screen.getByTestId("filter-bar-option-status-FIELD"),
+    );
 
     expect(screen.getByText("Task Alpha 1")).toBeInTheDocument();
     expect(screen.queryByText("Task Alpha 2")).not.toBeInTheDocument();
     expect(screen.queryByText("Task Beta 1")).not.toBeInTheDocument();
     expect(
       screen.getByTestId("filter-bar-option-status-FIELD"),
-    ).toHaveAttribute("aria-pressed", "true");
+    ).toHaveAttribute("aria-selected", "true");
   });
 
   it("typing text filters visible cards and shows the N OF M count", async () => {
@@ -641,8 +661,7 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     expect(screen.getByText("Task Beta 1")).toBeInTheDocument();
     expect(screen.getByText("Task Unfiled")).toBeInTheDocument();
 
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
-    await userEvent.click(screen.getByTestId("filter-bar-field-project"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(
       screen.getByTestId("filter-bar-option-project-alpha"),
     );
@@ -663,15 +682,14 @@ describe("TaskingScreen — shared FilterBar composition", () => {
     renderScreenWithFilter();
     await screen.findByText("Task Board");
 
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
-    await userEvent.click(screen.getByTestId("filter-bar-field-project"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(
       screen.getByTestId("filter-bar-option-project-alpha"),
     );
     // Multi-select fields leave the popover open; close it explicitly so the
     // outside text input is interactable again (react-aria's overlay hides
     // outside content from interaction while a non-modal popover is open).
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.type(screen.getByTestId("filter-bar-input"), "sealed");
 
     expect(screen.getByText("Task Sealed")).toBeInTheDocument();
@@ -945,8 +963,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     renderScreenWithFilter();
     await screen.findByText("Task Board");
 
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
-    await userEvent.click(screen.getByTestId("filter-bar-field-project"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(
       screen.getByTestId("filter-bar-option-project-alpha"),
     );
@@ -960,7 +977,7 @@ describe("TaskingScreen — list view completed toggle", () => {
     );
 
     // Close the facet popover, then reveal completed → 3 of 5
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-project"));
     await userEvent.click(screen.getByTestId("board-show-completed"));
     expect(await screen.findByText("Task Sealed")).toBeInTheDocument();
     expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(

@@ -336,6 +336,7 @@ export function BoardHeader({
       {/* Filter strip: shared FilterBar (text search + facet chips + count) */}
       <FilterBar
         fields={filterFields}
+        primaryFieldIds={["project", "status", "pri"]}
         state={filterState}
         onChange={onFilterChange}
         textInputId="tasking-filter"

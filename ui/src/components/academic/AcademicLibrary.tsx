@@ -271,6 +271,7 @@ export function AcademicLibrary({
           <div className="border-b border-rule-soft px-3 py-3">
             <FilterBar
               fields={filterFields}
+              primaryFieldIds={["work_type", "status", "year"]}
               state={filterState}
               onChange={onFilterChange}
               textPlaceholder="Title, author, citation key…"

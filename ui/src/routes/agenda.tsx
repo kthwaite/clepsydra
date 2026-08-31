@@ -266,6 +266,7 @@ export function AgendaScreen({
         <h1 className="font-heading text-lg font-bold">Agenda</h1>
         <FilterBar
           fields={filterFields}
+          primaryFieldIds={["type", "todoStatus", "taskStatus"]}
           state={filterState}
           onChange={onFilterChange}
           textPlaceholder="Filter Agenda…"

@@ -244,6 +244,32 @@ describe("AgendaPage", () => {
 });
 
 describe("AgendaScreen", () => {
+  it("uses Type, Todo Status, and Task Status as primary facets in that order", async () => {
+    const user = userEvent.setup();
+    render(<ControlledAgendaScreen />);
+
+    const type = screen.getByTestId("filter-bar-chip-type");
+    const todoStatus = screen.getByTestId("filter-bar-chip-todoStatus");
+    const taskStatus = screen.getByTestId("filter-bar-chip-taskStatus");
+
+    expect(
+      type.compareDocumentPosition(todoStatus) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      todoStatus.compareDocumentPosition(taskStatus) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(screen.queryByTestId("filter-bar-chip-todoPriority")).toBeNull();
+    expect(screen.queryByTestId("filter-bar-chip-taskPriority")).toBeNull();
+    expect(screen.queryByTestId("filter-bar-chip-project")).toBeNull();
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    expect(screen.getByTestId("filter-bar-field-todoPriority")).toBeVisible();
+    expect(screen.getByTestId("filter-bar-field-taskPriority")).toBeVisible();
+    expect(screen.getByTestId("filter-bar-field-project")).toBeVisible();
+  });
+
   it("renders one FilterBar above Today, Upcoming, and Undated tabs", () => {
     render(<ControlledAgendaScreen />);
 
@@ -510,8 +536,13 @@ describe("AgendaScreen", () => {
     };
 
     for (const [field, options] of Object.entries(expectedOptions)) {
-      await user.click(screen.getByTestId("filter-bar-add"));
-      await user.click(screen.getByTestId(`filter-bar-field-${field}`));
+      const primaryChip = screen.queryByTestId(`filter-bar-chip-${field}`);
+      if (primaryChip) {
+        await user.click(primaryChip);
+      } else {
+        await user.click(screen.getByTestId("filter-bar-add"));
+        await user.click(screen.getByTestId(`filter-bar-field-${field}`));
+      }
       const renderedOptions = screen.getAllByTestId(
         new RegExp(`^filter-bar-option-${field}-`),
       );
