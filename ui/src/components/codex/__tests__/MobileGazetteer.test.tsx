@@ -56,6 +56,12 @@ const FILTER_FIELDS: FilterField[] = [
     label: "TAG",
     options: [{ value: "research" }, { value: "active" }],
   },
+  {
+    id: "year",
+    kind: "single",
+    label: "YEAR",
+    options: [{ value: "2026" }, { value: "2025" }],
+  },
 ];
 
 function renderGazetteer(
@@ -169,15 +175,14 @@ describe("MobileGazetteer", () => {
     await user.type(within(dialog).getByTestId("filter-bar-input"), "a");
     expect(onFilterChange).toHaveBeenCalledWith({ text: "a", facets: {} });
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tags"));
+    await user.click(within(dialog).getByTestId("filter-bar-chip-tags"));
     await user.click(screen.getByTestId("filter-bar-option-tags-research"));
     expect(onFilterChange).toHaveBeenCalledWith({
       text: "",
       facets: { tags: ["research"] },
     });
-    // multi-select keeps the add-filter popover open; close it explicitly.
-    await user.click(screen.getByTestId("filter-bar-add"));
+    // Multi-select keeps the facet popover open; close it explicitly.
+    await user.click(within(dialog).getByTestId("filter-bar-chip-tags"));
 
     await user.click(within(dialog).getByRole("radio", { name: "Title" }));
     expect(onSortChange).toHaveBeenCalledWith("title");
@@ -190,6 +195,23 @@ describe("MobileGazetteer", () => {
     ).not.toBeInTheDocument();
   });
 
+  it("gives long-tail and facet listbox options 44px targets in the filter sheet", async () => {
+    const user = userEvent.setup();
+    renderGazetteer();
+
+    await user.click(screen.getByRole("button", { name: "Filters" }));
+    const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
+
+    await user.click(within(dialog).getByTestId("filter-bar-add"));
+    const longTailOption = screen.getByRole("option", { name: "YEAR" });
+    expect(longTailOption).toHaveClass("min-h-11");
+    expect(dialog).toHaveClass("[&_[role=option]]:min-h-11");
+
+    await user.click(longTailOption);
+    const facetOption = screen.getByRole("option", { name: "2026" });
+    expect(facetOption).toHaveClass("min-h-11");
+  });
+
   it("clears the active filter without rendering the complete tag vocabulary as chips", async () => {
     const user = userEvent.setup();
     const onFilterChange = vi.fn();
@@ -200,9 +222,10 @@ describe("MobileGazetteer", () => {
 
     await user.click(screen.getByRole("button", { name: "Filters · 1" }));
     const dialog = screen.getByRole("dialog", { name: "Gazetteer filters" });
-    expect(
-      within(dialog).getByTestId("filter-bar-chip-tags-legacy-url-tag"),
-    ).toBeVisible();
+    expect(within(dialog).getByTestId("filter-bar-chip-tags")).toBeVisible();
+    expect(within(dialog).getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: legacy-url-tag",
+    );
     expect(
       within(dialog).queryByTestId("filter-bar-chip-tags-research"),
     ).not.toBeInTheDocument();
@@ -217,21 +240,14 @@ describe("MobileGazetteer", () => {
   it("emits controlled Kind and Project changes from the shared vocabularies", async () => {
     const user = userEvent.setup();
     const onFilterChange = vi.fn();
-    renderGazetteer({
-      filterState: {
-        text: "",
-        facets: { kind: ["PROJECT"], project: ["clepsydra"] },
-      },
-      onFilterChange,
-    });
+    renderGazetteer({ onFilterChange });
 
-    await user.click(screen.getByRole("button", { name: "Filters · 2" }));
+    await user.click(screen.getByRole("button", { name: "Filters" }));
     expect(
       screen.getByRole("dialog", { name: "Gazetteer filters" }),
     ).toBeVisible();
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-kind"));
+    await user.click(screen.getByTestId("filter-bar-chip-kind"));
     for (const kind of KINDS) {
       expect(
         screen.getByTestId(`filter-bar-option-kind-${kind}`),
@@ -240,16 +256,15 @@ describe("MobileGazetteer", () => {
     await user.click(screen.getByTestId("filter-bar-option-kind-NOTE"));
     expect(onFilterChange).toHaveBeenCalledWith({
       text: "",
-      facets: { kind: ["NOTE"], project: ["clepsydra"] },
+      facets: { kind: ["NOTE"] },
     });
 
-    // single-select closes the popover; reopen it for the project field.
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-project"));
+    // Single-select closes the popover; open the project facet next.
+    await user.click(screen.getByTestId("filter-bar-chip-project"));
     await user.click(screen.getByTestId("filter-bar-option-project-atlas"));
     expect(onFilterChange).toHaveBeenCalledWith({
       text: "",
-      facets: { kind: ["PROJECT"], project: ["atlas"] },
+      facets: { project: ["atlas"] },
     });
   });
 });

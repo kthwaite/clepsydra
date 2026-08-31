@@ -226,7 +226,7 @@ export function MobileGazetteer({
         <Modal className="h-dvh w-full max-w-md bg-paper-2 shadow-lg outline-none">
           <Dialog
             aria-label="Gazetteer filters"
-            className="flex h-full min-h-0 flex-col outline-none [&_button]:min-h-11 [&_input]:min-h-11"
+            className="flex h-full min-h-0 flex-col outline-none [&_button]:min-h-11 [&_input]:min-h-11 [&_[role=option]]:min-h-11"
           >
             <div className="flex min-h-11 shrink-0 items-stretch border-b border-rule pl-4">
               <Heading
@@ -253,6 +253,7 @@ export function MobileGazetteer({
                 textPlaceholder="Title, path, description, or tag"
                 textAriaLabel="Search pages"
                 className="flex-wrap"
+                optionClassName="min-h-11"
               />
 
               <RadioGroup

@@ -79,57 +79,52 @@ function ControlledFilterBar({
 
 const meta = {
   title: "Filters/FilterBar",
-  component: FilterBar,
+  component: ControlledFilterBar,
   parameters: {
     layout: "padded",
   },
-} satisfies Meta<typeof FilterBar>;
+} satisfies Meta<typeof ControlledFilterBar>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const InactivePrimaryChips: Story = {
-  render: () => (
-    <ControlledFilterBar initialState={{ text: "", facets: {} }} />
-  ),
+  args: {
+    initialState: { text: "", facets: {} },
+  },
 };
 
 export const SingleSelection: Story = {
-  render: () => (
-    <ControlledFilterBar
-      initialState={{ text: "", facets: { project: ["atlas"] } }}
-    />
-  ),
+  args: {
+    initialState: { text: "", facets: { project: ["atlas"] } },
+  },
 };
 
 export const MultipleSelections: Story = {
-  render: () => (
-    <ControlledFilterBar
-      initialState={{ text: "", facets: { tags: ["reading", "urgent"] } }}
-    />
-  ),
+  args: {
+    initialState: {
+      text: "",
+      facets: { tags: ["reading", "urgent"] },
+    },
+  },
 };
 
 export const PromotedLongTailFacet: Story = {
-  render: () => (
-    <ControlledFilterBar
-      initialState={{ text: "", facets: { year: ["2026"] } }}
-    />
-  ),
+  args: {
+    initialState: { text: "", facets: { year: ["2026"] } },
+  },
 };
 
 export const MobileWidthWrapping: Story = {
-  render: () => (
-    <ControlledFilterBar
-      initialState={{
-        text: "",
-        facets: {
-          project: ["clepsydra"],
-          tags: ["reading", "research"],
-          year: ["2026"],
-        },
-      }}
-      mobileWidth
-    />
-  ),
+  args: {
+    initialState: {
+      text: "",
+      facets: {
+        project: ["clepsydra"],
+        tags: ["reading", "research"],
+        year: ["2026"],
+      },
+    },
+    mobileWidth: true,
+  },
 };

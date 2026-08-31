@@ -178,6 +178,33 @@ describe("FilterBar", () => {
     );
   });
 
+  it("moves focus from a primary clear control to its surviving chip", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={{ text: "", facets: { project: ["clepsydra"] } }}
+      />,
+    );
+
+    screen.getByRole("button", { name: "Clear PROJECT filter" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveFocus();
+  });
+
+  it("moves focus from a long-tail clear control to + FILTER", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness initial={{ text: "", facets: { status: ["open"] } }} />,
+    );
+
+    screen.getByRole("button", { name: "Clear STATUS filter" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("filter-bar-add")).toHaveFocus();
+    expect(screen.queryByTestId("filter-bar-chip-status")).not.toBeInTheDocument();
+  });
+
   it("selects options in one pane and closes only single-value panes", async () => {
     const user = userEvent.setup();
     render(<Harness />);
@@ -298,6 +325,31 @@ describe("FilterBar", () => {
     expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent("TAG");
     expect(screen.queryByTestId("filter-bar-chip-status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("filter-bar-clear")).not.toBeInTheDocument();
+  });
+
+  it("moves focus from global CLEAR to the text input", async () => {
+    const user = userEvent.setup();
+    render(<Harness initial={{ text: "needle", facets: {} }} />);
+
+    screen.getByTestId("filter-bar-clear").focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("filter-bar-input")).toHaveFocus();
+  });
+
+  it("moves focus from global CLEAR to the first primary chip without text search", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={{ text: "", facets: { tags: ["rust"] } }}
+        showText={false}
+      />,
+    );
+
+    screen.getByTestId("filter-bar-clear").focus();
+    await user.keyboard("{Enter}");
+
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveFocus();
   });
 
   it("keeps text search, Escape clearing, and active result count behavior", async () => {

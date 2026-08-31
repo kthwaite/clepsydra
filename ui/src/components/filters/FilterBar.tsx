@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   Button,
   Dialog,
@@ -36,6 +36,8 @@ interface FilterBarProps {
   filteredCount?: number;
   totalCount?: number;
   className?: string;
+  /** Extra option styling for context-specific targets such as mobile sheets. */
+  optionClassName?: string;
 }
 
 /** Above this many options, an option pane gets its own substring filter. */
@@ -76,10 +78,14 @@ export function FilterBar({
   filteredCount,
   totalCount,
   className,
+  optionClassName,
 }: FilterBarProps) {
   const [addOpen, setAddOpen] = useState(false);
   const [activeFieldId, setActiveFieldId] = useState<string | null>(null);
   const [optionFilter, setOptionFilter] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
+  const addButtonRef = useRef<HTMLButtonElement>(null);
 
   const configuredPrimaryIds =
     primaryFieldIds ?? fields.slice(0, 3).map((field) => field.id);
@@ -127,16 +133,40 @@ export function FilterBar({
     openOptionPane(field.id);
   };
 
+  const focusPrimaryChip = (fieldId: string) => {
+    const primaryChips =
+      rootRef.current?.querySelectorAll<HTMLButtonElement>(
+        "[data-filter-primary-chip]",
+      ) ?? [];
+    for (const chip of primaryChips) {
+      if (chip.dataset.filterPrimaryChip === fieldId) {
+        chip.focus();
+        return;
+      }
+    }
+  };
+
   const handleClearAll = () => {
+    if (showText) {
+      textInputRef.current?.focus();
+    } else {
+      rootRef.current
+        ?.querySelector<HTMLButtonElement>("[data-filter-primary-chip]")
+        ?.focus();
+    }
     onChange(clearFilter(state));
     setAddOpen(false);
     closeOptionPane();
   };
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-[10px]", className)}>
+    <div
+      ref={rootRef}
+      className={cn("flex flex-wrap items-center gap-[10px]", className)}
+    >
       {showText && (
         <input
+          ref={textInputRef}
           id={textInputId}
           data-testid="filter-bar-input"
           type="text"
@@ -159,6 +189,8 @@ export function FilterBar({
         const values = state.facets[field.id] ?? [];
         const isOpen = activeFieldId === field.id;
         const clearField = () => {
+          if (primaryIds.has(field.id)) focusPrimaryChip(field.id);
+          else addButtonRef.current?.focus();
           onChange(clearFacet(state, field.id));
           if (isOpen) closeOptionPane();
         };
@@ -169,6 +201,9 @@ export function FilterBar({
             <div key={field.id} className="flex shrink-0 items-stretch">
               <Button
                 data-testid={`filter-bar-chip-${field.id}`}
+                data-filter-primary-chip={
+                  primaryIds.has(field.id) ? field.id : undefined
+                }
                 aria-pressed={selected}
                 className={cn(
                   chromeButtonClasses,
@@ -199,9 +234,11 @@ export function FilterBar({
             key={field.id}
             field={field}
             values={values}
+            isPrimary={primaryIds.has(field.id)}
             isOpen={isOpen}
             optionFilter={optionFilter}
             onOptionFilterChange={setOptionFilter}
+            optionClassName={optionClassName}
             onOpenChange={(isFieldOpen) => {
               if (isFieldOpen) openOptionPane(field.id);
               else if (isOpen) closeOptionPane();
@@ -216,7 +253,11 @@ export function FilterBar({
       })}
 
       <DialogTrigger isOpen={addOpen} onOpenChange={setAddOpen}>
-        <Button data-testid="filter-bar-add" className={chromeButtonClasses}>
+        <Button
+          ref={addButtonRef}
+          data-testid="filter-bar-add"
+          className={chromeButtonClasses}
+        >
           + FILTER
         </Button>
         <Popover hideArrow placement="bottom start">
@@ -235,7 +276,7 @@ export function FilterBar({
                   id={field.id}
                   textValue={field.label}
                   data-testid={`filter-bar-field-${field.id}`}
-                  className={optionClasses}
+                  className={cn(optionClasses, optionClassName)}
                 >
                   {field.label}
                 </ListBoxItem>
@@ -271,8 +312,10 @@ export function FilterBar({
 interface FacetChipProps {
   field: FilterField;
   values: readonly string[];
+  isPrimary: boolean;
   isOpen: boolean;
   optionFilter: string;
+  optionClassName?: string;
   onOptionFilterChange: (value: string) => void;
   onOpenChange: (isOpen: boolean) => void;
   onOptionAction: (value: string) => void;
@@ -282,8 +325,10 @@ interface FacetChipProps {
 function FacetChip({
   field,
   values,
+  isPrimary,
   isOpen,
   optionFilter,
+  optionClassName,
   onOptionFilterChange,
   onOpenChange,
   onOptionAction,
@@ -306,6 +351,7 @@ function FacetChip({
       <DialogTrigger isOpen={isOpen} onOpenChange={onOpenChange}>
         <Button
           data-testid={`filter-bar-chip-${field.id}`}
+          data-filter-primary-chip={isPrimary ? field.id : undefined}
           className={cn(chromeButtonClasses, selected && activeChipClasses)}
         >
           {chipLabel(field, values)}
@@ -343,7 +389,7 @@ function FacetChip({
                     id={option.value}
                     textValue={option.label ?? option.value}
                     data-testid={`filter-bar-option-${field.id}-${option.value}`}
-                    className={optionClasses}
+                    className={cn(optionClasses, optionClassName)}
                   >
                     {({ isSelected }) => (
                       <>
