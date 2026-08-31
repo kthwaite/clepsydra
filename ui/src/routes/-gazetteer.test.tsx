@@ -218,8 +218,10 @@ describe("Gazetteer route filters", () => {
     const user = userEvent.setup();
     render(<GazetteerPage />);
 
+    routeMocks.navigate.mockClear();
     await user.click(screen.getByTestId("filter-bar-chip-kind"));
     await user.click(screen.getByRole("option", { name: "NOTE" }));
+    expect(routeMocks.navigate).toHaveBeenCalledOnce();
     expect(resolvedSearch()).toEqual({
       ...completeSearch,
       kind: "NOTE",
@@ -253,6 +255,7 @@ describe("Gazetteer route filters", () => {
     routeMocks.navigate.mockClear();
     await user.click(screen.getByTestId("filter-bar-chip-kind"));
     await user.click(screen.getByRole("option", { name: "NOTE" }));
+    expect(routeMocks.navigate).toHaveBeenCalledOnce();
     const call = routeMocks.navigate.mock.calls.at(-1)?.[0];
     expect(call.replace).not.toBe(true);
   });

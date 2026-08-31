@@ -6,6 +6,7 @@ import {
   ListBox,
   ListBoxItem,
 } from "react-aria-components";
+import type { Selection } from "react-aria-components/ListBox";
 import { Popover } from "#/components/ui/popover";
 import { cn } from "#/lib/cn";
 import {
@@ -243,8 +244,27 @@ export function FilterBar({
               if (isFieldOpen) openOptionPane(field.id);
               else if (isOpen) closeOptionPane();
             }}
-            onOptionAction={(value) => {
-              onChange(toggleFacetValue(state, field, value));
+            onSelectionChange={(keys, renderedOptions) => {
+              const currentValues = new Set(values);
+              let nextState = state;
+              let changed = false;
+
+              for (const { value } of renderedOptions) {
+                const selectedNext = keys === "all" || keys.has(value);
+                if (currentValues.has(value) && !selectedNext) {
+                  nextState = toggleFacetValue(nextState, field, value);
+                  changed = true;
+                }
+              }
+              for (const { value } of renderedOptions) {
+                const selectedNext = keys === "all" || keys.has(value);
+                if (!currentValues.has(value) && selectedNext) {
+                  nextState = toggleFacetValue(nextState, field, value);
+                  changed = true;
+                }
+              }
+
+              if (changed) onChange(nextState);
               if (field.kind === "single") closeOptionPane();
             }}
             onClear={clearField}
@@ -318,7 +338,10 @@ interface FacetChipProps {
   optionClassName?: string;
   onOptionFilterChange: (value: string) => void;
   onOpenChange: (isOpen: boolean) => void;
-  onOptionAction: (value: string) => void;
+  onSelectionChange: (
+    keys: Selection,
+    renderedOptions: FilterField["options"],
+  ) => void;
   onClear: () => void;
 }
 
@@ -331,7 +354,7 @@ function FacetChip({
   optionClassName,
   onOptionFilterChange,
   onOpenChange,
-  onOptionAction,
+  onSelectionChange,
   onClear,
 }: FacetChipProps) {
   const filteredOptions = useMemo(() => {
@@ -381,19 +404,9 @@ function FacetChip({
                 selectionMode={field.kind === "multi" ? "multiple" : "single"}
                 selectedKeys={selectedKeys}
                 escapeKeyBehavior="none"
-                onSelectionChange={(keys) => {
-                  if (keys === "all") return;
-                  let changedValue: string | undefined;
-                  for (const key of keys) {
-                    const value = String(key);
-                    if (!selectedKeys.has(value)) {
-                      changedValue = value;
-                      break;
-                    }
-                  }
-                  changedValue ??= values.find((value) => !keys.has(value));
-                  if (changedValue !== undefined) onOptionAction(changedValue);
-                }}
+                onSelectionChange={(keys) =>
+                  onSelectionChange(keys, filteredOptions)
+                }
               >
                 {filteredOptions.map((option) => (
                   <ListBoxItem

@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   EMPTY_FILTER_STATE,
   type FilterField,
@@ -55,6 +55,7 @@ interface HarnessProps {
   fields?: readonly FilterField[];
   primaryFieldIds?: readonly string[];
   showText?: boolean;
+  onChange?: (next: FilterState) => void;
 }
 
 function Harness({
@@ -62,13 +63,18 @@ function Harness({
   fields = FIELDS,
   primaryFieldIds = ["project", "tags", "hold"],
   showText,
+  onChange,
 }: HarnessProps) {
   const [state, setState] = useState(initial);
+  const handleChange = (next: FilterState) => {
+    onChange?.(next);
+    setState(next);
+  };
   return (
     <FilterBar
       fields={fields}
       state={state}
-      onChange={setState}
+      onChange={handleChange}
       primaryFieldIds={primaryFieldIds}
       showText={showText}
       filteredCount={3}
@@ -225,6 +231,123 @@ describe("FilterBar", () => {
     expect(
       screen.queryByRole("dialog", { name: "PROJECT options" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("changes an already-selected single facet once by mouse and closes", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={{ text: "", facets: { project: ["clepsydra"] } }}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-project"));
+    await user.click(screen.getByRole("option", { name: "XXII" }));
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith({
+      text: "",
+      facets: { project: ["xxii"] },
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "PROJECT options" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("changes an already-selected single facet once by keyboard and closes", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={{ text: "", facets: { project: ["clepsydra"] } }}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-project"));
+    screen.getByRole("option", { name: "XXII" }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith({
+      text: "",
+      facets: { project: ["xxii"] },
+    });
+    expect(
+      screen.queryByRole("dialog", { name: "PROJECT options" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("extends a multi-value keyboard range while preserving raw values", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={{ text: "", facets: { tags: ["legacy-url-tag"] } }}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
+    await user.click(screen.getByRole("option", { name: "Rust" }));
+    screen.getByRole("option", { name: "Rust" }).focus();
+    onChange.mockClear();
+    await user.keyboard("{Shift>}{ArrowDown}{ArrowDown}{/Shift}");
+
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange).toHaveBeenNthCalledWith(1, {
+      text: "",
+      facets: { tags: ["legacy-url-tag", "rust", "ui"] },
+    });
+    expect(onChange).toHaveBeenNthCalledWith(2, {
+      text: "",
+      facets: { tags: ["legacy-url-tag", "rust", "ui", "docs"] },
+    });
+  });
+
+  it("selects all rendered multi options while preserving raw and filtered-out values", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    render(
+      <Harness
+        initial={{
+          text: "",
+          facets: { owner: ["legacy-owner", "person-0"] },
+        }}
+        onChange={onChange}
+      />,
+    );
+
+    await user.click(screen.getByTestId("filter-bar-chip-owner"));
+    await user.type(
+      screen.getByRole("searchbox", { name: "Filter OWNER options" }),
+      "Person 1",
+    );
+    screen.getByRole("option", { name: "Person 1" }).focus();
+    await user.keyboard("{Control>}a{/Control}");
+
+    expect(onChange).toHaveBeenCalledOnce();
+    expect(onChange).toHaveBeenCalledWith({
+      text: "",
+      facets: {
+        owner: [
+          "legacy-owner",
+          "person-0",
+          "person-1",
+          "person-10",
+          "person-11",
+        ],
+      },
+    });
+    expect(screen.getByRole("dialog", { name: "OWNER options" })).toBeVisible();
+    for (const name of ["Person 1", "Person 10", "Person 11"]) {
+      expect(screen.getByRole("option", { name })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      );
+    }
   });
 
   it("filters a long option pane by resolved label", async () => {
