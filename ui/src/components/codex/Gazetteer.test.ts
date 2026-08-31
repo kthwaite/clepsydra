@@ -179,13 +179,12 @@ describe("Gazetteer controller", () => {
     await user.click(screen.getByRole("button", { name: "Filters" }));
     const filters = screen.getByRole("dialog", { name: "Gazetteer filters" });
     await user.type(within(filters).getByTestId("filter-bar-input"), "Al");
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tags"));
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
     await user.click(
       await screen.findByTestId("filter-bar-option-tags-research"),
     );
-    // multi-select keeps the add-filter popover open; close it explicitly.
-    await user.click(screen.getByTestId("filter-bar-add"));
+    // Multi-select keeps the facet popover open; close it explicitly.
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
     await user.click(within(filters).getByRole("radio", { name: "Title" }));
     await user.click(
       within(filters).getByRole("button", { name: "Close filters" }),
@@ -203,9 +202,9 @@ describe("Gazetteer controller", () => {
       name: "Gazetteer filters",
     });
     expect(within(restored).getByTestId("filter-bar-input")).toHaveValue("Al");
-    expect(
-      within(restored).getByTestId("filter-bar-chip-tags-research"),
-    ).toBeVisible();
+    expect(within(restored).getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: research",
+    );
     expect(
       within(restored).getByRole("radio", { name: "Title" }),
     ).toBeChecked();
@@ -312,18 +311,17 @@ describe("Gazetteer controller", () => {
       createElement(Gazetteer, { filters: makeFilters({ onFilterChange }) }),
     );
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-kind"));
+    await user.click(screen.getByTestId("filter-bar-chip-kind"));
     for (const kind of KINDS) {
-      expect(
-        screen.getByTestId(`filter-bar-option-kind-${kind}`),
-      ).toHaveTextContent(kindLabel(kind));
+      const option = screen.getByRole("option", { name: kindLabel(kind) });
+      expect(option).toBeVisible();
+      expect(option).toHaveAttribute("aria-selected", "false");
     }
-    const kindOptionIds = screen
-      .getAllByTestId(/^filter-bar-option-kind-/)
-      .map((el) => el.getAttribute("data-testid"));
-    expect(kindOptionIds).toEqual(
-      sortKindsByLabel(KINDS).map((k) => `filter-bar-option-kind-${k}`),
+    const kindOptionLabels = screen
+      .getAllByRole("option")
+      .map((option) => option.textContent);
+    expect(kindOptionLabels).toEqual(
+      sortKindsByLabel(KINDS).map((kind) => kindLabel(kind)),
     );
     await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
     expect(onFilterChange).toHaveBeenCalledWith({
@@ -331,12 +329,14 @@ describe("Gazetteer controller", () => {
       facets: { kind: ["PROJECT"] },
     });
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-project"));
-    expect(screen.getByTestId("filter-bar-option-project-atlas")).toBeVisible();
+    await user.click(screen.getByTestId("filter-bar-chip-project"));
+    expect(screen.getByRole("option", { name: "atlas" })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
     expect(
-      screen.getByTestId("filter-bar-option-project-clepsydra"),
-    ).toBeVisible();
+      screen.getByRole("option", { name: "clepsydra" }),
+    ).toHaveAttribute("aria-selected", "false");
   });
 
   it("adds a tag facet through the desktop FilterBar and reflects it as a chip", async () => {
@@ -347,8 +347,7 @@ describe("Gazetteer controller", () => {
       createElement(Gazetteer, { filters: makeFilters({ onFilterChange }) }),
     );
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tags"));
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
     await user.click(screen.getByTestId("filter-bar-option-tags-research"));
     expect(onFilterChange).toHaveBeenCalledWith({
       text: "",
@@ -356,7 +355,7 @@ describe("Gazetteer controller", () => {
     });
   });
 
-  it("shows an unknown URL tag as a removable chip", async () => {
+  it("shows an unknown URL tag in the aggregate chip and clears it separately", async () => {
     const user = userEvent.setup();
     const onFilterChange = vi.fn();
     layoutState.mobile = false;
@@ -369,9 +368,12 @@ describe("Gazetteer controller", () => {
       }),
     );
 
-    const chip = screen.getByTestId("filter-bar-chip-tags-legacy-url-tag");
-    expect(chip).toBeVisible();
-    await user.click(chip);
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: legacy-url-tag",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Clear TAG filter" }),
+    );
     expect(onFilterChange).toHaveBeenCalledWith({ text: "", facets: {} });
   });
 

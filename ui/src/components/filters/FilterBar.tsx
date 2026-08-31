@@ -381,7 +381,19 @@ function FacetChip({
                 selectionMode={field.kind === "multi" ? "multiple" : "single"}
                 selectedKeys={selectedKeys}
                 escapeKeyBehavior="none"
-                onAction={(key) => onOptionAction(String(key))}
+                onSelectionChange={(keys) => {
+                  if (keys === "all") return;
+                  let changedValue: string | undefined;
+                  for (const key of keys) {
+                    const value = String(key);
+                    if (!selectedKeys.has(value)) {
+                      changedValue = value;
+                      break;
+                    }
+                  }
+                  changedValue ??= values.find((value) => !keys.has(value));
+                  if (changedValue !== undefined) onOptionAction(changedValue);
+                }}
               >
                 {filteredOptions.map((option) => (
                   <ListBoxItem

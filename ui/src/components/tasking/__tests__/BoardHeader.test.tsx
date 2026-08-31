@@ -257,11 +257,10 @@ describe("BoardHeader", () => {
     expect(input).not.toHaveFocus();
   });
 
-  it("selecting a facet option in the add-filter popover calls onFilterChange with the toggled facet", async () => {
+  it("selecting a primary facet option calls onFilterChange with the toggled facet", async () => {
     const onFilterChange = vi.fn();
     renderHeader({ onFilterChange });
-    await userEvent.click(screen.getByTestId("filter-bar-add"));
-    await userEvent.click(screen.getByTestId("filter-bar-field-pri"));
+    await userEvent.click(screen.getByTestId("filter-bar-chip-pri"));
     await userEvent.click(screen.getByTestId("filter-bar-option-pri-P0"));
     expect(onFilterChange).toHaveBeenCalledWith({
       text: "",

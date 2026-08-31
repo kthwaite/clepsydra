@@ -281,8 +281,7 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
     const user = userEvent.setup();
     render(<ControlledAcademicLibrary />);
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-chip-status"));
     await user.click(screen.getByTestId("filter-bar-option-status-reading"));
 
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
@@ -302,18 +301,22 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
     expect(mocks.worksFilters.mock.calls.at(-1)?.[0]).toEqual(requestBefore);
   });
 
-  it("removing a facet chip restores the unfiltered works request", async () => {
+  it("clearing a facet restores the unfiltered works request", async () => {
     const user = userEvent.setup();
     render(<ControlledAcademicLibrary />);
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-chip-status"));
     await user.click(screen.getByTestId("filter-bar-option-status-reading"));
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: "reading" }),
     );
 
-    await user.click(screen.getByTestId("filter-bar-chip-status-reading"));
+    expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
+      "STATUS: reading",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Clear STATUS filter" }),
+    );
 
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
       expect.objectContaining({ status: undefined }),
@@ -330,8 +333,7 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
       expect.objectContaining({ limit: 250 }),
     );
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-chip-status"));
     await user.click(screen.getByTestId("filter-bar-option-status-reading"));
 
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
@@ -344,15 +346,19 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
     if (mocks.worksState.data) mocks.worksState.data.total = 250;
     render(<ControlledAcademicLibrary />);
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-status"));
+    await user.click(screen.getByTestId("filter-bar-chip-status"));
     await user.click(screen.getByTestId("filter-bar-option-status-reading"));
     await user.click(screen.getByRole("button", { name: "Load more works" }));
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
       expect.objectContaining({ limit: 250, status: "reading" }),
     );
 
-    await user.click(screen.getByTestId("filter-bar-chip-status-reading"));
+    expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
+      "STATUS: reading",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Clear STATUS filter" }),
+    );
 
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
       expect.objectContaining({ limit: 200, status: undefined }),
@@ -366,7 +372,9 @@ describe("AcademicLibrary — shared FilterBar composition", () => {
       />,
     );
 
-    expect(screen.getByTestId("filter-bar-chip-year-abc")).toBeVisible();
+    expect(screen.getByTestId("filter-bar-chip-year")).toHaveTextContent(
+      "YEAR: abc",
+    );
     expect(mocks.worksFilters).toHaveBeenLastCalledWith(
       expect.objectContaining({ year: undefined }),
     );

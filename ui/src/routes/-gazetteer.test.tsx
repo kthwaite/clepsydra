@@ -151,7 +151,7 @@ describe("Gazetteer route filters", () => {
     routeMocks.search.kind = "WIDGET";
     render(<GazetteerPage />);
 
-    expect(screen.getByTestId("filter-bar-chip-kind-WIDGET")).toHaveTextContent(
+    expect(screen.getByTestId("filter-bar-chip-kind")).toHaveTextContent(
       "KIND: WIDGET",
     );
     expect(routeMocks.useContentIndex).toHaveBeenLastCalledWith({
@@ -218,9 +218,8 @@ describe("Gazetteer route filters", () => {
     const user = userEvent.setup();
     render(<GazetteerPage />);
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-kind"));
-    await user.click(screen.getByTestId("filter-bar-option-kind-NOTE"));
+    await user.click(screen.getByTestId("filter-bar-chip-kind"));
+    await user.click(screen.getByRole("option", { name: "NOTE" }));
     expect(resolvedSearch()).toEqual({
       ...completeSearch,
       kind: "NOTE",
@@ -228,7 +227,12 @@ describe("Gazetteer route filters", () => {
     });
 
     routeMocks.navigate.mockClear();
-    await user.click(screen.getByTestId("filter-bar-chip-project-clepsydra"));
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
+      "PROJECT: clepsydra",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Clear PROJECT filter" }),
+    );
     expect(resolvedSearch()).toEqual({
       ...completeSearch,
       project: undefined,
@@ -247,9 +251,8 @@ describe("Gazetteer route filters", () => {
     );
 
     routeMocks.navigate.mockClear();
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-kind"));
-    await user.click(screen.getByTestId("filter-bar-option-kind-NOTE"));
+    await user.click(screen.getByTestId("filter-bar-chip-kind"));
+    await user.click(screen.getByRole("option", { name: "NOTE" }));
     const call = routeMocks.navigate.mock.calls.at(-1)?.[0];
     expect(call.replace).not.toBe(true);
   });

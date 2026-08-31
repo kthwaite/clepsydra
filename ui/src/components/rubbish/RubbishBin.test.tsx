@@ -451,8 +451,7 @@ describe("RubbishBin — shared FilterBar composition", () => {
     const user = userEvent.setup();
     render(<ControlledRubbishBin />);
 
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-kind"));
+    await user.click(screen.getByTestId("filter-bar-chip-kind"));
     await user.click(screen.getByTestId("filter-bar-option-kind-PROJECT"));
 
     expect(screen.getByRole("button", { name: /Alpha dossier/ })).toBeVisible();
