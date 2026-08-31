@@ -14,24 +14,63 @@ const FIELDS: FilterField[] = [
     id: "project",
     kind: "single",
     label: "PROJECT",
-    options: [{ value: "clepsydra" }, { value: "xxii" }],
+    options: [
+      { value: "clepsydra", label: "Clepsydra" },
+      { value: "xxii", label: "XXII" },
+    ],
   },
   {
     id: "tags",
     kind: "multi",
     label: "TAG",
-    options: [{ value: "rust" }, { value: "ui" }, { value: "docs" }],
+    options: [
+      { value: "rust", label: "Rust" },
+      { value: "ui", label: "Interface" },
+      { value: "docs", label: "Docs" },
+    ],
   },
   { id: "hold", kind: "flag", label: "ON HOLD", options: [] },
+  {
+    id: "owner",
+    kind: "multi",
+    label: "OWNER",
+    options: Array.from({ length: 12 }, (_, index) => ({
+      value: `person-${index}`,
+      label: `Person ${index}`,
+    })),
+  },
+  {
+    id: "status",
+    kind: "multi",
+    label: "STATUS",
+    options: [
+      { value: "open", label: "Open" },
+      { value: "closed", label: "Closed" },
+    ],
+  },
 ];
 
-function Harness({ initial = EMPTY_FILTER_STATE }: { initial?: FilterState }) {
+interface HarnessProps {
+  initial?: FilterState;
+  fields?: readonly FilterField[];
+  primaryFieldIds?: readonly string[];
+  showText?: boolean;
+}
+
+function Harness({
+  initial = EMPTY_FILTER_STATE,
+  fields = FIELDS,
+  primaryFieldIds = ["project", "tags", "hold"],
+  showText,
+}: HarnessProps) {
   const [state, setState] = useState(initial);
   return (
     <FilterBar
-      fields={FIELDS}
+      fields={fields}
       state={state}
       onChange={setState}
+      primaryFieldIds={primaryFieldIds}
+      showText={showText}
       filteredCount={3}
       totalCount={9}
     />
@@ -39,302 +78,247 @@ function Harness({ initial = EMPTY_FILTER_STATE }: { initial?: FilterState }) {
 }
 
 describe("FilterBar", () => {
-  it("adds a multi facet value through the popover and shows a chip", async () => {
-    const user = userEvent.setup();
+  it("always shows the configured primary field chips", () => {
     render(<Harness />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tags"));
-    await user.click(screen.getByTestId("filter-bar-option-tags-rust"));
-    expect(screen.getByTestId("filter-bar-chip-tags-rust")).toHaveTextContent(
-      "TAG: rust",
+
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
+      "PROJECT",
     );
-    // multi keeps the popover open for further toggles
-    expect(screen.getByTestId("filter-bar-option-tags-ui")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent("TAG");
+    expect(screen.getByTestId("filter-bar-chip-hold")).toHaveTextContent(
+      "ON HOLD",
+    );
+    expect(screen.queryByTestId("filter-bar-chip-owner")).not.toBeInTheDocument();
   });
 
-  it("closes the popover after a single-field selection", async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-project"));
-    await user.click(screen.getByTestId("filter-bar-option-project-xxii"));
-    expect(
-      screen.getByTestId("filter-bar-chip-project-xxii"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("filter-bar-option-project-clepsydra"),
-    ).not.toBeInTheDocument();
+  it("uses the first three fields as primary chips when no mapping is supplied", () => {
+    render(
+      <FilterBar
+        fields={FIELDS}
+        state={EMPTY_FILTER_STATE}
+        onChange={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId("filter-bar-chip-project")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-chip-tags")).toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-chip-hold")).toBeInTheDocument();
+    expect(screen.queryByTestId("filter-bar-chip-owner")).not.toBeInTheDocument();
   });
 
-  it("toggles flag fields directly from the field list", async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-hold"));
-    const chip = screen.getByTestId("filter-bar-chip-hold-1");
-    expect(chip).toHaveTextContent("ON HOLD");
-    expect(chip).not.toHaveTextContent(":");
-  });
+  it("shows a resolved option label for one value and a selected-value count for several", () => {
+    const { unmount } = render(
+      <Harness
+        initial={{ text: "", facets: { project: ["clepsydra"] } }}
+      />,
+    );
 
-  it("removes a facet value when its chip is clicked", async () => {
-    const user = userEvent.setup();
-    render(<Harness initial={{ text: "", facets: { tags: ["rust"] } }} />);
-    await user.click(screen.getByTestId("filter-bar-chip-tags-rust"));
-    expect(
-      screen.queryByTestId("filter-bar-chip-tags-rust"),
-    ).not.toBeInTheDocument();
-  });
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
+      "PROJECT: Clepsydra",
+    );
 
-  it("collapses two values of one field into a single badge", () => {
+    unmount();
     render(
       <Harness initial={{ text: "", facets: { tags: ["rust", "ui"] } }} />,
     );
     expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
-      "TAG: rust +1",
+      "TAG · 2",
     );
-    expect(
-      screen.queryByTestId("filter-bar-chip-tags-rust"),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByTestId("filter-bar-chip-tags-ui"),
-    ).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-chip-tags")).not.toHaveTextContent(
+      "Interface",
+    );
   });
 
-  it("counts every value beyond the first in the badge", () => {
+  it("opens a primary chip's single option pane without clearing its value", async () => {
+    const user = userEvent.setup();
     render(
       <Harness
-        initial={{ text: "", facets: { tags: ["rust", "ui", "docs"] } }}
+        initial={{ text: "", facets: { project: ["clepsydra"] } }}
       />,
     );
-    const badge = screen.getByTestId("filter-bar-chip-tags");
-    expect(badge).toHaveTextContent("TAG: rust +2");
-    expect(badge).toHaveAccessibleName("TAG: 3 filters applied");
-  });
 
-  it("badge label uses the resolved option label of the first value", () => {
-    const labeled: FilterField[] = [
-      {
-        id: "status",
-        kind: "multi",
-        label: "STATUS",
-        options: [
-          { value: "open", label: "Open Ticket" },
-          { value: "shut", label: "Shut Ticket" },
-        ],
-      },
-    ];
-    render(
-      <FilterBar
-        fields={labeled}
-        state={{ text: "", facets: { status: ["open", "shut"] } }}
-        onChange={() => {}}
-      />,
+    await user.click(screen.getByTestId("filter-bar-chip-project"));
+
+    expect(screen.getByRole("dialog", { name: "PROJECT options" })).toBeVisible();
+    expect(screen.queryByText("← FIELDS")).not.toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "Clepsydra" })).toHaveAttribute(
+      "aria-selected",
+      "true",
     );
-    expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
-      "STATUS: Open Ticket +1",
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
+      "PROJECT: Clepsydra",
     );
   });
 
-  it("lists the applied values in a popover when the badge is clicked", async () => {
-    const user = userEvent.setup();
-    render(
-      <Harness initial={{ text: "", facets: { tags: ["rust", "ui"] } }} />,
-    );
-    await user.click(screen.getByTestId("filter-bar-chip-tags"));
-    expect(
-      screen.getByTestId("filter-bar-facet-tags-rust"),
-    ).toHaveAccessibleName("Remove filter TAG: rust");
-    expect(screen.getByTestId("filter-bar-facet-tags-ui")).toBeInTheDocument();
-    // only the applied values, never the whole option list
-    expect(
-      screen.queryByTestId("filter-bar-facet-tags-docs"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("removing one popover value collapses the badge back to a plain chip", async () => {
-    const user = userEvent.setup();
-    render(
-      <Harness initial={{ text: "", facets: { tags: ["rust", "ui"] } }} />,
-    );
-    await user.click(screen.getByTestId("filter-bar-chip-tags"));
-    await user.click(screen.getByTestId("filter-bar-facet-tags-ui"));
-    expect(
-      screen.queryByTestId("filter-bar-chip-tags"),
-    ).not.toBeInTheDocument();
-    expect(screen.getByTestId("filter-bar-chip-tags-rust")).toHaveTextContent(
-      "TAG: rust",
-    );
-  });
-
-  it("clears one field from the popover without touching the others", async () => {
+  it("clears one field through a separate control without touching another", async () => {
     const user = userEvent.setup();
     render(
       <Harness
         initial={{
           text: "",
-          facets: { tags: ["rust", "ui"], project: ["clepsydra"] },
+          facets: { project: ["clepsydra"], tags: ["rust"] },
         }}
       />,
     );
-    await user.click(screen.getByTestId("filter-bar-chip-tags"));
-    const clear = screen.getByTestId("filter-bar-facet-clear-tags");
-    expect(clear).toHaveAccessibleName("Clear all TAG filters");
-    await user.click(clear);
+
+    const clearProject = screen.getByRole("button", {
+      name: "Clear PROJECT filter",
+    });
+    expect(clearProject).not.toBe(screen.getByTestId("filter-bar-chip-project"));
+    await user.click(clearProject);
+
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
+      "PROJECT",
+    );
     expect(
-      screen.queryByTestId("filter-bar-chip-tags"),
+      screen.queryByRole("button", { name: "Clear PROJECT filter" }),
     ).not.toBeInTheDocument();
-    expect(
-      screen.getByTestId("filter-bar-chip-project-clepsydra"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: Rust",
+    );
   });
 
-  it("clears everything via CLEAR and hides it when inactive", async () => {
+  it("selects options in one pane and closes only single-value panes", async () => {
     const user = userEvent.setup();
-    render(<Harness initial={{ text: "x", facets: { tags: ["ui"] } }} />);
-    await user.click(screen.getByTestId("filter-bar-clear"));
+    render(<Harness />);
+
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
+    await user.click(screen.getByRole("option", { name: "Rust" }));
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: Rust",
+    );
+    expect(screen.getByRole("dialog", { name: "TAG options" })).toBeVisible();
+
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByTestId("filter-bar-chip-project"));
+    await user.click(screen.getByRole("option", { name: "XXII" }));
+    expect(screen.getByTestId("filter-bar-chip-project")).toHaveTextContent(
+      "PROJECT: XXII",
+    );
     expect(
-      screen.queryByTestId("filter-bar-chip-tags-ui"),
+      screen.queryByRole("dialog", { name: "PROJECT options" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("filters a long option pane by resolved label", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    await user.click(screen.getByRole("option", { name: "OWNER" }));
+    const filter = screen.getByRole("searchbox", {
+      name: "Filter OWNER options",
+    });
+    await user.type(filter, "Person 1");
+
+    expect(screen.getByRole("option", { name: "Person 1" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "Person 11" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: "Person 2" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("toggles the focused option with Enter and closes on Escape without another change", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(screen.getByTestId("filter-bar-chip-tags"));
+    const rust = screen.getByRole("option", { name: "Rust" });
+    rust.focus();
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: Rust",
+    );
+
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "TAG options" })).not.toBeInTheDocument();
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent(
+      "TAG: Rust",
+    );
+  });
+
+  it("promotes a long-tail field from + FILTER while active and removes it when cleared", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    expect(screen.getByRole("option", { name: "OWNER" })).toBeVisible();
+    expect(screen.getByRole("option", { name: "STATUS" })).toBeVisible();
+    expect(
+      screen.queryByRole("option", { name: "PROJECT" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("option", { name: "STATUS" }));
+    expect(screen.getByTestId("filter-bar-chip-status")).toHaveTextContent(
+      "STATUS",
+    );
+    expect(screen.getByRole("dialog", { name: "STATUS options" })).toBeVisible();
+    await user.click(screen.getByRole("option", { name: "Open" }));
+    await user.keyboard("{Escape}");
+
+    await user.click(screen.getByTestId("filter-bar-add"));
+    expect(
+      screen.queryByRole("option", { name: "STATUS" }),
+    ).not.toBeInTheDocument();
+    await user.keyboard("{Escape}");
+
+    await user.click(
+      screen.getByRole("button", { name: "Clear STATUS filter" }),
+    );
+    expect(screen.queryByTestId("filter-bar-chip-status")).not.toBeInTheDocument();
+  });
+
+  it("toggles flag chips directly and exposes their selected state", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    const hold = screen.getByTestId("filter-bar-chip-hold");
+    expect(hold).toHaveAttribute("aria-pressed", "false");
+    await user.click(hold);
+    expect(hold).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("dialog", { name: "ON HOLD options" })).not.toBeInTheDocument();
+    await user.click(hold);
+    expect(hold).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("clears text and every facet globally while keeping inactive primary chips", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        initial={{
+          text: "needle",
+          facets: { tags: ["rust"], status: ["open"] },
+        }}
+      />,
+    );
+
+    await user.click(screen.getByTestId("filter-bar-clear"));
+
     expect(screen.getByTestId("filter-bar-input")).toHaveValue("");
+    expect(screen.getByTestId("filter-bar-chip-tags")).toHaveTextContent("TAG");
+    expect(screen.queryByTestId("filter-bar-chip-status")).not.toBeInTheDocument();
     expect(screen.queryByTestId("filter-bar-clear")).not.toBeInTheDocument();
   });
 
-  it("shows the count only while active", async () => {
+  it("keeps text search, Escape clearing, and active result count behavior", async () => {
     const user = userEvent.setup();
     render(<Harness />);
-    expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
-    await user.type(screen.getByTestId("filter-bar-input"), "abc");
-    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent(
-      "03 OF 09",
-    );
-  });
+    const input = screen.getByRole("textbox", { name: "Filter" });
 
-  it("Escape clears and blurs the text input without propagating", async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
-    const input = screen.getByTestId("filter-bar-input");
+    expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
     await user.type(input, "abc");
+    expect(input).toHaveValue("abc");
+    expect(screen.getByTestId("filter-bar-count")).toHaveTextContent("03 OF 09");
+
     await user.keyboard("{Escape}");
     expect(input).toHaveValue("");
     expect(input).not.toHaveFocus();
+    expect(screen.queryByTestId("filter-bar-count")).not.toBeInTheDocument();
   });
 
-  it("filters long option lists through the option filter input", async () => {
-    const user = userEvent.setup();
-    const many: FilterField[] = [
-      {
-        id: "tags",
-        kind: "multi",
-        label: "TAG",
-        options: Array.from({ length: 12 }, (_, i) => ({ value: `tag-${i}` })),
-      },
-    ];
-    function ManyHarness() {
-      const [state, setState] = useState(EMPTY_FILTER_STATE);
-      return <FilterBar fields={many} state={state} onChange={setState} />;
-    }
-    render(<ManyHarness />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tags"));
-    const optionFilter = screen.getByTestId("filter-bar-option-filter");
-    await user.type(optionFilter, "tag-1");
-    expect(
-      screen.getByTestId("filter-bar-option-tags-tag-1"),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByTestId("filter-bar-option-tags-tag-11"),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByTestId("filter-bar-option-tags-tag-2"),
-    ).not.toBeInTheDocument();
-  });
-
-  it("chip aria-label uses the resolved option label, not the raw value", () => {
-    const labeled: FilterField[] = [
-      {
-        id: "status",
-        kind: "single",
-        label: "STATUS",
-        options: [{ value: "open", label: "Open Ticket" }],
-      },
-    ];
-    render(
-      <FilterBar
-        fields={labeled}
-        state={{ text: "", facets: { status: ["open"] } }}
-        onChange={() => {}}
-      />,
-    );
-    expect(
-      screen.getByTestId("filter-bar-chip-status-open"),
-    ).toHaveAccessibleName("Remove filter STATUS: Open Ticket");
-  });
-
-  it("flag chip aria-label omits the internal sentinel value", () => {
-    render(<Harness initial={{ text: "", facets: { hold: ["1"] } }} />);
-    expect(screen.getByTestId("filter-bar-chip-hold-1")).toHaveAccessibleName(
-      "Remove filter ON HOLD",
-    );
-  });
-
-  it("hides the text input when showText is false", () => {
-    render(
-      <FilterBar
-        fields={FIELDS}
-        state={EMPTY_FILTER_STATE}
-        onChange={() => {}}
-        showText={false}
-      />,
-    );
+  it("supports text-field visibility and accessible-name overrides", () => {
+    const { rerender } = render(<Harness showText={false} />);
     expect(screen.queryByTestId("filter-bar-input")).not.toBeInTheDocument();
-  });
-
-  it("exposes selected state on pane-2 options via aria-pressed", async () => {
-    const user = userEvent.setup();
-    render(<Harness initial={{ text: "", facets: { tags: ["rust"] } }} />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tags"));
-    expect(screen.getByTestId("filter-bar-option-tags-rust")).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-    expect(screen.getByTestId("filter-bar-option-tags-ui")).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
-  });
-
-  it("marks a selected pane-1 flag field aria-pressed=true", async () => {
-    const user = userEvent.setup();
-    render(<Harness initial={{ text: "", facets: { hold: ["1"] } }} />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    expect(screen.getByTestId("filter-bar-field-hold")).toHaveAttribute(
-      "aria-pressed",
-      "true",
-    );
-  });
-
-  it("marks an unselected pane-1 flag field aria-pressed=false", async () => {
-    const user = userEvent.setup();
-    render(<Harness />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    expect(screen.getByTestId("filter-bar-field-hold")).toHaveAttribute(
-      "aria-pressed",
-      "false",
-    );
-  });
-
-  it("defaults the text input's accessible name to Filter and allows override", () => {
-    const { rerender } = render(
-      <FilterBar
-        fields={FIELDS}
-        state={EMPTY_FILTER_STATE}
-        onChange={() => {}}
-      />,
-    );
-    expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
-      "Filter",
-    );
 
     rerender(
       <FilterBar
@@ -344,30 +328,6 @@ describe("FilterBar", () => {
         textAriaLabel="Search pages"
       />,
     );
-    expect(screen.getByTestId("filter-bar-input")).toHaveAccessibleName(
-      "Search pages",
-    );
-  });
-
-  it("gives the pane-2 option-filter input a fixed accessible name", async () => {
-    const user = userEvent.setup();
-    const many: FilterField[] = [
-      {
-        id: "tags",
-        kind: "multi",
-        label: "TAG",
-        options: Array.from({ length: 12 }, (_, i) => ({ value: `tag-${i}` })),
-      },
-    ];
-    function ManyHarness() {
-      const [state, setState] = useState(EMPTY_FILTER_STATE);
-      return <FilterBar fields={many} state={state} onChange={setState} />;
-    }
-    render(<ManyHarness />);
-    await user.click(screen.getByTestId("filter-bar-add"));
-    await user.click(screen.getByTestId("filter-bar-field-tags"));
-    expect(screen.getByTestId("filter-bar-option-filter")).toHaveAccessibleName(
-      "Filter options",
-    );
+    expect(screen.getByRole("textbox", { name: "Search pages" })).toBeVisible();
   });
 });
