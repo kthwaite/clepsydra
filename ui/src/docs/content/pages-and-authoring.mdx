@@ -55,6 +55,11 @@ other Project with a 400 on create (Base member drafts included) and on single
 or bulk assignment; the bulk form moves nothing when one page fails. Hand-edited files are not blocked;
 `clep doctor` lists orphan slugs.
 
+A slug is one or more `/`-separated segments, and each segment may hold
+letters, digits, spaces, `-` and `_` — `field notes` names a project as
+readily as `field-notes`, and becomes the folder `notes/field notes/`. A
+segment may not lead or trail with a space, be empty, or be `.` or `..`.
+
 | Kind | Canonical folder |
 | --- | --- |
 | `NOTE` | `notes` |
