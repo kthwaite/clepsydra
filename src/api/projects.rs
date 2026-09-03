@@ -34,10 +34,16 @@ pub(crate) fn unknown_project(slug: &str) -> ApiError {
     ))
 }
 
-/// Check that `slug` is declared as the `project` of at least one PROJECT
-/// page. Returns 400 otherwise. Callers only pass a non-empty slug (the
-/// empty string clears on a task PATCH).
+/// Check that `slug` is well-formed and declared as the `project` of at least
+/// one PROJECT page. Returns 400 otherwise. Callers only pass a non-empty slug
+/// (the empty string clears on a task PATCH).
+///
+/// Shape comes first, because a PROJECT page authored by hand in the vault can
+/// declare a slug no API write path would have accepted. Existence alone would
+/// let such a slug through here while `validate_project_slug` refused it on
+/// assign, so the two paths would disagree about the same project.
 pub(crate) async fn ensure_project_exists(state: &AppState, slug: &str) -> Result<(), ApiError> {
+    super::pages::validate_project_slug(slug).map_err(ApiError::bad_request)?;
     if project_exists(state, slug).await? {
         Ok(())
     } else {

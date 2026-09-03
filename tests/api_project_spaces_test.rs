@@ -164,6 +164,67 @@ async fn a_nested_slug_may_carry_spaces_in_every_segment() {
         .assert_status(StatusCode::CREATED);
 }
 
+/// A PROJECT page can only be authored by hand with a slug the API would have
+/// refused. Both write paths must then refuse it alike — existence is not
+/// enough to make a malformed slug usable.
+#[tokio::test]
+async fn a_hand_authored_malformed_slug_is_refused_by_task_create_and_assign() {
+    let fixture = ApiFixture::builder()
+        .pre_index_seed(|root| {
+            std::fs::create_dir_all(root.join("projects/bad.slug")).unwrap();
+            std::fs::write(
+                root.join("projects/bad.slug/bad.slug.md"),
+                "+++\n\
+                 id = \"01951234-0000-7000-8000-0000000000f3\"\n\
+                 title = \"Bad Slug\"\n\
+                 type = \"PROJECT\"\n\
+                 project = \"bad.slug\"\n\
+                 +++\n",
+            )
+            .unwrap();
+            std::fs::create_dir_all(root.join("notes")).unwrap();
+            std::fs::write(
+                root.join("notes/loose.md"),
+                "+++\n\
+                 id = \"01951234-0000-7000-8000-0000000000f4\"\n\
+                 title = \"Loose\"\n\
+                 type = \"NOTE\"\n\
+                 +++\n",
+            )
+            .unwrap();
+        })
+        .build();
+    let root = fixture.state.vault.root().to_path_buf();
+
+    let task = fixture
+        .server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "Survey the ridge",
+            "project": "bad.slug",
+        }))
+        .await;
+    task.assert_status(StatusCode::BAD_REQUEST);
+
+    let assign = fixture
+        .server
+        .post("/api/vault/pages-assign/notes/loose.md")
+        .json(&serde_json::json!({ "project": "bad.slug" }))
+        .await;
+    assign.assert_status(StatusCode::BAD_REQUEST);
+
+    let task_error: serde_json::Value = task.json();
+    let assign_error: serde_json::Value = assign.json();
+    assert_eq!(
+        task_error["error"], assign_error["error"],
+        "both paths must refuse a malformed slug for the same stated reason"
+    );
+    assert!(
+        !root.join("tasks/bad.slug").exists(),
+        "a refused task must leave no project folder behind"
+    );
+}
+
 /// Padding, empty segments and traversal stay refused.
 #[tokio::test]
 async fn malformed_slugs_are_still_refused() {
