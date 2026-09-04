@@ -1,13 +1,11 @@
 //! Task mutations: `POST /board/tasks` and `PATCH /board/tasks/{id}`.
 
-use std::fs;
 use std::sync::Arc;
 
 use axum::Json;
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use chrono::Utc;
 use rusqlite::params;
 
 use crate::api::AppState;
@@ -16,13 +14,12 @@ use crate::api::events::SyncNotification;
 use crate::vault::board_vocab::{DEFAULT_PRIORITY, DEFAULT_STATUS};
 use crate::vault::code::CodeFamily;
 use crate::vault::kind::Kind;
-use crate::vault::mutation_coordinator::{
-    CreatePageCommand, MutationNotification, ProjectAssignment, UpdatePageCommand,
-};
+use crate::vault::mutation_coordinator::{CreatePageCommand, MutationNotification};
 use crate::vault::page::{Page, PageMeta};
 use crate::vault::path::VaultPath;
 
 use super::read::build_board_task_dto;
+use super::task_patch::{BoardLookups, TaskPatch, plan_task_patch};
 use super::{
     BoardTask, CreateTaskRequest, PatchTaskRequest, ensure_cycle_exists, mint_unique_code,
     path_stem, validate_priority, validate_status,
@@ -197,27 +194,7 @@ pub(crate) async fn patch_task(
     Path(id): Path<String>,
     Json(body): Json<PatchTaskRequest>,
 ) -> Result<Json<BoardTask>, ApiError> {
-    // 0. Normalize + validate the tri-state cycle field up front, while the
-    // index is reachable via `state` (the later tri-state application runs on
-    // an already-loaded PageMeta). "BACKLOG" is the no-cycle sentinel: setting
-    // it behaves exactly like null (clear the key). Any other set value must
-    // match an existing CYCLE page stem, same rule as POST.
-    let cycle_field: Option<Option<String>> = match &body.cycle {
-        Some(Some(c)) if c == "BACKLOG" => Some(None),
-        Some(Some(c)) => {
-            let canonical = ensure_cycle_exists(&state, c).await?;
-            Some(Some(canonical))
-        }
-        other => other.clone(),
-    };
-
-    // A set project must be declared by a PROJECT page; the empty string
-    // clears and is not validated.
-    if let Some(project) = body.project.as_deref().filter(|p| !p.is_empty()) {
-        ensure_project_exists(&state, project).await?;
-    }
-
-    // 1. Resolve path by UUID
+    // 1. Resolve the TASK page by UUID.
     let id_clone = id.clone();
     let page_path = state
         .index
@@ -244,63 +221,16 @@ pub(crate) async fn patch_task(
         )));
     }
 
-    // 2. Load file
-    let expected_content = fs::read_to_string(&abs_path)
-        .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
-    let page = Page::from_file(&abs_path, vault_path.clone())
+    // 2. Read once: `raw_content` doubles as the stale-write guard.
+    let page = Page::from_file(&abs_path, vault_path)
         .map_err(|e| ApiError::internal(format!("failed to read page: {e}")))?;
 
-    let mut meta = page.meta;
-    let page_body = page.body;
+    // 3. Plan the Task Patch.
+    let lookups = BoardLookups::load(&state).await?;
+    let patch = TaskPatch::from(body);
+    let command = plan_task_patch(page, &patch, &lookups, state.clock.now())?;
 
-    // 3. Apply mutations
-    if let Some(title) = body.title {
-        meta.title = Some(title);
-    }
-    if let Some(tags) = body.tags {
-        meta.tags = tags;
-    }
-
-    // status (validate)
-    if let Some(status) = &body.status {
-        validate_status(status)?;
-        meta.extra
-            .insert("status".to_string(), toml::Value::String(status.clone()));
-    }
-
-    // priority (validate)
-    if let Some(priority) = &body.priority {
-        validate_priority(priority)?;
-        meta.extra.insert(
-            "priority".to_string(),
-            toml::Value::String(priority.clone()),
-        );
-    }
-
-    // tri-state fields (cycle already validated/normalized above)
-    apply_tri_state(&mut meta, "cycle", &cycle_field);
-    apply_tri_state(&mut meta, "assignee", &body.assignee);
-    apply_tri_state(&mut meta, "estimate", &body.estimate);
-    apply_tri_state(&mut meta, "due", &body.due);
-    apply_tri_state(&mut meta, "start", &body.start);
-    apply_tri_state(&mut meta, "hold", &body.hold);
-    apply_tri_state(&mut meta, "link", &body.link);
-
-    let project = match &body.project {
-        Some(project) if project.is_empty() => {
-            meta.project = None;
-            ProjectAssignment::Clear
-        }
-        Some(project) => {
-            meta.project = Some(project.clone());
-            ProjectAssignment::Set(project.clone())
-        }
-        None => ProjectAssignment::Unchanged,
-    };
-    let reconcile = body.project.is_some();
-    let now = Utc::now();
-    meta.updated_at = Some(now);
-
+    // 4. Execute.
     let notify = |notification: MutationNotification| {
         let _ = state.change_tx.send(SyncNotification::IndexChanged {
             upserted: notification.upserted,
@@ -313,48 +243,13 @@ pub(crate) async fn patch_task(
             &state.vault,
             &state.index,
             Arc::clone(&state.hooks),
-            UpdatePageCommand {
-                path: vault_path,
-                expected_content,
-                meta,
-                body: page_body,
-                project,
-                reconcile,
-            },
+            command,
             &notify,
         )
         .await
         .map_err(crate::api::mutation_error)?;
 
-    let final_path = result.path.as_str();
-    let code = path_stem(final_path).to_string();
+    let code = path_stem(result.path.as_str()).to_string();
     let task_dto = build_board_task_dto(&state, &result.path, &code).await?;
     Ok(Json(task_dto))
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/// Apply a tri-state field to PageMeta.extra:
-///   - `None` (key absent): no-op
-///   - `Some(None)` (key present, null): remove the key
-///   - `Some(Some(v))` (key present, value): set the key
-///
-/// Values requiring validation (status/priority/cycle) are validated by the
-/// caller before this is applied.
-fn apply_tri_state(meta: &mut PageMeta, key: &str, field: &Option<Option<String>>) {
-    match field {
-        None => {
-            // absent — no change
-        }
-        Some(None) => {
-            // null — clear the field
-            meta.extra.remove(key);
-        }
-        Some(Some(v)) => {
-            meta.extra
-                .insert(key.to_string(), toml::Value::String(v.clone()));
-        }
-    }
 }
