@@ -2850,7 +2850,10 @@ export interface components {
             link?: string | null;
             /** @description Leave absent to keep current priority. */
             priority?: string | null;
-            /** @description Leave absent to keep current project. */
+            /**
+             * @description Leave absent to keep the current project; `""` clears it; any other
+             *     value must be a Project slug some PROJECT page declares.
+             */
             project?: string | null;
             /** @description Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set. */
             start?: string | null;

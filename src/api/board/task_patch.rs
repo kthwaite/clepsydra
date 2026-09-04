@@ -3,7 +3,8 @@
 //!
 //! [`apply_task_patch`] is the core: given a Task's `PageMeta`, a
 //! [`TaskPatch`] and a [`BoardLookups`] snapshot of the index facts the rules
-//! need, it validates every field and then applies every field. Nothing in
+//! need, it validates every field and then applies every field. Apart from
+//! [`BoardLookups::load`], which takes the one index snapshot, nothing in
 //! this file touches the index, the filesystem, or the clock, so the whole
 //! rule set is testable through this one interface. [`plan_task_patch`] and
 //! [`new_task_meta`] wrap the core for the PATCH and POST handlers.
@@ -331,9 +332,9 @@ pub(crate) fn plan_task_patch(
     })
 }
 
-/// Plan a create: a fresh TASK meta with the default status and priority,
-/// then the patch on top. The handler mints the Code and builds the path
-/// afterwards, so a refused create never consumes a Code.
+/// Plan a create: a fresh TASK meta stamped `now`, with the default status
+/// and priority, then the patch on top. The handler mints the Code and
+/// builds the path afterwards, so a refused create never consumes a Code.
 pub(crate) fn new_task_meta(
     patch: &TaskPatch,
     lookups: &BoardLookups,
@@ -341,6 +342,7 @@ pub(crate) fn new_task_meta(
 ) -> Result<PageMeta, TaskPatchError> {
     let mut meta = PageMeta::new();
     meta.kind = Some(Kind::Task);
+    meta.created_at = Some(now);
     set_field(&mut meta, "status", DEFAULT_STATUS);
     set_field(&mut meta, "priority", DEFAULT_PRIORITY);
     apply_task_patch(&mut meta, patch, lookups, now)?;
@@ -732,6 +734,22 @@ mod tests {
         );
     }
 
+    #[test]
+    fn apply_checks_the_cycle_before_the_project() {
+        let mut meta = task_meta();
+        let patch = TaskPatch {
+            status: Some("SEALED".into()),
+            priority: Some("P3".into()),
+            cycle: FieldChange::Set("S-99".into()),
+            project: FieldChange::Set("ghost".into()),
+            ..TaskPatch::default()
+        };
+        assert_eq!(
+            apply_task_patch(&mut meta, &patch, &lookups(), now()),
+            Err(TaskPatchError::UnknownCycle("S-99".into()))
+        );
+    }
+
     // -- planners -------------------------------------------------------------
 
     #[test]
@@ -763,6 +781,7 @@ mod tests {
         assert_eq!(extra(&meta, "status").as_deref(), Some(DEFAULT_STATUS));
         assert_eq!(extra(&meta, "priority").as_deref(), Some(DEFAULT_PRIORITY));
         assert_eq!(meta.updated_at, Some(now()));
+        assert_eq!(meta.created_at, Some(now()));
         assert_eq!(meta.project, None);
 
         let patch = TaskPatch {

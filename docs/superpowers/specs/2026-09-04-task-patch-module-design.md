@@ -52,4 +52,4 @@ Rules inside `apply_task_patch`, in order: status âˆˆ board columns; priority âˆ
 
 ## Non-goals
 
-Validating date or estimate formats; the page-identity resolver (candidate 2); thinning integration tests; moving the module into `src/vault/`.
+Validating date or estimate formats; the page-identity resolver (candidate 2); thinning integration tests; moving the module into `src/vault/`. Project keeps its own empty rule: `""` clears on PATCH and means none on create, and a whitespace-only Project is rejected as a malformed slug on both paths, as before.

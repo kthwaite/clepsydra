@@ -245,7 +245,8 @@ pub struct CreateTaskRequest {
 pub struct PatchTaskRequest {
     /// Leave absent to keep current title.
     pub title: Option<String>,
-    /// Leave absent to keep current project.
+    /// Leave absent to keep the current project; `""` clears it; any other
+    /// value must be a Project slug some PROJECT page declares.
     pub project: Option<String>,
     /// Leave absent to keep current status.
     pub status: Option<String>,
