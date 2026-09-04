@@ -288,34 +288,6 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 // ---------------------------------------------------------------------------
-// Shared validation helpers
-// ---------------------------------------------------------------------------
-
-/// Validate a status string against the known columns.
-fn validate_status(status: &str) -> Result<(), ApiError> {
-    let valid = COLUMNS.iter().any(|&(id, _, _)| id == status);
-    if !valid {
-        let valid_ids: Vec<&str> = COLUMNS.iter().map(|&(id, _, _)| id).collect();
-        return Err(ApiError::bad_request(format!(
-            "unknown status: '{status}'; valid values: {}",
-            valid_ids.join(", ")
-        )));
-    }
-    Ok(())
-}
-
-/// Validate a priority string.
-fn validate_priority(priority: &str) -> Result<(), ApiError> {
-    if !PRIORITIES.contains(&priority) {
-        return Err(ApiError::bad_request(format!(
-            "unknown priority: '{priority}'; valid values: {}",
-            PRIORITIES.join(", ")
-        )));
-    }
-    Ok(())
-}
-
-// ---------------------------------------------------------------------------
 // Code stems + code allocation (shared by tasks + cycles handlers)
 // ---------------------------------------------------------------------------
 

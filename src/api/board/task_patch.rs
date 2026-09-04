@@ -7,7 +7,6 @@
 //! this file touches the index, the filesystem, or the clock, so the whole
 //! rule set is testable through this one interface. [`plan_task_patch`] and
 //! [`new_task_meta`] wrap the core for the PATCH and POST handlers.
-#![allow(dead_code)]
 
 use std::collections::BTreeSet;
 
