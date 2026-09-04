@@ -10,6 +10,7 @@
 
 pub(crate) mod cycles;
 pub(crate) mod read;
+pub(crate) mod task_patch;
 pub(crate) mod tasks;
 
 use std::collections::BTreeSet;
