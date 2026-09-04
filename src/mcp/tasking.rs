@@ -11,6 +11,8 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::vault::code::{CodeLookup, resolve_prefix};
+
 /// Deserialize a tri-state PATCH field into `Option<Option<T>>`:
 ///
 /// - key absent → `None` (leave the field untouched; via `#[serde(default)]`)
@@ -31,17 +33,6 @@ where
     // key is absent this function is never called and the field stays `None`.
     let inner: Option<T> = Option::deserialize(deserializer)?;
     Ok(Some(inner))
-}
-
-/// Normalize a deserialized tri-state string field so an empty or
-/// whitespace-only string behaves as an explicit clear (`Some(None)`) —
-/// defensive against MCP clients that cannot emit JSON null. Every other
-/// state passes through unchanged.
-pub fn normalize_tri_state(value: Option<Option<String>>) -> Option<Option<String>> {
-    match value {
-        Some(Some(s)) if s.trim().is_empty() => Some(None),
-        other => other,
-    }
 }
 
 /// How a caller referenced a task or cycle page.
@@ -99,10 +90,11 @@ impl BoardKind {
 }
 
 /// Find the page UUID for `code` in a `GET /board` response, matching the
-/// `code` field of the kind's collection (`tasks` or `cycles`). An exact
-/// case-insensitive match wins; otherwise a unique case-insensitive prefix
-/// match resolves. A miss names the unknown code and points at vault_board
-/// for the live code list; an ambiguous prefix lists every candidate.
+/// `code` field of the kind's collection (`tasks` or `cycles`). Resolution is
+/// [`resolve_prefix`]'s: an exact case-insensitive match wins; otherwise a
+/// unique case-insensitive prefix. A miss names the unknown code and points
+/// at vault_board for the live code list; an ambiguous prefix lists every
+/// candidate.
 pub fn find_board_id(board: &Value, kind: BoardKind, code: &str) -> Result<String, String> {
     let entries: Vec<(&str, &str)> = board
         .get(kind.collection())
@@ -123,37 +115,18 @@ pub fn find_board_id(board: &Value, kind: BoardKind, code: &str) -> Result<Strin
         )
     };
 
-    if let Some((_, id)) = entries
-        .iter()
-        .find(|(entry_code, _)| entry_code.eq_ignore_ascii_case(code))
-    {
-        return Ok((*id).to_string());
-    }
-
-    // An empty (or whitespace-only) needle must never resolve: `starts_with`
-    // trivially matches every entry, which would otherwise make blank input
-    // "ambiguous" or silently pick an arbitrary task/cycle.
-    let needle = code.trim().to_ascii_lowercase();
-    if needle.is_empty() {
-        return Err(not_found());
-    }
-
-    let matches: Vec<(&str, &str)> = entries
-        .into_iter()
-        .filter(|(entry_code, _)| entry_code.to_ascii_lowercase().starts_with(&needle))
-        .collect();
-
-    match matches.as_slice() {
-        [] => Err(not_found()),
-        [(_, id)] => Ok((*id).to_string()),
-        _ => {
-            let codes: Vec<&str> = matches.iter().map(|(entry_code, _)| *entry_code).collect();
-            Err(format!(
-                "ambiguous {} prefix '{code}': candidates {}",
-                kind.noun(),
-                codes.join(", ")
-            ))
-        }
+    match resolve_prefix(entries.iter().map(|(entry_code, _)| *entry_code), code) {
+        CodeLookup::Found(found) => entries
+            .iter()
+            .find(|(entry_code, _)| *entry_code == found)
+            .map(|(_, id)| (*id).to_string())
+            .ok_or_else(not_found),
+        CodeLookup::NotFound => Err(not_found()),
+        CodeLookup::Ambiguous(codes) => Err(format!(
+            "ambiguous {} prefix '{code}': candidates {}",
+            kind.noun(),
+            codes.join(", ")
+        )),
     }
 }
 
@@ -278,25 +251,6 @@ mod tests {
     fn tri_state_value_means_set() {
         assert_eq!(
             probe(json!({"cycle": "S-13"})),
-            Some(Some("S-13".to_string()))
-        );
-    }
-
-    #[test]
-    fn normalize_tri_state_turns_empty_string_into_clear() {
-        assert_eq!(normalize_tri_state(probe(json!({"cycle": ""}))), Some(None));
-        assert_eq!(
-            normalize_tri_state(probe(json!({"cycle": "   "}))),
-            Some(None)
-        );
-    }
-
-    #[test]
-    fn normalize_tri_state_leaves_other_states_untouched() {
-        assert_eq!(normalize_tri_state(None), None);
-        assert_eq!(normalize_tri_state(Some(None)), Some(None));
-        assert_eq!(
-            normalize_tri_state(Some(Some("S-13".to_string()))),
             Some(Some("S-13".to_string()))
         );
     }

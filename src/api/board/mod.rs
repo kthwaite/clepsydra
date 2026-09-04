@@ -10,6 +10,7 @@
 
 pub(crate) mod cycles;
 pub(crate) mod read;
+pub(crate) mod task_patch;
 pub(crate) mod tasks;
 
 use std::collections::BTreeSet;
@@ -211,6 +212,8 @@ pub struct PatchCycleRequest {
     pub carry_to: Option<String>,
 }
 
+/// An empty or whitespace-only `cycle`, `assignee`, `estimate`, `due`,
+/// `start`, or `link` is treated as absent.
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct CreateTaskRequest {
     pub title: String,
@@ -234,7 +237,7 @@ pub struct CreateTaskRequest {
 /// PATCH request for updating a task. All fields are optional.
 ///
 /// For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `start`,
-/// `hold`, `link`): absent = leave unchanged; `null` = clear the field; string value =
+/// `hold`, `link`): absent = leave unchanged; `null` or an empty or whitespace-only string = clear the field; any other string =
 /// set to that value. Implemented via `#[serde(default, deserialize_with)]`
 /// which maps the outer `Option` to "present or absent" and the inner `Option`
 /// to "null or value".
@@ -242,31 +245,32 @@ pub struct CreateTaskRequest {
 pub struct PatchTaskRequest {
     /// Leave absent to keep current title.
     pub title: Option<String>,
-    /// Leave absent to keep current project.
+    /// Leave absent to keep the current project; `""` clears it; any other
+    /// value must be a Project slug some PROJECT page declares.
     pub project: Option<String>,
     /// Leave absent to keep current status.
     pub status: Option<String>,
     /// Leave absent to keep current priority.
     pub priority: Option<String>,
-    /// Tri-state: absent = keep, null = clear (→ backlog), value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear (→ backlog), value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub cycle: Option<Option<String>>,
-    /// Tri-state: absent = keep, null = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub assignee: Option<Option<String>>,
-    /// Tri-state: absent = keep, null = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub estimate: Option<Option<String>>,
-    /// Tri-state: absent = keep, null = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub due: Option<Option<String>>,
-    /// Tri-state: absent = keep, null = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub start: Option<Option<String>>,
-    /// Tri-state: absent = keep, null = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub hold: Option<Option<String>>,
-    /// Tri-state: absent = keep, null = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub link: Option<Option<String>>,
     /// Leave absent to keep current tags.
@@ -284,34 +288,6 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/tasks/{id}", patch(tasks::patch_task))
         .route("/cycles", post(cycles::create_cycle))
         .route("/cycles/{id}", patch(cycles::patch_cycle))
-}
-
-// ---------------------------------------------------------------------------
-// Shared validation helpers
-// ---------------------------------------------------------------------------
-
-/// Validate a status string against the known columns.
-fn validate_status(status: &str) -> Result<(), ApiError> {
-    let valid = COLUMNS.iter().any(|&(id, _, _)| id == status);
-    if !valid {
-        let valid_ids: Vec<&str> = COLUMNS.iter().map(|&(id, _, _)| id).collect();
-        return Err(ApiError::bad_request(format!(
-            "unknown status: '{status}'; valid values: {}",
-            valid_ids.join(", ")
-        )));
-    }
-    Ok(())
-}
-
-/// Validate a priority string.
-fn validate_priority(priority: &str) -> Result<(), ApiError> {
-    if !PRIORITIES.contains(&priority) {
-        return Err(ApiError::bad_request(format!(
-            "unknown priority: '{priority}'; valid values: {}",
-            PRIORITIES.join(", ")
-        )));
-    }
-    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -350,13 +326,7 @@ async fn fetch_cycle_codes(state: &AppState) -> Result<Vec<String>, ApiError> {
         .map_err(|e| ApiError::internal(e.to_string()))
 }
 
-/// The result of resolving user input to a canonical code stem via
-/// [`resolve_code`].
-pub(crate) enum CodeLookup {
-    Found(String),
-    NotFound,
-    Ambiguous(Vec<String>),
-}
+pub(crate) use crate::vault::code::CodeLookup;
 
 /// Resolve user input to a canonical stem of `kind`: an exact case-insensitive
 /// match wins; otherwise a unique case-insensitive prefix match; otherwise
@@ -368,24 +338,11 @@ pub(crate) fn resolve_code(
     kind: Kind,
     input: &str,
 ) -> Result<CodeLookup, rusqlite::Error> {
-    let needle = input.trim().to_ascii_lowercase();
-    if needle.is_empty() {
-        return Ok(CodeLookup::NotFound);
-    }
     let stems = code_stems(conn, kind)?;
-    if let Some(exact) = stems.iter().find(|s| s.to_ascii_lowercase() == needle) {
-        return Ok(CodeLookup::Found(exact.clone()));
-    }
-    let matches: Vec<String> = stems
-        .iter()
-        .filter(|s| s.to_ascii_lowercase().starts_with(&needle))
-        .cloned()
-        .collect();
-    Ok(match matches.len() {
-        0 => CodeLookup::NotFound,
-        1 => CodeLookup::Found(matches.into_iter().next().expect("one")),
-        _ => CodeLookup::Ambiguous(matches),
-    })
+    Ok(code::resolve_prefix(
+        stems.iter().map(String::as_str),
+        input,
+    ))
 }
 
 /// Resolve `cycle_code` (exact match or unique case-insensitive prefix)
