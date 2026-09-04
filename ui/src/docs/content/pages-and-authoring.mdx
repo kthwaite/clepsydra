@@ -59,6 +59,10 @@ A slug is one or more `/`-separated segments, and each segment may hold
 letters, digits, spaces, `-` and `_` — `field notes` names a project as
 readily as `field-notes`, and becomes the folder `notes/field notes/`. A
 segment may not lead or trail with a space, be empty, or be `.` or `..`.
+Every write path checks that shape, so a slug failing it can only have been
+written by hand — and every write against the project it names is then
+refused. `clep doctor` warns about those under `projects`, alongside the
+orphans.
 
 | Kind | Canonical folder |
 | --- | --- |

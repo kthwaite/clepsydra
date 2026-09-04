@@ -54,6 +54,7 @@ pub mod new_note;
 pub mod page;
 pub mod page_filename;
 pub mod path;
+pub mod project;
 pub mod projection;
 pub mod property_value;
 pub mod query;

@@ -1446,39 +1446,11 @@ pub async fn move_page(
 }
 
 /// Validate a `project` slug before it is persisted to frontmatter and used to
-/// build a folder path. Defense-in-depth: `VaultPath::new` rejects `..`
-/// downstream, but the value is persisted, so we reject anything that would
-/// not survive as a folder name at the boundary.
-///
-/// A slug is one or more `/`-separated segments. A segment may carry spaces —
-/// `field notes` is a project like any other — but not lead or trail with one:
-/// a padded segment names a folder no filesystem round-trips predictably, and
-/// two slugs differing only in padding would look identical everywhere they
-/// are displayed. Everything else stays as it was: letters, digits, `-`, `_`.
+/// build a folder path. The rule itself lives in [`crate::vault::project`],
+/// beside the folder layout it governs; this is the HTTP boundary's spelling
+/// of it, refusing the value before any mutation begins.
 pub(super) fn validate_project_slug(p: &str) -> Result<(), String> {
-    if p.is_empty() {
-        return Err("project must not be empty".to_string());
-    }
-    for segment in p.split('/') {
-        if segment.is_empty() {
-            return Err("project must not have an empty path segment".to_string());
-        }
-        if segment == "." || segment == ".." {
-            return Err("project must not contain `.` or `..` segments".to_string());
-        }
-        if segment.starts_with(' ') || segment.ends_with(' ') {
-            return Err("project must not start or end with a space".to_string());
-        }
-        if segment
-            .chars()
-            .any(|c| !(c.is_alphanumeric() || c == '-' || c == '_' || c == ' '))
-        {
-            return Err(
-                "project may contain only letters, digits, spaces, `-`, `_` and `/`".to_string(),
-            );
-        }
-    }
-    Ok(())
+    crate::vault::project::validate_slug(p).map_err(|error| error.to_string())
 }
 
 fn validate_kind_assignment(

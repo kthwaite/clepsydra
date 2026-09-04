@@ -1896,23 +1896,34 @@ fn for_each_page(vault: &Vault, mut visit: impl FnMut(&crate::vault::page::Page)
     }
 }
 
-/// Orphan project slugs: `project` values pages carry that no PROJECT page
-/// declares. The API refuses to write one, but files are hand-editable, so
-/// the doctor is where they surface — as information, since nothing breaks.
+/// Two things can be wrong with the `project` slugs a vault carries.
+///
+/// A slug can be malformed — a shape [`crate::vault::project::validate_slug`]
+/// refuses. Every write path checks that shape, so such a slug reached the
+/// vault by hand and now breaks writes against the project it names: creating
+/// a task under it, or assigning a page to it, is a 400. That is a warning.
+///
+/// A slug can also be an orphan: carried by pages, declared by no PROJECT
+/// page. Nothing breaks, so it stays information.
 fn check_projects(vault: &Vault, report: &mut Report) {
     use std::collections::{BTreeMap, BTreeSet};
 
     use crate::vault::kind::{Kind, resolve};
+    use crate::vault::project::validate_slug;
 
     const SECTION: &str = "projects";
     const LISTED: usize = 10;
 
     let mut declared: BTreeSet<String> = BTreeSet::new();
     let mut carried: BTreeMap<String, usize> = BTreeMap::new();
+    let mut malformed: BTreeMap<String, String> = BTreeMap::new();
     for_each_page(vault, |page| {
         let Some(slug) = page.meta.project.as_deref() else {
             return;
         };
+        if let Err(error) = validate_slug(slug) {
+            malformed.insert(slug.to_string(), error.to_string());
+        }
         let (kind, _) = resolve(page.path.as_str(), page.meta.kind);
         if kind == Kind::Project {
             declared.insert(slug.to_string());
@@ -1920,6 +1931,30 @@ fn check_projects(vault: &Vault, report: &mut Report) {
             *carried.entry(slug.to_string()).or_default() += 1;
         }
     });
+
+    if malformed.is_empty() {
+        report.push(ok(SECTION, "slugs", "every project slug is well-formed"));
+    } else {
+        let entries = malformed
+            .iter()
+            .map(|(slug, reason)| format!("{slug:?} — {reason}"))
+            .collect::<Vec<_>>();
+        report.push(
+            warn(
+                SECTION,
+                "slugs",
+                listing(
+                    &entries,
+                    format!("{} malformed project slug(s):", entries.len()),
+                    LISTED,
+                ),
+            )
+            .with_hint(
+                "writes against these projects are refused; rename the slug in the PROJECT page's \
+                 frontmatter and in every page carrying it",
+            ),
+        );
+    }
 
     let orphans = carried
         .iter()
@@ -3347,6 +3382,73 @@ mod tests {
             .unwrap();
         assert!(matches!(missing.status, Status::Warn));
         assert!(missing.detail.contains(&phantom));
+    }
+
+    /// A malformed slug reached the vault by hand; the doctor names it and
+    /// says why, because every write against that project is now refused.
+    #[test]
+    fn malformed_project_slugs_warn_and_well_formed_ones_do_not() {
+        fn report_for(seed: impl FnOnce(&Path)) -> Report {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path().join("vault");
+            crate::vault::init::init_vault(&root).unwrap();
+            seed(&root);
+            let vault = Vault::open(&root).unwrap();
+            let mut report = Report::default();
+            check_projects(&vault, &mut report);
+            report
+        }
+
+        fn write_project(root: &Path, folder: &str, id: &str, slug: &str) {
+            fs::create_dir_all(root.join("projects").join(folder)).unwrap();
+            fs::write(
+                root.join("projects").join(folder).join("page.md"),
+                format!(
+                    "+++\nid = \"{id}\"\ntitle = \"P\"\ntype = \"PROJECT\"\nproject = \"{slug}\"\n+++\n"
+                ),
+            )
+            .unwrap();
+        }
+
+        let malformed = report_for(|root| {
+            write_project(
+                root,
+                "bad.slug",
+                "01951234-0000-7000-8000-0000000000d1",
+                "bad.slug",
+            );
+        });
+        let record = malformed
+            .results
+            .iter()
+            .find(|record| record.section == "projects" && record.name == "slugs")
+            .expect("projects.slugs");
+        assert_eq!(record.status, Status::Warn, "{record:#?}");
+        assert!(
+            record.detail.contains("bad.slug") && record.detail.contains("may contain only"),
+            "the record must name the slug and why it fails: {record:#?}"
+        );
+        assert!(
+            record.hint.is_some(),
+            "a malformed slug needs a repair hint: {record:#?}"
+        );
+
+        // A spaced slug is well-formed, so the same check stays quiet.
+        let spaced = report_for(|root| {
+            write_project(
+                root,
+                "field notes",
+                "01951234-0000-7000-8000-0000000000d2",
+                "field notes",
+            );
+        });
+        assert_record(
+            &spaced,
+            "projects",
+            "slugs",
+            Status::Ok,
+            "every project slug is well-formed",
+        );
     }
 }
 
