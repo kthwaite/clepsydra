@@ -72,6 +72,14 @@ _Avoid_: Dossier link
 The stable identifier of a Task or Cycle: two short words and a five-character tail (e.g. `TSK-brave-finch-7q3zd`). A code never changes once minted; any unique prefix of it addresses the same page.
 _Avoid_: TSK number, sequential code, ticket number
 
+**Task Fields**:
+The structured attributes a Task carries beyond its title and body: status, priority, cycle, assignee, estimate, due, start, hold, link, and project.
+_Avoid_: task properties, task metadata
+
+**Task Patch**:
+A change to one or more Task Fields in which each field is kept, cleared, or set; an empty value clears.
+_Avoid_: tri-state field, PATCH body, partial update
+
 **Conflict Copy**:
 A sibling page holding the version of a page that lost an automatic merge after the same page was edited on two devices. It remains until the user reconciles or discards it. Journal Conflict Copies are the exception: the journal merger folds them back automatically.
 _Avoid_: conflicted file, merge artifact
