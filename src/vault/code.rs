@@ -111,6 +111,46 @@ pub fn family_of(code: &str) -> Option<CodeFamily> {
     }
 }
 
+/// The outcome of resolving user input against a set of Codes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CodeLookup {
+    Found(String),
+    NotFound,
+    Ambiguous(Vec<String>),
+}
+
+/// Resolve `input` against `candidates`: an exact case-insensitive match
+/// wins; otherwise a unique case-insensitive prefix match; otherwise
+/// `NotFound` (no match, or blank input) or `Ambiguous` (every prefix match,
+/// in candidate order). Whichever candidate is stored is what comes back —
+/// Codes are never re-cased here.
+pub fn resolve_prefix<'a>(
+    candidates: impl IntoIterator<Item = &'a str>,
+    input: &str,
+) -> CodeLookup {
+    let needle = input.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return CodeLookup::NotFound;
+    }
+    let candidates: Vec<&str> = candidates.into_iter().collect();
+    if let Some(exact) = candidates
+        .iter()
+        .find(|candidate| candidate.eq_ignore_ascii_case(&needle))
+    {
+        return CodeLookup::Found((*exact).to_string());
+    }
+    let matches: Vec<String> = candidates
+        .iter()
+        .filter(|candidate| candidate.to_ascii_lowercase().starts_with(&needle))
+        .map(|candidate| (*candidate).to_string())
+        .collect();
+    match matches.len() {
+        0 => CodeLookup::NotFound,
+        1 => CodeLookup::Found(matches.into_iter().next().expect("one match")),
+        _ => CodeLookup::Ambiguous(matches),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +228,66 @@ mod tests {
         assert_eq!(CodeFamily::Task.kind(), Kind::Task);
         assert_eq!(CodeFamily::from_kind(Kind::Cycle), Some(CodeFamily::Cycle));
         assert_eq!(CodeFamily::from_kind(Kind::Note), None);
+    }
+
+    const CODES: [&str; 3] = [
+        "TSK-brave-finch-7q3zd",
+        "TSK-brave-otter-9k2ma",
+        "TSK-calm-heron-2xm9p",
+    ];
+
+    #[test]
+    fn resolve_prefix_exact_match_wins_case_insensitively() {
+        assert_eq!(
+            resolve_prefix(CODES, "tsk-BRAVE-finch-7q3zd"),
+            CodeLookup::Found("TSK-brave-finch-7q3zd".into())
+        );
+    }
+
+    #[test]
+    fn resolve_prefix_unique_prefix_resolves_to_the_stored_code() {
+        assert_eq!(
+            resolve_prefix(CODES, "tsk-calm"),
+            CodeLookup::Found("TSK-calm-heron-2xm9p".into())
+        );
+    }
+
+    #[test]
+    fn resolve_prefix_ambiguous_prefix_lists_candidates_in_order() {
+        assert_eq!(
+            resolve_prefix(CODES, "TSK-brave"),
+            CodeLookup::Ambiguous(vec![
+                "TSK-brave-finch-7q3zd".into(),
+                "TSK-brave-otter-9k2ma".into()
+            ])
+        );
+    }
+
+    #[test]
+    fn resolve_prefix_exact_match_beats_an_ambiguous_prefix() {
+        assert_eq!(
+            resolve_prefix(["TSK-brave", "TSK-brave-finch-7q3zd"], "TSK-brave"),
+            CodeLookup::Found("TSK-brave".into())
+        );
+    }
+
+    #[test]
+    fn resolve_prefix_blank_input_never_matches() {
+        for blank in ["", "   "] {
+            assert_eq!(
+                resolve_prefix(CODES, blank),
+                CodeLookup::NotFound,
+                "{blank:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_prefix_miss_is_not_found_and_input_is_trimmed() {
+        assert_eq!(resolve_prefix(CODES, "TSK-zzz"), CodeLookup::NotFound);
+        assert_eq!(
+            resolve_prefix(CODES, "  TSK-calm  "),
+            CodeLookup::Found("TSK-calm-heron-2xm9p".into())
+        );
     }
 }

@@ -11,6 +11,8 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use uuid::Uuid;
 
+use crate::vault::code::{CodeLookup, resolve_prefix};
+
 /// Deserialize a tri-state PATCH field into `Option<Option<T>>`:
 ///
 /// - key absent → `None` (leave the field untouched; via `#[serde(default)]`)
@@ -99,10 +101,11 @@ impl BoardKind {
 }
 
 /// Find the page UUID for `code` in a `GET /board` response, matching the
-/// `code` field of the kind's collection (`tasks` or `cycles`). An exact
-/// case-insensitive match wins; otherwise a unique case-insensitive prefix
-/// match resolves. A miss names the unknown code and points at vault_board
-/// for the live code list; an ambiguous prefix lists every candidate.
+/// `code` field of the kind's collection (`tasks` or `cycles`). Resolution is
+/// [`resolve_prefix`]'s: an exact case-insensitive match wins; otherwise a
+/// unique case-insensitive prefix. A miss names the unknown code and points
+/// at vault_board for the live code list; an ambiguous prefix lists every
+/// candidate.
 pub fn find_board_id(board: &Value, kind: BoardKind, code: &str) -> Result<String, String> {
     let entries: Vec<(&str, &str)> = board
         .get(kind.collection())
@@ -123,37 +126,18 @@ pub fn find_board_id(board: &Value, kind: BoardKind, code: &str) -> Result<Strin
         )
     };
 
-    if let Some((_, id)) = entries
-        .iter()
-        .find(|(entry_code, _)| entry_code.eq_ignore_ascii_case(code))
-    {
-        return Ok((*id).to_string());
-    }
-
-    // An empty (or whitespace-only) needle must never resolve: `starts_with`
-    // trivially matches every entry, which would otherwise make blank input
-    // "ambiguous" or silently pick an arbitrary task/cycle.
-    let needle = code.trim().to_ascii_lowercase();
-    if needle.is_empty() {
-        return Err(not_found());
-    }
-
-    let matches: Vec<(&str, &str)> = entries
-        .into_iter()
-        .filter(|(entry_code, _)| entry_code.to_ascii_lowercase().starts_with(&needle))
-        .collect();
-
-    match matches.as_slice() {
-        [] => Err(not_found()),
-        [(_, id)] => Ok((*id).to_string()),
-        _ => {
-            let codes: Vec<&str> = matches.iter().map(|(entry_code, _)| *entry_code).collect();
-            Err(format!(
-                "ambiguous {} prefix '{code}': candidates {}",
-                kind.noun(),
-                codes.join(", ")
-            ))
-        }
+    match resolve_prefix(entries.iter().map(|(entry_code, _)| *entry_code), code) {
+        CodeLookup::Found(found) => entries
+            .iter()
+            .find(|(entry_code, _)| *entry_code == found)
+            .map(|(_, id)| (*id).to_string())
+            .ok_or_else(not_found),
+        CodeLookup::NotFound => Err(not_found()),
+        CodeLookup::Ambiguous(codes) => Err(format!(
+            "ambiguous {} prefix '{code}': candidates {}",
+            kind.noun(),
+            codes.join(", ")
+        )),
     }
 }
 

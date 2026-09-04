@@ -350,13 +350,7 @@ async fn fetch_cycle_codes(state: &AppState) -> Result<Vec<String>, ApiError> {
         .map_err(|e| ApiError::internal(e.to_string()))
 }
 
-/// The result of resolving user input to a canonical code stem via
-/// [`resolve_code`].
-pub(crate) enum CodeLookup {
-    Found(String),
-    NotFound,
-    Ambiguous(Vec<String>),
-}
+pub(crate) use crate::vault::code::CodeLookup;
 
 /// Resolve user input to a canonical stem of `kind`: an exact case-insensitive
 /// match wins; otherwise a unique case-insensitive prefix match; otherwise
@@ -368,24 +362,11 @@ pub(crate) fn resolve_code(
     kind: Kind,
     input: &str,
 ) -> Result<CodeLookup, rusqlite::Error> {
-    let needle = input.trim().to_ascii_lowercase();
-    if needle.is_empty() {
-        return Ok(CodeLookup::NotFound);
-    }
     let stems = code_stems(conn, kind)?;
-    if let Some(exact) = stems.iter().find(|s| s.to_ascii_lowercase() == needle) {
-        return Ok(CodeLookup::Found(exact.clone()));
-    }
-    let matches: Vec<String> = stems
-        .iter()
-        .filter(|s| s.to_ascii_lowercase().starts_with(&needle))
-        .cloned()
-        .collect();
-    Ok(match matches.len() {
-        0 => CodeLookup::NotFound,
-        1 => CodeLookup::Found(matches.into_iter().next().expect("one")),
-        _ => CodeLookup::Ambiguous(matches),
-    })
+    Ok(code::resolve_prefix(
+        stems.iter().map(String::as_str),
+        input,
+    ))
 }
 
 /// Resolve `cycle_code` (exact match or unique case-insensitive prefix)
