@@ -20,7 +20,7 @@ use serde_json::Value;
 use super::client::{ApiClient, encode_vault_path};
 use super::tasking::{
     BoardKind, TaskRef, classify_ref, deserialize_tri_state, filter_board_project, find_board_id,
-    insert_tri_state, normalize_tri_state, page_meta_id, resolve_project_patch,
+    insert_tri_state, page_meta_id, resolve_project_patch,
 };
 use crate::vault::kind::Kind;
 
@@ -1372,20 +1372,12 @@ impl VaultMcpServer {
         if let Some(tags) = params.tags {
             patch_body.insert("tags".to_string(), serde_json::json!(tags));
         }
-        insert_tri_state(&mut patch_body, "cycle", normalize_tri_state(params.cycle));
-        insert_tri_state(
-            &mut patch_body,
-            "assignee",
-            normalize_tri_state(params.assignee),
-        );
-        insert_tri_state(
-            &mut patch_body,
-            "estimate",
-            normalize_tri_state(params.estimate),
-        );
-        insert_tri_state(&mut patch_body, "due", normalize_tri_state(params.due));
-        insert_tri_state(&mut patch_body, "hold", normalize_tri_state(params.hold));
-        insert_tri_state(&mut patch_body, "link", normalize_tri_state(params.link));
+        insert_tri_state(&mut patch_body, "cycle", params.cycle);
+        insert_tri_state(&mut patch_body, "assignee", params.assignee);
+        insert_tri_state(&mut patch_body, "estimate", params.estimate);
+        insert_tri_state(&mut patch_body, "due", params.due);
+        insert_tri_state(&mut patch_body, "hold", params.hold);
+        insert_tri_state(&mut patch_body, "link", params.link);
         if patch_body.is_empty() {
             return Err("nothing to update — provide at least one field to change".to_string());
         }

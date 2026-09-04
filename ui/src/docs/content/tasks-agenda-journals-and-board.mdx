@@ -193,6 +193,9 @@ Cycle Markdown, or calling the API, use these persisted values:
 - Cycle `state`: Planned (`PLANNED`), Active (`ACTIVE`), and Closed (`CLOSED`).
 - Backlog is represented in Markdown by an absent `cycle` value. APIs that
   accept a Cycle target use `BACKLOG` to clear the Cycle.
+- Over the API an empty string on a clearable Task Field (`cycle`, `assignee`,
+  `estimate`, `due`, `start`, `hold`, `link`) clears it, the same as `null`;
+  on create it means the field is not set.
 - Blocked is represented by a non-empty `hold` value; clearing `hold` removes
   the Blocked condition.
 - When closing a Cycle through the API, `carry_to: "BACKLOG"` moves unfinished

@@ -2309,6 +2309,10 @@ export interface components {
             tags?: string[] | null;
             title?: string | null;
         };
+        /**
+         * @description An empty or whitespace-only `cycle`, `assignee`, `estimate`, `due`,
+         *     `start`, or `link` is treated as absent.
+         */
         CreateTaskRequest: {
             assignee?: string | null;
             /**
@@ -2826,29 +2830,29 @@ export interface components {
          * @description PATCH request for updating a task. All fields are optional.
          *
          *     For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `start`,
-         *     `hold`, `link`): absent = leave unchanged; `null` = clear the field; string value =
+         *     `hold`, `link`): absent = leave unchanged; `null` or an empty string = clear the field; any other string =
          *     set to that value. Implemented via `#[serde(default, deserialize_with)]`
          *     which maps the outer `Option` to "present or absent" and the inner `Option`
          *     to "null or value".
          */
         PatchTaskRequest: {
-            /** @description Tri-state: absent = keep, null = clear, value = set. */
+            /** @description Tri-state: absent = keep, null or empty string = clear, value = set. */
             assignee?: string | null;
-            /** @description Tri-state: absent = keep, null = clear (→ backlog), value = set. */
+            /** @description Tri-state: absent = keep, null or empty string = clear (→ backlog), value = set. */
             cycle?: string | null;
-            /** @description Tri-state: absent = keep, null = clear, value = set. */
+            /** @description Tri-state: absent = keep, null or empty string = clear, value = set. */
             due?: string | null;
-            /** @description Tri-state: absent = keep, null = clear, value = set. */
+            /** @description Tri-state: absent = keep, null or empty string = clear, value = set. */
             estimate?: string | null;
-            /** @description Tri-state: absent = keep, null = clear, value = set. */
+            /** @description Tri-state: absent = keep, null or empty string = clear, value = set. */
             hold?: string | null;
-            /** @description Tri-state: absent = keep, null = clear, value = set. */
+            /** @description Tri-state: absent = keep, null or empty string = clear, value = set. */
             link?: string | null;
             /** @description Leave absent to keep current priority. */
             priority?: string | null;
             /** @description Leave absent to keep current project. */
             project?: string | null;
-            /** @description Tri-state: absent = keep, null = clear, value = set. */
+            /** @description Tri-state: absent = keep, null or empty string = clear, value = set. */
             start?: string | null;
             /** @description Leave absent to keep current status. */
             status?: string | null;

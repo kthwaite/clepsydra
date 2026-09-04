@@ -35,17 +35,6 @@ where
     Ok(Some(inner))
 }
 
-/// Normalize a deserialized tri-state string field so an empty or
-/// whitespace-only string behaves as an explicit clear (`Some(None)`) —
-/// defensive against MCP clients that cannot emit JSON null. Every other
-/// state passes through unchanged.
-pub fn normalize_tri_state(value: Option<Option<String>>) -> Option<Option<String>> {
-    match value {
-        Some(Some(s)) if s.trim().is_empty() => Some(None),
-        other => other,
-    }
-}
-
 /// How a caller referenced a task or cycle page.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskRef {
@@ -262,25 +251,6 @@ mod tests {
     fn tri_state_value_means_set() {
         assert_eq!(
             probe(json!({"cycle": "S-13"})),
-            Some(Some("S-13".to_string()))
-        );
-    }
-
-    #[test]
-    fn normalize_tri_state_turns_empty_string_into_clear() {
-        assert_eq!(normalize_tri_state(probe(json!({"cycle": ""}))), Some(None));
-        assert_eq!(
-            normalize_tri_state(probe(json!({"cycle": "   "}))),
-            Some(None)
-        );
-    }
-
-    #[test]
-    fn normalize_tri_state_leaves_other_states_untouched() {
-        assert_eq!(normalize_tri_state(None), None);
-        assert_eq!(normalize_tri_state(Some(None)), Some(None));
-        assert_eq!(
-            normalize_tri_state(Some(Some("S-13".to_string()))),
             Some(Some("S-13".to_string()))
         );
     }

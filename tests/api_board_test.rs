@@ -1179,6 +1179,57 @@ async fn patch_task_start_tri_state() {
     );
 }
 
+#[tokio::test]
+async fn patch_task_empty_string_clears_a_task_field() {
+    let (server, _tmp) = setup_patch_target();
+
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "assignee": "kit" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert_eq!(body["assignee"], "kit", "{body}");
+
+    // "" clears, exactly like null.
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "assignee": "" }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(
+        body["assignee"].is_null(),
+        "assignee should be cleared: {body}"
+    );
+
+    // Whitespace clears too, and the Cycle is no exception (seeded as S-13).
+    let res = server
+        .patch("/api/vault/board/tasks/01951234-0000-7000-8000-000000000060")
+        .json(&serde_json::json!({ "cycle": "   " }))
+        .await;
+    res.assert_status_ok();
+    let body: serde_json::Value = res.json();
+    assert!(body["cycle"].is_null(), "cycle should be cleared: {body}");
+}
+
+#[tokio::test]
+async fn create_task_treats_an_empty_task_field_as_absent() {
+    let (server, _tmp) = setup_server_with(|_root| {});
+
+    let res = server
+        .post("/api/vault/board/tasks")
+        .json(&serde_json::json!({
+            "title": "x", "cycle": "", "assignee": "  ", "due": ""
+        }))
+        .await;
+    res.assert_status(axum::http::StatusCode::CREATED);
+    let body: serde_json::Value = res.json();
+    assert!(body["cycle"].is_null(), "{body}");
+    assert!(body["assignee"].is_null(), "{body}");
+    assert!(body["due"].is_null(), "{body}");
+}
+
 // ---------------------------------------------------------------------------
 // PATCH /board/tasks/{id} — project change A→B physically moves the file
 // ---------------------------------------------------------------------------
