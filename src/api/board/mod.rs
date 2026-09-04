@@ -237,7 +237,7 @@ pub struct CreateTaskRequest {
 /// PATCH request for updating a task. All fields are optional.
 ///
 /// For tri-state fields (`cycle`, `assignee`, `estimate`, `due`, `start`,
-/// `hold`, `link`): absent = leave unchanged; `null` or an empty string = clear the field; any other string =
+/// `hold`, `link`): absent = leave unchanged; `null` or an empty or whitespace-only string = clear the field; any other string =
 /// set to that value. Implemented via `#[serde(default, deserialize_with)]`
 /// which maps the outer `Option` to "present or absent" and the inner `Option`
 /// to "null or value".
@@ -251,25 +251,25 @@ pub struct PatchTaskRequest {
     pub status: Option<String>,
     /// Leave absent to keep current priority.
     pub priority: Option<String>,
-    /// Tri-state: absent = keep, null or empty string = clear (→ backlog), value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear (→ backlog), value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub cycle: Option<Option<String>>,
-    /// Tri-state: absent = keep, null or empty string = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub assignee: Option<Option<String>>,
-    /// Tri-state: absent = keep, null or empty string = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub estimate: Option<Option<String>>,
-    /// Tri-state: absent = keep, null or empty string = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub due: Option<Option<String>>,
-    /// Tri-state: absent = keep, null or empty string = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub start: Option<Option<String>>,
-    /// Tri-state: absent = keep, null or empty string = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub hold: Option<Option<String>>,
-    /// Tri-state: absent = keep, null or empty string = clear, value = set.
+    /// Tri-state: absent = keep, null or an empty or whitespace-only string = clear, value = set.
     #[serde(default, deserialize_with = "deserialize_tri_state")]
     pub link: Option<Option<String>>,
     /// Leave absent to keep current tags.
