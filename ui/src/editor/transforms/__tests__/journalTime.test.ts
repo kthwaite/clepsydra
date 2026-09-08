@@ -2,7 +2,11 @@ import { createEditor, type Descendant, Editor } from "slate";
 import { HistoryEditor, withHistory } from "slate-history";
 import { describe, expect, it } from "vitest";
 import { applyBlockConversion } from "../blockConversions";
-import { formatJournalTime, insertJournalTimeHeading } from "../journalTime";
+import {
+  formatJournalDate,
+  formatJournalTime,
+  insertJournalTimeHeading,
+} from "../journalTime";
 
 function makeEditor(children: Descendant[], path: number[], offset = 0) {
   const editor = withHistory(createEditor());
@@ -31,7 +35,28 @@ describe("formatJournalTime", () => {
   });
 });
 
+describe("formatJournalDate", () => {
+  it("uses zero-padded browser-local YYYY-MM-DD", () => {
+    expect(formatJournalDate(NOW)).toBe("2026-08-07");
+  });
+});
+
 describe("insertJournalTimeHeading", () => {
+  it("stamps the local date alongside the time when asked", () => {
+    const editor = makeEditor([EMPTY], [0, 0]);
+
+    insertJournalTimeHeading(editor, NOW, true, { withDate: true });
+
+    expect(editor.children).toEqual([{ ...TIME, date: "2026-08-07" }, EMPTY]);
+    expect(editor.selection?.anchor).toEqual({ path: [1, 0], offset: 0 });
+  });
+
+  it("omits the date key entirely by default", () => {
+    const editor = makeEditor([EMPTY], [0, 0]);
+    insertJournalTimeHeading(editor, NOW);
+    expect(editor.children[0]).not.toHaveProperty("date");
+  });
+
   it("replaces an empty paragraph and focuses a fresh paragraph below", () => {
     const editor = makeEditor([EMPTY], [0, 0]);
 
@@ -100,6 +125,30 @@ describe("insertJournalTimeHeading", () => {
 });
 
 describe("time-heading slash conversion", () => {
+  it("passes withDate through to the inserted heading", () => {
+    const original = {
+      type: "paragraph",
+      children: [{ text: "/datetime" }],
+    } as Descendant;
+    const editor = makeEditor([original], [0, 0], 9);
+
+    applyBlockConversion(editor, {
+      at: [0],
+      deleteRange: {
+        anchor: { path: [0, 0], offset: 0 },
+        focus: { path: [0, 0], offset: 9 },
+      },
+      conversion: { type: "journal-time", withDate: true },
+    });
+
+    expect(editor.children[0]).toMatchObject({
+      type: "journal-time",
+      date: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+      time: expect.stringMatching(/^\d{2}:\d{2}$/),
+    });
+    expect(editor.children[1]).toEqual(EMPTY);
+  });
+
   it("replaces the slash query and restores it with one undo", () => {
     const original = {
       type: "paragraph",

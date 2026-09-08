@@ -185,3 +185,20 @@ describe("registry", () => {
     expect(groups[0][1][0].id).toBe("palette.toggle");
   });
 });
+
+describe("editor.dateTimeHeading", () => {
+  it("is Mod+Alt+Shift+Enter in the Editor group and does not collide with the time heading", () => {
+    const chord = SHORTCUTS["editor.dateTimeHeading"].chord;
+    expect(chord).toEqual({ key: "Enter", mod: true, alt: true, shift: true });
+    expect(SHORTCUTS["editor.dateTimeHeading"]).toMatchObject({
+      label: "Insert date + time heading",
+      group: "Editor",
+      scope: "editor",
+    });
+    const dated = ev("Enter", { metaKey: true, altKey: true, shiftKey: true });
+    expect(matchesChord(dated, chord, true)).toBe(true);
+    expect(
+      matchesChord(dated, SHORTCUTS["editor.timeHeading"].chord, true),
+    ).toBe(false);
+  });
+});

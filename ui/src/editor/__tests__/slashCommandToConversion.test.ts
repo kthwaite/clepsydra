@@ -50,6 +50,26 @@ describe("slashCommandToConversion", () => {
     });
   });
 
+  it("SC-05b: discovers Date & Time Heading right after Time Heading", () => {
+    const ids = SlateEditorModule.SLASH_COMMANDS.map((command) => command.id);
+    expect(ids.indexOf("datetime")).toBe(ids.indexOf("time") + 1);
+    expect(SlateEditorModule.SLASH_COMMANDS).toContainEqual(
+      expect.objectContaining({
+        id: "datetime",
+        label: "Date & Time Heading",
+        description:
+          "Insert today's date and the current local time as a section heading",
+      }),
+    );
+  });
+
+  it("SC-05c: dispatches the datetime command to dated journal-time insertion", () => {
+    expect(slashCommandToConversion("datetime")).toEqual({
+      type: "journal-time",
+      withDate: true,
+    });
+  });
+
   it("SC-06: returns null for an unknown id", () => {
     expect(slashCommandToConversion("nope")).toBeNull();
   });
