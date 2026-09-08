@@ -4,6 +4,7 @@ type SlateNode = {
   type?: string;
   level?: number;
   time?: string;
+  date?: string;
   children?: Array<SlateNode | { text?: string }>;
 };
 
@@ -21,7 +22,9 @@ export function buildToc(value: unknown): TocEntry[] {
       node?.type === "journal-time" &&
       typeof node.time === "string" &&
       node.time.length > 0
-        ? node.time
+        ? typeof node.date === "string" && node.date.length > 0
+          ? `${node.date} ${node.time}`
+          : node.time
         : null;
     const depth = journalTime === null ? ordinaryDepth : 2;
     if (depth === null) continue;

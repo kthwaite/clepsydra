@@ -83,7 +83,12 @@ import {
 } from "#/hooks/useFolioHistoryNavigation";
 import { useMobileLayout } from "#/hooks/useMobileLayout";
 import { cn } from "#/lib/cn";
-import { todayAiJournalPath, todayJournalPath } from "#/lib/journal";
+import {
+  aiJournalDateFromPath,
+  journalDateFromPath,
+  todayAiJournalPath,
+  todayJournalPath,
+} from "#/lib/journal";
 import { kindLabel, resolveKind } from "#/lib/kind";
 import { presentationFor } from "#/lib/kindPresentation";
 import { matchesChord, SHORTCUTS } from "#/lib/shortcuts";
@@ -1197,6 +1202,9 @@ export function Folio({ tabId, path }: FolioProps) {
                   insertionRequest={attachmentInsertion}
                   onInsertionHandled={finishAttachmentInsertion}
                   readOnly={conversationReadOnly || bodyProtected}
+                  journalDate={
+                    journalDateFromPath(path) ?? aiJournalDateFromPath(path)
+                  }
                   editorRef={folioEditorRef}
                   onUnmountSnapshot={handleEditorSwapSnapshot}
                 />

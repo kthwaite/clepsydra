@@ -16,6 +16,23 @@ describe("buildToc", () => {
     ]);
   });
 
+  it("prefixes dated journal times with their date", () => {
+    expect(
+      buildToc([
+        {
+          type: "journal-time",
+          date: "2026-09-08",
+          time: "14:32",
+          children: [{ text: "" }],
+        },
+        { type: "journal-time", time: "15:00", children: [{ text: "" }] },
+      ]),
+    ).toEqual([
+      { number: "1", depth: 2, text: "2026-09-08 14:32" },
+      { number: "2", depth: 2, text: "15:00" },
+    ]);
+  });
+
   it("ignores malformed journal-time blocks and non-heading content", () => {
     expect(
       buildToc([
