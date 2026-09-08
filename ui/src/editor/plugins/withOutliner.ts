@@ -335,14 +335,27 @@ export function outdentListItem(editor: Editor): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Move the current list item (with children) up, swapping with the previous
- * sibling.
+ * The block ⌥↑/⌥↓ move: the list item holding the selection, or — outside a
+ * list, with a collapsed selection — the caret's top-level block.
+ */
+function findMovableBlock(editor: Editor): Path | undefined {
+  const entry = findListItem(editor);
+  if (entry) return entry[1];
+
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return undefined;
+  const topPath: Path = [selection.anchor.path[0]];
+  return Editor.hasPath(editor, topPath) ? topPath : undefined;
+}
+
+/**
+ * Move the current list item (with children), or top-level block, up,
+ * swapping with the previous sibling.
  */
 export function moveBlockUp(editor: Editor): void {
-  const entry = findListItem(editor);
-  if (!entry) return;
+  const itemPath = findMovableBlock(editor);
+  if (!itemPath) return;
 
-  const [, itemPath] = entry;
   const itemIndex = itemPath[itemPath.length - 1];
   if (itemIndex === 0) return;
 
@@ -351,26 +364,23 @@ export function moveBlockUp(editor: Editor): void {
 }
 
 /**
- * Move the current list item (with children) down, swapping with the next
- * sibling.
+ * Move the current list item (with children), or top-level block, down,
+ * swapping with the next sibling.
  */
 export function moveBlockDown(editor: Editor): void {
-  const entry = findListItem(editor);
-  if (!entry) return;
+  const itemPath = findMovableBlock(editor);
+  if (!itemPath) return;
 
-  const [, itemPath] = entry;
-
-  // Check if there is a next sibling
-  const parentPath = Path.parent(itemPath);
-  const parent = Node.get(editor, parentPath);
-  if (!SlateElement.isElement(parent)) return;
+  // Check if there is a next sibling (the parent may be the editor itself)
+  const parent = Node.get(editor, Path.parent(itemPath));
+  if (!Editor.isEditor(parent) && !SlateElement.isElement(parent)) return;
 
   const itemIndex = itemPath[itemPath.length - 1];
   if (itemIndex >= parent.children.length - 1) return;
 
-  // Move to after the next sibling (which effectively swaps them)
-  const afterNextPath = Path.next(Path.next(itemPath));
-  Transforms.moveNodes(editor, { at: itemPath, to: afterNextPath });
+  // Slate resolves `to` after removing the node, so the next sibling's path
+  // is the swap target (two steps would leave the selection on a stale path).
+  Transforms.moveNodes(editor, { at: itemPath, to: Path.next(itemPath) });
 }
 
 // ---------------------------------------------------------------------------
