@@ -54,3 +54,16 @@ Tasks:
 1. `commandRanking.ts` + test (red → green).
 2. Pointer gate + component test.
 3. Wire ranking into `filtered`.
+
+## D. Enter/arrow around void blocks — branch `feature/void-block-enter`
+
+Decisions (approved 2026-09-08):
+- `schema/withSchema.ts`: override `editor.insertBreak`. When `Editor.void(editor, { mode: "highest" })` at the selection is a *top-level block* void (registry kind `void-block`), insert `makeParagraph({})` after it and select its start; otherwise call the previous `insertBreak`. Base-embed and math-block keep their onKeyDown Enter handlers (they run first and `preventDefault`, never reaching `insertBreak`). Today the default splits the void and duplicates a `journal-time`; that is the bug.
+- New `transforms/voidNavigation.ts`: `selectAdjacentVoidBlock(editor, "above" | "below"): boolean`. Preconditions: collapsed selection; caret's top-level block is `code-block` or `table`; caret at that block's edge (export and reuse `caretAtBlockEdge` from `blockEscape.ts`: code-block = no "\n" between block start and caret / caret and block end; table = first/last row); the neighbouring top-level block (index−1 / index+1) is a `void-block`. Effect: `Transforms.select(editor, Editor.start(editor, neighbourPath))`. Paragraphs/headings are left to native caret movement (they already reach the void spacer).
+- `SlateEditor.tsx`: in `handleTrappingBlockEscape` (or a sibling helper called right after it) for plain ArrowUp/ArrowDown with no modifiers: if the escape returned false, try `selectAdjacentVoidBlock`. `preventDefault` on true.
+- Docs: one sentence in `editor-workflows.mdx` after the arrow-key paragraph: with a time heading or divider selected, `Enter` starts a paragraph below it; `ArrowUp`/`ArrowDown` from a code block or table select an adjacent heading or divider.
+
+Tasks (TDD):
+1. `schema/__tests__/withSchema.insertBreak.test.ts` (or extend an existing withSchema test): journal-time selected + insertBreak → `[journal-time, paragraph]`, selection at `[1,0]` offset 0, exactly one journal-time; thematic-break same; paragraph selection → default split still works. Then implement.
+2. `transforms/__tests__/voidNavigation.test.ts`: code block line 1 ↑ selects journal-time above; line 2 ↑ no-op; last line ↓ selects thematic-break below; not-last line ↓ no-op; table first row ↑ / last row ↓; neighbour paragraph → no-op; caret in paragraph → no-op; expanded selection → no-op. Then implement (export `caretAtBlockEdge` from blockEscape).
+3. SlateEditor wiring. 4. Docs.
