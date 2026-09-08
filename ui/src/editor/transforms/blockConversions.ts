@@ -25,7 +25,7 @@ export type BlockConversion =
   | { type: "blockquote" }
   | { type: "code-block"; language?: string }
   | { type: "thematic-break" }
-  | { type: "journal-time" };
+  | { type: "journal-time"; withDate?: boolean };
 
 export interface ApplyBlockConversionOptions {
   /** Path of the paragraph block to convert. */
@@ -76,7 +76,9 @@ export function applyBlockConversion(
         break;
       }
       case "journal-time":
-        insertJournalTimeHeading(editor, new Date(), false);
+        insertJournalTimeHeading(editor, new Date(), false, {
+          withDate: conversion.withDate,
+        });
         break;
       case "thematic-break": {
         Transforms.setNodes(editor, { type: "thematic-break" } as any, { at });

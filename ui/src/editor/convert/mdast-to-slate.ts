@@ -195,15 +195,16 @@ function convertBlockNode(
 
     case "heading": {
       const onlyChild = node.children.length === 1 ? node.children[0] : null;
-      if (
-        recognizeJournalTime &&
-        node.depth === 2 &&
-        onlyChild?.type === "text" &&
-        /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(onlyChild.value)
-      ) {
+      const journalTime =
+        recognizeJournalTime && node.depth === 2 && onlyChild?.type === "text"
+          ? JOURNAL_TIME_RE.exec(onlyChild.value)
+          : null;
+      if (journalTime) {
+        const [, date, time] = journalTime;
         return {
           type: "journal-time",
-          time: onlyChild.value,
+          ...(date ? { date } : {}),
+          time,
           children: [{ text: "" }],
         };
       }
@@ -798,6 +799,9 @@ function splitBlockRefs(value: string, marks: Marks): Descendant[] {
 
 /** Pattern for block IDs: whitespace + ^ + 10-12 alphanumeric chars at end of text */
 const BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})$/;
+/** `HH:MM`, optionally preceded by a `YYYY-MM-DD` date and one space. */
+const JOURNAL_TIME_RE =
+  /^(?:(\d{4}-\d{2}-\d{2}) )?((?:[01]\d|2[0-3]):[0-5]\d)$/;
 const CODE_BLOCK_ID_RE = /\s+\^([A-Za-z0-9]{10,12})\s*$/;
 
 const NESTED_LIST_TYPES: ReadonlySet<string> = new Set([

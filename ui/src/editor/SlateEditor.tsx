@@ -42,6 +42,7 @@ import { makeDecorateCode } from "./decorate-code";
 import { renderElement } from "./elements/renderElement";
 import { renderLeaf } from "./elements/renderLeaf";
 import { createSelectionReference } from "./floatingSelectionReference";
+import { JournalDateProvider } from "./journalContext";
 import { MathEditingProvider, useMathEditingController } from "./mathEditing";
 import { withAutoformat } from "./plugins/autoformat/withAutoformat";
 import {
@@ -112,6 +113,8 @@ export function slashCommandToConversion(id: string): BlockConversion | null {
       return { type: "thematic-break" };
     case "time":
       return { type: "journal-time" };
+    case "datetime":
+      return { type: "journal-time", withDate: true };
     default:
       return null;
   }
@@ -122,6 +125,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     id: "time",
     label: "Time Heading",
     description: "Insert the current local time as a section heading",
+  },
+  {
+    id: "datetime",
+    label: "Date & Time Heading",
+    description:
+      "Insert today's date and the current local time as a section heading",
   },
   {
     id: "base",
@@ -154,6 +163,9 @@ export interface SlateEditorProps {
   insertionRequest?: { id: number; markdown: string } | null;
   onInsertionHandled?: (id: number) => void;
   readOnly?: boolean;
+  /** `YYYY-MM-DD` of the journal page being edited, or null elsewhere. Dated
+   *  time headings hide a date that matches it. */
+  journalDate?: string | null;
   editorRef?: RefObject<CustomEditor | null>;
   /** Called with the live editor instance as this component unmounts, while
    *  its selection and focus bookkeeping are still intact. Lets the owner
@@ -213,6 +225,7 @@ export function SlateEditor({
   insertionRequest,
   onInsertionHandled,
   readOnly = false,
+  journalDate = null,
   editorRef,
   onUnmountSnapshot,
 }: SlateEditorProps) {
@@ -711,6 +724,11 @@ export function SlateEditor({
       }
     }
 
+    if (matchesChord(event, SHORTCUTS["editor.dateTimeHeading"].chord)) {
+      event.preventDefault();
+      insertJournalTimeHeading(editor, new Date(), true, { withDate: true });
+      return;
+    }
     if (matchesChord(event, SHORTCUTS["editor.timeHeading"].chord)) {
       event.preventDefault();
       insertJournalTimeHeading(editor);
@@ -837,82 +855,84 @@ export function SlateEditor({
   };
 
   return (
-    <div className="relative w-full min-w-0 max-md:[&>div.fixed]:max-w-[calc(100vw-24px)] max-md:[&>div.fixed_[role=option]]:flex max-md:[&>div.fixed_[role=option]]:min-h-11 max-md:[&>div.fixed_[role=option]]:items-center max-md:[&_button]:min-h-11">
-      <Slate
-        editor={editor}
-        initialValue={initialValue}
-        onChange={handleChange}
-      >
-        <BaseEmbedEditingProvider value={baseEmbedEditing}>
-          <MathEditingProvider value={mathEditing}>
-            <WikilinkEditingProvider value={wikilinkEditing}>
-              <TaskPropertyPopoverProvider value={taskProperties.opener}>
-                <Editable
-                  data-folio-heading-root
-                  renderElement={renderElement}
-                  renderLeaf={renderLeaf}
-                  decorate={decorateCode}
-                  readOnly={readOnly}
-                  onKeyDown={readOnly ? undefined : handleKeyDown}
-                  onDOMBeforeInput={
-                    readOnly ? undefined : vim.handleDOMBeforeInput
-                  }
-                  onMouseDown={readOnly ? undefined : vim.handleMouseDown}
-                  placeholder="Start writing..."
-                  className="min-h-[200px] w-full min-w-0 outline-none"
-                  spellCheck
-                />
-                <SelectionBubbleMenu readOnly={readOnly} />
-              </TaskPropertyPopoverProvider>
-              {!readOnly && isVimEnabled && (
-                <VimStatusBar mode={vim.mode} pending={vim.pending} />
-              )}
-            </WikilinkEditingProvider>
-          </MathEditingProvider>
-        </BaseEmbedEditingProvider>
-      </Slate>
+    <JournalDateProvider date={journalDate}>
+      <div className="relative w-full min-w-0 max-md:[&>div.fixed]:max-w-[calc(100vw-24px)] max-md:[&>div.fixed_[role=option]]:flex max-md:[&>div.fixed_[role=option]]:min-h-11 max-md:[&>div.fixed_[role=option]]:items-center max-md:[&_button]:min-h-11">
+        <Slate
+          editor={editor}
+          initialValue={initialValue}
+          onChange={handleChange}
+        >
+          <BaseEmbedEditingProvider value={baseEmbedEditing}>
+            <MathEditingProvider value={mathEditing}>
+              <WikilinkEditingProvider value={wikilinkEditing}>
+                <TaskPropertyPopoverProvider value={taskProperties.opener}>
+                  <Editable
+                    data-folio-heading-root
+                    renderElement={renderElement}
+                    renderLeaf={renderLeaf}
+                    decorate={decorateCode}
+                    readOnly={readOnly}
+                    onKeyDown={readOnly ? undefined : handleKeyDown}
+                    onDOMBeforeInput={
+                      readOnly ? undefined : vim.handleDOMBeforeInput
+                    }
+                    onMouseDown={readOnly ? undefined : vim.handleMouseDown}
+                    placeholder="Start writing..."
+                    className="min-h-[200px] w-full min-w-0 outline-none"
+                    spellCheck
+                  />
+                  <SelectionBubbleMenu readOnly={readOnly} />
+                </TaskPropertyPopoverProvider>
+                {!readOnly && isVimEnabled && (
+                  <VimStatusBar mode={vim.mode} pending={vim.pending} />
+                )}
+              </WikilinkEditingProvider>
+            </MathEditingProvider>
+          </BaseEmbedEditingProvider>
+        </Slate>
 
-      {!readOnly && wikilinkTrigger && (
-        <WikilinkCombobox
-          pages={pages}
-          query={wikilinkTrigger.query}
-          reference={createSelectionReference(editor)}
-          onSelect={insertWikilink}
-          onCreate={(title) => void createWikilinkTarget(title)}
-          onClose={() => updateWikilinkTrigger(null)}
-          isCreating={wikilinkCreateRequest?.trigger === wikilinkTrigger}
-          createError={wikilinkCreateError}
-        />
-      )}
+        {!readOnly && wikilinkTrigger && (
+          <WikilinkCombobox
+            pages={pages}
+            query={wikilinkTrigger.query}
+            reference={createSelectionReference(editor)}
+            onSelect={insertWikilink}
+            onCreate={(title) => void createWikilinkTarget(title)}
+            onClose={() => updateWikilinkTrigger(null)}
+            isCreating={wikilinkCreateRequest?.trigger === wikilinkTrigger}
+            createError={wikilinkCreateError}
+          />
+        )}
 
-      {!readOnly && blockRefTrigger && (
-        <BlockRefCombobox
-          query={blockRefTrigger.query}
-          reference={createSelectionReference(editor)}
-          onSelect={insertBlockRef}
-          onClose={() => setBlockRefTrigger(null)}
-        />
-      )}
+        {!readOnly && blockRefTrigger && (
+          <BlockRefCombobox
+            query={blockRefTrigger.query}
+            reference={createSelectionReference(editor)}
+            onSelect={insertBlockRef}
+            onClose={() => setBlockRefTrigger(null)}
+          />
+        )}
 
-      {!readOnly && taskProperties.session && (
-        <TaskPropertyPopover
-          key={taskProperties.session.id}
-          anchor={taskProperties.session.anchor}
-          initial={taskProperties.session.initial}
-          onCommit={taskProperties.commit}
-          onDiscard={taskProperties.discard}
-        />
-      )}
+        {!readOnly && taskProperties.session && (
+          <TaskPropertyPopover
+            key={taskProperties.session.id}
+            anchor={taskProperties.session.anchor}
+            initial={taskProperties.session.initial}
+            onCommit={taskProperties.commit}
+            onDiscard={taskProperties.discard}
+          />
+        )}
 
-      {!readOnly && slashTrigger && (
-        <SlashCombobox
-          commands={slashCommands}
-          query={slashTrigger.query}
-          reference={createSelectionReference(editor)}
-          onSelect={executeSlashCommand}
-          onClose={dismissSlash}
-        />
-      )}
-    </div>
+        {!readOnly && slashTrigger && (
+          <SlashCombobox
+            commands={slashCommands}
+            query={slashTrigger.query}
+            reference={createSelectionReference(editor)}
+            onSelect={executeSlashCommand}
+            onClose={dismissSlash}
+          />
+        )}
+      </div>
+    </JournalDateProvider>
   );
 }

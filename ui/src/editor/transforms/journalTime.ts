@@ -7,6 +7,7 @@ import {
 } from "slate";
 import { HistoryEditor } from "slate-history";
 import { makeJournalTime } from "#/editor/schema/elements/journalTime";
+import { localDateKey } from "#/lib/time";
 
 const emptyParagraph = () => ({
   type: "paragraph" as const,
@@ -17,10 +18,21 @@ export function formatJournalTime(date = new Date()): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
 }
 
+/** Browser-local calendar date as `YYYY-MM-DD`. */
+export function formatJournalDate(date = new Date()): string {
+  return localDateKey(date);
+}
+
+export interface InsertJournalTimeHeadingOptions {
+  /** Also freeze the local calendar date in front of the time. */
+  withDate?: boolean;
+}
+
 export function insertJournalTimeHeading(
   editor: Editor,
   now = new Date(),
   startNewBatch = true,
+  { withDate = false }: InsertJournalTimeHeadingOptions = {},
 ): void {
   if (!editor.selection) return;
   const topPath: Path = [editor.selection.anchor.path[0]];
@@ -37,7 +49,13 @@ export function insertJournalTimeHeading(
       if (replace) Transforms.removeNodes(editor, { at: topPath });
       Transforms.insertNodes(
         editor,
-        [makeJournalTime({ time: formatJournalTime(now) }), emptyParagraph()],
+        [
+          makeJournalTime({
+            ...(withDate ? { date: formatJournalDate(now) } : {}),
+            time: formatJournalTime(now),
+          }),
+          emptyParagraph(),
+        ],
         { at: [insertionIndex] },
       );
       Transforms.select(editor, { path: [insertionIndex + 1, 0], offset: 0 });

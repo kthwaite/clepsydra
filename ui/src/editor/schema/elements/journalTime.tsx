@@ -6,6 +6,7 @@ import {
   useSelected,
   useSlateStatic,
 } from "slate-react";
+import { useJournalDate } from "#/editor/journalContext";
 import { removeJournalTimeHeading } from "#/editor/transforms/journalTime";
 import type { CreateProps, ElementDescriptor } from "../descriptor";
 import type { JournalTimeElement } from "../types";
@@ -18,6 +19,10 @@ function JournalTimeHeading({
   const editor = useSlateStatic();
   const selected = useSelected();
   const readOnly = useReadOnly();
+  const journalDate = useJournalDate();
+  const text = journalTimeText(element);
+  // Inside the matching journal the date is implicit; the markdown keeps it.
+  const showDate = element.date !== undefined && element.date !== journalDate;
 
   return (
     <div
@@ -27,13 +32,14 @@ function JournalTimeHeading({
       data-selected={selected || undefined}
     >
       <h2
-        aria-label={`Time heading, ${element.time} local time`}
+        aria-label={`Time heading, ${text} local time`}
         className="flex shrink-0 items-baseline gap-2 text-xs font-bold tracking-[0.14em]"
       >
         <span aria-hidden="true" className="text-accent">
           TIME /
         </span>
-        <time dateTime={element.time} className="text-ink">
+        <time dateTime={text} className="text-ink">
+          {showDate && <span>{element.date} </span>}
           {element.time}
         </time>
       </h2>
@@ -41,7 +47,7 @@ function JournalTimeHeading({
       {!readOnly && (
         <button
           type="button"
-          aria-label={`Delete time heading ${element.time}`}
+          aria-label={`Delete time heading ${text}`}
           className={`shrink-0 border border-transparent p-1 text-ink-mute group-hover:pointer-events-auto group-hover:opacity-100 focus:pointer-events-auto focus:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 hover:border-border hover:text-accent focus-visible:border-accent focus-visible:text-accent focus-visible:outline-none ${selected ? "pointer-events-auto opacity-100" : "pointer-events-none opacity-0"}`}
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => {
@@ -60,11 +66,19 @@ function JournalTimeHeading({
   );
 }
 
+/** The heading text as written to markdown: `date time` or bare `time`. */
+export function journalTimeText(
+  node: Pick<JournalTimeElement, "date" | "time">,
+): string {
+  return node.date ? `${node.date} ${node.time}` : node.time;
+}
+
 export const journalTimeDescriptor: ElementDescriptor<JournalTimeElement> = {
   type: "journal-time",
   kind: "void-block",
-  create: ({ time }: CreateProps<JournalTimeElement>) => ({
+  create: ({ date, time }: CreateProps<JournalTimeElement>) => ({
     type: "journal-time",
+    ...(date ? { date } : {}),
     time,
     children: [{ text: "" }],
   }),
@@ -73,7 +87,7 @@ export const journalTimeDescriptor: ElementDescriptor<JournalTimeElement> = {
     const heading: Heading = {
       type: "heading",
       depth: 2,
-      children: [{ type: "text", value: node.time }],
+      children: [{ type: "text", value: journalTimeText(node) }],
     };
     return heading;
   },

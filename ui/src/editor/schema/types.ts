@@ -60,6 +60,8 @@ export interface ListItemElement {
 
 export interface JournalTimeElement {
   type: "journal-time";
+  /** Optional local calendar date (`YYYY-MM-DD`) written before the time. */
+  date?: string;
   time: string;
   children: CustomText[];
 }
