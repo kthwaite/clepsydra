@@ -51,7 +51,11 @@ export function escapeTrappingBlock(editor: Editor, side: EscapeSide): boolean {
   return true;
 }
 
-function caretAtBlockEdge(
+/**
+ * Whether the collapsed caret sits on the outer edge of `block` facing `side`:
+ * code block = first/last line, table = first/last row, void block = always.
+ */
+export function caretAtBlockEdge(
   editor: Editor,
   block: Node,
   blockPath: Path,

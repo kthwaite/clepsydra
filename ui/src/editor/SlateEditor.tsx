@@ -75,6 +75,7 @@ import {
 import { TaskPropertyPopoverProvider } from "./taskPropertyContext";
 import { escapeTrappingBlock } from "./transforms/blockEscape";
 import { insertMarkdown } from "./transforms/insertMarkdown";
+import { selectAdjacentVoidBlock } from "./transforms/voidNavigation";
 import {
   handleJournalTimeHeadingDeletion,
   insertJournalTimeHeading,
@@ -185,7 +186,9 @@ interface WikilinkCreateRequest {
 /**
  * Plain arrow keys step out of a trapping block (code block, table, divider,
  * embed, time heading) that opens or closes the note. Up/Down need only the
- * block's edge line or row; Left/Right need the exact start or end.
+ * block's edge line or row; Left/Right need the exact start or end. Up/Down
+ * from a code block or table also select a neighbouring void block, which
+ * their own caret movement would otherwise never reach.
  */
 function handleTrappingBlockEscape(
   editor: Editor,
@@ -200,9 +203,15 @@ function handleTrappingBlockEscape(
 
   switch (event.key) {
     case "ArrowUp":
-      return escapeTrappingBlock(editor, "above");
+      return (
+        escapeTrappingBlock(editor, "above") ||
+        selectAdjacentVoidBlock(editor, "above")
+      );
     case "ArrowDown":
-      return escapeTrappingBlock(editor, "below");
+      return (
+        escapeTrappingBlock(editor, "below") ||
+        selectAdjacentVoidBlock(editor, "below")
+      );
     case "ArrowLeft":
       return (
         Editor.isStart(editor, selection.anchor, topPath) &&
