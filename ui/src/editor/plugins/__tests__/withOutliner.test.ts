@@ -2,6 +2,7 @@ import {
   createEditor,
   type Descendant,
   Editor,
+  Node,
   Element as SlateElement,
   Transforms,
 } from "slate";
@@ -29,6 +30,11 @@ function makeEditor(nodes: Descendant[]) {
 
 function selectAt(editor: Editor, path: number[]) {
   Transforms.select(editor, { path, offset: 0 });
+}
+
+/** Plain text of every top-level block, in document order. */
+function topLevelTexts(editor: Editor) {
+  return editor.children.map((node) => Node.string(node));
 }
 
 /** Helper to get the top-level list element */
@@ -298,17 +304,43 @@ describe("moveBlockUp", () => {
     expect(texts).toEqual(["First", "Second"]);
   });
 
-  it("does nothing when not in a list item", () => {
+  it("moves a top-level block above its previous sibling", () => {
+    const editor = makeEditor([
+      { type: "paragraph", children: [{ text: "One" }] },
+      { type: "heading", level: 2, children: [{ text: "Two" }] },
+      { type: "paragraph", children: [{ text: "Three" }] },
+    ]);
+    selectAt(editor, [1, 0]);
+    moveBlockUp(editor);
+
+    expect(topLevelTexts(editor)).toEqual(["Two", "One", "Three"]);
+    expect(editor.selection?.anchor.path).toEqual([0, 0]);
+  });
+
+  it("does nothing when the top-level block is first", () => {
     const editor = makeEditor([
       { type: "paragraph", children: [{ text: "Hello" }] },
+      { type: "paragraph", children: [{ text: "World" }] },
     ]);
     selectAt(editor, [0, 0]);
     moveBlockUp(editor);
 
-    expect(
-      ((editor.children[0] as SlateElement).children[0] as { text: string })
-        .text,
-    ).toBe("Hello");
+    expect(topLevelTexts(editor)).toEqual(["Hello", "World"]);
+    expect(editor.selection?.anchor.path).toEqual([0, 0]);
+  });
+
+  it("does nothing with an expanded selection outside a list", () => {
+    const editor = makeEditor([
+      { type: "paragraph", children: [{ text: "One" }] },
+      { type: "paragraph", children: [{ text: "Two" }] },
+    ]);
+    Transforms.select(editor, {
+      anchor: { path: [1, 0], offset: 0 },
+      focus: { path: [1, 0], offset: 2 },
+    });
+    moveBlockUp(editor);
+
+    expect(topLevelTexts(editor)).toEqual(["One", "Two"]);
   });
 });
 
@@ -337,6 +369,8 @@ describe("moveBlockDown", () => {
       (li) => ((li as SlateElement).children[0] as { text: string }).text,
     );
     expect(texts).toEqual(["A", "C", "B"]);
+    // The selection follows the moved item to a path that still exists.
+    expect(editor.selection?.anchor.path).toEqual([0, 2, 0]);
   });
 
   it("does nothing when item is last", () => {
@@ -359,17 +393,43 @@ describe("moveBlockDown", () => {
     expect(texts).toEqual(["First", "Last"]);
   });
 
-  it("does nothing when not in a list item", () => {
+  it("moves a top-level block below its next sibling", () => {
     const editor = makeEditor([
-      { type: "paragraph", children: [{ text: "Hello" }] },
+      { type: "paragraph", children: [{ text: "One" }] },
+      { type: "heading", level: 2, children: [{ text: "Two" }] },
+      { type: "paragraph", children: [{ text: "Three" }] },
     ]);
-    selectAt(editor, [0, 0]);
+    selectAt(editor, [1, 0]);
     moveBlockDown(editor);
 
-    expect(
-      ((editor.children[0] as SlateElement).children[0] as { text: string })
-        .text,
-    ).toBe("Hello");
+    expect(topLevelTexts(editor)).toEqual(["One", "Three", "Two"]);
+    expect(editor.selection?.anchor.path).toEqual([2, 0]);
+  });
+
+  it("does nothing when the top-level block is last", () => {
+    const editor = makeEditor([
+      { type: "paragraph", children: [{ text: "Hello" }] },
+      { type: "paragraph", children: [{ text: "World" }] },
+    ]);
+    selectAt(editor, [1, 0]);
+    moveBlockDown(editor);
+
+    expect(topLevelTexts(editor)).toEqual(["Hello", "World"]);
+    expect(editor.selection?.anchor.path).toEqual([1, 0]);
+  });
+
+  it("does nothing with an expanded selection outside a list", () => {
+    const editor = makeEditor([
+      { type: "paragraph", children: [{ text: "One" }] },
+      { type: "paragraph", children: [{ text: "Two" }] },
+    ]);
+    Transforms.select(editor, {
+      anchor: { path: [0, 0], offset: 0 },
+      focus: { path: [0, 0], offset: 2 },
+    });
+    moveBlockDown(editor);
+
+    expect(topLevelTexts(editor)).toEqual(["One", "Two"]);
   });
 });
 

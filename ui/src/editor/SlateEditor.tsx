@@ -72,6 +72,7 @@ import {
   useTaskPropertyPopoverController,
 } from "./TaskPropertyPopover";
 import { TaskPropertyPopoverProvider } from "./taskPropertyContext";
+import { escapeTrappingBlock } from "./transforms/blockEscape";
 import { insertMarkdown } from "./transforms/insertMarkdown";
 import {
   handleJournalTimeHeadingDeletion,
@@ -167,6 +168,42 @@ interface ComboboxTrigger {
 
 interface WikilinkCreateRequest {
   trigger: ComboboxTrigger;
+}
+
+/**
+ * Plain arrow keys step out of a trapping block (code block, table, divider,
+ * embed, time heading) that opens or closes the note. Up/Down need only the
+ * block's edge line or row; Left/Right need the exact start or end.
+ */
+function handleTrappingBlockEscape(
+  editor: Editor,
+  event: React.KeyboardEvent,
+): boolean {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) {
+    return false;
+  }
+  const { selection } = editor;
+  if (!selection || !Range.isCollapsed(selection)) return false;
+  const topPath = [selection.anchor.path[0]];
+
+  switch (event.key) {
+    case "ArrowUp":
+      return escapeTrappingBlock(editor, "above");
+    case "ArrowDown":
+      return escapeTrappingBlock(editor, "below");
+    case "ArrowLeft":
+      return (
+        Editor.isStart(editor, selection.anchor, topPath) &&
+        escapeTrappingBlock(editor, "above")
+      );
+    case "ArrowRight":
+      return (
+        Editor.isEnd(editor, selection.anchor, topPath) &&
+        escapeTrappingBlock(editor, "below")
+      );
+    default:
+      return false;
+  }
 }
 
 export function SlateEditor({
@@ -651,6 +688,10 @@ export function SlateEditor({
       return;
     }
     if (vim.handleKeyDown(event)) {
+      return;
+    }
+    if (handleTrappingBlockEscape(editor, event)) {
+      event.preventDefault();
       return;
     }
     if (event.key === "ArrowRight" && exitTerminalInlineCode(editor)) {
