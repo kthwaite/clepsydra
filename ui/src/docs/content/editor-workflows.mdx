@@ -120,6 +120,11 @@ editor.
 `HH:MM`; an empty current paragraph is replaced. Selecting a time heading
 reveals a delete button.
 
+`Command+Option+Shift+Enter` inserts a date + time heading, written to Markdown
+as `## YYYY-MM-DD HH:MM`. It renders as `TIME / YYYY-MM-DD HH:MM`, except inside
+the journal for that same date, where the date is implicit and only the time is
+shown. The Markdown always keeps the date.
+
 Plain arrow keys step out of a code block, table, divider, embed, or time
 heading that opens or closes the note. `ArrowUp` or `ArrowLeft` at the block's
 start creates a paragraph above it; `ArrowDown` or `ArrowRight` at its end
@@ -233,6 +238,7 @@ filter the menu, then choose a command with the pointer, `Enter`, or `Tab`.
 | Command | Result |
 | --- | --- |
 | **Time Heading** | Current local time as a section heading |
+| **Date & Time Heading** | Today's date and the current local time as a section heading |
 | **Base embed** | A live saved Base view |
 | **Table** | Empty three-column, three-row GFM table |
 | **Heading 1** through **Heading 6** | Markdown heading levels 1–6 |
