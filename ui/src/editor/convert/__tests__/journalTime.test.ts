@@ -5,6 +5,7 @@ type Block = {
   type: string;
   level?: number;
   time?: string;
+  date?: string;
   children: Array<{ text?: string }>;
 };
 
@@ -36,6 +37,50 @@ describe("journal time heading markdown", () => {
     const block = firstBlock(markdown as string);
     expect(block.type).toBe("heading");
     expect(block.level).toBe(level);
+  });
+
+  it("recognizes a dated level-two heading as a journal-time with a date", () => {
+    expect(firstBlock("## 2026-09-08 14:32")).toEqual({
+      type: "journal-time",
+      date: "2026-09-08",
+      time: "14:32",
+      children: [{ text: "" }],
+    });
+  });
+
+  it.each([
+    "## 2026-09-08",
+    "## 2026-9-8 14:32",
+    "## 2026-09-08  14:32",
+    "## 2026-09-08 14:32 notes",
+  ])("keeps %s as an ordinary heading", (markdown) => {
+    const block = firstBlock(markdown);
+    expect(block.type).toBe("heading");
+    expect(block.level).toBe(2);
+  });
+
+  it("serializes a dated journal-time element as date then time", () => {
+    const markdown = slateToMarkdown([
+      {
+        type: "journal-time",
+        date: "2026-09-08",
+        time: "14:32",
+        children: [{ text: "" }],
+      },
+    ] as never);
+    expect(markdown.trim()).toBe("## 2026-09-08 14:32");
+  });
+
+  it("round-trips the dated form", () => {
+    const slate = markdownToSlate(`Before\n\n## 2026-09-08 14:32\n\nAfter`);
+    const markdown = slateToMarkdown(slate);
+    expect(markdown).toContain("## 2026-09-08 14:32");
+    expect(markdownToSlate(markdown)[1]).toEqual({
+      type: "journal-time",
+      date: "2026-09-08",
+      time: "14:32",
+      children: [{ text: "" }],
+    });
   });
 
   it("does not recognize an unmarked time as a heading", () => {
