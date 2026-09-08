@@ -683,4 +683,16 @@ describe("CommandPalette pointer highlight", () => {
     fireEvent.mouseMove(rows()[1], { clientX: 10, clientY: 24 });
     expect(activeRow()).toBe(rows()[1]);
   });
+
+  it("highlights the best-ranked command first after typing", () => {
+    render(<CommandPalette />);
+    const input = screen.getByRole("textbox", { name: "Command query" });
+
+    fireEvent.change(input, { target: { value: "re" } });
+
+    const [first, second] = rows();
+    expect(first).toHaveTextContent("Re-run boot sequence");
+    expect(second).toHaveTextContent("Open Reference Repairs");
+    expect(activeRow()).toBe(first);
+  });
 });

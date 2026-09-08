@@ -10,6 +10,7 @@ import {
 import { formatApiError, isInvalidSearchQuery } from "#/api/error";
 import { useSearch, useTags } from "#/api/index";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
+import { rankCommands } from "#/components/codex/commandRanking";
 import {
   enabledStaticCommands,
   runtimeQuireCommands,
@@ -316,12 +317,10 @@ function CommandPaletteContent() {
   const filtered = useMemo<Command[]>(() => {
     if (!q) return [...verbCommands, ...tagCommands].slice(0, 10);
     const ql = q.toLowerCase();
-    const verbsMatch = [...verbCommands, ...quireCommands].filter(
-      (c) =>
-        c.title.toLowerCase().includes(ql) || c.id.toLowerCase().includes(ql),
-    );
-    const tagsMatch = tagCommands.filter((c) =>
-      c.title.toLowerCase().includes(ql),
+    const verbsMatch = rankCommands([...verbCommands, ...quireCommands], q);
+    const tagsMatch = rankCommands(
+      tagCommands.filter((c) => c.title.toLowerCase().includes(ql)),
+      q,
     );
     return [...verbsMatch, ...noteCommands, ...tagsMatch].slice(0, 14);
   }, [q, verbCommands, noteCommands, tagCommands, quireCommands]);
