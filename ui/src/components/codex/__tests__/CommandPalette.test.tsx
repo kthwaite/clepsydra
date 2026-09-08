@@ -643,3 +643,56 @@ describe("CommandPalette keyboard navigation", () => {
     );
   });
 });
+
+describe("CommandPalette pointer highlight", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    featureFlagsState.academic = true;
+    featureFlagsState.feeds = true;
+    workspaceStateMock.tabs = [];
+    workspaceStateMock.quires = {};
+    workspaceStateMock.activeTabId = null;
+    useUiStore.setState({ isSearchOpen: true });
+    useSearchMock.mockReturnValue({
+      data: [],
+      isFetching: false,
+      isError: false,
+      error: null,
+      refetch: searchRefetchMock,
+    });
+  });
+
+  // The modal overlay adds hidden "Dismiss" buttons; only the result rows count.
+  const rows = () =>
+    screen.getAllByRole("button", { name: (name) => name !== "Dismiss" });
+  const activeRow = () => rows().find((row) => row.hasAttribute("data-active"));
+
+  it("ignores a mousemove that repeats the last pointer position after the query changes", () => {
+    render(<CommandPalette />);
+    const input = screen.getByRole("textbox", { name: "Command query" });
+
+    fireEvent.mouseMove(rows()[2], { clientX: 10, clientY: 10 });
+    expect(activeRow()).toBe(rows()[2]);
+
+    fireEvent.change(input, { target: { value: "re" } });
+    expect(activeRow()).toBe(rows()[0]);
+
+    fireEvent.mouseMove(rows()[1], { clientX: 10, clientY: 10 });
+    expect(activeRow()).toBe(rows()[0]);
+
+    fireEvent.mouseMove(rows()[1], { clientX: 10, clientY: 24 });
+    expect(activeRow()).toBe(rows()[1]);
+  });
+
+  it("highlights the best-ranked command first after typing", () => {
+    render(<CommandPalette />);
+    const input = screen.getByRole("textbox", { name: "Command query" });
+
+    fireEvent.change(input, { target: { value: "re" } });
+
+    const [first, second] = rows();
+    expect(first).toHaveTextContent("Re-run boot sequence");
+    expect(second).toHaveTextContent("Open Reference Repairs");
+    expect(activeRow()).toBe(first);
+  });
+});

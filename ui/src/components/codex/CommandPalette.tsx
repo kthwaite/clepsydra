@@ -1,6 +1,7 @@
 import { useNavigate } from "@tanstack/react-router";
 import {
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   useEffect,
   useMemo,
   useRef,
@@ -9,6 +10,7 @@ import {
 import { formatApiError, isInvalidSearchQuery } from "#/api/error";
 import { useSearch, useTags } from "#/api/index";
 import { CodexModalShell } from "#/components/codex/CodexModalShell";
+import { rankCommands } from "#/components/codex/commandRanking";
 import {
   enabledStaticCommands,
   runtimeQuireCommands,
@@ -77,6 +79,21 @@ function CommandPaletteContent() {
   const [q, setQ] = useState("");
   const [sel, setSel] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  /** Last pointer position that moved the highlight. Rows re-render under a
+   * stationary pointer on every keystroke, and the browser then re-fires
+   * mouse events at the same coordinates; those must not steal the highlight
+   * from the best match. */
+  const lastPointerRef = useRef<{ x: number; y: number } | null>(null);
+
+  const onRowPointerMove = (
+    e: ReactMouseEvent<HTMLButtonElement>,
+    i: number,
+  ) => {
+    const last = lastPointerRef.current;
+    if (last && last.x === e.clientX && last.y === e.clientY) return;
+    lastPointerRef.current = { x: e.clientX, y: e.clientY };
+    setSel(i);
+  };
 
   const debouncedQ = useDebounce(open ? q : "", 200);
   const {
@@ -300,12 +317,10 @@ function CommandPaletteContent() {
   const filtered = useMemo<Command[]>(() => {
     if (!q) return [...verbCommands, ...tagCommands].slice(0, 10);
     const ql = q.toLowerCase();
-    const verbsMatch = [...verbCommands, ...quireCommands].filter(
-      (c) =>
-        c.title.toLowerCase().includes(ql) || c.id.toLowerCase().includes(ql),
-    );
-    const tagsMatch = tagCommands.filter((c) =>
-      c.title.toLowerCase().includes(ql),
+    const verbsMatch = rankCommands([...verbCommands, ...quireCommands], q);
+    const tagsMatch = rankCommands(
+      tagCommands.filter((c) => c.title.toLowerCase().includes(ql)),
+      q,
     );
     return [...verbsMatch, ...noteCommands, ...tagsMatch].slice(0, 14);
   }, [q, verbCommands, noteCommands, tagCommands, quireCommands]);
@@ -397,7 +412,8 @@ function CommandPaletteContent() {
             <button
               type="button"
               key={`${c.kind}:${c.id}`}
-              onMouseEnter={() => setSel(i)}
+              data-active={active || undefined}
+              onMouseMove={(e) => onRowPointerMove(e, i)}
               onClick={() => {
                 c.action();
                 close();
