@@ -23,7 +23,10 @@ describe("rankCommands", () => {
   });
 
   it("matches the id as a substring at the lowest tier", () => {
-    const items = [item("sys.boot", "Restart"), item("nav.bases", "Open Bases")];
+    const items = [
+      item("sys.boot", "Restart"),
+      item("nav.bases", "Open Bases"),
+    ];
 
     expect(rankCommands(items, "boot").map((c) => c.id)).toEqual(["sys.boot"]);
   });
