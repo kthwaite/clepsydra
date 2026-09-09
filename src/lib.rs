@@ -6,7 +6,6 @@ pub mod feeds;
 pub mod lsp;
 pub mod mcp;
 pub mod sync_runtime;
-pub mod todo_capture;
 pub mod vault;
 
 use std::path::{Path, PathBuf};

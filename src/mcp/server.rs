@@ -17,12 +17,12 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::client::{ApiClient, encode_vault_path};
 use super::tasking::{
     BoardKind, TaskRef, classify_ref, deserialize_tri_state, filter_board_project, find_board_id,
     insert_tri_state, page_meta_id, resolve_project_patch,
 };
 use crate::vault::kind::Kind;
+use clep_client::client::{ApiClient, encode_vault_path};
 
 /// The `/pages/{path}` endpoint URL for a vault-relative path.
 fn pages_url(path: &str) -> String {

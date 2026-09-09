@@ -10,9 +10,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
+use clep_client::client::{ApiCallError, ApiClient};
+use clep_client::configured_api_client;
 use clepsydra::api::sync::{SyncReportDto, SyncStatusDto};
-use clepsydra::mcp::client::{ApiCallError, ApiClient};
-use clepsydra::mcp::configured_api_client;
 use clepsydra::vault::gitsync::Author;
 use clepsydra::vault::gitsync::engine::SyncEngine;
 use clepsydra::vault::gitsync::git::Git;

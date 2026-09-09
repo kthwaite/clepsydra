@@ -7,8 +7,8 @@ use std::path::Path;
 use chrono::NaiveDate;
 use thiserror::Error;
 
-use crate::mcp::client::{ApiCallError, ApiClient};
-use crate::mcp::configured_api_client;
+use crate::client::{ApiCallError, ApiClient};
+use crate::configured_api_client;
 
 const CAPTURE_ENDPOINT: &str = "/api/vault/journal/today/capture";
 
@@ -148,7 +148,7 @@ fn validate_optional_date(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mcp::client::ApiClient;
+    use crate::client::ApiClient;
     use clep_test_support::EnvGuard;
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};

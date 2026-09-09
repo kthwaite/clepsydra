@@ -516,6 +516,7 @@ dependencies = [
  "base64 0.22.1",
  "chrono",
  "clap",
+ "clep-client",
  "clep-config",
  "clepsydra",
  "dirs",
@@ -529,6 +530,24 @@ dependencies = [
  "thiserror",
  "tokio",
  "toml 0.8.23",
+]
+
+[[package]]
+name = "clep-client"
+version = "0.0.0"
+dependencies = [
+ "chrono",
+ "clep-config",
+ "clep-test-support",
+ "percent-encoding",
+ "reqwest",
+ "serde_json",
+ "serial_test",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "url",
+ "wiremock",
 ]
 
 [[package]]
@@ -562,6 +581,7 @@ dependencies = [
  "blake3",
  "bytes",
  "chrono",
+ "clep-client",
  "clep-config",
  "clep-test-support",
  "dirs",

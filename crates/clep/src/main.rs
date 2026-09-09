@@ -355,8 +355,8 @@ async fn run_todo_command<R, W, C, F>(
 where
     R: Read + ?Sized,
     W: Write + ?Sized,
-    C: FnOnce(clepsydra::todo_capture::TodoCaptureInput) -> F,
-    F: Future<Output = Result<String, clepsydra::todo_capture::TodoCaptureError>>,
+    C: FnOnce(clep_client::todo_capture::TodoCaptureInput) -> F,
+    F: Future<Output = Result<String, clep_client::todo_capture::TodoCaptureError>>,
 {
     let text = if words.is_empty() {
         let mut text = String::new();
@@ -365,7 +365,7 @@ where
     } else {
         words.join(" ")
     };
-    let path = capture(clepsydra::todo_capture::TodoCaptureInput {
+    let path = capture(clep_client::todo_capture::TodoCaptureInput {
         text,
         due,
         scheduled,
@@ -400,7 +400,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 priority,
                 &mut stdin,
                 &mut stdout,
-                clepsydra::todo_capture::capture_todo,
+                clep_client::todo_capture::capture_todo,
             )
             .await?;
             Ok(0)
@@ -1014,7 +1014,7 @@ mod cli_tests {
 
         assert_eq!(
             captured.unwrap(),
-            clepsydra::todo_capture::TodoCaptureInput {
+            clep_client::todo_capture::TodoCaptureInput {
                 text: "Buy milk".into(),
                 due: None,
                 scheduled: None,
@@ -1070,7 +1070,7 @@ mod cli_tests {
 
         assert_eq!(
             captured.unwrap(),
-            clepsydra::todo_capture::TodoCaptureInput {
+            clep_client::todo_capture::TodoCaptureInput {
                 text: "Plan".into(),
                 due: Some("2026-09-01".into()),
                 scheduled: Some("2026-08-30".into()),
@@ -1091,14 +1091,14 @@ mod cli_tests {
             None,
             &mut stdin,
             &mut stdout,
-            clepsydra::todo_capture::capture_todo,
+            clep_client::todo_capture::capture_todo,
         )
         .await
         .unwrap_err();
 
         assert!(matches!(
-            error.downcast_ref::<clepsydra::todo_capture::TodoCaptureError>(),
-            Some(clepsydra::todo_capture::TodoCaptureError::BlankText)
+            error.downcast_ref::<clep_client::todo_capture::TodoCaptureError>(),
+            Some(clep_client::todo_capture::TodoCaptureError::BlankText)
         ));
         assert!(stdout.is_empty());
     }
@@ -1136,8 +1136,8 @@ mod cli_tests {
             &mut stdin,
             &mut stdout,
             |_| {
-                std::future::ready(Err(clepsydra::todo_capture::TodoCaptureError::Api(
-                    clepsydra::mcp::client::ApiCallError::Api {
+                std::future::ready(Err(clep_client::todo_capture::TodoCaptureError::Api(
+                    clep_client::client::ApiCallError::Api {
                         status: 503,
                         message: "server unavailable".into(),
                     },
@@ -1148,9 +1148,9 @@ mod cli_tests {
         .unwrap_err();
 
         assert!(matches!(
-            error.downcast_ref::<clepsydra::todo_capture::TodoCaptureError>(),
-            Some(clepsydra::todo_capture::TodoCaptureError::Api(
-                clepsydra::mcp::client::ApiCallError::Api {
+            error.downcast_ref::<clep_client::todo_capture::TodoCaptureError>(),
+            Some(clep_client::todo_capture::TodoCaptureError::Api(
+                clep_client::client::ApiCallError::Api {
                     status: 503,
                     message,
                 }
