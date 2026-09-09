@@ -345,7 +345,7 @@ async fn publish_manifest(
     match result {
         Ok(_) => {
             state.feed_runtime().feed_refresh.notify_one();
-            reconcile_feed_manifest_locked(state)
+            reconcile_feed_manifest_locked(&state.feed_host())
                 .await
                 .map_err(|error| ApiError::internal(error.to_string()))?;
             Ok(revision)
@@ -431,7 +431,7 @@ pub async fn list_feeds(
     let preference_namespace = feed_preference_namespace(&state).await?;
     let _manifest_guard = state.feed_runtime().feed_manifest_lock.lock().await;
     let snapshot = read_manifest(&state).await?;
-    reconcile_feed_manifest_bytes_locked(&state, &snapshot.bytes)
+    reconcile_feed_manifest_bytes_locked(&state.feed_host(), &snapshot.bytes)
         .await
         .map_err(|error| ApiError::internal(error.to_string()))?;
     let runtime = state.feed_runtime();
@@ -1163,7 +1163,7 @@ mod tests {
         )
         .await
         .unwrap();
-        reconcile_feed_manifest(&state).await.unwrap();
+        reconcile_feed_manifest(&state.feed_host()).await.unwrap();
         let app = Router::new()
             .nest("/api/vault", crate::api::api_router())
             .with_state(Arc::clone(&state));
@@ -1186,13 +1186,16 @@ mod tests {
         let mut state = build_app_state_with_settings(&root, &settings, FeatureFlags::default())
             .await
             .unwrap();
-        Arc::get_mut(&mut state)
-            .expect("fresh fixture state should be uniquely owned")
-            .feed_runtime
-            .as_mut()
-            .expect("feed fixture enables the feed runtime")
-            .feed_client = client;
-        reconcile_feed_manifest(&state).await.unwrap();
+        Arc::get_mut(
+            Arc::get_mut(&mut state)
+                .expect("fresh fixture state should be uniquely owned")
+                .feed_runtime
+                .as_mut()
+                .expect("feed fixture enables the feed runtime"),
+        )
+        .expect("fresh fixture feed runtime should be uniquely owned")
+        .feed_client = client;
+        reconcile_feed_manifest(&state.feed_host()).await.unwrap();
         let app = Router::new()
             .nest("/api/vault", crate::api::api_router())
             .with_state(Arc::clone(&state));
@@ -1684,7 +1687,9 @@ mod tests {
             "## Replacement\n- [Replacement](https://replacement.example/rss)\n- [Broken]()\n",
         )
         .unwrap();
-        reconcile_feed_manifest(&fixture.state).await.unwrap();
+        reconcile_feed_manifest(&fixture.state.feed_host())
+            .await
+            .unwrap();
 
         let after = fixture
             .state
@@ -1710,7 +1715,9 @@ mod tests {
             warning_manifest,
         )
         .unwrap();
-        reconcile_feed_manifest(&fixture.state).await.unwrap();
+        reconcile_feed_manifest(&fixture.state.feed_host())
+            .await
+            .unwrap();
 
         let (status, body) =
             request_json(&fixture.app, Method::GET, "/api/vault/feeds", None).await;
@@ -2040,7 +2047,7 @@ mod tests {
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
         crate::feeds::scheduler::set_before_reconcile_commit_hook(
-            &fixture.state,
+            fixture.state.feed_runtime(),
             Some(Arc::new({
                 let first_hook = Arc::clone(&first_hook);
                 let release_rx = Arc::clone(&release_rx);
@@ -2053,8 +2060,8 @@ mod tests {
             })),
         );
         let old_reconcile = tokio::spawn({
-            let state = Arc::clone(&fixture.state);
-            async move { reconcile_feed_manifest(&state).await }
+            let host = fixture.state.feed_host();
+            async move { reconcile_feed_manifest(&host).await }
         });
         tokio::task::spawn_blocking(move || {
             entered_rx.recv_timeout(Duration::from_secs(1)).unwrap()
@@ -2085,7 +2092,10 @@ mod tests {
             Ok(result) => result.unwrap(),
             Err(_) => patch.await.unwrap(),
         };
-        crate::feeds::scheduler::set_before_reconcile_commit_hook(&fixture.state, None);
+        crate::feeds::scheduler::set_before_reconcile_commit_hook(
+            fixture.state.feed_runtime(),
+            None,
+        );
 
         assert!(
             patch_was_serialized,
@@ -2110,7 +2120,9 @@ mod tests {
         let new_manifest = "## New\n- [Fixture](https://fixture.example/rss)\n";
         let fixture = feed_test_app(valid_manifest).await;
         std::fs::write(fixture.state.vault.root().join("feeds.md"), old_manifest).unwrap();
-        reconcile_feed_manifest(&fixture.state).await.unwrap();
+        reconcile_feed_manifest(&fixture.state.feed_host())
+            .await
+            .unwrap();
         let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let release_rx = Arc::new(parking_lot::Mutex::new(release_rx));
@@ -2136,8 +2148,8 @@ mod tests {
 
         std::fs::write(fixture.state.vault.root().join("feeds.md"), new_manifest).unwrap();
         let mut newer_reconcile = tokio::spawn({
-            let state = Arc::clone(&fixture.state);
-            async move { reconcile_feed_manifest(&state).await }
+            let host = fixture.state.feed_host();
+            async move { reconcile_feed_manifest(&host).await }
         });
         let early_reconcile =
             tokio::time::timeout(Duration::from_millis(50), &mut newer_reconcile).await;

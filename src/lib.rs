@@ -730,10 +730,10 @@ pub async fn build_app_state_with_settings(
         );
     }
     let feed_runtime = if features.feeds {
-        Some(crate::feeds::runtime::FeedRuntime::open(
+        Some(Arc::new(crate::feeds::runtime::FeedRuntime::open(
             vault.root(),
             feed_settings,
-        )?)
+        )?))
     } else {
         None
     };
@@ -1205,8 +1205,8 @@ async fn serve_with_optional_feed_scheduler(
     if state.feed_runtime.is_none() {
         return serving.await;
     }
-    crate::feeds::scheduler::reconcile_feed_manifest(&state).await?;
-    let scheduler = crate::feeds::scheduler::spawn_scheduler(state);
+    crate::feeds::scheduler::reconcile_feed_manifest(&state.feed_host()).await?;
+    let scheduler = crate::feeds::scheduler::spawn_scheduler(state.feed_host());
     let serving_result = serving.await;
     let shutdown_result = scheduler.shutdown().await;
     match (serving_result, shutdown_result) {

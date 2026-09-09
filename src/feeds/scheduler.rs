@@ -7,12 +7,22 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 
-use crate::api::AppState;
-use crate::api::events::SyncNotification;
 use crate::feeds::fetch::fetch_subscription;
+use crate::feeds::runtime::FeedRuntime;
 
 const MANIFEST_PATH: &str = "feeds.md";
 const DUE_SWEEP_INTERVAL: StdDuration = StdDuration::from_secs(60);
+
+/// The scheduler's view of the server it runs inside: the feed runtime, the
+/// vault root, and a callback invoked after feed storage changes (manifest
+/// reconcile or fetch).
+#[derive(Clone)]
+pub struct FeedHost {
+    pub runtime: Arc<FeedRuntime>,
+    pub vault_root: PathBuf,
+    /// Called after feed storage changed (manifest reconcile or fetch).
+    pub on_change: Arc<dyn Fn() + Send + Sync>,
+}
 
 #[derive(Debug, Error)]
 pub enum SchedulerError {
@@ -34,15 +44,15 @@ pub enum SchedulerError {
 
 /// Reconcile one serialized raw-manifest snapshot into feed storage.
 ///
-/// Callers must hold `state.feed_runtime().feed_manifest_lock`. The returned
+/// Callers must hold `host.runtime.feed_manifest_lock`. The returned
 /// bytes are the exact snapshot that supplied diagnostics and the optional
 /// store commit.
 pub(crate) async fn reconcile_feed_manifest_bytes_locked(
-    state: &AppState,
+    host: &FeedHost,
     bytes: &[u8],
 ) -> Result<bool, SchedulerError> {
-    let runtime = state.feed_runtime();
-    let path = state.vault.root().join(MANIFEST_PATH);
+    let runtime = host.runtime.as_ref();
+    let path = host.vault_root.join(MANIFEST_PATH);
     let source = String::from_utf8(bytes.to_vec())
         .map_err(|source| SchedulerError::ManifestEncoding { path, source })?;
     let manifest = crate::feeds::manifest::parse(&source);
@@ -60,45 +70,42 @@ pub(crate) async fn reconcile_feed_manifest_bytes_locked(
 }
 
 pub(crate) async fn reconcile_feed_manifest_locked(
-    state: &AppState,
+    host: &FeedHost,
 ) -> Result<(Vec<u8>, bool), SchedulerError> {
-    let path = state.vault.root().join(MANIFEST_PATH);
+    let path = host.vault_root.join(MANIFEST_PATH);
     let bytes = match tokio::fs::read(&path).await {
         Ok(bytes) => bytes,
         Err(source) if source.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(source) => return Err(SchedulerError::ManifestIo { path, source }),
     };
-    let persisted = reconcile_feed_manifest_bytes_locked(state, &bytes).await?;
+    let persisted = reconcile_feed_manifest_bytes_locked(host, &bytes).await?;
     Ok((bytes, persisted))
 }
 
 /// Reconcile the raw root manifest while serializing the complete snapshot,
 /// parse, diagnostics, and store-commit operation with API mutations/lists.
-pub async fn reconcile_feed_manifest(state: &AppState) -> Result<(), SchedulerError> {
-    let _manifest_guard = state.feed_runtime().feed_manifest_lock.lock().await;
-    reconcile_feed_manifest_locked(state).await.map(|_| ())
+pub async fn reconcile_feed_manifest(host: &FeedHost) -> Result<(), SchedulerError> {
+    let _manifest_guard = host.runtime.feed_manifest_lock.lock().await;
+    reconcile_feed_manifest_locked(host).await.map(|_| ())
 }
 
 #[cfg(test)]
 pub(crate) fn set_before_reconcile_commit_hook(
-    state: &AppState,
+    runtime: &FeedRuntime,
     hook: Option<Arc<dyn Fn() + Send + Sync>>,
 ) {
-    *state
-        .feed_runtime()
-        .feed_before_reconcile_commit_hook
-        .lock() = hook;
+    *runtime.feed_before_reconcile_commit_hook.lock() = hook;
 }
 
-async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
-    let runtime = state.feed_runtime();
+async fn run_due_sweep(host: &FeedHost) -> Result<(), SchedulerError> {
+    let runtime = host.runtime.as_ref();
     let persisted_reconciliation = {
         let _manifest_guard = runtime.feed_manifest_lock.lock().await;
-        let (_, persisted) = reconcile_feed_manifest_locked(state).await?;
+        let (_, persisted) = reconcile_feed_manifest_locked(host).await?;
         persisted
     };
     if persisted_reconciliation {
-        let _ = state.change_tx.send(SyncNotification::FeedChanged);
+        (host.on_change)();
     }
     let now = Utc::now();
     let due = runtime.feeds.due_feeds(now).await?;
@@ -130,7 +137,7 @@ async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
         while let Some(result) = tasks.join_next().await {
             match result {
                 Ok(Ok(())) => {
-                    let _ = state.change_tx.send(SyncNotification::FeedChanged);
+                    (host.on_change)();
                 }
                 Ok(Err(error)) => tracing::warn!("feed fetch persistence failed: {error}"),
                 Err(error) => tracing::warn!("feed fetch task failed: {error}"),
@@ -149,11 +156,11 @@ async fn run_due_sweep(state: &Arc<AppState>) -> Result<(), SchedulerError> {
     Ok(())
 }
 
-async fn scheduler_loop(state: Arc<AppState>, mut shutdown: oneshot::Receiver<()>) {
+async fn scheduler_loop(host: FeedHost, mut shutdown: oneshot::Receiver<()>) {
     loop {
         tokio::select! {
             _ = &mut shutdown => break,
-            result = run_due_sweep(&state) => {
+            result = run_due_sweep(&host) => {
                 if let Err(error) = result {
                     tracing::warn!("feed scheduler sweep failed: {error}");
                 }
@@ -163,7 +170,7 @@ async fn scheduler_loop(state: Arc<AppState>, mut shutdown: oneshot::Receiver<()
         tokio::select! {
             _ = &mut shutdown => break,
             _ = tokio::time::sleep(DUE_SWEEP_INTERVAL) => {}
-            _ = state.feed_runtime().feed_refresh.notified() => {}
+            _ = host.runtime.feed_refresh.notified() => {}
         }
     }
 }
@@ -201,9 +208,9 @@ impl Drop for FeedSchedulerGuard {
     }
 }
 
-pub fn spawn_scheduler(state: Arc<AppState>) -> FeedSchedulerGuard {
+pub fn spawn_scheduler(host: FeedHost) -> FeedSchedulerGuard {
     let (shutdown, shutdown_rx) = oneshot::channel();
-    let task = tokio::spawn(scheduler_loop(state, shutdown_rx));
+    let task = tokio::spawn(scheduler_loop(host, shutdown_rx));
     FeedSchedulerGuard {
         shutdown: Some(shutdown),
         task: Some(task),
@@ -218,7 +225,7 @@ mod tests {
     use chrono::{TimeZone, Utc};
     use tempfile::TempDir;
 
-    use super::{reconcile_feed_manifest, run_due_sweep, spawn_scheduler};
+    use super::{FeedHost, reconcile_feed_manifest, run_due_sweep, spawn_scheduler};
     use crate::api::AppState;
     use crate::feeds::types::FetchOutcome;
     use crate::{FeatureFlags, FeedsSettings, build_app_state_with_settings};
@@ -240,7 +247,7 @@ mod tests {
         )
         .await
         .unwrap();
-        reconcile_feed_manifest(&state).await.unwrap();
+        reconcile_feed_manifest(&state.feed_host()).await.unwrap();
 
         // Keep the deterministic fixture feed outside the due set. A scheduler
         // bug must not turn this local contract test into a network request.
@@ -271,9 +278,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn reconcile_notifies_host_without_app_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        crate::vault::init::init_vault(tmp.path()).unwrap();
+        std::fs::write(
+            tmp.path().join("feeds.md"),
+            "+++\ntitle = \"Feeds\"\n+++\n\n- [Example](https://example.com/feed.xml)\n",
+        )
+        .unwrap();
+        let runtime = Arc::new(
+            crate::feeds::runtime::FeedRuntime::open(tmp.path(), &crate::FeedsSettings::default())
+                .unwrap(),
+        );
+        let changes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&changes);
+        let host = FeedHost {
+            runtime,
+            vault_root: tmp.path().to_path_buf(),
+            on_change: Arc::new(move || {
+                counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            }),
+        };
+        reconcile_feed_manifest(&host).await.unwrap();
+        assert_eq!(host.runtime.feeds.list_feeds().await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
     async fn refresh_notification_reconciles_before_the_next_timer_tick() {
         let fixture = scheduler_fixture("## Before\n- [Fixture](http://127.0.0.1:9/rss)\n").await;
-        let scheduler = spawn_scheduler(Arc::clone(&fixture.state));
+        let scheduler = spawn_scheduler(fixture.state.feed_host());
 
         // Allow the scheduler's immediate startup sweep to finish, then require
         // the notifier—not the long periodic interval—to observe this edit.
@@ -365,7 +398,7 @@ mod tests {
         .unwrap();
         let mut changes = fixture.state.change_tx.subscribe();
 
-        run_due_sweep(&fixture.state).await.unwrap();
+        run_due_sweep(&fixture.state.feed_host()).await.unwrap();
 
         let persisted = fixture
             .state
@@ -404,7 +437,7 @@ mod tests {
     #[tokio::test]
     async fn shutdown_cancels_and_joins_without_waiting_for_the_next_tick() {
         let fixture = scheduler_fixture("").await;
-        let scheduler = spawn_scheduler(Arc::clone(&fixture.state));
+        let scheduler = spawn_scheduler(fixture.state.feed_host());
 
         tokio::time::timeout(Duration::from_secs(1), scheduler.shutdown())
             .await

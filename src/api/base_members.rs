@@ -516,10 +516,10 @@ name = "All"
             mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
             sync: None,
             watcher_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            feed_runtime: Some(
+            feed_runtime: Some(Arc::new(
                 crate::feeds::runtime::FeedRuntime::open(&root, &crate::FeedsSettings::default())
                     .unwrap(),
-            ),
+            )),
             archive_ingest_lock: tokio::sync::Mutex::new(()),
             archive_view_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
             archive_resource_semaphore: Arc::new(tokio::sync::Semaphore::new(

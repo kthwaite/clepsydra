@@ -23,7 +23,9 @@ async fn feed_fixture() -> FeedFixture {
             .unwrap();
         })
         .build();
-    reconcile_feed_manifest(&api.state).await.unwrap();
+    reconcile_feed_manifest(&api.state.feed_host())
+        .await
+        .unwrap();
     let runtime = api
         .state
         .feed_runtime

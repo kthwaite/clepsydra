@@ -96,7 +96,7 @@ pub struct AppState {
     /// re-indexed path by path behind the closed mutation gate (D10).
     pub watcher_paused: Arc<std::sync::atomic::AtomicBool>,
     /// Resources allocated only when the Feeds feature is enabled.
-    pub feed_runtime: Option<crate::feeds::runtime::FeedRuntime>,
+    pub feed_runtime: Option<Arc<crate::feeds::runtime::FeedRuntime>>,
     /// Serializes archive ingest to prevent concurrent race conditions
     /// (duplicate URL check, path collision, file write/index atomicity).
     pub archive_ingest_lock: tokio::sync::Mutex<()>,
@@ -120,8 +120,25 @@ pub struct AppState {
 impl AppState {
     pub(crate) fn feed_runtime(&self) -> &crate::feeds::runtime::FeedRuntime {
         self.feed_runtime
-            .as_ref()
+            .as_deref()
             .expect("feed routes and scheduler are mounted only when the feed runtime exists")
+    }
+
+    /// The scheduler's view of this server: runtime, vault root and a
+    /// change notifier that fans out on the SSE bus.
+    pub fn feed_host(&self) -> crate::feeds::scheduler::FeedHost {
+        let change_tx = self.change_tx.clone();
+        crate::feeds::scheduler::FeedHost {
+            runtime: Arc::clone(
+                self.feed_runtime
+                    .as_ref()
+                    .expect("feed_host called with feeds disabled"),
+            ),
+            vault_root: self.vault.root().to_path_buf(),
+            on_change: Arc::new(move || {
+                let _ = change_tx.send(events::SyncNotification::FeedChanged);
+            }),
+        }
     }
 }
 
