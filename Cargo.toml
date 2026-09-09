@@ -17,7 +17,6 @@ base64 = { workspace = true }
 biblatex = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
-clep-client = { workspace = true }
 clep-config = { workspace = true }
 dirs = { workspace = true }
 feed-rs = { workspace = true }
@@ -60,8 +59,6 @@ utoipa = { workspace = true }
 utoipa-swagger-ui = { workspace = true }
 uuid = { workspace = true }
 walkdir = { workspace = true }
-rmcp = { workspace = true }
-schemars = { workspace = true }
 bytes = { workspace = true }
 http-body = { workspace = true }
 
@@ -86,6 +83,7 @@ edition = "2024"
 clep-test-support = { path = "crates/clep-test-support" }
 clep-config = { path = "crates/clep-config" }
 clep-client = { path = "crates/clep-client" }
+clep-mcp = { path = "crates/clep-mcp" }
 clepsydra = { path = "." }
 ammonia = "4"
 anstream = "1.0.0"

@@ -11,7 +11,7 @@ use serde::{Deserialize, Deserializer};
 use serde_json::Value;
 use uuid::Uuid;
 
-use crate::vault::code::{CodeLookup, resolve_prefix};
+use clepsydra::vault::code::{CodeLookup, resolve_prefix};
 
 /// Deserialize a tri-state PATCH field into `Option<Option<T>>`:
 ///

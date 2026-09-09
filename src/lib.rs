@@ -4,7 +4,6 @@ pub mod deeplink;
 pub mod doctor;
 pub mod feeds;
 pub mod lsp;
-pub mod mcp;
 pub mod sync_runtime;
 pub mod vault;
 
@@ -189,7 +188,10 @@ async fn resolve_bind_addr(
 
 /// Compose the full Axum router from application state. (Exact extraction of the
 /// inline router build formerly in run_server.)
-pub(crate) fn build_router(
+///
+/// Exposed for the `clep-mcp` crate's tests, which build a router directly
+/// against a seeded vault instead of going through `run_server`.
+pub fn build_router(
     state: Arc<AppState>,
     archive_body_limit: usize,
     archive_view_config: api::archive::ArchiveViewConfig,
@@ -779,7 +781,9 @@ impl StartupSync {
 /// (ADR 0001). Best-effort: failures are logged via tracing and never abort
 /// startup. Real `state.hooks` are forwarded so startup moves of academic work
 /// pages fire `AcademicMoveHook`, mirroring `move_page` and LSP `did_save`.
-pub(crate) async fn run_startup_reconcile(state: &AppState) -> usize {
+///
+/// Exposed for the `clep-mcp` crate's eval-fixture drift test.
+pub async fn run_startup_reconcile(state: &AppState) -> usize {
     let hooks = Arc::clone(&state.hooks);
     match state
         .index

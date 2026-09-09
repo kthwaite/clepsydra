@@ -7,7 +7,7 @@
 //! Organise tools (M3): assign, move, folders, and mutation preview.
 //! Every tool proxies the running HTTP server via [`ApiClient`] and returns
 //! the API's JSON as text content; failures come back as tool errors carrying
-//! the actionable messages built in `client.rs`.
+//! the actionable messages built in `clep_client::client`.
 
 use std::sync::Arc;
 
@@ -21,8 +21,8 @@ use super::tasking::{
     BoardKind, TaskRef, classify_ref, deserialize_tri_state, filter_board_project, find_board_id,
     insert_tri_state, page_meta_id, resolve_project_patch,
 };
-use crate::vault::kind::Kind;
 use clep_client::client::{ApiClient, encode_vault_path};
+use clepsydra::vault::kind::Kind;
 
 /// The `/pages/{path}` endpoint URL for a vault-relative path.
 fn pages_url(path: &str) -> String {
@@ -750,10 +750,10 @@ impl VaultMcpServer {
             params.folder.as_deref(),
         )?;
 
-        let filename = crate::vault::page_filename::page_filename(
+        let filename = clepsydra::vault::page_filename::page_filename(
             chrono::Utc::now(),
             title,
-            &crate::vault::block_id::generate_short_id(),
+            &clepsydra::vault::block_id::generate_short_id(),
         );
         let path = format!("{folder}/{filename}");
 
@@ -2001,7 +2001,7 @@ mod tests {
     async fn serve_seeded_vault() -> (VaultMcpServer, tempfile::TempDir) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clepsydra::vault::init::init_vault(&root).unwrap();
 
         let notes = root.join("notes");
         std::fs::create_dir_all(&notes).unwrap();
@@ -2016,11 +2016,11 @@ mod tests {
         )
         .unwrap();
 
-        let state = crate::build_app_state(&root).await.unwrap();
-        let app = crate::build_router(
+        let state = clepsydra::build_app_state(&root).await.unwrap();
+        let app = clepsydra::build_router(
             state,
             1024 * 1024,
-            crate::api::archive::ArchiveViewConfig::default(),
+            clepsydra::api::archive::ArchiveViewConfig::default(),
             true,
         );
 
@@ -2342,7 +2342,7 @@ mod tests {
         assert!(path.starts_with("notes/"), "unexpected path: {path}");
         let filename = path.rsplit('/').next().unwrap();
         assert!(
-            crate::vault::path::is_canonical_page_filename(filename),
+            clepsydra::vault::path::is_canonical_page_filename(filename),
             "filename not canonical: {filename}"
         );
         assert_eq!(value["meta"]["title"], "Fresh Note");
@@ -3595,7 +3595,10 @@ mod tests {
                 .await,
         );
         let code = value["code"].as_str().unwrap().to_string();
-        assert!(crate::vault::code::is_valid_code(&code), "{code}: {value}");
+        assert!(
+            clepsydra::vault::code::is_valid_code(&code),
+            "{code}: {value}"
+        );
         assert_eq!(value["path"], format!("tasks/xxii/{code}.md"));
         assert_eq!(value["status"], "INTAKE");
         assert_eq!(value["priority"], "P2");
@@ -3798,7 +3801,7 @@ mod tests {
         );
         let first_code = first["code"].as_str().unwrap().to_string();
         assert!(
-            first_code.starts_with("S-") && crate::vault::code::is_valid_code(&first_code),
+            first_code.starts_with("S-") && clepsydra::vault::code::is_valid_code(&first_code),
             "{first_code}"
         );
         assert_eq!(first["state"], "PLANNED");
@@ -3814,7 +3817,7 @@ mod tests {
         );
         let second_code = second["code"].as_str().unwrap().to_string();
         assert!(
-            second_code.starts_with("S-") && crate::vault::code::is_valid_code(&second_code),
+            second_code.starts_with("S-") && clepsydra::vault::code::is_valid_code(&second_code),
             "{second_code}"
         );
         assert_ne!(first_code, second_code, "codes must be distinct");

@@ -40,7 +40,7 @@ mod tests {
     #[tokio::test]
     async fn eval_fixture_vault_is_drift_free() {
         let fixture =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/mcp_evals/vault");
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/mcp_evals/vault");
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
         copy_tree(&fixture, &root);
@@ -48,8 +48,8 @@ mod tests {
         let paths_before = markdown_paths(&root);
         assert_eq!(paths_before.len(), 10, "fixture should hold 10 pages");
 
-        let state = crate::build_app_state(&root).await.unwrap();
-        crate::run_startup_reconcile(&state).await;
+        let state = clepsydra::build_app_state(&root).await.unwrap();
+        clepsydra::run_startup_reconcile(&state).await;
 
         assert_eq!(
             markdown_paths(&root),

@@ -478,7 +478,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             Ok(0)
         }
         Commands::Mcp { allow_remote } => {
-            clepsydra::mcp::run_mcp(allow_remote).await?;
+            clep_mcp::run_mcp(allow_remote).await?;
             Ok(0)
         }
         Commands::OpenUrl { url, print } => {
