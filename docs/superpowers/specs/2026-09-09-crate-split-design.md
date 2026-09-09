@@ -1,7 +1,7 @@
 # Workspace crate split — design
 
 **Date:** 2026-09-09
-**Status:** decided (four open questions resolved by Kit, see §6)
+**Status:** Phase 0 landed on branch feature/crate-split-phase0 (HEAD ff39d564 + this commit); Phases 1–3 pending
 **Scope:** `src/` only. `ui/` and `extension/` are untouched.
 
 ## 1. Why
