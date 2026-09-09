@@ -13,8 +13,8 @@ use std::path::Path;
 use chrono::{DateTime, Utc};
 
 use super::conflict_copy::is_conflict_copy_name;
-use crate::vault::index::extract_journal_date;
 use crate::vault::page::{PageMeta, parse_frontmatter, write_page_content};
+use crate::vault::page_filename::extract_journal_date;
 use crate::vault::rewriter::rewrite_links_in_content;
 
 /// The two top-level folders whose pages carry a path-derived journal date.

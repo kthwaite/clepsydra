@@ -21,6 +21,7 @@ use super::derivers::properties::PropertyDeriver;
 use super::derivers::tags::TagDeriver;
 use super::link::{Link, extract_links, extract_property_refs};
 use super::page::{PageMeta, parse_or_repair_frontmatter, write_page_content};
+use super::page_filename::extract_journal_date;
 use super::path::VaultPath;
 use super::reference_issues::{ReferenceIssueFilter, ReferenceIssuePage};
 use super::rubbish::{RubbishListEntry, RubbishManifest, RubbishStore};
@@ -2175,42 +2176,6 @@ fn migrate_links_fk(conn: &Connection) -> Result<(), IndexError> {
     }
 
     Ok(())
-}
-
-/// Extract a journal date from a `journals/` or `ai-journals/` path, in
-/// either the legacy `<prefix>/YYYY-MM-DD.md` or the canonical
-/// `<prefix>/<yyyymmdd>.YYYY-MM-DD.<shortid>.md` shape.
-///
-/// Returns `Some("YYYY-MM-DD")` if the path matches, `None` otherwise.
-/// Only matches the top-level prefix — e.g. `other/journals/2026-02-17.md`
-/// is rejected.
-pub(crate) fn extract_journal_date(path: &str) -> Option<String> {
-    let filename = path
-        .strip_prefix("journals/")
-        .or_else(|| path.strip_prefix("ai-journals/"))?;
-    let stem = filename.strip_suffix(".md").unwrap_or(filename);
-    let candidate = if stem.len() == 10 {
-        stem
-    } else if crate::vault::path::is_canonical_page_filename(filename) {
-        stem.split('.').nth(1)?
-    } else {
-        return None;
-    };
-
-    // Validate YYYY-MM-DD shape (exactly 10 chars, correct punctuation, all digits).
-    if candidate.len() != 10 {
-        return None;
-    }
-    let bytes = candidate.as_bytes();
-    if bytes[4] != b'-' || bytes[7] != b'-' {
-        return None;
-    }
-    for &i in &[0, 1, 2, 3, 5, 6, 8, 9] {
-        if !bytes[i].is_ascii_digit() {
-            return None;
-        }
-    }
-    Some(candidate.to_string())
 }
 
 // ---------------------------------------------------------------------------
