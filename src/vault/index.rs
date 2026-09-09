@@ -3725,6 +3725,51 @@ mod linkable_epoch_tests {
         );
     }
 
+    /// A vault whose config predates the `attendees` default still collects
+    /// the meeting → person backlinks: the relation is built in, not opted
+    /// into (see `base::BUILTIN_RELATION_PROPERTIES`).
+    #[test]
+    fn legacy_config_still_links_attendees() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join(".clepsydra")).unwrap();
+        fs::write(
+            tmp.path().join(".clepsydra/config.toml"),
+            "[vault]\nlinkable_properties = [\"tags\", \"aliases\"]\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("kickoff.md"),
+            "+++\nid = \"0190f8a0-0000-7000-8000-0000000000e2\"\ntitle = \"Kickoff\"\ntype = \"MEETING\"\nattendees = [\"[[Ada Lovelace]]\"]\n+++\nbody\n",
+        )
+        .unwrap();
+        fs::write(
+            tmp.path().join("ada-lovelace.md"),
+            "+++\nid = \"0190f8a0-0000-7000-8000-0000000000e3\"\ntitle = \"Ada Lovelace\"\ntype = \"PERSON\"\n+++\nbody\n",
+        )
+        .unwrap();
+
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+        assert!(
+            !vault
+                .config()
+                .vault
+                .linkable_properties
+                .iter()
+                .any(|k| k == "attendees"),
+            "the fixture config must be the legacy one"
+        );
+        index.build(&vault).unwrap();
+        index.resolve_links().unwrap();
+
+        let backlinks = index
+            .backlinks_with_context(&vault, &VaultPath::new("ada-lovelace.md").unwrap(), 200)
+            .unwrap();
+        assert_eq!(backlinks.len(), 1, "the meeting backlinks the person page");
+        assert_eq!(backlinks[0].source_path, "kickoff.md");
+        assert_eq!(backlinks[0].kind, "property_ref");
+    }
+
     #[test]
     fn derivation_meta_created_and_epoch_written_by_build() {
         let (_tmp, vault, mut index) = setup(false);

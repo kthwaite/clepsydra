@@ -1186,13 +1186,28 @@ impl BaseRegistry {
     }
 }
 
-/// The effective linkable-property set: `config ∪ relation-typed keys across
-/// all bases`, deduped with config order first.
+/// Property keys the server itself validates as relations, and therefore
+/// indexes as links whether or not a config or a base declares them.
+pub const BUILTIN_RELATION_PROPERTIES: &[&str] = &[crate::vault::attendance::ATTENDEES_KEY];
+
+/// The effective linkable-property set: `config ∪ built-in relations ∪
+/// relation-typed keys across all bases`, deduped with config order first.
+///
+/// The built-in relations are linkable whatever the config says. `attendees`
+/// is one: the server already refuses any value that is not a wikilink list
+/// (`vault::attendance`), so it is a relation by construction rather than by
+/// declaration, and a config written before the key existed would otherwise
+/// drop every attendee backlink without saying so.
 pub fn effective_linkable_properties(
     config_linkable: &[String],
     registry: &BaseRegistry,
 ) -> Vec<String> {
     let mut effective = config_linkable.to_vec();
+    for key in BUILTIN_RELATION_PROPERTIES {
+        if !effective.iter().any(|k| k == key) {
+            effective.push((*key).to_string());
+        }
+    }
     for key in registry.relation_property_keys() {
         if !effective.contains(&key) {
             effective.push(key);

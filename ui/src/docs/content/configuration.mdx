@@ -325,8 +325,16 @@ Path:
 | `attachment_folder` | string | `_attachments` | Attachment root under vault |
 | `excluded_patterns` | string[] | see below | Glob/prefix excludes |
 | `default_page_folder` | string | `""` | Used by `clep new` |
-| `linkable_properties` | string[] | `["tags", "aliases"]` | Frontmatter fields treated as refs |
+| `linkable_properties` | string[] | `["tags", "aliases", "link", "attendees"]` | Frontmatter fields treated as refs |
 | `disambiguation_strategy` | enum | `shortest_path` | `shortest_path`, `closest_directory`, `most_recent` |
+
+`linkable_properties` names the frontmatter fields whose wikilink values become
+links, so their targets collect the backlink. The effective set is the
+configured list plus every `relation`-typed property any Base declares, plus
+`attendees` — the MEETING attendee relation is always linkable, whatever the
+list says, since the server already refuses any other shape for it. A vault
+whose config predates a key therefore keeps its backlinks; changing the
+effective set re-derives every page's links on the next index build.
 
 Default `excluded_patterns`:
 
