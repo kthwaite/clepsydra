@@ -470,7 +470,11 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
             Ok(report.exit_code(strict))
         }
         Commands::Serve { tls, port } => {
-            run_server(ServeOverrides { tls, port }).await?;
+            run_server(
+                ServeOverrides { tls, port },
+                Some(clep_frontend_assets::frontend_router()),
+            )
+            .await?;
             Ok(0)
         }
         Commands::Lsp => {

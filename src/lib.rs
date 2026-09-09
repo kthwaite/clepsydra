@@ -191,11 +191,19 @@ async fn resolve_bind_addr(
 ///
 /// Exposed for the `clep-mcp` crate's tests, which build a router directly
 /// against a seeded vault instead of going through `run_server`.
+///
+/// `frontend` is the embedded-UI router, merged in when present and
+/// `dev_mode` is false. It is supplied by the caller (ultimately the `clep`
+/// binary) rather than built here: this lib crate must never link
+/// `clep-frontend-assets` directly, or every `ui/dist` change would force a
+/// recompile of the whole `clepsydra` lib instead of just the small assets
+/// crate and the binary.
 pub fn build_router(
     state: Arc<AppState>,
     archive_body_limit: usize,
     archive_view_config: api::archive::ArchiveViewConfig,
     dev_mode: bool,
+    frontend: Option<Router<Arc<AppState>>>,
 ) -> Router {
     let features = state.features;
     let mut app = Router::new()
@@ -213,8 +221,8 @@ pub fn build_router(
             "/api",
             Router::new().fallback(|| async { axum::http::StatusCode::NOT_FOUND }),
         );
-    if !dev_mode {
-        app = app.merge(clep_frontend_assets::frontend_router());
+    if !dev_mode && let Some(frontend) = frontend {
+        app = app.merge(frontend);
     }
     app.with_state(state)
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))
@@ -829,7 +837,15 @@ async fn serve_with_optional_feed_scheduler(
     }
 }
 
-pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::error::Error>> {
+/// `frontend` is the embedded-UI router, threaded through to [`build_router`].
+/// The binary passes `Some(clep_frontend_assets::frontend_router())`; tests
+/// and other callers that don't need the embedded UI pass `None`. Keeping the
+/// dependency on `clep-frontend-assets` in the binary (not this lib) means a
+/// `ui/dist` change only recompiles the assets crate and the binary.
+pub async fn run_server(
+    overrides: ServeOverrides,
+    frontend: Option<Router<Arc<AppState>>>,
+) -> Result<(), Box<dyn std::error::Error>> {
     init_logging();
     let (state, settings) = build_server_state(overrides).await?;
     let archive_view_config =
@@ -889,6 +905,7 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
         archive_body_limit,
         archive_view_config,
         settings.server.dev_mode,
+        frontend,
     );
     let sync_tasks = state
         .sync
@@ -1133,6 +1150,7 @@ mod router_tests {
             1024,
             api::archive::ArchiveViewConfig::default(),
             true,
+            None,
         );
     }
 
@@ -1144,7 +1162,23 @@ mod router_tests {
             1024,
             api::archive::ArchiveViewConfig::default(),
             false,
+            None,
         );
+    }
+
+    /// Stands in for `clep_frontend_assets::frontend_router()` in this lib's
+    /// own tests: this crate must not depend on `clep-frontend-assets` (see
+    /// `build_router`'s doc comment), so this fakes just enough of its
+    /// contract — an SPA fallback that serves `text/html` for any unmatched
+    /// route — to exercise the "/api" 404-before-fallback ordering below.
+    fn fake_frontend_router() -> Router<Arc<AppState>> {
+        Router::new().fallback(|| async {
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                "fake spa index",
+            )
+        })
     }
 
     #[tokio::test]
@@ -1159,6 +1193,7 @@ mod router_tests {
             1024,
             api::archive::ArchiveViewConfig::default(),
             false,
+            Some(fake_frontend_router()),
         );
 
         for uri in ["/api/vault/academic/works", "/api/vault/feeds"] {

@@ -2022,6 +2022,7 @@ mod tests {
             1024 * 1024,
             clepsydra::api::archive::ArchiveViewConfig::default(),
             true,
+            None,
         );
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
