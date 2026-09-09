@@ -83,6 +83,8 @@ pub struct AppState {
     pub hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostMoveHook>>>,
     /// Hooks for post-delete operations, shared across all API handlers.
     pub delete_hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostDeleteHook>>>,
+    /// Hooks invoked while a rubbish item is being purged, shared across all API handlers.
+    pub purge_hooks: Arc<Vec<Box<dyn crate::vault::hooks::RubbishPurgeHook>>>,
     /// Mutation coordinator for serializing vault mutations, shared across all API handlers.
     pub mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator,
     /// Git-backed sync runtime, present only when the vault is

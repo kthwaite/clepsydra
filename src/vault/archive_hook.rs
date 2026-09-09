@@ -1,5 +1,5 @@
 use crate::vault::cas::{CasError, ContentStore, ReleaseOutcome};
-use crate::vault::hooks::PostDeleteHook;
+use crate::vault::hooks::{PostDeleteHook, RubbishPurgeHook};
 use crate::vault::page::PageMeta;
 use crate::vault::path::VaultPath;
 use std::collections::{BTreeMap, BTreeSet};
@@ -63,7 +63,7 @@ pub(crate) fn captured_blob_types(meta: &PageMeta) -> BTreeMap<String, String> {
 /// Release only captured-archive references for one rubbish lifecycle item.
 /// The original page identity is carried through this boundary for truthful
 /// cleanup diagnostics; the item ID supplies durable idempotency.
-pub(crate) fn release_rubbish_archive_refs_for_purge(
+fn release_rubbish_archive_refs_for_purge(
     cas: &parking_lot::Mutex<ContentStore>,
     item_id: Uuid,
     original_path: &VaultPath,
@@ -110,6 +110,30 @@ impl PostDeleteHook for ArchiveDeleteHook {
             )
             .into())
         }
+    }
+}
+
+impl RubbishPurgeHook for ArchiveDeleteHook {
+    fn on_rubbish_purge(
+        &self,
+        item_id: Uuid,
+        original_path: &VaultPath,
+        page_id: &Uuid,
+        meta: &PageMeta,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        release_rubbish_archive_refs_for_purge(&self.cas, item_id, original_path, page_id, meta)
+            .map(|_| ())
+            .map_err(Into::into)
+    }
+
+    fn purge_committed(
+        &self,
+        item_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        self.cas
+            .lock()
+            .rubbish_archive_refs_released(item_id)
+            .map_err(Into::into)
     }
 }
 

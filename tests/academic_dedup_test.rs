@@ -43,6 +43,13 @@ fn setup_server() -> (TestServer, TempDir) {
 
     let cas_path = tmp.path().join("cas");
     let cas = ContentStore::open(&cas_path).unwrap();
+    let cas = Arc::new(parking_lot::Mutex::new(cas));
+    let purge_hooks: Arc<Vec<Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>>> =
+        Arc::new(vec![Box::new(
+            clepsydra::vault::archive_hook::ArchiveDeleteHook {
+                cas: Arc::clone(&cas),
+            },
+        )]);
 
     let index_handle = IndexHandle::spawn(index, vault.clone());
 
@@ -54,11 +61,12 @@ fn setup_server() -> (TestServer, TempDir) {
         vault,
         rubbish,
         index: index_handle,
-        cas: Arc::new(parking_lot::Mutex::new(cas)),
+        cas,
         warnings: parking_lot::Mutex::new(Vec::new()),
         change_tx,
         hooks: production_hooks(),
         delete_hooks: Arc::new(vec![]),
+        purge_hooks,
         mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(),
         sync: None,
         watcher_paused: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),

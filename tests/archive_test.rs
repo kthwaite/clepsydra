@@ -231,7 +231,7 @@ async fn purge_rubbish_releases_unique_captured_refs_and_leaves_ordinary_attachm
         .purge_rubbish(
             &state.vault,
             &state.index,
-            Arc::clone(&state.cas),
+            Arc::clone(&state.purge_hooks),
             &item_id.to_string(),
         )
         .await

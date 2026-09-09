@@ -749,6 +749,11 @@ pub async fn build_app_state_with_settings(
             cas: Arc::clone(&cas_arc),
         })]);
 
+    let purge_hooks: Arc<Vec<Box<dyn vault::hooks::RubbishPurgeHook>>> =
+        Arc::new(vec![Box::new(vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas_arc),
+        })]);
+
     let bcl = vault::bcl::load_or_seed(vault.root());
     let location = vault::location::load_or_seed(vault.root());
 
@@ -767,6 +772,7 @@ pub async fn build_app_state_with_settings(
         change_tx: change_broadcast_tx,
         hooks,
         delete_hooks,
+        purge_hooks,
         mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
         sync,
         watcher_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),

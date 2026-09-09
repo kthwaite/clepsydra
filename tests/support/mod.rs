@@ -135,6 +135,12 @@ impl ApiFixtureBuilder {
         let delete_hooks = self
             .delete_hook_factory
             .map_or_else(Vec::new, |factory| factory(&cas));
+        let purge_hooks: Arc<Vec<Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>>> =
+            Arc::new(vec![Box::new(
+                clepsydra::vault::archive_hook::ArchiveDeleteHook {
+                    cas: Arc::clone(&cas),
+                },
+            )]);
         let index = IndexHandle::spawn(index, vault.clone());
         let (change_tx, _) = broadcast::channel(64);
         let state = Arc::new(AppState {
@@ -149,6 +155,7 @@ impl ApiFixtureBuilder {
             change_tx,
             hooks: self.hooks,
             delete_hooks: Arc::new(delete_hooks),
+            purge_hooks,
             mutation_coordinator: clepsydra::vault::mutation_coordinator::MutationCoordinator::new(
             ),
             sync: None,

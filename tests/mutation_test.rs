@@ -981,12 +981,17 @@ async fn purge_rubbish_requires_an_opaque_uuid_and_removes_only_that_item_and_ca
         ContentStore::open(&tmp.path().join("cas")).unwrap(),
     ));
     let coordinator = MutationCoordinator::new();
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
 
     let invalid = coordinator
         .purge_rubbish(
             &vault,
             &index,
-            Arc::clone(&cas),
+            Arc::clone(&purge_hooks),
             manifest.original_path.as_str(),
         )
         .await
@@ -1018,7 +1023,7 @@ async fn purge_rubbish_requires_an_opaque_uuid_and_removes_only_that_item_and_ca
         .purge_rubbish(
             &vault,
             &index,
-            Arc::clone(&cas),
+            Arc::clone(&purge_hooks),
             &manifest.item_id.to_string(),
         )
         .await
@@ -1073,6 +1078,11 @@ async fn purge_rubbish_cleanup_failure_retains_exact_item_bytes_and_retries_safe
         ContentStore::open(&cas_root).unwrap(),
     ));
     let coordinator = MutationCoordinator::new();
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
     let store = RubbishStore::for_vault(vault.root());
     let manifest_before = fs::read(
         vault
@@ -1087,7 +1097,7 @@ async fn purge_rubbish_cleanup_failure_retains_exact_item_bytes_and_retries_safe
         .purge_rubbish(
             &vault,
             &index,
-            Arc::clone(&cas),
+            Arc::clone(&purge_hooks),
             &manifest.item_id.to_string(),
         )
         .await
@@ -1136,7 +1146,7 @@ async fn purge_rubbish_cleanup_failure_retains_exact_item_bytes_and_retries_safe
         .purge_rubbish(
             &vault,
             &index,
-            Arc::clone(&cas),
+            Arc::clone(&purge_hooks),
             &manifest.item_id.to_string(),
         )
         .await
@@ -1171,12 +1181,17 @@ async fn purge_rubbish_rejects_stored_page_identity_drift_before_cas_cleanup() {
     let index = IndexHandle::spawn(raw_index, vault.clone());
     let cas = Arc::new(parking_lot::Mutex::new(cas_store));
     let coordinator = MutationCoordinator::new();
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
 
     let error = coordinator
         .purge_rubbish(
             &vault,
             &index,
-            Arc::clone(&cas),
+            Arc::clone(&purge_hooks),
             &manifest.item_id.to_string(),
         )
         .await
@@ -1241,13 +1256,18 @@ async fn purge_rubbish_retries_after_completed_ledger_without_a_second_decrement
     let index = IndexHandle::spawn(raw_index, vault.clone());
     let cas = Arc::new(parking_lot::Mutex::new(cas_store));
     let coordinator = MutationCoordinator::new();
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
     let store = RubbishStore::for_vault(vault.root());
 
     let error = coordinator
         .purge_rubbish(
             &vault,
             &index,
-            Arc::clone(&cas),
+            Arc::clone(&purge_hooks),
             &manifest.item_id.to_string(),
         )
         .await
@@ -1280,7 +1300,7 @@ async fn purge_rubbish_retries_after_completed_ledger_without_a_second_decrement
         .purge_rubbish(
             &vault,
             &index,
-            Arc::clone(&cas),
+            Arc::clone(&purge_hooks),
             &manifest.item_id.to_string(),
         )
         .await
@@ -1337,10 +1357,20 @@ async fn purge_rubbish_rejects_malformed_and_future_items_without_hiding_their_e
         ContentStore::open(&tmp.path().join("cas")).unwrap(),
     ));
     let coordinator = MutationCoordinator::new();
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
 
     for item_id in [malformed_id, future.item_id] {
         let error = coordinator
-            .purge_rubbish(&vault, &index, Arc::clone(&cas), &item_id.to_string())
+            .purge_rubbish(
+                &vault,
+                &index,
+                Arc::clone(&purge_hooks),
+                &item_id.to_string(),
+            )
             .await
             .unwrap_err();
         assert!(matches!(
@@ -1412,9 +1442,14 @@ async fn empty_rubbish_snapshots_valid_items_newest_first_and_continues_truthful
         ContentStore::open(&tmp.path().join("cas")).unwrap(),
     ));
     let coordinator = MutationCoordinator::new();
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
 
     let result: EmptyRubbishResult = coordinator
-        .empty_rubbish(&vault, &index, Arc::clone(&cas))
+        .empty_rubbish(&vault, &index, Arc::clone(&purge_hooks))
         .await
         .unwrap();
 
@@ -1463,6 +1498,130 @@ async fn empty_rubbish_snapshots_valid_items_newest_first_and_continues_truthful
     assert_eq!(catalog[0], None);
     assert!(catalog[1].is_some());
     assert_eq!(catalog[2], None);
+}
+
+// ---------------------------------------------------------------------------
+// RubbishPurgeHook seam
+// ---------------------------------------------------------------------------
+
+/// A purge hook that records what the coordinator told it and can be
+/// switched into the "already committed" state.
+#[derive(Default)]
+struct RecordingPurgeHook {
+    purged: parking_lot::Mutex<Vec<(Uuid, String, Uuid)>>,
+    committed: std::sync::atomic::AtomicBool,
+}
+
+impl clepsydra::vault::hooks::RubbishPurgeHook for RecordingPurgeHook {
+    fn on_rubbish_purge(
+        &self,
+        item_id: Uuid,
+        original_path: &VaultPath,
+        page_id: &Uuid,
+        _meta: &PageMeta,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.purged
+            .lock()
+            .push((item_id, original_path.as_str().to_string(), *page_id));
+        Ok(())
+    }
+
+    fn purge_committed(
+        &self,
+        _item_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        Ok(self.committed.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+/// `Box<dyn RubbishPurgeHook>` needs an owned value; share the recorder by Arc.
+struct SharedHook(Arc<RecordingPurgeHook>);
+impl clepsydra::vault::hooks::RubbishPurgeHook for SharedHook {
+    fn on_rubbish_purge(
+        &self,
+        i: Uuid,
+        p: &VaultPath,
+        g: &Uuid,
+        m: &PageMeta,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.0.on_rubbish_purge(i, p, g, m)
+    }
+    fn purge_committed(&self, i: Uuid) -> Result<bool, Box<dyn std::error::Error + Send + Sync>> {
+        self.0.purge_committed(i)
+    }
+}
+
+#[tokio::test]
+async fn purge_invokes_registered_hook_with_item_identity() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000401",
+        "019fd000-0000-7000-8000-000000000402",
+        "notes/hooked.md",
+        "2026-08-14T15:00:00Z",
+    );
+    let bytes = format!(
+        "+++\nid = \"{}\"\ntitle = \"Hooked\"\n+++\nStored bytes.\n",
+        manifest.page_id
+    );
+    publish_purge_item(&vault, &raw_index, &manifest, bytes.as_bytes());
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+
+    let hook = Arc::new(RecordingPurgeHook::default());
+    let hooks: Arc<Vec<Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>>> =
+        Arc::new(vec![Box::new(SharedHook(Arc::clone(&hook)))]);
+    coordinator
+        .purge_rubbish(&vault, &index, hooks, &manifest.item_id.to_string())
+        .await
+        .unwrap();
+    let purged = hook.purged.lock();
+    assert_eq!(purged.len(), 1);
+    assert_eq!(purged[0].0, manifest.item_id);
+    assert_eq!(purged[0].1, manifest.original_path.as_str());
+    assert_eq!(purged[0].2, manifest.page_id);
+}
+
+#[tokio::test]
+async fn restore_refuses_when_a_hook_reports_purge_committed() {
+    let (_tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000411",
+        "019fd000-0000-7000-8000-000000000412",
+        "notes/committed.md",
+        "2026-08-14T15:00:00Z",
+    );
+    let bytes = format!(
+        "+++\nid = \"{}\"\ntitle = \"Committed\"\n+++\nStored bytes.\n",
+        manifest.page_id
+    );
+    publish_purge_item(&vault, &raw_index, &manifest, bytes.as_bytes());
+    let item = RubbishStore::for_vault(vault.root())
+        .read_item(&manifest.item_id.to_string())
+        .unwrap();
+    let command = MutationPlanner::new(&vault, &raw_index)
+        .plan(&MutationOp::RestorePage { item })
+        .unwrap()
+        .into_batch_command(&vault)
+        .unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    let move_hooks: Arc<Vec<Box<dyn PostMoveHook>>> = Arc::new(Vec::new());
+
+    let hook = Arc::new(RecordingPurgeHook::default());
+    hook.committed
+        .store(true, std::sync::atomic::Ordering::SeqCst);
+    let hooks: Arc<Vec<Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>>> =
+        Arc::new(vec![Box::new(SharedHook(hook))]);
+    let err = coordinator
+        .restore_rubbish(&vault, &index, hooks, move_hooks, command, Arc::new(|_| {}))
+        .await
+        .unwrap_err();
+    assert!(matches!(err, MutationError::Conflict(_)));
 }
 
 // ---------------------------------------------------------------------------

@@ -512,6 +512,7 @@ name = "All"
             change_tx,
             hooks: Arc::new(Vec::new()),
             delete_hooks: Arc::new(Vec::new()),
+            purge_hooks: Arc::new(Vec::new()),
             mutation_coordinator: crate::vault::mutation_coordinator::MutationCoordinator::new(),
             sync: None,
             watcher_paused: Arc::new(std::sync::atomic::AtomicBool::new(false)),

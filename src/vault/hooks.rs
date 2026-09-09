@@ -30,3 +30,25 @@ pub trait PostDeleteHook: Send + Sync {
         meta: &crate::vault::page::PageMeta,
     ) -> Result<(), Box<dyn std::error::Error>>;
 }
+
+/// Hook invoked while a rubbish item is being purged, before its files are
+/// removed. The item ID supplies idempotency; the page identity is carried
+/// for truthful diagnostics.
+pub trait RubbishPurgeHook: Send + Sync {
+    /// Release whatever this hook holds on behalf of the item (captured
+    /// archive references, for instance). Must be idempotent per `item_id`.
+    fn on_rubbish_purge(
+        &self,
+        item_id: Uuid,
+        original_path: &VaultPath,
+        page_id: &Uuid,
+        meta: &crate::vault::page::PageMeta,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>>;
+
+    /// Whether an earlier purge of `item_id` already released this hook's
+    /// resources, in which case the item can no longer be restored.
+    fn purge_committed(
+        &self,
+        item_id: Uuid,
+    ) -> Result<bool, Box<dyn std::error::Error + Send + Sync>>;
+}

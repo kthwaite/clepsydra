@@ -11,14 +11,12 @@ use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 use utoipa::ToSchema;
 
 use super::Vault;
-use super::archive_hook::release_rubbish_archive_refs_for_purge;
 use super::atomic_file::{
     AtomicPublicationError, ConditionalPublicationError, atomic_create, atomic_replace,
     atomic_replace_if_unchanged,
 };
 use super::batch_mutation::{self, BatchMutationCommand, BatchMutationError};
-use super::cas::{CasError, ContentStore};
-use super::hooks::PostMoveHook;
+use super::hooks::{PostMoveHook, RubbishPurgeHook};
 use super::index::IndexError;
 use super::index_handle::IndexHandle;
 use super::index_policy::{IndexMutation, IndexPolicyError};
@@ -232,7 +230,7 @@ pub enum MutationError {
     RubbishCleanup {
         item_id: uuid::Uuid,
         #[source]
-        source: CasError,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
     #[error("rubbish catalog removal failed for item {item_id}: {source}")]
     RubbishCatalog {
@@ -904,13 +902,13 @@ impl MutationCoordinator {
         &self,
         vault: &Vault,
         index: &IndexHandle,
-        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        purge_hooks: Arc<Vec<Box<dyn RubbishPurgeHook>>>,
         item_id: &str,
     ) -> Result<PurgeRubbishResult, MutationError> {
         let parsed_item_id = uuid::Uuid::parse_str(item_id).map_err(|source| {
             MutationError::InvalidInput(format!("invalid rubbish item ID {item_id:?}: {source}"))
         })?;
-        self.purge_rubbish_item(vault, index, cas, parsed_item_id)
+        self.purge_rubbish_item(vault, index, purge_hooks, parsed_item_id)
             .await
     }
 
@@ -918,7 +916,7 @@ impl MutationCoordinator {
         &self,
         vault: &Vault,
         index: &IndexHandle,
-        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        purge_hooks: Arc<Vec<Box<dyn RubbishPurgeHook>>>,
         item_id: uuid::Uuid,
     ) -> Result<PurgeRubbishResult, MutationError> {
         let guard = self.lock_resources(&[], &[item_id]).await;
@@ -938,16 +936,17 @@ impl MutationCoordinator {
             return Err(MutationError::RubbishItemNotFound(item_id));
         };
 
-        let cleanup_cas = Arc::clone(&cas);
+        let hooks = Arc::clone(&purge_hooks);
         let (guard, context) = run_blocking_fs(root.clone(), guard, move || {
-            release_rubbish_archive_refs_for_purge(
-                &cleanup_cas,
-                item_id,
-                &context.original_path,
-                &context.item.manifest.page_id,
-                &context.meta,
-            )
-            .map_err(|source| MutationError::RubbishCleanup { item_id, source })?;
+            for hook in hooks.iter() {
+                hook.on_rubbish_purge(
+                    item_id,
+                    &context.original_path,
+                    &context.item.manifest.page_id,
+                    &context.meta,
+                )
+                .map_err(|source| MutationError::RubbishCleanup { item_id, source })?;
+            }
             Ok(context)
         })
         .await?;
@@ -1023,7 +1022,7 @@ impl MutationCoordinator {
         &self,
         vault: &Vault,
         index: &IndexHandle,
-        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        purge_hooks: Arc<Vec<Box<dyn RubbishPurgeHook>>>,
     ) -> Result<EmptyRubbishResult, MutationError> {
         let root = vault.root().to_path_buf();
         let list_root = root.clone();
@@ -1043,7 +1042,7 @@ impl MutationCoordinator {
         let mut outcomes = Vec::new();
         for item_id in item_ids {
             match self
-                .purge_rubbish_item(vault, index, Arc::clone(&cas), item_id)
+                .purge_rubbish_item(vault, index, Arc::clone(&purge_hooks), item_id)
                 .await
             {
                 Ok(result) => outcomes.push(PurgeRubbishOutcome::Purged(result)),
@@ -1131,7 +1130,7 @@ impl MutationCoordinator {
         &self,
         vault: &Vault,
         index: &IndexHandle,
-        cas: Arc<parking_lot::Mutex<ContentStore>>,
+        purge_hooks: Arc<Vec<Box<dyn RubbishPurgeHook>>>,
         hooks: Arc<Vec<Box<dyn PostMoveHook>>>,
         command: BatchMutationCommand,
         notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
@@ -1154,17 +1153,19 @@ impl MutationCoordinator {
             .lock_resources(&affected_paths, &affected_rubbish_items)
             .await;
         let root = vault.root().to_path_buf();
+        let hooks_for_check = Arc::clone(&purge_hooks);
         let (guard, ()) = run_blocking_fs(root, guard, move || {
-            if cas
-                .lock()
-                .rubbish_archive_refs_released(item_id)
-                .map_err(|source| MutationError::RubbishCleanup { item_id, source })?
-            {
-                return Err(MutationError::Conflict(format!(
-                    "permanent deletion is already in progress for rubbish item {item_id}; \
-                     its captured-archive references have been released, so it cannot be \
-                     restored; retry permanent deletion"
-                )));
+            for hook in hooks_for_check.iter() {
+                if hook
+                    .purge_committed(item_id)
+                    .map_err(|source| MutationError::RubbishCleanup { item_id, source })?
+                {
+                    return Err(MutationError::Conflict(format!(
+                        "permanent deletion is already in progress for rubbish item {item_id}; \
+                         its captured-archive references have been released, so it cannot be \
+                         restored; retry permanent deletion"
+                    )));
+                }
             }
             Ok(())
         })
@@ -2025,7 +2026,9 @@ pub struct MutationGuard {
 mod tests {
     use super::*;
 
+    use crate::vault::archive_hook::ArchiveDeleteHook;
     use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
+    use crate::vault::cas::ContentStore;
     use crate::vault::sync::ChangeEvent;
 
     struct BatchFixture {
@@ -2169,6 +2172,9 @@ mod tests {
         let cas = Arc::new(parking_lot::Mutex::new(
             ContentStore::open(cas_temp.path()).unwrap(),
         ));
+        let purge_hooks = Arc::new(vec![Box::new(ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn RubbishPurgeHook>]);
         fs::set_permissions(&rubbish_root, fs::Permissions::from_mode(0o500)).unwrap();
 
         let error = fixture
@@ -2176,7 +2182,7 @@ mod tests {
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await
@@ -2202,7 +2208,7 @@ mod tests {
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await
@@ -2252,6 +2258,9 @@ mod tests {
         let cas = Arc::new(parking_lot::Mutex::new(
             ContentStore::open(cas_temp.path()).unwrap(),
         ));
+        let purge_hooks = Arc::new(vec![Box::new(ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn RubbishPurgeHook>]);
         let release_count = || -> i64 {
             rusqlite::Connection::open(cas_temp.path().join("cas.db"))
                 .unwrap()
@@ -2268,7 +2277,7 @@ mod tests {
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await
@@ -2297,7 +2306,7 @@ mod tests {
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await
@@ -2323,6 +2332,9 @@ mod tests {
         let cas = Arc::new(parking_lot::Mutex::new(
             ContentStore::open(cas_temp.path()).unwrap(),
         ));
+        let purge_hooks = Arc::new(vec![Box::new(ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn RubbishPurgeHook>]);
         let _sync_failure = crate::vault::rubbish::fail_next_directory_sync(
             &fixture.root().join(".clepsydra/rubbish"),
         );
@@ -2332,7 +2344,7 @@ mod tests {
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await
@@ -2357,7 +2369,7 @@ mod tests {
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await
@@ -2407,13 +2419,16 @@ mod tests {
         let cas = Arc::new(parking_lot::Mutex::new(
             ContentStore::open(cas_temp.path()).unwrap(),
         ));
+        let purge_hooks = Arc::new(vec![Box::new(ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn RubbishPurgeHook>]);
 
         let error = fixture
             .coordinator
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await
@@ -2439,7 +2454,7 @@ mod tests {
             .purge_rubbish(
                 &fixture.vault,
                 &fixture.index,
-                Arc::clone(&cas),
+                Arc::clone(&purge_hooks),
                 &item_id.to_string(),
             )
             .await

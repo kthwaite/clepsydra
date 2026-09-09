@@ -280,7 +280,7 @@ pub async fn restore_rubbish_item(
         .restore_rubbish(
             &state.vault,
             &state.index,
-            Arc::clone(&state.cas),
+            Arc::clone(&state.purge_hooks),
             Arc::clone(&state.hooks),
             command,
             super::mutation_notifier(&state),
@@ -309,7 +309,12 @@ pub async fn purge_rubbish_item(
 ) -> Result<Json<RubbishPurgeResponse>, ApiError> {
     let result = state
         .mutation_coordinator
-        .purge_rubbish(&state.vault, &state.index, Arc::clone(&state.cas), &item_id)
+        .purge_rubbish(
+            &state.vault,
+            &state.index,
+            Arc::clone(&state.purge_hooks),
+            &item_id,
+        )
         .await;
     notify_rubbish_changed(&state);
     let result = result.map_err(super::mutation_error)?;
@@ -335,7 +340,7 @@ pub async fn empty_rubbish(
 ) -> Result<Json<EmptyRubbishResponse>, ApiError> {
     let result = state
         .mutation_coordinator
-        .empty_rubbish(&state.vault, &state.index, Arc::clone(&state.cas))
+        .empty_rubbish(&state.vault, &state.index, Arc::clone(&state.purge_hooks))
         .await;
     notify_rubbish_changed(&state);
     let result = result.map_err(super::mutation_error)?;
