@@ -45,13 +45,20 @@ workspace crates only; every crate may also use `serde`, `thiserror`,
 | `clep-doctor` | doctor/ | 4k | config, vault, index, bases, mutate, archive, gitsync | axum-server (TLS check), glob, walkdir, owo-colors, rusqlite |
 | `clep-frontend-assets` | api/frontend.rs | 0.2k | — | rust-embed, mime_guess, axum |
 | `clep-api` | api/ (minus frontend.rs), lib.rs bootstrap (`build_app_state`, `build_router`, `run_server`, watcher, TLS serve, shutdown, `run_startup_reconcile`), sync_runtime, deeplink, geocode, events, openapi, `open_vault`, `open_vault_and_index` | 24k | every vault-side crate, feeds, config, frontend-assets | axum, axum-extra, axum-server, tower, tower-http, utoipa, utoipa-swagger-ui, tokio-stream, rusqlite |
-| `clep` (bin) | cli.rs, sync_command, config_command, macos_url_handler, backup, `create_new_note`, grep/tree `render_human`, `run_lsp_standalone` | 4.5k | all | clap, anstream, owo-colors, tar, tempfile |
+| `clep` (bin) | cli.rs, sync_command, config_command, macos_url_handler, backup, `create_new_note`, grep/tree `render_human`, `run_lsp_standalone` (backup, `create_new_note` stay at the lib crate root through Phase 0 and move here in Phase 1 — see §3.4) | 4.5k | all | clap, anstream, owo-colors, tar, tempfile |
 | `clep-test-support` (dev only) | `EnvGuard` | <0.1k | — | — |
 
 Dev-dependency edges: `clep-mcp` → `clep-api` (in-process router tests);
 `clep-doctor` → `clep-gitsync` with the `test-support` feature;
 integration tests that need several feature crates at once live in the
 bin crate's `tests/`.
+
+Two more dev edges exist after Phase 0 and are resolved in Phase 3 by
+moving tests rather than by adding cycles: the bases-aware half of
+`index.rs`'s `linkable_epoch_tests` (the seam test and any test that
+writes a `bases/*.base.toml`) moves into `clep-bases`; the feeds
+scheduler's in-module tests that build an `AppState` fixture move into
+`clep-api` or are rewritten over a bare `FeedHost`.
 
 ### Dependency graph
 
@@ -99,7 +106,9 @@ the risk from the later mechanical moves.
    `Arc<Mutex<ContentStore>>` today (mutation_coordinator.rs:907, 921,
    1026, 1134) and drops its `archive_hook` and `cas` imports.
    `ArchiveDeleteHook` implements the new trait and is registered at
-   lib.rs:746 next to the delete hooks.
+   lib.rs:746 next to the delete hooks. The `RubbishCleanup` error text
+   still says "captured-archive cleanup failed"; it is part of a 500
+   response body and changes only with the Phase 3 move.
 3. **Feeds scheduler inversion.** `feeds/scheduler.rs:10-11` takes
    `&AppState`; it uses `feed_runtime()`, `vault.root()` and `change_tx`.
    Give it `(FeedRuntime, vault_root: PathBuf, on_change: Arc<dyn Fn() +
@@ -110,17 +119,27 @@ the risk from the later mechanical moves.
    `VESSEL_ACCENT` stays in the CLI. `create_new_note` (new_note.rs, uses
    `app_config`) moves to the bin; `build_note_path` and
    `build_projected_note_path` stay. `backup.rs` moves to the bin (it
-   imports `feeds::store`; sole caller is cli.rs).
+   imports `feeds::store`; sole caller is cli.rs). In the Phase 0 code as
+   landed, `backup.rs` and `new_note_command.rs` stayed at the lib crate
+   root instead of moving into the bin; that move happens in Phase 1, at
+   which point `feeds::store`'s `open_feed_lock_file`,
+   `lock_feed_generation_shared` and `snapshot_database_file` widen from
+   `pub(crate)` to `pub`.
 5. **Relocations.** rubbish.rs, task_history.rs, init.rs stay in vault
    (they are already there; only their `pub(crate)` items widen).
    `index::extract_journal_date` (index.rs:2128) moves next to
    `page_filename`. checkpoint.rs goes with academic. geocode.rs goes with
-   api. `run_startup_reconcile` (lib.rs:1165) moves beside sync_runtime.
+   api.
 6. **Test plumbing.** The `cfg(test)` fault-injection hooks in
    atomic_file.rs:10-45 and rubbish.rs become a `test-failpoints` cargo
    feature. `sync_runtime::tests::isolate_git_process_wide` moves into
    `gitsync::testing`. `env_test_support::EnvGuard` (lib.rs:1298) becomes
    `clep-test-support`. About 26 `pub(crate)` items become `pub`.
+   `gitsync::testing` (including `GitEnv`/`isolate_git_process_wide`)
+   stays `#[cfg(test)]` in Phase 0; Phase 3 gates it with
+   `#[cfg(any(test, feature = "test-support"))]` and makes `tempfile` an
+   optional dependency of `clep-gitsync` so `clep-doctor`'s tests can
+   reach it.
 7. **utoipa.** The 37 `ToSchema` derives in nine vault files stay; utoipa
    (derive only) is a dependency of vault, bases, mutate, academic.
    `utoipa-swagger-ui` is api-only.
