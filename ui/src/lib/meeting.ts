@@ -40,6 +40,19 @@ export function localIso(date: Date): string {
   return `${day}T${time}`;
 }
 
+/** The quarter hour that has already started, as a new Date: 12:00 stays
+ * 12:00, 12:01 and 12:14 become 12:00, 12:16 becomes 12:15. Seconds and
+ * milliseconds are dropped.
+ *
+ * "Now" on a meeting means the slot it was booked in, not the instant the
+ * button was pressed — nobody records a meeting as having started at 12:16:41.
+ * `localIso` still writes the `:00` seconds, which a TOML date-time requires. */
+export function floorToQuarterHour(date: Date): Date {
+  const floored = new Date(date);
+  floored.setMinutes(Math.floor(date.getMinutes() / 15) * 15, 0, 0);
+  return floored;
+}
+
 /** The stored value as a string, or null when absent or unreadable.
  *
  * A hand-edited page can hold anything; a non-string is left to `clep doctor`

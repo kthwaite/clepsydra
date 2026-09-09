@@ -15,6 +15,7 @@ import { ATTENDEES_KEY, asWikilink, readAttendees } from "#/lib/attendance";
 import { cn } from "#/lib/cn";
 import type { KindMetaExtrasProps } from "#/lib/kindPresentation";
 import {
+  floorToQuarterHour,
   isOneOnOne,
   localIso,
   OCCURRED_AT_KEY,
@@ -130,7 +131,9 @@ export function MeetingMeta({
               type="button"
               className="cl-btn"
               disabled={saving}
-              onClick={() => void setOccurredAt(localIso(new Date()))}
+              onClick={() =>
+                void setOccurredAt(localIso(floorToQuarterHour(new Date())))
+              }
             >
               Now
             </button>

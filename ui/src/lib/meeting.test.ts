@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KINDS } from "#/lib/kind";
 import {
+  floorToQuarterHour,
   isOneOnOne,
   localIso,
   ONE_ON_ONE_TAG,
@@ -59,6 +60,50 @@ describe("localIso", () => {
     expect(localIso(new Date(2026, 7, 27, 14, 0, 0))).toMatch(
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/,
     );
+  });
+});
+
+describe("floorToQuarterHour", () => {
+  it("keeps a time already on a quarter", () => {
+    expect(localIso(floorToQuarterHour(new Date(2026, 7, 27, 12, 0, 0)))).toBe(
+      "2026-08-27T12:00:00",
+    );
+    expect(localIso(floorToQuarterHour(new Date(2026, 7, 27, 12, 45, 0)))).toBe(
+      "2026-08-27T12:45:00",
+    );
+  });
+
+  it("rounds down to the quarter that has already started", () => {
+    expect(localIso(floorToQuarterHour(new Date(2026, 7, 27, 12, 1, 0)))).toBe(
+      "2026-08-27T12:00:00",
+    );
+    expect(localIso(floorToQuarterHour(new Date(2026, 7, 27, 12, 16, 0)))).toBe(
+      "2026-08-27T12:15:00",
+    );
+    expect(localIso(floorToQuarterHour(new Date(2026, 7, 27, 12, 59, 0)))).toBe(
+      "2026-08-27T12:45:00",
+    );
+  });
+
+  it("drops the seconds and milliseconds", () => {
+    expect(
+      localIso(floorToQuarterHour(new Date(2026, 7, 27, 12, 16, 41, 500))),
+    ).toBe("2026-08-27T12:15:00");
+  });
+
+  it("never crosses back over the hour or the day", () => {
+    expect(localIso(floorToQuarterHour(new Date(2026, 7, 27, 0, 3, 9)))).toBe(
+      "2026-08-27T00:00:00",
+    );
+    expect(
+      localIso(floorToQuarterHour(new Date(2026, 7, 27, 23, 59, 59))),
+    ).toBe("2026-08-27T23:45:00");
+  });
+
+  it("leaves the given date untouched", () => {
+    const now = new Date(2026, 7, 27, 12, 16, 41);
+    floorToQuarterHour(now);
+    expect(localIso(now)).toBe("2026-08-27T12:16:41");
   });
 });
 

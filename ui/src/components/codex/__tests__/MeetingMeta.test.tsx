@@ -237,20 +237,21 @@ describe("MeetingMeta", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("stamps the current local time with the datetime hint", async () => {
+  it("stamps the quarter hour under way, with the datetime hint", async () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 7, 27, 14, 0, 0));
+    vi.setSystemTime(new Date(2026, 7, 27, 14, 16, 41));
     try {
       usePageMock.mockReturnValue(page(["[[Ada]]"], undefined));
       renderMeta();
 
       fireEvent.click(screen.getByRole("button", { name: "Now" }));
 
-      // The hint is what keeps it a TOML date-time rather than a string.
+      // The hint is what keeps it a TOML date-time rather than a string; the
+      // zeroed seconds are the quarter-hour floor, not the wall clock.
       expect(commitMock).toHaveBeenCalledWith(
         { id: "page-uuid", path: "meetings/kickoff.md" },
         "occurred_at",
-        "2026-08-27T14:00:00",
+        "2026-08-27T14:15:00",
         "datetime",
       );
     } finally {
