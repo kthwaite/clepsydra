@@ -539,6 +539,11 @@ impl VaultIndex {
     ///
     /// Creates parent directories if needed, sets WAL journal mode and enables
     /// foreign keys, then ensures the schema tables and indexes exist.
+    ///
+    /// The linkable-properties provider defaults to config only; callers that
+    /// want Bases' `type = "relation"` properties to derive links must chain
+    /// [`with_linkable_properties`](Self::with_linkable_properties) with the
+    /// Bases adapter.
     pub fn open(db_path: &Path) -> Result<Self, IndexError> {
         // 1. Create parent directory if needed
         if let Some(parent) = db_path.parent() {
@@ -554,6 +559,11 @@ impl VaultIndex {
     ///
     /// Useful for testing or for callers who want to register a custom set
     /// of derivers via [`Self::register_deriver`].
+    ///
+    /// The linkable-properties provider defaults to config only; callers that
+    /// want Bases' `type = "relation"` properties to derive links must chain
+    /// [`with_linkable_properties`](Self::with_linkable_properties) with the
+    /// Bases adapter.
     pub fn open_bare(db_path: &Path) -> Result<Self, IndexError> {
         if let Some(parent) = db_path.parent() {
             fs::create_dir_all(parent)?;
@@ -573,6 +583,11 @@ impl VaultIndex {
     /// standalone LSP process, which must never write inside the vault: the
     /// index is not merely off-vault, it also indexes read-only — repaired
     /// frontmatter stays in memory instead of being written back to the page.
+    ///
+    /// The linkable-properties provider defaults to config only; callers that
+    /// want Bases' `type = "relation"` properties to derive links must chain
+    /// [`with_linkable_properties`](Self::with_linkable_properties) with the
+    /// Bases adapter.
     pub fn open_in_memory() -> Result<Self, IndexError> {
         let conn = Connection::open_in_memory()?;
         let mut index = Self::from_connection(conn)?;
@@ -3786,7 +3801,7 @@ mod linkable_epoch_tests {
 
     /// A vault whose config predates the `attendees` default still collects
     /// the meeting → person backlinks: the relation is built in, not opted
-    /// into (see `base::BUILTIN_RELATION_PROPERTIES`).
+    /// into (see `BUILTIN_RELATION_PROPERTIES`).
     #[test]
     fn legacy_config_still_links_attendees() {
         let tmp = tempfile::tempdir().unwrap();

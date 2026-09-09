@@ -1153,7 +1153,7 @@ impl MutationCoordinator {
             .lock_resources(&affected_paths, &affected_rubbish_items)
             .await;
         let root = vault.root().to_path_buf();
-        let hooks_for_check = Arc::clone(&purge_hooks);
+        let hooks_for_check = purge_hooks;
         let (guard, ()) = run_blocking_fs(root, guard, move || {
             for hook in hooks_for_check.iter() {
                 if hook

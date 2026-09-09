@@ -1187,7 +1187,6 @@ impl BaseRegistry {
     }
 }
 
-pub use crate::vault::index::BUILTIN_RELATION_PROPERTIES;
 use crate::vault::index::{LinkablePropertiesProvider, merge_linkable_properties};
 
 /// Config, built-ins and every `type = "relation"` property declared in

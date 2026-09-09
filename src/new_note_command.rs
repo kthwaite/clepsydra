@@ -120,9 +120,8 @@ fn create_new_note_in_vault(
 
     // Defensive last-resort guard: with the random short-id in the filename a
     // collision is ~1-in-62^8, so this is effectively unreachable via
-    // create_new_note — kept as a cheap stat() backstop rather than removing the
-    // public NewNoteError::AlreadyExists variant (which the API error-mapping
-    // layer depends on).
+    // create_new_note — kept as a cheap stat() backstop so the public
+    // NewNoteError::AlreadyExists variant stays meaningful.
     if abs_path.exists() {
         return Err(NewNoteError::AlreadyExists(vault_path.as_str().to_string()));
     }
