@@ -413,6 +413,60 @@ fn rubbish_entry_from_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RubbishLi
     Ok(RubbishListEntry::Valid(manifest))
 }
 
+/// The frontmatter properties whose wikilink values derive `links` rows.
+///
+/// The index asks its provider on every build and single-page index. The
+/// config-only adapter is the default; the server injects the Bases adapter
+/// so `type = "relation"` properties declared in `bases/*.base.toml` join
+/// the set without the index depending on Bases.
+pub trait LinkablePropertiesProvider: Send {
+    fn linkable_properties(&self, vault: &Vault) -> Vec<String>;
+}
+
+/// Property keys that are relations by construction, whatever the config
+/// says. `attendees` is one: the server already refuses any value that is
+/// not a wikilink list (`vault::attendance`), so a config written before the
+/// key existed must not silently drop every attendee backlink.
+pub const BUILTIN_RELATION_PROPERTIES: &[&str] = &[crate::vault::attendance::ATTENDEES_KEY];
+
+/// `[vault].linkable_properties` plus the built-in relations, nothing else.
+pub struct ConfigLinkableProperties;
+
+impl LinkablePropertiesProvider for ConfigLinkableProperties {
+    fn linkable_properties(&self, vault: &Vault) -> Vec<String> {
+        merge_linkable_properties(&vault.config().vault.linkable_properties, &[])
+    }
+}
+
+/// Union of `config_linkable`, the built-in relations and `extra`, in that
+/// order, without duplicates.
+pub fn merge_linkable_properties(config_linkable: &[String], extra: &[String]) -> Vec<String> {
+    let mut effective = config_linkable.to_vec();
+    for key in BUILTIN_RELATION_PROPERTIES {
+        if !effective.iter().any(|k| k == key) {
+            effective.push((*key).to_string());
+        }
+    }
+    for key in extra {
+        if !effective.contains(key) {
+            effective.push(key.clone());
+        }
+    }
+    effective
+}
+
+/// Stable fingerprint of the effective linkable set. Persisted in
+/// `derivation_meta`; a mismatch disables skip-unchanged for one build so
+/// existing pages get their links re-derived under the new set.
+pub fn linkable_epoch(effective: &[String]) -> String {
+    let mut sorted = effective.to_vec();
+    sorted.sort();
+    sorted.dedup();
+    blake3::hash(sorted.join("\n").as_bytes())
+        .to_hex()
+        .to_string()
+}
+
 // ---------------------------------------------------------------------------
 // VaultIndex
 // ---------------------------------------------------------------------------
@@ -430,6 +484,8 @@ pub struct VaultIndex {
     /// there the repaired metadata is still indexed, only the disk write is
     /// skipped, leaving the file byte-identical.
     repair_frontmatter: bool,
+    /// Who decides which frontmatter properties derive links.
+    linkable: Box<dyn LinkablePropertiesProvider>,
 }
 
 impl VaultIndex {
@@ -474,6 +530,7 @@ impl VaultIndex {
                 Box::new(BlockDeriver),
             ],
             repair_frontmatter: true,
+            linkable: Box::new(ConfigLinkableProperties),
         })
     }
 
@@ -507,6 +564,7 @@ impl VaultIndex {
             conn,
             derivers: Vec::new(),
             repair_frontmatter: true,
+            linkable: Box::new(ConfigLinkableProperties),
         })
     }
 
@@ -659,6 +717,15 @@ impl VaultIndex {
         self.derivers.push(deriver);
     }
 
+    /// Replace the linkable-properties provider (default: config only).
+    pub fn with_linkable_properties(
+        mut self,
+        provider: Box<dyn LinkablePropertiesProvider>,
+    ) -> Self {
+        self.linkable = provider;
+        self
+    }
+
     /// Build (or incrementally update) the index from vault contents.
     ///
     /// Uses a two-pass approach:
@@ -671,16 +738,12 @@ impl VaultIndex {
     pub fn build(&mut self, vault: &Vault) -> Result<BuildStats, IndexError> {
         let mut stats = BuildStats::default();
 
-        // The base registry loads BEFORE page indexing: relation-typed
-        // properties join the effective linkable set, and a change to that
-        // set (the linkable epoch) disables skip-unchanged for this build so
+        // The provider decides the effective linkable set BEFORE page
+        // indexing: whatever it adds joins `links`, and a change to that set
+        // (the linkable epoch) disables skip-unchanged for this build so
         // untouched pages get their frontmatter links re-derived.
-        let registry = crate::vault::base::BaseRegistry::load(vault.root());
-        let linkable_properties = crate::vault::base::effective_linkable_properties(
-            &vault.config().vault.linkable_properties,
-            &registry,
-        );
-        let epoch = crate::vault::base::linkable_epoch(&linkable_properties);
+        let linkable_properties = self.linkable.linkable_properties(vault);
+        let epoch = linkable_epoch(&linkable_properties);
 
         let tx = self.conn.transaction()?;
         let stored_epoch: Option<String> = tx
@@ -847,15 +910,11 @@ impl VaultIndex {
         vault_path: &VaultPath,
     ) -> Result<bool, IndexError> {
         let abs_path = vault.resolve(vault_path);
-        // Single-page path: compose the effective linkable set from the
-        // current registry so relation-typed frontmatter links derive here
-        // too. Epoch bookkeeping stays in `build` — a set change forces the
-        // full re-derive there.
-        let registry = crate::vault::base::BaseRegistry::load(vault.root());
-        let linkable_properties = &crate::vault::base::effective_linkable_properties(
-            &vault.config().vault.linkable_properties,
-            &registry,
-        );
+        // Single-page path: ask the provider for the effective linkable set
+        // so relation-typed frontmatter links derive here too. Epoch
+        // bookkeeping stays in `build` — a set change forces the full
+        // re-derive there.
+        let linkable_properties = &self.linkable.linkable_properties(vault);
 
         let mut content = std::fs::read_to_string(&abs_path).map_err(IndexError::Io)?;
         let (meta, body, rewrote_frontmatter, fm_warning) = parse_or_repair_frontmatter(&content);
@@ -3672,8 +3731,9 @@ mod property_derivation_tests {
 
 #[cfg(test)]
 mod linkable_epoch_tests {
+    use super::linkable_epoch;
     use super::*;
-    use crate::vault::base::{BaseRegistry, effective_linkable_properties, linkable_epoch};
+    use crate::vault::base::{BaseRegistry, effective_linkable_properties};
 
     const SERIES_PAGE: &str = "+++\nid = \"0190f8a0-0000-7000-8000-0000000000e1\"\ntitle = \"Book\"\nseries = [\"[[Solar Cycle]]\"]\n+++\nbody\n";
     const SERIES_BASE: &str =
@@ -3686,9 +3746,43 @@ mod linkable_epoch_tests {
             fs::create_dir_all(tmp.path().join("bases")).unwrap();
             fs::write(tmp.path().join("bases/reading.base.toml"), SERIES_BASE).unwrap();
         }
-        let index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db"))
+            .unwrap()
+            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
         let vault = Vault::open(tmp.path()).unwrap();
         (tmp, vault, index)
+    }
+
+    /// The seam: the same vault indexes with or without base relations
+    /// depending only on the injected provider. Neither adapter is special
+    /// to the index.
+    #[test]
+    fn provider_decides_whether_base_relations_are_linkable() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::write(tmp.path().join("book.md"), SERIES_PAGE).unwrap();
+        fs::create_dir_all(tmp.path().join("bases")).unwrap();
+        fs::write(tmp.path().join("bases/reading.base.toml"), SERIES_BASE).unwrap();
+        let vault = Vault::open(tmp.path()).unwrap();
+
+        let mut config_only = VaultIndex::open_in_memory()
+            .unwrap()
+            .with_linkable_properties(Box::new(ConfigLinkableProperties));
+        config_only.build(&vault).unwrap();
+        assert_eq!(
+            series_link_count(&config_only),
+            0,
+            "config-only ignores the base"
+        );
+
+        let mut base_aware = VaultIndex::open_in_memory()
+            .unwrap()
+            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
+        base_aware.build(&vault).unwrap();
+        assert_eq!(
+            series_link_count(&base_aware),
+            1,
+            "bases adapter links `series`"
+        );
     }
 
     fn series_link_count(index: &VaultIndex) -> i64 {

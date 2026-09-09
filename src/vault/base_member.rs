@@ -890,7 +890,9 @@ layout = "table"
         )
         .unwrap();
         let vault = Vault::open(temp.path()).unwrap();
-        let mut index = VaultIndex::open(&temp.path().join(".clepsydra/index.db")).unwrap();
+        let mut index = VaultIndex::open(&temp.path().join(".clepsydra/index.db"))
+            .unwrap()
+            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
         index.build(&vault).unwrap();
         index.resolve_links().unwrap();
         let base = base(SOURCE);

@@ -121,7 +121,9 @@ impl ApiFixtureBuilder {
             vault.config().archive.max_blob_size_mb,
         );
         let db_path = vault.root().join(".clepsydra/cache.db");
-        let mut index = VaultIndex::open(&db_path).unwrap();
+        let mut index = VaultIndex::open(&db_path)
+            .unwrap()
+            .with_linkable_properties(Box::new(clepsydra::vault::base::BaseLinkableProperties));
         index.build(&vault).unwrap();
         index.resolve_links().unwrap();
 

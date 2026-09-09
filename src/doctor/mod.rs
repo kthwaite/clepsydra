@@ -1066,8 +1066,9 @@ async fn run_index_dry_build(vault: &Vault, report: &mut Report) {
     // the tokio runtime on large vaults.
     let vault = vault.clone();
     let result = tokio::task::spawn_blocking(move || -> Result<_, String> {
-        let mut index =
-            crate::vault::index::VaultIndex::open(&tmp_db).map_err(|e| format!("open: {e}"))?;
+        let mut index = crate::vault::index::VaultIndex::open(&tmp_db)
+            .map_err(|e| format!("open: {e}"))?
+            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
         index.build(&vault).map_err(|e| format!("build: {e}"))
     })
     .await;

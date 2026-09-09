@@ -680,7 +680,8 @@ pub async fn build_app_state_with_settings(
 
     let db_path = vault.root().join(INDEX_DB_RELATIVE);
     let mut index = VaultIndex::open(&db_path)
-        .map_err(|source| startup_index_error("open", source, &recovered_batches))?;
+        .map_err(|source| startup_index_error("open", source, &recovered_batches))?
+        .with_linkable_properties(Box::new(vault::base::BaseLinkableProperties));
 
     let stats = index
         .build(&vault)
@@ -933,7 +934,8 @@ pub fn open_vault_and_index() -> Result<(Vault, VaultIndex), Box<dyn std::error:
     let vault = open_vault()?;
 
     let db_path = vault.root().join(INDEX_DB_RELATIVE);
-    let mut index = VaultIndex::open(&db_path)?;
+    let mut index = VaultIndex::open(&db_path)?
+        .with_linkable_properties(Box::new(vault::base::BaseLinkableProperties));
     index.build(&vault)?;
     index.resolve_links()?;
 

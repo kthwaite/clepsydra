@@ -14,6 +14,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::vault::Vault;
 use crate::vault::query::{QueryContext, ResolvedField, resolve_field};
 use utoipa::ToSchema;
 
@@ -1186,46 +1187,26 @@ impl BaseRegistry {
     }
 }
 
-/// Property keys the server itself validates as relations, and therefore
-/// indexes as links whether or not a config or a base declares them.
-pub const BUILTIN_RELATION_PROPERTIES: &[&str] = &[crate::vault::attendance::ATTENDEES_KEY];
+pub use crate::vault::index::BUILTIN_RELATION_PROPERTIES;
+use crate::vault::index::{LinkablePropertiesProvider, merge_linkable_properties};
 
-/// The effective linkable-property set: `config ∪ built-in relations ∪
-/// relation-typed keys across all bases`, deduped with config order first.
-///
-/// The built-in relations are linkable whatever the config says. `attendees`
-/// is one: the server already refuses any value that is not a wikilink list
-/// (`vault::attendance`), so it is a relation by construction rather than by
-/// declaration, and a config written before the key existed would otherwise
-/// drop every attendee backlink without saying so.
+/// Config, built-ins and every `type = "relation"` property declared in
+/// `bases/*.base.toml`. The server, LSP and doctor inject this into the index.
+pub struct BaseLinkableProperties;
+
+impl LinkablePropertiesProvider for BaseLinkableProperties {
+    fn linkable_properties(&self, vault: &Vault) -> Vec<String> {
+        let registry = BaseRegistry::load(vault.root());
+        effective_linkable_properties(&vault.config().vault.linkable_properties, &registry)
+    }
+}
+
+/// The effective linkable set given an already-loaded registry.
 pub fn effective_linkable_properties(
     config_linkable: &[String],
     registry: &BaseRegistry,
 ) -> Vec<String> {
-    let mut effective = config_linkable.to_vec();
-    for key in BUILTIN_RELATION_PROPERTIES {
-        if !effective.iter().any(|k| k == key) {
-            effective.push((*key).to_string());
-        }
-    }
-    for key in registry.relation_property_keys() {
-        if !effective.contains(&key) {
-            effective.push(key);
-        }
-    }
-    effective
-}
-
-/// Stable fingerprint of the effective linkable set. Persisted in
-/// `derivation_meta`; a mismatch disables skip-unchanged for one build so
-/// existing pages get their links re-derived under the new set.
-pub fn linkable_epoch(effective: &[String]) -> String {
-    let mut sorted = effective.to_vec();
-    sorted.sort();
-    sorted.dedup();
-    blake3::hash(sorted.join("\n").as_bytes())
-        .to_hex()
-        .to_string()
+    merge_linkable_properties(config_linkable, &registry.relation_property_keys())
 }
 
 /// Derive the base slug from its file path (`bases/reading.base.toml` →

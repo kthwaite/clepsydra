@@ -22,7 +22,8 @@ pub struct LspState {
 pub fn open_lsp_state(root: &Path) -> Result<LspState, Box<dyn std::error::Error + Send + Sync>> {
     let vault = Vault::open(root)
         .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> { e.to_string().into() })?;
-    let mut index = VaultIndex::open_in_memory()?;
+    let mut index = VaultIndex::open_in_memory()?
+        .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
     index.build(&vault)?;
     index.resolve_links()?;
     let index = IndexHandle::spawn(index, vault.clone());

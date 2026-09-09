@@ -2044,7 +2044,9 @@ moment  = { type = "datetime" }
             ),
         );
 
-        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db")).unwrap();
+        let mut index = VaultIndex::open(&tmp.path().join(".clepsydra/index.db"))
+            .unwrap()
+            .with_linkable_properties(Box::new(crate::vault::base::BaseLinkableProperties));
         let vault = Vault::open(tmp.path()).unwrap();
         index.build(&vault).unwrap();
         index.resolve_links().unwrap();
