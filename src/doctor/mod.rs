@@ -2106,7 +2106,7 @@ mod tests {
     use super::*;
     use std::fs;
 
-    use crate::env_test_support::EnvGuard;
+    use clep_test_support::EnvGuard;
     use tempfile::TempDir;
 
     #[test]

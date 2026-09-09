@@ -148,8 +148,8 @@ fn validate_optional_date(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env_test_support::EnvGuard;
     use crate::mcp::client::ApiClient;
+    use clep_test_support::EnvGuard;
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
 

@@ -747,8 +747,8 @@ mod tests {
         // because `check_sync` builds its own `Git::new`.
         let global = tmp.path().join("gitconfig-with-marker");
         std::fs::write(&global, "[clep \"sync\"]\n\tversion = 1\n").unwrap();
-        let _global = crate::env_test_support::EnvGuard::set("GIT_CONFIG_GLOBAL", &global);
-        let _nosystem = crate::env_test_support::EnvGuard::set("GIT_CONFIG_NOSYSTEM", "1");
+        let _global = clep_test_support::EnvGuard::set("GIT_CONFIG_GLOBAL", &global);
+        let _nosystem = clep_test_support::EnvGuard::set("GIT_CONFIG_NOSYSTEM", "1");
 
         let root = tmp.path().join("v");
         crate::vault::init::init_vault(&root).unwrap();

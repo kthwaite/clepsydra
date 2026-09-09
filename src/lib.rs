@@ -1295,46 +1295,6 @@ pub async fn run_server(overrides: ServeOverrides) -> Result<(), Box<dyn std::er
 }
 
 #[cfg(test)]
-pub(crate) mod env_test_support {
-    /// RAII guard that records the prior value of an env var on construction
-    /// and restores it on drop, so `#[serial]` tests can't leak state.
-    pub(crate) struct EnvGuard {
-        key: &'static str,
-        prior: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        pub(crate) fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let prior = std::env::var_os(key);
-            // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
-            // so no other thread is racing on the same variable.
-            unsafe { std::env::set_var(key, value) }
-            Self { key, prior }
-        }
-
-        /// Unset `key` for as long as the guard lives.
-        pub(crate) fn remove(key: &'static str) -> Self {
-            let prior = std::env::var_os(key);
-            // SAFETY: see `set`.
-            unsafe { std::env::remove_var(key) }
-            Self { key, prior }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: see `set`.
-            unsafe {
-                match self.prior.take() {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-}
-
-#[cfg(test)]
 pub(crate) mod state_test_support {
     use super::*;
     use tempfile::TempDir;
@@ -2068,7 +2028,7 @@ mod watcher_reconcile_tests {
 #[cfg(test)]
 mod settings_tests {
     use super::*;
-    use crate::env_test_support::EnvGuard;
+    use clep_test_support::EnvGuard;
 
     fn assert_feature_defaults(features: FeatureFlags) {
         assert!(features.academic);

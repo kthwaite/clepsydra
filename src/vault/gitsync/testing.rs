@@ -9,9 +9,9 @@ use tempfile::TempDir;
 
 use super::git::Git;
 use super::{Author, INIT_MARKER_KEY, INIT_MARKER_VALUE};
-#[cfg(test)]
-use crate::env_test_support::EnvGuard;
 use crate::vault::init::init_vault;
+#[cfg(test)]
+use clep_test_support::EnvGuard;
 
 /// The path of an empty file used as `GIT_CONFIG_GLOBAL`, so tests never
 /// read (or write) the developer's real global git config. Created once

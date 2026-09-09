@@ -879,7 +879,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn env_defaults_disable_prompts() {
-        let _unset = crate::env_test_support::EnvGuard::remove("GIT_SSH_COMMAND");
+        let _unset = clep_test_support::EnvGuard::remove("GIT_SSH_COMMAND");
         let tmp = TempDir::new().unwrap();
         let git = Git::new(tmp.path());
         assert_eq!(git.env_value("GIT_TERMINAL_PROMPT").as_deref(), Some("0"));
@@ -901,7 +901,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn an_inherited_ssh_command_is_left_alone() {
-        let _set = crate::env_test_support::EnvGuard::set("GIT_SSH_COMMAND", "ssh -i /custom/key");
+        let _set = clep_test_support::EnvGuard::set("GIT_SSH_COMMAND", "ssh -i /custom/key");
         let tmp = TempDir::new().unwrap();
         assert_eq!(Git::new(tmp.path()).env_value("GIT_SSH_COMMAND"), None);
     }

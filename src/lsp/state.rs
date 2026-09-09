@@ -68,7 +68,7 @@ pub(crate) fn resolve_lsp_root(params: &InitializeParams, cwd: &Path) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::env_test_support::EnvGuard;
+    use clep_test_support::EnvGuard;
     use tower_lsp::lsp_types::{Url, WorkspaceFolder};
 
     #[test]
