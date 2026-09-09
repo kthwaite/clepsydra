@@ -5,7 +5,6 @@ use std::io::{self, Write};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
-use crate::VESSEL_ACCENT as ACCENT;
 use crate::vault::index::{IndexError, SearchResult, VaultIndex};
 
 /// Run an FTS search. When `raw` is false the query is quoted as a literal
@@ -38,7 +37,11 @@ pub(crate) fn fts_quote(query: &str) -> String {
 /// in the snippet are painted with the accent colour; the surrounding text is
 /// left plain and the ellipsis is dimmed. Callers wishing to honour `NO_COLOR`
 /// / non-TTY should wrap `w` in `anstream::AutoStream`.
-pub fn render_human(results: &[SearchResult], w: &mut impl Write) -> io::Result<()> {
+pub fn render_human(
+    results: &[SearchResult],
+    w: &mut impl Write,
+    accent: (u8, u8, u8),
+) -> io::Result<()> {
     if results.is_empty() {
         return writeln!(w, "{}", "no matches".dimmed());
     }
@@ -50,17 +53,17 @@ pub fn render_human(results: &[SearchResult], w: &mut impl Write) -> io::Result<
         writeln!(
             w,
             "{}{}",
-            r.path.truecolor(ACCENT.0, ACCENT.1, ACCENT.2),
+            r.path.truecolor(accent.0, accent.1, accent.2),
             title
         )?;
-        writeln!(w, "  {}", paint_snippet(&r.snippet))?;
+        writeln!(w, "  {}", paint_snippet(&r.snippet, accent))?;
     }
     Ok(())
 }
 
 /// Replace `<mark>…</mark>` with accent-coloured segments and dim the FTS5
 /// ellipsis. Operates on whole tokens so anstream can strip colour cleanly.
-fn paint_snippet(snippet: &str) -> String {
+fn paint_snippet(snippet: &str, accent: (u8, u8, u8)) -> String {
     let mut out = String::with_capacity(snippet.len());
     let mut rest = snippet;
     while let Some(open) = rest.find("<mark>") {
@@ -70,7 +73,7 @@ fn paint_snippet(snippet: &str) -> String {
             let marked = &rest[..close];
             out.push_str(
                 &marked
-                    .truecolor(ACCENT.0, ACCENT.1, ACCENT.2)
+                    .truecolor(accent.0, accent.1, accent.2)
                     .bold()
                     .to_string(),
             );
@@ -227,7 +230,7 @@ mod tests {
     #[test]
     fn render_human_includes_path_and_snippet_text() {
         let mut buf: Vec<u8> = Vec::new();
-        render_human(&sample(), &mut buf).unwrap();
+        render_human(&sample(), &mut buf, (0xee, 0x77, 0x33)).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("Notes/Photosynthesis.md"));
         assert!(out.contains("sunlight"));
@@ -236,7 +239,7 @@ mod tests {
     #[test]
     fn render_human_empty_says_no_matches() {
         let mut buf: Vec<u8> = Vec::new();
-        render_human(&[], &mut buf).unwrap();
+        render_human(&[], &mut buf, (0xee, 0x77, 0x33)).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.to_lowercase().contains("no matches"));
     }

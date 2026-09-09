@@ -181,6 +181,19 @@ fn default_cas_path() -> String {
     ".clepsydra/cas".to_string()
 }
 
+/// Expand a leading `~` or `~/` in `p` to the user's home directory.
+///
+/// Returns `None` for paths that do not start with `~`.
+pub fn expand_tilde(p: &str) -> Option<PathBuf> {
+    if p == "~" {
+        dirs::home_dir()
+    } else if let Some(rest) = p.strip_prefix("~/") {
+        dirs::home_dir().map(|h| h.join(rest))
+    } else {
+        None
+    }
+}
+
 /// Resolve `[archive].cas_path` to an absolute directory. `~` and `~/…`
 /// expand to the home directory, an absolute path is used as-is, and any
 /// other path is relative to the vault root — so the default
@@ -192,7 +205,7 @@ pub fn resolve_cas_path(raw: &str, vault_root: &Path) -> PathBuf {
     if raw.is_empty() {
         return vault_root.join(default_cas_path());
     }
-    if let Some(expanded) = crate::expand_tilde(raw) {
+    if let Some(expanded) = expand_tilde(raw) {
         return expanded;
     }
     let path = Path::new(raw);

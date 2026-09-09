@@ -1,5 +1,6 @@
 pub mod api;
 pub mod app_config;
+pub mod backup;
 pub mod config_command;
 pub mod deeplink;
 pub mod doctor;
@@ -7,6 +8,7 @@ pub mod feeds;
 pub mod lsp;
 pub mod macos_url_handler;
 pub mod mcp;
+pub mod new_note_command;
 pub mod sync_command;
 pub mod sync_runtime;
 pub mod todo_capture;
@@ -34,6 +36,8 @@ use vault::path::VaultPath;
 use vault::sync::ChangeEvent;
 use vault::sync::watcher::VaultWatcher;
 
+pub use vault::config::expand_tilde;
+
 /// Vault-relative path to the on-disk index/cache database. Shared by every
 /// callsite that opens a [`VaultIndex`] so they cannot drift.
 const INDEX_DB_RELATIVE: &str = ".clepsydra/cache.db";
@@ -42,7 +46,7 @@ const INDEX_DB_RELATIVE: &str = ".clepsydra/cache.db";
 /// every terminal renderer (`grep`, `tree`, diagnostics) so the accent cannot
 /// drift between commands. `anstream` down-samples this truecolor value to the
 /// nearest palette entry on 16/256-colour terminals.
-pub(crate) const VESSEL_ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
+pub const VESSEL_ACCENT: (u8, u8, u8) = (0xee, 0x77, 0x33);
 
 /// How long in-flight requests have to finish after a shutdown signal before
 /// the listener closes anyway (D11).
@@ -345,19 +349,6 @@ impl Settings {
             resolve_config_path(&p, "CLEPSYDRA__SERVER__TLS__KEY_PATH", config_path, &cwd)
         });
         Ok(settings)
-    }
-}
-
-/// Expand a leading `~` or `~/` in `p` to the user's home directory.
-///
-/// Returns `None` for paths that do not start with `~`.
-pub fn expand_tilde(p: &str) -> Option<PathBuf> {
-    if p == "~" {
-        dirs::home_dir()
-    } else if let Some(rest) = p.strip_prefix("~/") {
-        dirs::home_dir().map(|h| h.join(rest))
-    } else {
-        None
     }
 }
 

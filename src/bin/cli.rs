@@ -6,10 +6,10 @@ use std::{
 
 use clap::{Parser, Subcommand};
 
+use clepsydra::backup::create_backup;
 use clepsydra::doctor::{self, DoctorOpts};
-use clepsydra::vault::backup::create_backup;
+use clepsydra::new_note_command::create_new_note;
 use clepsydra::vault::init::init_vault;
-use clepsydra::vault::new_note::create_new_note;
 use clepsydra::{ServeOverrides, open_vault_and_index, run_lsp_standalone, run_server};
 
 #[derive(Debug, Parser)]
@@ -793,7 +793,11 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 clepsydra::vault::grep::render_json(&results, &mut std::io::stdout().lock())?;
             } else {
                 let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
-                clepsydra::vault::grep::render_human(&results, &mut stdout)?;
+                clepsydra::vault::grep::render_human(
+                    &results,
+                    &mut stdout,
+                    clepsydra::VESSEL_ACCENT,
+                )?;
             }
             Ok(0)
         }
@@ -805,7 +809,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 clepsydra::vault::tree::render_json(&root, &mut std::io::stdout().lock())?;
             } else {
                 let mut stdout = anstream::AutoStream::auto(std::io::stdout().lock());
-                clepsydra::vault::tree::render_human(&root, &mut stdout)?;
+                clepsydra::vault::tree::render_human(&root, &mut stdout, clepsydra::VESSEL_ACCENT)?;
             }
             Ok(0)
         }

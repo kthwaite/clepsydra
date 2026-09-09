@@ -6,7 +6,6 @@ use std::io::{self, Write};
 use owo_colors::OwoColorize;
 use serde::Serialize;
 
-use crate::VESSEL_ACCENT as ACCENT;
 use crate::vault::Vault;
 use crate::vault::index::VaultIndex;
 
@@ -199,36 +198,47 @@ fn read_dir_sorted(
 /// Render the tree as styled, box-drawing text. The root line is the vault
 /// directory name; children are drawn with `├──`/`└──` connectors. Wrap `w` in
 /// `anstream::AutoStream` to honour `NO_COLOR` / non-TTY.
-pub fn render_human(root: &TreeNode, w: &mut impl Write) -> io::Result<()> {
+pub fn render_human(root: &TreeNode, w: &mut impl Write, accent: (u8, u8, u8)) -> io::Result<()> {
     writeln!(
         w,
         "{}",
-        root.name.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).bold()
+        root.name.truecolor(accent.0, accent.1, accent.2).bold()
     )?;
     let count = root.children.len();
     for (i, child) in root.children.iter().enumerate() {
-        render_node(child, "", i + 1 == count, w)?;
+        render_node(child, "", i + 1 == count, w, accent)?;
     }
     Ok(())
 }
 
-fn render_node(node: &TreeNode, prefix: &str, last: bool, w: &mut impl Write) -> io::Result<()> {
+fn render_node(
+    node: &TreeNode,
+    prefix: &str,
+    last: bool,
+    w: &mut impl Write,
+    accent: (u8, u8, u8),
+) -> io::Result<()> {
     let connector = if last { "└── " } else { "├── " };
-    writeln!(w, "{prefix}{}{}", connector.dimmed(), node_label(node))?;
+    writeln!(
+        w,
+        "{prefix}{}{}",
+        connector.dimmed(),
+        node_label(node, accent)
+    )?;
     let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
     let count = node.children.len();
     for (i, child) in node.children.iter().enumerate() {
-        render_node(child, &child_prefix, i + 1 == count, w)?;
+        render_node(child, &child_prefix, i + 1 == count, w, accent)?;
     }
     Ok(())
 }
 
 /// The styled label for a single node, excluding the tree connector.
-fn node_label(node: &TreeNode) -> String {
+fn node_label(node: &TreeNode, accent: (u8, u8, u8)) -> String {
     match &node.entry {
         NodeEntry::Dir => node
             .name
-            .truecolor(ACCENT.0, ACCENT.1, ACCENT.2)
+            .truecolor(accent.0, accent.1, accent.2)
             .bold()
             .to_string(),
         NodeEntry::File { size } => {
@@ -251,7 +261,7 @@ fn node_label(node: &TreeNode) -> String {
                     .collect::<Vec<_>>()
                     .join(" ");
                 s.push(' ');
-                s.push_str(&tags.truecolor(ACCENT.0, ACCENT.1, ACCENT.2).to_string());
+                s.push_str(&tags.truecolor(accent.0, accent.1, accent.2).to_string());
             }
             if m.encrypted {
                 s.push_str(" 🔒");
@@ -371,7 +381,7 @@ mod tests {
         let meta = load_note_meta(&index).unwrap();
         let root = build(&vault, &meta);
         let mut buf: Vec<u8> = Vec::new();
-        render_human(&root, &mut buf).unwrap();
+        render_human(&root, &mut buf, (0xee, 0x77, 0x33)).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(out.contains("Alpha.md"));
         assert!(out.contains("NOTE")); // kind tag
@@ -400,7 +410,7 @@ mod tests {
         };
 
         let mut buf = Vec::new();
-        render_human(&root, &mut buf).unwrap();
+        render_human(&root, &mut buf, (0xee, 0x77, 0x33)).unwrap();
         let out = String::from_utf8(buf).unwrap();
         assert!(
             out.contains('🔒'),

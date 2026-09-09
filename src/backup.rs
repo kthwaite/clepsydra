@@ -440,7 +440,7 @@ impl PartialArchive {
             .sync_all()
             .map_err(|source| io_error("sync backup archive", &self.path, source))?;
         drop(builder);
-        super::atomic_file::install_noreplace(&self.path, final_path)
+        crate::vault::atomic_file::install_noreplace(&self.path, final_path)
             .map_err(|source| io_error("install backup archive", final_path, source))?;
         self.committed = true;
         Ok(final_path.to_path_buf())

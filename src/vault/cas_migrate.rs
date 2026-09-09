@@ -237,7 +237,7 @@ fn read_source_blob_types(
 /// The legacy default store, if it exists and holds a `cas.db` (a hint target
 /// for doctor/serve).
 pub fn legacy_store_with_blobs() -> Option<PathBuf> {
-    let path = crate::expand_tilde(LEGACY_DEFAULT_CAS_PATH)?;
+    let path = super::config::expand_tilde(LEGACY_DEFAULT_CAS_PATH)?;
     (path.join("cas.db").is_file()).then_some(path)
 }
 
