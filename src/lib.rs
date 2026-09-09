@@ -214,7 +214,7 @@ pub fn build_router(
             Router::new().fallback(|| async { axum::http::StatusCode::NOT_FOUND }),
         );
     if !dev_mode {
-        app = app.merge(api::frontend::frontend_router());
+        app = app.merge(clep_frontend_assets::frontend_router());
     }
     app.with_state(state)
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()))

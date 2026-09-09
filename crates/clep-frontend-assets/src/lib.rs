@@ -1,3 +1,12 @@
+//! Serves the built React UI (`ui/dist/`) embedded into the `clep` binary via
+//! `rust-embed`.
+//!
+//! This lives in its own crate purely for build isolation: `rust-embed`
+//! re-embeds `ui/dist/` and forces a recompile whenever any file under it
+//! changes. Kept inline in the main lib, that recompile drags the whole
+//! `clepsydra` crate down with it. Isolated here, a UI rebuild only
+//! recompiles this crate and relinks the `clep` binary.
+
 use axum::{
     Router,
     body::Body,
@@ -15,7 +24,7 @@ const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; base-uri 'self'; conn
     object-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'";
 
 #[derive(RustEmbed)]
-#[folder = "ui/dist/"]
+#[folder = "../../ui/dist/"]
 struct Assets;
 
 pub fn frontend_router<S>() -> Router<S>

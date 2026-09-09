@@ -16,7 +16,6 @@ pub mod events;
 pub mod features;
 pub mod feeds;
 pub mod folders;
-pub mod frontend;
 pub mod index_routes;
 pub mod journal;
 pub mod location;

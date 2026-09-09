@@ -565,6 +565,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-frontend-assets"
+version = "0.0.0"
+dependencies = [
+ "axum",
+ "mime_guess",
+ "rust-embed",
+ "tokio",
+]
+
+[[package]]
 name = "clep-mcp"
 version = "0.0.0"
 dependencies = [
@@ -601,6 +611,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clep-config",
+ "clep-frontend-assets",
  "clep-test-support",
  "dirs",
  "feed-rs",
@@ -620,7 +631,6 @@ dependencies = [
  "reqwest",
  "ropey",
  "rusqlite",
- "rust-embed",
  "rustix",
  "serde",
  "serde_json",
