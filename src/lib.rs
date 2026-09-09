@@ -1,14 +1,10 @@
 pub mod api;
 pub mod backup;
-pub mod config_command;
 pub mod deeplink;
 pub mod doctor;
 pub mod feeds;
 pub mod lsp;
-pub mod macos_url_handler;
 pub mod mcp;
-pub mod new_note_command;
-pub mod sync_command;
 pub mod sync_runtime;
 pub mod todo_capture;
 pub mod vault;

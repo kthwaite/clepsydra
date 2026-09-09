@@ -10,13 +10,13 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::api::sync::{SyncReportDto, SyncStatusDto};
-use crate::mcp::client::{ApiCallError, ApiClient};
-use crate::mcp::configured_api_client;
-use crate::vault::gitsync::Author;
-use crate::vault::gitsync::engine::SyncEngine;
-use crate::vault::gitsync::git::Git;
-use crate::vault::gitsync::init::{
+use clepsydra::api::sync::{SyncReportDto, SyncStatusDto};
+use clepsydra::mcp::client::{ApiCallError, ApiClient};
+use clepsydra::mcp::configured_api_client;
+use clepsydra::vault::gitsync::Author;
+use clepsydra::vault::gitsync::engine::SyncEngine;
+use clepsydra::vault::gitsync::git::Git;
+use clepsydra::vault::gitsync::init::{
     InitOpts, InitReport, LfsPolicy, PromptFn, init, probe_lfs_remote,
 };
 
@@ -69,7 +69,7 @@ pub async fn run_init(args: InitArgs) -> Result<InitReport, Box<dyn std::error::
     if let Some(url) = args.remote.as_deref() {
         probe_lfs_remote(url).await?;
     }
-    let vault = crate::open_vault()?;
+    let vault = clepsydra::open_vault()?;
     let author = match (args.author_name, args.author_email) {
         (Some(name), Some(email)) => Some(Author { name, email }),
         (None, None) => None,
@@ -89,7 +89,7 @@ pub async fn run_init(args: InitArgs) -> Result<InitReport, Box<dyn std::error::
         None
     };
     let git = Git::new(vault.root());
-    let legacy_cas = crate::vault::cas_migrate::legacy_store_with_blobs();
+    let legacy_cas = clepsydra::vault::cas_migrate::legacy_store_with_blobs();
     let report = tokio::task::spawn_blocking(move || {
         init(
             &vault,
@@ -120,7 +120,7 @@ pub async fn run_sync() -> Result<RenderedSync, Box<dyn std::error::Error>> {
             serde_json::from_value::<SyncReportDto>(value)?
         }
         None => {
-            let vault = crate::open_vault()?;
+            let vault = clepsydra::open_vault()?;
             let engine = SyncEngine::open(&vault)?;
             let report = tokio::task::spawn_blocking(move || engine.full_sync()).await??;
             SyncReportDto::from(&report)
@@ -142,7 +142,7 @@ pub async fn run_status() -> Result<RenderedSync, Box<dyn std::error::Error>> {
             (serde_json::from_value::<SyncStatusDto>(value)?, true)
         }
         None => {
-            let vault = crate::open_vault()?;
+            let vault = clepsydra::open_vault()?;
             let engine = SyncEngine::open(&vault)?;
             let status = tokio::task::spawn_blocking(move || engine.status()).await??;
             // Nothing is running, so nothing can be pending or in progress.
@@ -427,8 +427,8 @@ pub fn render_init(report: &InitReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::sync::{ConflictCopyDto, JournalMergeDto};
-    use crate::vault::gitsync::Author;
+    use clepsydra::api::sync::{ConflictCopyDto, JournalMergeDto};
+    use clepsydra::vault::gitsync::Author;
 
     fn report(warnings: Vec<String>) -> InitReport {
         InitReport {

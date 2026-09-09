@@ -147,11 +147,7 @@ impl SyncStatusDto {
         }
     }
 
-    pub(crate) fn from_status(
-        status: &SyncStatus,
-        pending_autocommit: bool,
-        syncing: bool,
-    ) -> Self {
+    pub fn from_status(status: &SyncStatus, pending_autocommit: bool, syncing: bool) -> Self {
         Self {
             initialised: status.initialised,
             branch: status.branch.clone(),

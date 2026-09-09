@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use owo_colors::OwoColorize;
 use thiserror::Error;
 
-use crate::VESSEL_ACCENT as ACCENT;
+use clep_config::VESSEL_ACCENT as ACCENT;
 
 const LITERATE_CONFIG_TEMPLATE: &str = r##"# Clepsydra application configuration
 #
@@ -106,7 +106,7 @@ fn resolve_existing_with_env(
     home: Option<OsString>,
 ) -> Result<ConfigResolution, ConfigCommandError> {
     let mut considered =
-        crate::app_config::config_candidates_with_env(start_dir, xdg_config_home, home);
+        clep_config::app_config::config_candidates_with_env(start_dir, xdg_config_home, home);
     let Some(selected_index) = considered.iter().position(|path| path.is_file()) else {
         let searched = considered
             .iter()

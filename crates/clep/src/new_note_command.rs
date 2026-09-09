@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::app_config::{config_candidates_with_env, find_config_path_with_env};
-use crate::vault::Vault;
-use crate::vault::new_note::{NewNoteError, build_note_path};
-use crate::vault::page::{PageMeta, write_page_content};
-use crate::vault::path::VaultPath;
+use clep_config::app_config::{config_candidates_with_env, find_config_path_with_env};
+use clepsydra::vault::Vault;
+use clepsydra::vault::new_note::{NewNoteError, build_note_path};
+use clepsydra::vault::page::{PageMeta, write_page_content};
+use clepsydra::vault::path::VaultPath;
 
 /// Information about a note created by [`create_new_note`].
 #[derive(Debug, Clone)]
@@ -146,8 +146,8 @@ fn create_new_note_in_vault(
 
 #[cfg(test)]
 mod tests {
-    use crate::vault::init::init_vault;
-    use crate::vault::page::Page;
+    use clepsydra::vault::init::init_vault;
+    use clepsydra::vault::page::Page;
 
     use super::*;
 
@@ -229,7 +229,7 @@ mod tests {
 
         let created = create_new_note(&cwd, "My Note", None).unwrap();
         assert!(created.vault_path.as_str().starts_with("notes/"));
-        assert!(crate::vault::path::is_canonical_page_filename(
+        assert!(clepsydra::vault::path::is_canonical_page_filename(
             created.vault_path.filename()
         ));
 
@@ -278,7 +278,7 @@ mod tests {
         let created = create_new_note(&cwd, "My Note", None).unwrap();
         let fname = created.vault_path.filename();
         assert!(
-            crate::vault::path::is_canonical_page_filename(fname),
+            clepsydra::vault::path::is_canonical_page_filename(fname),
             "filename was: {fname}"
         );
         assert!(created.vault_path.as_str().starts_with("notes/"));
@@ -304,10 +304,10 @@ mod tests {
         let second = create_new_note(&cwd, "Same Title", None).unwrap();
 
         assert_ne!(first.vault_path.as_str(), second.vault_path.as_str());
-        assert!(crate::vault::path::is_canonical_page_filename(
+        assert!(clepsydra::vault::path::is_canonical_page_filename(
             first.vault_path.filename()
         ));
-        assert!(crate::vault::path::is_canonical_page_filename(
+        assert!(clepsydra::vault::path::is_canonical_page_filename(
             second.vault_path.filename()
         ));
     }

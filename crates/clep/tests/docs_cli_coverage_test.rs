@@ -90,8 +90,17 @@ fn missing_command_headings(commands: &BTreeSet<String>, docs: &str) -> Vec<Stri
 #[test]
 fn every_public_cli_command_is_documented() {
     let commands = public_commands_from_help();
-    let docs = std::fs::read_to_string("ui/src/docs/content/cli.mdx")
-        .expect("CLI reference should be readable");
+    // `cargo test` sets the working directory to this package's root
+    // (`crates/clep`), not the workspace root, so the docs path is resolved
+    // relative to `CARGO_MANIFEST_DIR` instead of the process cwd.
+    let docs_path =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../ui/src/docs/content/cli.mdx");
+    let docs = std::fs::read_to_string(&docs_path).unwrap_or_else(|error| {
+        panic!(
+            "CLI reference should be readable at {}: {error}",
+            docs_path.display()
+        )
+    });
     let missing = missing_command_headings(&commands, &docs);
 
     assert!(

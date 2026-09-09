@@ -509,6 +509,29 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
+name = "clep"
+version = "0.0.0"
+dependencies = [
+ "anstream 1.0.0",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "clep-config",
+ "clepsydra",
+ "dirs",
+ "owo-colors",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml 0.8.23",
+]
+
+[[package]]
 name = "clep-config"
 version = "0.0.0"
 dependencies = [
@@ -530,7 +553,6 @@ name = "clepsydra"
 version = "0.0.0"
 dependencies = [
  "ammonia",
- "anstream 1.0.0",
  "axum",
  "axum-extra",
  "axum-server",
@@ -540,7 +562,6 @@ dependencies = [
  "blake3",
  "bytes",
  "chrono",
- "clap",
  "clep-config",
  "clep-test-support",
  "dirs",

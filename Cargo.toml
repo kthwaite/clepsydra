@@ -3,10 +3,6 @@ name = "clepsydra"
 version.workspace = true
 edition.workspace = true
 
-[[bin]]
-name = "clep"
-path = "src/bin/cli.rs"
-
 [features]
 # Enables the directory-flush/sync fault-injection hooks in
 # `vault::atomic_file` and `vault::rubbish` for another crate's tests.
@@ -14,7 +10,6 @@ test-failpoints = []
 
 [dependencies]
 ammonia = { workspace = true }
-anstream = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
 axum-server = { workspace = true }
@@ -22,7 +17,6 @@ base64 = { workspace = true }
 biblatex = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
-clap = { workspace = true }
 clep-config = { workspace = true }
 dirs = { workspace = true }
 feed-rs = { workspace = true }
@@ -90,6 +84,7 @@ edition = "2024"
 [workspace.dependencies]
 clep-test-support = { path = "crates/clep-test-support" }
 clep-config = { path = "crates/clep-config" }
+clepsydra = { path = "." }
 ammonia = "4"
 anstream = "1.0.0"
 axum = { version = "0.8.8", features = ["multipart"] }

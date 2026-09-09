@@ -1,3 +1,8 @@
+mod config_command;
+mod macos_url_handler;
+mod new_note_command;
+mod sync_command;
+
 use std::{
     future::Future,
     io::{Read, Write},
@@ -8,9 +13,9 @@ use clap::{Parser, Subcommand};
 
 use clepsydra::backup::create_backup;
 use clepsydra::doctor::{self, DoctorOpts};
-use clepsydra::new_note_command::create_new_note;
 use clepsydra::vault::init::init_vault;
 use clepsydra::{ServeOverrides, open_vault_and_index, run_lsp_standalone, run_server};
+use new_note_command::create_new_note;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -422,26 +427,26 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         Commands::Config { command } => match command {
             ConfigCommands::Show { origin } => {
                 let cwd = std::env::current_dir()?;
-                let config = clepsydra::config_command::read_existing(&cwd)?;
+                let config = config_command::read_existing(&cwd)?;
                 if origin {
                     let mut stderr = anstream::AutoStream::auto(std::io::stderr().lock());
-                    clepsydra::config_command::render_origin(&config.resolution.path, &mut stderr)?;
+                    config_command::render_origin(&config.resolution.path, &mut stderr)?;
                 }
                 std::io::stdout().lock().write_all(&config.contents)?;
                 Ok(0)
             }
             ConfigCommands::Path { trace } => {
                 let cwd = std::env::current_dir()?;
-                let resolution = clepsydra::config_command::resolve_existing(&cwd)?;
+                let resolution = config_command::resolve_existing(&cwd)?;
                 if trace {
                     let mut stderr = anstream::AutoStream::auto(std::io::stderr().lock());
-                    clepsydra::config_command::render_trace(&resolution, &mut stderr)?;
+                    config_command::render_trace(&resolution, &mut stderr)?;
                 }
                 println!("{}", resolution.path.display());
                 Ok(0)
             }
             ConfigCommands::Create => {
-                let path = clepsydra::config_command::create()?;
+                let path = config_command::create()?;
                 println!("Created config at {}", path.display());
                 Ok(0)
             }
@@ -504,7 +509,7 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 return Err("register-url is only supported on macOS".into());
             }
             let binary = std::env::current_exe()?;
-            let app = clepsydra::macos_url_handler::install(&binary, obsidian)?;
+            let app = macos_url_handler::install(&binary, obsidian)?;
             println!("Installed URL handler at {}", app.display());
             println!("Registered scheme: clepsydra://");
             if obsidian {
@@ -749,12 +754,12 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
         },
         Commands::Sync { command } => match command {
             None => {
-                let rendered = clepsydra::sync_command::run_sync().await?;
+                let rendered = sync_command::run_sync().await?;
                 print!("{}", rendered.lines);
                 Ok(rendered.exit_code)
             }
             Some(SyncCommands::Status) => {
-                let rendered = clepsydra::sync_command::run_status().await?;
+                let rendered = sync_command::run_status().await?;
                 print!("{}", rendered.lines);
                 Ok(rendered.exit_code)
             }
@@ -763,13 +768,13 @@ async fn run_cli(cli: Cli) -> Result<i32, Box<dyn std::error::Error>> {
                 author_name,
                 author_email,
             }) => {
-                let report = clepsydra::sync_command::run_init(clepsydra::sync_command::InitArgs {
+                let report = sync_command::run_init(sync_command::InitArgs {
                     remote,
                     author_name,
                     author_email,
                 })
                 .await?;
-                print!("{}", clepsydra::sync_command::render_init(&report));
+                print!("{}", sync_command::render_init(&report));
                 Ok(if report.warnings.is_empty() { 0 } else { 1 })
             }
         },
