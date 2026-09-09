@@ -104,6 +104,7 @@ function AgendaTileContent({ className }: AgendaTileProps) {
             const priority = task.properties.priority;
             const overdue = due ? due < localDateKey(new Date()) : false;
             const source = task.page_title ?? task.page_path;
+            const parent = task.parent_content;
 
             return (
               <li
@@ -122,7 +123,21 @@ function AgendaTileContent({ className }: AgendaTileProps) {
                   isDisabled={toggle.isPending}
                 />
 
-                <div className="min-w-0 flex-1">
+                <div className={cn("min-w-0 flex-1", parent && "pl-2.5")}>
+                  {/* The agenda orders rows by date and priority across every
+                      page, so a nested Todo arrives without its parent. The
+                      parent line travels with the row instead: the indent
+                      shows there is one, this says which. */}
+                  {parent ? (
+                    <span
+                      data-testid="agenda-row-parent"
+                      title={parent}
+                      className="cl-mono block truncate text-[9px] text-ink-mute"
+                    >
+                      <span aria-hidden>↳ </span>
+                      {parent}
+                    </span>
+                  ) : null}
                   <span
                     title={task.content}
                     className="cl-mono block truncate text-[11px] text-ink"

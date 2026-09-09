@@ -250,9 +250,9 @@ pub async fn get_today(
         .with_index(move |index, _vault| {
             let conn = index.connection();
 
-            let sql = "\
-                SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
-                       status_prop.value AS status, p.path, p.title \
+            let sql = &format!(
+                "SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
+                       status_prop.value AS status, p.path, p.title, {} \
                 FROM blocks b \
                 JOIN block_properties status_prop \
                   ON status_prop.page_id = b.page_id \
@@ -264,7 +264,9 @@ pub async fn get_today(
                   AND p.journal_date < ?1 \
                   AND p.journal_date >= ?2 \
                   AND status_prop.value IN ('todo', 'doing') \
-                ORDER BY p.journal_date DESC, b.order_index ASC";
+                ORDER BY p.journal_date DESC, b.order_index ASC",
+                crate::api::tasks::PARENT_CONTENT_SQL,
+            );
 
             let mut stmt = conn.prepare(sql)?;
             let rows = stmt.query_map(params![today_clone, lookback_date], |row| {
@@ -277,6 +279,7 @@ pub async fn get_today(
                     row.get::<_, String>(5)?,         // status
                     row.get::<_, String>(6)?,         // path
                     row.get::<_, Option<String>>(7)?, // title
+                    row.get::<_, Option<String>>(8)?, // parent_content
                 ))
             })?;
 
@@ -293,6 +296,7 @@ pub async fn get_today(
                     status,
                     page_path,
                     page_title,
+                    parent_content,
                 ) = row?;
                 task_keys.push((page_id, span_start));
                 tasks.push(TaskItem {
@@ -302,6 +306,7 @@ pub async fn get_today(
                     properties: HashMap::new(),
                     page_path,
                     page_title,
+                    parent_content,
                     span_start,
                     span_end,
                 });

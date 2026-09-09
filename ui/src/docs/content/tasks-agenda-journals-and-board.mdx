@@ -63,6 +63,15 @@ inline priority with `A` before `B` before `C`. Its count is the authoritative
 total returned by the Todo query, not merely the number of rows shown. Choose
 **Agenda →** or open `/agenda` for the full Agenda surface.
 
+Each row names its source page, and choosing that name opens the page in a
+Folio tab. A Todo written underneath another line is indented and carries that
+line above it, marked `↳`. The parent is the nearest preceding line at a
+shallower indent, whether or not it is itself a Todo — most nesting hangs off a
+plain bullet or a heading. The tile orders rows by date and priority across
+every page rather than by document position, so a nested Todo usually arrives
+without its parent or its siblings; the carried line is the context, not a
+tree.
+
 Choose **Stats →** in the Atrium to open `/stats`, which contains the vault
 inventory and subjects ranked by frequency.
 

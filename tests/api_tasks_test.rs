@@ -1011,3 +1011,50 @@ async fn update_task_status_rejects_span_inside_a_character() {
         .await;
     res.assert_status(axum::http::StatusCode::BAD_REQUEST);
 }
+
+/// A Todo nested under another line carries that line's text, so a row torn
+/// out of its page by the agenda's own ordering still says what it sits under.
+/// The parent is the nearest preceding block at a shallower depth — the rule
+/// `vault::block::assign_parents_and_order` uses — whether or not that block is
+/// itself a Todo.
+#[tokio::test]
+async fn task_rows_name_the_line_they_are_nested_under() {
+    let (server, _tmp) = setup_server_with_seed(|root| {
+        std::fs::write(
+            root.join("plan.md"),
+            "---\nid: 01951234-0000-7000-8000-ccc000000001\ntitle: Plan\n---\n\n\
+             - Ship the release\n  - [ ] Cut the tag\n    - [ ] Sign the tarball\n\
+             - [ ] Standalone chore\n",
+        )
+        .unwrap();
+    });
+
+    let response = server.get("/api/vault/tasks?status=todo").await;
+    response.assert_status_ok();
+    let body: serde_json::Value = response.json();
+    let tasks = body["tasks"].as_array().expect("task rows");
+
+    let row = |content: &str| {
+        tasks
+            .iter()
+            .find(|t| t["content"].as_str() == Some(content))
+            .unwrap_or_else(|| panic!("expected a row for {content}"))
+            .clone()
+    };
+
+    // A plain bullet is a legitimate parent: most nesting hangs off one.
+    assert_eq!(
+        row("Cut the tag")["parent_content"].as_str(),
+        Some("Ship the release"),
+    );
+    // Todo under Todo.
+    assert_eq!(
+        row("Sign the tarball")["parent_content"].as_str(),
+        Some("Cut the tag"),
+    );
+    // A top-level Todo has nothing above it, and says so with null.
+    assert!(
+        row("Standalone chore")["parent_content"].is_null(),
+        "a top-level Todo has no parent line"
+    );
+}

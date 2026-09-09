@@ -3246,6 +3246,14 @@ export interface components {
             content: string;
             page_path: string;
             page_title?: string | null;
+            /**
+             * @description The text of the line this Todo is nested under, when it is nested.
+             *
+             *     Agenda views order rows by due date and priority across every page, so
+             *     a child arrives without its parent and often without its siblings. The
+             *     parent's text travels with the row instead, which survives any slice.
+             */
+            parent_content?: string | null;
             properties: {
                 [key: string]: string;
             };

@@ -167,6 +167,27 @@ describe("AgendaTile", () => {
     });
   });
 
+  it("names the line a nested Todo sits under", () => {
+    agendaMocks.useTasks.mockReturnValue(
+      successfulState(
+        [
+          task("Cut the tag", 1, { parent_content: "Ship the release" }),
+          task("Standalone chore", 2),
+        ],
+        2,
+      ),
+    );
+    render(<AgendaTile />);
+
+    const nested = rowFor("Cut the tag");
+    const parent = within(nested).getByText("Ship the release");
+    expect(parent).toHaveAttribute("title", "Ship the release");
+
+    expect(
+      within(rowFor("Standalone chore")).queryByTestId("agenda-row-parent"),
+    ).not.toBeInTheDocument();
+  });
+
   it("opens the source Folio of a row from its page link", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<AgendaTile />);

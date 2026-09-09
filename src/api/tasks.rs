@@ -50,7 +50,27 @@ pub struct TaskItem {
     pub page_title: Option<String>,
     pub span_start: i64,
     pub span_end: i64,
+    /// The text of the line this Todo is nested under, when it is nested.
+    ///
+    /// Agenda views order rows by due date and priority across every page, so
+    /// a child arrives without its parent and often without its siblings. The
+    /// parent's text travels with the row instead, which survives any slice.
+    pub parent_content: Option<String>,
 }
+
+/// Scalar subquery for the content of a block's parent line, for a query whose
+/// `blocks` row is aliased `b`. Selects as `parent_content`.
+///
+/// `blocks.parent_id` cannot serve here: it holds the parent's `block_id`,
+/// which exists only for a line carrying an explicit `^id` suffix, so it is
+/// null for ordinary nested Todos. This re-states the parser's own rule
+/// (`vault::block::assign_parents_and_order`): the parent is the nearest
+/// preceding block at a strictly shallower depth. A parent need not be a Todo
+/// — most nesting hangs off a plain bullet or a heading.
+pub const PARENT_CONTENT_SQL: &str = "(SELECT pb.content FROM blocks pb \
+     WHERE pb.page_id = b.page_id AND pb.span_start < b.span_start \
+       AND pb.depth < b.depth \
+     ORDER BY pb.span_start DESC LIMIT 1) AS parent_content";
 
 #[derive(Debug, Serialize, ToSchema)]
 pub struct TaskListResponse {
@@ -374,7 +394,7 @@ pub async fn list_tasks(
             // Data query
             let data_sql = format!(
                 "SELECT b.block_id, b.content, status_prop.value AS status, \
-                 p.path, p.title, b.span_start, b.span_end \
+                 p.path, p.title, b.span_start, b.span_end, {PARENT_CONTENT_SQL} \
                  FROM blocks b \
                  JOIN pages p ON b.page_id = p.id \
                  JOIN block_properties status_prop ON status_prop.page_id = b.page_id \
@@ -406,6 +426,7 @@ pub async fn list_tasks(
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             })?;
 
@@ -413,8 +434,16 @@ pub async fn list_tasks(
             let mut task_keys: Vec<(String, i64)> = Vec::new(); // (page_id, span_start) for property lookup
 
             for row in rows {
-                let (block_id, content, status, page_path, page_title, span_start, span_end) =
-                    row?;
+                let (
+                    block_id,
+                    content,
+                    status,
+                    page_path,
+                    page_title,
+                    span_start,
+                    span_end,
+                    parent_content,
+                ) = row?;
                 task_keys.push((page_path.clone(), span_start));
                 tasks.push(TaskItem {
                     block_id,
@@ -425,6 +454,7 @@ pub async fn list_tasks(
                     page_title,
                     span_start,
                     span_end,
+                    parent_content,
                 });
             }
 
@@ -597,14 +627,14 @@ pub async fn update_task_status(
         .with_index(move |index, _vault| {
             let conn = index.connection();
 
-            let mut stmt = conn.prepare(
-                "SELECT b.block_id, b.content, status_prop.value, p.path, p.title, b.span_start, b.span_end \
+            let mut stmt = conn.prepare(&format!(
+                "SELECT b.block_id, b.content, status_prop.value, p.path, p.title, b.span_start, b.span_end, {PARENT_CONTENT_SQL} \
                  FROM blocks b \
                  JOIN pages p ON b.page_id = p.id \
                  JOIN block_properties status_prop ON status_prop.page_id = b.page_id \
                    AND status_prop.span_start = b.span_start AND status_prop.key = 'status' \
-                 WHERE p.path = ?1 AND b.span_start = ?2",
-            )?;
+                 WHERE p.path = ?1 AND b.span_start = ?2"
+            ))?;
 
             let result = stmt.query_row(params![page_path_str, span_start_i64], |row| {
                 Ok((
@@ -615,11 +645,21 @@ pub async fn update_task_status(
                     row.get::<_, Option<String>>(4)?,
                     row.get::<_, i64>(5)?,
                     row.get::<_, i64>(6)?,
+                    row.get::<_, Option<String>>(7)?,
                 ))
             });
 
             match result {
-                Ok((block_id, content, status, page_path, page_title, span_start, span_end)) => {
+                Ok((
+                    block_id,
+                    content,
+                    status,
+                    page_path,
+                    page_title,
+                    span_start,
+                    span_end,
+                    parent_content,
+                )) => {
                     // Fetch properties
                     let mut prop_stmt = conn.prepare(
                         "SELECT bp.key, bp.value FROM block_properties bp \
@@ -644,6 +684,7 @@ pub async fn update_task_status(
                         page_title,
                         span_start,
                         span_end,
+                        parent_content,
                     }))
                 }
                 Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),

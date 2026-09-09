@@ -476,10 +476,11 @@ pub async fn get_agenda(
             let end_key = end_key.clone();
             move |index, _vault| {
                 let conn = index.connection();
-                let sql = "\
-                    SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
+                let sql = &format!(
+                    "SELECT b.page_id, b.block_id, b.content, b.span_start, b.span_end, \
                            status_prop.value AS status, p.path, p.title, \
-                           CASE WHEN p.kind = 'JOURNAL' THEN p.journal_date ELSE NULL END AS journal_date \
+                           CASE WHEN p.kind = 'JOURNAL' THEN p.journal_date ELSE NULL END AS journal_date, \
+                           {} \
                     FROM blocks b \
                     JOIN block_properties status_prop \
                       ON status_prop.page_id = b.page_id \
@@ -502,7 +503,9 @@ pub async fn get_agenda(
                         OR (p.journal_date = ?1 AND p.kind = 'JOURNAL') \
                         OR bp_due.value IS NULL \
                       ) \
-                      AND p.kind != 'AI_JOURNAL'";
+                      AND p.kind != 'AI_JOURNAL'",
+                    crate::api::tasks::PARENT_CONTENT_SQL,
+                );
 
                 let mut stmt = conn.prepare(sql)?;
                 let rows = stmt.query_map(params![today_key, tomorrow_key, end_key], |row| {
@@ -516,6 +519,7 @@ pub async fn get_agenda(
                         row.get::<_, String>(6)?,
                         row.get::<_, Option<String>>(7)?,
                         row.get::<_, Option<String>>(8)?,
+                        row.get::<_, Option<String>>(9)?,
                     ))
                 })?;
 
@@ -533,6 +537,7 @@ pub async fn get_agenda(
                         page_path,
                         page_title,
                         journal_date,
+                        parent_content,
                     ) = row?;
                     todo_keys.push((page_id, span_start));
                     todo_items.push(TaskItem {
@@ -544,6 +549,7 @@ pub async fn get_agenda(
                         page_title,
                         span_start,
                         span_end,
+                        parent_content,
                     });
                     journal_dates.push(journal_date);
                 }
