@@ -2105,6 +2105,8 @@ fn check_runtime(report: &mut Report) {
 mod tests {
     use super::*;
     use std::fs;
+
+    use crate::env_test_support::EnvGuard;
     use tempfile::TempDir;
 
     #[test]
@@ -2156,37 +2158,6 @@ mod tests {
             legacy_store_hint(&legacy, Some(&legacy)).is_none(),
             "store IS the legacy path: no hint"
         );
-    }
-
-    /// RAII guard that records the prior value of an env var on construction
-    /// and restores it on drop. Required because tokio's default test runtime
-    /// runs tests on a multi-threaded executor where process-wide env state is
-    /// shared, and `find_config_path`/`dirs::home_dir` read these values.
-    struct EnvGuard {
-        key: &'static str,
-        prior: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let prior = std::env::var_os(key);
-            // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
-            // so no other thread is racing on the same variable.
-            unsafe { std::env::set_var(key, value) }
-            Self { key, prior }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: see `set`.
-            unsafe {
-                match self.prior.take() {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
     }
 
     fn write_top_level_config(dir: &Path, vault_root: &Path) {

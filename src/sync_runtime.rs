@@ -435,27 +435,10 @@ pub(crate) mod tests {
     use super::*;
     use crate::api::AppState;
     use crate::api::events::SyncNotification;
-    use crate::env_test_support::EnvGuard;
     use crate::vault::Vault;
     use crate::vault::gitsync::engine::{PushStatus, SyncEngine};
-    use crate::vault::gitsync::testing::{self, TestRepos};
+    use crate::vault::gitsync::testing::{self, TestRepos, isolate_git_process_wide};
     use crate::vault::path::VaultPath;
-
-    /// Point the whole process at an empty global git config for as long as
-    /// the guard lives, so a `Git` built by production code (`Git::new`, as
-    /// [`SyncRuntime::detect`] uses) cannot read — or be broken by — the
-    /// developer's real `~/.gitconfig`. Callers must be `#[serial]`.
-    pub(crate) struct GitEnv {
-        _global: EnvGuard,
-        _nosystem: EnvGuard,
-    }
-
-    pub(crate) fn isolate_git_process_wide() -> GitEnv {
-        GitEnv {
-            _global: EnvGuard::set("GIT_CONFIG_GLOBAL", testing::empty_global_config()),
-            _nosystem: EnvGuard::set("GIT_CONFIG_NOSYSTEM", "1"),
-        }
-    }
 
     /// A server state over a sync-initialised vault (`TestRepos`'s clone `a`,
     /// which already carries the D3 marker and a `[sync]` author), with its

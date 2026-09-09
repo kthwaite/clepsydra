@@ -68,6 +68,7 @@ pub(crate) fn resolve_lsp_root(params: &InitializeParams, cwd: &Path) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env_test_support::EnvGuard;
     use tower_lsp::lsp_types::{Url, WorkspaceFolder};
 
     #[test]
@@ -117,37 +118,6 @@ mod tests {
         let params = InitializeParams::default();
         let resolved = resolve_lsp_root(&params, tmp.path()).unwrap();
         assert_eq!(resolved, root);
-    }
-
-    /// RAII guard that records the prior value of an env var on construction
-    /// and restores it on drop. Mirrors `doctor::tests::EnvGuard` — required
-    /// because the default test runner shares process-wide env state across
-    /// threads, and `find_config_path`/`dirs::home_dir` read these values.
-    struct EnvGuard {
-        key: &'static str,
-        prior: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
-            let prior = std::env::var_os(key);
-            // SAFETY: tests touching env are gated behind `#[serial_test::serial]`
-            // so no other thread is racing on the same variable.
-            unsafe { std::env::set_var(key, value) }
-            Self { key, prior }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: see `set`.
-            unsafe {
-                match self.prior.take() {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
     }
 
     #[test]

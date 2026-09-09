@@ -7,16 +7,16 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 static TEMP_FILE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 static FAIL_DIRECTORY_FLUSHES: std::sync::LazyLock<parking_lot::Mutex<Vec<PathBuf>>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(Vec::new()));
 
-#[cfg(test)]
-pub(crate) struct TestDirectoryFlushFailureGuard {
+#[cfg(any(test, feature = "test-failpoints"))]
+pub struct TestDirectoryFlushFailureGuard {
     path: PathBuf,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 impl Drop for TestDirectoryFlushFailureGuard {
     fn drop(&mut self) {
         let mut targets = FAIL_DIRECTORY_FLUSHES.lock();
@@ -26,8 +26,8 @@ impl Drop for TestDirectoryFlushFailureGuard {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn fail_next_directory_flush(path: &Path) -> TestDirectoryFlushFailureGuard {
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn fail_next_directory_flush(path: &Path) -> TestDirectoryFlushFailureGuard {
     let path = path.to_path_buf();
     let mut targets = FAIL_DIRECTORY_FLUSHES.lock();
     assert!(
@@ -39,7 +39,7 @@ pub(crate) fn fail_next_directory_flush(path: &Path) -> TestDirectoryFlushFailur
     TestDirectoryFlushFailureGuard { path }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 fn hit_test_directory_flush_failure(path: &Path) -> io::Result<()> {
     let mut targets = FAIL_DIRECTORY_FLUSHES.lock();
     if let Some(index) = targets.iter().position(|target| target == path) {
@@ -480,7 +480,7 @@ fn sync_parent(parent: &Path) -> io::Result<()> {
 /// handle. `File::sync_all` then delegates to `FlushFileBuffers`, matching the
 /// durability boundary used by ordinary `File` synchronization.
 pub(crate) fn flush_directory(path: &Path) -> io::Result<()> {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-failpoints"))]
     hit_test_directory_flush_failure(path)?;
     flush_directory_platform(path)
 }

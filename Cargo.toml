@@ -7,6 +7,11 @@ edition = "2024"
 name = "clep"
 path = "src/bin/cli.rs"
 
+[features]
+# Enables the directory-flush/sync fault-injection hooks in
+# `vault::atomic_file` and `vault::rubbish` for another crate's tests.
+test-failpoints = []
+
 [dependencies]
 ammonia = "4"
 anstream = "1.0.0"

@@ -557,7 +557,7 @@ mod tests {
     #[serial_test::serial]
     fn sync_check_passes_on_an_initialised_clean_vault_and_flags_unmerged() {
         use crate::vault::gitsync::testing;
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         let vault = sync_initialised_vault(&repos.a);
 
@@ -617,7 +617,7 @@ mod tests {
     #[serial_test::serial]
     fn sync_check_flags_missing_managed_lines_and_nested_repo() {
         use crate::vault::gitsync::{MANAGED_GITIGNORE, testing};
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         let vault = sync_initialised_vault(&repos.a);
 
@@ -681,7 +681,7 @@ mod tests {
     #[serial_test::serial]
     fn sync_check_warns_when_dot_git_is_not_excluded() {
         use crate::vault::gitsync::testing;
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         sync_initialised_vault(&repos.a);
 
@@ -710,7 +710,7 @@ mod tests {
     #[serial_test::serial]
     fn sync_check_reports_a_repo_without_the_marker_as_uninitialised() {
         use crate::vault::gitsync::testing;
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
         crate::vault::init::init_vault(&root).unwrap();
@@ -784,7 +784,7 @@ mod tests {
     #[serial_test::serial]
     fn sync_check_warns_when_the_checked_out_branch_is_not_the_configured_one() {
         use crate::vault::gitsync::testing;
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
         let repos = testing::TestRepos::new();
         let vault = sync_initialised_vault(&repos.a);
         testing::git(&repos.a)
@@ -810,7 +810,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn driver_check_warns_until_init_registers_it() {
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
         // `sync_initialised_vault` runs `gitsync::init`, which now registers
         // the merge driver (Task 3) -> ok. Unset it by hand -> warn.
         let tmp = TempDir::new().unwrap();
@@ -888,7 +888,7 @@ mod tests {
     #[test]
     #[serial_test::serial]
     fn conflict_copies_check_lists_copies() {
-        let _env = crate::sync_runtime::tests::isolate_git_process_wide();
+        let _env = crate::vault::gitsync::testing::isolate_git_process_wide();
         let tmp = TempDir::new().unwrap();
         let root = tmp.path().join("v");
         crate::vault::init::init_vault(&root).unwrap();

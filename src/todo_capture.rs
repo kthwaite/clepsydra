@@ -148,6 +148,7 @@ fn validate_optional_date(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::env_test_support::EnvGuard;
     use crate::mcp::client::ApiClient;
     use wiremock::matchers::{body_json, method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -158,39 +159,6 @@ mod tests {
             due: None,
             scheduled: None,
             priority: None,
-        }
-    }
-
-    struct EnvGuard {
-        key: &'static str,
-        prior: Option<std::ffi::OsString>,
-    }
-
-    impl EnvGuard {
-        fn set(key: &'static str, value: &str) -> Self {
-            let prior = std::env::var_os(key);
-            // SAFETY: proxy-environment tests are serialized.
-            unsafe { std::env::set_var(key, value) };
-            Self { key, prior }
-        }
-
-        fn remove(key: &'static str) -> Self {
-            let prior = std::env::var_os(key);
-            // SAFETY: proxy-environment tests are serialized.
-            unsafe { std::env::remove_var(key) };
-            Self { key, prior }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            // SAFETY: proxy-environment tests are serialized.
-            unsafe {
-                match self.prior.take() {
-                    Some(value) => std::env::set_var(self.key, value),
-                    None => std::env::remove_var(self.key),
-                }
-            }
         }
     }
 

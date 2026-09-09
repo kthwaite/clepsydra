@@ -9,6 +9,8 @@ use tempfile::TempDir;
 
 use super::git::Git;
 use super::{Author, INIT_MARKER_KEY, INIT_MARKER_VALUE};
+#[cfg(test)]
+use crate::env_test_support::EnvGuard;
 use crate::vault::init::init_vault;
 
 /// The path of an empty file used as `GIT_CONFIG_GLOBAL`, so tests never
@@ -141,4 +143,22 @@ fn seed_sync_author(root: &Path) {
     contents
         .push_str("\n[sync]\nauthor_name = \"Test Author\"\nauthor_email = \"test@example.com\"\n");
     std::fs::write(&config_path, contents).expect("write [sync] section into config.toml");
+}
+
+/// Point the whole process at an empty global git config for as long as the
+/// guard lives, so a `Git` built by production code (`Git::new`, as
+/// `SyncRuntime::detect` uses) cannot read — or be broken by — the
+/// developer's real `~/.gitconfig`. Callers must be `#[serial]`.
+#[cfg(test)]
+pub(crate) struct GitEnv {
+    _global: EnvGuard,
+    _nosystem: EnvGuard,
+}
+
+#[cfg(test)]
+pub(crate) fn isolate_git_process_wide() -> GitEnv {
+    GitEnv {
+        _global: EnvGuard::set("GIT_CONFIG_GLOBAL", empty_global_config()),
+        _nosystem: EnvGuard::set("GIT_CONFIG_NOSYSTEM", "1"),
+    }
 }
