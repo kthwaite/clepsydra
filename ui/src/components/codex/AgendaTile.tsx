@@ -3,6 +3,7 @@ import { Component, type ReactNode } from "react";
 import { useTasks, useToggleTaskStatus } from "#/api/tasks";
 import { priorityLabel } from "#/components/agenda/AgendaItemList";
 import { TaskStatusButton } from "#/components/ui/task-status-button";
+import { useOpenTab } from "#/hooks/useOpenTab";
 import { cn } from "#/lib/cn";
 import { localDateKey } from "#/lib/time";
 import { Card } from "./Card";
@@ -67,6 +68,7 @@ class AgendaErrorBoundary extends Component<
 function AgendaTileContent({ className }: AgendaTileProps) {
   const query = useTasks(AGENDA_FILTERS);
   const toggle = useToggleTaskStatus();
+  const openTab = useOpenTab();
 
   if (query.isLoading) {
     return (
@@ -101,6 +103,7 @@ function AgendaTileContent({ className }: AgendaTileProps) {
             const due = task.properties.due;
             const priority = task.properties.priority;
             const overdue = due ? due < localDateKey(new Date()) : false;
+            const source = task.page_title ?? task.page_path;
 
             return (
               <li
@@ -149,9 +152,17 @@ function AgendaTileContent({ className }: AgendaTileProps) {
                         {priorityLabel(priority)}
                       </span>
                     ) : null}
-                    <span className="cl-mono min-w-0 truncate text-[9px] text-ink-mute">
-                      {task.page_title ?? task.page_path}
-                    </span>
+                    {/* The row names a Todo written on a page; the source is
+                        the only way back to the line's context, so it opens
+                        the Folio the way the full agenda's rows do. */}
+                    <button
+                      type="button"
+                      aria-label={`Open ${source}`}
+                      onClick={() => openTab("page", task.page_path, source)}
+                      className="cl-mono min-w-0 cursor-pointer truncate text-left text-[9px] text-ink-mute underline decoration-rule underline-offset-2 hover:text-accent focus-visible:outline-2 focus-visible:outline-accent focus-visible:outline-offset-2"
+                    >
+                      {source}
+                    </button>
                   </div>
                 </div>
               </li>

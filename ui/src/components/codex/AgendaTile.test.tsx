@@ -7,10 +7,15 @@ const agendaMocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   mutate: vi.fn(),
   useTasks: vi.fn(),
+  openTab: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-router", () => ({
   useNavigate: () => agendaMocks.navigate,
+}));
+
+vi.mock("#/hooks/useOpenTab", () => ({
+  useOpenTab: () => agendaMocks.openTab,
 }));
 
 vi.mock("#/api/tasks", () => ({
@@ -160,6 +165,41 @@ describe("AgendaTile", () => {
       spanStart: 42,
       status: "done",
     });
+  });
+
+  it("opens the source Folio of a row from its page link", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<AgendaTile />);
+
+    await user.click(
+      within(rowFor("Overdue high priority")).getByRole("button", {
+        name: "Open Alpha Folio",
+      }),
+    );
+
+    expect(agendaMocks.openTab).toHaveBeenCalledWith(
+      "page",
+      "projects/alpha.md",
+      "Alpha Folio",
+    );
+  });
+
+  it("labels a row whose page carries no title by its path", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    agendaMocks.useTasks.mockReturnValue(
+      successfulState([task("Untitled source", 1, { page_title: null })], 1),
+    );
+    render(<AgendaTile />);
+
+    await user.click(
+      screen.getByRole("button", { name: "Open folios/source-1.md" }),
+    );
+
+    expect(agendaMocks.openTab).toHaveBeenCalledWith(
+      "page",
+      "folios/source-1.md",
+      "folios/source-1.md",
+    );
   });
 
   it("renders an agenda heading action that opens the full agenda", async () => {
