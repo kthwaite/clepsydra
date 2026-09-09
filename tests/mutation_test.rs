@@ -1500,6 +1500,227 @@ async fn empty_rubbish_snapshots_valid_items_newest_first_and_continues_truthful
     assert_eq!(catalog[2], None);
 }
 
+/// Moved here from `mutation_coordinator.rs`'s internal unit tests: the
+/// coordinator must no longer name the archive feature in its own test
+/// module, and this test only needs the public `RubbishPurgeHook` seam, so
+/// it belongs in this integration suite alongside the rest of the
+/// `ArchiveDeleteHook`-backed purge coverage.
+#[cfg(unix)]
+#[tokio::test]
+async fn purge_rubbish_rename_failure_keeps_actionable_item_and_retries_one_shot_cleanup() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let (_tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000391").unwrap();
+    let page_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000392").unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000391",
+        "019fd000-0000-7000-8000-000000000392",
+        "purge-boundary.md",
+        "2026-08-14T12:00:00Z",
+    );
+    let bytes = format!("+++\nid = \"{page_id}\"\ntitle = \"Purge boundary\"\n+++\nbody\n");
+    publish_purge_item(&vault, &raw_index, &manifest, bytes.as_bytes());
+    let store = RubbishStore::for_vault(vault.root());
+    let rubbish_root = vault.root().join(".clepsydra/rubbish");
+    let tombstone = rubbish_root.join(format!(".purge-{item_id}"));
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let coordinator = MutationCoordinator::new();
+    let cas_temp = tempfile::tempdir().unwrap();
+    let cas = Arc::new(parking_lot::Mutex::new(
+        ContentStore::open(cas_temp.path()).unwrap(),
+    ));
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
+    fs::set_permissions(&rubbish_root, fs::Permissions::from_mode(0o500)).unwrap();
+
+    let error = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&purge_hooks),
+            &item_id.to_string(),
+        )
+        .await
+        .unwrap_err();
+
+    fs::set_permissions(&rubbish_root, fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(matches!(
+        error,
+        MutationError::RubbishStore { item_id: found, .. } if found == item_id
+    ));
+    assert_eq!(
+        store.read_item(&item_id.to_string()).unwrap().bytes,
+        bytes.as_bytes()
+    );
+    assert!(!tombstone.exists());
+    let found_item_id = item_id.to_string();
+    assert_eq!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&found_item_id))
+            .await
+            .unwrap()
+            .unwrap(),
+        Some(RubbishListEntry::Valid(manifest))
+    );
+
+    coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&purge_hooks),
+            &item_id.to_string(),
+        )
+        .await
+        .unwrap();
+
+    assert!(store.read_item(&item_id.to_string()).is_err());
+    assert!(!tombstone.exists());
+    let found_item_id = item_id.to_string();
+    assert_eq!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&found_item_id))
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+    let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+            [item_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(releases, 1);
+}
+
+/// Moved here from `mutation_coordinator.rs`'s internal unit tests, for the
+/// same reason as `purge_rubbish_rename_failure_keeps_actionable_item_and_retries_one_shot_cleanup`.
+#[cfg(unix)]
+#[tokio::test]
+async fn purge_rubbish_partial_tombstone_retry_finishes_without_second_cas_release() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let (_tmp, vault) = setup_vault(&[]);
+    let mut raw_index = VaultIndex::open(&vault.root().join(".clepsydra/cache.db")).unwrap();
+    raw_index.build(&vault).unwrap();
+    let item_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000411").unwrap();
+    let page_id = Uuid::parse_str("019fd000-0000-7000-8000-000000000412").unwrap();
+    let manifest = purge_manifest(
+        "019fd000-0000-7000-8000-000000000411",
+        "019fd000-0000-7000-8000-000000000412",
+        "purge-boundary.md",
+        "2026-08-14T12:00:00Z",
+    );
+    let bytes = format!("+++\nid = \"{page_id}\"\ntitle = \"Purge boundary\"\n+++\nbody\n");
+    publish_purge_item(&vault, &raw_index, &manifest, bytes.as_bytes());
+    let store = RubbishStore::for_vault(vault.root());
+    raw_index
+        .remove_rubbish_entry(&item_id.to_string())
+        .unwrap();
+    let index = IndexHandle::spawn(raw_index, vault.clone());
+    let found_item_id = item_id.to_string();
+    assert_eq!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&found_item_id))
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+    let item_dir = vault
+        .root()
+        .join(".clepsydra/rubbish")
+        .join(item_id.to_string());
+    let tombstone = vault
+        .root()
+        .join(".clepsydra/rubbish")
+        .join(format!(".purge-{item_id}"));
+    fs::set_permissions(&item_dir, fs::Permissions::from_mode(0o500)).unwrap();
+    let coordinator = MutationCoordinator::new();
+    let cas_temp = tempfile::tempdir().unwrap();
+    let cas = Arc::new(parking_lot::Mutex::new(
+        ContentStore::open(cas_temp.path()).unwrap(),
+    ));
+    let purge_hooks = Arc::new(vec![
+        Box::new(clepsydra::vault::archive_hook::ArchiveDeleteHook {
+            cas: Arc::clone(&cas),
+        }) as Box<dyn clepsydra::vault::hooks::RubbishPurgeHook>,
+    ]);
+
+    let error = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&purge_hooks),
+            &item_id.to_string(),
+        )
+        .await
+        .unwrap_err();
+    fs::set_permissions(&tombstone, fs::Permissions::from_mode(0o700)).unwrap();
+
+    assert!(matches!(
+        error,
+        MutationError::RubbishStore { item_id: found, .. } if found == item_id
+    ));
+    assert!(!item_dir.exists());
+    assert!(tombstone.exists());
+    assert_eq!(store.list_entries().unwrap(), Vec::new());
+    let found_item_id = item_id.to_string();
+    assert_eq!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&found_item_id))
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+
+    fs::remove_file(tombstone.join("manifest.json")).unwrap();
+
+    let retry = coordinator
+        .purge_rubbish(
+            &vault,
+            &index,
+            Arc::clone(&purge_hooks),
+            &item_id.to_string(),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(
+        retry,
+        MutationError::RubbishItemNotFound(found) if found == item_id
+    ));
+
+    assert!(store.read_item(&item_id.to_string()).is_err());
+    assert!(!tombstone.exists());
+    let found_item_id = item_id.to_string();
+    assert_eq!(
+        index
+            .with_index(move |index, _| index.rubbish_entry(&found_item_id))
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+    let releases: i64 = rusqlite::Connection::open(cas_temp.path().join("cas.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COUNT(*) FROM rubbish_archive_releases WHERE item_id = ?1",
+            [item_id.to_string()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(releases, 1);
+}
+
 // ---------------------------------------------------------------------------
 // RubbishPurgeHook seam
 // ---------------------------------------------------------------------------
