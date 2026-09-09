@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use clep_config::expand_tilde;
 use serde::Deserialize;
 
 /// Strategy for ranking candidates when a link is ambiguous.
@@ -179,19 +180,6 @@ fn default_archive_enabled() -> bool {
 
 fn default_cas_path() -> String {
     ".clepsydra/cas".to_string()
-}
-
-/// Expand a leading `~` or `~/` in `p` to the user's home directory.
-///
-/// Returns `None` for paths that do not start with `~`.
-pub fn expand_tilde(p: &str) -> Option<PathBuf> {
-    if p == "~" {
-        dirs::home_dir()
-    } else if let Some(rest) = p.strip_prefix("~/") {
-        dirs::home_dir().map(|h| h.join(rest))
-    } else {
-        None
-    }
 }
 
 /// Resolve `[archive].cas_path` to an absolute directory. `~` and `~/…`

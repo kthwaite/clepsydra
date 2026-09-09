@@ -23,7 +23,7 @@ biblatex = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
 clap = { workspace = true }
-config = { workspace = true }
+clep-config = { workspace = true }
 dirs = { workspace = true }
 feed-rs = { workspace = true }
 fs4 = { workspace = true }
@@ -89,6 +89,7 @@ edition = "2024"
 
 [workspace.dependencies]
 clep-test-support = { path = "crates/clep-test-support" }
+clep-config = { path = "crates/clep-config" }
 ammonia = "4"
 anstream = "1.0.0"
 axum = { version = "0.8.8", features = ["multipart"] }

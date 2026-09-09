@@ -509,6 +509,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a822ea5bc7590f9d40f1ba12c0dc3c2760f3482c6984db1573ad11031420831"
 
 [[package]]
+name = "clep-config"
+version = "0.0.0"
+dependencies = [
+ "clep-test-support",
+ "config",
+ "dirs",
+ "serde",
+ "serial_test",
+ "tempfile",
+ "url",
+]
+
+[[package]]
 name = "clep-test-support"
 version = "0.0.0"
 
@@ -528,8 +541,8 @@ dependencies = [
  "bytes",
  "chrono",
  "clap",
+ "clep-config",
  "clep-test-support",
- "config",
  "dirs",
  "feed-rs",
  "fs4",
