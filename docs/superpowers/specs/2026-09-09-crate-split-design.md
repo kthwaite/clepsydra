@@ -1,7 +1,7 @@
 # Workspace crate split — design
 
 **Date:** 2026-09-09
-**Status:** Phase 0 landed on branch feature/crate-split-phase0 (HEAD ff39d564 + this commit); Phases 1–3 pending
+**Status:** Phase 0 merged to develop (b79a8bea); Phase 1 landed on branch feature/crate-split-phase1; Phases 2–3 pending
 **Scope:** `src/` only. `ui/` and `extension/` are untouched.
 
 ## 1. Why
@@ -14,6 +14,29 @@ with dependencies cached and only the `clepsydra` package cleaned:
 | `cargo check` | 8.5 s | |
 | `cargo build` (debug) | 42 s | lib 40 s, bin 2 s, strictly serial |
 | `cargo test --no-run` | 107 s (360 s CPU) | lib rebuilt under `cfg(test)` plus 59 integration test binaries, each linking the whole lib |
+
+Phase 1 (`[workspace]` skeleton; `clep-config`, `clep-client`, `clep-mcp`,
+`clep-frontend-assets`, `clep-test-support`, and the `clep` bin peeled out),
+measured the same way — `cargo clean -p clepsydra -p clep -p clep-config -p
+clep-client -p clep-mcp -p clep-frontend-assets -p clep-test-support`, then
+each step timed in turn:
+
+| Step | Wall | Notes |
+|---|---|---|
+| `cargo check` | 10.97 s | |
+| `cargo build` (debug) | 20.89 s | |
+| `cargo test --no-run` | 35.76 s | only the seven cleaned crates' lib/test binaries recompile; the rest of the workspace stays cached |
+
+Per-crate, cleaned in isolation:
+
+| Crate | Step | Wall |
+|---|---|---|
+| `clep-mcp` | `cargo test -p clep-mcp --no-run` | 3.72 s |
+| `clep-config` | `cargo test -p clep-config` | 2.49 s |
+
+Post-`touch ui/dist/index.html`, a release rebuild of `clep` is 8.65 s,
+compiling only `clep-frontend-assets` and `clep` (was 38.7–44.3 s with the
+lib recompiling, before `clep-frontend-assets` existed).
 
 Two costs follow from the single crate. Every edit anywhere recompiles the
 whole unit, and every integration test binary links all of it. The second
@@ -30,8 +53,8 @@ workspace crates only; every crate may also use `serde`, `thiserror`,
 
 | Crate | Contents | ~SLOC | Depends on | Notable external deps |
 |---|---|---|---|---|
-| `clep-config` | `Settings`, `FeatureFlags`, `FeedsSettings`, `ServerSettings`, `TlsSettings`, `ServeOverrides`, `VaultSettings`, `resolve_vault_root`, `default_tls_paths`, `INDEX_DB_RELATIVE`, `VESSEL_ACCENT`, `app_config.rs` | 0.5k | — | config, dirs |
-| `clep-vault` | path, page, page_filename, legacy_yaml, markdown, link, rewriter, block, block_id, context, canonical, kind, code + wordlists, toml_json, toml_patch, encryption, keyring, board_vocab, projection, project, meeting, attendance, conflict, location, bcl, config (`VaultConfig`), `Vault` handle (mod.rs), atomic_file, rubbish, task_history, init, conversation, `expand_tilde`, `extract_journal_date` | 9.5k | — | pulldown-cmark, regex, toml, toml_edit, serde_yaml, blake3, base64, glob, walkdir, rustix, utoipa (derive) |
+| `clep-config` | `Settings`, `FeatureFlags`, `FeedsSettings`, `ServerSettings`, `TlsSettings`, `ServeOverrides`, `VaultSettings`, `resolve_vault_root`, `default_tls_paths`, `INDEX_DB_RELATIVE`, `VESSEL_ACCENT`, `app_config.rs`, `expand_tilde` | 0.5k | — | config, dirs |
+| `clep-vault` | path, page, page_filename, legacy_yaml, markdown, link, rewriter, block, block_id, context, canonical, kind, code + wordlists, toml_json, toml_patch, encryption, keyring, board_vocab, projection, project, meeting, attendance, conflict, location, bcl, config (`VaultConfig`), `Vault` handle (mod.rs), atomic_file, rubbish, task_history, init, conversation, `extract_journal_date` | 9.5k | config | pulldown-cmark, regex, toml, toml_edit, serde_yaml, blake3, base64, glob, walkdir, rustix, utoipa (derive) |
 | `clep-index` | index, index_handle, index_policy, derivation, derivers/, search/, sync/ (fs events + watcher), reference_issues, hooks (all three traits), grep + tree (data half) | 8.6k | vault | rusqlite, notify-debouncer-mini, tokio (`sync` only) |
 | `clep-bases` | base, base_document, base_embed, base_member, query, property_value | 12.3k | index | utoipa (derive) |
 | `clep-mutate` | mutation, mutation_coordinator, batch_mutation, reconcile, reference_repair, relabel, recode, migrate, new_note (path builders only) | 8.4k | index | tokio (rt), parking_lot, utoipa (derive) |
@@ -44,8 +67,8 @@ workspace crates only; every crate may also use `serde`, `thiserror`,
 | `clep-lsp` | lsp/ | 4.5k | config, vault, index, bases | tower-lsp, ropey, tokio, rusqlite |
 | `clep-doctor` | doctor/ | 4k | config, vault, index, bases, mutate, archive, gitsync | axum-server (TLS check), glob, walkdir, owo-colors, rusqlite |
 | `clep-frontend-assets` | api/frontend.rs | 0.2k | — | rust-embed, mime_guess, axum |
-| `clep-api` | api/ (minus frontend.rs), lib.rs bootstrap (`build_app_state`, `build_router`, `run_server`, watcher, TLS serve, shutdown, `run_startup_reconcile`), sync_runtime, deeplink, geocode, events, openapi, `open_vault`, `open_vault_and_index` | 24k | every vault-side crate, feeds, config, frontend-assets | axum, axum-extra, axum-server, tower, tower-http, utoipa, utoipa-swagger-ui, tokio-stream, rusqlite |
-| `clep` (bin) | cli.rs, sync_command, config_command, macos_url_handler, backup, `create_new_note`, grep/tree `render_human`, `run_lsp_standalone` (backup, `create_new_note` stay at the lib crate root through Phase 0 and move here in Phase 1 — see §3.4) | 4.5k | all | clap, anstream, owo-colors, tar, tempfile |
+| `clep-api` | api/ (minus frontend.rs), lib.rs bootstrap (`build_app_state`, `build_router`, `run_server`, watcher, TLS serve, shutdown, `run_startup_reconcile`), sync_runtime, deeplink, geocode, events, openapi, `open_vault`, `open_vault_and_index`, `backup` | 24k | every vault-side crate, feeds, config | axum, axum-extra, axum-server, tower, tower-http, utoipa, utoipa-swagger-ui, tokio-stream, rusqlite |
+| `clep` (bin) | cli.rs, sync_command, config_command, macos_url_handler, `create_new_note`, grep/tree `render_human`, `run_lsp_standalone` (`create_new_note` stays at the lib crate root through Phase 0 and moves here in Phase 1; `backup.rs` stays in the lib permanently — see §3 item 4) | 4.5k | all, `frontend-assets` | clap, anstream, owo-colors, tar, tempfile |
 | `clep-test-support` (dev only) | `EnvGuard` | <0.1k | — | — |
 
 Dev-dependency edges: `clep-mcp` → `clep-api` (in-process router tests);
@@ -63,7 +86,7 @@ scheduler's in-module tests that build an `AppState` fixture move into
 ### Dependency graph
 
 ```
-clep-config        clep-vault          clep-test-support (dev)
+clep-config ───────► clep-vault          clep-test-support (dev)
    │                  │
    │               clep-index
    │             ┌────┼─────────┬───────────┐
@@ -71,19 +94,22 @@ clep-config        clep-vault          clep-test-support (dev)
    │             │                                    │
    │             │                               clep-gitsync
    │             │
-clep-feeds   clep-client                          clep-frontend-assets
+clep-feeds   clep-client
    │             │
    │          clep-mcp        clep-lsp          clep-doctor
    │                                                │
    └──────────────────── clep-api ──────────────────┘
                            │
-                          clep
+                          clep ◄────────── clep-frontend-assets
 ```
 
 Critical path for a cold build: vault → index → bases (or mutate) → api →
 bin. Bases, mutate, academic and archive compile concurrently; feeds,
 client, mcp and lsp never wait on the mutation layer; doctor never waits
 on api.
+
+Root package: `clepsydra` stays at the repo root as the not-yet-split
+remainder through Phase 3, then becomes `crates/clep-api`.
 
 ## 3. Seams that must change (Phase 0)
 
@@ -113,18 +139,23 @@ the risk from the later mechanical moves.
    `&AppState`; it uses `feed_runtime()`, `vault.root()` and `change_tx`.
    Give it `(FeedRuntime, vault_root: PathBuf, on_change: Arc<dyn Fn() +
    Send + Sync>)` so `SyncNotification` stays in api.
-4. **Upward references.** `expand_tilde` moves from lib.rs:354 into the
-   vault (config.rs:195, cas_migrate.rs:240 use it). `render_human` in
-   grep.rs and tree.rs takes the accent colour as a parameter so
-   `VESSEL_ACCENT` stays in the CLI. `create_new_note` (new_note.rs, uses
-   `app_config`) moves to the bin; `build_note_path` and
-   `build_projected_note_path` stay. `backup.rs` moves to the bin (it
-   imports `feeds::store`; sole caller is cli.rs). In the Phase 0 code as
-   landed, `backup.rs` and `new_note_command.rs` stayed at the lib crate
-   root instead of moving into the bin; that move happens in Phase 1, at
-   which point `feeds::store`'s `open_feed_lock_file`,
-   `lock_feed_generation_shared` and `snapshot_database_file` widen from
-   `pub(crate)` to `pub`.
+4. **Upward references.** `expand_tilde` moved from lib.rs:354 into the
+   vault in Phase 0 (config.rs:195, cas_migrate.rs:240 use it); in Phase 1
+   it moved again into `clep-config`, and `vault::config` imports it from
+   there (`clep-vault → clep-config`). `render_human` in grep.rs and
+   tree.rs takes the accent colour as a parameter so `VESSEL_ACCENT` stays
+   in the CLI. `create_new_note` (new_note.rs, uses `app_config`) moves to
+   the bin; `build_note_path` and `build_projected_note_path` stay.
+   `backup.rs` stays in the lib (its tests use `cfg(test)` barriers in
+   `vault::cas` and `feeds::store`); the bin calls
+   `clepsydra::backup::create_backup`. In the Phase 0 code as landed,
+   `backup.rs` and `new_note_command.rs` stayed at the lib crate root; in
+   Phase 1 `new_note_command.rs` moved into the bin as planned, but
+   `backup.rs`'s planned move to the bin was reconsidered per the ruling
+   above and it stays in the lib; `feeds::store`'s `open_feed_lock_file`,
+   `lock_feed_generation_shared` and `snapshot_database_file` stay
+   `pub(crate)` (backup.rs is in the same crate, so no widening is
+   needed).
 5. **Relocations.** rubbish.rs, task_history.rs, init.rs stay in vault
    (they are already there; only their `pub(crate)` items widen).
    `index::extract_journal_date` (index.rs:2128) moves next to
@@ -153,14 +184,16 @@ Facts that shape the later phases but need no change:
 - `AppState` is one struct with one router; `clep-api` is one crate.
 - In debug builds rust-embed reads `ui/dist` from disk; in release every
   `ui/dist` change recompiles the whole lib. `clep-frontend-assets`
-  confines that to one crate plus a relink.
+  confines that to one crate plus a relink. The binary, not the lib, links
+  `clep-frontend-assets`; `run_server` takes the UI router as a parameter.
 
 ## 4. Phases
 
 - **Phase 0** — the seven seam changes above, in the single crate.
 - **Phase 1** — `[workspace]` skeleton under `crates/`; peel `clep-config`,
   `clep-client`, `clep-mcp`, `clep-frontend-assets`, `clep-test-support`,
-  and the `clep` bin. Re-measure with `cargo clean -p`.
+  and the `clep` bin. Re-measure with `cargo clean -p` — landed 2026-09-09
+  on branch feature/crate-split-phase1.
 - **Phase 2** — cut the bottom: `clep-vault`, `clep-index`; move their
   integration tests with them.
 - **Phase 3** — `clep-bases`, `clep-mutate`, `clep-academic`,

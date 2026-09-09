@@ -5,7 +5,7 @@
 //! re-embeds `ui/dist/` and forces a recompile whenever any file under it
 //! changes. Kept inline in the main lib, that recompile drags the whole
 //! `clepsydra` crate down with it. Isolated here, a UI rebuild only
-//! recompiles this crate and relinks the `clep` binary.
+//! recompiles this crate and the `clep` binary, never the server lib.
 
 use axum::{
     Router,
