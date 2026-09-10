@@ -9,15 +9,15 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use super::Vault;
-use super::atomic_file::atomic_replace;
-use super::code::{self, CodeFamily};
-use super::conflict::has_conflict_markers;
-use super::index::{IndexError, VaultIndex};
-use super::kind::Kind;
-use super::page::parse_or_repair_frontmatter;
-use super::path::VaultPath;
-use super::reconcile::move_page_to;
+use crate::reconcile::move_page_to;
+use clep_index::index::{IndexError, VaultIndex};
+use clep_vault::Vault;
+use clep_vault::atomic_file::atomic_replace;
+use clep_vault::code::{self, CodeFamily};
+use clep_vault::conflict::has_conflict_markers;
+use clep_vault::kind::Kind;
+use clep_vault::page::parse_or_repair_frontmatter;
+use clep_vault::path::VaultPath;
 
 /// Matches a bare legacy code anywhere in prose or frontmatter text:
 /// `TSK-0072` (exactly 4 digits) or `S-3` (one or more digits).
@@ -248,7 +248,7 @@ fn is_legacy_stem(stem: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::code::is_valid_code;
+    use clep_vault::code::is_valid_code;
 
     const TASK_A: &str = "+++\nid = \"01900000-0000-7000-8000-00000000000a\"\ntitle = \"A\"\ntype = \"TASK\"\ncreated_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\nstatus = \"INTAKE\"\ncycle = \"S-1\"\n+++\nSee TSK-0002 and [[TSK-0002]].\n";
     const TASK_B: &str = "+++\nid = \"01900000-0000-7000-8000-00000000000b\"\ntitle = \"B\"\ntype = \"TASK\"\ncreated_at = \"2026-01-01T00:00:00Z\"\nupdated_at = \"2026-01-01T00:00:00Z\"\nstatus = \"INTAKE\"\n+++\nbody\n";
@@ -258,7 +258,7 @@ mod tests {
     fn fixture() -> (tempfile::TempDir, Vault, VaultIndex) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         for (rel, content) in [
             ("tasks/proj/TSK-0001.md", TASK_A),
             ("tasks/proj/TSK-0002.md", TASK_B),
@@ -289,7 +289,7 @@ mod tests {
     fn single_task_fixture() -> (tempfile::TempDir, Vault, VaultIndex) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         for (rel, content) in [
             ("tasks/proj/TSK-0001.md", TASK_LEGACY),
             ("notes/ref.md", NOTE_REF),

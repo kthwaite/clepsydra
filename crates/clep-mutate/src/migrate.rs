@@ -6,11 +6,11 @@
 
 use walkdir::WalkDir;
 
-use super::Vault;
-use super::atomic_file::atomic_replace;
-use super::legacy_yaml;
-use super::page::write_page_content;
-use super::path::VaultPath;
+use clep_vault::Vault;
+use clep_vault::atomic_file::atomic_replace;
+use clep_vault::legacy_yaml;
+use clep_vault::page::write_page_content;
+use clep_vault::path::VaultPath;
 
 /// Outcome of a migration sweep (or dry run).
 #[derive(Debug, Default)]
@@ -71,7 +71,7 @@ fn migrate_with_publication(
     mut publish: impl FnMut(
         &std::path::Path,
         &[u8],
-    ) -> Result<(), super::atomic_file::AtomicPublicationError>,
+    ) -> Result<(), clep_vault::atomic_file::AtomicPublicationError>,
 ) -> MigrateReport {
     let mut report = MigrateReport {
         dry_run: !write,
@@ -90,7 +90,7 @@ fn migrate_with_publication(
             }
         };
 
-        if super::conflict::has_conflict_markers(&content) {
+        if clep_vault::conflict::has_conflict_markers(&content) {
             report.warnings.push(format!(
                 "{}: contains merge conflict markers; skipped",
                 vault_path.as_str()
@@ -124,12 +124,12 @@ fn migrate_with_publication(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::page::parse_frontmatter;
+    use clep_vault::page::parse_frontmatter;
 
     fn make_vault(pages: &[(&str, &str)]) -> (tempfile::TempDir, Vault) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         for (rel, content) in pages {
             let abs = root.join(rel);
             if let Some(parent) = abs.parent() {
@@ -251,12 +251,12 @@ mod tests {
         let report = migrate_with_publication(&vault, true, |path, content| {
             if path.ends_with("a.md") {
                 Err(
-                    crate::vault::atomic_file::AtomicPublicationError::NotPublished(
+                    clep_vault::atomic_file::AtomicPublicationError::NotPublished(
                         std::io::Error::other("injected migration publication failure"),
                     ),
                 )
             } else {
-                crate::vault::atomic_file::atomic_replace(path, content)
+                clep_vault::atomic_file::atomic_replace(path, content)
             }
         });
 

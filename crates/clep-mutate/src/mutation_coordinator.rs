@@ -10,23 +10,23 @@ use thiserror::Error;
 use tokio::sync::{OwnedRwLockReadGuard, OwnedRwLockWriteGuard, RwLock};
 use utoipa::ToSchema;
 
-use super::Vault;
-use super::atomic_file::{
+use crate::batch_mutation::{self, BatchMutationCommand, BatchMutationError};
+use crate::mutation::{EmptyRubbishResult, PurgeRubbishOutcome, PurgeRubbishResult};
+use clep_index::hooks::{PostMoveHook, RubbishPurgeHook};
+use clep_index::index::IndexError;
+use clep_index::index_handle::IndexHandle;
+use clep_index::index_policy::{IndexMutation, IndexPolicyError};
+use clep_index::sync::{ChangeEvent, SyncEngine};
+use clep_vault::Vault;
+use clep_vault::atomic_file::{
     AtomicPublicationError, ConditionalPublicationError, atomic_create, atomic_replace,
     atomic_replace_if_unchanged,
 };
-use super::batch_mutation::{self, BatchMutationCommand, BatchMutationError};
-use super::hooks::{PostMoveHook, RubbishPurgeHook};
-use super::index::IndexError;
-use super::index_handle::IndexHandle;
-use super::index_policy::{IndexMutation, IndexPolicyError};
-use super::mutation::{EmptyRubbishResult, PurgeRubbishOutcome, PurgeRubbishResult};
-use super::page::{Page, PageMeta, parse_frontmatter, write_page_content};
-use super::path::VaultPath;
-use super::projection::{project_path, project_path_cleared};
-use super::rubbish::{RubbishItem, RubbishListEntry, RubbishStore, RubbishStoreError};
-use super::sync::{ChangeEvent, SyncEngine};
-use super::task_history::{heal_task_replacement, heal_task_update, initialize_task_history};
+use clep_vault::page::{Page, PageMeta, parse_frontmatter, write_page_content};
+use clep_vault::path::VaultPath;
+use clep_vault::projection::{project_path, project_path_cleared};
+use clep_vault::rubbish::{RubbishItem, RubbishListEntry, RubbishStore, RubbishStoreError};
+use clep_vault::task_history::{heal_task_replacement, heal_task_update, initialize_task_history};
 
 type BeforeUpdatePublishHook = dyn Fn(&VaultPath) + Send + Sync;
 type AfterPageIdLookupHook = dyn Fn(&VaultPath) + Send + Sync;
@@ -132,19 +132,19 @@ fn guard_protected_body(
     expected_content: &str,
     new_body: &str,
 ) -> Result<(), MutationError> {
-    if !super::page::body_is_protected(path.as_str(), meta) {
+    if !clep_vault::page::body_is_protected(path.as_str(), meta) {
         return Ok(());
     }
-    if super::page::body_of(expected_content) == new_body {
+    if clep_vault::page::body_of(expected_content) == new_body {
         return Ok(());
     }
     Err(MutationError::ReadOnly(path.clone()))
 }
 
 fn strip_redundant_computed_tag(path: &VaultPath, meta: &mut PageMeta) {
-    let (kind, _) = super::kind::resolve(path.as_str(), meta.kind);
+    let (kind, _) = clep_vault::kind::resolve(path.as_str(), meta.kind);
     meta.tags
-        .retain(|tag| !super::kind::is_computed_tag(kind, tag));
+        .retain(|tag| !clep_vault::kind::is_computed_tag(kind, tag));
 }
 
 /// An exact-content replacement for adapters that mutate source spans without
@@ -501,7 +501,7 @@ enum MovedPageIdentity {
 
 fn reconcile_batch_index(
     vault: &Vault,
-    index: &mut super::index::VaultIndex,
+    index: &mut clep_index::index::VaultIndex,
     hooks: &[Box<dyn PostMoveHook>],
     index_events: &[ChangeEvent],
     moved_pages: &[(VaultPath, VaultPath)],
@@ -590,7 +590,7 @@ fn reconcile_batch_index(
 /// Public for the workspace split; not part of the stable API.
 pub fn reconcile_recovered_batch_index(
     vault: &Vault,
-    index: &mut super::index::VaultIndex,
+    index: &mut clep_index::index::VaultIndex,
     hooks: &[Box<dyn PostMoveHook>],
     recovered: &batch_mutation::RecoveredBatch,
 ) -> Result<(), IndexError> {
@@ -641,7 +641,7 @@ fn rollback_created_publication(
 }
 
 fn sync_rollback_parent(parent: &Path) -> io::Result<()> {
-    super::atomic_file::flush_directory(parent)
+    clep_vault::atomic_file::flush_directory(parent)
 }
 
 struct RubbishPurgeContext {
@@ -1064,7 +1064,7 @@ impl MutationCoordinator {
     /// a second coordinator or Tokio index worker.
     pub fn execute_batch_direct(
         vault: &Vault,
-        index: &mut super::index::VaultIndex,
+        index: &mut clep_index::index::VaultIndex,
         hooks: &[Box<dyn PostMoveHook>],
         command: BatchMutationCommand,
     ) -> Result<MutationNotification, MutationError> {
@@ -1342,7 +1342,7 @@ impl MutationCoordinator {
         mut command: CreatePageCommand,
         notify: Arc<dyn Fn(MutationNotification) + Send + Sync>,
     ) -> Result<Page, MutationError> {
-        if command.meta.kind == Some(super::kind::Kind::Task) {
+        if command.meta.kind == Some(clep_vault::kind::Kind::Task) {
             initialize_task_history(&mut command.meta);
         }
         strip_redundant_computed_tag(&command.path, &mut command.meta);
@@ -1492,13 +1492,13 @@ impl MutationCoordinator {
             // The incoming content carries its own frontmatter; protection is
             // decided from that, so clearing `readonly` in the same write is
             // still permitted.
-            let (meta, _) = super::page::parse_frontmatter(&command.content)
+            let (meta, _) = clep_vault::page::parse_frontmatter(&command.content)
                 .map_err(|error| MutationError::InvalidInput(error.to_string()))?;
             guard_protected_body(
                 &command.path,
                 &meta,
                 &command.expected_content,
-                super::page::body_of(&command.content),
+                clep_vault::page::body_of(&command.content),
             )?;
         }
         let guard = self.lock_paths(std::slice::from_ref(&command.path)).await;
@@ -1807,7 +1807,7 @@ impl MutationCoordinator {
                     let destination_string = destination.as_str().to_string();
                     let moved = index
                         .with_index(move |vault_index, index_vault| {
-                            super::reconcile::move_page_to(
+                            crate::reconcile::move_page_to(
                                 index_vault,
                                 vault_index,
                                 &source,
@@ -2028,8 +2028,8 @@ pub struct MutationGuard {
 mod tests {
     use super::*;
 
-    use crate::vault::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
-    use crate::vault::sync::ChangeEvent;
+    use crate::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
+    use clep_index::sync::ChangeEvent;
 
     /// Records which items have been released, without depending on the
     /// archive feature. The coordinator retries a failed purge by re-running
@@ -2110,7 +2110,7 @@ mod tests {
         fn new(files: &[(&str, &str)]) -> Self {
             let temp = tempfile::tempdir().unwrap();
             let root = temp.path().join("vault");
-            crate::vault::init::init_vault(&root).unwrap();
+            clep_vault::init::init_vault(&root).unwrap();
             for (path, content) in files {
                 let path = root.join(path);
                 if let Some(parent) = path.parent() {
@@ -2120,7 +2120,7 @@ mod tests {
             }
             let vault = Vault::open(&root).unwrap();
             let mut raw_index =
-                crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+                clep_index::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
             raw_index.build(&vault).unwrap();
             let index = IndexHandle::spawn(raw_index, vault.clone());
             Self {
@@ -2139,12 +2139,8 @@ mod tests {
             &self,
             item_id: uuid::Uuid,
             page_id: uuid::Uuid,
-        ) -> (
-            crate::vault::rubbish::RubbishManifest,
-            RubbishStore,
-            Vec<u8>,
-        ) {
-            let manifest = crate::vault::rubbish::RubbishManifest::new(
+        ) -> (clep_vault::rubbish::RubbishManifest, RubbishStore, Vec<u8>) {
+            let manifest = clep_vault::rubbish::RubbishManifest::new(
                 item_id,
                 page_id,
                 "purge-boundary.md",
@@ -2185,7 +2181,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("page.md");
         fs::write(&path, b"content").unwrap();
-        let _failure = crate::vault::atomic_file::fail_next_directory_flush(temp.path());
+        let _failure = clep_vault::atomic_file::fail_next_directory_flush(temp.path());
 
         let error = rollback_created_publication(&path, None).unwrap_err();
 
@@ -2337,7 +2333,7 @@ mod tests {
         let purge_hook = Arc::new(CountingPurgeHook::default());
         let purge_hooks: Arc<Vec<Box<dyn RubbishPurgeHook>>> =
             Arc::new(vec![Box::new(SharedCountingHook(Arc::clone(&purge_hook)))]);
-        let _sync_failure = crate::vault::rubbish::fail_next_directory_sync(
+        let _sync_failure = clep_vault::rubbish::fail_next_directory_sync(
             &fixture.root().join(".clepsydra/rubbish"),
         );
 
@@ -2394,7 +2390,7 @@ mod tests {
         let path = VaultPath::new("target.md").unwrap();
         let expected = fs::read(fixture.root().join(path.as_str())).unwrap();
         let item_id = uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000212").unwrap();
-        let manifest = crate::vault::rubbish::RubbishManifest::new(
+        let manifest = clep_vault::rubbish::RubbishManifest::new(
             item_id,
             uuid::Uuid::parse_str("019fd000-0000-7000-8000-000000000211").unwrap(),
             path.as_str(),
@@ -2407,8 +2403,8 @@ mod tests {
         let command = fixture
             .index
             .with_index(move |index, vault| {
-                crate::vault::mutation::MutationPlanner::new(vault, index)
-                    .plan(&crate::vault::mutation::MutationOp::ArchivePage {
+                crate::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::mutation::MutationOp::ArchivePage {
                         path: "target.md".to_owned(),
                         expected_bytes: expected,
                         manifest,
@@ -2463,7 +2459,7 @@ mod tests {
             b"changed while waiting"
         );
         assert!(
-            crate::vault::rubbish::RubbishStore::for_vault(fixture.root())
+            clep_vault::rubbish::RubbishStore::for_vault(fixture.root())
                 .read_item(&item_id.to_string())
                 .is_err()
         );
@@ -2596,8 +2592,8 @@ mod tests {
         let command = fixture
             .index
             .with_index(|index, vault| {
-                crate::vault::mutation::MutationPlanner::new(vault, index)
-                    .plan(&crate::vault::mutation::MutationOp::MovePage {
+                crate::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::mutation::MutationOp::MovePage {
                         source: "target.md".to_string(),
                         destination: "renamed.md".to_string(),
                     })?
@@ -2660,8 +2656,8 @@ mod tests {
         let command = fixture
             .index
             .with_index(|index, vault| {
-                crate::vault::mutation::MutationPlanner::new(vault, index)
-                    .plan(&crate::vault::mutation::MutationOp::MoveFolder {
+                crate::mutation::MutationPlanner::new(vault, index)
+                    .plan(&crate::mutation::MutationOp::MoveFolder {
                         source: "notes".to_string(),
                         destination: "archive/notes".to_string(),
                     })?
@@ -3093,10 +3089,10 @@ mod tests {
     async fn reserved_manifest_create_and_replace_publish_exact_bytes_without_indexing() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = Vault::open(&root).unwrap();
         let mut raw_index =
-            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+            clep_index::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
         raw_index.build(&vault).unwrap();
         let index = IndexHandle::spawn(raw_index, vault.clone());
         assert_eq!(indexed_page_count(&index).await, 0);
@@ -3150,7 +3146,7 @@ mod tests {
     async fn reserved_manifest_compare_and_swap_preserves_external_bytes_when_stale() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = Vault::open(&root).unwrap();
         let coordinator = MutationCoordinator::new();
         let path = VaultPath::new("feeds.md").unwrap();
@@ -3192,10 +3188,10 @@ mod tests {
     async fn reserved_manifest_rejects_path_replacement_at_the_publication_seam() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = Vault::open(&root).unwrap();
         let mut raw_index =
-            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+            clep_index::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
         raw_index.build(&vault).unwrap();
         let index = IndexHandle::spawn(raw_index, vault.clone());
         let coordinator = MutationCoordinator::new();
@@ -3252,10 +3248,10 @@ mod tests {
     async fn reserved_manifest_rejects_completed_same_inode_write_before_claim_verification() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = Vault::open(&root).unwrap();
         let mut raw_index =
-            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+            clep_index::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
         raw_index.build(&vault).unwrap();
         let index = IndexHandle::spawn(raw_index, vault.clone());
         let coordinator = MutationCoordinator::new();
@@ -3332,7 +3328,7 @@ mod tests {
 
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = Vault::open(&root).unwrap();
         let coordinator = MutationCoordinator::new();
         let path = VaultPath::new("feeds.md").unwrap();
@@ -3376,19 +3372,19 @@ mod tests {
     async fn rewrites_strip_redundant_computed_tags() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let vault = Vault::open(&root).unwrap();
         let mut raw_index =
-            crate::vault::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+            clep_index::index::VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
         raw_index.build(&vault).unwrap();
         let index = IndexHandle::spawn(raw_index, vault.clone());
         let coordinator = MutationCoordinator::new();
         let path = VaultPath::new("transition.md").unwrap();
         let notify: Arc<dyn Fn(MutationNotification) + Send + Sync> = Arc::new(|_| {});
-        let hooks: Arc<Vec<Box<dyn crate::vault::hooks::PostMoveHook>>> = Arc::new(Vec::new());
+        let hooks: Arc<Vec<Box<dyn clep_index::hooks::PostMoveHook>>> = Arc::new(Vec::new());
 
         let mut note_meta = PageMeta::new();
-        note_meta.kind = Some(crate::vault::kind::Kind::Note);
+        note_meta.kind = Some(clep_vault::kind::Kind::Note);
         note_meta.tags = vec!["journal".to_string(), "research".to_string()];
         let note = coordinator
             .create_page(
@@ -3405,12 +3401,12 @@ mod tests {
             .unwrap();
         assert_eq!(note.meta.tags, ["journal", "research"]);
         assert_eq!(
-            crate::vault::kind::effective_tags(crate::vault::kind::Kind::Note, &note.meta.tags),
+            clep_vault::kind::effective_tags(clep_vault::kind::Kind::Note, &note.meta.tags),
             ["journal", "research", "note"]
         );
 
         let mut journal_meta = note.meta.clone();
-        journal_meta.kind = Some(crate::vault::kind::Kind::Journal);
+        journal_meta.kind = Some(clep_vault::kind::Kind::Journal);
         let journal = coordinator
             .update_page(
                 &vault,
@@ -3430,18 +3426,18 @@ mod tests {
             .unwrap();
         let journal_stored = std::fs::read_to_string(root.join(path.as_str())).unwrap();
         let (journal_stored_meta, _) =
-            crate::vault::page::parse_frontmatter(&journal_stored).unwrap();
+            clep_vault::page::parse_frontmatter(&journal_stored).unwrap();
         assert_eq!(journal_stored_meta.tags, ["research"]);
         assert_eq!(
-            crate::vault::kind::effective_tags(
-                crate::vault::kind::Kind::Journal,
+            clep_vault::kind::effective_tags(
+                clep_vault::kind::Kind::Journal,
                 &journal_stored_meta.tags,
             ),
             ["research", "journal"]
         );
 
         let mut note_meta = journal.meta;
-        note_meta.kind = Some(crate::vault::kind::Kind::Note);
+        note_meta.kind = Some(clep_vault::kind::Kind::Note);
         let note = coordinator
             .update_page(
                 &vault,
@@ -3460,10 +3456,10 @@ mod tests {
             .await
             .unwrap();
         let note_stored = std::fs::read_to_string(root.join(path.as_str())).unwrap();
-        let (note_stored_meta, _) = crate::vault::page::parse_frontmatter(&note_stored).unwrap();
+        let (note_stored_meta, _) = clep_vault::page::parse_frontmatter(&note_stored).unwrap();
         assert_eq!(note_stored_meta.tags, ["research"]);
         assert_eq!(
-            crate::vault::kind::effective_tags(crate::vault::kind::Kind::Note, &note.meta.tags),
+            clep_vault::kind::effective_tags(clep_vault::kind::Kind::Note, &note.meta.tags),
             ["research", "note"]
         );
     }

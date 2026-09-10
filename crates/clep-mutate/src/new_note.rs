@@ -1,7 +1,7 @@
 use thiserror::Error;
 
-use super::kind::Kind;
-use super::path::VaultPath;
+use clep_vault::kind::Kind;
+use clep_vault::path::VaultPath;
 
 #[derive(Debug, Error)]
 pub enum NewNoteError {
@@ -24,12 +24,12 @@ pub enum NewNoteError {
 }
 
 pub fn build_note_path(
-    vault: &super::Vault,
+    vault: &clep_vault::Vault,
     title: &str,
     created: chrono::DateTime<chrono::Utc>,
 ) -> Result<VaultPath, NewNoteError> {
-    let short_id = crate::vault::block_id::generate_short_id();
-    let filename = crate::vault::page_filename::page_filename(created, title, &short_id);
+    let short_id = clep_vault::block_id::generate_short_id();
+    let filename = clep_vault::page_filename::page_filename(created, title, &short_id);
 
     let folder = vault
         .config()
@@ -58,7 +58,7 @@ pub fn build_projected_note_path(
     if title.is_empty() {
         return Err(NewNoteError::EmptyTitle);
     }
-    let filename = crate::vault::page_filename::page_filename(created, title, short_id);
+    let filename = clep_vault::page_filename::page_filename(created, title, short_id);
     let folder = match project.map(str::trim).filter(|value| !value.is_empty()) {
         Some(project) => format!("{}/{project}", kind.canonical_folder()),
         None => kind.canonical_folder().to_string(),
@@ -80,7 +80,7 @@ mod tests {
         let path = build_projected_note_path(
             "The Left Hand of Darkness",
             created,
-            crate::vault::kind::Kind::Book,
+            clep_vault::kind::Kind::Book,
             Some("ursula"),
             "Ab3xYz90",
         )
@@ -101,7 +101,7 @@ mod tests {
         let path = build_projected_note_path(
             "Inbox Thought",
             created,
-            crate::vault::kind::Kind::Note,
+            clep_vault::kind::Kind::Note,
             None,
             "Ab3xYz90",
         )
@@ -119,7 +119,7 @@ mod tests {
         let error = build_projected_note_path(
             "Escaping Note",
             created,
-            crate::vault::kind::Kind::Note,
+            clep_vault::kind::Kind::Note,
             Some("../outside"),
             "Ab3xYz90",
         )

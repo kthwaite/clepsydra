@@ -2,14 +2,14 @@
 //! rubbish catalog. Page relocation remains serve/LSP/assign-only; catalog
 //! reconciliation reads lifecycle manifests during index builds.
 
-use super::Vault;
-use super::hooks::PostMoveHook;
-use super::index::{IndexError, VaultIndex};
-use super::mutation::{MutationOp, MutationPlanner};
-use super::mutation_coordinator::MutationCoordinator;
-use super::page::Page;
-use super::path::VaultPath;
-use super::projection::project_path;
+use crate::mutation::{MutationOp, MutationPlanner};
+use crate::mutation_coordinator::MutationCoordinator;
+use clep_index::hooks::PostMoveHook;
+use clep_index::index::{IndexError, VaultIndex};
+use clep_vault::Vault;
+use clep_vault::page::Page;
+use clep_vault::path::VaultPath;
+use clep_vault::projection::project_path;
 
 /// Reconcile a single page. Returns `Some(new_path)` if it was moved, else
 /// `None`. Reads declared kind/project from the file's frontmatter. `hooks`

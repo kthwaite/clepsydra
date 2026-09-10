@@ -2,21 +2,21 @@ use std::fs;
 
 use thiserror::Error;
 
-use super::Vault;
-use super::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
-use super::index::{IndexError, VaultIndex};
-use super::link::{LinkKind, extract_links};
-use super::mutation::{MutationPlan, PlannedTextEdit};
-use super::page::{
-    PageMeta, body_offset, page_revision, parse_or_repair_frontmatter, write_page_content,
-};
-use super::path::VaultPath;
-use super::reference_issues::{
+use crate::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
+use crate::mutation::{MutationPlan, PlannedTextEdit};
+use clep_index::index::{IndexError, VaultIndex};
+use clep_index::reference_issues::{
     ReferenceIssue, ReferenceIssueAction, ReferenceIssueFilter, ReferenceIssueKind,
 };
-use super::sync::ChangeEvent;
-use super::toml_json::toml_value_to_json;
-use super::toml_patch::{FrontmatterEdits, SpliceError, splice_frontmatter};
+use clep_index::sync::ChangeEvent;
+use clep_vault::Vault;
+use clep_vault::link::{LinkKind, extract_links};
+use clep_vault::page::{
+    PageMeta, body_offset, page_revision, parse_or_repair_frontmatter, write_page_content,
+};
+use clep_vault::path::VaultPath;
+use clep_vault::toml_json::toml_value_to_json;
+use clep_vault::toml_patch::{FrontmatterEdits, SpliceError, splice_frontmatter};
 
 #[derive(Debug, Clone)]
 pub enum ReferenceRepairAction {
@@ -156,7 +156,7 @@ fn prepare_create(
 
     let mut plan = MutationPlan::empty();
     plan.stage_create_file(vault, destination.clone(), created)?;
-    plan.staged_writes.push(super::mutation::StagedWrite {
+    plan.staged_writes.push(crate::mutation::StagedWrite {
         path: vault.resolve(&source_path),
         expected_bytes: source.as_bytes().to_vec(),
         content: source,
@@ -391,7 +391,8 @@ fn rewrite_property_value(
     after: &mut Option<String>,
 ) -> Result<(), ReferenceRepairError> {
     let mut rewrite = |text: &mut String| -> Result<(), ReferenceRepairError> {
-        let extracted = super::link::extract_property_refs("property", std::slice::from_ref(text));
+        let extracted =
+            clep_vault::link::extract_property_refs("property", std::slice::from_ref(text));
         if extracted
             .first()
             .is_some_and(|link| link.target_raw == old_target)

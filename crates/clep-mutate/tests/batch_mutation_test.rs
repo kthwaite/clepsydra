@@ -1,17 +1,17 @@
 use std::fs;
 use std::sync::Arc;
 
-use clepsydra::vault::Vault;
-use clepsydra::vault::batch_mutation::{BatchMutationError, recover_pending};
-use clepsydra::vault::index::{IndexError, VaultIndex};
-use clepsydra::vault::index_handle::IndexHandle;
-use clepsydra::vault::init::init_vault;
-use clepsydra::vault::mutation::{MutationOp, MutationPlanner};
-use clepsydra::vault::mutation_coordinator::{
+use clep_index::index::{IndexError, VaultIndex};
+use clep_index::index_handle::IndexHandle;
+use clep_mutate::batch_mutation::{BatchMutationError, recover_pending};
+use clep_mutate::mutation::{MutationOp, MutationPlanner};
+use clep_mutate::mutation_coordinator::{
     BatchRecoveryError, MutationCoordinator, MutationError, MutationNotification,
 };
-use clepsydra::vault::path::VaultPath;
-use clepsydra::vault::rubbish::{RubbishManifest, RubbishStore};
+use clep_vault::Vault;
+use clep_vault::init::init_vault;
+use clep_vault::path::VaultPath;
+use clep_vault::rubbish::{RubbishManifest, RubbishStore};
 use tempfile::TempDir;
 use uuid::Uuid;
 
@@ -340,7 +340,7 @@ struct RestoreIndexFailureFixture {
     path: VaultPath,
     item_id: Uuid,
     backlink_id: Uuid,
-    item: clepsydra::vault::rubbish::RubbishItem,
+    item: clep_vault::rubbish::RubbishItem,
     notifications: Arc<parking_lot::Mutex<Vec<MutationNotification>>>,
     error: MutationError,
 }

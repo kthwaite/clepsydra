@@ -4,14 +4,14 @@
 
 use chrono::{DateTime, Utc};
 
-use super::Vault;
-use super::block_id::generate_short_id;
-use super::index::{IndexError, VaultIndex};
-use super::mutation::{MutationOp, MutationPlanner};
-use super::mutation_coordinator::MutationCoordinator;
-use super::page::Page;
-use super::page_filename::page_filename;
-use super::path::{VaultPath, is_canonical_page_filename};
+use crate::mutation::{MutationOp, MutationPlanner};
+use crate::mutation_coordinator::MutationCoordinator;
+use clep_index::index::{IndexError, VaultIndex};
+use clep_vault::Vault;
+use clep_vault::block_id::generate_short_id;
+use clep_vault::page::Page;
+use clep_vault::page_filename::page_filename;
+use clep_vault::path::{VaultPath, is_canonical_page_filename};
 
 /// Outcome of a relabel run.
 #[derive(Debug, Default, PartialEq)]

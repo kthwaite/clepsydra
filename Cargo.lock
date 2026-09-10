@@ -638,6 +638,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-mutate"
+version = "0.0.0"
+dependencies = [
+ "blake3",
+ "chrono",
+ "clep-index",
+ "clep-test-support",
+ "clep-vault",
+ "parking_lot",
+ "regex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "utoipa",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "clep-test-support"
 version = "0.0.0"
 
@@ -689,6 +713,7 @@ dependencies = [
  "clep-bases",
  "clep-config",
  "clep-index",
+ "clep-mutate",
  "clep-test-support",
  "clep-vault",
  "dirs",

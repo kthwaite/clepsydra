@@ -20,6 +20,7 @@ chrono = { workspace = true }
 clep-bases = { workspace = true }
 clep-config = { workspace = true }
 clep-index = { workspace = true }
+clep-mutate = { workspace = true }
 clep-vault = { workspace = true }
 dirs = { workspace = true }
 feed-rs = { workspace = true }
@@ -89,6 +90,7 @@ clep-client = { path = "crates/clep-client" }
 clep-frontend-assets = { path = "crates/clep-frontend-assets" }
 clep-index = { path = "crates/clep-index" }
 clep-mcp = { path = "crates/clep-mcp" }
+clep-mutate = { path = "crates/clep-mutate" }
 clep-vault = { path = "crates/clep-vault" }
 clepsydra = { path = "." }
 ammonia = "4"

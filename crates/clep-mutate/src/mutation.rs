@@ -5,15 +5,15 @@ use rusqlite::params;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use super::Vault;
-use super::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
-use super::canonical::CanonicalName;
-use super::index::{IndexError, VaultIndex};
-use super::page::parse_or_repair_frontmatter;
-use super::path::VaultPath;
-use super::rewriter;
-use super::rubbish::{RubbishItem, RubbishManifest};
-use super::sync::ChangeEvent;
+use crate::batch_mutation::{BatchMutationCommand, BatchPathIntent, ExpectedPathState};
+use clep_index::index::{IndexError, VaultIndex};
+use clep_index::sync::ChangeEvent;
+use clep_vault::Vault;
+use clep_vault::canonical::CanonicalName;
+use clep_vault::page::parse_or_repair_frontmatter;
+use clep_vault::path::VaultPath;
+use clep_vault::rewriter;
+use clep_vault::rubbish::{RubbishItem, RubbishManifest};
 
 // ---------------------------------------------------------------------------
 // Utility: VaultPath error → IndexError mapping

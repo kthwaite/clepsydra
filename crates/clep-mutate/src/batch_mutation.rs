@@ -9,12 +9,12 @@ use thiserror::Error;
 use uuid::Uuid;
 
 #[cfg(test)]
-use super::atomic_file::AtomicPublicationError;
-use super::atomic_file::install_noreplace;
+use clep_vault::atomic_file::AtomicPublicationError;
+use clep_vault::atomic_file::install_noreplace;
 
-use super::path::VaultPath;
-use super::rubbish::{RubbishItem, RubbishManifest, RubbishStore, RubbishStoreError};
-use super::sync::ChangeEvent;
+use clep_index::sync::ChangeEvent;
+use clep_vault::path::VaultPath;
+use clep_vault::rubbish::{RubbishItem, RubbishManifest, RubbishStore, RubbishStoreError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExpectedPathState {
@@ -368,7 +368,7 @@ pub enum BatchMutationError {
     Publication {
         path: PathBuf,
         #[source]
-        source: super::atomic_file::AtomicPublicationError,
+        source: clep_vault::atomic_file::AtomicPublicationError,
     },
     #[error(
         "batch preparation failed and cleanup failed for transaction {directory}: preparation error: {source}; cleanup error: {cleanup}"
@@ -1291,8 +1291,8 @@ fn publish_file_state(
         ));
     }
     let result = match before_hash {
-        Some(_) => super::atomic_file::atomic_replace(path, content),
-        None => super::atomic_file::atomic_create(path, content),
+        Some(_) => clep_vault::atomic_file::atomic_replace(path, content),
+        None => clep_vault::atomic_file::atomic_create(path, content),
     };
     result.map_err(|source| BatchMutationError::Publication {
         path: path.to_path_buf(),
@@ -1309,7 +1309,7 @@ fn restore_file_state(
     match observed_hash(path)?.as_deref() {
         Some(observed) if observed == before_hash => Ok(()),
         Some(observed) if observed == after_hash => {
-            super::atomic_file::atomic_replace(path, content).map_err(|source| {
+            clep_vault::atomic_file::atomic_replace(path, content).map_err(|source| {
                 BatchMutationError::Publication {
                     path: path.to_path_buf(),
                     source,
@@ -1342,7 +1342,7 @@ fn restore_missing_file(
 ) -> Result<(), BatchMutationError> {
     match observed_hash(path)?.as_deref() {
         Some(observed) if observed == before_hash => Ok(()),
-        None => super::atomic_file::atomic_create(path, content).map_err(|source| {
+        None => clep_vault::atomic_file::atomic_create(path, content).map_err(|source| {
             BatchMutationError::Publication {
                 path: path.to_path_buf(),
                 source,
@@ -1444,9 +1444,9 @@ fn write_manifest(
             message: error.to_string(),
         })?;
     let result = if create {
-        super::atomic_file::atomic_create(&path, &content)
+        clep_vault::atomic_file::atomic_create(&path, &content)
     } else {
-        super::atomic_file::atomic_replace(&path, &content)
+        clep_vault::atomic_file::atomic_replace(&path, &content)
     };
     result.map_err(|source| BatchMutationError::Publication { path, source })
 }
@@ -1649,7 +1649,7 @@ fn sync_directory_parent(path: &Path) -> Result<(), BatchMutationError> {
 }
 
 fn sync_directory(path: &Path) -> Result<(), BatchMutationError> {
-    super::atomic_file::flush_directory(path)
+    clep_vault::atomic_file::flush_directory(path)
         .map_err(|source| BatchMutationError::filesystem("sync directory", path, source))
 }
 
@@ -2371,7 +2371,7 @@ mod tests {
     fn phase_publication_parent_flush_failure_is_uncertain_before_mutation() {
         let fixture = fixture_with_file("a.md", b"before");
         let mut prepared = prepare(fixture.root(), &replace("a.md", b"before", b"after")).unwrap();
-        let _failure = crate::vault::atomic_file::fail_next_directory_flush(prepared.directory());
+        let _failure = clep_vault::atomic_file::fail_next_directory_flush(prepared.directory());
 
         let error = prepared.publish().unwrap_err();
 
