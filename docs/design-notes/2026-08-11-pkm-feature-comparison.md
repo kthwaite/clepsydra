@@ -10,9 +10,9 @@ Clepsydra is no longer an early vault-core prototype. The prior comparison in `d
 
 Several items it described as future work are now shipped:
 
-- Composable index derivation: `src/vault/derivation.rs:12-65`, `src/vault/index.rs:318-334`
-- Hash-gated incremental indexing and reverse-dependency re-resolution: `src/vault/sync/mod.rs:39-123`, `src/vault/index.rs:427-480`
-- First-class unresolved and ambiguous references, candidate ranking, create-from-link, mutation previews, contextual backlinks, graph, search, and content-index APIs: `src/vault/index.rs:939-1278`, `src/api/index_routes.rs:349-933`
+- Composable index derivation: `crates/clep-index/src/derivation.rs:12-65`, `crates/clep-index/src/index.rs:318-334`
+- Hash-gated incremental indexing and reverse-dependency re-resolution: `crates/clep-index/src/sync/mod.rs:39-123`, `crates/clep-index/src/index.rs:427-480`
+- First-class unresolved and ambiguous references, candidate ranking, create-from-link, mutation previews, contextual backlinks, graph, search, and content-index APIs: `crates/clep-index/src/index.rs:939-1278`, `src/api/index_routes.rs:349-933`
 - Structured tasks, journals, Bases, academic records/importers, feeds, encryption, browser capture, and MCP
 - A full standalone LSP—not merely a planned integration: `ui/src/docs/content/lsp.mdx:7-19,74-88`
 - A substantial Slate authoring environment and domain-specific workspaces
@@ -91,7 +91,7 @@ Logseq’s core model is hierarchical blocks transacted into DataScript/logseq.d
 
 Clepsydra parses hierarchy, task state, inline properties, block IDs, parents, order, and source spans, but Markdown documents remain the primary editing unit:
 
-- `src/vault/block.rs:6-103`
+- `crates/clep-vault/src/block.rs:6-103`
 - `src/api/blocks.rs:18-223`
 
 This is mostly an intentional divergence. Replacing Clepsydra with a DB-native outliner would undermine its strongest invariant: ordinary files remain independently useful.
