@@ -588,7 +588,6 @@ dependencies = [
  "parking_lot",
  "percent-encoding",
  "quick-xml 0.37.5",
- "regex",
  "reqwest",
  "rusqlite",
  "rustix",
@@ -602,7 +601,6 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "toml 0.8.23",
- "toml_edit",
  "tower 0.5.3",
  "tower-http",
  "tracing",
@@ -612,7 +610,6 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "walkdir",
- "windows-sys 0.61.2",
  "wiremock",
 ]
 

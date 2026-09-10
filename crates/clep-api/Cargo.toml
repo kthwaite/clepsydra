@@ -33,7 +33,6 @@ dirs = { workspace = true }
 mime_guess = { workspace = true }
 parking_lot = { workspace = true }
 percent-encoding = { workspace = true }
-regex = { workspace = true }
 quick-xml = { workspace = true }
 reqwest = { workspace = true }
 rusqlite = { workspace = true }
@@ -47,7 +46,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 toml = { workspace = true }
-toml_edit = { workspace = true }
 tower = { workspace = true }
 tower-http = { workspace = true }
 tracing = { workspace = true }
@@ -59,9 +57,6 @@ uuid = { workspace = true }
 walkdir = { workspace = true }
 bytes = { workspace = true }
 http-body = { workspace = true }
-
-[target.'cfg(windows)'.dependencies]
-windows-sys = { workspace = true }
 
 [dev-dependencies]
 axum-test = { workspace = true }

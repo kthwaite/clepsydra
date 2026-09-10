@@ -15,6 +15,7 @@ pub mod journal_merge;
 pub mod managed_block;
 pub mod merge_driver;
 pub mod state;
+/// Public for the workspace split; not part of the stable API.
 #[cfg(any(test, feature = "test-support"))]
 pub mod testing;
 

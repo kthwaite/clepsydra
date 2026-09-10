@@ -239,7 +239,7 @@ the risk from the later mechanical moves.
    the bin; `build_note_path` and `build_projected_note_path` stay.
    `backup.rs` stays in the lib (its tests use `cfg(test)` barriers in
    `vault::cas` and `feeds::store`); the bin calls
-   `clepsydra::backup::create_backup`. In the Phase 0 code as landed,
+   `create_backup` (then `clepsydra::backup`, now `clep_api::backup`). In the Phase 0 code as landed,
    `backup.rs` and `new_note_command.rs` stayed at the lib crate root; in
    Phase 1 `new_note_command.rs` moved into the bin as planned, but
    `backup.rs`'s planned move to the bin was reconsidered per the ruling
@@ -358,7 +358,13 @@ through the re-export shim rather than depending on `clep-vault` directly
 (§2). Rewriting those call sites to depend on the leaf crates `clep-mcp`
 actually needs — dropping the `clep-mcp` → `clep-api` production edge
 back to a dev-only one, matching the original plan — is unstarted work,
-not a Phase 3 deliverable.
+not a Phase 3 deliverable. The same applies to `crates/clep/src/main.rs`, which
+reaches `Settings`, `resolve_vault_root`, `expand_tilde`, and
+`VESSEL_ACCENT` through `clep_api::` although the bin depends on
+`clep-config` directly (an edge inherited from Phase 1); and to its
+gitsync, mutate, archive, and vault calls through the `clep_api::vault`
+shim, which keep `clep-api` on the build path of CLI-only subcommands
+such as `clep merge-driver`.
 
 `keyring_test` and `encryption_test` only use `clep-vault` and `clep-index`
 respectively, so Phase 2 moved them there instead of to the bin. The

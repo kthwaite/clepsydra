@@ -32,7 +32,7 @@ For any feature implementation: (1) grill/clarify scope and design first, (2) wr
 
 Rust 2024 edition. Axum 0.8 + Tokio; rusqlite (bundled, FTS5 powers `grep`); pulldown-cmark; notify for file watching; utoipa for OpenAPI. Seventeen crates under `crates/`, all prefixed `clep-` except the `clep` binary itself; full design and DAG in `docs/superpowers/specs/2026-09-09-crate-split-design.md`.
 
-- `crates/clep` — the binary: clap dispatch (`main.rs`), `sync_command.rs` and `config_command.rs` (CLI), `macos_url_handler.rs`, `new_note_command.rs`, `run_lsp_standalone` (bridges to `clep-lsp`), grep/tree human-readable rendering
+- `crates/clep` — the binary: clap dispatch (`main.rs`), `sync_command.rs` and `config_command.rs` (CLI), `macos_url_handler.rs`, `new_note_command.rs`, `clep lsp` calling `clep_lsp::run_standalone` directly, grep/tree human-readable rendering
 - `crates/clep-config` — `Settings` and its layered sources, `FeatureFlags`, TLS/server/vault settings, `app_config`, `expand_tilde`; no dependencies on other workspace crates
 - `crates/clep-vault` — the vault model, independent of SQLite and HTTP: paths (`VaultPath`, NFC-normalized), page/frontmatter parsing, link extraction/rewriting, kinds, codes, config, atomic writes, rubbish, task history, init
 - `crates/clep-index` — SQLite index + derivation chain (`derivers/`), hooks traits, FTS `grep`/`tree`, filesystem sync/reconcile (`sync/`)
@@ -45,8 +45,8 @@ Rust 2024 edition. Axum 0.8 + Tokio; rusqlite (bundled, FTS5 powers `grep`); pul
 - `crates/clep-client` — `ApiClient`, `configured_api_client`, TLS/loopback helpers, `todo_capture`
 - `crates/clep-mcp` — the MCP server (`server.rs`, `tasking.rs`, `edit.rs`, `run_mcp`)
 - `crates/clep-lsp` — tower-lsp server (completion, hover, references, rename, diagnostics, code actions) over its own private, read-only vault index; started standalone with `clep lsp` (see `ui/src/docs/content/lsp.mdx`)
-- `crates/clep-doctor` — `clep doctor`'s read-only checks, one section per concern (`mod.rs` + `sync.rs`); never writes to the vault or the repo
-- `crates/clep-frontend-assets` — the embedded UI (`api/frontend.rs`, rust-embed over `ui/dist`); only the `clep` binary links it, so a `ui/dist` change recompiles this small crate and the binary, not the whole API layer
+- `crates/clep-doctor` — `clep doctor`'s read-only checks, one section per concern (`lib.rs` + `sync.rs`); never writes to the vault or the repo
+- `crates/clep-frontend-assets` — the embedded UI (`src/lib.rs`, rust-embed over `ui/dist`); only the `clep` binary links it, so a `ui/dist` change recompiles this small crate and the binary, not the whole API layer
 - `crates/clep-api` — everything else: `crates/clep-api/src/api/` (one module per HTTP resource — pages, blocks, tasks, journal, agenda, board, folders, attachments, archive, academic, …; `events.rs` is the SSE stream the UI's sync indicator consumes; `openapi.rs` + Swagger UI at `/api/docs`), plus `lib.rs` bootstrap (`build_app_state`, `build_router`, `run_server`, watcher, TLS serve, shutdown, `run_startup_reconcile`), `sync_runtime.rs`, `deeplink.rs`, `vault/geocode.rs` (declared by the vault shim), `backup.rs`. Depends on every feature crate above except `clep-lsp`, `clep-doctor`, and `clep-frontend-assets` — the `clep` binary links those directly
 - `crates/clep-test-support` (dev only) — `EnvGuard` and shared test fixtures (e.g. the `private-note.age` encryption fixture)
 - `tests/` under each crate — integration tests using axum-test, wiremock, serial_test; multi-crate/`ApiFixture` tests live in `crates/clep-api/tests`, bin-spawning tests in `crates/clep/tests`

@@ -17,8 +17,8 @@ thiserror = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
 utoipa = { workspace = true }
-uuid = { workspace = true }
 
 [dev-dependencies]
+uuid = { workspace = true }
 clep-test-support = { workspace = true }
 tempfile = { workspace = true }
