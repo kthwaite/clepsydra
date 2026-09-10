@@ -18,6 +18,7 @@ biblatex = { workspace = true }
 blake3 = { workspace = true }
 chrono = { workspace = true }
 clep-config = { workspace = true }
+clep-index = { workspace = true }
 clep-vault = { workspace = true }
 dirs = { workspace = true }
 feed-rs = { workspace = true }
@@ -84,6 +85,7 @@ clep-test-support = { path = "crates/clep-test-support" }
 clep-config = { path = "crates/clep-config" }
 clep-client = { path = "crates/clep-client" }
 clep-frontend-assets = { path = "crates/clep-frontend-assets" }
+clep-index = { path = "crates/clep-index" }
 clep-mcp = { path = "crates/clep-mcp" }
 clep-vault = { path = "crates/clep-vault" }
 clepsydra = { path = "." }

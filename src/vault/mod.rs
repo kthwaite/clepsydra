@@ -20,19 +20,12 @@ pub mod cas;
 pub mod cas_migrate;
 pub mod cas_scan;
 pub mod checkpoint;
-pub mod derivation;
-pub mod derivers;
 pub mod geocode;
 pub mod gitsync;
-pub mod grep;
-pub mod hooks;
 pub mod import;
 pub mod import_doi;
 pub mod import_isbn;
 pub mod import_zotero;
-pub mod index;
-pub mod index_handle;
-pub mod index_policy;
 pub mod migrate;
 pub mod mutation;
 pub mod mutation_coordinator;
@@ -41,9 +34,10 @@ pub mod property_value;
 pub mod query;
 pub mod recode;
 pub mod reconcile;
-pub mod reference_issues;
 pub mod reference_repair;
 pub mod relabel;
-mod search;
-pub mod sync;
-pub mod tree;
+
+pub use clep_index::{
+    derivation, derivers, grep, hooks, index, index_handle, index_policy, reference_issues, sync,
+    tree,
+};

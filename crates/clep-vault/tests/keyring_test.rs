@@ -5,7 +5,7 @@ use clep_vault::keyring::{KeyringError, load_keyring, rewrap_identity, setup_key
 use tempfile::TempDir;
 
 const KEY_ID: &str = "019fd000-0000-7000-8000-000000000501";
-const ARMOR: &str = include_str!("support/fixtures/private-note.age");
+const ARMOR: &str = include_str!("../../../tests/support/fixtures/private-note.age");
 
 fn recipient() -> String {
     format!("age1{}", "q".repeat(58))

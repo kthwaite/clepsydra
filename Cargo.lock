@@ -576,6 +576,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-index"
+version = "0.0.0"
+dependencies = [
+ "anstream 1.0.0",
+ "base64 0.22.1",
+ "blake3",
+ "chrono",
+ "clep-vault",
+ "notify-debouncer-mini",
+ "owo-colors",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "toml 0.8.23",
+ "tracing",
+ "uuid",
+ "walkdir",
+]
+
+[[package]]
 name = "clep-mcp"
 version = "0.0.0"
 dependencies = [
@@ -642,6 +665,7 @@ dependencies = [
  "bytes",
  "chrono",
  "clep-config",
+ "clep-index",
  "clep-test-support",
  "clep-vault",
  "dirs",

@@ -1,0 +1,436 @@
+//! Vault tree listing for the `clepsydra tree` CLI subcommand.
+
+use std::collections::HashMap;
+use std::io::{self, Write};
+
+use owo_colors::OwoColorize;
+use serde::Serialize;
+
+use crate::index::VaultIndex;
+use clep_vault::Vault;
+
+/// Metadata attached to an indexed note in the tree.
+#[derive(Debug, Clone, Serialize, Default)]
+pub struct NoteMeta {
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    pub encrypted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub word_count: Option<i64>,
+}
+
+/// Bulk-load note metadata keyed by the vault-relative path (the `pages.path`
+/// column, which equals each note's path under the vault root). Every field is
+/// sourced from the index — kind/title/dates/word-count from `pages`, tags from
+/// `tags` — so no note files are read. `created_at`/`updated_at`/`word_count`
+/// are populated during index build (`word_count` is NULL only for rows indexed
+/// before the column existed, or for encrypted pages where body-derived data
+/// is intentionally unavailable).
+pub fn load_note_meta(index: &VaultIndex) -> Result<HashMap<String, NoteMeta>, rusqlite::Error> {
+    let conn = index.connection();
+
+    // Tags grouped by page_id.
+    let mut tags_by_page: HashMap<String, Vec<String>> = HashMap::new();
+    {
+        let mut stmt = conn.prepare("SELECT page_id, tag FROM tags")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?;
+        for (pid, tag) in rows.flatten() {
+            tags_by_page.entry(pid).or_default().push(tag);
+        }
+    }
+
+    let mut stmt = conn.prepare(
+        "SELECT id, path, title, kind, created_at, updated_at, encrypted, word_count FROM pages",
+    )?;
+    type Row = (
+        String,
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        Option<String>,
+        bool,
+        Option<i64>,
+    );
+    let rows: Vec<Row> = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+                row.get(5)?,
+                row.get(6)?,
+                row.get(7)?,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    let mut out = HashMap::with_capacity(rows.len());
+    for (page_id, path, title, kind, created_at, updated_at, encrypted, word_count) in rows {
+        let tags = tags_by_page.remove(&page_id).unwrap_or_default();
+        out.insert(
+            path,
+            NoteMeta {
+                kind,
+                title,
+                tags,
+                created_at,
+                updated_at,
+                encrypted,
+                word_count,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// What a tree node represents.
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum NodeEntry {
+    /// A directory.
+    Dir,
+    /// A file matching an indexed page, with its metadata.
+    Note(NoteMeta),
+    /// Any other regular file, with its size in bytes.
+    File { size: u64 },
+}
+
+/// A single node in the rendered vault tree.
+#[derive(Debug, Serialize)]
+pub struct TreeNode {
+    pub name: String,
+    /// Vault-relative path (`/`-separated). Empty for the root node.
+    pub path: String,
+    #[serde(flatten)]
+    pub entry: NodeEntry,
+    pub children: Vec<TreeNode>,
+}
+
+/// Build the vault tree rooted at `vault.root()`. Skips dotfiles/dot-dirs and
+/// `.clepsydra`. Files whose vault path is a key in `meta` become `Note`
+/// nodes; other regular files become `File` nodes carrying their size.
+pub fn build(vault: &Vault, meta: &HashMap<String, NoteMeta>) -> TreeNode {
+    let root_path = vault.root().to_path_buf();
+    let children = read_dir_sorted(&root_path, "", meta);
+    TreeNode {
+        name: vault
+            .root()
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| ".".to_string()),
+        path: String::new(),
+        entry: NodeEntry::Dir,
+        children,
+    }
+}
+
+/// Recursively read `abs_dir`, returning its child nodes. `rel_prefix` is the
+/// vault-relative path of `abs_dir` (`""` at the root, else trailing-slash-free).
+fn read_dir_sorted(
+    abs_dir: &std::path::Path,
+    rel_prefix: &str,
+    meta: &HashMap<String, NoteMeta>,
+) -> Vec<TreeNode> {
+    let Ok(entries) = std::fs::read_dir(abs_dir) else {
+        return Vec::new();
+    };
+
+    let mut dirs: Vec<TreeNode> = Vec::new();
+    let mut files: Vec<TreeNode> = Vec::new();
+
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        // Skip dotfiles/dot-dirs (covers .git, .clepsydra, .DS_Store, ...).
+        if name.starts_with('.') {
+            continue;
+        }
+        let rel = if rel_prefix.is_empty() {
+            name.clone()
+        } else {
+            format!("{rel_prefix}/{name}")
+        };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+
+        if file_type.is_dir() {
+            let children = read_dir_sorted(&entry.path(), &rel, meta);
+            dirs.push(TreeNode {
+                name,
+                path: rel,
+                entry: NodeEntry::Dir,
+                children,
+            });
+        } else if file_type.is_file() {
+            let entry_kind = if let Some(m) = meta.get(&rel) {
+                NodeEntry::Note(m.clone())
+            } else {
+                let size = entry.metadata().map(|m| m.len()).unwrap_or(0);
+                NodeEntry::File { size }
+            };
+            files.push(TreeNode {
+                name,
+                path: rel,
+                entry: entry_kind,
+                children: Vec::new(),
+            });
+        }
+    }
+
+    dirs.sort_by(|a, b| a.name.cmp(&b.name));
+    files.sort_by(|a, b| a.name.cmp(&b.name));
+    dirs.extend(files);
+    dirs
+}
+
+/// Render the tree as styled, box-drawing text. The root line is the vault
+/// directory name; children are drawn with `├──`/`└──` connectors. Wrap `w` in
+/// `anstream::AutoStream` to honour `NO_COLOR` / non-TTY.
+pub fn render_human(root: &TreeNode, w: &mut impl Write, accent: (u8, u8, u8)) -> io::Result<()> {
+    writeln!(
+        w,
+        "{}",
+        root.name.truecolor(accent.0, accent.1, accent.2).bold()
+    )?;
+    let count = root.children.len();
+    for (i, child) in root.children.iter().enumerate() {
+        render_node(child, "", i + 1 == count, w, accent)?;
+    }
+    Ok(())
+}
+
+fn render_node(
+    node: &TreeNode,
+    prefix: &str,
+    last: bool,
+    w: &mut impl Write,
+    accent: (u8, u8, u8),
+) -> io::Result<()> {
+    let connector = if last { "└── " } else { "├── " };
+    writeln!(
+        w,
+        "{prefix}{}{}",
+        connector.dimmed(),
+        node_label(node, accent)
+    )?;
+    let child_prefix = format!("{prefix}{}", if last { "    " } else { "│   " });
+    let count = node.children.len();
+    for (i, child) in node.children.iter().enumerate() {
+        render_node(child, &child_prefix, i + 1 == count, w, accent)?;
+    }
+    Ok(())
+}
+
+/// The styled label for a single node, excluding the tree connector.
+fn node_label(node: &TreeNode, accent: (u8, u8, u8)) -> String {
+    match &node.entry {
+        NodeEntry::Dir => node
+            .name
+            .truecolor(accent.0, accent.1, accent.2)
+            .bold()
+            .to_string(),
+        NodeEntry::File { size } => {
+            format!("{}  {}", node.name, human_size(*size).dimmed())
+        }
+        NodeEntry::Note(m) => {
+            let mut s = node.name.clone();
+            s.push(' ');
+            s.push_str(&format!("[{}]", m.kind).dimmed().to_string());
+            if let Some(t) = &m.title
+                && Some(t.as_str()) != node.name.strip_suffix(".md")
+            {
+                s.push_str(&format!(" {t}"));
+            }
+            if !m.tags.is_empty() {
+                let tags = m
+                    .tags
+                    .iter()
+                    .map(|t| format!("#{t}"))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                s.push(' ');
+                s.push_str(&tags.truecolor(accent.0, accent.1, accent.2).to_string());
+            }
+            if m.encrypted {
+                s.push_str(" 🔒");
+            } else if let Some(wc) = m.word_count {
+                s.push(' ');
+                s.push_str(&format!("({wc}w)").dimmed().to_string());
+            }
+            s
+        }
+    }
+}
+
+/// Format a byte count as a short human-readable size (e.g. `1.2K`, `3.4M`).
+fn human_size(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes}{}", UNITS[0])
+    } else {
+        format!("{size:.1}{}", UNITS[unit])
+    }
+}
+
+/// Render the tree as pretty-printed JSON.
+pub fn render_json(root: &TreeNode, w: &mut impl Write) -> io::Result<()> {
+    serde_json::to_writer_pretty(&mut *w, root)?;
+    writeln!(w)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::index::VaultIndex;
+    use clep_vault::Vault;
+
+    /// Temp vault with a note and an attachment; returns (TempDir, Vault, VaultIndex).
+    fn fixture() -> (tempfile::TempDir, Vault, VaultIndex) {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        clep_vault::init::init_vault(&root).unwrap();
+        std::fs::write(
+            root.join("Alpha.md"),
+            "---\ntitle: Alpha\ntags: [physics]\n---\nword one two three\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("_attachments")).unwrap();
+        std::fs::write(root.join("_attachments/diagram.png"), b"\x89PNG fake").unwrap();
+        let vault = Vault::open(&root).unwrap();
+        let mut index = VaultIndex::open(&root.join(".clepsydra/cache.db")).unwrap();
+        index.build(&vault).unwrap();
+        index.resolve_links().unwrap();
+        (dir, vault, index)
+    }
+
+    #[test]
+    fn load_note_meta_carries_kind_and_tags() {
+        let (_dir, _vault, index) = fixture();
+        let meta = load_note_meta(&index).unwrap();
+        let alpha = meta.get("Alpha.md").expect("Alpha.md indexed");
+        assert_eq!(alpha.kind, "NOTE");
+        assert!(alpha.tags.contains(&"physics".to_string()));
+        assert_eq!(alpha.word_count, Some(4));
+    }
+
+    /// Collect every node name in the tree (depth-first) for assertions.
+    fn names(node: &TreeNode, acc: &mut Vec<String>) {
+        acc.push(node.name.clone());
+        for c in &node.children {
+            names(c, acc);
+        }
+    }
+
+    #[test]
+    fn build_excludes_dotfiles_and_clepsydra() {
+        let (_dir, vault, index) = fixture();
+        let meta = load_note_meta(&index).unwrap();
+        let root = build(&vault, &meta);
+        let mut all = Vec::new();
+        names(&root, &mut all);
+        // The root name (all[0]) is the vault directory's own basename, which
+        // may be a dot-prefixed temp dir; only assert on the walked children.
+        let children = &all[1..];
+        assert!(!children.iter().any(|n| n == ".clepsydra"));
+        assert!(!children.iter().any(|n| n.starts_with('.')));
+        assert!(children.iter().any(|n| n == "Alpha.md"));
+        assert!(children.iter().any(|n| n == "_attachments"));
+        assert!(children.iter().any(|n| n == "diagram.png"));
+    }
+
+    #[test]
+    fn build_classifies_note_and_file() {
+        let (_dir, vault, index) = fixture();
+        let meta = load_note_meta(&index).unwrap();
+        let root = build(&vault, &meta);
+
+        fn find<'a>(node: &'a TreeNode, name: &str) -> Option<&'a TreeNode> {
+            if node.name == name {
+                return Some(node);
+            }
+            node.children.iter().find_map(|c| find(c, name))
+        }
+
+        let alpha = find(&root, "Alpha.md").unwrap();
+        assert!(matches!(alpha.entry, NodeEntry::Note(_)));
+        let png = find(&root, "diagram.png").unwrap();
+        assert!(matches!(png.entry, NodeEntry::File { .. }));
+    }
+
+    #[test]
+    fn render_human_draws_branches_and_metadata() {
+        let (_dir, vault, index) = fixture();
+        let meta = load_note_meta(&index).unwrap();
+        let root = build(&vault, &meta);
+        let mut buf: Vec<u8> = Vec::new();
+        render_human(&root, &mut buf, (0xee, 0x77, 0x33)).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("Alpha.md"));
+        assert!(out.contains("NOTE")); // kind tag
+        assert!(out.contains("diagram.png"));
+        assert!(out.contains("├──") || out.contains("└──")); // branch glyphs
+    }
+
+    #[test]
+    fn encrypted_note_renders_lock_indicator_without_word_count() {
+        let root = TreeNode {
+            name: "vault".to_string(),
+            path: String::new(),
+            entry: NodeEntry::Dir,
+            children: vec![TreeNode {
+                name: "Protected.md".to_string(),
+                path: "Protected.md".to_string(),
+                entry: NodeEntry::Note(NoteMeta {
+                    kind: "NOTE".to_string(),
+                    title: Some("Protected".to_string()),
+                    encrypted: true,
+                    word_count: None,
+                    ..NoteMeta::default()
+                }),
+                children: Vec::new(),
+            }],
+        };
+
+        let mut buf = Vec::new();
+        render_human(&root, &mut buf, (0xee, 0x77, 0x33)).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(
+            out.contains('🔒'),
+            "encrypted note needs a lock indicator: {out}"
+        );
+        assert!(
+            !out.contains("w)"),
+            "encrypted note must omit word count: {out}"
+        );
+    }
+
+    #[test]
+    fn render_json_round_trips() {
+        let (_dir, vault, index) = fixture();
+        let meta = load_note_meta(&index).unwrap();
+        let root = build(&vault, &meta);
+        let mut buf: Vec<u8> = Vec::new();
+        render_json(&root, &mut buf).unwrap();
+        let v: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(v["type"], "dir");
+        assert!(v["children"].is_array());
+    }
+}
