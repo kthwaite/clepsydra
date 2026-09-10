@@ -1,7 +1,7 @@
 # Workspace crate split — design
 
 **Date:** 2026-09-09
-**Status:** All phases landed; Phase 3 on branch feature/crate-split-phase3 pending merge to develop — see §1 for the final numbers
+**Status:** All phases landed; Phase 3 merged to develop as 57e82601 (2026-09-10) — see §1 for the final numbers
 **Scope:** `src/` only. `ui/` and `extension/` are untouched.
 
 ## 1. Why
