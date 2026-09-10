@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, Notify, Semaphore};
 use super::network::CheckedHttpClient;
 use super::store::FeedStoreHandle;
 use super::types::ManifestWarning;
-use crate::FeedsSettings;
+use clep_config::FeedsSettings;
 
 /// Resources that exist only while the Feeds feature is enabled.
 pub struct FeedRuntime {

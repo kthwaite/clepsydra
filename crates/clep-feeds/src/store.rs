@@ -3355,7 +3355,7 @@ mod tests {
     use tempfile::TempDir;
 
     use super::{FeedStoreError, FeedStoreHandle};
-    use crate::feeds::types::{
+    use crate::types::{
         Entry, EntryCursor, EntryFilters, EntryPatch, EntryView, FetchOutcome, FetchedEntry,
         ManifestFeed, MarkReadScope,
     };

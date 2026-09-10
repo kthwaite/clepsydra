@@ -1,0 +1,35 @@
+[package]
+name = "clep-feeds"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[features]
+test-failpoints = []
+
+[dependencies]
+ammonia = { workspace = true }
+chrono = { workspace = true }
+clep-config = { workspace = true }
+feed-rs = { workspace = true }
+parking_lot = { workspace = true }
+quick-xml = { workspace = true }
+reqwest = { workspace = true }
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tracing = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
+
+[dev-dependencies]
+axum = { workspace = true }
+clep-vault = { workspace = true }
+serial_test = { workspace = true }
+wiremock = { workspace = true }

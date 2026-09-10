@@ -637,6 +637,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-feeds"
+version = "0.0.0"
+dependencies = [
+ "ammonia",
+ "axum",
+ "chrono",
+ "clep-config",
+ "clep-vault",
+ "feed-rs",
+ "parking_lot",
+ "quick-xml 0.37.5",
+ "reqwest",
+ "rusqlite",
+ "rustix",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
 name = "clep-frontend-assets"
 version = "0.0.0"
 dependencies = [
@@ -775,7 +802,6 @@ dependencies = [
 name = "clepsydra"
 version = "0.0.0"
 dependencies = [
- "ammonia",
  "axum",
  "axum-extra",
  "axum-server",
@@ -788,13 +814,13 @@ dependencies = [
  "clep-archive",
  "clep-bases",
  "clep-config",
+ "clep-feeds",
  "clep-gitsync",
  "clep-index",
  "clep-mutate",
  "clep-test-support",
  "clep-vault",
  "dirs",
- "feed-rs",
  "glob",
  "http-body",
  "mime_guess",

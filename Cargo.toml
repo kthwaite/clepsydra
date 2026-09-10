@@ -6,10 +6,13 @@ edition.workspace = true
 [features]
 # Enables the directory-flush/sync fault-injection hooks in
 # `vault::atomic_file` and `vault::rubbish` for another crate's tests.
-test-failpoints = ["clep-vault/test-failpoints", "clep-archive/test-failpoints"]
+test-failpoints = [
+    "clep-vault/test-failpoints",
+    "clep-archive/test-failpoints",
+    "clep-feeds/test-failpoints",
+]
 
 [dependencies]
-ammonia = { workspace = true }
 axum = { workspace = true }
 axum-extra = { workspace = true }
 axum-server = { workspace = true }
@@ -20,12 +23,12 @@ clep-academic = { workspace = true }
 clep-archive = { workspace = true }
 clep-bases = { workspace = true }
 clep-config = { workspace = true }
+clep-feeds = { workspace = true }
 clep-gitsync = { workspace = true }
 clep-index = { workspace = true }
 clep-mutate = { workspace = true }
 clep-vault = { workspace = true }
 dirs = { workspace = true }
-feed-rs = { workspace = true }
 glob = { workspace = true }
 mime_guess = { workspace = true }
 notify-debouncer-mini = { workspace = true }
@@ -70,6 +73,7 @@ axum-test = { workspace = true }
 serial_test = { workspace = true }
 wiremock = { workspace = true }
 clep-archive = { workspace = true, features = ["test-failpoints"] }
+clep-feeds = { workspace = true, features = ["test-failpoints"] }
 clep-gitsync = { workspace = true, features = ["test-support"] }
 clep-test-support = { workspace = true }
 clep-vault = { workspace = true, features = ["test-failpoints"] }
@@ -89,6 +93,7 @@ clep-archive = { path = "crates/clep-archive" }
 clep-bases = { path = "crates/clep-bases" }
 clep-config = { path = "crates/clep-config" }
 clep-client = { path = "crates/clep-client" }
+clep-feeds = { path = "crates/clep-feeds" }
 clep-frontend-assets = { path = "crates/clep-frontend-assets" }
 clep-gitsync = { path = "crates/clep-gitsync" }
 clep-index = { path = "crates/clep-index" }

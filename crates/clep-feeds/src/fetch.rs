@@ -427,8 +427,8 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
-    use crate::feeds::network::{CheckedHttpClient, HostResolver};
-    use crate::feeds::types::{FeedSummary, FetchOutcome};
+    use crate::network::{CheckedHttpClient, HostResolver};
+    use crate::types::{FeedSummary, FetchOutcome};
 
     const RSS_CONTENT_TYPE: &str = "application/rss+xml; charset=utf-8";
     const ATOM_CONTENT_TYPE: &str = "application/atom+xml; charset=utf-8";

@@ -122,7 +122,8 @@ impl CheckedHttpClient {
         })
     }
 
-    #[cfg(test)]
+    /// Public for the workspace split; not part of the stable API.
+    #[cfg(any(test, feature = "test-failpoints"))]
     pub fn for_test(
         max_response_bytes: usize,
         host: &str,
@@ -467,14 +468,14 @@ fn is_global_ietf_protocol_assignment(segments: &[u16; 8]) -> bool {
         || segments[1] & 0xfff0 == 0x0030
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 #[derive(Debug)]
 struct FixedResolver {
     host: String,
     address: SocketAddr,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 impl HostResolver for FixedResolver {
     fn resolve<'a>(
         &'a self,

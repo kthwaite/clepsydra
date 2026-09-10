@@ -7,8 +7,8 @@ use thiserror::Error;
 use tokio::sync::oneshot;
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 
-use crate::feeds::fetch::fetch_subscription;
-use crate::feeds::runtime::FeedRuntime;
+use crate::fetch::fetch_subscription;
+use crate::runtime::FeedRuntime;
 
 const MANIFEST_PATH: &str = "feeds.md";
 const DUE_SWEEP_INTERVAL: StdDuration = StdDuration::from_secs(60);
@@ -39,7 +39,7 @@ pub enum SchedulerError {
         source: std::string::FromUtf8Error,
     },
     #[error(transparent)]
-    Store(#[from] crate::feeds::store::FeedStoreError),
+    Store(#[from] crate::store::FeedStoreError),
 }
 
 /// Reconcile one serialized raw-manifest snapshot into feed storage.
@@ -56,7 +56,7 @@ pub async fn reconcile_feed_manifest_bytes_locked(
     let path = host.vault_root.join(MANIFEST_PATH);
     let source = String::from_utf8(bytes.to_vec())
         .map_err(|source| SchedulerError::ManifestEncoding { path, source })?;
-    let manifest = crate::feeds::manifest::parse(&source);
+    let manifest = crate::manifest::parse(&source);
     #[cfg(any(test, feature = "test-failpoints"))]
     if let Some(hook) = runtime.feed_before_reconcile_commit_hook.lock().clone() {
         hook();
@@ -233,14 +233,14 @@ mod tests {
     #[tokio::test]
     async fn reconcile_runs_against_a_bare_feed_host() {
         let tmp = tempfile::tempdir().unwrap();
-        crate::vault::init::init_vault(tmp.path()).unwrap();
+        clep_vault::init::init_vault(tmp.path()).unwrap();
         std::fs::write(
             tmp.path().join("feeds.md"),
             "+++\ntitle = \"Feeds\"\n+++\n\n- [Example](https://example.com/feed.xml)\n",
         )
         .unwrap();
         let runtime = Arc::new(
-            crate::feeds::runtime::FeedRuntime::open(tmp.path(), &crate::FeedsSettings::default())
+            crate::runtime::FeedRuntime::open(tmp.path(), &clep_config::FeedsSettings::default())
                 .unwrap(),
         );
         let host = FeedHost {
