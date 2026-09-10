@@ -1,10 +1,12 @@
-use crate::vault::cas::{CasError, ContentStore, ReleaseOutcome};
-use crate::vault::hooks::{PostDeleteHook, RubbishPurgeHook};
-use crate::vault::page::PageMeta;
-use crate::vault::path::VaultPath;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+
+use clep_index::hooks::{PostDeleteHook, RubbishPurgeHook};
+use clep_vault::page::PageMeta;
+use clep_vault::path::VaultPath;
 use uuid::Uuid;
+
+use crate::cas::{CasError, ContentStore, ReleaseOutcome};
 
 /// Decrements CAS ref_counts when an archive page is deleted.
 pub struct ArchiveDeleteHook {

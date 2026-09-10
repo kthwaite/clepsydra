@@ -7,11 +7,12 @@ use std::path::Path;
 use rusqlite::OptionalExtension;
 use walkdir::WalkDir;
 
-use super::Vault;
-use super::archive_hook::captured_blob_types;
-use super::atomic_file::atomic_replace;
-use super::page::{parse_or_repair_frontmatter, write_page_content};
-use super::path::VaultPath;
+use clep_vault::Vault;
+use clep_vault::atomic_file::atomic_replace;
+use clep_vault::page::{parse_or_repair_frontmatter, write_page_content};
+use clep_vault::path::VaultPath;
+
+use crate::archive_hook::captured_blob_types;
 
 /// Outcome of a backfill sweep (or dry run).
 #[derive(Debug, Default)]
@@ -75,7 +76,7 @@ fn backfill_with_publication(
     mut publish: impl FnMut(
         &std::path::Path,
         &[u8],
-    ) -> Result<(), super::atomic_file::AtomicPublicationError>,
+    ) -> Result<(), clep_vault::atomic_file::AtomicPublicationError>,
 ) -> BackfillReport {
     let mut report = BackfillReport {
         dry_run: !write,
@@ -200,7 +201,7 @@ mod tests {
     fn make_vault(pages: &[(&str, &str)]) -> (tempfile::TempDir, Vault) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         for (rel, content) in pages {
             let abs = root.join(rel);
             if let Some(parent) = abs.parent() {
@@ -263,9 +264,9 @@ mod tests {
         let report = backfill(&vault, &db, true);
         assert_eq!(report.updated, vec!["archive/x/a.md"]);
         let after = std::fs::read_to_string(vault.root().join("archive/x/a.md")).unwrap();
-        let (meta, _, _, w) = crate::vault::page::parse_or_repair_frontmatter(&after);
+        let (meta, _, _, w) = clep_vault::page::parse_or_repair_frontmatter(&after);
         assert!(w.is_none());
-        let types = crate::vault::archive_hook::captured_blob_types(&meta);
+        let types = crate::archive_hook::captured_blob_types(&meta);
         assert_eq!(types.get(H2).map(String::as_str), Some("image/png"));
     }
 
@@ -300,12 +301,12 @@ mod tests {
         let report = backfill_with_publication(&vault, &db, true, |path, content| {
             if path.ends_with("a.md") {
                 Err(
-                    crate::vault::atomic_file::AtomicPublicationError::NotPublished(
+                    clep_vault::atomic_file::AtomicPublicationError::NotPublished(
                         std::io::Error::other("injected backfill publication failure"),
                     ),
                 )
             } else {
-                crate::vault::atomic_file::atomic_replace(path, content)
+                clep_vault::atomic_file::atomic_replace(path, content)
             }
         });
 
@@ -319,9 +320,9 @@ mod tests {
         );
 
         let after_b = std::fs::read_to_string(vault.root().join("archive/x/b.md")).unwrap();
-        let (meta, _, _, w) = crate::vault::page::parse_or_repair_frontmatter(&after_b);
+        let (meta, _, _, w) = clep_vault::page::parse_or_repair_frontmatter(&after_b);
         assert!(w.is_none());
-        let types = crate::vault::archive_hook::captured_blob_types(&meta);
+        let types = crate::archive_hook::captured_blob_types(&meta);
         assert_eq!(
             types.get(H2).map(String::as_str),
             Some("image/png"),

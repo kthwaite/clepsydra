@@ -18,9 +18,10 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::vault::Vault;
-use crate::vault::cas::{ContentStore, blob_relative_path, list_blob_hashes};
-use crate::vault::cas_scan::{ArchiveRefScan, scan_archive_refs};
+use clep_vault::Vault;
+
+use crate::cas::{ContentStore, blob_relative_path, list_blob_hashes};
+use crate::cas_scan::{ArchiveRefScan, scan_archive_refs};
 
 /// Where the store lived before 2026-08-28; the migration's default source.
 pub const LEGACY_DEFAULT_CAS_PATH: &str = "~/.clepsydra/cas";
@@ -48,7 +49,7 @@ pub struct MigrateReport {
     /// Source blobs no live page or rubbish item references.
     pub orphans_left: u64,
     /// Set only when `write` was true.
-    pub rebuild: Option<crate::vault::cas::RebuildReport>,
+    pub rebuild: Option<crate::cas::RebuildReport>,
     /// Scan warnings plus one line per missing, corrupt, or failed-I/O
     /// blob, one per malformed hash, and one if the source's `cas.db`
     /// couldn't be read for content types.
@@ -165,7 +166,7 @@ pub fn migrate(
 /// a `to` that doesn't exist yet.
 fn copy_blob(to: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     std::fs::create_dir_all(to.parent().expect("fan-out parent"))?;
-    crate::vault::atomic_file::atomic_create(to, bytes)?;
+    clep_vault::atomic_file::atomic_create(to, bytes)?;
     Ok(())
 }
 
@@ -244,8 +245,8 @@ pub fn legacy_store_with_blobs() -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::vault::Vault;
-    use crate::vault::cas::{ContentStore, blob_relative_path};
+    use crate::cas::{ContentStore, blob_relative_path};
+    use clep_vault::Vault;
     use std::fs;
 
     /// Bytes → (hash, bytes). Distinct inputs give distinct blobs.
@@ -265,7 +266,7 @@ mod tests {
     fn fixture() -> (tempfile::TempDir, Vault, std::path::PathBuf, [String; 4]) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let (snap, snap_b) = blob(b"<html>snap</html>");
         let (img, img_b) = blob(b"\x89PNG img");
         let (orphan, orphan_b) = blob(b"orphan");
@@ -412,7 +413,7 @@ mod tests {
     fn rubbish_item_reference_is_migrated() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let (rub_hash, rub_bytes) = blob(b"<html>rubbish snap</html>");
         let item = root.join(".clepsydra/rubbish/0190aaaa-0000-7000-8000-000000000001");
         fs::create_dir_all(&item).unwrap();
@@ -445,7 +446,7 @@ mod tests {
     fn legacy_string_entries_get_content_type_from_source_cas_db() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         let (snap, snap_b) = blob(b"<html>snap</html>");
         let (img, img_b) = blob(b"\x89PNG img");
         let (pdf, pdf_b) = blob(b"%PDF-1.4 doc");

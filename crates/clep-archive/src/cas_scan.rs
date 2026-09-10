@@ -1,10 +1,12 @@
 //! Vault-wide CAS reference scan: counts captured-archive references and tracks content types.
 
-use crate::vault::Vault;
-use crate::vault::archive_hook::{captured_archive_hashes, captured_blob_types};
-use crate::vault::page::parse_or_repair_frontmatter;
 use std::collections::BTreeMap;
+
+use clep_vault::Vault;
+use clep_vault::page::parse_or_repair_frontmatter;
 use walkdir::WalkDir;
+
+use crate::archive_hook::{captured_archive_hashes, captured_blob_types};
 
 #[derive(Debug, Default)]
 pub struct ArchiveRefScan {
@@ -54,7 +56,7 @@ fn scan_live_pages(vault: &Vault, scan: &mut ArchiveRefScan) {
         if rel_str.starts_with(".clepsydra/") {
             continue;
         }
-        let Ok(vault_path) = crate::vault::path::VaultPath::new(&rel_str) else {
+        let Ok(vault_path) = clep_vault::path::VaultPath::new(&rel_str) else {
             continue;
         };
         if vault.is_excluded(&vault_path) {
@@ -166,7 +168,7 @@ mod tests {
     fn make_vault(pages: &[(&str, &str)]) -> (tempfile::TempDir, Vault) {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
+        clep_vault::init::init_vault(&root).unwrap();
         for (rel, content) in pages {
             let abs = root.join(rel);
             if let Some(parent) = abs.parent() {

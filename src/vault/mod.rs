@@ -8,12 +8,6 @@ pub use clep_vault::{
 
 pub mod academic;
 pub mod academic_hook;
-pub mod archive_backfill;
-pub mod archive_hook;
-pub mod archive_snapshot;
-pub mod cas;
-pub mod cas_migrate;
-pub mod cas_scan;
 pub mod checkpoint;
 pub mod geocode;
 pub mod gitsync;
@@ -21,6 +15,10 @@ pub mod import;
 pub mod import_doi;
 pub mod import_isbn;
 pub mod import_zotero;
+
+pub use clep_archive::{
+    archive_backfill, archive_hook, archive_snapshot, cas, cas_migrate, cas_scan,
+};
 
 pub use clep_mutate::{
     batch_mutation, migrate, mutation, mutation_coordinator, new_note, recode, reconcile,

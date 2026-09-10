@@ -535,6 +535,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "clep-archive"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "clep-config",
+ "clep-index",
+ "clep-vault",
+ "fs4",
+ "lol_html",
+ "parking_lot",
+ "pulldown-cmark",
+ "regex",
+ "rusqlite",
+ "rustix",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "toml 0.8.23",
+ "tracing",
+ "url",
+ "uuid",
+ "walkdir",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "clep-bases"
 version = "0.0.0"
 dependencies = [
@@ -710,6 +737,7 @@ dependencies = [
  "blake3",
  "bytes",
  "chrono",
+ "clep-archive",
  "clep-bases",
  "clep-config",
  "clep-index",
@@ -718,11 +746,9 @@ dependencies = [
  "clep-vault",
  "dirs",
  "feed-rs",
- "fs4",
  "gethostname",
  "glob",
  "http-body",
- "lol_html",
  "mime_guess",
  "notify-debouncer-mini",
  "owo-colors",

@@ -20,8 +20,9 @@ use std::collections::BTreeMap;
 use std::ops::Range;
 use url::Url;
 
-use crate::vault::cas::ContentStore;
-use crate::vault::markdown::markdown_options;
+use clep_vault::markdown::markdown_options;
+
+use crate::cas::ContentStore;
 
 const OCTET_STREAM: &str = "application/octet-stream";
 

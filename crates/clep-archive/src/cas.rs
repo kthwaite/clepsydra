@@ -11,7 +11,7 @@ use rusqlite::{Connection, OptionalExtension, backup::Backup, params};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use super::cas_scan::ArchiveRefScan;
+use crate::cas_scan::ArchiveRefScan;
 
 /// Result of storing a blob in the CAS.
 pub struct StoreResult {
