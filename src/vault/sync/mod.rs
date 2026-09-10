@@ -137,12 +137,14 @@ impl SyncEngine {
         Ok(stats)
     }
 
+    /// Public for the workspace split; not part of the stable API.
+    ///
     /// Process lifecycle page events, a caller-supplied catalog mutation, and
     /// affected-link reconciliation as one SQLite savepoint.
     ///
     /// The callback runs once per event after its page row mutation and before
     /// any link invalidation or re-resolution for that event.
-    pub(crate) fn process_events_atomically<F>(
+    pub fn process_events_atomically<F>(
         events: &[ChangeEvent],
         vault: &Vault,
         index: &mut VaultIndex,

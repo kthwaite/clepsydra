@@ -30,16 +30,20 @@ pub enum LinkKind {
     BlockRef,
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// The two values used by the indexed `links_to` predicate.
-pub(crate) struct NormalizedLinksToTarget {
+pub struct NormalizedLinksToTarget {
     pub target_id: String,
     pub target_canonical: String,
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// Normalize UUID-shaped targets to the canonical lowercase/hyphenated form
 /// stored in `links.target_id`; ordinary text still uses canonical-name
 /// matching.
-pub(crate) fn normalize_links_to_target(value: &str) -> NormalizedLinksToTarget {
+pub fn normalize_links_to_target(value: &str) -> NormalizedLinksToTarget {
     let target_id = uuid::Uuid::parse_str(value)
         .map(|value| value.to_string())
         .unwrap_or_else(|_| value.to_owned());

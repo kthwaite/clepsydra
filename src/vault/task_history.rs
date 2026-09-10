@@ -19,8 +19,9 @@ use crate::vault::{kind::Kind, page::parse_frontmatter, page::write_page_content
 
 pub(crate) const TASK_HISTORY_KEY: &str = "task_history";
 
+/// Public for the workspace split; not part of the stable API.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
-pub(crate) struct TaskHistoryEvent {
+pub struct TaskHistoryEvent {
     pub at: String,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -30,7 +31,8 @@ pub(crate) struct TaskHistoryEvent {
 }
 
 impl TaskHistoryEvent {
-    pub(crate) fn timestamp(&self) -> Option<DateTime<Utc>> {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn timestamp(&self) -> Option<DateTime<Utc>> {
         DateTime::parse_from_rfc3339(&self.at)
             .ok()
             .map(|timestamp| timestamp.with_timezone(&Utc))
@@ -112,8 +114,10 @@ pub(crate) fn effective_page_history(meta: &PageMeta) -> Vec<TaskHistoryEvent> {
     normalize(events)
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// Parse the same history representation from indexed `meta_json`.
-pub(crate) fn effective_indexed_history(meta: &serde_json::Value) -> Vec<TaskHistoryEvent> {
+pub fn effective_indexed_history(meta: &serde_json::Value) -> Vec<TaskHistoryEvent> {
     let created_at = meta
         .get("created_at")
         .and_then(serde_json::Value::as_str)
@@ -182,7 +186,8 @@ fn history_value(events: &[TaskHistoryEvent]) -> toml::Value {
     )
 }
 
-pub(crate) fn initialize_task_history(meta: &mut PageMeta) {
+/// Public for the workspace split; not part of the stable API.
+pub fn initialize_task_history(meta: &mut PageMeta) {
     let events = effective_page_history(meta);
     meta.extra
         .insert(TASK_HISTORY_KEY.to_string(), history_value(&events));
@@ -207,7 +212,8 @@ fn path_is_task(path: &VaultPath) -> bool {
         .is_some_and(|(folder, _)| folder == Kind::Task.canonical_folder())
 }
 
-pub(crate) fn heal_task_update(
+/// Public for the workspace split; not part of the stable API.
+pub fn heal_task_update(
     path: &VaultPath,
     expected_content: &str,
     new_meta: &mut PageMeta,
@@ -229,7 +235,8 @@ pub(crate) fn heal_task_update(
     Ok(())
 }
 
-pub(crate) fn heal_task_replacement(
+/// Public for the workspace split; not part of the stable API.
+pub fn heal_task_replacement(
     path: &VaultPath,
     expected_content: &str,
     new_content: &str,
@@ -272,7 +279,8 @@ pub(crate) fn heal_task_replacement(
     }
 }
 
-pub(crate) fn matches_project_scope(
+/// Public for the workspace split; not part of the stable API.
+pub fn matches_project_scope(
     event_project: Option<&str>,
     project: Option<&str>,
     unfiled: bool,

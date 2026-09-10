@@ -50,7 +50,8 @@ impl RubbishManifest {
         })
     }
 
-    pub(crate) fn validate(&self) -> Result<(), RubbishItemValidationError> {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn validate(&self) -> Result<(), RubbishItemValidationError> {
         if self.version != RUBBISH_MANIFEST_VERSION {
             return Err(RubbishItemValidationError::UnsupportedManifestVersion {
                 version: u64::from(self.version),
@@ -318,7 +319,8 @@ impl RubbishStore {
         Ok(entries)
     }
 
-    pub(crate) fn read_item_if_exists(
+    /// Public for the workspace split; not part of the stable API.
+    pub fn read_item_if_exists(
         &self,
         item_id: Uuid,
     ) -> Result<Option<RubbishItem>, RubbishStoreError> {
@@ -334,11 +336,13 @@ impl RubbishStore {
         }
     }
 
+    /// Public for the workspace split; not part of the stable API.
+    ///
     /// Finish any interrupted permanent deletion without reading item content.
     ///
     /// A purge tombstone is created only after the CAS release ledger commits,
     /// so cleanup is intentionally deletion-only and idempotent.
-    pub(crate) fn finish_purge_tombstone(&self, item_id: Uuid) -> Result<bool, RubbishStoreError> {
+    pub fn finish_purge_tombstone(&self, item_id: Uuid) -> Result<bool, RubbishStoreError> {
         if !self.validate_root_for_cleanup()? {
             return Ok(false);
         }
@@ -372,8 +376,10 @@ impl RubbishStore {
         Ok(true)
     }
 
+    /// Public for the workspace split; not part of the stable API.
+    ///
     /// Remove every identifiable interrupted-purge tombstone at startup.
-    pub(crate) fn reconcile_purge_tombstones(&self) -> Result<(), RubbishStoreError> {
+    pub fn reconcile_purge_tombstones(&self) -> Result<(), RubbishStoreError> {
         if !self.validate_root_for_cleanup()? {
             return Ok(());
         }
@@ -404,10 +410,12 @@ impl RubbishStore {
         Ok(())
     }
 
+    /// Public for the workspace split; not part of the stable API.
+    ///
     /// Permanently remove one exactly-read item. The complete UUID directory
     /// first moves atomically to a hidden tombstone and that parent transition
     /// is made durable before recursive deletion can partially remove content.
-    pub(crate) fn remove_item(&self, expected: &RubbishItem) -> Result<(), RubbishStoreError> {
+    pub fn remove_item(&self, expected: &RubbishItem) -> Result<(), RubbishStoreError> {
         let item_id = expected.manifest.item_id;
         if self.read_item(&item_id.to_string())? != *expected {
             return Err(RubbishStoreError::ItemStateConflict { item_id });
@@ -426,11 +434,13 @@ impl RubbishStore {
         self.finish_purge_tombstone(item_id).map(|_| ())
     }
 
+    /// Public for the workspace split; not part of the stable API.
+    ///
     /// Project the live authoritative state of one item after an ambiguous
     /// removal error. Only byte-identical content remains valid; absence
     /// removes the catalog row, while partial or changed state stays visible
     /// as an invalid entry.
-    pub(crate) fn catalog_entry_for_expected_item(
+    pub fn catalog_entry_for_expected_item(
         &self,
         expected: &RubbishItem,
     ) -> Option<RubbishListEntry> {
@@ -462,7 +472,8 @@ impl RubbishStore {
         }
     }
 
-    pub(crate) fn publish_transaction_item(
+    /// Public for the workspace split; not part of the stable API.
+    pub fn publish_transaction_item(
         &self,
         expected: &RubbishItem,
         prepared_dir: &Path,
@@ -502,7 +513,8 @@ impl RubbishStore {
         sync_directory_parent(prepared_dir)
     }
 
-    pub(crate) fn withdraw_transaction_item(
+    /// Public for the workspace split; not part of the stable API.
+    pub fn withdraw_transaction_item(
         &self,
         expected: &RubbishItem,
         transaction_dir: &Path,

@@ -474,12 +474,14 @@ fn sync_parent(parent: &Path) -> io::Result<()> {
     flush_directory(parent)
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// Durably flush a directory entry update.
 ///
 /// Windows requires `FILE_FLAG_BACKUP_SEMANTICS` to obtain a directory
 /// handle. `File::sync_all` then delegates to `FlushFileBuffers`, matching the
 /// durability boundary used by ordinary `File` synchronization.
-pub(crate) fn flush_directory(path: &Path) -> io::Result<()> {
+pub fn flush_directory(path: &Path) -> io::Result<()> {
     #[cfg(any(test, feature = "test-failpoints"))]
     hit_test_directory_flush_failure(path)?;
     flush_directory_platform(path)

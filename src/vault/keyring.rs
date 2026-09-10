@@ -355,13 +355,15 @@ fn set_owner_only_file(_path: &Path) -> Result<(), KeyringError> {
     Ok(())
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// Re-tighten `.clepsydra/crypto` (0700) and its files (0600).
 ///
 /// A git checkout recreates those paths with the process umask, so every
 /// sync that touches the tree calls this afterwards. A no-op when the
 /// directory is absent, and on platforms where the owner-only helpers are
 /// themselves no-ops.
-pub(crate) fn tighten_crypto_permissions(vault_root: &Path) -> Result<(), KeyringError> {
+pub fn tighten_crypto_permissions(vault_root: &Path) -> Result<(), KeyringError> {
     let dir = crypto_dir(vault_root);
     if !dir.is_dir() {
         return Ok(());
