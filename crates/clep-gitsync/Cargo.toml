@@ -6,8 +6,8 @@ publish = false
 
 [features]
 # `testing` (gitsync::testing) needs `clep-test-support::EnvGuard` for
-# `isolate_git_process_wide`, used by src/sync_runtime.rs and
-# src/doctor/sync.rs tests in the `clepsydra` crate. tempfile is NOT gated
+# `isolate_git_process_wide`, used by crates/clep-api/src/sync_runtime.rs
+# and crates/clep-doctor/src/sync.rs tests. tempfile is NOT gated
 # here: unlike clep-test-support, it is also a production dependency
 # (merge_driver::text_merge shells out via a real tempdir), so it stays
 # unconditional in [dependencies] below.

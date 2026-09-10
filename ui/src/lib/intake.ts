@@ -1,11 +1,11 @@
 // Client-side mirror of the backend's new-page path rules, used by the INTAKE
 // modal: ADR 0002 canonical filenames (`<yyyymmdd>.<title-slug>.<shortid>.md`,
-// see src/vault/page_filename.rs) projected into the metadata folder layout
-// (`<kind-folder>/<project>/…`, see src/vault/projection.rs / ADR 0001).
+// see crates/clep-vault/src/page_filename.rs) projected into the metadata folder layout
+// (`<kind-folder>/<project>/…`, see crates/clep-vault/src/projection.rs / ADR 0001).
 
 import type { Kind } from "#/lib/kind";
 
-/** Canonical top-level folder per kind — mirrors `Kind::canonical_folder` in src/vault/kind.rs. */
+/** Canonical top-level folder per kind — mirrors `Kind::canonical_folder` in crates/clep-vault/src/kind.rs. */
 export const KIND_FOLDER: Record<Kind, string> = {
   NOTE: "notes",
   PROJECT: "projects",
@@ -27,7 +27,7 @@ export const KIND_FOLDER: Record<Kind, string> = {
 
 const SLUG_MAX = 40;
 
-/** Mirrors `slugify_title` in src/vault/path.rs: ASCII alphanumerics survive,
+/** Mirrors `slugify_title` in crates/clep-vault/src/path.rs: ASCII alphanumerics survive,
  * every other run collapses to a single dash, trimmed, capped at `maxLen`. */
 export function slugifyTitle(title: string, maxLen = SLUG_MAX): string {
   const lower = title.normalize("NFC").toLowerCase();
@@ -51,7 +51,7 @@ export function slugifyTitle(title: string, maxLen = SLUG_MAX): string {
 
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-/** 8-char base62 id — counterpart of `generate_short_id` in src/vault/block_id.rs. */
+/** 8-char base62 id — counterpart of `generate_short_id` in crates/clep-vault/src/block_id.rs. */
 export function generateShortId(): string {
   const bytes = new Uint8Array(8);
   crypto.getRandomValues(bytes);

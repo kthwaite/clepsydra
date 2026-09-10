@@ -1,5 +1,5 @@
 // Client-side mirror of the `attendees` relation MEETING pages carry
-// (src/vault/attendance.rs). The backend stays authoritative — it re-checks
+// (crates/clep-vault/src/attendance.rs). The backend stays authoritative — it re-checks
 // every write — so this exists to render the rail. A meeting names any number
 // of people; a 1:1 is a MEETING tagged `1:1`, with no cardinality of its own.
 
@@ -12,7 +12,7 @@ export const ATTENDEES_KEY = "attendees";
 export const hasAttendees = (kind: Kind): boolean => kind === "MEETING";
 
 /** Strip wikilink brackets and any `|display` alias, mirroring
- * `extract_property_refs` in src/vault/link.rs. */
+ * `extract_property_refs` in crates/clep-vault/src/link.rs. */
 export function attendeeTarget(raw: string): string {
   const trimmed = raw.trim();
   const inner =

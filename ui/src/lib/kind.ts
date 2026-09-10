@@ -30,7 +30,7 @@ import {
 import type { components } from "#/api/schema";
 
 /** The kind vocabulary, generated from the backend's OpenAPI `Kind` enum
- * (src/vault/kind.rs via `bun run openapi`). The backend stays authoritative:
+ * (crates/clep-vault/src/kind.rs via `bun run openapi`). The backend stays authoritative:
  * adding/removing a variant there changes this union on regeneration. */
 export type Kind = components["schemas"]["Kind"];
 
@@ -160,7 +160,7 @@ const FOLDER_KIND: Record<string, Kind> = {
   meetings: "MEETING",
   meeting: "MEETING",
   // Legacy 1:1 folders: a 1:1 is a MEETING tagged `1:1` (mirrors
-  // Kind::from_folder in src/vault/kind.rs).
+  // Kind::from_folder in crates/clep-vault/src/kind.rs).
   "one-on-ones": "MEETING",
   "one-on-one": "MEETING",
   "one-to-ones": "MEETING",

@@ -12,7 +12,7 @@ Several items it described as future work are now shipped:
 
 - Composable index derivation: `crates/clep-index/src/derivation.rs:12-65`, `crates/clep-index/src/index.rs:318-334`
 - Hash-gated incremental indexing and reverse-dependency re-resolution: `crates/clep-index/src/sync/mod.rs:39-123`, `crates/clep-index/src/index.rs:427-480`
-- First-class unresolved and ambiguous references, candidate ranking, create-from-link, mutation previews, contextual backlinks, graph, search, and content-index APIs: `crates/clep-index/src/index.rs:939-1278`, `src/api/index_routes.rs:349-933`
+- First-class unresolved and ambiguous references, candidate ranking, create-from-link, mutation previews, contextual backlinks, graph, search, and content-index APIs: `crates/clep-index/src/index.rs:939-1278`, `crates/clep-api/src/api/index_routes.rs:349-933`
 - Structured tasks, journals, Bases, academic records/importers, feeds, encryption, browser capture, and MCP
 - A full standalone LSP—not merely a planned integration: `ui/src/docs/content/lsp.mdx:7-19,74-88`
 - A substantial Slate authoring environment and domain-specific workspaces
@@ -92,7 +92,7 @@ Logseq’s core model is hierarchical blocks transacted into DataScript/logseq.d
 Clepsydra parses hierarchy, task state, inline properties, block IDs, parents, order, and source spans, but Markdown documents remain the primary editing unit:
 
 - `crates/clep-vault/src/block.rs:6-103`
-- `src/api/blocks.rs:18-223`
+- `crates/clep-api/src/api/blocks.rs:18-223`
 
 This is mostly an intentional divergence. Replacing Clepsydra with a DB-native outliner would undermine its strongest invariant: ordinary files remain independently useful.
 
@@ -105,7 +105,7 @@ Logseq’s DSL supports boolean composition, page references, properties, tasks,
 Clepsydra’s Bases are already sophisticated—typed fields, nested `all`/`any`/`not`, relations, grouping, ordered sorts, and aggregates—but are oriented toward structured saved views rather than ad hoc Datalog-style exploration:
 
 - `ui/src/docs/content/bases.mdx:81-189`
-- `src/vault/query.rs:1-294`
+- `crates/clep-bases/src/query.rs:1-294`
 
 Potential enhancement: add a discoverable ad hoc query surface over the existing evaluator rather than importing Datalog.
 
@@ -181,7 +181,7 @@ Its most useful contribution is not its exact implementation; it is the idea tha
 Clepsydra’s LSP already provides completion, hover, definitions, unresolved and ambiguous diagnostics, create/disambiguate actions, rename, references, symbols, and code lenses:
 
 - `ui/src/docs/content/lsp.mdx:74-88`
-- `src/lsp/mod.rs:100-116,335-855,1141-1348`
+- `crates/clep-lsp/src/lib.rs:100-116,335-855,1141-1348`
 
 Beyond LSP parity, Clepsydra has:
 
@@ -429,7 +429,7 @@ This exceeds markdown-oxide’s client-applied rename and the static systems’ 
 
 The remaining exception is real: board-cycle carryover explicitly lacks a cross-file transaction and may leave the cycle page updated before a later task rewrite fails:
 
-- `src/api/board/cycles.rs:270-278`
+- `crates/clep-api/src/api/board/cycles.rs:270-278`
 
 ### 3. Agent-facing PKM
 
@@ -476,7 +476,7 @@ Acceptance target:
 - Update/reconcile the index only after filesystem publication
 - Surface a dry-run plan where the operation is user-visible
 
-Evidence of the current hole: `src/api/board/cycles.rs:270-278`.
+Evidence of the current hole: `crates/clep-api/src/api/board/cycles.rs:270-278`.
 
 #### 2. Define true block-transclusion semantics — High, M
 
@@ -680,7 +680,7 @@ The conservative sequence:
 
 SSE currently means cache invalidation, not collaborative editing:
 
-- `src/api/events.rs:1-49`
+- `crates/clep-api/src/api/events.rs:1-49`
 
 Do not equate the two. Collaboration requires identity, authorization, encryption, merge/conflict semantics, offline queues, recovery, and audit history.
 

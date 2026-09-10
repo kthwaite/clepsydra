@@ -115,7 +115,7 @@ Ordered by risk.
 
 ### G1 — Archived HTML is served same-origin with no CSP *(security)*
 
-`serve_blob` (`src/api/archive.rs:433-443`) echoes the stored `content_type` verbatim. We upload the
+`serve_blob` (`crates/clep-api/src/api/archive.rs:433-443`) echoes the stored `content_type` verbatim. We upload the
 page snapshot as `text/html` (`service-worker.ts:184-188`). A `grep` for `Content-Security-Policy`
 across `src/` returns nothing. So `GET /api/vault/archive/cas/<hash>` returns attacker-authored HTML
 and JavaScript, executing **on the vault's own origin**, with access to the vault UI's storage and
@@ -284,7 +284,7 @@ we ship today).
 
 ### Why it is wrong as *the* storage medium
 
-- **Deletion and GC regress.** `src/vault/cas.rs` gives refcounted blobs (`increment_ref` /
+- **Deletion and GC regress.** `crates/clep-archive/src/cas.rs` gives refcounted blobs (`increment_ref` /
   `decrement_ref`, lines 146-166) plus an age-gated `gc` (line 167). WARC is append-only by design;
   deleting one archived page means rewriting a WARC or leaving tombstones, and `revisit` dedup
   records create inter-file dependencies that block compaction. Wrong shape for a vault where pages
@@ -352,7 +352,7 @@ that is a separate, unrelated UI concern.
 `ui/src/main.css:943-992` is a complete reading stylesheet, tokenised into Vessel (`--ink`,
 `--ink-2`, `--accent`, `--highlight`, `--font-sans`): measure, 1.65 leading, heading scale, link
 treatment, media clamped to `max-width: 100%`. `FeedReaderPane` renders `entry.content_html` into it
-via `dangerouslySetInnerHTML`, which is safe because `src/feeds/fetch.rs:248` runs `ammonia::clean`
+via `dangerouslySetInnerHTML`, which is safe because `crates/clep-feeds/src/fetch.rs:248` runs `ammonia::clean`
 at ingest under a size cap, with tests asserting scripts and event handlers are stripped
 (`fetch.rs:760-768`).
 

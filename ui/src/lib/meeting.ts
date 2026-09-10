@@ -1,5 +1,5 @@
 // Client-side mirror of the `occurred_at` field MEETING pages carry
-// (src/vault/meeting.rs). The backend re-checks every write; this exists so
+// (crates/clep-vault/src/meeting.rs). The backend re-checks every write; this exists so
 // the rail knows which kinds show the field and what "now" looks like.
 //
 // A 1:1 is a MEETING carrying the user tag `1:1` (ADR 0006); the helpers at

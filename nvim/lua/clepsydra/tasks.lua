@@ -2,7 +2,7 @@ local client = require("clepsydra.client")
 
 local M = {}
 
---- Board stage vocabulary, in column order (src/api/board/mod.rs COLUMNS).
+--- Board stage vocabulary, in column order (crates/clep-api/src/api/board/mod.rs COLUMNS).
 M.STAGES = { "INTAKE", "TRIAGE", "FIELD", "REVIEW", "SEALED" }
 
 --- Extract a task code from the word under the cursor, falling back to the

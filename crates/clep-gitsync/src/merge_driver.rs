@@ -336,7 +336,7 @@ mod tests {
         // a single base64 line, well under the 64-char wrap width, so no
         // multi-line rewrapping is needed for canonicalization to be a
         // no-op. Pattern mirrors the existing fixture in
-        // src/vault/query.rs's `encryption_fixture`.
+        // crates/clep-bases/src/query.rs's `encryption_fixture`.
         const ARMOR_A: &str = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0ZXN0LUEKLS0tCloK\n-----END AGE ENCRYPTED FILE-----\n";
         const ARMOR_B: &str = "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSB0ZXN0LUIKLS0tCloK\n-----END AGE ENCRYPTED FILE-----\n";
         let fm = "[encryption]\nformat = \"age\"\nversion = 1\nkey_id = \"test-key\"\n";

@@ -1,6 +1,6 @@
 //! Mutation planning, coordination, and repair over a `clep_vault::Vault` and
 //! its `clep_index` index: batched writes, reconciliation, and reference,
-//! label, and encoding repair.
+//! label, and code repair.
 
 pub mod batch_mutation;
 pub mod migrate;

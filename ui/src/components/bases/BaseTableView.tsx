@@ -188,7 +188,7 @@ interface CreatedFocusRequest {
 
 /**
  * System fields render read-only — the complete contract, mirroring
- * `SYSTEM_FIELDS` in `src/vault/base.rs`. Only *declared* properties reach
+ * `SYSTEM_FIELDS` in `crates/clep-bases/src/base.rs`. Only *declared* properties reach
  * an editor; anything else (system metadata, undeclared keys) is inert.
  */
 const SYSTEM_COLUMNS: Record<string, boolean> = {

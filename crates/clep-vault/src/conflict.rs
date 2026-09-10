@@ -23,7 +23,7 @@ pub fn has_conflict_markers(content: &str) -> bool {
 }
 
 /// Sweep the vault for markdown files containing conflict markers.
-/// Mirrors `migrate::legacy_pages` (src/vault/migrate.rs:27): skips
+/// Mirrors `migrate::legacy_pages` (crates/clep-mutate/src/migrate.rs:27): skips
 /// `.clepsydra/` and excluded paths, sorts by path. Read-only.
 pub fn conflicted_pages(vault: &Vault) -> Vec<VaultPath> {
     let mut out = Vec::new();

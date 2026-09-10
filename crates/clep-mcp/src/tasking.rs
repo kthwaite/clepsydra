@@ -4,7 +4,7 @@
 //! absent (keep), JSON null (clear), and a value (set). This module carries
 //! that tri-state through MCP param structs and classifies the free-form
 //! task/cycle references the tools accept (UUID, vault path, or board code).
-//! It mirrors the semantics of `src/api/board` without importing from the
+//! It mirrors the semantics of `crates/clep-api/src/api/board` without importing from the
 //! HTTP layer — the MCP side only speaks to the server over HTTP.
 
 use serde::{Deserialize, Deserializer};

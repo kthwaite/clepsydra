@@ -57,7 +57,7 @@ pub fn relabel(
     let mut report = RelabelReport::default();
     for (path, kind) in rows {
         // TASK/CYCLE pages carry petname codes, not canonical-scheme
-        // filenames; `clep codes migrate` (src/vault/recode.rs) owns their
+        // filenames; `clep codes migrate` (crates/clep-mutate/src/recode.rs) owns their
         // renames, so relabel must never touch them.
         if kind == "TASK" || kind == "CYCLE" {
             report.skipped += 1;
@@ -146,7 +146,7 @@ mod tests {
     }
 
     /// TASK/CYCLE pages carry petname codes, not canonical-scheme filenames;
-    /// `clep codes migrate` (src/vault/recode.rs) owns their renames, so
+    /// `clep codes migrate` (crates/clep-mutate/src/recode.rs) owns their renames, so
     /// relabel must leave them alone even when the stem isn't canonical.
     #[test]
     fn task_pages_are_skipped_not_renamed() {

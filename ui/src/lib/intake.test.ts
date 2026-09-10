@@ -8,7 +8,7 @@ import {
 import { KINDS } from "#/lib/kind";
 
 describe("slugifyTitle", () => {
-  // Vectors mirror the Rust tests in src/vault/path.rs so the two
+  // Vectors mirror the Rust tests in crates/clep-vault/src/path.rs so the two
   // implementations cannot drift silently.
   it("matches the backend slug rules", () => {
     expect(slugifyTitle("Redesign Retro!")).toBe("redesign-retro");
@@ -86,7 +86,7 @@ describe("intakePath", () => {
 
   it("has a folder for every kind", () => {
     // Hyphens are allowed because `ai-journals` has one; mirrors
-    // `Kind::canonical_folder` in src/vault/kind.rs.
+    // `Kind::canonical_folder` in crates/clep-vault/src/kind.rs.
     for (const k of KINDS) {
       expect(KIND_FOLDER[k]).toMatch(/^[a-z][a-z-]*[a-z]$/);
     }

@@ -17,8 +17,8 @@ use crate::vault::canonical::CanonicalName;
 /// a scheme URL is embedded as a query value.
 ///
 /// This is the feature's canonical query-value encode set; shared with
-/// `src/api/deeplink.rs` for the `/deeplink` redirect's `target=` param so
-/// both sites stay byte-for-byte in agreement.
+/// `crates/clep-api/src/api/deeplink.rs` for the `/deeplink` redirect's
+/// `target=` param so both sites stay byte-for-byte in agreement.
 pub const QUERY_VALUE: &AsciiSet = &NON_ALPHANUMERIC
     .remove(b'-')
     .remove(b'.')

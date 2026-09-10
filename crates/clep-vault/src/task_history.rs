@@ -19,6 +19,9 @@ use crate::{kind::Kind, page::parse_frontmatter, page::write_page_content};
 
 pub(crate) const TASK_HISTORY_KEY: &str = "task_history";
 
+/// One recorded status transition for a TASK/CYCLE page, as stored in the
+/// `task_history` frontmatter key.
+///
 /// Public for the workspace split; not part of the stable API.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TaskHistoryEvent {

@@ -83,7 +83,7 @@ const VALUELESS_OPERATORS: ReadonlySet<FilterOp> = new Set([
   "is_this_month",
 ]);
 
-/** Mirrors `SysField::supports_relative_date` in `src/vault/query.rs`. */
+/** Mirrors `SysField::supports_relative_date` in `crates/clep-bases/src/query.rs`. */
 const RELATIVE_DATE_OPERATORS: ReadonlySet<FilterOp> = new Set([
   "is_today",
   "is_this_week",
@@ -98,7 +98,7 @@ const RELATIVE_DATE_SYSTEM_FIELDS: ReadonlySet<string> = new Set([
 ]);
 
 /** Mirrors `SysField::supports_affix` / `PropertyType::supports_affix` in
- * `src/vault/query.rs` and `src/vault/base.rs`. */
+ * `crates/clep-bases/src/query.rs` and `crates/clep-bases/src/base.rs`. */
 const AFFIX_OPERATORS: ReadonlySet<FilterOp> = new Set([
   "starts_with",
   "ends_with",

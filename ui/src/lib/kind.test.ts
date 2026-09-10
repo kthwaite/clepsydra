@@ -21,7 +21,7 @@ describe("resolveKindFromPath", () => {
     expect(resolveKindFromPath("People/kit.md")).toBe("PERSON");
     expect(resolveKindFromPath("reading/some-book.md")).toBe("BOOK");
     // "tasks" moved from TODO to the TASK kind with the tasking board
-    // (mirrors Kind::from_folder in src/vault/kind.rs); "todos" stays TODO.
+    // (mirrors Kind::from_folder in crates/clep-vault/src/kind.rs); "todos" stays TODO.
     expect(resolveKindFromPath("tasks/x.md")).toBe("TASK");
     expect(resolveKindFromPath("todos/x.md")).toBe("TODO");
     expect(resolveKindFromPath("cycles/S-13.md")).toBe("CYCLE");
@@ -38,7 +38,7 @@ describe("resolveKindFromPath", () => {
       "MEETING",
     );
     // Legacy 1:1 folders infer MEETING: a 1:1 is a MEETING tagged `1:1`
-    // (mirrors Kind::from_folder in src/vault/kind.rs).
+    // (mirrors Kind::from_folder in crates/clep-vault/src/kind.rs).
     for (const folder of [
       "one-on-ones",
       "one-on-one",
