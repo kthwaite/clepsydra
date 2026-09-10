@@ -10,14 +10,6 @@ use super::mutation_coordinator::MutationCoordinator;
 use super::page::Page;
 use super::path::VaultPath;
 use super::projection::project_path;
-use super::rubbish::RubbishStore;
-
-/// Rebuild the SQLite rubbish catalog from the authoritative store without
-/// constructing or reading any internal item path directly.
-pub fn reconcile_rubbish_catalog(vault: &Vault, index: &mut VaultIndex) -> Result<(), IndexError> {
-    let store = RubbishStore::for_vault(vault.root());
-    index.reconcile_rubbish_catalog(&store)
-}
 
 /// Reconcile a single page. Returns `Some(new_path)` if it was moved, else
 /// `None`. Reads declared kind/project from the file's frontmatter. `hooks`

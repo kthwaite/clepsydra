@@ -330,7 +330,7 @@ mod tests {
     fn encrypted_bodies_never_text_merge() {
         // Two distinct, canonically-armored age bodies: real armor is
         // required because `parse_frontmatter` validates it on every parse
-        // (see `validate_encrypted_body` in src/vault/page.rs). Each payload
+        // (see `validate_encrypted_body` in crates/clep-vault/src/page.rs). Each payload
         // decodes to a valid `age-encryption.org/v1` header — the only
         // thing `validate_age_armor` checks beyond canonical shape — and is
         // a single base64 line, well under the 64-char wrap width, so no

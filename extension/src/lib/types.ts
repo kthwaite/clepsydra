@@ -57,7 +57,7 @@ export interface ExtensionSettings {
 	notify_on_success: boolean;
 	notify_on_duplicate: boolean;
 	/**
-	 * Mirrors the server's `archive.max_blob_size_mb` (src/vault/config.rs). Handed
+	 * Mirrors the server's `archive.max_blob_size_mb` (crates/clep-vault/src/config.rs). Handed
 	 * to SingleFile as `maxResourceSize` so it declines an oversized resource at
 	 * capture time, rather than sending a payload the server will reject.
 	 */

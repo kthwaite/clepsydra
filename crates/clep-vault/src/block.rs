@@ -251,7 +251,7 @@ fn append_text(current: &mut Option<BlockBuilder>, text: String) {
 ///
 /// Uses pulldown-cmark with all extensions enabled (including task lists).
 /// Follows the same `TextMergeWithOffset` pattern as `extract_links` in
-/// `src/vault/link.rs`.
+/// `crates/clep-vault/src/link.rs`.
 pub fn parse_blocks(markdown: &str) -> Vec<Block> {
     let opts = markdown_options();
     let raw_iter = Parser::new_ext(markdown, opts).into_offset_iter();

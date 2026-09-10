@@ -74,8 +74,8 @@ workspace crates only; every crate may also use `serde`, `thiserror`,
 | Crate | Contents | ~SLOC | Depends on | Notable external deps |
 |---|---|---|---|---|
 | `clep-config` | `Settings`, `FeatureFlags`, `FeedsSettings`, `ServerSettings`, `TlsSettings`, `ServeOverrides`, `VaultSettings`, `resolve_vault_root`, `default_tls_paths`, `INDEX_DB_RELATIVE`, `VESSEL_ACCENT`, `app_config.rs`, `expand_tilde` | 0.5k | — | config, dirs |
-| `clep-vault` | path, page, page_filename, legacy_yaml, markdown, link, rewriter, block, block_id, context, canonical, kind, code + wordlists, toml_json, toml_patch, encryption, keyring, board_vocab, projection, project, meeting, attendance, conflict, location, bcl, config (`VaultConfig`), `Vault` handle (`lib.rs`), atomic_file, rubbish, task_history, init, conversation, `extract_journal_date` | 9.5k | config | pulldown-cmark, regex, toml, toml_edit, serde_yaml, blake3, base64, glob, walkdir, rustix, utoipa (derive) |
-| `clep-index` | index, index_handle, index_policy, derivation, derivers/, search/ (private), sync/ (fs events + watcher), reference_issues, hooks (all three traits), grep, tree (whole; render takes the accent as a parameter) | 8.6k | vault | rusqlite, notify-debouncer-mini, tokio (`sync` only) |
+| `clep-vault` | path, page, page_filename, legacy_yaml, markdown, link, rewriter, block, block_id, context, canonical, kind, code + wordlists, toml_json, toml_patch, encryption, keyring, board_vocab, projection, project, meeting, attendance, conflict, location, bcl, config (`VaultConfig`), `Vault` handle (`lib.rs`), atomic_file, rubbish, task_history, init, conversation, `extract_journal_date` | 9.5k | config | pulldown-cmark, regex, toml, toml_edit, serde_yaml, blake3, base64, glob, walkdir, rustix, utoipa (derive), dirs, parking_lot, serde_json, sha2, unicode-normalization, windows-sys |
+| `clep-index` | index, index_handle, index_policy, derivation, derivers/, search/ (private), sync/ (fs events + watcher), reference_issues, hooks (all three traits), grep, tree (whole; render takes the accent as a parameter) | 8.6k | vault | rusqlite, notify-debouncer-mini, tokio (`sync` only), owo-colors, blake3, walkdir, toml, serde_json |
 | `clep-bases` | base, base_document, base_embed, base_member, query, property_value | 12.3k | index | utoipa (derive) |
 | `clep-mutate` | mutation, mutation_coordinator, batch_mutation, reconcile, reference_repair, relabel, recode, migrate, new_note (path builders only) | 8.4k | index | tokio (rt), parking_lot, utoipa (derive) |
 | `clep-academic` | academic, academic_hook, import, import_doi, import_isbn, import_zotero, checkpoint | 1.5k | index | biblatex, reqwest, rusqlite |
@@ -183,7 +183,13 @@ the risk from the later mechanical moves.
    `test-failpoints` hooks directly, and `cfg(test)` no longer crosses the
    crate boundary, so the root package also needed a
    `[dev-dependencies]` entry `clep-vault = { workspace = true, features =
-   ["test-failpoints"] }` in addition to forwarding the feature.
+   ["test-failpoints"] }` in addition to forwarding the feature. Cargo
+   unifies features per package per invocation, so any `cargo test` that
+   builds both compiles `clep-vault` with `test-failpoints` for the whole
+   workspace, including the `clep` binary that `merge_driver_test` spawns;
+   behaviour is unchanged because the failpoint registry is empty unless a
+   test arms it, and `cargo build`/`cargo install` are unaffected — but do
+   not benchmark a binary produced by `cargo test`.
 6. **Relocations.** rubbish.rs, task_history.rs, init.rs stay in vault
    (they are already there; only their `pub(crate)` items widen).
    `index::extract_journal_date` (index.rs:2128) moves next to
@@ -242,7 +248,7 @@ Facts that shape the later phases but need no change:
 | clep-bases | property_patch |
 | clep-academic | import_test, academic_http_test |
 | clep-lsp | lsp_document_test |
-| clep-api | the 27 api-level tests, tests/support (ApiFixture), openapi_contract, docs_api_coverage_test, deeplink_test, geocode_http_test, e2e_test, examples/openapi.rs |
+| clep-api | the 27 api-level tests, tests/support (ApiFixture), openapi_contract, docs_api_coverage_test, deeplink_test, geocode_http_test, e2e_test, examples/openapi.rs, frontmatter_migration, block_ref_resolution_test, reference_repair_test, bases_api |
 | clep (bin) | mutation_test, batch_mutation_test, academic_test, academic_dedup_test, archive_test, e2e_encryption_test, checkpoint_test, merge_driver_test (needs `CARGO_BIN_EXE_clep`), docs_cli_coverage_test, macos_url_handler_test |
 | root package (`clepsydra`, until later phases) | linkable_epoch_test (from `index.rs`; stays until `clep-bases` exists), index_test (uses `query`, `tree`; stays until Phase 3) |
 

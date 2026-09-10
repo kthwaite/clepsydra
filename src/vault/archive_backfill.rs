@@ -26,7 +26,7 @@ pub struct BackfillReport {
 }
 
 /// Walk the vault and return every non-excluded `.md` page, sorted by path.
-/// Mirrors `conflict::conflicted_pages` (src/vault/conflict.rs:28).
+/// Mirrors `conflict::conflicted_pages` (crates/clep-vault/src/conflict.rs:28).
 fn candidate_pages(vault: &Vault) -> Vec<VaultPath> {
     let mut out = Vec::new();
     for entry in WalkDir::new(vault.root())

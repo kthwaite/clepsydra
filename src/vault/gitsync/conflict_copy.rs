@@ -88,7 +88,7 @@ pub fn conflict_copy_content(original_rel: &str, theirs: &[u8], short: &str) -> 
     let Ok(text) = std::str::from_utf8(theirs) else {
         return theirs.to_vec();
     };
-    // `parse_frontmatter` (src/vault/page.rs) returns `(PageMeta, body)` and
+    // `parse_frontmatter` (crates/clep-vault/src/page.rs) returns `(PageMeta, body)` and
     // is strict: no frontmatter, a missing id or a mistyped system field all
     // mean "copy it raw".
     let Ok((mut meta, body)) = parse_frontmatter(text) else {

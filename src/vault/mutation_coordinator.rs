@@ -2315,9 +2315,10 @@ mod tests {
 
     /// Stays in this module (rather than moving to `tests/mutation_test.rs`
     /// with the other purge-retry tests) because it drives
-    /// `fail_next_directory_sync`, a `#[cfg(test)]`, `pub(crate)`-only test
-    /// aid on `crate::vault::rubbish` not reachable from an integration test
-    /// crate. It no longer names the archive feature: `CountingPurgeHook`
+    /// `fail_next_directory_sync`, `pub` on `clep_vault::rubbish` behind the
+    /// `test-failpoints` feature. The test stays here because the root
+    /// package already enables that feature through its dev-dependency on
+    /// `clep-vault`. It no longer names the archive feature: `CountingPurgeHook`
     /// stands in for `ArchiveDeleteHook` to verify the coordinator's own
     /// idempotency guarantee (the hook fires exactly once across the retry)
     /// without a CAS backing store.

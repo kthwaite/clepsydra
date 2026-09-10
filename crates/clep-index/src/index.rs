@@ -981,7 +981,7 @@ impl VaultIndex {
             raw_body.clone()
         };
         let body_links = extract_links(&body);
-        // Guards against upstream parser panics (see src/vault/markdown.rs).
+        // Guards against upstream parser panics (see crates/clep-vault/src/markdown.rs).
         let blocks = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             clep_vault::block::parse_blocks(&body)
         }))
@@ -2335,7 +2335,7 @@ fn collect_indexed_pages(
         let body_links = extract_links(&body);
 
         // Extract blocks. Guards against upstream parser panics (see
-        // src/vault/markdown.rs).
+        // crates/clep-vault/src/markdown.rs).
         let blocks = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             clep_vault::block::parse_blocks(&body)
         }))
