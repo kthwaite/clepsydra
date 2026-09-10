@@ -459,7 +459,7 @@ async fn protected_matching_page_returns_conflict() {
     )
     .unwrap();
     let ledger = &transcript.ledger;
-    let armor = include_str!("support/fixtures/private-note.age");
+    let armor = clep_test_support::PRIVATE_NOTE_AGE;
     let page = format!(
         "+++\nid = \"01951234-0000-7000-8000-000000000003\"\ntitle = \"Protected\"\ntype = \"AI_CONVERSATION\"\nencryption = {{ format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }}\n[conversation]\nprovider = \"claude\"\nhost_id_hash = \"{host_hash}\"\ncaptured_turn_count = {}\ncaptured_prefix_hash = \"{}\"\nlast_source_identity = \"{}\"\n+++\n{armor}",
         ledger.captured_turn_count, ledger.captured_prefix_hash, ledger.last_source_identity

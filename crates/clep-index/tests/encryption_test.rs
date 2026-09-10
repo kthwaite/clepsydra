@@ -50,13 +50,13 @@ fn file_contains(path: &Path, needle: &[u8]) -> bool {
 
 #[test]
 fn accepts_one_canonical_age_block() {
-    let armor = include_str!("../../../tests/support/fixtures/private-note.age");
+    let armor = clep_test_support::PRIVATE_NOTE_AGE;
     validate_age_armor(armor).expect("valid age armor");
 }
 
 #[test]
 fn rejects_missing_or_extra_fences() {
-    let valid = include_str!("../../../tests/support/fixtures/private-note.age");
+    let valid = clep_test_support::PRIVATE_NOTE_AGE;
     let missing_begin = valid.replacen(BEGIN_FENCE, "", 1);
     let missing_end = valid.replacen(END_FENCE, "", 1);
     let extra = format!("{valid}{valid}");
@@ -68,7 +68,7 @@ fn rejects_missing_or_extra_fences() {
 
 #[test]
 fn rejects_prefix_or_suffix_text() {
-    let valid = include_str!("../../../tests/support/fixtures/private-note.age");
+    let valid = clep_test_support::PRIVATE_NOTE_AGE;
 
     assert!(validate_age_armor(&format!("comment\n{valid}")).is_err());
     assert!(validate_age_armor(&format!("{valid}comment\n")).is_err());
@@ -95,7 +95,7 @@ fn rejects_decoded_data_without_age_header() {
 
 #[test]
 fn rejects_noncanonical_line_wrapping_and_trailing_newline() {
-    let valid = include_str!("../../../tests/support/fixtures/private-note.age");
+    let valid = clep_test_support::PRIVATE_NOTE_AGE;
     let payload = valid
         .strip_prefix(&format!("{BEGIN_FENCE}\n"))
         .unwrap()
@@ -110,7 +110,7 @@ fn rejects_noncanonical_line_wrapping_and_trailing_newline() {
 
 #[test]
 fn canonicalizer_normalizes_crlf_but_validator_requires_lf() {
-    let valid = include_str!("../../../tests/support/fixtures/private-note.age");
+    let valid = clep_test_support::PRIVATE_NOTE_AGE;
     let crlf = valid.replace('\n', "\r\n");
 
     assert!(validate_age_armor(&crlf).is_err());
@@ -119,7 +119,7 @@ fn canonicalizer_normalizes_crlf_but_validator_requires_lf() {
 
 #[test]
 fn rejects_lone_carriage_returns() {
-    let valid = include_str!("../../../tests/support/fixtures/private-note.age");
+    let valid = clep_test_support::PRIVATE_NOTE_AGE;
     let with_lone_cr = valid.replacen('\n', "\r", 1);
     assert!(canonicalize_age_armor(&with_lone_cr).is_err());
 }
@@ -225,7 +225,7 @@ title = "Private"
 encryption = {{ format = "age", version = 1, key_id = "019fd000-0000-7000-8000-000000000002" }}
 +++
 {}"#,
-            include_str!("../../../tests/support/fixtures/private-note.age")
+            clep_test_support::PRIVATE_NOTE_AGE
         ),
     )
     .unwrap();

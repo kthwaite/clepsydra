@@ -1006,7 +1006,7 @@ title = "Serialized Scrub"
 encryption = {{ format = "age", version = 1, key_id = "019fd000-0000-7000-8000-000000000002" }}
 +++
 {}"#,
-            include_str!("../../../tests/support/fixtures/private-note.age")
+            clep_test_support::PRIVATE_NOTE_AGE
         ),
     )
     .unwrap();

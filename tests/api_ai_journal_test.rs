@@ -13,7 +13,7 @@ use support::ApiFixture;
 const FIXED_NOW: &str = "2042-05-17T23:59:59Z";
 const PROTECTED_ID: &str = "019fd000-0000-7000-8000-000000000410";
 const KEY_ID: &str = "019fd000-0000-7000-8000-000000000002";
-const ARMOR: &str = include_str!("support/fixtures/private-note.age");
+const ARMOR: &str = clep_test_support::PRIVATE_NOTE_AGE;
 
 #[derive(Debug)]
 struct FixedClock(DateTime<Utc>);

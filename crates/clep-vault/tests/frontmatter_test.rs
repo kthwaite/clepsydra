@@ -70,7 +70,7 @@ fn deserialize_minimal_frontmatter() {
 
 #[test]
 fn encryption_inline_table_parses_as_typed_metadata_and_preserves_armor() {
-    let armor = include_str!("../../../tests/support/fixtures/private-note.age");
+    let armor = clep_test_support::PRIVATE_NOTE_AGE;
     let content = encrypted_page(
         &format!(
             "encryption = {{ format = \"age\", version = 1, key_id = \"{ENCRYPTION_KEY_ID}\" }}"
@@ -102,7 +102,7 @@ fn encryption_inline_table_parses_as_typed_metadata_and_preserves_armor() {
 
 #[test]
 fn encryption_standard_table_parses_and_writes_as_canonical_inline_table() {
-    let armor = include_str!("../../../tests/support/fixtures/private-note.age");
+    let armor = clep_test_support::PRIVATE_NOTE_AGE;
     let content = encrypted_page(
         &format!("[encryption]\nformat = \"age\"\nversion = 1\nkey_id = \"{ENCRYPTION_KEY_ID}\""),
         armor,
@@ -122,7 +122,7 @@ fn encryption_standard_table_parses_and_writes_as_canonical_inline_table() {
 
 #[test]
 fn encryption_metadata_rejects_unsupported_versions_and_empty_key_ids() {
-    let armor = include_str!("../../../tests/support/fixtures/private-note.age");
+    let armor = clep_test_support::PRIVATE_NOTE_AGE;
     let unsupported = encrypted_page(
         &format!(
             "encryption = {{ format = \"age\", version = 2, key_id = \"{ENCRYPTION_KEY_ID}\" }}"
@@ -148,7 +148,7 @@ fn encryption_marker_requires_canonical_armor_but_unmarked_armor_is_plain() {
     );
     assert!(parse_frontmatter(&marked_plaintext).is_err());
 
-    let armor = include_str!("../../../tests/support/fixtures/private-note.age");
+    let armor = clep_test_support::PRIVATE_NOTE_AGE;
     let unmarked = format!("+++\nid = \"019578a1-c234-7000-8000-000000000001\"\n+++\n{armor}");
     let (meta, body) = parse_frontmatter(&unmarked).unwrap();
     assert!(meta.encryption.is_none());

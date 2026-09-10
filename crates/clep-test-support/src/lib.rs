@@ -1,5 +1,9 @@
 //! Test-only helpers shared by every crate's test suite. Dev-dependency only.
 
+/// An age-armored encrypted note, used as a fixture by encryption and
+/// keyring tests across the workspace.
+pub const PRIVATE_NOTE_AGE: &str = include_str!("../fixtures/private-note.age");
+
 /// RAII guard that records the prior value of an env var on construction
 /// and restores it on drop, so `#[serial]` tests can't leak state.
 pub struct EnvGuard {

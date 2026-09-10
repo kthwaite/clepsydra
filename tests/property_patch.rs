@@ -1007,7 +1007,7 @@ async fn get_reports_encryption_without_exposing_the_page_body() {
                 root.join("protected.md"),
                 format!(
                     "+++\nid = \"{ENCRYPTED_PAGE_ID}\"\ntitle = \"Protected\"\nencryption = {{ format = \"age\", version = 1, key_id = \"019fd000-0000-7000-8000-000000000002\" }}\nstatus = \"private\"\n+++\n{}",
-                    include_str!("support/fixtures/private-note.age")
+                    clep_test_support::PRIVATE_NOTE_AGE
                 ),
             )
             .unwrap();

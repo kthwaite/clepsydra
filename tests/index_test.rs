@@ -37,7 +37,7 @@ const ENCRYPTION_KEY_ID: &str = "019fd000-0000-7000-8000-000000000002";
 fn protected_page(id: &str, title: &str) -> String {
     format!(
         "+++\nid = \"{id}\"\ntitle = \"{title}\"\nstatus = \"private\"\nencryption = {{ format = \"age\", version = 1, key_id = \"{ENCRYPTION_KEY_ID}\" }}\n+++\n{}",
-        include_str!("support/fixtures/private-note.age")
+        clep_test_support::PRIVATE_NOTE_AGE
     )
 }
 

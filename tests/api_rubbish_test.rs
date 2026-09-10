@@ -354,7 +354,7 @@ async fn rubbish_detail_discloses_protected_plaintext_and_encrypted_armor_withou
         ),
     )
     .await;
-    let armor = include_str!("support/fixtures/private-note.age");
+    let armor = clep_test_support::PRIVATE_NOTE_AGE;
     publish_item(
         &fixture,
         manifest(

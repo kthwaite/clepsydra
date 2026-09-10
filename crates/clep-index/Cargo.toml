@@ -22,4 +22,5 @@ walkdir = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
+clep-test-support = { workspace = true }
 tempfile = { workspace = true }
