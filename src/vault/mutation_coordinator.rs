@@ -587,7 +587,8 @@ fn reconcile_batch_index(
     SyncEngine::process_events(&hook_events, vault, index).map(|_| ())
 }
 
-pub(crate) fn reconcile_recovered_batch_index(
+/// Public for the workspace split; not part of the stable API.
+pub fn reconcile_recovered_batch_index(
     vault: &Vault,
     index: &mut super::index::VaultIndex,
     hooks: &[Box<dyn PostMoveHook>],
@@ -766,7 +767,8 @@ impl MutationCoordinator {
         *self.before_rubbish_remove_hook.lock() = hook;
     }
 
-    pub(crate) fn observe_page_id_lookup(&self, path: &VaultPath) {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn observe_page_id_lookup(&self, path: &VaultPath) {
         let hook = self.after_page_id_lookup_hook.lock().clone();
         if let Some(hook) = hook {
             hook(path);

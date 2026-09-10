@@ -121,8 +121,9 @@ pub fn composed_candidate_matches(
 
 // Every argument is one field of the `MetaFilterContext` this builds; bundling
 // them into a struct would only move the same list one call earlier.
+/// Public for the workspace split; not part of the stable API.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn composed_candidate_matches_with_link_targets(
+pub fn composed_candidate_matches_with_link_targets(
     base: &BaseDefinition,
     view: &ViewDefinition,
     embed_filter: Option<&Filter>,

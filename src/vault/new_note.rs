@@ -46,7 +46,8 @@ pub fn build_note_path(
     VaultPath::new(&combined).map_err(|e| NewNoteError::InvalidPath(e.to_string()))
 }
 
-pub(crate) fn build_projected_note_path(
+/// Public for the workspace split; not part of the stable API.
+pub fn build_projected_note_path(
     title: &str,
     created: chrono::DateTime<chrono::Utc>,
     kind: Kind,

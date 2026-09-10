@@ -410,8 +410,9 @@ impl BatchMutationError {
     }
 }
 
+/// Public for the workspace split; not part of the stable API.
 #[derive(Debug)]
-pub(crate) struct PreparedBatch {
+pub struct PreparedBatch {
     root: PathBuf,
     directory: PathBuf,
     manifest: TransactionManifest,
@@ -419,11 +420,13 @@ pub(crate) struct PreparedBatch {
 }
 
 impl PreparedBatch {
-    pub(crate) fn directory(&self) -> &Path {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn directory(&self) -> &Path {
         &self.directory
     }
 
-    pub(crate) fn publish(&mut self) -> Result<(), BatchMutationError> {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn publish(&mut self) -> Result<(), BatchMutationError> {
         self.publish_inner::<false>(usize::MAX)
     }
 
@@ -534,7 +537,8 @@ impl PreparedBatch {
         remove_workspace(&self.directory)
     }
 
-    pub(crate) fn mark_filesystem_committed(&mut self) -> Result<(), BatchMutationError> {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn mark_filesystem_committed(&mut self) -> Result<(), BatchMutationError> {
         self.ensure_phase_certain()?;
         if self.manifest.phase != TransactionPhase::Committing {
             return Err(BatchMutationError::InvalidPhase {
@@ -612,12 +616,14 @@ impl RecoveredBatch {
         &self.directory
     }
 
-    pub(crate) fn finish(self) -> Result<(), BatchMutationError> {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn finish(self) -> Result<(), BatchMutationError> {
         remove_workspace(&self.directory)
     }
 }
 
-pub(crate) fn prepare(
+/// Public for the workspace split; not part of the stable API.
+pub fn prepare(
     root: &Path,
     command: &BatchMutationCommand,
 ) -> Result<PreparedBatch, BatchMutationError> {
@@ -872,7 +878,8 @@ pub fn recover_pending(root: &Path) -> Result<Vec<RecoveredBatch>, BatchMutation
     Ok(recovered)
 }
 
-pub(crate) fn retained_transaction_directories(root: &Path) -> io::Result<Vec<PathBuf>> {
+/// Public for the workspace split; not part of the stable API.
+pub fn retained_transaction_directories(root: &Path) -> io::Result<Vec<PathBuf>> {
     let transactions = root.join(".clepsydra").join("transactions");
     let entries = match fs::read_dir(&transactions) {
         Ok(entries) => entries,

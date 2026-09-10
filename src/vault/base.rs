@@ -534,15 +534,18 @@ pub fn validate_definition(slug: &str, file: BaseFile) -> ValidationResult {
 // In-memory filter matching (LSP path: cheap, no SQL)
 // ---------------------------------------------------------------------------
 
+/// Public for the workspace split; not part of the stable API.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct CandidateLinkTarget {
+pub struct CandidateLinkTarget {
     target_canonical: String,
     target_id: Option<String>,
 }
 
-pub(crate) type CandidateLinkTargets = HashMap<String, Vec<CandidateLinkTarget>>;
+/// Public for the workspace split; not part of the stable API.
+pub type CandidateLinkTargets = HashMap<String, Vec<CandidateLinkTarget>>;
 
-pub(crate) fn candidate_link_targets<E>(
+/// Public for the workspace split; not part of the stable API.
+pub fn candidate_link_targets<E>(
     base: &BaseDefinition,
     meta: &crate::vault::page::PageMeta,
     mut resolve_target_id: impl FnMut(&str) -> Result<Option<String>, E>,

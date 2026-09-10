@@ -474,7 +474,7 @@ fn worker_loop(opened: &mut OpenedConnection, rx: mpsc::Receiver<Command>) {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 type TestPathBarrier = (PathBuf, std::sync::Arc<std::sync::Barrier>);
 
 #[cfg(test)]
@@ -482,7 +482,7 @@ static AFTER_DATABASE_OPEN_PATH_RESOLVED: std::sync::LazyLock<
     parking_lot::Mutex<Option<TestPathBarrier>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 static AFTER_SNAPSHOT_SOURCE_OPEN_PATH_RESOLVED: std::sync::LazyLock<
     parking_lot::Mutex<Option<TestPathBarrier>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(None));
@@ -510,7 +510,7 @@ static INCREMENTAL_WAL_TEST_CONTROLS: std::sync::LazyLock<
     parking_lot::Mutex<BTreeMap<PathBuf, IncrementalWalTestControl>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(BTreeMap::new()));
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 fn normalize_test_barrier_path(path: &Path) -> PathBuf {
     if let Ok(path) = std::fs::canonicalize(path) {
         return path;
@@ -557,7 +557,7 @@ fn forced_wal_checkpoint_bytes(path: &Path) -> Option<u64> {
         .filter(|threshold| *threshold != u64::MAX)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 fn install_test_path_barrier(
     slot: &std::sync::LazyLock<parking_lot::Mutex<Option<TestPathBarrier>>>,
     path: PathBuf,
@@ -568,7 +568,7 @@ fn install_test_path_barrier(
     assert!(prior.is_none(), "test path barrier was already installed");
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 fn pause_at_test_path_barrier(
     slot: &std::sync::LazyLock<parking_lot::Mutex<Option<TestPathBarrier>>>,
     path: &Path,
@@ -595,8 +595,9 @@ fn install_after_database_open_path_resolved_barrier(
     install_test_path_barrier(&AFTER_DATABASE_OPEN_PATH_RESOLVED, path, barrier);
 }
 
-#[cfg(test)]
-pub(crate) fn install_after_snapshot_source_open_path_resolved_barrier(
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn install_after_snapshot_source_open_path_resolved_barrier(
     path: PathBuf,
     barrier: std::sync::Arc<std::sync::Barrier>,
 ) {
@@ -689,8 +690,10 @@ fn verify_retained_file_identity(
     }
     Ok(())
 }
-pub(crate) const FEED_WRITER_LOCK_FILENAME: &str = ".feeds.db.writer.lock";
-pub(crate) const FEED_GENERATION_LOCK_FILENAME: &str = ".feeds.db.generation.lock";
+/// Public for the workspace split; not part of the stable API.
+pub const FEED_WRITER_LOCK_FILENAME: &str = ".feeds.db.writer.lock";
+/// Public for the workspace split; not part of the stable API.
+pub const FEED_GENERATION_LOCK_FILENAME: &str = ".feeds.db.generation.lock";
 #[cfg(unix)]
 fn database_lock_filename(database_filename: &std::ffi::OsStr, suffix: &str) -> std::ffi::OsString {
     let mut filename = std::ffi::OsString::from(".");
@@ -699,8 +702,9 @@ fn database_lock_filename(database_filename: &std::ffi::OsStr, suffix: &str) -> 
     filename
 }
 
+/// Public for the workspace split; not part of the stable API.
 #[cfg(unix)]
-pub(crate) fn open_feed_lock_file(
+pub fn open_feed_lock_file(
     directory: &std::os::fd::OwnedFd,
     filename: &std::ffi::OsStr,
     directory_path: &Path,
@@ -798,8 +802,9 @@ fn lock_feed_generation_exclusive(
     Ok(FeedGenerationLock { file })
 }
 
+/// Public for the workspace split; not part of the stable API.
 #[cfg(unix)]
-pub(crate) fn lock_feed_generation_shared(
+pub fn lock_feed_generation_shared(
     directory: &std::os::fd::OwnedFd,
     directory_path: &Path,
     database_filename: &std::ffi::OsStr,
@@ -3053,8 +3058,9 @@ fn open_snapshot_source(source: &Path) -> Result<VerifiedSnapshotSource, FeedSto
     })
 }
 
+/// Public for the workspace split; not part of the stable API.
 #[cfg(unix)]
-pub(crate) fn snapshot_database_file(
+pub fn snapshot_database_file(
     source_directory: &std::os::fd::OwnedFd,
     source_filename: &std::ffi::OsStr,
     source_file: &std::fs::File,
@@ -3063,7 +3069,7 @@ pub(crate) fn snapshot_database_file(
     destination: &Path,
 ) -> Result<(), FeedStoreError> {
     verify_retained_file_identity(source_directory, source_filename, source_file, source_path)?;
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-failpoints"))]
     pause_at_test_path_barrier(&AFTER_SNAPSHOT_SOURCE_OPEN_PATH_RESOLVED, source_path);
     #[cfg(test)]
     pause_at_test_path_barrier(&AFTER_SNAPSHOT_GENERATION_SHARED_LOCKED, source_path);

@@ -47,7 +47,8 @@ pub enum SchedulerError {
 /// Callers must hold `host.runtime.feed_manifest_lock`. The returned
 /// bytes are the exact snapshot that supplied diagnostics and the optional
 /// store commit.
-pub(crate) async fn reconcile_feed_manifest_bytes_locked(
+/// Public for the workspace split; not part of the stable API.
+pub async fn reconcile_feed_manifest_bytes_locked(
     host: &FeedHost,
     bytes: &[u8],
 ) -> Result<bool, SchedulerError> {
@@ -56,7 +57,7 @@ pub(crate) async fn reconcile_feed_manifest_bytes_locked(
     let source = String::from_utf8(bytes.to_vec())
         .map_err(|source| SchedulerError::ManifestEncoding { path, source })?;
     let manifest = crate::feeds::manifest::parse(&source);
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-failpoints"))]
     if let Some(hook) = runtime.feed_before_reconcile_commit_hook.lock().clone() {
         hook();
     }
@@ -69,7 +70,8 @@ pub(crate) async fn reconcile_feed_manifest_bytes_locked(
     Ok(true)
 }
 
-pub(crate) async fn reconcile_feed_manifest_locked(
+/// Public for the workspace split; not part of the stable API.
+pub async fn reconcile_feed_manifest_locked(
     host: &FeedHost,
 ) -> Result<(Vec<u8>, bool), SchedulerError> {
     let path = host.vault_root.join(MANIFEST_PATH);
@@ -89,15 +91,17 @@ pub async fn reconcile_feed_manifest(host: &FeedHost) -> Result<(), SchedulerErr
     reconcile_feed_manifest_locked(host).await.map(|_| ())
 }
 
-#[cfg(test)]
-pub(crate) fn set_before_reconcile_commit_hook(
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn set_before_reconcile_commit_hook(
     runtime: &FeedRuntime,
     hook: Option<Arc<dyn Fn() + Send + Sync>>,
 ) {
     *runtime.feed_before_reconcile_commit_hook.lock() = hook;
 }
 
-async fn run_due_sweep(host: &FeedHost) -> Result<(), SchedulerError> {
+/// Public for the workspace split; not part of the stable API.
+pub async fn run_due_sweep(host: &FeedHost) -> Result<(), SchedulerError> {
     let runtime = host.runtime.as_ref();
     let persisted_reconciliation = {
         let _manifest_guard = runtime.feed_manifest_lock.lock().await;
@@ -220,62 +224,8 @@ pub fn spawn_scheduler(host: FeedHost) -> FeedSchedulerGuard {
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
-    use std::time::Duration;
 
-    use chrono::{TimeZone, Utc};
-    use tempfile::TempDir;
-
-    use super::{FeedHost, reconcile_feed_manifest, run_due_sweep, spawn_scheduler};
-    use crate::api::AppState;
-    use crate::feeds::types::FetchOutcome;
-    use crate::{FeatureFlags, FeedsSettings, build_app_state_with_settings};
-
-    struct SchedulerFixture {
-        state: Arc<AppState>,
-        _temp: TempDir,
-    }
-
-    async fn scheduler_fixture(manifest: &str) -> SchedulerFixture {
-        let temp = tempfile::tempdir().unwrap();
-        let root = temp.path().join("vault");
-        crate::vault::init::init_vault(&root).unwrap();
-        std::fs::write(root.join("feeds.md"), manifest).unwrap();
-        let state = build_app_state_with_settings(
-            &root,
-            &FeedsSettings::default(),
-            FeatureFlags::default(),
-        )
-        .await
-        .unwrap();
-        reconcile_feed_manifest(&state.feed_host()).await.unwrap();
-
-        // Keep the deterministic fixture feed outside the due set. A scheduler
-        // bug must not turn this local contract test into a network request.
-        if let Some(feed) = state
-            .feed_runtime()
-            .feeds
-            .list_feeds()
-            .await
-            .unwrap()
-            .first()
-        {
-            state
-                .feed_runtime()
-                .feeds
-                .apply_fetch(
-                    feed.id,
-                    FetchOutcome::Failure {
-                        fetched_at: Utc.with_ymd_and_hms(2026, 8, 9, 0, 0, 0).unwrap(),
-                        next_fetch_at: Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap(),
-                        error: "fixture bookkeeping".to_owned(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-
-        SchedulerFixture { state, _temp: temp }
-    }
+    use super::{FeedHost, reconcile_feed_manifest};
 
     /// Proves that `reconcile_feed_manifest` runs against a bare `FeedHost`
     /// with no `AppState` in sight: the scheduler entry point compiles and
@@ -300,166 +250,5 @@ mod tests {
         };
         reconcile_feed_manifest(&host).await.unwrap();
         assert_eq!(host.runtime.feeds.list_feeds().await.unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn refresh_notification_reconciles_before_the_next_timer_tick() {
-        let fixture = scheduler_fixture("## Before\n- [Fixture](http://127.0.0.1:9/rss)\n").await;
-        let scheduler = spawn_scheduler(fixture.state.feed_host());
-
-        // Allow the scheduler's immediate startup sweep to finish, then require
-        // the notifier—not the long periodic interval—to observe this edit.
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        std::fs::write(
-            fixture.state.vault.root().join("feeds.md"),
-            "## After\n- [Fixture](http://127.0.0.1:9/rss)\n",
-        )
-        .unwrap();
-        fixture.state.feed_runtime().feed_refresh.notify_one();
-
-        tokio::time::timeout(Duration::from_secs(1), async {
-            loop {
-                let feeds = fixture
-                    .state
-                    .feed_runtime()
-                    .feeds
-                    .list_feeds()
-                    .await
-                    .unwrap();
-                if feeds.len() == 1 && feeds[0].group == "After" {
-                    break;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("refresh notification did not wake the scheduler");
-
-        scheduler.shutdown().await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn persisted_reconciliation_and_every_due_fetch_broadcast_feed_changed() {
-        let fixture = scheduler_fixture(
-            "## Fixture\n\
-             - [Explicit](http://127.0.0.1:9/explicit.xml)\n\
-             - [Periodic](http://127.0.0.1:9/periodic.xml)\n",
-        )
-        .await;
-        let feeds = fixture
-            .state
-            .feed_runtime()
-            .feeds
-            .list_feeds()
-            .await
-            .unwrap();
-        assert_eq!(feeds.len(), 2);
-        for feed in &feeds {
-            let periodic = feed.url.ends_with("/periodic.xml");
-            fixture
-                .state
-                .feed_runtime()
-                .feeds
-                .apply_fetch(
-                    feed.id,
-                    FetchOutcome::Failure {
-                        fetched_at: Utc.with_ymd_and_hms(2026, 8, 9, 0, 0, 0).unwrap(),
-                        next_fetch_at: if periodic {
-                            Utc::now() - chrono::Duration::minutes(1)
-                        } else {
-                            Utc.with_ymd_and_hms(2099, 1, 1, 0, 0, 0).unwrap()
-                        },
-                        error: "pre-sweep fixture state".to_owned(),
-                    },
-                )
-                .await
-                .unwrap();
-        }
-        let explicit_id = feeds
-            .iter()
-            .find(|feed| feed.url.ends_with("/explicit.xml"))
-            .unwrap()
-            .id;
-        fixture
-            .state
-            .feed_runtime()
-            .feeds
-            .schedule_refresh(Some(explicit_id), Utc::now())
-            .await
-            .unwrap();
-        std::fs::write(
-            fixture.state.vault.root().join("feeds.md"),
-            "## Fixture\n\
-             - [Explicit](http://127.0.0.1:9/explicit.xml)\n\
-             - [Periodic](http://127.0.0.1:9/periodic.xml)\n\
-             - [New subscription](http://127.0.0.1:9/new.xml)\n",
-        )
-        .unwrap();
-        let mut changes = fixture.state.change_tx.subscribe();
-
-        run_due_sweep(&fixture.state.feed_host()).await.unwrap();
-
-        let persisted = fixture
-            .state
-            .feed_runtime()
-            .feeds
-            .list_feeds()
-            .await
-            .unwrap();
-        assert_eq!(persisted.len(), 3);
-        assert!(
-            persisted.iter().all(|feed| {
-                feed.last_error
-                    .as_deref()
-                    .is_some_and(|error| error != "pre-sweep fixture state")
-            }),
-            "explicit, periodic, and first-subscription fetch outcomes must be persisted"
-        );
-        for completion in [
-            "external manifest reconciliation",
-            "explicit refresh fetch",
-            "periodic fetch",
-            "new-subscription first fetch",
-        ] {
-            let notification = tokio::time::timeout(Duration::from_millis(100), changes.recv())
-                .await
-                .unwrap_or_else(|_| panic!("missing feed-changed event after {completion}"))
-                .unwrap();
-            assert_eq!(
-                serde_json::to_value(notification).unwrap(),
-                serde_json::json!({ "type": "feed_changed" }),
-                "{completion} must use the existing SyncNotification channel"
-            );
-        }
-    }
-
-    #[tokio::test]
-    async fn shutdown_cancels_and_joins_without_waiting_for_the_next_tick() {
-        let fixture = scheduler_fixture("").await;
-        let scheduler = spawn_scheduler(fixture.state.feed_host());
-
-        tokio::time::timeout(Duration::from_secs(1), scheduler.shutdown())
-            .await
-            .expect("scheduler shutdown waited for its periodic tick")
-            .unwrap();
-
-        // A joined worker cannot consume later notifications.
-        std::fs::write(
-            fixture.state.vault.root().join("feeds.md"),
-            "## After shutdown\n- https://after.example/rss\n",
-        )
-        .unwrap();
-        fixture.state.feed_runtime().feed_refresh.notify_one();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-        assert!(
-            fixture
-                .state
-                .feed_runtime()
-                .feeds
-                .list_feeds()
-                .await
-                .unwrap()
-                .is_empty()
-        );
     }
 }

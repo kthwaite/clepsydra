@@ -1,9 +1,9 @@
 use reqwest::Url;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 thread_local! {
     static PARSE_OBSERVATIONS: Cell<usize> = const { Cell::new(0) };
 }
@@ -52,18 +52,20 @@ struct ListItem<'a> {
 }
 
 pub fn parse(text: &str) -> Manifest {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-failpoints"))]
     PARSE_OBSERVATIONS.with(|count| count.set(count.get() + 1));
     parse_document(text).manifest
 }
 
-#[cfg(test)]
-pub(crate) fn reset_observed_parse_count() {
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn reset_observed_parse_count() {
     PARSE_OBSERVATIONS.with(|count| count.set(0));
 }
 
-#[cfg(test)]
-pub(crate) fn observed_parse_count() -> usize {
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn observed_parse_count() -> usize {
     PARSE_OBSERVATIONS.with(Cell::get)
 }
 

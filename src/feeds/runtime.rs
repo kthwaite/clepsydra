@@ -1,6 +1,6 @@
 use std::error::Error;
 use std::path::Path;
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -26,14 +26,15 @@ pub struct FeedRuntime {
     pub feed_manifest_diagnostics: RwLock<Vec<ManifestWarning>>,
     /// Serializes API read/transform/CAS membership mutations.
     pub feed_manifest_lock: Mutex<()>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-failpoints"))]
     pub(crate) feed_before_reconcile_commit_hook:
         parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    #[cfg(test)]
-    pub(crate) feed_after_list_snapshot_hook:
-        parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
-    #[cfg(test)]
-    pub(crate) feed_before_opml_parse_hook: parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Public for the workspace split; not part of the stable API.
+    #[cfg(any(test, feature = "test-failpoints"))]
+    pub feed_after_list_snapshot_hook: parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    /// Public for the workspace split; not part of the stable API.
+    #[cfg(any(test, feature = "test-failpoints"))]
+    pub feed_before_opml_parse_hook: parking_lot::Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     /// Feed scheduler limits resolved from the application configuration.
     pub feed_settings: FeedsSettings,
 }
@@ -50,11 +51,11 @@ impl FeedRuntime {
             feed_refresh: Notify::new(),
             feed_manifest_diagnostics: RwLock::new(Vec::new()),
             feed_manifest_lock: Mutex::new(()),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-failpoints"))]
             feed_before_reconcile_commit_hook: parking_lot::Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-failpoints"))]
             feed_after_list_snapshot_hook: parking_lot::Mutex::new(None),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-failpoints"))]
             feed_before_opml_parse_hook: parking_lot::Mutex::new(None),
             feed_settings: settings.clone(),
         })

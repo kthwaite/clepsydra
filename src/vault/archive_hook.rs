@@ -11,9 +11,11 @@ pub struct ArchiveDeleteHook {
     pub cas: Arc<parking_lot::Mutex<ContentStore>>,
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// Return the deduplicated captured-archive CAS references encoded by the
 /// established `[archive]` page metadata convention.
-pub(crate) fn captured_archive_hashes(meta: &PageMeta) -> BTreeSet<String> {
+pub fn captured_archive_hashes(meta: &PageMeta) -> BTreeSet<String> {
     let Some(toml::Value::Table(archive)) = meta.extra.get("archive") else {
         return BTreeSet::new();
     };

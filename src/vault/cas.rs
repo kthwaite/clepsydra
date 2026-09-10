@@ -110,15 +110,15 @@ impl OpenBlob {
 }
 const LOCK_FILE_NAME: &str = "cas.lock";
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 type TestBarrierMap =
     std::collections::BTreeMap<(&'static str, PathBuf), std::sync::Arc<std::sync::Barrier>>;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 static TEST_PATH_BARRIERS: std::sync::LazyLock<parking_lot::Mutex<TestBarrierMap>> =
     std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 static BACKUP_BLOB_VERIFICATION_PASSES: std::sync::LazyLock<
     parking_lot::Mutex<std::collections::BTreeMap<String, usize>>,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
@@ -133,7 +133,7 @@ static TEST_BLOCKED_LOCK_BARRIERS: std::sync::LazyLock<
     >,
 > = std::sync::LazyLock::new(|| parking_lot::Mutex::new(std::collections::BTreeMap::new()));
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 fn normalized_test_path(path: &Path) -> PathBuf {
     if let Ok(path) = fs::canonicalize(path) {
         return path;
@@ -150,7 +150,7 @@ fn normalized_test_path(path: &Path) -> PathBuf {
         .unwrap_or_else(|_| path.to_path_buf())
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 fn install_test_path_barrier(
     event: &'static str,
     path: PathBuf,
@@ -164,7 +164,7 @@ fn install_test_path_barrier(
     );
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-failpoints"))]
 fn pause_at_test_path_barrier(event: &'static str, path: &Path) {
     let key = (event, normalized_test_path(path));
     let barrier = TEST_PATH_BARRIERS.lock().remove(&key);
@@ -190,8 +190,9 @@ fn install_after_database_path_resolved_barrier(
     install_test_path_barrier("database-resolved", path, barrier);
 }
 
-#[cfg(all(test, target_vendor = "apple"))]
-pub(crate) fn install_before_backup_database_open_barrier(
+/// Public for the workspace split; not part of the stable API.
+#[cfg(all(target_vendor = "apple", any(test, feature = "test-failpoints")))]
+pub fn install_before_backup_database_open_barrier(
     path: PathBuf,
     barrier: std::sync::Arc<std::sync::Barrier>,
 ) {
@@ -206,21 +207,24 @@ fn install_after_blob_ancestor_path_resolved_barrier(
     install_test_path_barrier("blob-ancestor-resolved", path, barrier);
 }
 
-#[cfg(test)]
-pub(crate) fn install_before_backup_blob_use_barrier(
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn install_before_backup_blob_use_barrier(
     path: PathBuf,
     barrier: std::sync::Arc<std::sync::Barrier>,
 ) {
     install_test_path_barrier("before-blob-use", path, barrier);
 }
 
-#[cfg(test)]
-pub(crate) fn reset_backup_blob_verification_passes(hash: &str) {
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn reset_backup_blob_verification_passes(hash: &str) {
     BACKUP_BLOB_VERIFICATION_PASSES.lock().remove(hash);
 }
 
-#[cfg(test)]
-pub(crate) fn backup_blob_verification_passes(hash: &str) -> usize {
+/// Public for the workspace split; not part of the stable API.
+#[cfg(any(test, feature = "test-failpoints"))]
+pub fn backup_blob_verification_passes(hash: &str) -> usize {
     BACKUP_BLOB_VERIFICATION_PASSES
         .lock()
         .get(hash)
@@ -397,7 +401,7 @@ impl BackupSnapshot<'_> {
             stored_size,
             false,
         )?;
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-failpoints"))]
         pause_at_test_path_barrier(
             "before-blob-use",
             &self.canonical_root.join(blob.relative_path()),
@@ -692,17 +696,21 @@ fn open_or_create_regular_cas_file(display_path: &Path, create: bool) -> io::Res
         .open(display_path)
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// `"sha256:<64 hex>"` → `<hex[..2]>/<hex>`, the store's two-level fan-out,
 /// relative to a CAS root. `None` for a malformed hash.
-pub(crate) fn blob_relative_path(hash: &str) -> Option<PathBuf> {
+pub fn blob_relative_path(hash: &str) -> Option<PathBuf> {
     let hex = ContentStore::validate_hash(hash).ok()?;
     Some(Path::new(&hex[..2]).join(hex))
 }
 
+/// Public for the workspace split; not part of the stable API.
+///
 /// Every blob file under `root`'s two-level fan-out, as `"sha256:<hex>"`
 /// hashes (sorted). `root` need not exist; a missing or unreadable directory
 /// yields an empty list.
-pub(crate) fn list_blob_hashes(root: &Path) -> Vec<String> {
+pub fn list_blob_hashes(root: &Path) -> Vec<String> {
     fn is_lowercase_hex(name: &str, len: usize) -> bool {
         name.len() == len
             && name
@@ -744,7 +752,8 @@ impl ContentStore {
         Self::open_with_root_policy(root, true)
     }
 
-    pub(crate) fn open_existing(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn open_existing(root: &Path) -> Result<Self, Box<dyn std::error::Error>> {
         Self::open_with_root_policy(root, false)
     }
 
@@ -859,7 +868,8 @@ impl ContentStore {
         })
     }
 
-    pub(crate) fn root(&self) -> &Path {
+    /// Public for the workspace split; not part of the stable API.
+    pub fn root(&self) -> &Path {
         &self.root
     }
 
@@ -1119,7 +1129,7 @@ impl ContentStore {
                     message: format!("content hash mismatch: got {actual_hash}"),
                 });
             }
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-failpoints"))]
             {
                 *BACKUP_BLOB_VERIFICATION_PASSES
                     .lock()
@@ -1153,7 +1163,7 @@ impl ContentStore {
             &self._database_file,
             &self.root.join("cas.db"),
         )?;
-        #[cfg(all(test, target_vendor = "apple"))]
+        #[cfg(all(target_vendor = "apple", any(test, feature = "test-failpoints")))]
         pause_at_test_path_barrier("before-backup-database-open", &self.root.join("cas.db"));
         #[cfg(unix)]
         let source_database = Connection::open_with_flags(
